@@ -8,7 +8,7 @@
 
 #include "System/Object.hpp"
 #include "System/TimeSpan.hpp"
-#include "CNA/CnaHelper.hpp"
+#include "CppDotNet/DotNetHelper.hpp"
 
 namespace System {
 

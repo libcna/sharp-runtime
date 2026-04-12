@@ -5,7 +5,7 @@
 #pragma once
 
 #include <random>
-#include "CNA/CnaHelper.hpp"
+#include "CppDotNet/DotNetHelper.hpp"
 
 namespace System {
 

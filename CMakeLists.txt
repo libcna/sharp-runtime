@@ -1,41 +1,30 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(CNA LANGUAGES CXX)
+project(CPP_DOTNET LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(SDL3 REQUIRED)
-find_package(SDL3_image REQUIRED)
-find_package(SDL3_mixer REQUIRED)
-find_package(SDL3_ttf REQUIRED)
-
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
         "src/*.cpp"
 )
 
-add_library(CNA STATIC
+add_library(CPP_DOTNET STATIC
         ${SOURCES}
 )
 
-target_include_directories(CNA
+target_include_directories(CPP_DOTNET
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_compile_definitions(CNA
+target_compile_definitions(CPP_DOTNET
         PUBLIC
-        SOUND_ENABLED
-        XNA5
 )
 
-target_link_libraries(CNA
+target_link_libraries(CPP_DOTNET
         PRIVATE
-        SDL3::SDL3
-        SDL3_image::SDL3_image
-        SDL3_mixer::SDL3_mixer
-        SDL3_ttf::SDL3_ttf
 )
 
 add_subdirectory(vendor/googletest)
@@ -57,7 +46,7 @@ target_include_directories(Tests
 
 target_link_libraries(Tests
         PRIVATE
-        CNA
+        CPP_DOTNET
         gtest_main
 )
 

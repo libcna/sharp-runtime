@@ -6,7 +6,6 @@
 
 #include <iomanip>
 
-#include "Microsoft/Xna/Framework/GameTime.hpp"
 #include "System/Int64.hpp"
 #include "System/OverflowException.hpp"
 

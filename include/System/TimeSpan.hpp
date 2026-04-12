@@ -12,7 +12,7 @@
 #include "IComparable.hpp"
 #include "IEquatable.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
-#include "CNA/CnaHelper.hpp"
+#include "CppDotNet/DotNetHelper.hpp"
 
 namespace System {
     using CNA::intcs;

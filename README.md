@@ -1,55 +1,67 @@
-# CNA
+# CppDotNet
 
-This is a C++ reimplementation of XNA 4.0 built on top of SDL 3.
+**CppDotNet** is a partial C++ reimplementation of selected .NET Base Class Library (BCL) concepts and APIs.
 
-## How to build
+The goal of this project is to provide a lightweight, .NET-inspired foundation layer for C++ projects, with a focus on:
+
+* familiar API design (`System::*`-like namespaces)
+* clean and modern C++ implementation
+* compatibility with higher-level frameworks (e.g. CNA)
+
+> ⚠️ This is **not** a full .NET runtime or CLR implementation.
+> It is a pragmatic subset designed for use in native C++ applications.
+
+---
+
+# 🚀 Goals
+
+* Recreate useful parts of `.NET` API in idiomatic C++
+* Provide building blocks such as:
+
+    * exceptions
+    * events / delegates
+    * basic system types
+* Serve as a foundation for higher-level frameworks (e.g. CNA)
+* Keep the codebase simple, readable, and well-documented
+
+---
+
+# 🛠️ Build
 
 ```bash
 cmake -S . -B build
-cmake --build ./build/
+cmake --build build
 ```
 
-## Implementation Status Convention
+---
 
-This project uses a simple documentation-only status convention to describe how complete individual classes and functions are.
+# 📊 Implementation Status Convention
 
-The following status values are used in Doxygen comments:
+This project uses a **documentation-only status system** to track implementation progress of classes and functions.
 
-* `Todo` — not implemented yet
-* `Stub` — skeleton only, fails or returns a placeholder
-* `Partial` — partially working
-* `Implemented` — functionally complete
-* `Verified` — complete and checked against expected XNA behavior
+These statuses are written in Doxygen comments and are not enforced by the compiler.
 
-These statuses are **not** represented by a real C++ enum in the codebase. They are used only as source-level documentation.
+## Status values
 
-### Comment format
+* **Todo** — not implemented yet
+* **Stub** — skeleton only, returns placeholder or fails
+* **Partial** — partially implemented, may be incomplete
+* **Implemented** — functionally complete
+* **Verified** — validated against expected .NET behavior
 
-Classes and functions may include a Doxygen comment in this form:
+---
+
+# 📝 Comment Format
+
+Each class or function may include a status note:
 
 ```cpp
 /**
- * @note Status: Todo
- */
-
-/**
- * @note Status: Stub
- */
-
-/**
  * @note Status: Partial
- */
-
-/**
- * @note Status: Implemented
- */
-
-/**
- * @note Status: Verified
  */
 ```
 
-Example:
+Full example:
 
 ```cpp
 /**
@@ -83,4 +95,30 @@ public:
 };
 ```
 
-The goal is to keep API names clean and XNA-like while making implementation progress explicit in the source code and visible in Doxygen-compatible documentation tools.
+---
+
+# 🧠 Design Philosophy
+
+* Prefer clarity over completeness
+* Avoid unnecessary complexity
+* Keep APIs close to .NET where it makes sense
+* Use modern C++ (RAII, strong typing, clear ownership)
+
+---
+
+# ⚠️ Scope
+
+CppDotNet intentionally **does not aim to implement:**
+
+* the CLR (Common Language Runtime)
+* JIT compilation
+* full .NET standard compatibility
+
+Instead, it focuses on a **practical subset** useful for native development.
+
+---
+
+# 🔗 Related Projects
+
+* CNA — C++ reimplementation of XNA 4.0 (built on top of this library)
+
