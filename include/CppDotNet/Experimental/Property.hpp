@@ -3,7 +3,7 @@
 /**
  * @brief Experimental property wrapper.
  * @note Status: Stub
- * @note This type is experimental and is not used by the current CNA design.
+ * @note This type is experimental and is not used by the current CDotNet design.
  * Prop.hpp is preferred because it expands to ordinary members and methods
  * without per-instance std::function-based indirection.
  */
@@ -12,7 +12,7 @@
 
 #define DEF_PROP_AUTO(type, name, init) \
     private: type name##VVVV = init; \
-    public: CNA::Property<type> name;
+    public: CDotNet::Property<type> name;
 
 #define IMPL_PROP_AUTO(type, name)\
 name( [this]() { return name##VVVV; } , [this](type v) {name##VVVV = v; })
@@ -21,7 +21,7 @@ name( [this]() { return name##VVVV; } , [this](type v) {name##VVVV = v; })
 name( [this]() { return name##VVVV; })
 
 #define DEF_PROP_CUSTOM(type, name) \
-CNA::Property<type> name;
+CDotNet::Property<type> name;
 
 #define IMPL_PROP_CUSTOM(type, name, customGetter, customSetter)\
 name( [this]() customGetter, [this](type v) customSetter)
@@ -29,7 +29,7 @@ name( [this]() customGetter, [this](type v) customSetter)
 #define IMPL_PROP_CUSTOM_READONLY(type, name, customGetter)\
 name( [this]() customGetter )
 
-namespace CNA::Experimental {
+namespace CDotNet::Experimental {
     // Template for Property
     template <typename T>
     class Property {

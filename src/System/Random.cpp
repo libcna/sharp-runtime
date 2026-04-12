@@ -13,7 +13,7 @@ namespace System {
 
     intcs Random::Next()
     {
-        return Next(0, CNA::INTCS_MAX);
+        return Next(0, CDotNet::INTCS_MAX);
     }
 
     intcs Random::Next(intcs maxValue)

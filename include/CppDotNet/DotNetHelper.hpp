@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace CNA
+namespace CDotNet
 {
     /**
      * @brief 32-bit signed integer type compatible with C# @c int.
@@ -30,42 +30,42 @@ namespace CNA
     using bytecs = uint8_t;
 
     /**
-     * @brief Maximum value of @c CNA::intcs.
+     * @brief Maximum value of @c CDotNet::intcs.
      */
     inline constexpr intcs INTCS_MAX = std::numeric_limits<intcs>::max();
 
     /**
-     * @brief Minimum value of @c CNA::intcs.
+     * @brief Minimum value of @c CDotNet::intcs.
      */
     inline constexpr intcs INTCS_MIN = std::numeric_limits<intcs>::min();
 
     /**
-     * @brief Maximum value of @c CNA::uintcs.
+     * @brief Maximum value of @c CDotNet::uintcs.
      */
     inline constexpr uintcs UINTCS_MAX = std::numeric_limits<uintcs>::max();
 
     /**
-     * @brief Minimum value of @c CNA::uintcs.
+     * @brief Minimum value of @c CDotNet::uintcs.
      */
     inline constexpr uintcs UINTCS_MIN = std::numeric_limits<uintcs>::min();
 
     /**
-     * @brief Maximum value of @c CNA::longcs.
+     * @brief Maximum value of @c CDotNet::longcs.
      */
     inline constexpr longcs LONGCS_MAX = std::numeric_limits<longcs>::max();
 
     /**
-     * @brief Minimum value of @c CNA::longcs.
+     * @brief Minimum value of @c CDotNet::longcs.
      */
     inline constexpr longcs LONGCS_MIN = std::numeric_limits<longcs>::min();
 
     /**
-     * @brief Maximum value of @c CNA::byte.
+     * @brief Maximum value of @c CDotNet::byte.
      */
     inline constexpr bytecs BYTE_MAX = std::numeric_limits<bytecs>::max();
 
     /**
-     * @brief Minimum value of @c CNA::byte.
+     * @brief Minimum value of @c CDotNet::byte.
      */
     inline constexpr bytecs BYTE_MIN = std::numeric_limits<bytecs>::min();
-} // namespace CNA
+} // namespace CDotNet

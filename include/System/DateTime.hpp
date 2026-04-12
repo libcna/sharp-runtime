@@ -12,7 +12,7 @@
 
 namespace System {
 
-    using CNA::longcs;
+    using CDotNet::longcs;
 
     /**
      * @brief Represents an instant in time, expressed as the number of ticks.

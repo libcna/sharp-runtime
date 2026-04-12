@@ -9,7 +9,7 @@
 
 namespace System {
 
-    using CNA::intcs;
+    using CDotNet::intcs;
 
     /**
      * @brief Represents a pseudo-random number generator.

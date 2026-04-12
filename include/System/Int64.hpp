@@ -11,8 +11,8 @@ namespace System {
 class Int64 {
 public:
 
-    static constexpr CNA::longcs MaxValue = CNA::LONGCS_MAX;
-    static constexpr CNA::longcs MinValue = CNA::LONGCS_MIN;
+    static constexpr CDotNet::longcs MaxValue = CDotNet::LONGCS_MAX;
+    static constexpr CDotNet::longcs MinValue = CDotNet::LONGCS_MIN;
 };
 }
 

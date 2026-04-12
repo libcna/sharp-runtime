@@ -4,7 +4,7 @@
 #include "gtest/gtest.h"
 #include "System/Random.hpp"
 
-using CNA::intcs;
+using CDotNet::intcs;
 TEST(RandomTests, NextWithMaxValue) {
     System::Random rng;
     const intcs max = 100;
@@ -50,6 +50,6 @@ TEST(RandomTests, NextWithoutArguments) {
     for (int i = 0; i < 1000; ++i) {
         intcs value = rng.Next();
         ASSERT_GE(value, 0);
-        ASSERT_LT(value, CNA::INTCS_MAX);
+        ASSERT_LT(value, CDotNet::INTCS_MAX);
     }
 }

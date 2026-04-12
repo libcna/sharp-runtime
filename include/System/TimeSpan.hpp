@@ -15,8 +15,8 @@
 #include "CppDotNet/DotNetHelper.hpp"
 
 namespace System {
-    using CNA::intcs;
-    using CNA::longcs;
+    using CDotNet::intcs;
+    using CDotNet::longcs;
 
     /**
      * @class TimeSpan
@@ -87,14 +87,14 @@ namespace System {
         static constexpr longcs TicksPerDay = TicksPerHour * 24; // 864,000,000,000
 
     private:
-        static constexpr longcs MaxSeconds = CNA::LONGCS_MAX / TicksPerSecond;
-        static constexpr longcs MinSeconds = CNA::LONGCS_MIN / TicksPerSecond;
+        static constexpr longcs MaxSeconds = CDotNet::LONGCS_MAX / TicksPerSecond;
+        static constexpr longcs MinSeconds = CDotNet::LONGCS_MIN / TicksPerSecond;
 
-        static constexpr longcs MaxMilliSeconds = CNA::LONGCS_MAX / TicksPerMillisecond;
-        static constexpr longcs MinMilliSeconds = CNA::LONGCS_MIN / TicksPerMillisecond;
+        static constexpr longcs MaxMilliSeconds = CDotNet::LONGCS_MAX / TicksPerMillisecond;
+        static constexpr longcs MinMilliSeconds = CDotNet::LONGCS_MIN / TicksPerMillisecond;
 
-        static constexpr longcs MaxMicroSeconds = CNA::LONGCS_MAX / TicksPerMicrosecond;
-        static constexpr longcs MinMicroSeconds = CNA::LONGCS_MIN / TicksPerMicrosecond;
+        static constexpr longcs MaxMicroSeconds = CDotNet::LONGCS_MAX / TicksPerMicrosecond;
+        static constexpr longcs MinMicroSeconds = CDotNet::LONGCS_MIN / TicksPerMicrosecond;
 
         static constexpr longcs TicksPerTenthSecond = TicksPerMillisecond * 100;
 

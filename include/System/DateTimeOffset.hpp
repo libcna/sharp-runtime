@@ -59,7 +59,7 @@ namespace System {
          *
          * @return UTC tick count.
          */
-        [[nodiscard]] CNA::longcs getUtcTicksProperty() const;
+        [[nodiscard]] CDotNet::longcs getUtcTicksProperty() const;
 
         /**
          * @brief Returns a string representation of the current instance.
