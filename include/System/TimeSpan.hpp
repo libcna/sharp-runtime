@@ -12,11 +12,11 @@
 #include "IComparable.hpp"
 #include "IEquatable.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
-#include "CppDotNet/DotNetHelper.hpp"
+#include "CppDotNet/CppDotNetHelper.hpp"
 
 namespace System {
-    using CDotNet::intcs;
-    using CDotNet::longcs;
+    using CppDotNet::intcs;
+    using CppDotNet::longcs;
 
     /**
      * @class TimeSpan
@@ -87,14 +87,14 @@ namespace System {
         static constexpr longcs TicksPerDay = TicksPerHour * 24; // 864,000,000,000
 
     private:
-        static constexpr longcs MaxSeconds = CDotNet::LONGCS_MAX / TicksPerSecond;
-        static constexpr longcs MinSeconds = CDotNet::LONGCS_MIN / TicksPerSecond;
+        static constexpr longcs MaxSeconds = CppDotNet::LONGCS_MAX / TicksPerSecond;
+        static constexpr longcs MinSeconds = CppDotNet::LONGCS_MIN / TicksPerSecond;
 
-        static constexpr longcs MaxMilliSeconds = CDotNet::LONGCS_MAX / TicksPerMillisecond;
-        static constexpr longcs MinMilliSeconds = CDotNet::LONGCS_MIN / TicksPerMillisecond;
+        static constexpr longcs MaxMilliSeconds = CppDotNet::LONGCS_MAX / TicksPerMillisecond;
+        static constexpr longcs MinMilliSeconds = CppDotNet::LONGCS_MIN / TicksPerMillisecond;
 
-        static constexpr longcs MaxMicroSeconds = CDotNet::LONGCS_MAX / TicksPerMicrosecond;
-        static constexpr longcs MinMicroSeconds = CDotNet::LONGCS_MIN / TicksPerMicrosecond;
+        static constexpr longcs MaxMicroSeconds = CppDotNet::LONGCS_MAX / TicksPerMicrosecond;
+        static constexpr longcs MinMicroSeconds = CppDotNet::LONGCS_MIN / TicksPerMicrosecond;
 
         static constexpr longcs TicksPerTenthSecond = TicksPerMillisecond * 100;
 

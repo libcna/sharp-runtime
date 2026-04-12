@@ -3,7 +3,7 @@
 //
 
 #pragma once
-#include "CppDotNet/DotNetHelper.hpp"
+#include "CppDotNet/CppDotNetHelper.hpp"
 
 namespace System {
 
@@ -11,8 +11,8 @@ namespace System {
 class Int64 {
 public:
 
-    static constexpr CDotNet::longcs MaxValue = CDotNet::LONGCS_MAX;
-    static constexpr CDotNet::longcs MinValue = CDotNet::LONGCS_MIN;
+    static constexpr CppDotNet::longcs MaxValue = CppDotNet::LONGCS_MAX;
+    static constexpr CppDotNet::longcs MinValue = CppDotNet::LONGCS_MIN;
 };
 }
 

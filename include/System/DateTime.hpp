@@ -8,11 +8,11 @@
 
 #include "System/Object.hpp"
 #include "System/TimeSpan.hpp"
-#include "CppDotNet/DotNetHelper.hpp"
+#include "CppDotNet/CppDotNetHelper.hpp"
 
 namespace System {
 
-    using CDotNet::longcs;
+    using CppDotNet::longcs;
 
     /**
      * @brief Represents an instant in time, expressed as the number of ticks.

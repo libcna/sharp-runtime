@@ -4,7 +4,7 @@
 #include "System/TimeSpan.hpp"
 
 using System::TimeSpan;
-using CDotNet::longcs;
+using CppDotNet::longcs;
 
 TEST(TimeSpanTests, ConstructorWithTicks) {
     TimeSpan ts(1000000); // 100,000,000 ns = 0.1 s
@@ -40,7 +40,7 @@ TEST(TimeSpanPropertyTest, GettersFromConstructedTimeSpan) {
     EXPECT_EQ(ts.getMicrosecondsProperty(), 6);
 
     // Ticks = total nanoseconds
-    CDotNet::longcs expectedTicks =
+    CppDotNet::longcs expectedTicks =
             1LL * 24 * 60 * 60 * 10 * 1000 * 1000 + // days
             2LL * 60 * 60 * 10 * 1000 * 1000 + // hours
             3LL * 60 * 10 * 1000 * 1000 + // minutes

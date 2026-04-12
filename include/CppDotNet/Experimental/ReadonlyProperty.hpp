@@ -3,7 +3,7 @@
 /**
  * @brief Experimental property wrapper.
  * @note Status: Stub
- * @note This type is experimental and is not used by the current CDotNet design.
+ * @note This type is experimental and is not used by the current CppDotNet design.
  * Prop.hpp is preferred because it expands to ordinary members and methods
  * without per-instance std::function-based indirection.
  */
@@ -11,7 +11,7 @@
 #include <functional>
 #include "Property.hpp"
 
-namespace CDotNet::Experimental {
+namespace CppDotNet::Experimental {
     // Derived class: ReadOnlyProperty
     template <typename T>
     class ReadOnlyProperty : public Property<T> {

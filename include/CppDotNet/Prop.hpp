@@ -188,5 +188,5 @@ IMPL_PROP(type, name, getter1, setter0, member0, static0, constret1, ref1, const
 #define IGETTERSTATIC(type, name, clazz, init) \
 IMPL_PROP(type, name, getter1, setter0, member1, static1, constret1, ref1, constmet0, clazz, init)
 
-namespace CDotNet {
+namespace CppDotNet {
 }

@@ -9,7 +9,7 @@
 #include "System/Object.hpp"
 #include "System/DateTime.hpp"
 #include "System/TimeSpan.hpp"
-#include "CppDotNet/DotNetHelper.hpp"
+#include "CppDotNet/CppDotNetHelper.hpp"
 
 namespace System {
 
@@ -59,7 +59,7 @@ namespace System {
          *
          * @return UTC tick count.
          */
-        [[nodiscard]] CDotNet::longcs getUtcTicksProperty() const;
+        [[nodiscard]] CppDotNet::longcs getUtcTicksProperty() const;
 
         /**
          * @brief Returns a string representation of the current instance.

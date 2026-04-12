@@ -26,9 +26,9 @@ namespace System {
     }
 
     const TimeSpan TimeSpan::Zero = TimeSpan(0);
-    const TimeSpan TimeSpan::MaxValue = TimeSpan(CDotNet::LONGCS_MAX);
+    const TimeSpan TimeSpan::MaxValue = TimeSpan(CppDotNet::LONGCS_MAX);
 
-    const TimeSpan TimeSpan::MinValue = TimeSpan(CDotNet::LONGCS_MIN);
+    const TimeSpan TimeSpan::MinValue = TimeSpan(CppDotNet::LONGCS_MIN);
 
 
     TimeSpan::TimeSpan() : ticks_internal(0) {
@@ -205,7 +205,7 @@ namespace System {
     }
 
     TimeSpan TimeSpan::IntervalFromDoubleTicks(double ticks) {
-        if (std::isnan(ticks) || (ticks > CDotNet::LONGCS_MAX) || (ticks < CDotNet::LONGCS_MIN))
+        if (std::isnan(ticks) || (ticks > CppDotNet::LONGCS_MAX) || (ticks < CppDotNet::LONGCS_MIN))
             throw OverflowException("TimeSpanTooLong");
         if (ticks == Int64::MaxValue)
             return MaxValue;

@@ -6,12 +6,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
+option(CPP_DOTNET_BUILD_TESTS "Build cpp-dotnet tests" ON)
+
+file(GLOB_RECURSE CPP_DOTNET_SOURCES CONFIGURE_DEPENDS
         "src/*.cpp"
 )
 
 add_library(CPP_DOTNET STATIC
-        ${SOURCES}
+        ${CPP_DOTNET_SOURCES}
 )
 
 target_include_directories(CPP_DOTNET
@@ -19,36 +21,26 @@ target_include_directories(CPP_DOTNET
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_compile_definitions(CPP_DOTNET
-        PUBLIC
-)
+if(CPP_DOTNET_BUILD_TESTS)
+    add_subdirectory(vendor/googletest)
 
-target_link_libraries(CPP_DOTNET
-        PRIVATE
-)
+    enable_testing()
 
-add_subdirectory(vendor/googletest)
+    file(GLOB_RECURSE CPP_DOTNET_TEST_SOURCES CONFIGURE_DEPENDS
+            "tests/*.cpp"
+    )
 
-enable_testing()
+    add_executable(CppDotNetTests
+            ${CPP_DOTNET_TEST_SOURCES}
+    )
 
-file(GLOB_RECURSE TESTS CONFIGURE_DEPENDS
-        "tests/*.cpp"
-)
+    target_link_libraries(CppDotNetTests
+            PUBLIC
+            CPP_DOTNET
+            PRIVATE
+            gtest_main
+    )
 
-add_executable(Tests
-        ${TESTS}
-)
-
-target_include_directories(Tests
-        PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/googletest/googletest/include
-)
-
-target_link_libraries(Tests
-        PRIVATE
-        CPP_DOTNET
-        gtest_main
-)
-
-include(GoogleTest)
-gtest_discover_tests(Tests)
+    include(GoogleTest)
+    gtest_discover_tests(CppDotNetTests)
+endif()
