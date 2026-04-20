@@ -10,6 +10,15 @@
 namespace CppDotNet
 {
     /**
+     * @brief 16-bit signed integer type compatible with C# @c int.
+     */
+    using shortcs = int16_t;
+
+    /**
+     * @brief 16-bit unsigned integer type compatible with C# unsigned integer usage.
+     */
+    using ushortcs = uint16_t;
+    /**
      * @brief 32-bit signed integer type compatible with C# @c int.
      */
     using intcs = int32_t;
@@ -27,7 +36,16 @@ namespace CppDotNet
     /**
      * @brief 8-bit unsigned byte type compatible with C# @c byte.
      */
+    using ubytecs = uint8_t;
+
+    /**
+     * @brief 8-bit signed byte type compatible with C# @c byte.
+     */
     using bytecs = uint8_t;
+    /**
+     * @brief 16-bit unsigned char type compatible with C# @c byte.
+     */
+    using charcs = char16_t;
 
     /**
      * @brief Maximum value of @c CppDotNet::intcs.
