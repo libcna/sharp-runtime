@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <limits>
+#define CONTAINS(STRING, SUBSTR) ((STRING).find(SUBSTR) != std::string::npos)
 
 namespace CppDotNet
 {
@@ -34,14 +35,19 @@ namespace CppDotNet
     using longcs = int64_t;
 
     /**
+     * @brief 8-bit signed byte type compatible with C# @c byte.
+     */
+
+    using sbytecs = int8_t;
+    /**
      * @brief 8-bit unsigned byte type compatible with C# @c byte.
      */
     using ubytecs = uint8_t;
 
     /**
-     * @brief 8-bit signed byte type compatible with C# @c byte.
+     * @brief 8-bit unsigned byte type compatible with C# @c byte.
      */
-    using bytecs = uint8_t;
+    using bytecs = ubytecs;
     /**
      * @brief 16-bit unsigned char type compatible with C# @c byte.
      */
