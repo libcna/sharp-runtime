@@ -1,6 +1,6 @@
 # Sharp Runtime
 
-**Sharp Runtime** is a partial C++ reimplementation of selected .NET Base Class Library (BCL) concepts and APIs.
+**Sharp Runtime** is a C++ reimplementation of a small C#/.NET runtime subset (mainly used by CNA and game ports).
 
 The goal of this project is to provide a lightweight, .NET-inspired foundation layer for C++ projects, with a focus on:
 
