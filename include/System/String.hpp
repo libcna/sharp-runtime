@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System
 {
@@ -65,9 +65,9 @@ namespace System
          */
         static bool IsNullOrEmpty(const std::string& value);
 
-        static std::string Format(const std::string& format, CppDotNet::intcs arg0);
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0);
         static std::string Format(const std::string& format, const std::string& arg0);
 
-        static std::string ToString(CppDotNet::intcs value, int width, char fill = '0');
+        static std::string ToString(SharpRuntime::intcs value, int width, char fill = '0');
     };
 }

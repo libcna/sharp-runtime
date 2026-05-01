@@ -2,7 +2,7 @@
 
 #include <filesystem>
 
-#include "CppDotNet/Storage/StoragePaths.hpp"
+#include "SharpRuntime/Storage/StoragePaths.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
 
@@ -16,12 +16,12 @@ namespace System::IO::IsolatedStorage
 
     IsolatedStorageFile IsolatedStorageFile::GetUserStoreForApplication()
     {
-        return IsolatedStorageFile(CppDotNet::Storage::StoragePaths::GetIsolatedStorageRoot());
+        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
     }
 
     IsolatedStorageFile IsolatedStorageFile::GetUserStoreForAssembly()
     {
-        return IsolatedStorageFile(CppDotNet::Storage::StoragePaths::GetIsolatedStorageRoot());
+        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
     }
 
     bool IsolatedStorageFile::FileExists(const std::string& relativePath) const

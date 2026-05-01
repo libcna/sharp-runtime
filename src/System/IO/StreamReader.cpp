@@ -23,7 +23,7 @@ namespace System::IO
         }
 
         std::vector<char> buffer(static_cast<std::size_t>(length));
-        const intcs bytesRead = stream->Read(reinterpret_cast<CppDotNet::bytecs*>(buffer.data()), 0, length);
+        const intcs bytesRead = stream->Read(reinterpret_cast<SharpRuntime::bytecs*>(buffer.data()), 0, length);
 
         return std::string(buffer.data(), static_cast<std::size_t>(bytesRead));
     }

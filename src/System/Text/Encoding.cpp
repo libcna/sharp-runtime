@@ -8,15 +8,15 @@ namespace System::Text
         return instance;
     }
 
-    std::vector<CppDotNet::bytecs> Encoding::GetBytes(const std::string& str) const
+    std::vector<SharpRuntime::bytecs> Encoding::GetBytes(const std::string& str) const
     {
-        return std::vector<CppDotNet::bytecs>(str.begin(), str.end());
+        return std::vector<SharpRuntime::bytecs>(str.begin(), str.end());
     }
 
     std::string Encoding::GetString(
-        const CppDotNet::bytecs* data,
-        CppDotNet::intcs index,
-        CppDotNet::intcs count) const
+        const SharpRuntime::bytecs* data,
+        SharpRuntime::intcs index,
+        SharpRuntime::intcs count) const
     {
         if (data == nullptr || count <= 0)
         {

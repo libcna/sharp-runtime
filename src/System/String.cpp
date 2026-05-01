@@ -40,7 +40,7 @@ namespace System
         return value.empty();
     }
 
-    std::string String::Format(const std::string& format, CppDotNet::intcs arg0)
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0)
     {
         return Format(format, std::to_string(arg0));
     }
@@ -60,7 +60,7 @@ namespace System
 
         return result;
     }
-    std::string String::ToString(CppDotNet::intcs value, int width, char fill)
+    std::string String::ToString(SharpRuntime::intcs value, int width, char fill)
     {
         std::ostringstream oss;
         oss << std::setw(width) << std::setfill(fill) << value;

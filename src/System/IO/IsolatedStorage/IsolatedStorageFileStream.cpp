@@ -43,10 +43,10 @@ namespace System::IO::IsolatedStorage
         }
     }
 
-    CppDotNet::intcs IsolatedStorageFileStream::Read(
-        CppDotNet::bytecs buffer[],
-        CppDotNet::intcs offset,
-        CppDotNet::intcs count)
+    SharpRuntime::intcs IsolatedStorageFileStream::Read(
+        SharpRuntime::bytecs buffer[],
+        SharpRuntime::intcs offset,
+        SharpRuntime::intcs count)
     {
         if (!stream.is_open() || buffer == nullptr || offset < 0 || count < 0)
         {
@@ -54,13 +54,13 @@ namespace System::IO::IsolatedStorage
         }
 
         stream.read(reinterpret_cast<char*>(buffer + offset), count);
-        return static_cast<CppDotNet::intcs>(stream.gcount());
+        return static_cast<SharpRuntime::intcs>(stream.gcount());
     }
 
     void IsolatedStorageFileStream::Write(
-        const CppDotNet::bytecs buffer[],
-        CppDotNet::intcs offset,
-        CppDotNet::intcs count)
+        const SharpRuntime::bytecs buffer[],
+        SharpRuntime::intcs offset,
+        SharpRuntime::intcs count)
     {
         if (!stream.is_open() || buffer == nullptr || offset < 0 || count < 0)
         {
@@ -75,14 +75,14 @@ namespace System::IO::IsolatedStorage
         }
     }
 
-    CppDotNet::intcs IsolatedStorageFileStream::getLengthProperty()
+    SharpRuntime::intcs IsolatedStorageFileStream::getLengthProperty()
     {
         if (!std::filesystem::exists(fullPath))
         {
             return 0;
         }
 
-        return static_cast<CppDotNet::intcs>(std::filesystem::file_size(fullPath));
+        return static_cast<SharpRuntime::intcs>(std::filesystem::file_size(fullPath));
     }
 
     bool IsolatedStorageFileStream::IsOpen() const

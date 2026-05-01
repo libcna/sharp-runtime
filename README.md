@@ -1,6 +1,6 @@
-# CppDotNet
+# Sharp Runtime
 
-**CppDotNet** is a partial C++ reimplementation of selected .NET Base Class Library (BCL) concepts and APIs.
+**Sharp Runtime** is a partial C++ reimplementation of selected .NET Base Class Library (BCL) concepts and APIs.
 
 The goal of this project is to provide a lightweight, .NET-inspired foundation layer for C++ projects, with a focus on:
 
@@ -108,7 +108,7 @@ public:
 
 # ⚠️ Scope
 
-CppDotNet intentionally **does not aim to implement:**
+Sharp Runtime intentionally **does not aim to implement:**
 
 * the CLR (Common Language Runtime)
 * JIT compilation

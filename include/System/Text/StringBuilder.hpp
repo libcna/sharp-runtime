@@ -2,11 +2,11 @@
 
 #include <string>
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Text
 {
-    using CppDotNet::intcs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides a mutable string buffer for efficient string construction.
@@ -14,7 +14,7 @@ namespace System::Text
      * This class is a lightweight C++ emulation of the .NET
      * System.Text.StringBuilder class. It is intended primarily
      * for source-porting convenience and practical use in the
-     * CppDotNet layer.
+     * SharpRuntime layer.
      *
      * Only a small useful subset of the original .NET API is provided.
      *

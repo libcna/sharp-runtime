@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Text
 {
@@ -35,7 +35,7 @@ namespace System::Text
          *
          * @note Status: IMPLEMENTED
          */
-        [[nodiscard]] std::vector<CppDotNet::bytecs> GetBytes(const std::string& str) const;
+        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& str) const;
 
         /**
          * @brief Converts byte array to string (UTF-8).
@@ -48,9 +48,9 @@ namespace System::Text
          * @note Status: IMPLEMENTED
          */
         [[nodiscard]] std::string GetString(
-            const CppDotNet::bytecs* data,
-            CppDotNet::intcs index,
-            CppDotNet::intcs count) const;
+            const SharpRuntime::bytecs* data,
+            SharpRuntime::intcs index,
+            SharpRuntime::intcs count) const;
 
     private:
         Encoding() = default;

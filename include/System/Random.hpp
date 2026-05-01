@@ -5,11 +5,11 @@
 #pragma once
 
 #include <random>
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
-    using CppDotNet::intcs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a pseudo-random number generator.

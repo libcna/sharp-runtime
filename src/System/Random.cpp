@@ -13,7 +13,7 @@ namespace System {
 
     intcs Random::Next()
     {
-        return Next(0, CppDotNet::INTCS_MAX);
+        return Next(0, SharpRuntime::INTCS_MAX);
     }
 
     intcs Random::Next(intcs maxValue)

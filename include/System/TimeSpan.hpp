@@ -12,11 +12,11 @@
 #include "IComparable.hpp"
 #include "IEquatable.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
-    using CppDotNet::intcs;
-    using CppDotNet::longcs;
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /**
      * @class TimeSpan
@@ -87,14 +87,14 @@ namespace System {
         static constexpr longcs TicksPerDay = TicksPerHour * 24; // 864,000,000,000
 
     private:
-        static constexpr longcs MaxSeconds = CppDotNet::LONGCS_MAX / TicksPerSecond;
-        static constexpr longcs MinSeconds = CppDotNet::LONGCS_MIN / TicksPerSecond;
+        static constexpr longcs MaxSeconds = SharpRuntime::LONGCS_MAX / TicksPerSecond;
+        static constexpr longcs MinSeconds = SharpRuntime::LONGCS_MIN / TicksPerSecond;
 
-        static constexpr longcs MaxMilliSeconds = CppDotNet::LONGCS_MAX / TicksPerMillisecond;
-        static constexpr longcs MinMilliSeconds = CppDotNet::LONGCS_MIN / TicksPerMillisecond;
+        static constexpr longcs MaxMilliSeconds = SharpRuntime::LONGCS_MAX / TicksPerMillisecond;
+        static constexpr longcs MinMilliSeconds = SharpRuntime::LONGCS_MIN / TicksPerMillisecond;
 
-        static constexpr longcs MaxMicroSeconds = CppDotNet::LONGCS_MAX / TicksPerMicrosecond;
-        static constexpr longcs MinMicroSeconds = CppDotNet::LONGCS_MIN / TicksPerMicrosecond;
+        static constexpr longcs MaxMicroSeconds = SharpRuntime::LONGCS_MAX / TicksPerMicrosecond;
+        static constexpr longcs MinMicroSeconds = SharpRuntime::LONGCS_MIN / TicksPerMicrosecond;
 
         static constexpr longcs TicksPerTenthSecond = TicksPerMillisecond * 100;
 

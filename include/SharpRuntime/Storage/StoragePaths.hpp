@@ -2,7 +2,7 @@
 
 #include <filesystem>
 
-namespace CppDotNet::Storage
+namespace SharpRuntime::Storage
 {
     /**
      * @brief Provides filesystem paths for persistent storage used by the application.

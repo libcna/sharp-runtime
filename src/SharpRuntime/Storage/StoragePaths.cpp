@@ -1,8 +1,8 @@
-#include "CppDotNet/Storage/StoragePaths.hpp"
+#include "SharpRuntime/Storage/StoragePaths.hpp"
 
 #include <filesystem>
 
-namespace CppDotNet::Storage
+namespace SharpRuntime::Storage
 {
     std::filesystem::path StoragePaths::GetIsolatedStorageRoot()
     {

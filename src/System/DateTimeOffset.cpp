@@ -24,7 +24,7 @@ namespace System {
         return offset_;
     }
 
-    CppDotNet::longcs DateTimeOffset::getUtcTicksProperty() const {
+    SharpRuntime::longcs DateTimeOffset::getUtcTicksProperty() const {
         return dateTime_.getTicksProperty() - offset_.getTicksProperty();
     }
 

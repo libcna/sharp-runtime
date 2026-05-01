@@ -9,7 +9,7 @@
 #include "System/Object.hpp"
 #include "System/DateTime.hpp"
 #include "System/TimeSpan.hpp"
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
@@ -59,7 +59,7 @@ namespace System {
          *
          * @return UTC tick count.
          */
-        [[nodiscard]] CppDotNet::longcs getUtcTicksProperty() const;
+        [[nodiscard]] SharpRuntime::longcs getUtcTicksProperty() const;
 
         /**
          * @brief Returns a string representation of the current instance.

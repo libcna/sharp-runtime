@@ -2,12 +2,12 @@
 
 #include <cstddef>
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::IO
 {
-    using CppDotNet::bytecs;
-    using CppDotNet::intcs;
+    using SharpRuntime::bytecs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a readable stream.

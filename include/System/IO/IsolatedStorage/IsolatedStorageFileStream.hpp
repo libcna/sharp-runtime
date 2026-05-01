@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/FileMode.hpp"
 
 namespace System::IO::IsolatedStorage
@@ -62,7 +62,7 @@ namespace System::IO::IsolatedStorage
          *
          * @note Status: IMPLEMENTED
          */
-        CppDotNet::intcs Read(CppDotNet::bytecs buffer[], CppDotNet::intcs offset, CppDotNet::intcs count);
+        SharpRuntime::intcs Read(SharpRuntime::bytecs buffer[], SharpRuntime::intcs offset, SharpRuntime::intcs count);
 
         /**
          * @brief Writes bytes to the stream.
@@ -73,7 +73,7 @@ namespace System::IO::IsolatedStorage
          *
          * @note Status: IMPLEMENTED
          */
-        void Write(const CppDotNet::bytecs buffer[], CppDotNet::intcs offset, CppDotNet::intcs count);
+        void Write(const SharpRuntime::bytecs buffer[], SharpRuntime::intcs offset, SharpRuntime::intcs count);
 
         /**
          * @brief Gets the length of the file in bytes.
@@ -82,7 +82,7 @@ namespace System::IO::IsolatedStorage
          *
          * @note Status: IMPLEMENTED
          */
-        [[nodiscard]] CppDotNet::intcs getLengthProperty();
+        [[nodiscard]] SharpRuntime::intcs getLengthProperty();
 
         /**
          * @brief Returns true if the stream is open.

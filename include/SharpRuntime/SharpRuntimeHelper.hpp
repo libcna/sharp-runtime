@@ -8,7 +8,7 @@
 #include <limits>
 #define CONTAINS(STRING, SUBSTR) ((STRING).find(SUBSTR) != std::string::npos)
 
-namespace CppDotNet
+namespace SharpRuntime
 {
     /**
      * @brief 16-bit signed integer type compatible with C# @c int.
@@ -54,42 +54,42 @@ namespace CppDotNet
     using charcs = char16_t;
 
     /**
-     * @brief Maximum value of @c CppDotNet::intcs.
+     * @brief Maximum value of @c SharpRuntime::intcs.
      */
     inline constexpr intcs INTCS_MAX = std::numeric_limits<intcs>::max();
 
     /**
-     * @brief Minimum value of @c CppDotNet::intcs.
+     * @brief Minimum value of @c SharpRuntime::intcs.
      */
     inline constexpr intcs INTCS_MIN = std::numeric_limits<intcs>::min();
 
     /**
-     * @brief Maximum value of @c CppDotNet::uintcs.
+     * @brief Maximum value of @c SharpRuntime::uintcs.
      */
     inline constexpr uintcs UINTCS_MAX = std::numeric_limits<uintcs>::max();
 
     /**
-     * @brief Minimum value of @c CppDotNet::uintcs.
+     * @brief Minimum value of @c SharpRuntime::uintcs.
      */
     inline constexpr uintcs UINTCS_MIN = std::numeric_limits<uintcs>::min();
 
     /**
-     * @brief Maximum value of @c CppDotNet::longcs.
+     * @brief Maximum value of @c SharpRuntime::longcs.
      */
     inline constexpr longcs LONGCS_MAX = std::numeric_limits<longcs>::max();
 
     /**
-     * @brief Minimum value of @c CppDotNet::longcs.
+     * @brief Minimum value of @c SharpRuntime::longcs.
      */
     inline constexpr longcs LONGCS_MIN = std::numeric_limits<longcs>::min();
 
     /**
-     * @brief Maximum value of @c CppDotNet::byte.
+     * @brief Maximum value of @c SharpRuntime::byte.
      */
     inline constexpr bytecs BYTE_MAX = std::numeric_limits<bytecs>::max();
 
     /**
-     * @brief Minimum value of @c CppDotNet::byte.
+     * @brief Minimum value of @c SharpRuntime::byte.
      */
     inline constexpr bytecs BYTE_MIN = std::numeric_limits<bytecs>::min();
-} // namespace CppDotNet
+} // namespace SharpRuntime

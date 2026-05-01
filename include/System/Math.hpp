@@ -1,10 +1,10 @@
 #pragma once
 
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System
 {
-    using CppDotNet::intcs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides constants and static methods for trigonometric,
@@ -25,7 +25,7 @@ namespace System
          *
          * @note Status: Ported
          */
-        static constexpr double E = 2.7182818284590452354;
+        static constexpr double E = 2.71828'18284'59045'2354;
 
         /**
          * @brief Represents the ratio of the circumference of a circle
@@ -33,7 +33,7 @@ namespace System
          *
          * @note Status: Ported
          */
-        static constexpr double PI = 3.14159265358979323846;
+        static constexpr double PI = 3.14159'26535'89793'23846;
 
         /**
          * @brief Returns the sine of the specified angle.

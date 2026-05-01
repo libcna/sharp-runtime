@@ -3,7 +3,7 @@
 //
 
 #pragma once
-#include "CppDotNet/CppDotNetHelper.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
@@ -11,8 +11,8 @@ namespace System {
 class Int64 {
 public:
 
-    static constexpr CppDotNet::longcs MaxValue = CppDotNet::LONGCS_MAX;
-    static constexpr CppDotNet::longcs MinValue = CppDotNet::LONGCS_MIN;
+    static constexpr SharpRuntime::longcs MaxValue = SharpRuntime::LONGCS_MAX;
+    static constexpr SharpRuntime::longcs MinValue = SharpRuntime::LONGCS_MIN;
 };
 }
 
