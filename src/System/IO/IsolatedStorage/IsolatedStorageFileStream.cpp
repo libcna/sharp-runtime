@@ -5,6 +5,10 @@
 
 #include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
 namespace System::IO::IsolatedStorage
 {
     IsolatedStorageFileStream::IsolatedStorageFileStream(
@@ -40,6 +44,16 @@ namespace System::IO::IsolatedStorage
         if (stream.is_open())
         {
             stream.close();
+#if defined(__EMSCRIPTEN__)
+            // Flush in-memory IDBFS writes to IndexedDB so save data survives
+            // page reloads.  The callback is fire-and-forget; errors are logged
+            // to the browser console.
+            EM_ASM(
+                FS.syncfs(false, function(err) {
+                    if (err) { console.warn('IDBFS post-close sync failed:', err); }
+                });
+            );
+#endif
         }
     }
 
