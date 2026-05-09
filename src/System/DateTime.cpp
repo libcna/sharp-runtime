@@ -3,6 +3,7 @@
 //
 
 #include "System/DateTime.hpp"
+#include <chrono>
 
 namespace System {
 
@@ -28,6 +29,31 @@ namespace System {
 
     TimeSpan DateTime::Subtract(const DateTime& value) const {
         return TimeSpan(ticks_ - value.ticks_);
+    }
+
+    DateTime DateTime::getNowProperty() {
+        using namespace std::chrono;
+
+        static constexpr longcs TicksPerSecond = 10000000LL;
+        static constexpr longcs UnixEpochTicks = 621355968000000000LL;
+
+        const auto now = system_clock::now();
+        const auto duration = now.time_since_epoch();
+
+        const auto secondsPart = duration_cast<seconds>(duration);
+        const auto subSecondPart = duration - secondsPart;
+
+        const longcs ticks =
+            UnixEpochTicks
+            + static_cast<longcs>(secondsPart.count()) * TicksPerSecond
+            + static_cast<longcs>(duration_cast<nanoseconds>(subSecondPart).count() / 100);
+
+        return DateTime(ticks);
+    }
+
+    TimeSpan DateTime::getTimeOfDayProperty() const {
+        static constexpr longcs TicksPerDay = 864000000000LL;
+        return {ticks_ % TicksPerDay};
     }
 
     std::string DateTime::ToString() const {

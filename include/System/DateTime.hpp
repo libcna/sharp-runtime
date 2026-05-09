@@ -71,6 +71,18 @@ namespace System {
         [[nodiscard]] TimeSpan Subtract(const DateTime& value) const;
 
         /**
+ * @brief Gets the current local date and time.
+ *
+ * @return Current local DateTime represented in .NET-compatible ticks.
+ *
+ * @note Status: PARTIAL
+ * @note This currently stores ticks compatible with .NET DateTime.Ticks,
+ *       but does not store DateTimeKind.
+ */
+        [[nodiscard]] static DateTime getNowProperty();
+        [[nodiscard]] TimeSpan getTimeOfDayProperty() const;
+
+        /**
          * @brief Returns a string representation of the current instance.
          *
          * @return String representation.
