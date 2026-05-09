@@ -21,6 +21,15 @@ target_include_directories(SHARP_RUNTIME
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
+# which require SDL3 headers and library.  SDL3 is provided by the parent project
+# (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
+if(ANDROID AND TARGET SDL3::SDL3)
+    target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
+elseif(ANDROID AND TARGET SDL3::SDL3-static)
+    target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3-static)
+endif()
+
 if(SHARP_RUNTIME_BUILD_TESTS)
     add_subdirectory(vendor/googletest)
 
