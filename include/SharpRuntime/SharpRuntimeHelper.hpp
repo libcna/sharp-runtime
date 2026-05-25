@@ -70,6 +70,8 @@ namespace SharpRuntime
      */
     using charcs = char16_t;
 
+    using IntPtr = std::uintptr_t;
+
     /**
      * @brief Maximum value of @c SharpRuntime::sbytecs.
      */
