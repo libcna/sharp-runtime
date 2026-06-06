@@ -49,15 +49,15 @@ Already partially done; the gaps matter for CNA/mobile-eggbert compilation.
 | `Int32` (boxed int) | ✅ DONE | `System/Int32.hpp` — mostly for `Int32::MaxValue` constants. |
 | `Int64` (boxed long) | ✅ DONE | `System/Int64.hpp`. |
 | `IntPtr` | ✅ DONE | `System/IntPtr.hpp`. |
-| `UIntPtr` | 🧩 STUB | Mirror `IntPtr`; needed for completeness. Low priority. |
+| `UIntPtr` | ✅ DONE | `System/UIntPtr.hpp`. Mirrors `IntPtr` with `uintptr_t`. |
 | `Nullable<T>` | ✅ DONE | `System/Nullable.hpp`. Map to `std::optional<T>`. |
 | `Math` | ✅ DONE | `System/Math.hpp`. 📌 Essential, already used by CNA. |
 | `Random` | ✅ DONE | `System/Random.hpp`. 📌 Used by mobile-eggbert `Decor`. |
 | `DateTime` | ✅ DONE | `System/DateTime.hpp`. |
 | `DateTimeOffset` | ✅ DONE | `System/DateTimeOffset.hpp`. 📌 Used by CNA sensor API. |
 | `TimeSpan` | ✅ DONE | `System/TimeSpan.hpp`. 📌 Used by CNA and mobile-eggbert. |
-| `TimeOnly` | 🧩 STUB | Needed only if XNA/mobile-eggbert uses it. Currently unused — low priority. |
-| `DateOnly` | 🧩 STUB | Same as `TimeOnly`. |
+| `TimeOnly` | ✅ DONE | `System/TimeOnly.hpp`. Hour/Minute/Second/Millisecond, ToString(), comparison. |
+| `DateOnly` | ✅ DONE | `System/DateOnly.hpp`. Year/Month/Day, ToString(), comparison. |
 | `Guid` | ✅ DONE | `System/Guid.hpp` + `.cpp`. RFC 4122 v4, `NewGuid()`, `ToString()`. |
 | `Version` | ✅ DONE | `System/Version.hpp`. Major/Minor/Build/Revision, ToString(), comparison operators, string parser. |
 | `Uri` | ❌ IGNORE | Network/web type. Not needed for game engine core. |
@@ -132,9 +132,9 @@ C# ported code may use them but modern code prefers Generic collections.
 |------|--------|---------|
 | `IEnumerable` | ✅ DONE | `System/Collections/IEnumerable.hpp`. |
 | `IEnumerator` | ✅ DONE | `System/Collections/IEnumerator.hpp`. |
-| `ICollection` | 🧩 STUB | Interface only. |
-| `IList` | 🧩 STUB | Interface only. |
-| `IDictionary` | 🧩 STUB | Interface only. |
+| `ICollection` | ✅ DONE | `System/Collections/ICollection.hpp`. Count + IsSynchronized. |
+| `IList` | ✅ DONE | `System/Collections/IList.hpp`. Add/Clear/Contains/IndexOf/Insert/Remove/RemoveAt. |
+| `IDictionary` | ✅ DONE | `System/Collections/IDictionary.hpp`. Add/Clear/Contains/Remove. |
 | `ArrayList` | ❌ IGNORE | Use `List<T>`. |
 | `Hashtable` | ❌ IGNORE | Use `Dictionary<K,V>`. |
 | `Queue` | 🧩 STUB | Wrap `std::queue`. Only if non-generic usage found. |
@@ -160,14 +160,14 @@ Core collection types. Already partially done.
 | `IReadOnlyCollection<T>` | ✅ DONE | `System/Collections/Generic/IReadOnlyCollection.hpp`. |
 | `IReadOnlyDictionary<K,V>` | ✅ DONE | `System/Collections/Generic/IReadOnlyDictionary.hpp`. |
 | `HashSet<T>` | ✅ DONE | `System/Collections/Generic/HashSet.hpp`. Wraps `std::unordered_set`. Add/Remove/Contains/UnionWith/IntersectWith. |
-| `SortedDictionary<K,V>` | 🧩 STUB | Wrap `std::map`. Low priority. |
-| `SortedList<K,V>` | 🧩 STUB | Rarely used in game code. |
+| `SortedDictionary<K,V>` | ✅ DONE | `System/Collections/Generic/SortedDictionary.hpp`. Wraps `std::map`. |
+| `SortedList<K,V>` | ✅ DONE | `System/Collections/Generic/SortedList.hpp`. Wraps `std::map`; has IndexOfKey/RemoveAt. |
 | `Queue<T>` | ✅ DONE | `System/Collections/Generic/Queue.hpp`. Enqueue/Dequeue/Peek/Contains/Clear. |
 | `Stack<T>` | ✅ DONE | `System/Collections/Generic/Stack.hpp`. Push/Pop/Peek/Contains/Clear. |
-| `LinkedList<T>` | 🧩 STUB | Rarely used directly. |
+| `LinkedList<T>` | ✅ DONE | `System/Collections/Generic/LinkedList.hpp`. Wraps `std::list`; AddFirst/AddLast/Remove/Contains. |
 | `KeyValuePair<K,V>` | ✅ DONE | `System/Collections/Generic/KeyValuePair.hpp`. Struct with Key+Value. |
-| `Comparer<T>` | 🧩 STUB | Used for sort customization. Low priority. |
-| `EqualityComparer<T>` | 🧩 STUB | Used for dictionary customization. |
+| `Comparer<T>` | ✅ DONE | `System/Collections/Generic/Comparer.hpp`. Default() uses `operator<`. |
+| `EqualityComparer<T>` | ✅ DONE | `System/Collections/Generic/Comparer.hpp`. Default() uses `operator==` + `std::hash`. |
 
 ---
 
@@ -177,7 +177,7 @@ Core collection types. Already partially done.
 |------|--------|---------|
 | `Collection<T>` | ✅ DONE | `System/Collections/ObjectModel/Collection.hpp`. |
 | `ReadOnlyCollection<T>` | ✅ DONE | `System/Collections/ObjectModel/ReadOnlyCollection.hpp`. |
-| `ObservableCollection<T>` | 🧩 STUB | Used in WPF/WinPhone MVVM pattern. Mobile-eggbert might need it. Stub with change notification. |
+| `ObservableCollection<T>` | ✅ DONE | `System/Collections/ObjectModel/ObservableCollection.hpp`. CollectionChanged event + NotifyCollectionChangedEventArgs. |
 | `KeyedCollection<K,T>` | 🧩 STUB | Rarely needed in game code. |
 
 ---
@@ -250,8 +250,8 @@ Used by mobile-eggbert for save game storage on Windows Phone.
 | `IsolatedStorageFile` | ✅ DONE | `System/IO/IsolatedStorage/IsolatedStorageFile.hpp`. 📌 |
 | `IsolatedStorageFileStream` | ✅ DONE | `System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp`. 📌 |
 | `IsolatedStorageException` | ✅ DONE | `System/IO/IsolatedStorage/IsolatedStorageException.hpp`. 📌 |
-| `IsolatedStorage` (abstract) | 🧩 STUB | Abstract base. Interface only. |
-| `IsolatedStorageScope` | 🧩 STUB | Enum for scope (User/Assembly). |
+| `IsolatedStorage` (abstract) | ✅ DONE | `System/IO/IsolatedStorage/IsolatedStorage.hpp`. Abstract base with Scope/AvailableFreeSpace/Quota/UsedSize. |
+| `IsolatedStorageScope` | ✅ DONE | `System/IO/IsolatedStorage/IsolatedStorageScope.hpp`. User/Domain/Assembly/Roaming/Machine/Application flags. |
 
 ---
 
@@ -275,9 +275,9 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | `Thread` | ✅ DONE | `System/Threading/Thread.hpp`. Wraps `std::thread`; Join/Sleep/IsAlive/Name/IsBackground. |
 | `Monitor` | ✅ DONE | `System/Threading/Monitor.hpp`. Stub — Enter/Exit/TryEnter (full impl needs per-object map). |
 | `Mutex` | ✅ DONE | `System/Threading/Mutex.hpp`. Wraps `std::mutex`; WaitOne/ReleaseMutex. |
-| `Semaphore` / `SemaphoreSlim` | 🧩 STUB | Wrap `std::counting_semaphore` (C++20). Low priority. |
-| `ManualResetEvent` | 🧩 STUB | Wrap `std::condition_variable`. |
-| `AutoResetEvent` | 🧩 STUB | Wrap `std::condition_variable`. |
+| `Semaphore` / `SemaphoreSlim` | ✅ DONE | `System/Threading/SemaphoreSlim.hpp`. Wraps `std::condition_variable`; Wait/Release/CurrentCount. |
+| `ManualResetEvent` | ✅ DONE | `System/Threading/ManualResetEvent.hpp`. Set/Reset/WaitOne with optional timeout. |
+| `AutoResetEvent` | ✅ DONE | `System/Threading/AutoResetEvent.hpp`. Set/Reset/WaitOne — auto-resets after releasing one thread. |
 | `Interlocked` | ✅ DONE | `System/Threading/Interlocked.hpp`. Increment/Decrement/Add/Exchange/CompareExchange via GCC builtins. |
 | `Timer` | 🧩 STUB | Periodic callback. Game engines usually use their own loop. Low priority. |
 | `ThreadPool` | ❌ IGNORE | Complex to port correctly. Use `std::async` directly. |
@@ -348,7 +348,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | Type | Status | Opinion |
 |------|--------|---------|
 | `CultureInfo` | ✅ DONE | `System/Globalization/CultureInfo.hpp`. InvariantCulture() + CurrentCulture() stub, Name/IsNeutralCulture/IsReadOnly — header-only. |
-| `NumberFormatInfo` | 🧩 STUB | Number formatting. Low priority. |
+| `NumberFormatInfo` | ✅ DONE | `System/Globalization/NumberFormatInfo.hpp`. InvariantInfo/CurrentInfo; decimal/group separators, currency, NaN symbols. |
 | `StringInfo` | ❌ IGNORE | Unicode text segmentation. Not needed for game code. |
 | `Calendar` | ❌ IGNORE | Not needed. |
 
@@ -370,7 +370,7 @@ Already partially done.
 |------|--------|---------|
 | `Attribute` (base) | ✅ DONE | `System/ComponentModel/Attribute.hpp`. |
 | `PropertyDescriptorCollection` | ✅ DONE | `System/ComponentModel/PropertyDescriptorCollection.hpp`. |
-| `INotifyPropertyChanged` | 🧩 STUB | Used in MVVM pattern on Windows Phone. Mobile-eggbert may need it. Stub with event. |
+| `INotifyPropertyChanged` | ✅ DONE | `System/ComponentModel/INotifyPropertyChanged.hpp`. PropertyChanged event + PropertyChangedEventArgs. |
 | `TypeConverter` | ❌ IGNORE | Reflection-based type conversion. Not needed. |
 | `DescriptionAttribute` | 🧩 STUB | Metadata only. Low priority. |
 | `DefaultValueAttribute` | 🧩 STUB | Metadata only. Low priority. |
@@ -503,16 +503,23 @@ Types unique to sharp-runtime with no .NET equivalent.
 - **Core**: `Span<T>`, `ReadOnlySpan<T>`, `Tuple2/3/4`, `IFormattable`, `ICloneable`,
   `BitConverter`, `Buffer`, `Environment`, `Version`, `CultureInfo`
 
+### ✅ Already ported (wave 4 — collections, threading events, Globalization)
+- **Core**: `UIntPtr`, `TimeOnly`, `DateOnly`
+- **Collections non-generic**: `ICollection`, `IList`, `IDictionary` interfaces
+- **Collections.Generic**: `SortedDictionary<K,V>`, `SortedList<K,V>`, `LinkedList<T>`, `Comparer<T>`, `EqualityComparer<T>`
+- **Collections.ObjectModel**: `ObservableCollection<T>` with `CollectionChanged` event + `NotifyCollectionChangedEventArgs`
+- **ComponentModel**: `INotifyPropertyChanged` + `PropertyChangedEventArgs`
+- **Threading**: `ManualResetEvent`, `AutoResetEvent`, `SemaphoreSlim`
+- **IO.IsolatedStorage**: `IsolatedStorage` (abstract base), `IsolatedStorageScope` enum
+- **Globalization**: `NumberFormatInfo`
+
 ### 🔨 Next to port (nice to have)
-- `TimeOnly`, `DateOnly`
-- `ObservableCollection<T>` + `INotifyPropertyChanged`
-- `GZipStream` / `DeflateStream` (XNB uses DEFLATE)
-- `XmlReader` / `XmlWriter` (XNA content descriptors)
-- `UIntPtr`
-- `SortedDictionary<K,V>`, `SortedList<K,V>`
-- `ManualResetEvent`, `AutoResetEvent`, `SemaphoreSlim`
-- `IsolatedStorage` (abstract base), `IsolatedStorageScope` enum
-- `NumberFormatInfo`
+- `GZipStream` / `DeflateStream` (XNB uses DEFLATE — needs zlib/miniz dependency)
+- `XmlReader` / `XmlWriter` (XNA content descriptors — needs tinyxml2/pugixml)
+- `BitArray`
+- `Timer` (threading timer — needs std::thread + callback)
+- `FileInfo`, `DirectoryInfo` (OOP wrappers over File/Directory)
+- `BufferedStream`
 
 ### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
