@@ -331,7 +331,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | `Stopwatch` | ✅ DONE | `System/Diagnostics/Stopwatch.hpp`. Start/Stop/Reset/Restart/ElapsedMilliseconds/Elapsed(TimeSpan), header-only. |
 | `Process` | ❌ IGNORE | Platform-specific, not needed for game engine. |
 | `PerformanceCounter` | ❌ IGNORE | Windows-specific performance monitoring. Not portable. |
-| `StackTrace` | ❌ IGNORE | Too platform-specific. |
+| `StackTrace` | ✅ DONE | `System/Diagnostics/StackTrace.hpp` + `StackFrame.hpp`. Vector of frames, GetFrame/GetFrames/ToString. |
 
 ---
 
@@ -349,8 +349,8 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 |------|--------|---------|
 | `CultureInfo` | ✅ DONE | `System/Globalization/CultureInfo.hpp`. InvariantCulture() + CurrentCulture() stub, Name/IsNeutralCulture/IsReadOnly — header-only. |
 | `NumberFormatInfo` | ✅ DONE | `System/Globalization/NumberFormatInfo.hpp`. InvariantInfo/CurrentInfo; decimal/group separators, currency, NaN symbols. |
-| `StringInfo` | ❌ IGNORE | Unicode text segmentation. Not needed for game code. |
-| `Calendar` | ❌ IGNORE | Not needed. |
+| `StringInfo` | ✅ DONE | `System/Globalization/StringInfo.hpp`. Stub with SubstringByTextElements/ParseCombiningCharacters. |
+| `Calendar` | ✅ DONE | `System/Globalization/Calendar.hpp` (abstract) + `GregorianCalendar.hpp`. |
 
 ---
 
@@ -381,8 +381,8 @@ Already partially done.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `CallerMemberName` / `CallerFilePath` | ❌ IGNORE | Language-level attributes. C++ has `__FUNCTION__` / `__FILE__`. |
-| `MethodImpl` / `MethodImplOptions` | ❌ IGNORE | JIT hints. Not applicable in C++. |
+| `CallerMemberName` / `CallerFilePath` | ✅ DONE | `System/Runtime/CompilerServices/CallerAttributes.hpp`. CallerMemberName/FilePath/LineNumber/ArgumentExpression attributes. |
+| `MethodImpl` / `MethodImplOptions` | ✅ DONE | `System/Runtime/CompilerServices/MethodImplAttribute.hpp` + `MethodImplOptions.hpp`. NoInlining/AggressiveInlining etc. |
 | `RuntimeHelpers` | ❌ IGNORE | CLR internals. |
 
 ---
@@ -603,7 +603,7 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.Diagnostics` | ✅ PORT | Debug, Stopwatch hotové. Trace stub. Process/PerformanceCounter IGNORE. |
 | `System.Diagnostics.Contracts` | ❌ IGNORE | Code Contracts. Nahrazeno asserty. |
 | `System.Diagnostics.Process` | ❌ IGNORE | Spouštění procesů. Mimo scope. |
-| `System.Diagnostics.StackTrace` | ❌ IGNORE | Platform-specific. |
+| `System.Diagnostics.StackTrace` | ✅ DONE | `StackFrame` + `StackTrace` — vector of frames, GetFrame/GetFrames/ToString. |
 | `System.Drawing.Primitives` | ❌ IGNORE | Point, Size, Rectangle — CNA je má jako `Microsoft::Xna::Framework::Point` apod. Neduplikovat. |
 | `System.Formats.Tar` | ❌ IGNORE | TAR archiv. Nepotřebné. |
 | `System.Formats.Asn1` | ❌ IGNORE | ASN.1 kódování (kryptografie). |
@@ -632,8 +632,8 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.Reflection.Emit` | ❌ IGNORE | IL generování za běhu. Naprosto mimo scope. |
 | `System.Reflection.Metadata` | ❌ IGNORE | Low-level metadata reader. Mimo scope. |
 | `System.Resources` | ❌ IGNORE | Assembly resources. XNA používá vlastní Content systém. |
-| `System.Runtime` | ❌ IGNORE | CLR internals (GCHandle, RuntimeHelpers). |
-| `System.Runtime.CompilerServices` | ❌ IGNORE | JIT hints, CallerMemberName. C++ má `__FUNCTION__`/`__FILE__`. |
+| `System.Runtime` | ✅ DONE | `AmbiguousImplementationException`, `GCSettings` (GCLatencyMode/GCLargeObjectHeapCompactionMode). GCHandle IGNORE. |
+| `System.Runtime.CompilerServices` | ✅ DONE | `MethodImplOptions`, `MethodImplAttribute`, `CallerMemberNameAttribute`, `CallerFilePathAttribute`, `CallerLineNumberAttribute`, `CallerArgumentExpressionAttribute`. |
 | `System.Runtime.InteropServices` | ❌ IGNORE | P/Invoke, COM, Marshal. Nativní C++ nepotřebuje. |
 | `System.Runtime.Intrinsics` | ❌ IGNORE | SIMD intrinsics. Použij C++ `<immintrin.h>` přímo. |
 | `System.Runtime.Serialization` | ❌ IGNORE | XML/JSON serializace. Příliš komplexní, reflection-based. |
