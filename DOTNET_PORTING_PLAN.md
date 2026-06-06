@@ -58,15 +58,15 @@ Already partially done; the gaps matter for CNA/mobile-eggbert compilation.
 | `TimeSpan` | ✅ DONE | `System/TimeSpan.hpp`. 📌 Used by CNA and mobile-eggbert. |
 | `TimeOnly` | 🧩 STUB | Needed only if XNA/mobile-eggbert uses it. Currently unused — low priority. |
 | `DateOnly` | 🧩 STUB | Same as `TimeOnly`. |
-| `Guid` | 🔨 PORT | XNA uses `Guid` (e.g. `GraphicsAdapter`). Simple to implement as 128-bit value + string formatting. |
+| `Guid` | ✅ DONE | `System/Guid.hpp` + `.cpp`. RFC 4122 v4, `NewGuid()`, `ToString()`. |
 | `Version` | 🧩 STUB | Rarely needed in game code; stub with major.minor parsing is enough. |
 | `Uri` | ❌ IGNORE | Network/web type. Not needed for game engine core. |
-| `Convert` | 🔨 PORT | `Convert.ToInt32()`, `Convert.ToString()` etc. used frequently in ported C# code. Simple to implement. |
+| `Convert` | ✅ DONE | `System/Convert.hpp` + `.cpp`. ToInt32/64/16, ToDouble/Single, ToString, base-N. |
 | `BitConverter` | 🧩 STUB | Useful for binary data reading. CNA content pipeline may need it. |
 | `Buffer` | 🧩 STUB | `Buffer.BlockCopy` — useful for raw memory operations in content loaders. |
 | `Span<T>` / `ReadOnlySpan<T>` | 🧩 STUB | C++23 has `std::span`. Can typedef. Useful for slicing without copying. |
 | `Memory<T>` | ❌ IGNORE | Too complex for the scope of sharp-runtime. Use `std::vector` slices. |
-| `Array` (static methods) | 🔨 PORT | `Array::Sort`, `Array::Copy`, `Array::Resize` — frequently used in C# ports. Wrap `std::algorithm`. |
+| `Array` (static methods) | ✅ DONE | `System/Array.hpp`. Sort/Copy/Resize/IndexOf/Reverse/Clear — template helpers over `std::vector`. |
 | `Tuple<>` / `ValueTuple<>` | 🧩 STUB | Map to `std::tuple`. Rarely needed in game logic. |
 | `Type` | ✅ DONE | `System/Type.hpp`. Runtime type info is limited in C++; keep as partial stub. |
 | `IComparable<T>` | ✅ DONE | Interface in `System/IComparable.hpp`. |
@@ -76,11 +76,11 @@ Already partially done; the gaps matter for CNA/mobile-eggbert compilation.
 | `IFormattable` | 🧩 STUB | Interface only; `ToString(format)` not critical. |
 | `ICloneable` | 🧩 STUB | Interface only. Rarely needed. |
 | `Action<>` | ✅ DONE | `System/Action.hpp`. Map to `std::function<void(...)>`. 📌 |
-| `Func<>` | 🔨 PORT | Mirror `Action` — typedef `std::function<R(...)>`. Used in LINQ-style iteration in C# code. |
-| `Predicate<T>` | 🔨 PORT | `std::function<bool(T)>` typedef. Used in `List::FindAll` etc. |
+| `Func<>` | ✅ DONE | `System/Func.hpp`. `Func<R>`, `FuncT<T,R>`, `FuncT2`, `FuncT3` via `std::function`. |
+| `Predicate<T>` | ✅ DONE | `System/Predicate.hpp`. Typedef `std::function<bool(T)>`. |
 | `EventArgs` | ✅ DONE | `System/EventArgs.hpp`. 📌 Used everywhere in CNA. |
 | `EventHandler<T>` | ✅ DONE | `System/EventHandler.hpp`. 📌 Used everywhere in CNA. |
-| `Console` | 🔨 PORT | `Console::WriteLine`, `Console::Write` — basic debug output wrapper over `std::cout`. Simple and useful for ported code. |
+| `Console` | ✅ DONE | `System/Console.hpp`. Write/WriteLine/ReadLine/Error, header-only. |
 | `Environment` | 🧩 STUB | `Environment::NewLine`, `Environment::OSVersion`. Simple constants; full process info is IGNORE. |
 | `GC` | ❌ IGNORE | No GC in C++. RAII + smart pointers replace it. Don't port. |
 | `AppDomain` | ❌ IGNORE | CLR concept. Not applicable. |
@@ -99,25 +99,25 @@ Already mostly done. A few important ones are missing.
 | `Exception` | ✅ DONE | `System/Exception.hpp`. 📌 |
 | `SystemException` | ✅ DONE | `System/SystemException.hpp`. |
 | `ArgumentException` | ✅ DONE | `System/ArgumentException.hpp`. |
-| `ArgumentNullException` | 🔨 PORT | Missing! Common in C# code. Simple — inherits ArgumentException. |
+| `ArgumentNullException` | ✅ DONE | `System/ArgumentNullException.hpp`. Inherits `ArgumentException`. |
 | `ArgumentOutOfRangeException` | ✅ DONE | `System/ArgumentOutOfRangeException.hpp`. |
 | `ArithmeticException` | ✅ DONE | `System/ArithmeticException.hpp`. |
-| `DivideByZeroException` | 🔨 PORT | Common exception. Inherits ArithmeticException. |
+| `DivideByZeroException` | ✅ DONE | `System/DivideByZeroException.hpp`. Inherits `ArithmeticException`. |
 | `OverflowException` | ✅ DONE | `System/OverflowException.hpp`. |
 | `InvalidOperationException` | ✅ DONE | `System/InvalidOperationException.hpp`. |
 | `NotImplementedException` | ✅ DONE | `System/NotImplementedException.hpp`. 📌 Heavily used during porting. |
-| `NotSupportedException` | 🔨 PORT | Commonly thrown in partial implementations. Easy to add. |
+| `NotSupportedException` | ✅ DONE | `System/NotSupportedException.hpp`. Default thrown by `Stream::Write`. |
 | `NullReferenceException` | 🧩 STUB | In C++ usually segfault; can stub for porting completeness. |
-| `IndexOutOfRangeException` | 🔨 PORT | Needed for `List`/`Array` bounds checking. |
+| `IndexOutOfRangeException` | ✅ DONE | `System/IndexOutOfRangeException.hpp`. |
 | `InvalidCastException` | 🧩 STUB | Useful for type-safe casts. Low priority. |
-| `FormatException` | 🔨 PORT | Needed for string parsing (`Int32::Parse` etc.). |
+| `FormatException` | ✅ DONE | `System/FormatException.hpp`. Thrown by `Convert` on bad input. |
 | `OutOfMemoryException` | 🧩 STUB | In C++ this is `std::bad_alloc`. Can stub as alias. |
 | `ObjectDisposedException` | ✅ DONE | `System/ObjectDisposedException.hpp`. 📌 Used by CNA. |
 | `UnauthorizedAccessException` | ✅ DONE | `System/UnauthorizedAccessException.hpp`. |
-| `IOException` | 🔨 PORT | Needed as base for file-system exceptions. |
-| `FileNotFoundException` | 🔨 PORT | Content pipeline needs this. |
+| `IOException` | ✅ DONE | `System/IO/IOException.hpp`. Base for all I/O exceptions. |
+| `FileNotFoundException` | ✅ DONE | `System/IO/FileNotFoundException.hpp`. Has `FileName` property. |
 | `DirectoryNotFoundException` | 🧩 STUB | Useful for file system operations. |
-| `EndOfStreamException` | 🔨 PORT | Used by `BinaryReader` when reading past end. |
+| `EndOfStreamException` | ✅ DONE | `System/IO/EndOfStreamException.hpp`. |
 | `TimeoutException` | 🧩 STUB | Low priority for game engine. |
 | `StackOverflowException` | ❌ IGNORE | Platform crash, can't meaningfully catch in C++. |
 
@@ -155,17 +155,17 @@ Core collection types. Already partially done.
 | `IEnumerator<T>` | ✅ DONE | `System/Collections/Generic/IEnumerator.hpp`. |
 | `ICollection<T>` | ✅ DONE | `System/Collections/Generic/ICollection.hpp`. |
 | `IList<T>` | ✅ DONE | `System/Collections/Generic/IList.hpp`. |
-| `IDictionary<K,V>` | 🔨 PORT | Interface. Needed for proper type hierarchy. |
-| `IReadOnlyList<T>` | 🔨 PORT | Used in XNA public API (e.g. `EffectPassCollection`). |
-| `IReadOnlyCollection<T>` | 🔨 PORT | Interface for read-only collections. |
+| `IDictionary<K,V>` | ✅ DONE | `System/Collections/Generic/IDictionary.hpp`. Interface. |
+| `IReadOnlyList<T>` | ✅ DONE | `System/Collections/Generic/IReadOnlyList.hpp`. |
+| `IReadOnlyCollection<T>` | ✅ DONE | `System/Collections/Generic/IReadOnlyCollection.hpp`. |
 | `IReadOnlyDictionary<K,V>` | 🧩 STUB | Low priority. |
-| `HashSet<T>` | 🔨 PORT | Used in some XNA/game logic. Wrap `std::unordered_set`. Useful. |
+| `HashSet<T>` | ✅ DONE | `System/Collections/Generic/HashSet.hpp`. Wraps `std::unordered_set`. Add/Remove/Contains/UnionWith/IntersectWith. |
 | `SortedDictionary<K,V>` | 🧩 STUB | Wrap `std::map`. Low priority. |
 | `SortedList<K,V>` | 🧩 STUB | Rarely used in game code. |
-| `Queue<T>` | 🔨 PORT | Useful for event queues in game engines. Wrap `std::queue`. |
-| `Stack<T>` | 🔨 PORT | Useful for undo/parse stacks. Wrap `std::stack`. |
+| `Queue<T>` | ✅ DONE | `System/Collections/Generic/Queue.hpp`. Enqueue/Dequeue/Peek/Contains/Clear. |
+| `Stack<T>` | ✅ DONE | `System/Collections/Generic/Stack.hpp`. Push/Pop/Peek/Contains/Clear. |
 | `LinkedList<T>` | 🧩 STUB | Rarely used directly. |
-| `KeyValuePair<K,V>` | 🔨 PORT | Used in Dictionary iteration (`foreach (var kvp in dict)`). |
+| `KeyValuePair<K,V>` | ✅ DONE | `System/Collections/Generic/KeyValuePair.hpp`. Struct with Key+Value. |
 | `Comparer<T>` | 🧩 STUB | Used for sort customization. Low priority. |
 | `EqualityComparer<T>` | 🧩 STUB | Used for dictionary customization. |
 
@@ -188,8 +188,8 @@ Core collection types. Already partially done.
 |------|--------|---------|
 | `StringBuilder` | ✅ DONE | `System/Text/StringBuilder.hpp`. 📌 Used by mobile-eggbert `Worlds`. |
 | `Encoding` | ✅ DONE | `System/Text/Encoding.hpp`. Base class for encodings. |
-| `UTF8Encoding` | 🔨 PORT | Most important encoding. Needed for file/network I/O in game content. |
-| `ASCIIEncoding` | 🔨 PORT | Simple encoding, useful for legacy content formats. |
+| `UTF8Encoding` | ✅ DONE | `System/Text/UTF8Encoding.hpp`. Inherits polymorphic `Encoding`. |
+| `ASCIIEncoding` | ✅ DONE | `System/Text/ASCIIEncoding.hpp`. Non-ASCII chars replaced with `?`. |
 | `UnicodeEncoding` | 🧩 STUB | UTF-16. Less common in modern game content. |
 | `Decoder` | 🧩 STUB | Advanced encoding; low priority. |
 | `Encoder` | 🧩 STUB | Advanced encoding; low priority. |
@@ -212,31 +212,31 @@ File I/O — already partially done. Important for content loading and save game
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Stream` | ✅ DONE | `System/IO/Stream.hpp`. 📌 Base stream class. |
+| `Stream` | ✅ DONE | `System/IO/Stream.hpp`. 📌 Polymorphic base; now has virtual `Write`, `WriteByte`, `Flush`, `CanWrite`. |
 | `StreamReader` | ✅ DONE | `System/IO/StreamReader.hpp`. |
-| `StreamWriter` | 🔨 PORT | Counterpart to `StreamReader`. Needed for save file writing. |
+| `StreamWriter` | ✅ DONE | `System/IO/StreamWriter.hpp`. Write/WriteLine over any `Stream` or file path. |
 | `BinaryReader` | ✅ DONE | `System/IO/BinaryReader.hpp`. 📌 Critical for XNA content pipeline. |
-| `BinaryWriter` | 🔨 PORT | Counterpart to `BinaryReader`. Needed for binary save files. |
-| `MemoryStream` | ✅ DONE | `System/IO/MemoryStream.hpp`. |
-| `FileStream` | ✅ DONE | `System/IO/FileStream.hpp`. |
+| `BinaryWriter` | ✅ DONE | `System/IO/BinaryWriter.hpp`. Little-endian; 7-bit string encoding matches `BinaryReader`. |
+| `MemoryStream` | ✅ DONE | `System/IO/MemoryStream.hpp`. Now has empty writable constructor + `Write`/`WriteByte`. |
+| `FileStream` | ✅ DONE | `System/IO/FileStream.hpp`. Refactored to `std::fstream`; full read+write, all `FileMode` values. |
 | `BufferedStream` | 🧩 STUB | Optimization wrapper. Low priority. |
 | `TextReader` | 🧩 STUB | Abstract base for `StreamReader`. |
 | `TextWriter` | 🧩 STUB | Abstract base for `StreamWriter`. |
 | `StringReader` | 🧩 STUB | Read from string as stream. Occasionally useful. |
 | `StringWriter` | 🧩 STUB | Write to string as stream. |
-| `File` | 🔨 PORT | `File::ReadAllText`, `File::WriteAllText`, `File::Exists`, `File::Delete`. Very useful for save/config. Wrap C++ file APIs. |
-| `Directory` | 🔨 PORT | `Directory::Exists`, `Directory::CreateDirectory`. Needed for save game paths. |
-| `Path` | 🔨 PORT | `Path::Combine`, `Path::GetFileName`, `Path::GetExtension`. Very commonly used. |
+| `File` | ✅ DONE | `System/IO/File.hpp`. ReadAllText/WriteAllText/ReadAllBytes/WriteAllBytes/Exists/Delete/Copy/Move/AppendAllText. |
+| `Directory` | ✅ DONE | `System/IO/Directory.hpp`. Exists/CreateDirectory/Delete/Move/GetFiles/GetDirectories. |
+| `Path` | ✅ DONE | `System/IO/Path.hpp`. Combine/GetFileName/GetExtension/GetDirectoryName/GetTempPath/ChangeExtension etc. |
 | `FileInfo` | 🧩 STUB | OOP wrapper over file metadata. Lower priority than static `File`. |
 | `DirectoryInfo` | 🧩 STUB | OOP wrapper over directory. Lower priority than static `Directory`. |
-| `FileMode` | ✅ DONE | `System/IO/FileMode.hpp`. Enum. |
-| `FileAccess` | 🔨 PORT | Enum used with `FileStream`. |
-| `FileShare` | 🔨 PORT | Enum used with `FileStream`. |
-| `SeekOrigin` | 🔨 PORT | Enum for `Stream::Seek`. |
-| `IOException` | 🔨 PORT | Base exception for I/O errors. |
-| `FileNotFoundException` | 🔨 PORT | Inherits `IOException`. |
+| `FileMode` | ✅ DONE | `System/IO/FileMode.hpp`. Now includes all values: CreateNew/Create/Open/OpenOrCreate/Truncate/Append. |
+| `FileAccess` | ✅ DONE | `System/IO/FileAccess.hpp`. Read/Write/ReadWrite. |
+| `FileShare` | ✅ DONE | `System/IO/FileShare.hpp`. None/Read/Write/ReadWrite/Delete/Inheritable. |
+| `SeekOrigin` | ✅ DONE | `System/IO/SeekOrigin.hpp`. Begin/Current/End. |
+| `IOException` | ✅ DONE | `System/IO/IOException.hpp`. Base for all I/O exceptions. |
+| `FileNotFoundException` | ✅ DONE | `System/IO/FileNotFoundException.hpp`. Has `FileName` property. |
 | `DirectoryNotFoundException` | 🧩 STUB | Inherits `IOException`. |
-| `EndOfStreamException` | 🔨 PORT | Used by `BinaryReader`. |
+| `EndOfStreamException` | ✅ DONE | `System/IO/EndOfStreamException.hpp`. |
 | `InvalidDataException` | 🧩 STUB | Useful for malformed content. |
 
 ---
@@ -326,9 +326,9 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Debug` | 🔨 PORT | `Debug::Assert`, `Debug::WriteLine` — essential during development. Simple wrapper. |
+| `Debug` | ✅ DONE | `System/Diagnostics/Debug.hpp`. Assert/Write/WriteLine/Fail — stripped in NDEBUG, header-only. |
 | `Trace` | 🧩 STUB | Lower priority than `Debug`. |
-| `Stopwatch` | 🔨 PORT | Used for performance measurement in games. Wrap `std::chrono::high_resolution_clock`. Very useful. |
+| `Stopwatch` | ✅ DONE | `System/Diagnostics/Stopwatch.hpp`. Start/Stop/Reset/Restart/ElapsedMilliseconds/Elapsed(TimeSpan), header-only. |
 | `Process` | ❌ IGNORE | Platform-specific, not needed for game engine. |
 | `PerformanceCounter` | ❌ IGNORE | Windows-specific performance monitoring. Not portable. |
 | `StackTrace` | ❌ IGNORE | Too platform-specific. |
@@ -439,7 +439,7 @@ Already partially done.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Console` | 🔨 PORT | `Console::WriteLine`, `Console::Write`, `Console::ReadLine`. Simple wrapper over stdout/stdin. Useful for ported code. |
+| `Console` | ✅ DONE | `System/Console.hpp`. Write/WriteLine/ReadLine/Error_Write/Error_WriteLine, header-only. |
 
 ---
 
@@ -476,40 +476,37 @@ Types unique to sharp-runtime with no .NET equivalent.
 
 ## Priority Summary
 
-### Must port (blocking CNA/mobile-eggbert)
-- `ArgumentNullException` (very commonly thrown in C# code)
-- `FormatException` (needed for parsing methods)
-- `IndexOutOfRangeException` (bounds checking in List/Array)
-- `NotSupportedException` (partial implementations)
-- `IOException` + `FileNotFoundException` + `EndOfStreamException`
-- `File`, `Directory`, `Path` (static helpers)
-- `SeekOrigin`, `FileAccess`, `FileShare` (Stream API completeness)
-- `StreamWriter`, `BinaryWriter` (write-side of streams)
-- `IDictionary<K,V>`, `IReadOnlyList<T>`, `IReadOnlyCollection<T>`
-- `KeyValuePair<K,V>`
+### ✅ Already ported (first wave — complete)
+- MIT License + SPDX headers
+- `ArgumentNullException`, `NotSupportedException`, `DivideByZeroException`
+- `IndexOutOfRangeException`, `FormatException`
+- `IOException`, `FileNotFoundException`, `EndOfStreamException`
+- `SeekOrigin`, `FileAccess`, `FileShare`, `FileMode` (extended)
+- `StreamWriter`, `BinaryWriter`
+- `Stream` (Write/WriteByte/Flush/CanWrite), `MemoryStream` (writable), `FileStream` (read+write)
+- `File`, `Directory`, `Path`
+- `IDictionary<K,V>`, `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `KeyValuePair<K,V>`
 - `Queue<T>`, `Stack<T>`, `HashSet<T>`
-- `Convert` (type conversion)
-- `Guid` (XNA uses it in public API)
-- `Debug::Assert` + `Stopwatch`
-- `Console::WriteLine`
+- `Convert`, `Guid`, `Array` (static helpers)
+- `Func<>` / `FuncT` / `FuncT2` / `FuncT3`, `Predicate<T>`
+- `Console`, `Debug`, `Stopwatch`
 - `UTF8Encoding`, `ASCIIEncoding`
-- `Func<>`, `Predicate<T>`
-- `Array` static methods
-- MIT License file + attribution headers
 
-### Nice to have (adds completeness)
+### 🔨 Next to port (nice to have)
 - `TimeOnly`, `DateOnly`
 - `Version`
 - `ObservableCollection<T>`
-- `CultureInfo::InvariantCulture`
+- `CultureInfo` (`InvariantCulture` constant)
 - `GZipStream` / `DeflateStream` (XNB uses DEFLATE)
-- `XmlReader` (XNA content descriptors)
-- `Regex` (string processing in content)
+- `XmlReader` / `XmlWriter` (XNA content descriptors)
+- `Regex` + `Match` (string processing in content)
 - `INotifyPropertyChanged`
 - `UIntPtr`
 - `Thread`, `Monitor`, `CancellationToken`
+- `BitConverter`
+- `DirectoryNotFoundException`, `InvalidDataException`
 
-### Explicitly out of scope
+### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
 - Reflection
 - async/await / Task
@@ -519,7 +516,94 @@ Types unique to sharp-runtime with no .NET equivalent.
 - Cryptography
 - Network HTTP (HttpClient, WebClient)
 - Microsoft.Extensions.*
-- System.Numerics (vectors/matrix — CNA owns these)
+- System.Numerics vectors/matrix (CNA owns these)
+
+---
+
+---
+
+## 30. .NET Namespace Overview
+
+Complete view of .NET namespaces from `dotnet/runtime`.
+**Rozhodnutí je na tobě** — navrhnu, ty rozhodneš. Použij `✅ PORT` / `🧩 STUB` / `❌ IGNORE`.
+
+| Namespace | Můj návrh | Zdůvodnění |
+|-----------|-----------|------------|
+| `System` (core) | ✅ PORT | Základ všeho — typy, výjimky, Math, Convert, Guid, Console. Velká část hotova. |
+| `System.Collections` | 🧩 STUB | Non-generic kolekce (ArrayList, Hashtable) jsou zastaralé. Jen rozhraní IEnumerable/IEnumerator. |
+| `System.Collections.Generic` | ✅ PORT | Klíčové — List, Dictionary, Queue, Stack, HashSet, interfaces. Velká část hotova. |
+| `System.Collections.Concurrent` | 🧩 STUB | Thread-safe kolekce (ConcurrentDictionary, ConcurrentQueue). Pro game engine nízká priorita. |
+| `System.Collections.Immutable` | ❌ IGNORE | Immutable kolekce. Příliš komplexní, v C++ máme `const`. |
+| `System.Collections.NonGeneric` | ❌ IGNORE | Legacy .NET 1.x (ArrayList, Hashtable). Používej Generic varianty. |
+| `System.Collections.Specialized` | 🧩 STUB | OrderedDictionary, NameValueCollection — občas užitečné v ported kódu. |
+| `System.Collections.ObjectModel` | ✅ PORT | Collection<T>, ReadOnlyCollection<T> hotové. ObservableCollection pro WinPhone. |
+| `System.ComponentModel` | 🧩 STUB | Attribute, INotifyPropertyChanged hotové/stub. TypeConverter IGNORE. |
+| `System.ComponentModel.Annotations` | ❌ IGNORE | Validační atributy. Nepotřebné pro game engine. |
+| `System.ComponentModel.Composition` | ❌ IGNORE | MEF (Managed Extensibility Framework). Příliš komplexní. |
+| `System.ComponentModel.TypeConverter` | ❌ IGNORE | Reflection-based konverze. |
+| `System.Configuration` | ❌ IGNORE | app.config/web.config. Pro C++ game engine nepotřebné. |
+| `System.Console` | ✅ PORT | Hotovo. |
+| `System.Data` | ❌ IGNORE | ADO.NET, databáze. Mimo scope. |
+| `System.Data.Common` | ❌ IGNORE | Stejné jako System.Data. |
+| `System.Diagnostics` | ✅ PORT | Debug, Stopwatch hotové. Trace stub. Process/PerformanceCounter IGNORE. |
+| `System.Diagnostics.Contracts` | ❌ IGNORE | Code Contracts. Nahrazeno asserty. |
+| `System.Diagnostics.Process` | ❌ IGNORE | Spouštění procesů. Mimo scope. |
+| `System.Diagnostics.StackTrace` | ❌ IGNORE | Platform-specific. |
+| `System.Drawing.Primitives` | ❌ IGNORE | Point, Size, Rectangle — CNA je má jako `Microsoft::Xna::Framework::Point` apod. Neduplikovat. |
+| `System.Formats.Tar` | ❌ IGNORE | TAR archiv. Nepotřebné. |
+| `System.Formats.Asn1` | ❌ IGNORE | ASN.1 kódování (kryptografie). |
+| `System.IO` | ✅ PORT | Velká část hotova. Zbývá: TextReader/TextWriter, StringReader/StringWriter, FileInfo/DirectoryInfo. |
+| `System.IO.Compression` | 🧩 STUB | GZipStream/DeflateStream — XNB formát používá DEFLATE. Obalit zlib/miniz. |
+| `System.IO.IsolatedStorage` | ✅ PORT | Hotovo. Klíčové pro mobile-eggbert save hry. |
+| `System.IO.FileSystem.Watcher` | ❌ IGNORE | FileSystemWatcher. Nepotřebné pro game. |
+| `System.IO.FileSystem.DriveInfo` | ❌ IGNORE | Informace o discích. Mimo scope. |
+| `System.IO.Hashing` | ❌ IGNORE | Hashovací funkce (xxHash, CRC). Použij přímou C++ implementaci. |
+| `System.IO.MemoryMappedFiles` | ❌ IGNORE | Memory-mapped soubory. Příliš OS-specifické. |
+| `System.IO.Pipelines` | ❌ IGNORE | Async I/O pipeline. Závisí na async/await. |
+| `System.IO.Pipes` | ❌ IGNORE | Named pipes. Mimo scope. |
+| `System.IO.Ports` | ❌ IGNORE | Sériové porty. Mimo scope. |
+| `System.Linq` | ❌ IGNORE | C++ ranges/algorithms jsou idiomatičtější. Neplést port. |
+| `System.Linq.Expressions` | ❌ IGNORE | Expression trees. Vyžaduje runtime kompilaci. |
+| `System.Memory` | 🧩 STUB | Span<T>, Memory<T> — C++23 má `std::span`. Typedef by stačil. |
+| `System.Net` | ❌ IGNORE | HTTP client. Mimo scope game engine core. |
+| `System.Net.Sockets` | 🧩 STUB | TcpClient, UdpClient — v TODO.md pro multiplayer. Nízká priorita. |
+| `System.Net.Http` | ❌ IGNORE | HttpClient. Použij libcurl nebo platform API přímo. |
+| `System.Net.Security` | ❌ IGNORE | TLS/SSL. Mimo scope. |
+| `System.Net.WebSockets` | ❌ IGNORE | WebSocket. Mimo scope. |
+| `System.Numerics` | ❌ IGNORE | Vector2/3/4, Matrix4x4, Quaternion — CNA je definuje v `Microsoft::Xna::Framework`. Neduplikovat! |
+| `System.Numerics.Vectors` | ❌ IGNORE | Stejné. |
+| `System.ObjectModel` | ✅ PORT | Viz System.Collections.ObjectModel — hotovo. |
+| `System.Reflection` | ❌ IGNORE | C++ nemá runtime reflection. Templates pokryjí potřeby. |
+| `System.Reflection.Emit` | ❌ IGNORE | IL generování za běhu. Naprosto mimo scope. |
+| `System.Reflection.Metadata` | ❌ IGNORE | Low-level metadata reader. Mimo scope. |
+| `System.Resources` | ❌ IGNORE | Assembly resources. XNA používá vlastní Content systém. |
+| `System.Runtime` | ❌ IGNORE | CLR internals (GCHandle, RuntimeHelpers). |
+| `System.Runtime.CompilerServices` | ❌ IGNORE | JIT hints, CallerMemberName. C++ má `__FUNCTION__`/`__FILE__`. |
+| `System.Runtime.InteropServices` | ❌ IGNORE | P/Invoke, COM, Marshal. Nativní C++ nepotřebuje. |
+| `System.Runtime.Intrinsics` | ❌ IGNORE | SIMD intrinsics. Použij C++ `<immintrin.h>` přímo. |
+| `System.Runtime.Serialization` | ❌ IGNORE | XML/JSON serializace. Příliš komplexní, reflection-based. |
+| `System.Security` | ❌ IGNORE | Permissions, access control. Mimo scope. |
+| `System.Security.Cryptography` | ❌ IGNORE | Kryptografie. Použij OpenSSL v případě potřeby. |
+| `System.Security.Claims` | ❌ IGNORE | Identity claims. Webový koncept. |
+| `System.Speech` | ❌ IGNORE | Text-to-speech. Mimo scope. |
+| `System.Text` | ✅ PORT | StringBuilder, Encoding, UTF8Encoding, ASCIIEncoding hotové. |
+| `System.Text.Encoding.CodePages` | ❌ IGNORE | Windows code pages (CP1250 atd.). Zbytečné. |
+| `System.Text.Encodings.Web` | ❌ IGNORE | HTML/URL/JSON escaping. Webový koncept. |
+| `System.Text.Json` | ❌ IGNORE | JSON serializace. Použij nlohmann/json nebo rapidjson přímo v C++. |
+| `System.Text.RegularExpressions` | 🧩 STUB | Regex/Match — obalit `std::regex`. Občas užitečné pro parsing. |
+| `System.Threading` | 🧩 STUB | Thread, Monitor, Mutex, Interlocked — obalit STL threading. Nízká priorita. |
+| `System.Threading.Channels` | ❌ IGNORE | Producer-consumer channels. Příliš async. |
+| `System.Threading.Tasks` | ❌ IGNORE | async/await runtime. Nemoho portovat do C++ smysluplně. |
+| `System.Threading.Tasks.Dataflow` | ❌ IGNORE | Dataflow pipelines. Mimo scope. |
+| `System.Transactions` | ❌ IGNORE | Databázové transakce. |
+| `System.Web` | ❌ IGNORE | ASP.NET/web framework. Mimo scope. |
+| `System.Xml` | 🧩 STUB | XmlReader/XmlWriter — XNA content pipeline. Obalit tinyxml2 nebo pugixml. |
+| `System.Xml.Linq` | 🧩 STUB | XDocument/XElement — pohodlnější API nad XML. Nízká priorita. |
+| `System.Xml.XPath` | ❌ IGNORE | XPath queries. Mimo scope pro game engine. |
+| `System.Xml.XmlSerializer` | ❌ IGNORE | Reflection-based serializace. |
+| `Microsoft.CSharp` | ❌ IGNORE | Dynamic runtime. Mimo scope. |
+| `Microsoft.Extensions.*` | ❌ IGNORE | ASP.NET Core infrastruktura. Mimo scope. |
+| `Microsoft.VisualBasic` | ❌ IGNORE | VB.NET runtime. Mimo scope. |
 
 ---
 
