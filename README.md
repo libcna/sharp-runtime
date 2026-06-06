@@ -13,6 +13,17 @@ The goal of this project is to provide a lightweight, .NET-inspired foundation l
 
 ---
 
+# License
+
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+Sharp Runtime is **partly based on the .NET runtime**
+([dotnet/runtime](https://github.com/dotnet/runtime), MIT License, Copyright .NET Foundation and Contributors).
+The public API design of `System::*` types (class names, method signatures, namespace structure) follows the .NET standard library.
+The C++ implementation is original work by Robert Vokac and contributors.
+
+---
+
 # 🚀 Goals
 
 * Recreate useful parts of `.NET` API in idiomatic C++

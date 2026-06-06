@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
 //
 // Created by robertvokac on 5/30/25.
 //

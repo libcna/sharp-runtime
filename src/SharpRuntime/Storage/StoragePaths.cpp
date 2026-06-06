@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
 #include "SharpRuntime/Storage/StoragePaths.hpp"
 
 #include <filesystem>
