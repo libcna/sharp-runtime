@@ -294,10 +294,12 @@ namespace System {
             oss << '-';
         }
         if (days != 0) {
-            oss << days << '.';
+            oss << days << '.'
+                << std::setw(2) << std::setfill('0') << hours;
+        } else {
+            oss << hours;
         }
-
-        oss << hours << ":"
+        oss << ":"
             << std::setw(2) << std::setfill('0') << minutes << ":"
             << std::setw(2) << std::setfill('0') << seconds << "."
             << std::setw(7) << std::setfill('0') << magnitude;

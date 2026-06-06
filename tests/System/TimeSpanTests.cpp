@@ -279,7 +279,7 @@ TEST(TimeSpanStaticFactoryTests, FromTicksBasic) {
 
 TEST(TimeSpanToStringTests, BasicFormatting) {
     TimeSpan ts(1, 2, 3, 4, 5, 6);
-    std::string expected = "26:03:04.0050060";
+    std::string expected = "1.02:03:04.0050060";
     EXPECT_EQ(ts.ToString(), expected);
 }
 
