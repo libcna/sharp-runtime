@@ -116,7 +116,7 @@ Already mostly done. A few important ones are missing.
 | `UnauthorizedAccessException` | ✅ DONE | `System/UnauthorizedAccessException.hpp`. |
 | `IOException` | ✅ DONE | `System/IO/IOException.hpp`. Base for all I/O exceptions. |
 | `FileNotFoundException` | ✅ DONE | `System/IO/FileNotFoundException.hpp`. Has `FileName` property. |
-| `DirectoryNotFoundException` | 🧩 STUB | Useful for file system operations. |
+| `DirectoryNotFoundException` | ✅ DONE | `System/IO/DirectoryNotFoundException.hpp`. Inherits `IOException`. |
 | `EndOfStreamException` | ✅ DONE | `System/IO/EndOfStreamException.hpp`. |
 | `TimeoutException` | ✅ DONE | `System/TimeoutException.hpp`. |
 | `StackOverflowException` | ❌ IGNORE | Platform crash, can't meaningfully catch in C++. |
@@ -137,9 +137,9 @@ C# ported code may use them but modern code prefers Generic collections.
 | `IDictionary` | ✅ DONE | `System/Collections/IDictionary.hpp`. Add/Clear/Contains/Remove. |
 | `ArrayList` | ❌ IGNORE | Use `List<T>`. |
 | `Hashtable` | ❌ IGNORE | Use `Dictionary<K,V>`. |
-| `Queue` | 🧩 STUB | Wrap `std::queue`. Only if non-generic usage found. |
-| `Stack` | 🧩 STUB | Wrap `std::stack`. Only if non-generic usage found. |
-| `BitArray` | 🧩 STUB | Wrap `std::vector<bool>`. Rarely used in game code. |
+| `Queue` | ✅ DONE | `System/Collections/Queue.hpp`. Non-generic void* queue. Prefer Generic::Queue<T>. |
+| `Stack` | ✅ DONE | `System/Collections/Stack.hpp`. Non-generic void* stack. Prefer Generic::Stack<T>. |
+| `BitArray` | ✅ DONE | `System/Collections/BitArray.hpp`. And/Or/Xor/Not, Get/Set/SetAll. |
 
 ---
 
@@ -219,7 +219,7 @@ File I/O — already partially done. Important for content loading and save game
 | `BinaryWriter` | ✅ DONE | `System/IO/BinaryWriter.hpp`. Little-endian; 7-bit string encoding matches `BinaryReader`. |
 | `MemoryStream` | ✅ DONE | `System/IO/MemoryStream.hpp`. Now has empty writable constructor + `Write`/`WriteByte`. |
 | `FileStream` | ✅ DONE | `System/IO/FileStream.hpp`. Refactored to `std::fstream`; full read+write, all `FileMode` values. |
-| `BufferedStream` | 🧩 STUB | Optimization wrapper. Low priority. |
+| `BufferedStream` | ✅ DONE | `System/IO/BufferedStream.hpp`. Pass-through wrapper; no actual buffering. |
 | `TextReader` | ✅ DONE | `System/IO/TextReader.hpp`. Abstract base; Peek/Read/ReadLine/ReadToEnd. |
 | `TextWriter` | ✅ DONE | `System/IO/TextWriter.hpp`. Abstract base; Write/WriteLine for all primitive types. |
 | `StringReader` | ✅ DONE | `System/IO/StringReader.hpp`. Reads from std::string; Peek/Read/ReadLine/ReadToEnd. |
@@ -227,8 +227,8 @@ File I/O — already partially done. Important for content loading and save game
 | `File` | ✅ DONE | `System/IO/File.hpp`. ReadAllText/WriteAllText/ReadAllBytes/WriteAllBytes/Exists/Delete/Copy/Move/AppendAllText. |
 | `Directory` | ✅ DONE | `System/IO/Directory.hpp`. Exists/CreateDirectory/Delete/Move/GetFiles/GetDirectories. |
 | `Path` | ✅ DONE | `System/IO/Path.hpp`. Combine/GetFileName/GetExtension/GetDirectoryName/GetTempPath/ChangeExtension etc. |
-| `FileInfo` | 🧩 STUB | OOP wrapper over file metadata. Lower priority than static `File`. |
-| `DirectoryInfo` | 🧩 STUB | OOP wrapper over directory. Lower priority than static `Directory`. |
+| `FileInfo` | ✅ DONE | `System/IO/FileInfo.hpp`. Name/FullName/Extension/Length/Exists/IsReadOnly, Delete/CopyTo/MoveTo. |
+| `DirectoryInfo` | ✅ DONE | `System/IO/DirectoryInfo.hpp`. Name/FullName/Exists/Parent, Create/Delete/MoveTo/GetFiles/GetDirectories. |
 | `FileMode` | ✅ DONE | `System/IO/FileMode.hpp`. Now includes all values: CreateNew/Create/Open/OpenOrCreate/Truncate/Append. |
 | `FileAccess` | ✅ DONE | `System/IO/FileAccess.hpp`. Read/Write/ReadWrite. |
 | `FileShare` | ✅ DONE | `System/IO/FileShare.hpp`. None/Read/Write/ReadWrite/Delete/Inheritable. |
@@ -259,9 +259,9 @@ Used by mobile-eggbert for save game storage on Windows Phone.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `GZipStream` | 🧩 STUB | Useful for compressed XNB content. Wrap zlib or miniz. |
-| `DeflateStream` | 🧩 STUB | Same as above — XNB format uses DEFLATE. Consider porting if XNB loading is needed. |
-| `ZipArchive` | 🧩 STUB | Lower priority. Wrap libzip or miniz. |
+| `GZipStream` | ✅ DONE | `System/IO/Compression/GZipStream.hpp`. Stub; NotImplementedException + zlib/miniz integration notes. |
+| `DeflateStream` | ✅ DONE | `System/IO/Compression/DeflateStream.hpp`. Stub; NotImplementedException + zlib integration notes; XNB note. |
+| `ZipArchive` | ✅ DONE | `System/IO/Compression/ZipArchive.hpp`. Stub; NotImplementedException + miniz/libzip notes. |
 | `ZipFile` | ❌ IGNORE | Too complex for game engine core. |
 
 ---
@@ -279,7 +279,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | `ManualResetEvent` | ✅ DONE | `System/Threading/ManualResetEvent.hpp`. Set/Reset/WaitOne with optional timeout. |
 | `AutoResetEvent` | ✅ DONE | `System/Threading/AutoResetEvent.hpp`. Set/Reset/WaitOne — auto-resets after releasing one thread. |
 | `Interlocked` | ✅ DONE | `System/Threading/Interlocked.hpp`. Increment/Decrement/Add/Exchange/CompareExchange via GCC builtins. |
-| `Timer` | 🧩 STUB | Periodic callback. Game engines usually use their own loop. Low priority. |
+| `Timer` | ✅ DONE | `System/Threading/Timer.hpp`. std::thread-based; dueTime + period, Change/Dispose. |
 | `ThreadPool` | ❌ IGNORE | Complex to port correctly. Use `std::async` directly. |
 | `CancellationToken` | ✅ DONE | `System/Threading/CancellationToken.hpp`. IsCancellationRequested, ThrowIfCancellationRequested. |
 | `CancellationTokenSource` | ✅ DONE | `System/Threading/CancellationTokenSource.hpp`. Cancel, Token property. |
@@ -316,9 +316,9 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | `Vector2/3/4` | ❌ IGNORE | Defined in CNA (`Microsoft::Xna::Framework`). |
 | `Matrix4x4` | ❌ IGNORE | Defined in CNA as `Matrix`. |
 | `Quaternion` | ❌ IGNORE | Defined in CNA. |
-| `Complex` | 🧩 STUB | Not needed for game engine. Could be useful for DSP/audio. Low priority. |
-| `BigInteger` | 🧩 STUB | Not needed for game engine. |
-| `Half` (float16) | 🧩 STUB | Could be useful for GPU texture data. |
+| `Complex` | ✅ DONE | `System/Numerics/Complex.hpp`. Wraps std::complex<double>; arithmetic, Sqrt/Exp/Log/Sin/Cos/Pow. |
+| `BigInteger` | 🧩 STUB | Not needed for game engine. Needs external library (boost::multiprecision or similar). |
+| `Half` (float16) | ✅ DONE | `System/Half.hpp`. IEEE 754 ToSingle/FromSingle, Zero/NaN/Infinity/MaxValue/Epsilon constants. |
 
 ---
 
@@ -327,7 +327,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | Type | Status | Opinion |
 |------|--------|---------|
 | `Debug` | ✅ DONE | `System/Diagnostics/Debug.hpp`. Assert/Write/WriteLine/Fail — stripped in NDEBUG, header-only. |
-| `Trace` | 🧩 STUB | Lower priority than `Debug`. |
+| `Trace` | ✅ DONE | `System/Diagnostics/Trace.hpp`. Write/WriteLine/TraceInfo/TraceWarning/TraceError/Assert/Fail — always enabled, writes to std::cerr. |
 | `Stopwatch` | ✅ DONE | `System/Diagnostics/Stopwatch.hpp`. Start/Stop/Reset/Restart/ElapsedMilliseconds/Elapsed(TimeSpan), header-only. |
 | `Process` | ❌ IGNORE | Platform-specific, not needed for game engine. |
 | `PerformanceCounter` | ❌ IGNORE | Windows-specific performance monitoring. Not portable. |
@@ -372,8 +372,8 @@ Already partially done.
 | `PropertyDescriptorCollection` | ✅ DONE | `System/ComponentModel/PropertyDescriptorCollection.hpp`. |
 | `INotifyPropertyChanged` | ✅ DONE | `System/ComponentModel/INotifyPropertyChanged.hpp`. PropertyChanged event + PropertyChangedEventArgs. |
 | `TypeConverter` | ❌ IGNORE | Reflection-based type conversion. Not needed. |
-| `DescriptionAttribute` | 🧩 STUB | Metadata only. Low priority. |
-| `DefaultValueAttribute` | 🧩 STUB | Metadata only. Low priority. |
+| `DescriptionAttribute` | ✅ DONE | `System/ComponentModel/DescriptionAttribute.hpp`. Stores description string. |
+| `DefaultValueAttribute` | ✅ DONE | `System/ComponentModel/DescriptionAttribute.hpp`. Stores default value (int/double/bool/string). |
 
 ---
 
@@ -411,8 +411,8 @@ Already partially done.
 |------|--------|---------|
 | `HttpClient` | ❌ IGNORE | Not needed for game engine core. |
 | `WebClient` | ❌ IGNORE | Deprecated even in .NET. |
-| `Sockets (TcpClient, UdpClient)` | 🧩 STUB | Listed in `TODO.md`. Possibly needed for multiplayer. Low priority now but on roadmap. |
-| `IPAddress`, `IPEndPoint` | 🧩 STUB | Supporting types for sockets. |
+| `Sockets (TcpClient, UdpClient)` | 🧩 STUB | Needs platform socket API (POSIX/Winsock). Low priority. |
+| `IPAddress`, `IPEndPoint` | ✅ DONE | `System/Net/IPAddress.hpp` + `IPEndPoint.hpp`. IPv4 parse/toString, Any/Loopback constants. |
 
 ---
 
@@ -420,8 +420,8 @@ Already partially done.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `XmlReader` / `XmlWriter` | 🧩 STUB | XNA content pipeline uses XML for XNB descriptors. Wrap tinyxml2 or pugixml. |
-| `XDocument` / `XElement` (LINQ to XML) | 🧩 STUB | Easier API over raw XML. Lower priority than `XmlReader`. |
+| `XmlReader` / `XmlWriter` | ✅ DONE | `System/Xml/XmlReader.hpp` + `XmlWriter.hpp`. Stubs; NotImplementedException + tinyxml2/pugixml integration notes. |
+| `XDocument` / `XElement` (LINQ to XML) | 🧩 STUB | Easier API over raw XML. Implement after XmlReader when tinyxml2/pugixml is added. |
 | `XmlSerializer` | ❌ IGNORE | Reflection-based. Too complex. |
 
 ---
@@ -513,13 +513,27 @@ Types unique to sharp-runtime with no .NET equivalent.
 - **IO.IsolatedStorage**: `IsolatedStorage` (abstract base), `IsolatedStorageScope` enum
 - **Globalization**: `NumberFormatInfo`
 
-### 🔨 Next to port (nice to have)
-- `GZipStream` / `DeflateStream` (XNB uses DEFLATE — needs zlib/miniz dependency)
-- `XmlReader` / `XmlWriter` (XNA content descriptors — needs tinyxml2/pugixml)
-- `BitArray`
-- `Timer` (threading timer — needs std::thread + callback)
-- `FileInfo`, `DirectoryInfo` (OOP wrappers over File/Directory)
-- `BufferedStream`
+### ✅ Already ported (wave 5 — IO wrappers, collections, numerics, net, XML stubs)
+- **IO**: `BufferedStream`, `FileInfo`, `DirectoryInfo`
+- **IO.Compression**: `ZipArchive` stub (NotImplementedException + miniz/libzip notes)
+- **Collections**: non-generic `Queue`, `Stack`, `BitArray`
+- **Numerics**: `Complex` (wraps std::complex<double>)
+- **Half**: IEEE 754 float16 with ToSingle/FromSingle
+- **Threading**: `Timer`
+- **Diagnostics**: `Trace` (always-on, std::cerr)
+- **ComponentModel**: `DescriptionAttribute`, `DefaultValueAttribute`
+- **Net**: `IPAddress`, `IPEndPoint`
+- **Xml**: `XmlReader`, `XmlWriter` stubs (NotImplementedException + tinyxml2/pugixml notes)
+
+### 🔨 Zbývá portovat (vyžadují externí závislosti nebo jsou nízká priorita)
+- `GZipStream` / `DeflateStream` — implementace čeká na zlib/miniz
+- `ZipArchive` — implementace čeká na miniz/libzip
+- `XmlReader` / `XmlWriter` — implementace čeká na tinyxml2/pugixml
+- `XDocument` / `XElement` — čeká na XML backend
+- `TcpClient` / `UdpClient` — čeká na POSIX sockets wrapper
+- `BigInteger` — čeká na boost::multiprecision nebo vlastní implementaci
+- `KeyedCollection<K,T>` — nízká priorita
+- `Decoder` / `Encoder` (Text) — nízká priorita
 
 ### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
