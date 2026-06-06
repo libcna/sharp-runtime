@@ -51,6 +51,18 @@ namespace System::Threading {
         [[nodiscard]] static intcs getCurrentThreadManagedThreadIdProperty() {
             return static_cast<intcs>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
         }
+
+        struct CurrentThreadProxy {
+            [[nodiscard]] intcs getManagedThreadIdProperty() const {
+                return static_cast<intcs>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            }
+            [[nodiscard]] bool getIsBackgroundProperty() const { return false; }
+            static void Sleep(intcs ms) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+            }
+        };
+
+        static CurrentThreadProxy CurrentThread() { return CurrentThreadProxy{}; }
     };
 
 } // namespace System::Threading
