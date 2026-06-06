@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 
+#include "System/IO/FileAccess.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/Stream.hpp"
 
@@ -34,6 +35,11 @@ namespace System::IO
          * @brief Opens or creates a file with the specified FileMode.
          */
         FileStream(const std::string& path, FileMode mode);
+
+        /**
+         * @brief Opens or creates a file with the specified FileMode and FileAccess.
+         */
+        FileStream(const std::string& path, FileMode mode, FileAccess access);
 
         ~FileStream() override;
 

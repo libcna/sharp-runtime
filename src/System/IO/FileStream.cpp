@@ -32,6 +32,27 @@ namespace System::IO
         return mode != FileMode::Open;
     }
 
+    static std::ios::openmode toIosModeWithAccess(FileMode mode, FileAccess access)
+    {
+        std::ios::openmode m = std::ios::binary;
+        // Apply FileMode base flags
+        switch (mode) {
+            case FileMode::CreateNew:   m |= std::ios::out; break;
+            case FileMode::Create:      m |= std::ios::out | std::ios::trunc; break;
+            case FileMode::Open:        break;
+            case FileMode::OpenOrCreate:break;
+            case FileMode::Truncate:    m |= std::ios::out | std::ios::trunc; break;
+            case FileMode::Append:      m |= std::ios::out | std::ios::app; break;
+            default: break;
+        }
+        // Layer FileAccess on top
+        if (access == FileAccess::Read || access == FileAccess::ReadWrite)
+            m |= std::ios::in;
+        if (access == FileAccess::Write || access == FileAccess::ReadWrite)
+            m |= std::ios::out;
+        return m;
+    }
+
     FileStream::FileStream(const std::string& path)
         : FileStream(path, FileMode::Open) {}
 
@@ -46,6 +67,24 @@ namespace System::IO
             throw std::runtime_error("Failed to open file: " + path);
         }
         if (!canWrite_) {
+            file_.seekg(0, std::ios::end);
+            length_ = static_cast<intcs>(file_.tellg());
+            file_.seekg(0, std::ios::beg);
+        }
+    }
+
+    FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
+        : mode_(mode), length_(0),
+          canWrite_(access == FileAccess::Write || access == FileAccess::ReadWrite)
+    {
+        auto iosMode = toIosModeWithAccess(mode, access);
+        file_.open(path, iosMode);
+        if (!file_.is_open()) {
+            if (mode == FileMode::Open)
+                throw FileNotFoundException("Unable to find the specified file.", path);
+            throw std::runtime_error("Failed to open file: " + path);
+        }
+        if (access == FileAccess::Read) {
             file_.seekg(0, std::ios::end);
             length_ = static_cast<intcs>(file_.tellg());
             file_.seekg(0, std::ios::beg);
