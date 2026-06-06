@@ -585,14 +585,14 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | Namespace | Můj návrh | Zdůvodnění |
 |-----------|-----------|------------|
 | `System` (core) | ✅ PORT | Základ všeho — typy, výjimky, Math, Convert, Guid, Console. Velká část hotova. |
-| `System.Collections` | 🧩 STUB | Non-generic kolekce (ArrayList, Hashtable) jsou zastaralé. Jen rozhraní IEnumerable/IEnumerator. |
-| `System.Collections.Generic` | ✅ PORT | Klíčové — List, Dictionary, Queue, Stack, HashSet, interfaces. Velká část hotova. |
-| `System.Collections.Concurrent` | 🧩 STUB | Thread-safe kolekce (ConcurrentDictionary, ConcurrentQueue). Pro game engine nízká priorita. |
+| `System.Collections` | ✅ DONE | IEnumerable/IEnumerator/ICollection/IList/IDictionary interfaces; Queue/Stack/BitArray non-generic; DictionaryEntry; Comparer. |
+| `System.Collections.Generic` | ✅ DONE | List, Dictionary, Queue, Stack, HashSet, SortedDictionary, SortedList, LinkedList, KeyValuePair, Comparer, EqualityComparer, CollectionExtensions, IAsyncEnumerable, all IXxx interfaces. |
+| `System.Collections.Concurrent` | ✅ DONE | `ConcurrentDictionary<K,V>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`, `IProducerConsumerCollection<T>`. |
 | `System.Collections.Immutable` | ✅ DONE | `ImmutableArray<T>`, `ImmutableList<T>`, `ImmutableDictionary<K,V>`, `ImmutableHashSet<T>`, `ImmutableSortedDictionary<K,V>`, `ImmutableSortedSet<T>`, `ImmutableQueue<T>`, `ImmutableStack<T>` — all use `shared_ptr<const container<T>>` pattern. |
 | `System.Collections.NonGeneric` | ❌ IGNORE | Legacy .NET 1.x (ArrayList, Hashtable). Používej Generic varianty. |
-| `System.Collections.Specialized` | 🧩 STUB | OrderedDictionary, NameValueCollection — občas užitečné v ported kódu. |
+| `System.Collections.Specialized` | ✅ DONE | `OrderedDictionary`, `NameValueCollection`, `StringCollection`, `StringDictionary`, `HybridDictionary`, `BitVector32`. |
 | `System.Collections.ObjectModel` | ✅ PORT | Collection<T>, ReadOnlyCollection<T> hotové. ObservableCollection pro WinPhone. |
-| `System.ComponentModel` | 🧩 STUB | Attribute, INotifyPropertyChanged hotové/stub. TypeConverter IGNORE. |
+| `System.ComponentModel` | ✅ DONE | `Attribute` base, `INotifyPropertyChanged`, `PropertyDescriptorCollection`, `DescriptionAttribute`, `DefaultValueAttribute`, `EditorBrowsableAttribute`, `Win32Exception`. TypeConverter IGNORE. |
 | `System.ComponentModel.Annotations` | ❌ IGNORE | Validační atributy. Nepotřebné pro game engine. |
 | `System.ComponentModel.Composition` | ❌ IGNORE | MEF (Managed Extensibility Framework). Příliš komplexní. |
 | `System.ComponentModel.TypeConverter` | ❌ IGNORE | Reflection-based konverze. |
@@ -607,7 +607,7 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.Drawing.Primitives` | ❌ IGNORE | Point, Size, Rectangle — CNA je má jako `Microsoft::Xna::Framework::Point` apod. Neduplikovat. |
 | `System.Formats.Tar` | ❌ IGNORE | TAR archiv. Nepotřebné. |
 | `System.Formats.Asn1` | ❌ IGNORE | ASN.1 kódování (kryptografie). |
-| `System.IO` | ✅ PORT | Velká část hotova. Zbývá: TextReader/TextWriter, StringReader/StringWriter, FileInfo/DirectoryInfo. |
+| `System.IO` | ✅ DONE | Vše hotovo: Stream, File, Directory, Path, BinaryReader/Writer, StreamReader/Writer, TextReader/Writer, StringReader/Writer, FileInfo, DirectoryInfo, MemoryStream, FileStream, BufferedStream, DriveInfo. |
 | `System.IO.Compression` | 🧩 STUB | GZipStream/DeflateStream — XNB formát používá DEFLATE. Obalit zlib/miniz. |
 | `System.IO.IsolatedStorage` | ✅ PORT | Hotovo. Klíčové pro mobile-eggbert save hry. |
 | `System.IO.FileSystem.Watcher` | ❌ IGNORE | FileSystemWatcher. Nepotřebné pro game. |
@@ -619,7 +619,7 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.IO.Ports` | ❌ IGNORE | Sériové porty. Mimo scope. |
 | `System.Linq` | ❌ IGNORE | C++ ranges/algorithms jsou idiomatičtější. Neplést port. |
 | `System.Linq.Expressions` | ❌ IGNORE | Expression trees. Vyžaduje runtime kompilaci. |
-| `System.Memory` | 🧩 STUB | Span<T>, Memory<T> — C++23 má `std::span`. Typedef by stačil. |
+| `System.Memory` | ✅ DONE | `Span<T>` + `ReadOnlySpan<T>` in `System/Span.hpp`. `Memory<T>` — IGNORE (use `std::vector` slices). |
 | `System.Net` | ❌ IGNORE | HTTP client. Mimo scope game engine core. |
 | `System.Net.Sockets` | 🧩 STUB | TcpClient, UdpClient — v TODO.md pro multiplayer. Nízká priorita. |
 | `System.Net.Http` | ❌ IGNORE | HttpClient. Použij libcurl nebo platform API přímo. |
@@ -641,19 +641,19 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.Security.Cryptography` | ❌ IGNORE | Kryptografie. Použij OpenSSL v případě potřeby. |
 | `System.Security.Claims` | ❌ IGNORE | Identity claims. Webový koncept. |
 | `System.Speech` | ❌ IGNORE | Text-to-speech. Mimo scope. |
-| `System.Text` | ✅ PORT | StringBuilder, Encoding, UTF8Encoding, ASCIIEncoding hotové. |
+| `System.Text` | ✅ DONE | `StringBuilder`, `Encoding`, `UTF8Encoding`, `ASCIIEncoding`, `UnicodeEncoding`, `UTF7Encoding`, `Decoder`, `Encoder`, `Rune`. |
 | `System.Text.Encoding.CodePages` | ❌ IGNORE | Windows code pages (CP1250 atd.). Zbytečné. |
 | `System.Text.Encodings.Web` | ❌ IGNORE | HTML/URL/JSON escaping. Webový koncept. |
 | `System.Text.Json` | ❌ IGNORE | JSON serializace. Použij nlohmann/json nebo rapidjson přímo v C++. |
-| `System.Text.RegularExpressions` | 🧩 STUB | Regex/Match — obalit `std::regex`. Občas užitečné pro parsing. |
-| `System.Threading` | 🧩 STUB | Thread, Monitor, Mutex, Interlocked — obalit STL threading. Nízká priorita. |
+| `System.Text.RegularExpressions` | ✅ DONE | `Regex`, `Match`, `MatchCollection` — wraps `std::regex`; IsMatch/Match/Matches/Replace/Split. |
+| `System.Threading` | ✅ DONE | Thread, Monitor, Mutex, Semaphore/Slim, ManualResetEvent, AutoResetEvent, Interlocked, Timer, CancellationToken/Source, SpinLock, SpinWait, ReaderWriterLockSlim, Volatile, ThreadLocal, AsyncLocal, PeriodicTimer. |
 | `System.Threading.Channels` | ❌ IGNORE | Producer-consumer channels. Příliš async. |
 | `System.Threading.Tasks` | ❌ IGNORE | async/await runtime. Nemoho portovat do C++ smysluplně. |
 | `System.Threading.Tasks.Dataflow` | ❌ IGNORE | Dataflow pipelines. Mimo scope. |
 | `System.Transactions` | ❌ IGNORE | Databázové transakce. |
 | `System.Web` | ❌ IGNORE | ASP.NET/web framework. Mimo scope. |
 | `System.Xml` | 🧩 STUB | XmlReader/XmlWriter — XNA content pipeline. Obalit tinyxml2 nebo pugixml. |
-| `System.Xml.Linq` | 🧩 STUB | XDocument/XElement — pohodlnější API nad XML. Nízká priorita. |
+| `System.Xml.Linq` | ✅ DONE | `XName`, `XAttribute`, `XElement`, `XDocument` — full tree manipulation + stub parse/load. |
 | `System.Xml.XPath` | ❌ IGNORE | XPath queries. Mimo scope pro game engine. |
 | `System.Xml.XmlSerializer` | ❌ IGNORE | Reflection-based serializace. |
 | `Microsoft.CSharp` | ❌ IGNORE | Dynamic runtime. Mimo scope. |
