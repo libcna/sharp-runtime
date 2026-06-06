@@ -4,6 +4,7 @@
 #include "System/Text/Encoding.hpp"
 #include "System/Text/UTF8Encoding.hpp"
 #include "System/Text/ASCIIEncoding.hpp"
+#include "System/Text/UnicodeEncoding.hpp"
 
 namespace System::Text
 {
@@ -16,6 +17,12 @@ namespace System::Text
     std::shared_ptr<Encoding> Encoding::ASCII()
     {
         static std::shared_ptr<Encoding> instance = std::make_shared<ASCIIEncoding>();
+        return instance;
+    }
+
+    std::shared_ptr<Encoding> Encoding::Unicode()
+    {
+        static std::shared_ptr<Encoding> instance = std::make_shared<UnicodeEncoding>();
         return instance;
     }
 

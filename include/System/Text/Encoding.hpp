@@ -30,6 +30,9 @@ namespace System::Text
         /** @brief Gets an ASCII encoding instance. */
         [[nodiscard]] static std::shared_ptr<Encoding> ASCII();
 
+        /** @brief Gets a UTF-16 LE encoding instance. */
+        [[nodiscard]] static std::shared_ptr<Encoding> Unicode();
+
         /** @brief Encodes a string to bytes. */
         [[nodiscard]] virtual std::vector<SharpRuntime::bytecs> GetBytes(const std::string& str) const;
 

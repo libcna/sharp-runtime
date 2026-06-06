@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <mutex>
+#include <string>
+
+namespace System::Threading {
+
+    /**
+     * @brief A synchronization primitive that can be used for inter-thread and inter-process synchronization.
+     *
+     * Wraps std::mutex. Partial C++ counterpart of .NET System.Threading.Mutex.
+     *
+     * @note Status: Partial — inter-process (named) mutex not supported.
+     */
+    class Mutex {
+        std::mutex mutex_;
+    public:
+        Mutex() = default;
+        explicit Mutex(bool /*initiallyOwned*/) {}
+        Mutex(bool /*initiallyOwned*/, const std::string& /*name*/) {}
+
+        void WaitOne() { mutex_.lock(); }
+        bool WaitOne(int /*millisecondsTimeout*/) { return mutex_.try_lock(); }
+        void ReleaseMutex() { mutex_.unlock(); }
+        void Close() {}
+    };
+
+} // namespace System::Threading
