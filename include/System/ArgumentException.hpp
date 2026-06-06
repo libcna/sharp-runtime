@@ -40,6 +40,12 @@ namespace System {
          * \param str A string that describes the error.
          */
         explicit ArgumentException(const std::string& str);
+
+        /// Constructs with message and parameter name.
+        ArgumentException(const char* message, const char* paramName);
+
+        /// Constructs with message and parameter name.
+        ArgumentException(const std::string& message, const std::string& paramName);
     };
 
 } // namespace System

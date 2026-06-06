@@ -6,52 +6,46 @@
 #include <fstream>
 #include <string>
 
+#include "System/IO/FileMode.hpp"
 #include "System/IO/Stream.hpp"
 
 namespace System::IO
 {
     /**
-     * @brief Represents a file-backed stream.
+     * @brief Represents a file-backed stream supporting read and write.
      *
-     * This is a lightweight implementation used by TitleContainer and
-     * other ported code requiring a Stream object.
-     *
-     * @note Status: IMPLEMENTED
+     * @note Status: Implemented
      */
     class FileStream : public Stream
     {
     private:
-        std::ifstream file;
-        intcs length;
+        std::fstream file_;
+        FileMode     mode_;
+        intcs        length_;
+        bool         canWrite_;
 
     public:
         /**
-         * @brief Opens a file stream for reading.
-         *
-         * @param path File path.
-         *
-         * @note Status: IMPLEMENTED
+         * @brief Opens a file for reading (FileMode::Open).
          */
         explicit FileStream(const std::string& path);
 
         /**
-         * @brief Destroys the FileStream instance.
-         *
-         * @note Status: IMPLEMENTED
+         * @brief Opens or creates a file with the specified FileMode.
          */
+        FileStream(const std::string& path, FileMode mode);
+
         ~FileStream() override;
 
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
-        void Close() override;
-        [[nodiscard]] intcs getLengthProperty() const override;
+        void  Write(const bytecs buffer[], intcs offset, intcs count) override;
+        void  WriteByte(bytecs value) override;
+        void  Close() override;
+        void  Flush() override;
 
-        /**
-         * @brief Returns true if the file is open.
-         *
-         * @return True if open, otherwise false.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        [[nodiscard]] bool IsOpen() const;
+        [[nodiscard]] intcs getLengthProperty() const override;
+        [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_; }
+        [[nodiscard]] bool  getCanReadProperty()  const override { return !canWrite_ || mode_ != FileMode::Append; }
+        [[nodiscard]] bool  IsOpen() const;
     };
 }

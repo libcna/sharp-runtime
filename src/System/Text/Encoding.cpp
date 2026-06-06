@@ -2,12 +2,20 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/Encoding.hpp"
+#include "System/Text/UTF8Encoding.hpp"
+#include "System/Text/ASCIIEncoding.hpp"
 
 namespace System::Text
 {
     std::shared_ptr<Encoding> Encoding::UTF8()
     {
-        static std::shared_ptr<Encoding> instance = std::shared_ptr<Encoding>(new Encoding());
+        static std::shared_ptr<Encoding> instance = std::make_shared<UTF8Encoding>();
+        return instance;
+    }
+
+    std::shared_ptr<Encoding> Encoding::ASCII()
+    {
+        static std::shared_ptr<Encoding> instance = std::make_shared<ASCIIEncoding>();
         return instance;
     }
 

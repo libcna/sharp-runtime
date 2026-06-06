@@ -35,4 +35,12 @@ namespace System {
         : SystemException(str) {
     }
 
+    ArgumentException::ArgumentException(const char* message, const char* paramName)
+        : SystemException(std::string(message) + " (Parameter '" + paramName + "')") {
+    }
+
+    ArgumentException::ArgumentException(const std::string& message, const std::string& paramName)
+        : SystemException(message + " (Parameter '" + paramName + "')") {
+    }
+
 } // namespace System

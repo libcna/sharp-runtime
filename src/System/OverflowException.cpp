@@ -9,6 +9,10 @@
 
 namespace System {
 
+    OverflowException::OverflowException()
+        : ArithmeticException("Arithmetic operation resulted in an overflow.") {
+    }
+
     OverflowException::OverflowException(const char* str)
         : ArithmeticException(str) {
     }

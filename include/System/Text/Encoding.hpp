@@ -14,48 +14,41 @@ namespace System::Text
     /**
      * @brief Represents a character encoding.
      *
-     * Minimal implementation supporting UTF-8 encoding.
+     * Abstract base class; use UTF8() or ASCII() factory methods to obtain
+     * a concrete instance.
      *
      * @note Status: PARTIAL
      */
     class Encoding
     {
     public:
-        /**
-         * @brief Gets UTF-8 encoding instance.
-         *
-         * @return Shared pointer to UTF-8 Encoding.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        virtual ~Encoding() = default;
+
+        /** @brief Gets a UTF-8 encoding instance. */
         [[nodiscard]] static std::shared_ptr<Encoding> UTF8();
 
-        /**
-         * @brief Converts string to byte array (UTF-8).
-         *
-         * @param str Input string.
-         * @return Byte vector.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& str) const;
+        /** @brief Gets an ASCII encoding instance. */
+        [[nodiscard]] static std::shared_ptr<Encoding> ASCII();
+
+        /** @brief Encodes a string to bytes. */
+        [[nodiscard]] virtual std::vector<SharpRuntime::bytecs> GetBytes(const std::string& str) const;
 
         /**
-         * @brief Converts byte array to string (UTF-8).
+         * @brief Decodes a range of bytes to a string.
          *
-         * @param data Byte buffer.
-         * @param index Start index.
-         * @param count Number of bytes.
-         * @return Decoded string.
-         *
-         * @note Status: IMPLEMENTED
+         * @param data  Byte buffer.
+         * @param index Start index in data.
+         * @param count Number of bytes to decode.
          */
-        [[nodiscard]] std::string GetString(
+        [[nodiscard]] virtual std::string GetString(
             const SharpRuntime::bytecs* data,
             SharpRuntime::intcs index,
             SharpRuntime::intcs count) const;
 
-    private:
+        /** @brief Gets the name of the encoding (e.g. "utf-8", "us-ascii"). */
+        [[nodiscard]] virtual std::string getEncodingNameProperty() const { return "utf-8"; }
+
+    protected:
         Encoding() = default;
     };
 }

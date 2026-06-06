@@ -52,5 +52,40 @@ namespace System::IO
          * @note Status: IMPLEMENTED
          */
         [[nodiscard]] virtual intcs getLengthProperty() const = 0;
+
+        /**
+         * @brief Writes a sequence of bytes to the current stream and
+         * advances the current position by the number of bytes written.
+         *
+         * Default implementation throws NotSupportedException.
+         *
+         * @note Status: STUB (override in writable streams)
+         */
+        virtual void Write(const bytecs buffer[], intcs offset, intcs count);
+
+        /**
+         * @brief Writes a single byte to the current stream.
+         *
+         * @note Status: STUB (override in writable streams)
+         */
+        virtual void WriteByte(bytecs value);
+
+        /**
+         * @brief When overridden in a derived class, gets a value indicating
+         * whether the stream supports writing.
+         */
+        [[nodiscard]] virtual bool getCanWriteProperty() const { return false; }
+
+        /**
+         * @brief When overridden in a derived class, gets a value indicating
+         * whether the stream supports reading.
+         */
+        [[nodiscard]] virtual bool getCanReadProperty()  const { return true; }
+
+        /**
+         * @brief Flushes any buffered data to the underlying device.
+         * Default is no-op.
+         */
+        virtual void Flush() {}
     };
 }

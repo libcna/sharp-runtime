@@ -26,6 +26,7 @@ namespace System {
          *
          * @param str A null-terminated character string that describes the error.
          */
+        OverflowException();
         explicit OverflowException(const char* str);
     };
 
