@@ -178,7 +178,7 @@ Core collection types. Already partially done.
 | `Collection<T>` | ✅ DONE | `System/Collections/ObjectModel/Collection.hpp`. |
 | `ReadOnlyCollection<T>` | ✅ DONE | `System/Collections/ObjectModel/ReadOnlyCollection.hpp`. |
 | `ObservableCollection<T>` | ✅ DONE | `System/Collections/ObjectModel/ObservableCollection.hpp`. CollectionChanged event + NotifyCollectionChangedEventArgs. |
-| `KeyedCollection<K,T>` | 🧩 STUB | Rarely needed in game code. |
+| `KeyedCollection<K,T>` | ✅ DONE | `System/Collections/ObjectModel/KeyedCollection.hpp`. Abstract base; GetKeyForItem() + key-based lookup. |
 
 ---
 
@@ -191,8 +191,8 @@ Core collection types. Already partially done.
 | `UTF8Encoding` | ✅ DONE | `System/Text/UTF8Encoding.hpp`. Inherits polymorphic `Encoding`. |
 | `ASCIIEncoding` | ✅ DONE | `System/Text/ASCIIEncoding.hpp`. Non-ASCII chars replaced with `?`. |
 | `UnicodeEncoding` | ✅ DONE | `System/Text/UnicodeEncoding.hpp`. UTF-16 LE; `Encoding::Unicode()` factory added. |
-| `Decoder` | 🧩 STUB | Advanced encoding; low priority. |
-| `Encoder` | 🧩 STUB | Advanced encoding; low priority. |
+| `Decoder` | ✅ DONE | `System/Text/Decoder.hpp`. Wraps Encoding::GetString; stateless. |
+| `Encoder` | ✅ DONE | `System/Text/Encoder.hpp`. Wraps Encoding::GetBytes; stateless. |
 
 ---
 
@@ -317,7 +317,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 | `Matrix4x4` | ❌ IGNORE | Defined in CNA as `Matrix`. |
 | `Quaternion` | ❌ IGNORE | Defined in CNA. |
 | `Complex` | ✅ DONE | `System/Numerics/Complex.hpp`. Wraps std::complex<double>; arithmetic, Sqrt/Exp/Log/Sin/Cos/Pow. |
-| `BigInteger` | 🧩 STUB | Not needed for game engine. Needs external library (boost::multiprecision or similar). |
+| `BigInteger` | ✅ DONE | `System/Numerics/BigInteger.hpp`. Self-contained sign+base-10⁹ magnitude; +/-/*/compare/ToString/Parse. |
 | `Half` (float16) | ✅ DONE | `System/Half.hpp`. IEEE 754 ToSingle/FromSingle, Zero/NaN/Infinity/MaxValue/Epsilon constants. |
 
 ---
@@ -411,7 +411,7 @@ Already partially done.
 |------|--------|---------|
 | `HttpClient` | ❌ IGNORE | Not needed for game engine core. |
 | `WebClient` | ❌ IGNORE | Deprecated even in .NET. |
-| `Sockets (TcpClient, UdpClient)` | 🧩 STUB | Needs platform socket API (POSIX/Winsock). Low priority. |
+| `Sockets (TcpClient, UdpClient)` | ✅ DONE | `System/Net/Sockets/TcpClient.hpp` + `UdpClient.hpp`. Stubs; NotImplementedException + POSIX/Winsock integration notes. |
 | `IPAddress`, `IPEndPoint` | ✅ DONE | `System/Net/IPAddress.hpp` + `IPEndPoint.hpp`. IPv4 parse/toString, Any/Loopback constants. |
 
 ---
@@ -421,7 +421,7 @@ Already partially done.
 | Type | Status | Opinion |
 |------|--------|---------|
 | `XmlReader` / `XmlWriter` | ✅ DONE | `System/Xml/XmlReader.hpp` + `XmlWriter.hpp`. Stubs; NotImplementedException + tinyxml2/pugixml integration notes. |
-| `XDocument` / `XElement` (LINQ to XML) | 🧩 STUB | Easier API over raw XML. Implement after XmlReader when tinyxml2/pugixml is added. |
+| `XDocument` / `XElement` (LINQ to XML) | 🧩 STUB | Implement after XmlReader when tinyxml2/pugixml is added. |
 | `XmlSerializer` | ❌ IGNORE | Reflection-based. Too complex. |
 
 ---
@@ -431,7 +431,7 @@ Already partially done.
 | Type | Status | Opinion |
 |------|--------|---------|
 | `JsonSerializer` | ❌ IGNORE | Use nlohmann/json or rapidjson directly in C++. |
-| `JsonDocument` / `JsonElement` | 🧩 STUB | If save file format uses JSON. Low priority. |
+| `JsonDocument` / `JsonElement` | 🧩 STUB | Low priority. Implement when JSON backend (nlohmann/json or similar) is added. |
 
 ---
 
@@ -525,15 +525,21 @@ Types unique to sharp-runtime with no .NET equivalent.
 - **Net**: `IPAddress`, `IPEndPoint`
 - **Xml**: `XmlReader`, `XmlWriter` stubs (NotImplementedException + tinyxml2/pugixml notes)
 
-### 🔨 Zbývá portovat (vyžadují externí závislosti nebo jsou nízká priorita)
+### ✅ Already ported (wave 6 — concurrent, specialized, BigInteger, sockets stubs)
+- **Collections.Concurrent**: `ConcurrentDictionary<K,V>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`
+- **Collections.Specialized**: `OrderedDictionary`, `NameValueCollection`
+- **Collections.ObjectModel**: `KeyedCollection<K,T>` abstract base
+- **Text**: `Decoder`, `Encoder` (thin wrappers over `Encoding`)
+- **Numerics**: `BigInteger` (self-contained, no external lib)
+- **Net.Sockets**: `TcpClient`, `TcpListener`, `UdpClient` stubs (NotImplementedException + POSIX/Winsock notes)
+
+### 🔨 Zbývá portovat (pouze s externími závislostmi)
 - `GZipStream` / `DeflateStream` — implementace čeká na zlib/miniz
 - `ZipArchive` — implementace čeká na miniz/libzip
 - `XmlReader` / `XmlWriter` — implementace čeká na tinyxml2/pugixml
 - `XDocument` / `XElement` — čeká na XML backend
-- `TcpClient` / `UdpClient` — čeká na POSIX sockets wrapper
-- `BigInteger` — čeká na boost::multiprecision nebo vlastní implementaci
-- `KeyedCollection<K,T>` — nízká priorita
-- `Decoder` / `Encoder` (Text) — nízká priorita
+- `TcpClient` / `UdpClient` — implementace čeká na POSIX sockets / Winsock2
+- `JsonDocument` / `JsonElement` — čeká na JSON backend
 
 ### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
