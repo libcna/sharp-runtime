@@ -83,8 +83,8 @@ Already partially done; the gaps matter for CNA/mobile-eggbert compilation.
 | `Console` | ✅ DONE | `System/Console.hpp`. Write/WriteLine/ReadLine/Error, header-only. |
 | `Environment` | ✅ DONE | `System/Environment.hpp`. NewLine, GetCurrentDirectory, GetEnvironmentVariable, ProcessorCount, Exit, Is64BitProcess — header-only. |
 | `GC` | ❌ IGNORE | No GC in C++. RAII + smart pointers replace it. Don't port. |
-| `AppDomain` | ❌ IGNORE | CLR concept. Not applicable. |
-| `AppContext` | ❌ IGNORE | Not needed. |
+| `AppDomain` | ✅ DONE | `System/AppDomain.hpp`. CurrentDomain() singleton; FriendlyName/BaseDirectory; UnhandledException/ProcessExit no-ops. |
+| `AppContext` | ✅ DONE | `System/AppContext.hpp`. GetData/SetData + TryGetSwitch/SetSwitch with mutex-guarded maps. |
 | `Activator` | ❌ IGNORE | Runtime reflection-based factory. Not portable to C++. |
 | `Delegate` | ❌ IGNORE | `std::function` covers all practical use cases. |
 
@@ -421,7 +421,7 @@ Already partially done.
 | Type | Status | Opinion |
 |------|--------|---------|
 | `XmlReader` / `XmlWriter` | ✅ DONE | `System/Xml/XmlReader.hpp` + `XmlWriter.hpp`. Stubs; NotImplementedException + tinyxml2/pugixml integration notes. |
-| `XDocument` / `XElement` (LINQ to XML) | 🧩 STUB | Implement after XmlReader when tinyxml2/pugixml is added. |
+| `XDocument` / `XElement` (LINQ to XML) | ✅ DONE | `System/Xml/Linq/XDocument.hpp` + `XElement.hpp` + `XAttribute.hpp` + `XName.hpp`. Stub parse/load; full tree manipulation, ToString(). |
 | `XmlSerializer` | ❌ IGNORE | Reflection-based. Too complex. |
 
 ---
@@ -431,7 +431,9 @@ Already partially done.
 | Type | Status | Opinion |
 |------|--------|---------|
 | `JsonSerializer` | ❌ IGNORE | Use nlohmann/json or rapidjson directly in C++. |
-| `JsonDocument` / `JsonElement` | 🧩 STUB | Low priority. Implement when JSON backend (nlohmann/json or similar) is added. |
+| `JsonDocument` / `JsonElement` | ✅ DONE | `System/Text/Json/JsonDocument.hpp` + `JsonElement.hpp` + `JsonValueKind.hpp`. Parse stub; GetString/Int32/Double/Boolean/TryGetProperty/EnumerateArray. |
+| `JsonSerializerOptions` | ✅ DONE | `System/Text/Json/JsonSerializerOptions.hpp`. WriteIndented/AllowTrailingCommas/MaxDepth/ReadCommentHandling; Default() singleton. |
+| `JsonSerializer` | ✅ DONE | `System/Text/Json/JsonSerializer.hpp`. Stub; Serialize throws NotImplementedException; Deserialize calls JsonDocument::Parse(). |
 
 ---
 
@@ -533,13 +535,31 @@ Types unique to sharp-runtime with no .NET equivalent.
 - **Numerics**: `BigInteger` (self-contained, no external lib)
 - **Net.Sockets**: `TcpClient`, `TcpListener`, `UdpClient` stubs (NotImplementedException + POSIX/Winsock notes)
 
+### ✅ Already ported (waves 10–15 — attributes, immutable, hashing, unicode, JSON/XML stubs)
+- **System**: `Attribute`, `AttributeTargets`, `AttributeUsageAttribute`, `CLSCompliantAttribute`, `FlagsAttribute`, `ObsoleteAttribute`, `NonSerializedAttribute`, `ParamArrayAttribute`, `SerializableAttribute`, `ThreadStaticAttribute`, `AppContext`, `AppDomain`, `GC`, `MarshalByRefObject`, `AsyncCallback`, `ResolveEventArgs`, `ResolveEventHandler`, `UnhandledExceptionEventArgs`, `UnhandledExceptionEventHandler`, `ApplicationId`, `IParsable<T>`, `Int128`, `UInt128`, `TimeZone`, `TimeZoneInfo`, `AssemblyLoadEventArgs`
+- **System.Diagnostics**: `ConditionalAttribute`, `DebuggableAttribute`, `DebuggerBrowsableAttribute`, `DebuggerDisplayAttribute`, `DebuggerHiddenAttribute`, `DebuggerNonUserCodeAttribute`, `DebuggerStepperBoundaryAttribute`, `DebuggerStepThroughAttribute`, `DebuggerTypeProxyAttribute`, `DebuggerVisualizerAttribute`, `StackTraceHiddenAttribute`, `StackFrame`, `StackTrace`
+- **System.ComponentModel**: `DefaultValueAttribute`, `Win32Exception`
+- **System.Globalization**: `SortVersion`, `StringInfo` (stub), `Calendar` (abstract), `GregorianCalendar`
+- **System.Buffers**: `OperationStatus`, `IMemoryOwner<T>`, `StandardFormat`, `ArrayPool<T>`
+- **System.Security**: `CryptographicException`, `SecurityException`, `VerificationException`, security attributes (SecurityRules/AllowPartiallyTrustedCallers/SecurityCritical/etc.)
+- **System.Runtime**: `AmbiguousImplementationException`, `GCSettings`
+- **System.Net**: `HttpStatusCode` (100–511)
+- **System.IO**: `DriveInfo` + `DriveType` enum
+- **System.Text**: `Rune` (UTF-32 codepoint), `UTF7Encoding`
+- **System.Text.Unicode**: `UnicodeRange`, `UnicodeRanges` (30+ named blocks)
+- **System.IO.Hashing**: `NonCryptographicHashAlgorithm`, `Crc32`, `XxHash32`, `XxHash64`
+- **System.Xml.Linq**: `XName`, `XAttribute`, `XElement`, `XDocument` (stub parse/load)
+- **System.Text.Json**: `JsonValueKind`, `JsonElement`, `JsonDocument`, `JsonSerializerOptions`, `JsonSerializer` (stub)
+- **System.Runtime.CompilerServices**: `MethodImplOptions`, `MethodImplAttribute`, `CallerMemberNameAttribute`, `CallerFilePathAttribute`, `CallerLineNumberAttribute`, `CallerArgumentExpressionAttribute`
+- **System.Collections.Generic**: `EqualityComparer<T>`
+- **System.Numerics**: `BFloat16`, `DivisionRounding`
+- **System.Collections.Immutable**: `ImmutableArray<T>`, `ImmutableList<T>`, `ImmutableDictionary<K,V>`, `ImmutableHashSet<T>`, `ImmutableSortedDictionary<K,V>`, `ImmutableSortedSet<T>`, `ImmutableQueue<T>`, `ImmutableStack<T>`
+
 ### 🔨 Zbývá portovat (pouze s externími závislostmi)
 - `GZipStream` / `DeflateStream` — implementace čeká na zlib/miniz
 - `ZipArchive` — implementace čeká na miniz/libzip
 - `XmlReader` / `XmlWriter` — implementace čeká na tinyxml2/pugixml
-- `XDocument` / `XElement` — čeká na XML backend
 - `TcpClient` / `UdpClient` — implementace čeká na POSIX sockets / Winsock2
-- `JsonDocument` / `JsonElement` — čeká na JSON backend
 
 ### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
@@ -568,7 +588,7 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.Collections` | 🧩 STUB | Non-generic kolekce (ArrayList, Hashtable) jsou zastaralé. Jen rozhraní IEnumerable/IEnumerator. |
 | `System.Collections.Generic` | ✅ PORT | Klíčové — List, Dictionary, Queue, Stack, HashSet, interfaces. Velká část hotova. |
 | `System.Collections.Concurrent` | 🧩 STUB | Thread-safe kolekce (ConcurrentDictionary, ConcurrentQueue). Pro game engine nízká priorita. |
-| `System.Collections.Immutable` | ❌ IGNORE | Immutable kolekce. Příliš komplexní, v C++ máme `const`. |
+| `System.Collections.Immutable` | ✅ DONE | `ImmutableArray<T>`, `ImmutableList<T>`, `ImmutableDictionary<K,V>`, `ImmutableHashSet<T>`, `ImmutableSortedDictionary<K,V>`, `ImmutableSortedSet<T>`, `ImmutableQueue<T>`, `ImmutableStack<T>` — all use `shared_ptr<const container<T>>` pattern. |
 | `System.Collections.NonGeneric` | ❌ IGNORE | Legacy .NET 1.x (ArrayList, Hashtable). Používej Generic varianty. |
 | `System.Collections.Specialized` | 🧩 STUB | OrderedDictionary, NameValueCollection — občas užitečné v ported kódu. |
 | `System.Collections.ObjectModel` | ✅ PORT | Collection<T>, ReadOnlyCollection<T> hotové. ObservableCollection pro WinPhone. |
@@ -592,7 +612,7 @@ Complete view of .NET namespaces from `dotnet/runtime`.
 | `System.IO.IsolatedStorage` | ✅ PORT | Hotovo. Klíčové pro mobile-eggbert save hry. |
 | `System.IO.FileSystem.Watcher` | ❌ IGNORE | FileSystemWatcher. Nepotřebné pro game. |
 | `System.IO.FileSystem.DriveInfo` | ❌ IGNORE | Informace o discích. Mimo scope. |
-| `System.IO.Hashing` | ❌ IGNORE | Hashovací funkce (xxHash, CRC). Použij přímou C++ implementaci. |
+| `System.IO.Hashing` | ✅ DONE | `NonCryptographicHashAlgorithm` (abstract base), `Crc32` (lookup table, 0xEDB88320), `XxHash32` (streaming, accumulators), `XxHash64` (streaming, 32-byte blocks). |
 | `System.IO.MemoryMappedFiles` | ❌ IGNORE | Memory-mapped soubory. Příliš OS-specifické. |
 | `System.IO.Pipelines` | ❌ IGNORE | Async I/O pipeline. Závisí na async/await. |
 | `System.IO.Pipes` | ❌ IGNORE | Named pipes. Mimo scope. |
