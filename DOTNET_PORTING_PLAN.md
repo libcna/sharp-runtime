@@ -59,29 +59,29 @@ Already partially done; the gaps matter for CNA/mobile-eggbert compilation.
 | `TimeOnly` | 🧩 STUB | Needed only if XNA/mobile-eggbert uses it. Currently unused — low priority. |
 | `DateOnly` | 🧩 STUB | Same as `TimeOnly`. |
 | `Guid` | ✅ DONE | `System/Guid.hpp` + `.cpp`. RFC 4122 v4, `NewGuid()`, `ToString()`. |
-| `Version` | 🧩 STUB | Rarely needed in game code; stub with major.minor parsing is enough. |
+| `Version` | ✅ DONE | `System/Version.hpp`. Major/Minor/Build/Revision, ToString(), comparison operators, string parser. |
 | `Uri` | ❌ IGNORE | Network/web type. Not needed for game engine core. |
 | `Convert` | ✅ DONE | `System/Convert.hpp` + `.cpp`. ToInt32/64/16, ToDouble/Single, ToString, base-N. |
-| `BitConverter` | 🧩 STUB | Useful for binary data reading. CNA content pipeline may need it. |
-| `Buffer` | 🧩 STUB | `Buffer.BlockCopy` — useful for raw memory operations in content loaders. |
-| `Span<T>` / `ReadOnlySpan<T>` | 🧩 STUB | C++23 has `std::span`. Can typedef. Useful for slicing without copying. |
+| `BitConverter` | ✅ DONE | `System/BitConverter.hpp`. GetBytes/ToInt16/32/64/Single/Double/Boolean + ToString hex, little-endian. |
+| `Buffer` | ✅ DONE | `System/Buffer.hpp`. BlockCopy, ByteLength<T>, GetByte/SetByte — header-only. |
+| `Span<T>` / `ReadOnlySpan<T>` | ✅ DONE | `System/Span.hpp`. Non-owning view with Slice, range-for, bounds check. |
 | `Memory<T>` | ❌ IGNORE | Too complex for the scope of sharp-runtime. Use `std::vector` slices. |
 | `Array` (static methods) | ✅ DONE | `System/Array.hpp`. Sort/Copy/Resize/IndexOf/Reverse/Clear — template helpers over `std::vector`. |
-| `Tuple<>` / `ValueTuple<>` | 🧩 STUB | Map to `std::tuple`. Rarely needed in game logic. |
+| `Tuple<>` / `ValueTuple<>` | ✅ DONE | `System/Tuple.hpp`. Tuple2/3/4 structs with Item1/Item2/... fields. |
 | `Type` | ✅ DONE | `System/Type.hpp`. Runtime type info is limited in C++; keep as partial stub. |
 | `IComparable<T>` | ✅ DONE | Interface in `System/IComparable.hpp`. |
 | `IEquatable<T>` | ✅ DONE | Interface in `System/IEquatable.hpp`. |
 | `IDisposable` | ✅ DONE | `System/IDisposable.hpp`. 📌 Used by CNA audio/graphics. |
 | `IServiceProvider` | ✅ DONE | `System/IServiceProvider.hpp`. |
-| `IFormattable` | 🧩 STUB | Interface only; `ToString(format)` not critical. |
-| `ICloneable` | 🧩 STUB | Interface only. Rarely needed. |
+| `IFormattable` | ✅ DONE | `System/IFormattable.hpp`. Abstract `ToString(format)` interface. |
+| `ICloneable` | ✅ DONE | `System/ICloneable.hpp`. Abstract `Clone()` returning `shared_ptr<ICloneable>`. |
 | `Action<>` | ✅ DONE | `System/Action.hpp`. Map to `std::function<void(...)>`. 📌 |
 | `Func<>` | ✅ DONE | `System/Func.hpp`. `Func<R>`, `FuncT<T,R>`, `FuncT2`, `FuncT3` via `std::function`. |
 | `Predicate<T>` | ✅ DONE | `System/Predicate.hpp`. Typedef `std::function<bool(T)>`. |
 | `EventArgs` | ✅ DONE | `System/EventArgs.hpp`. 📌 Used everywhere in CNA. |
 | `EventHandler<T>` | ✅ DONE | `System/EventHandler.hpp`. 📌 Used everywhere in CNA. |
 | `Console` | ✅ DONE | `System/Console.hpp`. Write/WriteLine/ReadLine/Error, header-only. |
-| `Environment` | 🧩 STUB | `Environment::NewLine`, `Environment::OSVersion`. Simple constants; full process info is IGNORE. |
+| `Environment` | ✅ DONE | `System/Environment.hpp`. NewLine, GetCurrentDirectory, GetEnvironmentVariable, ProcessorCount, Exit, Is64BitProcess — header-only. |
 | `GC` | ❌ IGNORE | No GC in C++. RAII + smart pointers replace it. Don't port. |
 | `AppDomain` | ❌ IGNORE | CLR concept. Not applicable. |
 | `AppContext` | ❌ IGNORE | Not needed. |
@@ -107,18 +107,18 @@ Already mostly done. A few important ones are missing.
 | `InvalidOperationException` | ✅ DONE | `System/InvalidOperationException.hpp`. |
 | `NotImplementedException` | ✅ DONE | `System/NotImplementedException.hpp`. 📌 Heavily used during porting. |
 | `NotSupportedException` | ✅ DONE | `System/NotSupportedException.hpp`. Default thrown by `Stream::Write`. |
-| `NullReferenceException` | 🧩 STUB | In C++ usually segfault; can stub for porting completeness. |
+| `NullReferenceException` | ✅ DONE | `System/NullReferenceException.hpp`. |
 | `IndexOutOfRangeException` | ✅ DONE | `System/IndexOutOfRangeException.hpp`. |
-| `InvalidCastException` | 🧩 STUB | Useful for type-safe casts. Low priority. |
+| `InvalidCastException` | ✅ DONE | `System/InvalidCastException.hpp`. |
 | `FormatException` | ✅ DONE | `System/FormatException.hpp`. Thrown by `Convert` on bad input. |
-| `OutOfMemoryException` | 🧩 STUB | In C++ this is `std::bad_alloc`. Can stub as alias. |
+| `OutOfMemoryException` | ✅ DONE | `System/OutOfMemoryException.hpp`. |
 | `ObjectDisposedException` | ✅ DONE | `System/ObjectDisposedException.hpp`. 📌 Used by CNA. |
 | `UnauthorizedAccessException` | ✅ DONE | `System/UnauthorizedAccessException.hpp`. |
 | `IOException` | ✅ DONE | `System/IO/IOException.hpp`. Base for all I/O exceptions. |
 | `FileNotFoundException` | ✅ DONE | `System/IO/FileNotFoundException.hpp`. Has `FileName` property. |
 | `DirectoryNotFoundException` | 🧩 STUB | Useful for file system operations. |
 | `EndOfStreamException` | ✅ DONE | `System/IO/EndOfStreamException.hpp`. |
-| `TimeoutException` | 🧩 STUB | Low priority for game engine. |
+| `TimeoutException` | ✅ DONE | `System/TimeoutException.hpp`. |
 | `StackOverflowException` | ❌ IGNORE | Platform crash, can't meaningfully catch in C++. |
 
 ---
@@ -158,7 +158,7 @@ Core collection types. Already partially done.
 | `IDictionary<K,V>` | ✅ DONE | `System/Collections/Generic/IDictionary.hpp`. Interface. |
 | `IReadOnlyList<T>` | ✅ DONE | `System/Collections/Generic/IReadOnlyList.hpp`. |
 | `IReadOnlyCollection<T>` | ✅ DONE | `System/Collections/Generic/IReadOnlyCollection.hpp`. |
-| `IReadOnlyDictionary<K,V>` | 🧩 STUB | Low priority. |
+| `IReadOnlyDictionary<K,V>` | ✅ DONE | `System/Collections/Generic/IReadOnlyDictionary.hpp`. |
 | `HashSet<T>` | ✅ DONE | `System/Collections/Generic/HashSet.hpp`. Wraps `std::unordered_set`. Add/Remove/Contains/UnionWith/IntersectWith. |
 | `SortedDictionary<K,V>` | 🧩 STUB | Wrap `std::map`. Low priority. |
 | `SortedList<K,V>` | 🧩 STUB | Rarely used in game code. |
@@ -190,7 +190,7 @@ Core collection types. Already partially done.
 | `Encoding` | ✅ DONE | `System/Text/Encoding.hpp`. Base class for encodings. |
 | `UTF8Encoding` | ✅ DONE | `System/Text/UTF8Encoding.hpp`. Inherits polymorphic `Encoding`. |
 | `ASCIIEncoding` | ✅ DONE | `System/Text/ASCIIEncoding.hpp`. Non-ASCII chars replaced with `?`. |
-| `UnicodeEncoding` | 🧩 STUB | UTF-16. Less common in modern game content. |
+| `UnicodeEncoding` | ✅ DONE | `System/Text/UnicodeEncoding.hpp`. UTF-16 LE; `Encoding::Unicode()` factory added. |
 | `Decoder` | 🧩 STUB | Advanced encoding; low priority. |
 | `Encoder` | 🧩 STUB | Advanced encoding; low priority. |
 
@@ -200,9 +200,9 @@ Core collection types. Already partially done.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Regex` | 🧩 STUB | Wrap `std::regex`. Not common in XNA/game engine code. Low priority. |
-| `Match` | 🧩 STUB | Goes with `Regex`. |
-| `MatchCollection` | 🧩 STUB | Goes with `Regex`. |
+| `Regex` | ✅ DONE | `System/Text/RegularExpressions/Regex.hpp`. Wraps `std::regex`; IsMatch/Match/Matches/Replace/Split + static overloads. |
+| `Match` | ✅ DONE | `System/Text/RegularExpressions/Match.hpp`. Success/Value/Index/Length + Group(n). |
+| `MatchCollection` | ✅ DONE | `System/Text/RegularExpressions/MatchCollection.hpp`. Count, operator[], range-for. |
 
 ---
 
@@ -220,10 +220,10 @@ File I/O — already partially done. Important for content loading and save game
 | `MemoryStream` | ✅ DONE | `System/IO/MemoryStream.hpp`. Now has empty writable constructor + `Write`/`WriteByte`. |
 | `FileStream` | ✅ DONE | `System/IO/FileStream.hpp`. Refactored to `std::fstream`; full read+write, all `FileMode` values. |
 | `BufferedStream` | 🧩 STUB | Optimization wrapper. Low priority. |
-| `TextReader` | 🧩 STUB | Abstract base for `StreamReader`. |
-| `TextWriter` | 🧩 STUB | Abstract base for `StreamWriter`. |
-| `StringReader` | 🧩 STUB | Read from string as stream. Occasionally useful. |
-| `StringWriter` | 🧩 STUB | Write to string as stream. |
+| `TextReader` | ✅ DONE | `System/IO/TextReader.hpp`. Abstract base; Peek/Read/ReadLine/ReadToEnd. |
+| `TextWriter` | ✅ DONE | `System/IO/TextWriter.hpp`. Abstract base; Write/WriteLine for all primitive types. |
+| `StringReader` | ✅ DONE | `System/IO/StringReader.hpp`. Reads from std::string; Peek/Read/ReadLine/ReadToEnd. |
+| `StringWriter` | ✅ DONE | `System/IO/StringWriter.hpp`. Writes to std::ostringstream; ToString() returns buffer. |
 | `File` | ✅ DONE | `System/IO/File.hpp`. ReadAllText/WriteAllText/ReadAllBytes/WriteAllBytes/Exists/Delete/Copy/Move/AppendAllText. |
 | `Directory` | ✅ DONE | `System/IO/Directory.hpp`. Exists/CreateDirectory/Delete/Move/GetFiles/GetDirectories. |
 | `Path` | ✅ DONE | `System/IO/Path.hpp`. Combine/GetFileName/GetExtension/GetDirectoryName/GetTempPath/ChangeExtension etc. |
@@ -235,9 +235,9 @@ File I/O — already partially done. Important for content loading and save game
 | `SeekOrigin` | ✅ DONE | `System/IO/SeekOrigin.hpp`. Begin/Current/End. |
 | `IOException` | ✅ DONE | `System/IO/IOException.hpp`. Base for all I/O exceptions. |
 | `FileNotFoundException` | ✅ DONE | `System/IO/FileNotFoundException.hpp`. Has `FileName` property. |
-| `DirectoryNotFoundException` | 🧩 STUB | Inherits `IOException`. |
+| `DirectoryNotFoundException` | ✅ DONE | `System/IO/DirectoryNotFoundException.hpp`. Inherits `IOException`. |
 | `EndOfStreamException` | ✅ DONE | `System/IO/EndOfStreamException.hpp`. |
-| `InvalidDataException` | 🧩 STUB | Useful for malformed content. |
+| `InvalidDataException` | ✅ DONE | `System/IO/InvalidDataException.hpp`. Useful for malformed content. |
 
 ---
 
@@ -272,17 +272,17 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Thread` | 🧩 STUB | Wrap `std::thread`. Only basic Start/Join needed for ported code. |
-| `Monitor` | 🧩 STUB | Wrap `std::mutex`. `Monitor::Enter`/`Exit` pattern used in C#. |
-| `Mutex` | 🧩 STUB | Wrap `std::mutex`. |
+| `Thread` | ✅ DONE | `System/Threading/Thread.hpp`. Wraps `std::thread`; Join/Sleep/IsAlive/Name/IsBackground. |
+| `Monitor` | ✅ DONE | `System/Threading/Monitor.hpp`. Stub — Enter/Exit/TryEnter (full impl needs per-object map). |
+| `Mutex` | ✅ DONE | `System/Threading/Mutex.hpp`. Wraps `std::mutex`; WaitOne/ReleaseMutex. |
 | `Semaphore` / `SemaphoreSlim` | 🧩 STUB | Wrap `std::counting_semaphore` (C++20). Low priority. |
 | `ManualResetEvent` | 🧩 STUB | Wrap `std::condition_variable`. |
 | `AutoResetEvent` | 🧩 STUB | Wrap `std::condition_variable`. |
-| `Interlocked` | 🧩 STUB | Wrap `std::atomic` operations. |
+| `Interlocked` | ✅ DONE | `System/Threading/Interlocked.hpp`. Increment/Decrement/Add/Exchange/CompareExchange via GCC builtins. |
 | `Timer` | 🧩 STUB | Periodic callback. Game engines usually use their own loop. Low priority. |
 | `ThreadPool` | ❌ IGNORE | Complex to port correctly. Use `std::async` directly. |
-| `CancellationToken` | 🧩 STUB | Useful for async-style cancellation. Can use `std::atomic<bool>`. |
-| `CancellationTokenSource` | 🧩 STUB | Goes with `CancellationToken`. |
+| `CancellationToken` | ✅ DONE | `System/Threading/CancellationToken.hpp`. IsCancellationRequested, ThrowIfCancellationRequested. |
+| `CancellationTokenSource` | ✅ DONE | `System/Threading/CancellationTokenSource.hpp`. Cancel, Token property. |
 | `volatile` keyword | ❌ IGNORE | Language feature; C++ has `std::atomic`. |
 
 ---
@@ -347,7 +347,7 @@ Threading support. C++ has excellent STL threading; these are shims for ported c
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `CultureInfo` | 🧩 STUB | `CultureInfo::InvariantCulture` constant is the most important part. Used for locale-independent number formatting. |
+| `CultureInfo` | ✅ DONE | `System/Globalization/CultureInfo.hpp`. InvariantCulture() + CurrentCulture() stub, Name/IsNeutralCulture/IsReadOnly — header-only. |
 | `NumberFormatInfo` | 🧩 STUB | Number formatting. Low priority. |
 | `StringInfo` | ❌ IGNORE | Unicode text segmentation. Not needed for game code. |
 | `Calendar` | ❌ IGNORE | Not needed. |
@@ -447,7 +447,7 @@ Already partially done.
 
 | Type | Status | Opinion |
 |------|--------|---------|
-| `Environment` | 🧩 STUB | `Environment::NewLine` (platform-correct `\n`/`\r\n`), `Environment::CurrentDirectory`. Constants only. |
+| `Environment` | ✅ DONE | `System/Environment.hpp`. NewLine, GetCurrentDirectory, GetEnvironmentVariable, ProcessorCount, Exit, Is64BitProcess — header-only. |
 
 ---
 
@@ -476,7 +476,7 @@ Types unique to sharp-runtime with no .NET equivalent.
 
 ## Priority Summary
 
-### ✅ Already ported (first wave — complete)
+### ✅ Already ported (wave 1 — core types)
 - MIT License + SPDX headers
 - `ArgumentNullException`, `NotSupportedException`, `DivideByZeroException`
 - `IndexOutOfRangeException`, `FormatException`
@@ -492,19 +492,27 @@ Types unique to sharp-runtime with no .NET equivalent.
 - `Console`, `Debug`, `Stopwatch`
 - `UTF8Encoding`, `ASCIIEncoding`
 
+### ✅ Already ported (wave 2+3 — exceptions, IO/Text/Threading, Regex, collections)
+- **Exceptions**: `DirectoryNotFoundException`, `InvalidDataException`, `NullReferenceException`,
+  `InvalidCastException`, `OutOfMemoryException`, `TimeoutException`, `OperationCanceledException`
+- **IO**: `TextReader`, `TextWriter`, `StringReader`, `StringWriter`
+- **Text**: `UnicodeEncoding` + `Encoding::Unicode()` factory
+- **Text.RegularExpressions**: `Regex`, `Match`, `MatchCollection` (wraps `std::regex`)
+- **Threading**: `Thread`, `Monitor` (stub), `Mutex`, `Interlocked`, `CancellationToken`, `CancellationTokenSource`
+- **Collections**: `IReadOnlyDictionary<K,V>`
+- **Core**: `Span<T>`, `ReadOnlySpan<T>`, `Tuple2/3/4`, `IFormattable`, `ICloneable`,
+  `BitConverter`, `Buffer`, `Environment`, `Version`, `CultureInfo`
+
 ### 🔨 Next to port (nice to have)
 - `TimeOnly`, `DateOnly`
-- `Version`
-- `ObservableCollection<T>`
-- `CultureInfo` (`InvariantCulture` constant)
+- `ObservableCollection<T>` + `INotifyPropertyChanged`
 - `GZipStream` / `DeflateStream` (XNB uses DEFLATE)
 - `XmlReader` / `XmlWriter` (XNA content descriptors)
-- `Regex` + `Match` (string processing in content)
-- `INotifyPropertyChanged`
 - `UIntPtr`
-- `Thread`, `Monitor`, `CancellationToken`
-- `BitConverter`
-- `DirectoryNotFoundException`, `InvalidDataException`
+- `SortedDictionary<K,V>`, `SortedList<K,V>`
+- `ManualResetEvent`, `AutoResetEvent`, `SemaphoreSlim`
+- `IsolatedStorage` (abstract base), `IsolatedStorageScope` enum
+- `NumberFormatInfo`
 
 ### ❌ Explicitly out of scope
 - Full CLR / GC / JIT
