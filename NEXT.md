@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 14*
+*Last updated: 2026-06-07 (branch: develop) — session 15*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 847 tests pass:** `./build/SharpRuntimeTests` → `847 tests from 44 test suites` ✅
+- **All 881 tests pass:** `./build/SharpRuntimeTests` → `881 tests from 45 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (798 tests across 42 suites)
@@ -63,10 +63,10 @@
 | `Diagnostics/StopwatchTests.cpp` | Stopwatch (15) |
 | `Diagnostics/DebugTraceTests.cpp` | Debug + Trace (22) |
 | `TimeZoneInfoTests.cpp` | TimeZoneInfo (27) |
+| `UriTests.cpp` | Uri (34) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Uri` — **next target**
-2. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
+1. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.) — **next target**
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -80,6 +80,13 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 15 (Uri implementation + tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Uri.hpp` | New — header-only URI parser: scheme/host/port (default per scheme)/path/query/fragment/userInfo/authority/loopback; UriKind enum; TryCreate; relative URI support; equality operators |
+| `tests/System/UriTests.cpp` | New — 34 tests: http/https/ftp parsing, default ports, explicit port, query/fragment, pathAndQuery, userInfo, authority, loopback, relative URIs, UriKind validation, TryCreate (valid/invalid), equality |
 
 **Session 14 (TimeZoneInfo fix + tests):**
 
@@ -208,32 +215,35 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 24: Uri
+## 7. Next task — Task 25: Threading primitives
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests (15 Stopwatch + 14 Encoding), total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
 ~~Task 23 (TimeZoneInfo fix + tests) — DONE ✅ — 27 new tests, total 847~~
+~~Task 24 (Uri implementation + tests) — DONE ✅ — 34 new tests, total 881~~
 
-### `System::Uri` — `tests/System/UriTests.cpp`
+### `System::Threading` — `tests/System/Threading/ThreadingTests.cpp`
 
-Headers to read first:
-- `include/System/Uri.hpp`
+Headers to read first (pick whichever exist):
+- `include/System/Threading/Thread.hpp`
+- `include/System/Threading/Monitor.hpp`
+- `include/System/Threading/Mutex.hpp`
+- `include/System/Threading/Semaphore.hpp`
+- `include/System/Threading/ManualResetEvent.hpp`
+- `include/System/Threading/AutoResetEvent.hpp`
+- `include/System/Threading/Interlocked.hpp`
 
-Typical API to test (mirror .NET):
-- Constructor with absolute URI string — must not throw for valid URIs
-- `getAbsoluteUriProperty()` — returns the original string
-- `getSchemeProperty()` — "http", "https", "ftp", etc.
-- `getHostProperty()` — hostname
-- `getPortProperty()` — port number (-1 or default if not specified)
-- `getPathAndQueryProperty()` / `getAbsolutePathProperty()` — path segment
-- `IsAbsoluteUri` / `getIsAbsoluteUriProperty()` — true for absolute URIs
-- `getQueryProperty()` — query string (empty if none)
-- Static `Uri::TryCreate(string, UriKind, out Uri)` if implemented
-- Constructor with invalid string — may throw
+Typical API to test (mirror .NET, only what is actually implemented):
+- `Thread::Sleep(ms)` — does not throw
+- `Thread::CurrentThread()` — returns a valid proxy
+- `Interlocked::Increment(ref int)` / `Decrement` — atomic operations
+- `Monitor::Enter/Exit` — lock/unlock without throw
+- `Mutex` RAII — ctor/dtor without throw
+- `Semaphore` — Wait/Release without throw (if implemented)
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="UriTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="ThreadingTests.*"`
 
-After: run full suite `./build/SharpRuntimeTests` — must show 847+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 24 done, add Task 25).
+After: run full suite `./build/SharpRuntimeTests` — must show 881+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 25 done, add Task 26).
 
 ---
 
@@ -250,11 +260,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 847+ passing, 0 
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 24 is `System::Uri` tests.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 25 is `System::Threading` tests.
 >
-> Read `include/System/Uri.hpp`. Write `tests/System/UriTests.cpp` covering the API that is actually implemented. Use `--gtest_filter="UriTests.*"` to verify before the full run.
+> Run `find include/System/Threading -name "*.hpp" | sort` to see what headers exist. Read the ones that are implemented (not just stubs). Write `tests/System/Threading/ThreadingTests.cpp` covering the API that actually works. Use `--gtest_filter="ThreadingTests.*"` to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run new tests: `./build/SharpRuntimeTests --gtest_filter="UriTests.*"`
-> Run full suite: `./build/SharpRuntimeTests` — must show 847+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 24 done, add Task 25.
+> Run new tests: `./build/SharpRuntimeTests --gtest_filter="ThreadingTests.*"`
+> Run full suite: `./build/SharpRuntimeTests` — must show 881+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 25 done, add Task 26.
