@@ -45,30 +45,31 @@ namespace System {
         }
 
         static const TimeZoneInfo& Utc() {
-            static TimeZoneInfo tz("UTC", TimeSpan::Zero(), "Coordinated Universal Time",
+            static TimeZoneInfo tz("UTC", TimeSpan::Zero, "Coordinated Universal Time",
                                    "Coordinated Universal Time", "Coordinated Universal Time", false);
             return tz;
         }
 
         static const TimeZoneInfo& Local() {
-            static TimeZoneInfo tz("Local", TimeSpan::Zero(), "Local Time", "Local Time", "Local Time", false);
+            static TimeZoneInfo tz("Local", TimeSpan::Zero, "Local Time", "Local Time", "Local Time", false);
             return tz;
         }
 
         static std::shared_ptr<TimeZoneInfo> FindSystemTimeZoneById(const std::string& id) {
-            if (id == "UTC") return std::make_shared<TimeZoneInfo>(Utc());
+            if (id == "UTC") return std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Utc()));
             throw std::invalid_argument("Time zone not found: " + id);
         }
 
         static std::vector<std::shared_ptr<TimeZoneInfo>> GetSystemTimeZones() {
-            return { std::make_shared<TimeZoneInfo>(Utc()), std::make_shared<TimeZoneInfo>(Local()) };
+            return { std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Utc())),
+                     std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Local())) };
         }
 
         static std::shared_ptr<TimeZoneInfo> CreateCustomTimeZone(
             const std::string& id, const TimeSpan& utcOffset,
             const std::string& displayName, const std::string& standardName)
         {
-            return std::make_shared<TimeZoneInfo>(id, utcOffset, displayName, standardName, standardName, false);
+            return std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(id, utcOffset, displayName, standardName, standardName, false));
         }
 
         static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt, const std::string& destinationTimeZoneId) {
