@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 17*
+*Last updated: 2026-06-07 (branch: develop) — session 18*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 997 tests pass:** `./build/SharpRuntimeTests` → `997 tests from 50 test suites` ✅
+- **All 1058 tests pass:** `./build/SharpRuntimeTests` → `1058 tests from 53 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -69,11 +69,14 @@
 | `ConsoleTests.cpp` | Console (17) |
 | `EnvironmentTests.cpp` | Environment (8) |
 | `VersionTests.cpp` | Version (19) |
+| `ArrayTests.cpp` | Array (26) |
+| `BufferTests.cpp` | Buffer (15) |
+| `TupleTests.cpp` | Tuple2/Tuple3/Tuple4 (20) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Array` / `System::Buffer` / `System::Tuple` — **next target**
-2. `System::Globalization` (CultureInfo, NumberFormatInfo)
-3. `System::Net` (IPAddress, HttpStatusCode)
+1. `System::Globalization` (CultureInfo, NumberFormatInfo) — **next target**
+2. `System::Net` (IPAddress, HttpStatusCode)
+3. `System::Buffers` (ArrayPool, OperationStatus)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -87,6 +90,14 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 18 (Array/Buffer/Tuple):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/ArrayTests.cpp` | New — 26 tests |
+| `tests/System/BufferTests.cpp` | New — 15 tests |
+| `tests/System/TupleTests.cpp` | New — 20 tests (Tuple2/3/4) |
 
 **Session 17 (BitConverter/Console/Environment/Version):**
 
@@ -225,7 +236,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 27: Array / Buffer / Tuple
+## 7. Next task — Task 28: Globalization
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -233,22 +244,22 @@ find include -name "*.hpp" | wc -l
 ~~Task 24 (Uri implementation + tests) — DONE ✅ — 34 new tests, total 881~~
 ~~Task 25 (Threading tests) — DONE ✅ — 49 new tests, total 930~~
 ~~Task 26 (BitConverter/Console/Environment/Version) — DONE ✅ — 67 new tests, total 997~~
+~~Task 27 (Array/Buffer/Tuple) — DONE ✅ — 61 new tests, total 1058~~
 
-### Batch: Array + Buffer + Tuple
+### Batch: Globalization
 
 Headers to read first:
-- `include/System/Array.hpp`
-- `include/System/Buffer.hpp`
-- `include/System/Tuple.hpp` (check if it exists)
+- `include/System/Globalization/CultureInfo.hpp`
+- `include/System/Globalization/NumberFormatInfo.hpp`
+- Scan `include/System/Globalization/` for other implemented types
 
 Write test files:
-- `tests/System/ArrayTests.cpp`
-- `tests/System/BufferTests.cpp`
-- `tests/System/TupleTests.cpp` (if Tuple is implemented)
+- `tests/System/Globalization/CultureInfoTests.cpp`
+- `tests/System/Globalization/NumberFormatInfoTests.cpp` (or combined)
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="ArrayTests.*:BufferTests.*:TupleTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="CultureInfoTests.*:NumberFormatInfoTests.*"`
 
-After: run full suite `./build/SharpRuntimeTests` — must show 997+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 27 done, add Task 28).
+After: run full suite `./build/SharpRuntimeTests` — must show 1058+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 28 done, add Task 29).
 
 ---
 
@@ -265,11 +276,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 997+ passing, 0 
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 27 is a batch: Array, Buffer, Tuple.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 28 is Globalization.
 >
-> Read `include/System/Array.hpp`, `include/System/Buffer.hpp`, and check if `include/System/Tuple.hpp` exists. Write test files for each header that has real implementation. Use `--gtest_filter="ArrayTests.*:BufferTests.*:TupleTests.*"` to verify before the full run.
+> Scan `include/System/Globalization/` to see what's implemented. Write test files for CultureInfo, NumberFormatInfo, and any other types that have real implementation. Use `--gtest_filter="CultureInfoTests.*:NumberFormatInfoTests.*"` (or a broader filter) to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with filter above.
-> Run full suite: `./build/SharpRuntimeTests` — must show 997+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 27 done, add Task 28.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1058+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 28 done, add Task 29.
