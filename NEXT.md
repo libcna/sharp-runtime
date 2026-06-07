@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 7*
+*Last updated: 2026-06-07 (branch: develop) — session 8*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 201 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 201` ✅
+- **All 248 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 248` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -42,7 +42,7 @@
 - Hashing: CRC32, XxHash32, XxHash64 (full streaming)
 - Threading: Thread, Monitor, Mutex, Semaphore/Slim, ManualResetEvent, AutoResetEvent, Interlocked, Timer, CancellationToken, SpinLock, ReaderWriterLockSlim, Barrier, CountdownEvent
 - Threading.Tasks: Task, TaskT, TaskCompletionSource, ValueTask, Parallel
-- Primitive boxes: Int16/Int32/Int64, UInt16/UInt32/UInt64, SByte, Byte, Char, Boolean, Single, Double, Decimal (double-backed stub)
+- Primitive boxes: Int16/Int32/Int64, UInt16/UInt32/UInt64, SByte, Byte, Char, Boolean, Single, Double, Decimal (128-bit fixed-point: 96-bit mantissa + scale 0–28 + sign)
 - Collections.Generic: PriorityQueue, SortedSet (added), full interfaces
 - ComponentModel: INotifyPropertyChanged, INotifyPropertyChanging, DataAnnotations, Category/Browsable/ReadOnly/DisplayName attributes
 - Text.Json.Serialization: JsonPropertyName, JsonIgnore, JsonConverter, JsonPolymorphic, JsonDerivedType, etc.
@@ -57,13 +57,19 @@
 - **ZipArchive:** throws `NotImplementedException` — awaiting miniz/libzip
 - **XmlReader / XmlWriter:** throw `NotImplementedException` — awaiting tinyxml2/pugixml
 - **TcpClient / UdpClient:** throw `NotImplementedException` — awaiting POSIX/Winsock
-- **JsonDocument::Parse:** returns a stub with raw text, no real parsing
-- **Decimal:** backed by `double`, not 128-bit fixed-point — precision differs from .NET
+- **JsonDocument::Parse:** ~~returns a stub~~ **DONE** — uses nlohmann/json 3.10.4 ✅
 - **Task/TaskT:** use `std::async(std::launch::async)`, not a full threadpool scheduler
 
 ---
 
 ## 3. Recent changes
+
+**Session 8 (Decimal 128-bit precision):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Decimal.hpp` | Complete rewrite — 96-bit mantissa using `unsigned __int128`, scale 0–28, sign bit; 192-bit multiplication via `uint192` struct; full Parse/ToString, arithmetic, comparison, math methods (Abs/Truncate/Floor/Ceiling/Round) |
+| `tests/System/DecimalTests.cpp` | New — 47 tests: constants, Parse/ToString roundtrip, 0.1+0.2==0.3 precision test, all arithmetic operators, comparison, math methods, conversions |
 
 **Session 7 (real JSON parsing via nlohmann/json):**
 
@@ -151,7 +157,7 @@
 
 | Status | Issue |
 |--------|-------|
-| **confirmed** | `Decimal` is backed by `double` — loses precision beyond ~15 decimal digits; .NET `Decimal` is 128-bit |
+| ~~**confirmed**~~ **fixed** | `Decimal` is now 128-bit fixed-point (96-bit mantissa, scale 0–28, sign); 0.1+0.2==0.3 passes; 47 tests cover full API |
 | **confirmed** | `Task` / `TaskT` use `std::async(std::launch::async)` — spawns a raw OS thread per task, no threadpool |
 | ~~**confirmed**~~ **fixed** | `JsonDocument::Parse()` now uses nlohmann/json 3.10.4 (vendor/nlohmann/json.hpp) to build a full `JsonElement` tree; 28 tests cover primitives, objects, arrays, nesting, error handling, and Dispose |
 | **confirmed** | `XmlReader` / `XmlWriter` throw `NotImplementedException` always |
@@ -287,10 +293,16 @@ nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()
 
 ---
 
-### Task 1 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
-**Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
-**Files:** `include/System/Decimal.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
+### ~~Task 1 (was Task 8) — Add Decimal 128-bit precision using `__int128`~~ DONE ✅
+47 tests in `tests/System/DecimalTests.cpp` — all pass. 0.1 + 0.2 == 0.3 exactly. MaxValue/MinValue correct. Full arithmetic, comparison, and math methods implemented.
+
+---
+
+### Task 1 (was Task 9) — Add tests for BigInteger
+**Goal:** Verify the base-10⁹ `BigInteger` implementation handles large values correctly.
+**Files:** `include/System/Numerics/BigInteger.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="BigIntegerTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Numerics.BigInteger/tests/`
 
 ---
 
@@ -302,11 +314,11 @@ nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 57 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 248 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Decimal 128-bit precision: read `include/System/Decimal.hpp` to understand the current double-backed stub, then check the .NET Decimal spec (128-bit fixed-point: 96-bit mantissa, sign bit, scale 0–28). Implement using `__int128` or a 96-bit mantissa + scale struct. Write tests in `tests/System/DecimalTests.cpp` that verify precision beyond double range (e.g., 0.1 + 0.2 == 0.3 exactly, 29-digit integer values). Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is BigInteger tests: read `include/System/Numerics/BigInteger.hpp` to understand the current base-10⁹ implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Numerics.BigInteger/tests/`, and write tests in `tests/System/Numerics/BigIntegerTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="BigIntegerTests.*"`. Update NEXT.md when done.
