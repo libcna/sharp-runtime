@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 21*
+*Last updated: 2026-06-07 (branch: develop) — session 22*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1262 tests pass:** `./build/SharpRuntimeTests` → `1262 tests from 77 test suites` ✅
+- **All 1347 tests pass:** `./build/SharpRuntimeTests` → `1347 tests from 107 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -76,11 +76,13 @@
 | `Net/NetTests.cpp` | IPAddress/IPEndPoint/HttpStatusCode/WebUtility (67) |
 | `Buffers/BuffersTests.cpp` | ArrayPool/OperationStatus/StandardFormat (29) |
 | `ComponentModel/ComponentModelTests.cpp` | 9 attribute types + INotifyPropertyChanged/Changing (39) |
+| `Runtime/RuntimeTests.cpp` | CompilerServices/GCSettings/InteropServices/Versioning (60) |
+| `Security/SecurityTests.cpp` | SecurityAttributes/SecurityException/CryptographicException (25) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Runtime` (CompilerServices, InteropServices) — **next target**
-2. `System::Security` (exceptions, security attributes)
-3. `System::Xml` (XmlReader/XmlWriter stubs)
+1. `System::Xml` (XmlReader/XmlWriter — stubs only, verify exception behaviour) — **next target**
+2. `System::IO::Compression` (GZipStream/DeflateStream — stubs only)
+3. `System::Net::Sockets` (TcpClient/UdpClient — stubs only)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -94,6 +96,14 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 22 (Runtime + Security):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Runtime/InteropServices/InteropAttributes.hpp` | Fix: fully-qualify `CharSet` and `CallingConvention` member type references to eliminate `-Wchanges-meaning` errors |
+| `tests/System/Runtime/RuntimeTests.cpp` | New — 60 tests: CompilerServices/GCSettings/InteropServices enums+attributes/Versioning/ExternalException |
+| `tests/System/Security/SecurityTests.cpp` | New — 25 tests: SecurityAttributes/SecurityException/CryptographicException |
 
 **Session 21 (Buffers + ComponentModel):**
 
@@ -266,7 +276,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 31: Runtime
+## 7. Next task — Task 32: Xml + IO::Compression stubs
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -278,20 +288,23 @@ find include -name "*.hpp" | wc -l
 ~~Task 28 (Globalization) — DONE ✅ — 69 new tests, total 1127~~
 ~~Task 29 (System::Net) — DONE ✅ — 67 new tests, total 1194~~
 ~~Task 30 (Buffers + ComponentModel) — DONE ✅ — 68 new tests, total 1262~~
+~~Task 31 (Runtime + Security) — DONE ✅ — 85 new tests, total 1347~~
 
-### Batch: Runtime (CompilerServices + InteropServices + Security)
+### Batch: Xml + IO::Compression (stub verification)
 
 Headers to read first:
-- Scan `include/System/Runtime/` for implemented types
-- Scan `include/System/Security/` for implemented types
+- Scan `include/System/Xml/` for available types
+- Scan `include/System/IO/Compression/` for available types
+
+Goal: verify that stub types throw `NotImplementedException` as documented, and that any non-stub parts (enums, constants, constructors) work correctly.
 
 Write test files:
-- `tests/System/Runtime/RuntimeTests.cpp`
-- `tests/System/Security/SecurityTests.cpp` (if non-trivial)
+- `tests/System/Xml/XmlTests.cpp`
+- `tests/System/IO/Compression/CompressionTests.cpp`
 
 **Run:** filter by new suite names before full run.
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1262+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 31 done, add Task 32).
+After: run full suite `./build/SharpRuntimeTests` — must show 1347+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 32 done, add Task 33).
 
 ---
 
@@ -308,11 +321,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 1262+ passing, 0
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 31 is Runtime + Security.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 32 is Xml + IO::Compression.
 >
-> Scan `include/System/Runtime/` and `include/System/Security/` to see what's implemented. Write test files for any types that have real implementation and compile cleanly.
+> Scan `include/System/Xml/` and `include/System/IO/Compression/` to see what's available. Write tests that verify stub exception behaviour (NotImplementedException) and any working parts (enums, constructors, constants).
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with appropriate filter.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1262+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 31 done, add Task 32.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1347+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 32 done, add Task 33.
