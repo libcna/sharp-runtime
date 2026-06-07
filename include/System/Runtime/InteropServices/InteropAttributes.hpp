@@ -73,7 +73,7 @@ namespace System::Runtime::InteropServices {
         LayoutKind Value;
         int    Pack    = 8;
         int    Size    = 0;
-        CharSet CharSet = CharSet::Ansi;
+        ::System::Runtime::InteropServices::CharSet CharSet = ::System::Runtime::InteropServices::CharSet::Ansi;
 
         explicit StructLayoutAttribute(LayoutKind layout) : Value(layout) {}
         explicit StructLayoutAttribute(int16_t layout)    : Value(static_cast<LayoutKind>(layout)) {}
@@ -103,8 +103,8 @@ namespace System::Runtime::InteropServices {
     public:
         std::string Value;
         std::string EntryPoint;
-        CharSet            CharSet           = CharSet::None;
-        CallingConvention  CallingConvention = CallingConvention::Winapi;
+        ::System::Runtime::InteropServices::CharSet            CharSet           = ::System::Runtime::InteropServices::CharSet::None;
+        ::System::Runtime::InteropServices::CallingConvention  CallingConvention = ::System::Runtime::InteropServices::CallingConvention::Winapi;
         bool               SetLastError      = false;
         bool               ExactSpelling     = false;
         bool               PreserveSig       = true;
