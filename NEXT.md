@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 518 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 518` ✅
+- **All 547 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 547` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 17 (IO stream tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/IO/StreamTests.cpp` | New — 29 tests: MemoryStream (default empty+writable, WriteByte, Write with offset, GetBuffer copy, ToArray ref, read-only from buffer ctor, Read/partial/at-end, write→read roundtrip), StringReader (Peek non-advancing, Read advancing, -1 at end, ReadLine, CR stripping, ReadToEnd, partial-then-rest), StringWriter (empty, Write, multi-Write, GetStringBuilder alias, idempotent ToString) |
 
 **Session 16 (Exception hierarchy tests):**
 
@@ -397,10 +403,16 @@ Covers 11 exception types: message, what(), inheritance chains (all catchable as
 
 ---
 
-### Task 1 (was Task 17) — Add tests for IO/Stream types
-**Goal:** Verify `System::IO::MemoryStream` (Write, Read, Seek, Position, Length, ToArray) and `System::IO::StringReader`/`StringWriter` if present.
-**Files:** `include/System/IO/MemoryStream.hpp`, `include/System/IO/StringReader.hpp`, `include/System/IO/StringWriter.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="MemoryStreamTests.*|StringReader*"`
+### ~~Task 1 (was Task 17) — Add tests for IO/Stream types~~ DONE ✅
+29 tests in `tests/System/IO/StreamTests.cpp` — all pass.
+Covers MemoryStream (writable, read-only, Write/Read/WriteByte, roundtrip), StringReader (Peek/Read/ReadLine/ReadToEnd), StringWriter (Write/ToString/GetStringBuilder).
+
+---
+
+### Task 1 (was Task 18) — Add tests for Collections.Generic (List, Dictionary, HashSet)
+**Goal:** Verify `System::Collections::Generic::List<T>`, `Dictionary<K,V>`, `HashSet<T>` — Add, Remove, Contains, iteration, Count.
+**Files:** `include/System/Collections/Generic/List.hpp`, `Dictionary.hpp`, `HashSet.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ListTests.*|DictionaryTests.*|HashSetTests.*"`
 
 ---
 
@@ -412,11 +424,11 @@ Covers 11 exception types: message, what(), inheritance chains (all catchable as
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 518 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 547 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is IO stream tests: find what IO stream types exist under `include/System/IO/` (MemoryStream, StringReader, StringWriter, BinaryReader, BinaryWriter), read their headers to understand the API, and write tests in `tests/System/IO/StreamTests.cpp` (or separate files per type). Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="MemoryStream*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is generic collections tests: read `include/System/Collections/Generic/List.hpp`, `Dictionary.hpp`, and `HashSet.hpp` to understand the API, then write tests in `tests/System/Collections/Generic/CollectionsTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ListTests.*|DictionaryTests.*|HashSetTests.*"`. Update NEXT.md when done.
