@@ -446,11 +446,37 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 
 ---
 
-### Task 1 (was Task 21) — Add tests for System::Text::Encoding (UTF-8, ASCII)
-**Goal:** Verify `System::Text::Encoding` — UTF8/ASCII singletons, GetEncoding(), GetBytes(string), GetString(bytes), GetByteCount, GetCharCount, round-trip UTF-8↔string.
-**Files:** `include/System/Text/Encoding.hpp` (check what's implemented first)
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
-**Note:** Check the header first — if the encoding API is stub/minimal, consider testing `System::Diagnostics::Stopwatch` instead (which is likely more fully implemented).
+### Task 1 (was Task 21) — Add tests for Stopwatch and Encoding
+
+Do **both** in one session — both headers are fully implemented.
+
+#### A. Stopwatch — `tests/System/Diagnostics/StopwatchTests.cpp`
+Header: `include/System/Diagnostics/Stopwatch.hpp` (fully header-only)
+API:
+- `Stopwatch()` default ctor — not running, zero elapsed
+- `Start()` / `Stop()` — `getIsRunningProperty()` toggles; `getElapsedMillisecondsProperty()` accumulates
+- `Reset()` — stops and zeros elapsed
+- `Restart()` — resets + starts immediately
+- `StartNew()` — static factory, returns a running stopwatch
+- `getElapsedTicksProperty()` — .NET ticks (100 ns units)
+- `getElapsedProperty()` — returns `System::TimeSpan`
+
+Suggested tests: default ctor (not running, zero elapsed), Start sets isRunning, Stop clears isRunning, elapsed > 0 after Start+small delay+Stop, StartNew is running, Reset zeros elapsed, Restart is running after call, Stop-stop is idempotent (no crash), getElapsed returns TimeSpan with ticks == getElapsedTicks.
+
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"`
+
+#### B. Encoding — `tests/System/Text/EncodingTests.cpp`
+Header: `include/System/Text/Encoding.hpp` (factory methods in a .cpp)
+API:
+- `Encoding::UTF8()` → shared_ptr, `getEncodingNameProperty()` == `"utf-8"`
+- `Encoding::ASCII()` → shared_ptr, name contains `"ascii"` or `"us-ascii"`
+- `GetBytes(string)` → `vector<uint8_t>`
+- `GetString(const uint8_t* data, int index, int count)` → `string`
+- Round-trip: `GetString(GetBytes("hello").data(), 0, n)` == `"hello"`
+
+Suggested tests: UTF8/ASCII singletons not null, UTF8 name, ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct for ASCII range, GetString round-trip for both encodings.
+
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="EncodingTests.*:StopwatchTests.*"`
 
 ---
 
@@ -469,4 +495,13 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Text::Encoding tests: read `include/System/Text/Encoding.hpp` to see what's implemented, then write tests in `tests/System/Text/EncodingTests.cpp`. If Encoding is a stub, switch to `System::Diagnostics::Stopwatch` (`include/System/Diagnostics/Stopwatch.hpp`) and write tests in `tests/System/Diagnostics/StopwatchTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"` (or `"StopwatchTests.*"`). Update NEXT.md when done.
+> Read NEXT.md first. The working directory is `/rv/data/development/github.com/openeggbert/sharp-runtime`. Task 1 in section 8 covers two targets this session: **Stopwatch** and **Encoding**.
+>
+> 1. Read `include/System/Diagnostics/Stopwatch.hpp`. Write `tests/System/Diagnostics/StopwatchTests.cpp` covering: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+Stop, StartNew() is already running, Reset() zeros and stops, Restart() zeros and starts, Stop-on-stopped is idempotent, getElapsedProperty() == TimeSpan with same ticks as getElapsedTicks. The directory `tests/System/Diagnostics/` likely does not exist — create it with `mkdir -p`.
+>
+> 2. Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp` covering: UTF8()/ASCII() return non-null shared_ptr, UTF8 encoding name == "utf-8", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct bytes, GetString round-trip for both encodings.
+>
+> Build: `cmake --build build --parallel 4`
+> Run: `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*:EncodingTests.*"`
+> Then run full suite: `./build/SharpRuntimeTests` — must be 769+ passing, 0 failing.
+> Update NEXT.md when done (bump test count, mark Task 21 done, add Task 22).
