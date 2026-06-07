@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 3*
+*Last updated: 2026-06-07 (branch: develop) — session 4*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 81 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 81` ✅
+- **All 114 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 114` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -64,6 +64,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 4 (immutable collection tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Collections/ImmutableCollectionTests.cpp` | New — 33 tests for ImmutableArray, ImmutableList, ImmutableDictionary |
 
 **Session 3 (hashing tests + bug fix):**
 
@@ -135,7 +141,7 @@
 | **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs with no real implementation |
 | ~~**needs verification**~~ **verified** | `XxHash32` / `XxHash64` spec test vectors pass (empty-string canonical values); streaming == one-shot confirmed for short, medium, and 100-byte inputs |
 | ~~**needs verification**~~ **verified** | `CRC32` lookup table correct — standard test vector `"123456789"` → `0xCBF43926` passes |
-| **needs verification** | `ImmutableDictionary` / `ImmutableHashSet` compile but have zero test coverage |
+| ~~**needs verification**~~ **verified** | `ImmutableArray`, `ImmutableList`, `ImmutableDictionary` — 33 tests covering Add/Remove/SetItem/Insert/Sort/Contains/IndexOf/Clear; all operations confirmed to return new instances and leave originals unchanged |
 | **risky assumption** | `SharpRuntime::charcs = char16_t` — some headers cast char16_t to/from `wint_t` which may not be identity on all platforms |
 
 ---
@@ -234,35 +240,34 @@ Also fixed: `XxHash32`, `XxHash64`, and `Crc32` were missing `using NonCryptogra
 
 ---
 
-### Task 1 (was Task 4) — Add tests for ImmutableArray/ImmutableList/ImmutableDictionary
-**Goal:** Verify Add/Remove/SetItem return new instances and leave originals unchanged.
-**Files:** New `tests/System/Collections/ImmutableCollectionTests.cpp`
-**Command:** `./build/SharpRuntimeTests --gtest_filter="ImmutableCollectionTests.*"`
+### ~~Task 1 (was Task 4) — Add tests for ImmutableArray/ImmutableList/ImmutableDictionary~~ DONE ✅
+33 tests in `tests/System/Collections/ImmutableCollectionTests.cpp` — all pass.
+All operations confirmed immutable: originals unchanged, mutations return new instances.
 
 ---
 
-### Task 3 (was Task 5) — Add tests for PriorityQueue<T,P>
+### Task 1 (was Task 5) — Add tests for PriorityQueue<T,P>
 **Goal:** Verify min-heap ordering with mixed priorities.
 **Files:** New `tests/System/Collections/PriorityQueueTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="PriorityQueueTests.*"`
 
 ---
 
-### Task 4 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
+### Task 2 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
 **Goal:** Verify `&`, `<`, `>`, `"`, `'` are correctly escaped; URL percent-encoding roundtrips.
 **Files:** New `tests/System/Text/EncodingWebTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`
 
 ---
 
-### Task 5 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
+### Task 3 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
 **Goal:** Replace the raw-text stub with actual parse logic using a bundled parser (e.g., nlohmann/json in `vendor/`).
 **Files:** `include/System/Text/Json/JsonDocument.hpp`, `include/System/Text/Json/JsonElement.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="JsonTests.*"`
 
 ---
 
-### Task 6 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
+### Task 4 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
 **Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
 **Files:** `include/System/Decimal.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
@@ -284,4 +289,4 @@ Also fixed: `XxHash32`, `XxHash64`, and `Crc32` were missing `using NonCryptogra
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. Then inspect the immutable collection headers needed for Task 1 in section 8 (ImmutableArray, ImmutableList, ImmutableDictionary). Do not refactor any unrelated code. Create `tests/System/Collections/ImmutableCollectionTests.cpp` with tests that verify Add/Remove/SetItem return new instances and leave originals unchanged. Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="ImmutableCollectionTests.*"`, and report the result. After finishing, update NEXT.md to reflect the new test status and promote Task 2 to the top of the list.
+> Read NEXT.md first. Then inspect the PriorityQueue header at `include/System/Collections/Generic/PriorityQueue.hpp` needed for Task 1 in section 8. Do not refactor any unrelated code. Create `tests/System/Collections/PriorityQueueTests.cpp` verifying min-heap ordering with mixed priorities, Enqueue/Dequeue/TryDequeue/TryPeek, and edge cases (empty queue). Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="PriorityQueueTests.*"`, and report the result. After finishing, update NEXT.md to reflect the new test status and promote Task 2 to the top of the list.
