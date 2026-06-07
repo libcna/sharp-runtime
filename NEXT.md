@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 355 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 355` ✅
+- **All 392 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 392` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 12 (Math tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/MathTests.cpp` | New — 37 tests: E/PI constants, Abs (double + int), Min/Max (int + double), Clamp (int + double), Floor/Ceiling/Round with official .NET vectors, Sqrt, Pow (including fractional exponent), Sin/Cos/Tan at canonical angles, Pythagorean identity sin²+cos²=1 for 5 angles |
 
 **Session 11 (Guid tests):**
 
@@ -335,11 +341,17 @@ Covers Empty, Parse/ToString roundtrip, braces/parentheses formats, invalid thro
 
 ---
 
-### Task 1 (was Task 12) — Add tests for Math static methods
-**Goal:** Verify `System::Math` correctness (Abs, Min, Max, Pow, Sqrt, Floor, Ceiling, Round, Log, Sin, Cos, Tan, Atan2, Clamp, Sign, Truncate).
-**Files:** `include/System/Math.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="MathTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/MathTests.cs`
+### ~~Task 1 (was Task 12) — Add tests for Math static methods~~ DONE ✅
+37 tests in `tests/System/MathTests.cpp` — all pass.
+Covers all implemented methods: E/PI, Abs(double+int), Min/Max(int+double), Clamp(int+double), Floor/Ceiling/Round, Sqrt, Pow, Sin/Cos/Tan, Pythagorean identity.
+
+---
+
+### Task 1 (was Task 13) — Add tests for Convert static methods
+**Goal:** Verify `System::Convert` correctness (ToInt32, ToDouble, ToString, ToBoolean, etc.).
+**Files:** `include/System/Convert.hpp` or `src/System/Convert.cpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ConvertTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/ConvertTests.cs`
 
 ---
 
@@ -351,11 +363,11 @@ Covers Empty, Parse/ToString roundtrip, braces/parentheses formats, invalid thro
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 355 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 392 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Math tests: read `include/System/Math.hpp` to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/MathTests.cs`, and write tests in `tests/System/MathTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="MathTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Convert tests: read `include/System/Convert.hpp` (or the src/ counterpart) to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/ConvertTests.cs`, and write tests in `tests/System/ConvertTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ConvertTests.*"`. Update NEXT.md when done.
