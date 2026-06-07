@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 4*
+*Last updated: 2026-06-07 (branch: develop) — session 5*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 114 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 114` ✅
+- **All 137 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 137` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -64,6 +64,15 @@
 ---
 
 ## 3. Recent changes
+
+**Session 5 (PriorityQueue tests + official hash vectors):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Collections/PriorityQueueTests.cpp` | New — 20 tests for PriorityQueue min-heap (ordering, edge cases, EnqueueRange, Clear, 1000-element stress) |
+| `tests/System/IO/HashingTests.cpp` | Extended — 3 new tests using official .NET runtime test vectors for CRC32, XxHash32, XxHash64 |
+
+**Note:** The .NET runtime source is available at `/rv/tmp/runtime/src/libraries` — use it for official test vectors before writing any new hash/collection tests.
 
 **Session 4 (immutable collection tests):**
 
@@ -246,28 +255,27 @@ All operations confirmed immutable: originals unchanged, mutations return new in
 
 ---
 
-### Task 1 (was Task 5) — Add tests for PriorityQueue<T,P>
-**Goal:** Verify min-heap ordering with mixed priorities.
-**Files:** New `tests/System/Collections/PriorityQueueTests.cpp`
-**Command:** `./build/SharpRuntimeTests --gtest_filter="PriorityQueueTests.*"`
+### ~~Task 1 (was Task 5) — Add tests for PriorityQueue<T,P>~~ DONE ✅
+20 tests in `tests/System/Collections/PriorityQueueTests.cpp` — all pass.
+Covers: empty-queue throws, single-element Peek/Dequeue, min-heap ordering, negative/equal priorities, TryDequeue/TryPeek, EnqueueRange, Clear, 1000-element stress.
 
 ---
 
-### Task 2 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
+### Task 1 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
 **Goal:** Verify `&`, `<`, `>`, `"`, `'` are correctly escaped; URL percent-encoding roundtrips.
 **Files:** New `tests/System/Text/EncodingWebTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`
 
 ---
 
-### Task 3 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
+### Task 2 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
 **Goal:** Replace the raw-text stub with actual parse logic using a bundled parser (e.g., nlohmann/json in `vendor/`).
 **Files:** `include/System/Text/Json/JsonDocument.hpp`, `include/System/Text/Json/JsonElement.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="JsonTests.*"`
 
 ---
 
-### Task 4 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
+### Task 3 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
 **Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
 **Files:** `include/System/Decimal.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
@@ -289,4 +297,4 @@ All operations confirmed immutable: originals unchanged, mutations return new in
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. Then inspect the PriorityQueue header at `include/System/Collections/Generic/PriorityQueue.hpp` needed for Task 1 in section 8. Do not refactor any unrelated code. Create `tests/System/Collections/PriorityQueueTests.cpp` verifying min-heap ordering with mixed priorities, Enqueue/Dequeue/TryDequeue/TryPeek, and edge cases (empty queue). Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="PriorityQueueTests.*"`, and report the result. After finishing, update NEXT.md to reflect the new test status and promote Task 2 to the top of the list.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries` — check `System.Text.Encodings.Web/` there for reference behavior before writing any tests. Then inspect `include/System/Text/Encodings/Web/HtmlEncoder.hpp` and `UrlEncoder.hpp`. Create `tests/System/Text/EncodingWebTests.cpp` verifying HTML escape of `&`, `<`, `>`, `"`, `'`; URL percent-encoding of unsafe characters; and JavaScriptEncoder basics. Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`, and report the result. After finishing, update NEXT.md.

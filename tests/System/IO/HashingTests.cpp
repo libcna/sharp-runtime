@@ -61,6 +61,15 @@ TEST(HashingTests, Crc32DifferentInputsDifferentHashes) {
               Crc32::HashToUInt32(bytes("abd")));
 }
 
+// Official .NET runtime test vectors (little-endian uint32 of the byte output)
+TEST(HashingTests, Crc32OfficialVectors) {
+    // Single byte 0x01 → 0xA505DF1B  (bytes {0x1B,0xDF,0x05,0xA5} little-endian)
+    EXPECT_EQ(Crc32::HashToUInt32({0x01}), 0xA505DF1Bu);
+    // "The quick brown fox jumps over the lazy dog"
+    EXPECT_EQ(Crc32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog")),
+              0x414FA339u);
+}
+
 // ---------------------------------------------------------------------------
 // XxHash32
 // ---------------------------------------------------------------------------
@@ -125,6 +134,14 @@ TEST(HashingTests, XxHash32LargeInputStreamingMatchesOneShot) {
 TEST(HashingTests, XxHash32DifferentInputsDifferentHashes) {
     EXPECT_NE(XxHash32::HashToUInt32(bytes("abc")),
               XxHash32::HashToUInt32(bytes("abd")));
+}
+
+// Official .NET runtime test vectors (seed=0)
+TEST(HashingTests, XxHash32OfficialVectors) {
+    EXPECT_EQ(XxHash32::HashToUInt32(bytes("abc")),                                          0x32D153FFu);
+    EXPECT_EQ(XxHash32::HashToUInt32(bytes("Nobody inspects the spammish repetition")),      0xE2293B2Fu);
+    EXPECT_EQ(XxHash32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog")),  0xE85EA4DEu);
+    EXPECT_EQ(XxHash32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog.")), 0x68D039C8u);
 }
 
 TEST(HashingTests, XxHash32GetHashLengthInBytes) {
@@ -195,6 +212,14 @@ TEST(HashingTests, XxHash64LargeInputStreamingMatchesOneShot) {
 TEST(HashingTests, XxHash64DifferentInputsDifferentHashes) {
     EXPECT_NE(XxHash64::HashToUInt64(bytes("abc")),
               XxHash64::HashToUInt64(bytes("abd")));
+}
+
+// Official .NET runtime test vectors (seed=0)
+TEST(HashingTests, XxHash64OfficialVectors) {
+    EXPECT_EQ(XxHash64::HashToUInt64(bytes("abc")),                                          0x44BC2CF5AD770999ULL);
+    EXPECT_EQ(XxHash64::HashToUInt64(bytes("Nobody inspects the spammish repetition")),      0xFBCEA83C8A378BF1ULL);
+    EXPECT_EQ(XxHash64::HashToUInt64(bytes("The quick brown fox jumps over the lazy dog")),  0x0B242D361FDA71BCULL);
+    EXPECT_EQ(XxHash64::HashToUInt64(bytes("The quick brown fox jumps over the lazy dog.")), 0x44AD33705751AD73ULL);
 }
 
 TEST(HashingTests, XxHash64GetHashLengthInBytes) {
