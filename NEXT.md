@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-06 (branch: develop)*
+*Last updated: 2026-06-07 (branch: develop) — session 3*
 
 ---
 
@@ -30,8 +30,8 @@
 
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
-- **Tests are NOT built:** `SHARP_RUNTIME_BUILD_TESTS=OFF` in current build cache
-- Running `ctest` reports: *No tests were found*
+- **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
+- **All 81 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 81` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -52,7 +52,7 @@
 - Text.Encodings.Web: HtmlEncoder, JavaScriptEncoder, UrlEncoder
 
 ### What does NOT work yet
-- **Tests cannot be run** (`SHARP_RUNTIME_BUILD_TESTS=OFF` in cache)
+- ~~**Tests cannot be run** (`SHARP_RUNTIME_BUILD_TESTS=OFF` in cache)~~ — **DONE: 39/39 pass** ✅
 - **GZipStream / DeflateStream:** throw `NotImplementedException` — awaiting zlib/miniz integration
 - **ZipArchive:** throws `NotImplementedException` — awaiting miniz/libzip
 - **XmlReader / XmlWriter:** throw `NotImplementedException` — awaiting tinyxml2/pugixml
@@ -65,7 +65,14 @@
 
 ## 3. Recent changes
 
-**Waves 16–20 (current session):**
+**Session 3 (hashing tests + bug fix):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/IO/HashingTests.cpp` | New — 24 tests for Crc32, XxHash32, XxHash64 (spec vectors, streaming, Reset, seed variation) |
+| `include/System/IO/Hashing/Crc32.hpp`, `XxHash32.hpp`, `XxHash64.hpp` | Bug fix — added `using NonCryptographicHashAlgorithm::Append;` to expose vector overload hidden by the override |
+
+**Waves 16–20 (session 2):**
 
 | File(s) | Change |
 |---------|--------|
@@ -101,15 +108,12 @@
 
 ## 4. Current blocker / main problem
 
-**Tests cannot be run.** The existing GoogleTest suite in `tests/System/` is not built because the build cache was configured with `SHARP_RUNTIME_BUILD_TESTS=OFF`.
+**No critical blocker.** The test suite is now enabled and all 39 tests pass.
 
-- **Symptom:** `ctest` reports *No tests were found*
-- **Failing command:** `cd build && ctest --output-on-failure`
-- **Affected:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
-- **Cause:** Build was initially configured without `-DSHARP_RUNTIME_BUILD_TESTS=ON`; the OFF value is cached
-- **Fix needed:** Reconfigure: `cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON && cmake --build build --parallel 4`
+- `cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON && cmake --build build --parallel 4` — ✅ clean
+- `cd build && ctest --output-on-failure` — ✅ `100% tests passed, 0 tests failed out of 39`
 
-This is not a code defect — just a configuration issue. Once tests build, their actual pass/fail status is unknown.
+**Next focus:** expand test coverage — hashing, immutable collections (see section 8).
 
 ---
 
@@ -123,14 +127,14 @@ This is not a code defect — just a configuration issue. Once tests build, thei
 | **confirmed** | `XmlReader` / `XmlWriter` throw `NotImplementedException` always |
 | **confirmed** | `GZipStream`, `DeflateStream`, `ZipArchive` throw `NotImplementedException` always |
 | **confirmed** | `TcpClient`, `UdpClient` throw `NotImplementedException` always |
-| **incomplete** | Tests suite exists but is not built (`SHARP_RUNTIME_BUILD_TESTS=OFF` in cache) |
+| ~~**incomplete**~~ **fixed** | Test suite is now built and all 39 tests pass (`SHARP_RUNTIME_BUILD_TESTS=ON`) |
 | **incomplete** | `Thread::CurrentThread()` returns a proxy struct, not a full `Thread` object — cannot `Join()` or check `IsAlive` on it |
 | **incomplete** | `Char::Parse(string)` only works for 1-byte ASCII chars — does not handle multi-byte UTF-8 sequences |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` only knows UTC, Local, and a handful of hardcoded zones |
 | **incomplete** | `BigInteger` uses a base-10⁹ representation — correct but slower than binary; `TryParse` not present |
 | **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs with no real implementation |
-| **needs verification** | `XxHash32` / `XxHash64` produce correct hashes — implementation matches the reference spec but no test verifies it |
-| **needs verification** | `CRC32` lookup table correctness — polynomial 0xEDB88320, no test |
+| ~~**needs verification**~~ **verified** | `XxHash32` / `XxHash64` spec test vectors pass (empty-string canonical values); streaming == one-shot confirmed for short, medium, and 100-byte inputs |
+| ~~**needs verification**~~ **verified** | `CRC32` lookup table correct — standard test vector `"123456789"` → `0xCBF43926` passes |
 | **needs verification** | `ImmutableDictionary` / `ImmutableHashSet` compile but have zero test coverage |
 | **risky assumption** | `SharpRuntime::charcs = char16_t` — some headers cast char16_t to/from `wint_t` which may not be identity on all platforms |
 
@@ -213,61 +217,52 @@ git diff master..develop --stat
 
 ## 8. Next smallest tasks
 
-### Task 1 — Enable and run the test suite
-**Goal:** Confirm existing 3 test files pass.
-**Files:** `CMakeLists.txt`, `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
-**Command:**
-```bash
-cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --parallel 4
-cd build && ctest --output-on-failure
-```
+### ~~Task 1 — Enable and run the test suite~~ DONE ✅
+All 39 tests pass. `SHARP_RUNTIME_BUILD_TESTS=ON` is now in the build cache.
 
 ---
 
-### Task 2 — Add tests for Int32/Int64/UInt32 primitive boxes
-**Goal:** Verify Parse/TryParse/MaxValue/MinValue are correct.
-**Files:** New `tests/System/PrimitiveTypeTests.cpp`
-**Command:** `./build/SharpRuntimeTests --gtest_filter="PrimitiveTypeTests.*"`
+### ~~Task 1 (was Task 2) — Add tests for Int32/Int64/UInt32 primitive boxes~~ DONE ✅
+18 tests in `tests/System/PrimitiveTypeTests.cpp` — all pass.
+Also fixed: `Int64` was missing Parse/TryParse (added). `UInt32::Parse` silently truncated overflow on 64-bit (fixed with range check).
 
 ---
 
-### Task 3 — Add tests for XxHash32/XxHash64/CRC32
-**Goal:** Verify hash outputs against known test vectors from the xxHash spec.
-**Files:** New `tests/System/IO/HashingTests.cpp`
-**Command:** `./build/SharpRuntimeTests --gtest_filter="HashingTests.*"`
+### ~~Task 1 (was Task 3) — Add tests for XxHash32/XxHash64/CRC32~~ DONE ✅
+24 tests in `tests/System/IO/HashingTests.cpp` — all pass.
+Also fixed: `XxHash32`, `XxHash64`, and `Crc32` were missing `using NonCryptographicHashAlgorithm::Append;`, which hid the base-class vector overload (the static `HashToUInt32/64` methods were also affected). Fixed with a one-line `using` declaration in each header.
 
 ---
 
-### Task 4 — Add tests for ImmutableArray/ImmutableList/ImmutableDictionary
+### Task 1 (was Task 4) — Add tests for ImmutableArray/ImmutableList/ImmutableDictionary
 **Goal:** Verify Add/Remove/SetItem return new instances and leave originals unchanged.
 **Files:** New `tests/System/Collections/ImmutableCollectionTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="ImmutableCollectionTests.*"`
 
 ---
 
-### Task 5 — Add tests for PriorityQueue<T,P>
+### Task 3 (was Task 5) — Add tests for PriorityQueue<T,P>
 **Goal:** Verify min-heap ordering with mixed priorities.
 **Files:** New `tests/System/Collections/PriorityQueueTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="PriorityQueueTests.*"`
 
 ---
 
-### Task 6 — Add tests for HtmlEncoder / UrlEncoder
+### Task 4 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
 **Goal:** Verify `&`, `<`, `>`, `"`, `'` are correctly escaped; URL percent-encoding roundtrips.
 **Files:** New `tests/System/Text/EncodingWebTests.cpp`
 **Command:** `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`
 
 ---
 
-### Task 7 — Wire up real JSON parsing in JsonDocument::Parse()
+### Task 5 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
 **Goal:** Replace the raw-text stub with actual parse logic using a bundled parser (e.g., nlohmann/json in `vendor/`).
 **Files:** `include/System/Text/Json/JsonDocument.hpp`, `include/System/Text/Json/JsonElement.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="JsonTests.*"`
 
 ---
 
-### Task 8 — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
+### Task 6 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
 **Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
 **Files:** `include/System/Decimal.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
@@ -282,11 +277,11 @@ cd build && ctest --output-on-failure
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite is enabled and all 3 existing tests pass
+- **No merge to master** until the test suite has broad coverage beyond the existing 57 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. Then inspect only the files needed for the first task listed in section 8 (enabling and running the test suite). Do not refactor any unrelated code. Make one small, verified improvement — specifically reconfigure the build with `SHARP_RUNTIME_BUILD_TESTS=ON`, build, run `ctest`, and report the result. After finishing, update NEXT.md to reflect the new test status and promote Task 2 to the top of the list.
+> Read NEXT.md first. Then inspect the immutable collection headers needed for Task 1 in section 8 (ImmutableArray, ImmutableList, ImmutableDictionary). Do not refactor any unrelated code. Create `tests/System/Collections/ImmutableCollectionTests.cpp` with tests that verify Add/Remove/SetItem return new instances and leave originals unchanged. Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="ImmutableCollectionTests.*"`, and report the result. After finishing, update NEXT.md to reflect the new test status and promote Task 2 to the top of the list.

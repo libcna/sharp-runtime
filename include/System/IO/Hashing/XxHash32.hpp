@@ -46,6 +46,7 @@ namespace System::IO::Hashing {
 
         void Reset() override { totalLength_ = 0; bufLen_ = 0; initState(); }
 
+        using NonCryptographicHashAlgorithm::Append;
         void Append(const uint8_t* source, size_t length) override {
             totalLength_ += length;
             const uint8_t* p = source;

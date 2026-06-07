@@ -28,6 +28,7 @@ namespace System::IO::Hashing {
     public:
         Crc32() : NonCryptographicHashAlgorithm(4) { initTable(); }
 
+        using NonCryptographicHashAlgorithm::Append;
         void Append(const uint8_t* source, size_t length) override {
             for (size_t i = 0; i < length; ++i)
                 crc_ = table_[(crc_ ^ source[i]) & 0xFF] ^ (crc_ >> 8);

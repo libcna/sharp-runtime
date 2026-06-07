@@ -16,8 +16,14 @@ public:
     static constexpr SharpRuntime::uintcs MinValue = 0;
 
     static SharpRuntime::uintcs Parse(const std::string& s) {
-        try { return static_cast<uint32_t>(std::stoul(s)); }
-        catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        try {
+            unsigned long v = std::stoul(s);
+            if (v > std::numeric_limits<uint32_t>::max())
+                throw std::out_of_range("overflow");
+            return static_cast<uint32_t>(v);
+        }
+        catch (const std::invalid_argument&) { throw std::invalid_argument("Input string was not in a correct format."); }
+        catch (const std::out_of_range&)     { throw std::invalid_argument("Input string was not in a correct format."); }
     }
 
     static bool TryParse(const std::string& s, SharpRuntime::uintcs& result) {
