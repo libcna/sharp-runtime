@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 16*
+*Last updated: 2026-06-07 (branch: develop) — session 17*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 930 tests pass:** `./build/SharpRuntimeTests` → `930 tests from 46 test suites` ✅
+- **All 997 tests pass:** `./build/SharpRuntimeTests` → `997 tests from 50 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (798 tests across 42 suites)
@@ -65,11 +65,15 @@
 | `TimeZoneInfoTests.cpp` | TimeZoneInfo (27) |
 | `UriTests.cpp` | Uri (34) |
 | `Threading/ThreadingTests.cpp` | Thread/Interlocked/Monitor/Mutex/Semaphore/SemaphoreSlim/MRE/ARE/CancellationToken/SpinLock/Volatile/Timeout (49) |
+| `BitConverterTests.cpp` | BitConverter (23) |
+| `ConsoleTests.cpp` | Console (17) |
+| `EnvironmentTests.cpp` | Environment (8) |
+| `VersionTests.cpp` | Version (19) |
 
 ### What is NOT yet tested (priority order)
-1. `System::BitConverter` / `System::Console` / `System::Environment` / `System::Version` — **next target**
-2. `System::Array` / `System::Buffer`
-3. `System::Tuple` and related generic types
+1. `System::Array` / `System::Buffer` / `System::Tuple` — **next target**
+2. `System::Globalization` (CultureInfo, NumberFormatInfo)
+3. `System::Net` (IPAddress, HttpStatusCode)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -83,6 +87,16 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 17 (BitConverter/Console/Environment/Version):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Console.hpp` | Fix: remove nonexistent `using SharpRuntime::doublecs` |
+| `tests/System/BitConverterTests.cpp` | New — 23 tests |
+| `tests/System/ConsoleTests.cpp` | New — 17 tests |
+| `tests/System/EnvironmentTests.cpp` | New — 8 tests |
+| `tests/System/VersionTests.cpp` | New — 19 tests |
 
 **Session 16 (Threading tests):**
 
@@ -224,31 +238,30 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 26: BitConverter / Console / Environment / Version
+## 7. Next task — Task 27: Array / Buffer / Tuple
 
-~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests (15 Stopwatch + 14 Encoding), total 798~~
+~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
 ~~Task 23 (TimeZoneInfo fix + tests) — DONE ✅ — 27 new tests, total 847~~
 ~~Task 24 (Uri implementation + tests) — DONE ✅ — 34 new tests, total 881~~
 ~~Task 25 (Threading tests) — DONE ✅ — 49 new tests, total 930~~
+~~Task 26 (BitConverter/Console/Environment/Version) — DONE ✅ — 67 new tests, total 997~~
 
-### Batch: BitConverter + Console + Environment + Version
+### Batch: Array + Buffer + Tuple
 
 Headers to read first:
-- `include/System/BitConverter.hpp`
-- `include/System/Console.hpp`
-- `include/System/Environment.hpp`
-- `include/System/Version.hpp`
+- `include/System/Array.hpp`
+- `include/System/Buffer.hpp`
+- `include/System/Tuple.hpp` (check if it exists)
 
-Write up to 4 test files (or combine in one if APIs are small):
-- `tests/System/BitConverterTests.cpp`
-- `tests/System/ConsoleTests.cpp`
-- `tests/System/EnvironmentTests.cpp`
-- `tests/System/VersionTests.cpp`
+Write test files:
+- `tests/System/ArrayTests.cpp`
+- `tests/System/BufferTests.cpp`
+- `tests/System/TupleTests.cpp` (if Tuple is implemented)
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="BitConverterTests.*:ConsoleTests.*:EnvironmentTests.*:VersionTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="ArrayTests.*:BufferTests.*:TupleTests.*"`
 
-After: run full suite `./build/SharpRuntimeTests` — must show 930+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 26 done, add Task 27).
+After: run full suite `./build/SharpRuntimeTests` — must show 997+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 27 done, add Task 28).
 
 ---
 
@@ -265,11 +278,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 930+ passing, 0 
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 26 is a batch: BitConverter, Console, Environment, Version.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 27 is a batch: Array, Buffer, Tuple.
 >
-> Read `include/System/BitConverter.hpp`, `include/System/Console.hpp`, `include/System/Environment.hpp`, `include/System/Version.hpp`. Write test files for each covering only what is actually implemented. Use `--gtest_filter="BitConverterTests.*:ConsoleTests.*:EnvironmentTests.*:VersionTests.*"` to verify before the full run.
+> Read `include/System/Array.hpp`, `include/System/Buffer.hpp`, and check if `include/System/Tuple.hpp` exists. Write test files for each header that has real implementation. Use `--gtest_filter="ArrayTests.*:BufferTests.*:TupleTests.*"` to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with filter above.
-> Run full suite: `./build/SharpRuntimeTests` — must show 930+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 26 done, add Task 27.
+> Run full suite: `./build/SharpRuntimeTests` — must show 997+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 27 done, add Task 28.
