@@ -17,17 +17,21 @@ namespace System::Buffers {
             if (clearArray) array.assign(array.size(), T{});
         }
 
-        static ArrayPool<T>& Shared() {
-            static SharedImpl instance;
-            return instance;
-        }
-
-    private:
-        struct SharedImpl : ArrayPool<T> {
-            std::vector<T> Rent(int minimumLength) override {
-                return std::vector<T>(static_cast<size_t>(minimumLength));
-            }
-        };
+        static ArrayPool<T>& Shared();
     };
+
+    // Defined after ArrayPool<T> is complete to avoid incomplete-type warning.
+    template<typename T>
+    struct SharedArrayPool : ArrayPool<T> {
+        std::vector<T> Rent(int minimumLength) override {
+            return std::vector<T>(static_cast<size_t>(minimumLength));
+        }
+    };
+
+    template<typename T>
+    ArrayPool<T>& ArrayPool<T>::Shared() {
+        static SharedArrayPool<T> instance;
+        return instance;
+    }
 
 } // namespace System::Buffers
