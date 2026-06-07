@@ -6,6 +6,7 @@
 #include <string>
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/IDisposable.hpp"
+#include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
 
@@ -14,6 +15,34 @@ namespace System::Text::Json {
         bool disposed_ = false;
 
         explicit JsonDocument(std::shared_ptr<JsonElement> root) : root_(std::move(root)) {}
+
+        static std::shared_ptr<JsonElement> fromNlohmann(const nlohmann::json& j) {
+            if (j.is_null())
+                return std::make_shared<JsonElement>(JsonValueKind::Null, "null");
+            if (j.is_boolean()) {
+                bool b = j.get<bool>();
+                return std::make_shared<JsonElement>(
+                    b ? JsonValueKind::True : JsonValueKind::False,
+                    b ? "true" : "false");
+            }
+            if (j.is_number())
+                return std::make_shared<JsonElement>(JsonValueKind::Number, j.dump());
+            if (j.is_string())
+                return std::make_shared<JsonElement>(JsonValueKind::String, j.get<std::string>());
+            if (j.is_array()) {
+                auto el = std::make_shared<JsonElement>(JsonValueKind::Array, "");
+                for (const auto& item : j)
+                    el->addArrayItemForTesting(fromNlohmann(item));
+                return el;
+            }
+            if (j.is_object()) {
+                auto el = std::make_shared<JsonElement>(JsonValueKind::Object, "");
+                for (const auto& [key, val] : j.items())
+                    el->addPropertyForTesting(key, fromNlohmann(val));
+                return el;
+            }
+            return std::make_shared<JsonElement>(JsonValueKind::Undefined);
+        }
 
     public:
         ~JsonDocument() override = default;
@@ -25,12 +54,9 @@ namespace System::Text::Json {
             return *root_;
         }
 
-        // Stub — real implementation requires JSON parser (nlohmann/json, rapidjson, etc.)
         static std::shared_ptr<JsonDocument> Parse(const std::string& json) {
-            (void)json;
-            // Returns an empty object stub; integrate JSON backend for real parsing
-            return std::shared_ptr<JsonDocument>(
-                new JsonDocument(std::make_shared<JsonElement>(JsonValueKind::Object, json)));
+            auto j = nlohmann::json::parse(json); // throws nlohmann::json::parse_error on bad input
+            return std::shared_ptr<JsonDocument>(new JsonDocument(fromNlohmann(j)));
         }
 
         static std::shared_ptr<JsonDocument> ParseValue(const std::string& json) {

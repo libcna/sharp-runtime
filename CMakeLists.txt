@@ -19,6 +19,7 @@ add_library(SHARP_RUNTIME STATIC
 target_include_directories(SHARP_RUNTIME
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
 )
 
 # On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath

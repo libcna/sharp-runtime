@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 6*
+*Last updated: 2026-06-07 (branch: develop) — session 7*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 173 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 173` ✅
+- **All 201 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 201` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -64,6 +64,15 @@
 ---
 
 ## 3. Recent changes
+
+**Session 7 (real JSON parsing via nlohmann/json):**
+
+| File(s) | Change |
+|---------|--------|
+| `vendor/nlohmann/json.hpp` | New — nlohmann/json 3.10.4 (copied from mesh-craft vendor; MIT license) |
+| `CMakeLists.txt` | Add `vendor/` to `target_include_directories` so `#include "nlohmann/json.hpp"` works |
+| `include/System/Text/Json/JsonDocument.hpp` | Rewritten — `Parse()` now uses `nlohmann::json::parse()` and recursively builds the `JsonElement` tree; `ParseValue()` delegates to `Parse()` |
+| `tests/System/Text/JsonTests.cpp` | New — 28 tests covering all JSON value kinds, object/array nesting, error handling, Dispose |
 
 **Session 6 (encoder tests):**
 
@@ -144,7 +153,7 @@
 |--------|-------|
 | **confirmed** | `Decimal` is backed by `double` — loses precision beyond ~15 decimal digits; .NET `Decimal` is 128-bit |
 | **confirmed** | `Task` / `TaskT` use `std::async(std::launch::async)` — spawns a raw OS thread per task, no threadpool |
-| **confirmed** | `JsonDocument::Parse()` is a stub — returns an element with `rawText_` set but no real JSON parsing |
+| ~~**confirmed**~~ **fixed** | `JsonDocument::Parse()` now uses nlohmann/json 3.10.4 (vendor/nlohmann/json.hpp) to build a full `JsonElement` tree; 28 tests cover primitives, objects, arrays, nesting, error handling, and Dispose |
 | **confirmed** | `XmlReader` / `XmlWriter` throw `NotImplementedException` always |
 | **confirmed** | `GZipStream`, `DeflateStream`, `ZipArchive` throw `NotImplementedException` always |
 | **confirmed** | `TcpClient`, `UdpClient` throw `NotImplementedException` always |
@@ -273,14 +282,12 @@ Covers HtmlEncoder (5 special chars + composites from official .NET tests), UrlE
 
 ---
 
-### Task 1 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
-**Goal:** Replace the raw-text stub with actual parse logic using a bundled parser (e.g., nlohmann/json in `vendor/`).
-**Files:** `include/System/Text/Json/JsonDocument.hpp`, `include/System/Text/Json/JsonElement.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="JsonTests.*"`
+### ~~Task 1 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()~~ DONE ✅
+nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()` now builds a full `JsonElement` tree. 28 tests in `tests/System/Text/JsonTests.cpp` — all pass.
 
 ---
 
-### Task 2 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
+### Task 1 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
 **Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
 **Files:** `include/System/Decimal.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
@@ -302,4 +309,4 @@ Covers HtmlEncoder (5 special chars + composites from official .NET tests), UrlE
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is JSON parsing: check `System.Text.Json/` in the runtime source for reference behavior, then look at `include/System/Text/Json/JsonDocument.hpp` and `JsonElement.hpp` to understand the current stub. The goal is to replace the raw-text stub with real parsing using a header-only library (nlohmann/json or similar) added to `vendor/`. Check what is already in `vendor/` before adding anything. Build with `cmake --build build --parallel 4`, write tests in `tests/System/Text/JsonTests.cpp`, run them, and update NEXT.md.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Decimal 128-bit precision: read `include/System/Decimal.hpp` to understand the current double-backed stub, then check the .NET Decimal spec (128-bit fixed-point: 96-bit mantissa, sign bit, scale 0–28). Implement using `__int128` or a 96-bit mantissa + scale struct. Write tests in `tests/System/DecimalTests.cpp` that verify precision beyond double range (e.g., 0.1 + 0.2 == 0.3 exactly, 29-digit integer values). Update NEXT.md when done.
