@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include <string>
+#include <vector>
+
+#include "System/Collections/Generic/LinkedList.hpp"
+#include "System/Collections/Generic/SortedSet.hpp"
+
+using System::Collections::Generic::LinkedList;
+using System::Collections::Generic::SortedSet;
+
+// ---------------------------------------------------------------------------
+// LinkedList<T>
+// ---------------------------------------------------------------------------
+
+TEST(LinkedListTests, DefaultCtorIsEmpty) {
+    LinkedList<int> ll;
+    EXPECT_EQ(ll.getCountProperty(), 0);
+}
+
+TEST(LinkedListTests, AddLastIncreasesCount) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    EXPECT_EQ(ll.getCountProperty(), 2);
+}
+
+TEST(LinkedListTests, AddFirstPrepends) {
+    LinkedList<int> ll;
+    ll.AddLast(2);
+    ll.AddFirst(1);
+    EXPECT_EQ(ll.getFirstProperty(), 1);
+    EXPECT_EQ(ll.getLastProperty(),  2);
+}
+
+TEST(LinkedListTests, AddLastAppends) {
+    LinkedList<int> ll;
+    ll.AddFirst(1);
+    ll.AddLast(2);
+    EXPECT_EQ(ll.getFirstProperty(), 1);
+    EXPECT_EQ(ll.getLastProperty(),  2);
+}
+
+TEST(LinkedListTests, GetFirstProperty) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20); ll.AddLast(30);
+    EXPECT_EQ(ll.getFirstProperty(), 10);
+}
+
+TEST(LinkedListTests, GetLastProperty) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20); ll.AddLast(30);
+    EXPECT_EQ(ll.getLastProperty(), 30);
+}
+
+TEST(LinkedListTests, RemoveFirst) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    ll.RemoveFirst();
+    EXPECT_EQ(ll.getCountProperty(), 2);
+    EXPECT_EQ(ll.getFirstProperty(), 2);
+}
+
+TEST(LinkedListTests, RemoveLast) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    ll.RemoveLast();
+    EXPECT_EQ(ll.getCountProperty(), 2);
+    EXPECT_EQ(ll.getLastProperty(), 2);
+}
+
+TEST(LinkedListTests, RemoveFirstOnEmptyIsNoop) {
+    LinkedList<int> ll;
+    EXPECT_NO_THROW(ll.RemoveFirst());
+    EXPECT_EQ(ll.getCountProperty(), 0);
+}
+
+TEST(LinkedListTests, RemoveLastOnEmptyIsNoop) {
+    LinkedList<int> ll;
+    EXPECT_NO_THROW(ll.RemoveLast());
+    EXPECT_EQ(ll.getCountProperty(), 0);
+}
+
+TEST(LinkedListTests, RemoveByValue) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20); ll.AddLast(30);
+    EXPECT_TRUE(ll.Remove(20));
+    EXPECT_EQ(ll.getCountProperty(), 2);
+    EXPECT_EQ(ll.getFirstProperty(), 10);
+    EXPECT_EQ(ll.getLastProperty(),  30);
+}
+
+TEST(LinkedListTests, RemoveByValueNotFound) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    EXPECT_FALSE(ll.Remove(99));
+    EXPECT_EQ(ll.getCountProperty(), 1);
+}
+
+TEST(LinkedListTests, ContainsFound) {
+    LinkedList<int> ll;
+    ll.AddLast(5); ll.AddLast(10);
+    EXPECT_TRUE(ll.Contains(10));
+}
+
+TEST(LinkedListTests, ContainsNotFound) {
+    LinkedList<int> ll;
+    ll.AddLast(5);
+    EXPECT_FALSE(ll.Contains(99));
+}
+
+TEST(LinkedListTests, ClearResetsCount) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    ll.Clear();
+    EXPECT_EQ(ll.getCountProperty(), 0);
+    EXPECT_FALSE(ll.Contains(1));
+}
+
+TEST(LinkedListTests, RangeForIteration) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    std::vector<int> collected;
+    for (int x : ll) collected.push_back(x);
+    ASSERT_EQ(collected.size(), 3u);
+    EXPECT_EQ(collected[0], 1);
+    EXPECT_EQ(collected[1], 2);
+    EXPECT_EQ(collected[2], 3);
+}
+
+TEST(LinkedListTests, AddFirstThenIterateIsReversed) {
+    LinkedList<int> ll;
+    ll.AddFirst(3); ll.AddFirst(2); ll.AddFirst(1);
+    std::vector<int> collected;
+    for (int x : ll) collected.push_back(x);
+    EXPECT_EQ(collected[0], 1);
+    EXPECT_EQ(collected[1], 2);
+    EXPECT_EQ(collected[2], 3);
+}
+
+TEST(LinkedListTests, StringLinkedList) {
+    LinkedList<std::string> ll;
+    ll.AddLast(std::string("a"));
+    ll.AddLast(std::string("b"));
+    ll.AddFirst(std::string("z"));
+    EXPECT_EQ(ll.getFirstProperty(), "z");
+    EXPECT_EQ(ll.getLastProperty(),  "b");
+    EXPECT_EQ(ll.getCountProperty(), 3);
+    EXPECT_TRUE(ll.Contains(std::string("a")));
+    ll.Remove(std::string("a"));
+    EXPECT_FALSE(ll.Contains(std::string("a")));
+}
+
+// ---------------------------------------------------------------------------
+// SortedSet<T>
+// ---------------------------------------------------------------------------
+
+TEST(SortedSetTests, DefaultCtorIsEmpty) {
+    SortedSet<int> ss;
+    EXPECT_EQ(ss.getCountProperty(), 0);
+    EXPECT_TRUE(ss.getIsEmptyProperty());
+}
+
+TEST(SortedSetTests, InitializerListCtor) {
+    SortedSet<int> ss{3, 1, 2};
+    EXPECT_EQ(ss.getCountProperty(), 3);
+    EXPECT_FALSE(ss.getIsEmptyProperty());
+}
+
+TEST(SortedSetTests, AddReturnsTrueFirstTime) {
+    SortedSet<int> ss;
+    EXPECT_TRUE(ss.Add(42));
+    EXPECT_EQ(ss.getCountProperty(), 1);
+}
+
+TEST(SortedSetTests, AddReturnsFalseIfDuplicate) {
+    SortedSet<int> ss;
+    ss.Add(7);
+    EXPECT_FALSE(ss.Add(7));
+    EXPECT_EQ(ss.getCountProperty(), 1);
+}
+
+TEST(SortedSetTests, ContainsAfterAdd) {
+    SortedSet<int> ss;
+    ss.Add(5);
+    EXPECT_TRUE(ss.Contains(5));
+}
+
+TEST(SortedSetTests, ContainsNotFound) {
+    SortedSet<int> ss;
+    ss.Add(1);
+    EXPECT_FALSE(ss.Contains(99));
+}
+
+TEST(SortedSetTests, RemoveReturnsTrueIfFound) {
+    SortedSet<int> ss;
+    ss.Add(10);
+    EXPECT_TRUE(ss.Remove(10));
+    EXPECT_EQ(ss.getCountProperty(), 0);
+}
+
+TEST(SortedSetTests, RemoveReturnsFalseIfAbsent) {
+    SortedSet<int> ss;
+    EXPECT_FALSE(ss.Remove(99));
+}
+
+TEST(SortedSetTests, MinProperty) {
+    SortedSet<int> ss{5, 1, 3, 9, 2};
+    EXPECT_EQ(ss.getMinProperty(), 1);
+}
+
+TEST(SortedSetTests, MaxProperty) {
+    SortedSet<int> ss{5, 1, 3, 9, 2};
+    EXPECT_EQ(ss.getMaxProperty(), 9);
+}
+
+TEST(SortedSetTests, IterationIsSorted) {
+    SortedSet<int> ss;
+    ss.Add(30); ss.Add(10); ss.Add(20);
+    std::vector<int> v;
+    for (int x : ss) v.push_back(x);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 10);
+    EXPECT_EQ(v[1], 20);
+    EXPECT_EQ(v[2], 30);
+}
+
+TEST(SortedSetTests, ToVectorIsSorted) {
+    SortedSet<int> ss{5, 3, 1, 4, 2};
+    std::vector<int> v = ss.ToVector();
+    ASSERT_EQ(v.size(), 5u);
+    for (int i = 0; i < 4; ++i) EXPECT_LT(v[i], v[i+1]);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[4], 5);
+}
+
+TEST(SortedSetTests, ClearResetsCount) {
+    SortedSet<int> ss{1, 2, 3};
+    ss.Clear();
+    EXPECT_EQ(ss.getCountProperty(), 0);
+    EXPECT_TRUE(ss.getIsEmptyProperty());
+}
+
+TEST(SortedSetTests, UnionWith) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{2, 3, 4};
+    a.UnionWith(b);
+    EXPECT_EQ(a.getCountProperty(), 4);
+    EXPECT_TRUE(a.Contains(1));
+    EXPECT_TRUE(a.Contains(4));
+}
+
+TEST(SortedSetTests, IntersectWith) {
+    SortedSet<int> a{1, 2, 3, 4};
+    SortedSet<int> b{2, 4, 6};
+    a.IntersectWith(b);
+    EXPECT_EQ(a.getCountProperty(), 2);
+    EXPECT_FALSE(a.Contains(1));
+    EXPECT_TRUE(a.Contains(2));
+    EXPECT_FALSE(a.Contains(3));
+    EXPECT_TRUE(a.Contains(4));
+}
+
+TEST(SortedSetTests, ExceptWith) {
+    SortedSet<int> a{1, 2, 3, 4};
+    SortedSet<int> b{2, 4};
+    a.ExceptWith(b);
+    EXPECT_EQ(a.getCountProperty(), 2);
+    EXPECT_TRUE(a.Contains(1));
+    EXPECT_FALSE(a.Contains(2));
+    EXPECT_TRUE(a.Contains(3));
+    EXPECT_FALSE(a.Contains(4));
+}
+
+TEST(SortedSetTests, IsSubsetOf) {
+    SortedSet<int> sub{2, 3};
+    SortedSet<int> sup{1, 2, 3, 4};
+    EXPECT_TRUE(sub.IsSubsetOf(sup));
+    EXPECT_FALSE(sup.IsSubsetOf(sub));
+}
+
+TEST(SortedSetTests, IsSupersetOf) {
+    SortedSet<int> sup{1, 2, 3, 4};
+    SortedSet<int> sub{2, 3};
+    EXPECT_TRUE(sup.IsSupersetOf(sub));
+    EXPECT_FALSE(sub.IsSupersetOf(sup));
+}
+
+TEST(SortedSetTests, GetViewBetween) {
+    SortedSet<int> ss{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    SortedSet<int> view = ss.GetViewBetween(3, 7);
+    EXPECT_EQ(view.getCountProperty(), 5);
+    EXPECT_EQ(view.getMinProperty(), 3);
+    EXPECT_EQ(view.getMaxProperty(), 7);
+    EXPECT_FALSE(view.Contains(2));
+    EXPECT_FALSE(view.Contains(8));
+}
+
+TEST(SortedSetTests, StringSortedSet) {
+    SortedSet<std::string> ss;
+    ss.Add(std::string("banana"));
+    ss.Add(std::string("apple"));
+    ss.Add(std::string("cherry"));
+    EXPECT_EQ(ss.getCountProperty(), 3);
+    std::vector<std::string> v = ss.ToVector();
+    EXPECT_EQ(v[0], "apple");
+    EXPECT_EQ(v[1], "banana");
+    EXPECT_EQ(v[2], "cherry");
+}
