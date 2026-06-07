@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 435 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 435` ✅
+- **All 462 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 462` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 14 (StringBuilder tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Text/StringBuilderTests.cpp` | New — 27 tests: default ctor, ctor with initial value, Append (string/char*/char/int/double/bool), AppendLine (no-arg, with string, twice), fluent chaining, Length, Empty, Clear, ToString, stress (1000 chars, 10000-char string) |
 
 **Session 13 (Convert tests):**
 
@@ -360,11 +366,17 @@ Covers ToInt32/64/16, ToDouble, ToSingle, ToByte, ToBoolean, ToString — all ov
 
 ---
 
-### Task 1 (was Task 14) — Add tests for StringBuilder
-**Goal:** Verify `System::Text::StringBuilder` append, insert, remove, replace, ToString, Length, Capacity.
-**Files:** `include/System/Text/StringBuilder.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="StringBuilderTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/Text/StringBuilderTests.cs`
+### ~~Task 1 (was Task 14) — Add tests for StringBuilder~~ DONE ✅
+27 tests in `tests/System/Text/StringBuilderTests.cpp` — all pass.
+Covers constructors, all Append overloads (string/char*/char/int/double/bool), AppendLine, fluent chaining, Length, Empty, Clear, ToString, large-input stress.
+
+---
+
+### Task 1 (was Task 15) — Add tests for DateTime
+**Goal:** Verify `System::DateTime` construction, Now, properties (Year/Month/Day/Hour/Minute/Second), Add methods, ToString, comparisons.
+**Files:** `include/System/DateTime.hpp` or `src/System/DateTime.cpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DateTimeTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/tests/System/DateTimeTests.cs`
 
 ---
 
@@ -376,11 +388,11 @@ Covers ToInt32/64/16, ToDouble, ToSingle, ToByte, ToBoolean, ToString — all ov
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 435 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 462 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is StringBuilder tests: read `include/System/Text/StringBuilder.hpp` to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/Text/StringBuilderTests.cs`, and write tests in `tests/System/Text/StringBuilderTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="StringBuilderTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is DateTime tests: read `include/System/DateTime.hpp` (or `src/System/DateTime.cpp`) to understand the implementation, check reference vectors in `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/tests/`, and write tests in `tests/System/DateTimeTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="DateTimeTests.*"`. Update NEXT.md when done.
