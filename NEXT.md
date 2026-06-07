@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 22*
+*Last updated: 2026-06-07 (branch: develop) — session 23*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1347 tests pass:** `./build/SharpRuntimeTests` → `1347 tests from 107 test suites` ✅
+- **All 1437 tests pass:** `./build/SharpRuntimeTests` → `1437 tests from 122 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -78,11 +78,13 @@
 | `ComponentModel/ComponentModelTests.cpp` | 9 attribute types + INotifyPropertyChanged/Changing (39) |
 | `Runtime/RuntimeTests.cpp` | CompilerServices/GCSettings/InteropServices/Versioning (60) |
 | `Security/SecurityTests.cpp` | SecurityAttributes/SecurityException/CryptographicException (25) |
+| `Xml/XmlTests.cpp` | ReadState/XmlNodeType enums + XmlReader/XmlWriter stubs + Linq types (55) |
+| `IO/Compression/CompressionTests.cpp` | CompressionMode/ZipArchiveMode enums + GZipStream/DeflateStream + ZipArchive stubs (35) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Xml` (XmlReader/XmlWriter — stubs only, verify exception behaviour) — **next target**
-2. `System::IO::Compression` (GZipStream/DeflateStream — stubs only)
-3. `System::Net::Sockets` (TcpClient/UdpClient — stubs only)
+1. `System::Net::Sockets` (TcpClient/UdpClient — stubs only) — **next target**
+2. `System::IO` remaining types (BinaryReader/BinaryWriter, File, Path)
+3. `System::Collections::Concurrent` (ConcurrentDictionary, BlockingCollection)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -96,6 +98,15 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 23 (Xml + IO::Compression):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Xml/XmlTests.cpp` | New — 55 tests: ReadState/XmlNodeType enums, XmlReader/XmlWriter stub-throws, XName/XAttribute/XElement/XDocument/XDeclaration |
+| `tests/System/IO/Compression/CompressionTests.cpp` | New — 35 tests: CompressionMode/ZipArchiveMode enums, GZipStream/DeflateStream CanRead/CanWrite/Flush/Close + stub-throws, ZipArchive/ZipArchiveEntry stub-throws |
+
+Notes: `XDocument::Save` declared but not defined — excluded. Vexing-parse for `ZipArchive(ptr)` fixed with block-statement `{ ZipArchive z(ptr); }`. `[[nodiscard]]` stub callers wrapped with `(void)`.
 
 **Session 22 (Runtime + Security):**
 
@@ -276,7 +287,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 32: Xml + IO::Compression stubs
+## 7. Next task — Task 33: Net::Sockets + IO remaining
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -289,22 +300,21 @@ find include -name "*.hpp" | wc -l
 ~~Task 29 (System::Net) — DONE ✅ — 67 new tests, total 1194~~
 ~~Task 30 (Buffers + ComponentModel) — DONE ✅ — 68 new tests, total 1262~~
 ~~Task 31 (Runtime + Security) — DONE ✅ — 85 new tests, total 1347~~
+~~Task 32 (Xml + IO::Compression) — DONE ✅ — 90 new tests, total 1437~~
 
-### Batch: Xml + IO::Compression (stub verification)
+### Batch: Net::Sockets + IO remaining
 
 Headers to read first:
-- Scan `include/System/Xml/` for available types
-- Scan `include/System/IO/Compression/` for available types
-
-Goal: verify that stub types throw `NotImplementedException` as documented, and that any non-stub parts (enums, constants, constructors) work correctly.
+- Scan `include/System/Net/Sockets/` for available types
+- Scan `include/System/IO/` for untested types (BinaryReader, BinaryWriter, File, Path)
 
 Write test files:
-- `tests/System/Xml/XmlTests.cpp`
-- `tests/System/IO/Compression/CompressionTests.cpp`
+- `tests/System/Net/Sockets/SocketsTests.cpp` (stub verification + any enums)
+- Tests for remaining IO types if they have real implementation
 
 **Run:** filter by new suite names before full run.
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1347+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 32 done, add Task 33).
+After: run full suite `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 33 done, add Task 34).
 
 ---
 
@@ -321,11 +331,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 1347+ passing, 0
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 32 is Xml + IO::Compression.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 33 is Net::Sockets + remaining IO types.
 >
-> Scan `include/System/Xml/` and `include/System/IO/Compression/` to see what's available. Write tests that verify stub exception behaviour (NotImplementedException) and any working parts (enums, constructors, constants).
+> Scan `include/System/Net/Sockets/` and `include/System/IO/` to see what's untested. Write test files for stub verification (enums + NotImplementedException checks) and any fully-implemented IO types.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with appropriate filter.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1347+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 32 done, add Task 33.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 33 done, add Task 34.
