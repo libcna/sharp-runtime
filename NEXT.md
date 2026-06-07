@@ -30,10 +30,10 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 784 tests pass:** `./build/SharpRuntimeTests` → `784 tests from 41 test suites` ✅
+- **All 798 tests pass:** `./build/SharpRuntimeTests` → `798 tests from 42 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
-### What is tested (784 tests across 41 suites)
+### What is tested (798 tests across 42 suites)
 | Suite file | Tests |
 |------------|-------|
 | `PrimitiveTypeTests.cpp` | Int32, Int64, UInt32 (18) |
@@ -50,6 +50,7 @@
 | `Text/StringBuilderTests.cpp` | StringBuilder (27) |
 | `Text/EncodingWebTests.cpp` | HtmlEncoder, UrlEncoder, JavaScriptEncoder (36) |
 | `Text/JsonTests.cpp` | JsonDocument / JsonElement (28) |
+| `Text/EncodingTests.cpp` | Encoding UTF8/ASCII/Unicode (14) |
 | `IO/HashingTests.cpp` | CRC32, XxHash32, XxHash64 (27) |
 | `IO/StreamTests.cpp` | MemoryStream, StringReader, StringWriter (29) |
 | `Collections/ImmutableCollectionTests.cpp` | ImmutableArray, ImmutableList, ImmutableDictionary (33) |
@@ -62,11 +63,10 @@
 | `Diagnostics/StopwatchTests.cpp` | Stopwatch (15) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Text::Encoding` (UTF8/ASCII) — **next target**
-2. `System::Diagnostics::Debug` / `Trace`
-3. `System::TimeZoneInfo`
-4. `System::Uri`
-5. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
+1. `System::Diagnostics::Debug` / `Trace` — **next target**
+2. `System::TimeZoneInfo`
+3. `System::Uri`
+4. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -81,11 +81,12 @@
 
 ## 3. Recent changes (last 3 sessions)
 
-**Session 21 (Stopwatch tests):**
+**Session 12 (Stopwatch + Encoding tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+sleep+Stop, elapsed grows while running, StartNew() already-running, Reset() zeros+stops, Reset()-while-running, Restart() zeros+starts, Stop-on-stopped idempotent, Start-on-running idempotent, getElapsedProperty() ticks == getElapsedTicks, accumulates across multiple Start/Stop cycles. Fixed: test used non-existent `getTotalTicksProperty()` → corrected to `getTicksProperty()`. |
+| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+sleep+Stop, elapsed grows while running, StartNew() already-running, Reset() zeros+stops, Reset()-while-running, Restart() zeros+starts, Stop-on-stopped idempotent, Start-on-running idempotent, getElapsedProperty() ticks == getElapsedTicks, accumulates across multiple Start/Stop cycles |
+| `tests/System/Text/EncodingTests.cpp` | New — 14 tests: UTF8/ASCII/Unicode factory non-null, UTF8 name == "utf-8", ASCII name contains "ascii", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct bytes, round-trip GetString(GetBytes(s)) for both encodings, empty string edge cases, GetString with non-zero offset |
 
 **Session 20 (primitive box tests):**
 
@@ -143,7 +144,7 @@ include/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
 src/                                    ← .cpp for types needing it (exceptions, Guid, DateTime, Encoding, etc.)
-tests/System/                           ← GoogleTest suites (built, 769 tests pass)
+tests/System/                           ← GoogleTest suites (built, 798 tests pass)
 vendor/googletest/                      ← bundled test framework
 vendor/nlohmann/json.hpp                ← nlohmann/json 3.10.4 (MIT)
 ```
@@ -194,32 +195,26 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 22: Encoding (UTF8/ASCII)
+## 7. Next task — Task 22: Debug / Trace
 
-~~Task 21 (Stopwatch) — DONE ✅ — 15 tests in `tests/System/Diagnostics/StopwatchTests.cpp`~~
+~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests (15 Stopwatch + 14 Encoding), total 798~~
 
-### Encoding — `tests/System/Text/EncodingTests.cpp`
+### `System::Diagnostics::Debug` and `Trace` — `tests/System/Diagnostics/DebugTraceTests.cpp`
 
-Header: `include/System/Text/Encoding.hpp` (factory methods implemented in `src/`)
+Headers to read first:
+- `include/System/Diagnostics/Debug.hpp`
+- `include/System/Diagnostics/Trace.hpp`
 
-API summary:
-- `Encoding::UTF8()` → `shared_ptr<Encoding>`, `getEncodingNameProperty()` == `"utf-8"`
-- `Encoding::ASCII()` → `shared_ptr<Encoding>`, name contains `"ascii"`
-- `GetBytes(const string& str)` → `vector<uint8_t>`
-- `GetString(const uint8_t* data, int index, int count)` → `string`
+Typical API to test (mirror .NET):
+- `Debug::WriteLine(string)` / `Trace::WriteLine(string)` — must not throw
+- `Debug::Assert(true)` — must not throw; `Debug::Assert(false)` — may throw or abort (check actual impl)
+- `Debug::Write(string)` / `Debug::WriteIf(bool, string)` / `Debug::WriteLineIf(bool, string)`
+- `Trace::Write(string)` / `Trace::WriteIf(bool, string)` / `Trace::WriteLineIf(bool, string)`
+- If listener collection is exposed: `Debug::Listeners` / `Trace::Listeners` non-null
 
-Suggested test coverage:
-- `UTF8()` returns non-null
-- `ASCII()` returns non-null
-- `UTF8()->getEncodingNameProperty() == "utf-8"`
-- `ASCII()->GetBytes("ABC")` == `{65, 66, 67}`
-- `UTF8()->GetBytes("hello")` == `{104, 101, 108, 108, 111}`
-- Round-trip: `GetString(GetBytes("hello world").data(), 0, n)` == `"hello world"` for both UTF8 and ASCII
-- Empty string: `GetBytes("")` is empty
+**Run:** `./build/SharpRuntimeTests --gtest_filter="DebugTraceTests.*"`
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
-
-After: run full suite `./build/SharpRuntimeTests` — must show 784+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 22 done, add Task 23).
+After: run full suite `./build/SharpRuntimeTests` — must show 798+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 22 done, add Task 23).
 
 ---
 
@@ -230,17 +225,17 @@ After: run full suite `./build/SharpRuntimeTests` — must show 784+ passing, 0 
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 784 tests)
+- **No merge to master** until test coverage is substantially broader (currently 798 tests)
 
 ---
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 22 is `System::Text::Encoding` tests.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 22 is `System::Diagnostics::Debug` and `Trace` tests.
 >
-> Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp` covering: UTF8()/ASCII() return non-null shared_ptr, UTF8 encoding name == "utf-8", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") == {104,101,108,108,111}, round-trip GetString(GetBytes("hello world").data(), 0, n) == "hello world" for both encodings, empty string edge case.
+> Read `include/System/Diagnostics/Debug.hpp` and `include/System/Diagnostics/Trace.hpp`. Write `tests/System/Diagnostics/DebugTraceTests.cpp` covering the API that is actually implemented (not-throwing Write/WriteLine, Assert(true), etc). Use `--gtest_filter="DebugTraceTests.*"` to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run: `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
-> Full suite: `./build/SharpRuntimeTests` — must show 784+ passing, 0 failing.
+> Run new tests: `./build/SharpRuntimeTests --gtest_filter="DebugTraceTests.*"`
+> Run full suite: `./build/SharpRuntimeTests` — must show 798+ passing, 0 failing.
 > Commit, then update NEXT.md: bump test count, mark Task 22 done, add Task 23.
