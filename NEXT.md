@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 20*
+*Last updated: 2026-06-07 (branch: develop) — session 21*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1194 tests pass:** `./build/SharpRuntimeTests` → `1194 tests from 62 test suites` ✅
+- **All 1262 tests pass:** `./build/SharpRuntimeTests` → `1262 tests from 77 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -74,11 +74,13 @@
 | `TupleTests.cpp` | Tuple2/Tuple3/Tuple4 (20) |
 | `Globalization/GlobalizationTests.cpp` | CultureInfo/NumberFormatInfo/RegionInfo/StringInfo/UnicodeCategory (69) |
 | `Net/NetTests.cpp` | IPAddress/IPEndPoint/HttpStatusCode/WebUtility (67) |
+| `Buffers/BuffersTests.cpp` | ArrayPool/OperationStatus/StandardFormat (29) |
+| `ComponentModel/ComponentModelTests.cpp` | 9 attribute types + INotifyPropertyChanged/Changing (39) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Buffers` (ArrayPool, OperationStatus) — **next target**
-2. `System::ComponentModel` (attributes, INotifyPropertyChanged)
-3. `System::Runtime` (CompilerServices, InteropServices)
+1. `System::Runtime` (CompilerServices, InteropServices) — **next target**
+2. `System::Security` (exceptions, security attributes)
+3. `System::Xml` (XmlReader/XmlWriter stubs)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -92,6 +94,16 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 21 (Buffers + ComponentModel):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Buffers/ArrayPool.hpp` | Fix: move `SharedArrayPool` outside `ArrayPool` class — eliminates incomplete-type warning |
+| `tests/System/Buffers/BuffersTests.cpp` | New — 29 tests: ArrayPool/OperationStatus/StandardFormat |
+| `tests/System/ComponentModel/ComponentModelTests.cpp` | New — 39 tests: 9 attribute types + INotifyPropertyChanged/Changing |
+
+Note: `DefaultValueAttribute.hpp` excluded from ComponentModel tests — its `DefaultValueAttribute` class conflicts with the same name in `DescriptionAttribute.hpp`. Test uses `std::string("…")` explicitly to bypass `bool`-vs-`std::string` overload ambiguity for `const char*` args.
 
 **Session 20 (System::Net):**
 
@@ -254,7 +266,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 30: Buffers + ComponentModel
+## 7. Next task — Task 31: Runtime
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -265,20 +277,21 @@ find include -name "*.hpp" | wc -l
 ~~Task 27 (Array/Buffer/Tuple) — DONE ✅ — 61 new tests, total 1058~~
 ~~Task 28 (Globalization) — DONE ✅ — 69 new tests, total 1127~~
 ~~Task 29 (System::Net) — DONE ✅ — 67 new tests, total 1194~~
+~~Task 30 (Buffers + ComponentModel) — DONE ✅ — 68 new tests, total 1262~~
 
-### Batch: Buffers + ComponentModel
+### Batch: Runtime (CompilerServices + InteropServices + Security)
 
 Headers to read first:
-- Scan `include/System/Buffers/` for implemented types
-- Scan `include/System/ComponentModel/` for implemented types
+- Scan `include/System/Runtime/` for implemented types
+- Scan `include/System/Security/` for implemented types
 
 Write test files:
-- `tests/System/Buffers/BuffersTests.cpp` (if types are non-trivial)
-- `tests/System/ComponentModel/ComponentModelTests.cpp` (if types are non-trivial)
+- `tests/System/Runtime/RuntimeTests.cpp`
+- `tests/System/Security/SecurityTests.cpp` (if non-trivial)
 
 **Run:** filter by new suite names before full run.
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1194+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 30 done, add Task 31).
+After: run full suite `./build/SharpRuntimeTests` — must show 1262+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 31 done, add Task 32).
 
 ---
 
@@ -295,11 +308,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 1194+ passing, 0
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 30 is Buffers + ComponentModel.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 31 is Runtime + Security.
 >
-> Scan `include/System/Buffers/` and `include/System/ComponentModel/` to see what's implemented. Write test files for any types that have real implementation and compile cleanly.
+> Scan `include/System/Runtime/` and `include/System/Security/` to see what's implemented. Write test files for any types that have real implementation and compile cleanly.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with appropriate filter.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1194+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 30 done, add Task 31.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1262+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 31 done, add Task 32.
