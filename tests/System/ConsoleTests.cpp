@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include "System/Console.hpp"
+
+using System::Console;
+
+// ---------------------------------------------------------------------------
+// NewLine constant
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, NewLine_IsNonEmpty) {
+    EXPECT_FALSE(Console::NewLine.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Write overloads — must not throw (output to stdout is tested implicitly)
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, Write_String_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(std::string("hello")));
+}
+
+TEST(ConsoleTests, Write_CString_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write("world"));
+}
+
+TEST(ConsoleTests, Write_Char_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write('A'));
+}
+
+TEST(ConsoleTests, Write_Int_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(static_cast<SharpRuntime::intcs>(42)));
+}
+
+TEST(ConsoleTests, Write_Long_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(static_cast<SharpRuntime::longcs>(1234567890LL)));
+}
+
+TEST(ConsoleTests, Write_Double_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(3.14));
+}
+
+TEST(ConsoleTests, Write_Float_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(2.71f));
+}
+
+TEST(ConsoleTests, Write_BoolTrue_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(true));
+}
+
+TEST(ConsoleTests, Write_BoolFalse_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write(false));
+}
+
+// ---------------------------------------------------------------------------
+// WriteLine overloads
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, WriteLine_NoArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine());
+}
+
+TEST(ConsoleTests, WriteLine_String_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine(std::string("line")));
+}
+
+TEST(ConsoleTests, WriteLine_CString_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine("cstr line"));
+}
+
+TEST(ConsoleTests, WriteLine_Int_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine(static_cast<SharpRuntime::intcs>(0)));
+}
+
+TEST(ConsoleTests, WriteLine_Bool_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine(true));
+}
+
+// ---------------------------------------------------------------------------
+// Error stream
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, Error_Write_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Error_Write("err"));
+}
+
+TEST(ConsoleTests, Error_WriteLine_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Error_WriteLine("err line"));
+}

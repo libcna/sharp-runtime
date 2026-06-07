@@ -12,7 +12,6 @@ namespace System {
 
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
-    using SharpRuntime::doublecs;
     using SharpRuntime::Single;
 
     /**
