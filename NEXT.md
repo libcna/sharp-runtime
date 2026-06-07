@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 8*
+*Last updated: 2026-06-07 (branch: develop) — session 9*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 547 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 547` ✅
+- **All 599 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 599` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,14 @@
 ---
 
 ## 3. Recent changes
+
+**Session 18 (generic collections tests + IEnumerable bug fix):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Collections/Generic/IEnumerable.hpp` | Bugfix — declared two `GetEnumerator()` overloads with identical parameters but different return types (illegal in C++). The non-generic overload is unnecessary: `IEnumerator<T>` derives from `IEnumerator`, so the typed declaration is already a valid covariant return-type override. Removed duplicate. |
+| `include/System/Collections/Generic/List.hpp` | Bugfix — removed the second `GetEnumerator()` body using a qualified name (`System::Collections::IEnumerable::GetEnumerator()`) that C++ does not allow inside a class definition |
+| `tests/System/Collections/Generic/CollectionsTests.cpp` | New — 52 tests: List<int/string> (default ctor, Add, Contains, operator[], Remove/true/false/first-only, IndexOf, Insert, RemoveAt, Clear, ToVector, ctor-from-vector, range-for); Dictionary<string,int>/<int,string> (Add, ContainsKey, dup-Add-throws, TryGetValue found/not-found, operator[] write/overwrite, const-operator[]-throws, Remove true/false, Count, Clear, range-for); HashSet<int/string> (Add true/false, Contains, Remove true/false, Count, Clear, UnionWith/IntersectWith/ExceptWith with overlap and disjoint cases, ToArray, range-for) |
 
 **Session 17 (IO stream tests):**
 
@@ -409,10 +417,17 @@ Covers MemoryStream (writable, read-only, Write/Read/WriteByte, roundtrip), Stri
 
 ---
 
-### Task 1 (was Task 18) — Add tests for Collections.Generic (List, Dictionary, HashSet)
-**Goal:** Verify `System::Collections::Generic::List<T>`, `Dictionary<K,V>`, `HashSet<T>` — Add, Remove, Contains, iteration, Count.
-**Files:** `include/System/Collections/Generic/List.hpp`, `Dictionary.hpp`, `HashSet.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ListTests.*|DictionaryTests.*|HashSetTests.*"`
+### ~~Task 1 (was Task 18) — Add tests for Collections.Generic (List, Dictionary, HashSet)~~ DONE ✅
+52 tests in `tests/System/Collections/Generic/CollectionsTests.cpp` — all pass.
+Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on return type (C++ rejects same-name same-params different-return overloads); `List.hpp` had an illegal qualified-name method definition inside a class body. Both removed — covariant return types handle the override automatically.
+
+---
+
+### Task 1 (was Task 19) — Add tests for Queue<T> and Stack<T>
+**Goal:** Verify `System::Collections::Generic::Queue<T>` and `Stack<T>` — Enqueue/Dequeue/Peek (Queue); Push/Pop/Peek (Stack); Count, Contains, Clear, ToArray.
+**Files:** `include/System/Collections/Generic/Queue.hpp`, `Stack.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="QueueTests.*:StackTests.*"`
+**Note:** Check the headers first — if they don't exist, create them (header-only, backed by `std::queue` / `std::stack` / `std::deque`). The existing LinkedList.hpp may also be a candidate.
 
 ---
 
@@ -424,11 +439,11 @@ Covers MemoryStream (writable, read-only, Write/Read/WriteByte, roundtrip), Stri
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 547 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 599 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is generic collections tests: read `include/System/Collections/Generic/List.hpp`, `Dictionary.hpp`, and `HashSet.hpp` to understand the API, then write tests in `tests/System/Collections/Generic/CollectionsTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ListTests.*|DictionaryTests.*|HashSetTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Queue/Stack tests: check whether `include/System/Collections/Generic/Queue.hpp` and `Stack.hpp` exist; if not, create them (header-only, .NET API). Then write tests in `tests/System/Collections/Generic/QueueStackTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="QueueTests.*:StackTests.*"`. Update NEXT.md when done.
