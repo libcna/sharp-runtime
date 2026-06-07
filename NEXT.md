@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 392 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 392` ✅
+- **All 435 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 435` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 13 (Convert tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/ConvertTests.cpp` | New — 43 tests: ToInt32 (string, bool, double, float, int, long, byte, overflow, base 2/8/10/16), ToInt64 (string, int, double), ToInt16 (string, int, overflow), ToDouble (string, int, long), ToSingle (string, double, int), ToByte (int, overflow, string), ToBoolean (int, string true/false variants, invalid), ToString (int, long, bool, char, byte, base 2/8/10/16, invalid base). Note: const char* → bool implicit conversion requires explicit std::string{} wrapping for ToInt32 (which has both bool and string overloads) |
 
 **Session 12 (Math tests):**
 
@@ -347,11 +353,18 @@ Covers all implemented methods: E/PI, Abs(double+int), Min/Max(int+double), Clam
 
 ---
 
-### Task 1 (was Task 13) — Add tests for Convert static methods
-**Goal:** Verify `System::Convert` correctness (ToInt32, ToDouble, ToString, ToBoolean, etc.).
-**Files:** `include/System/Convert.hpp` or `src/System/Convert.cpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ConvertTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/ConvertTests.cs`
+### ~~Task 1 (was Task 13) — Add tests for Convert static methods~~ DONE ✅
+43 tests in `tests/System/ConvertTests.cpp` — all pass.
+Covers ToInt32/64/16, ToDouble, ToSingle, ToByte, ToBoolean, ToString — all overloads, base conversions (2/8/10/16), and overflow/format exceptions.
+**Note:** When `Convert` has both `bool` and `string` overloads for the same function (e.g. `ToInt32`), `const char*` literals must be wrapped in `std::string{}` to avoid the built-in `const char* → bool` implicit conversion taking priority.
+
+---
+
+### Task 1 (was Task 14) — Add tests for StringBuilder
+**Goal:** Verify `System::Text::StringBuilder` append, insert, remove, replace, ToString, Length, Capacity.
+**Files:** `include/System/Text/StringBuilder.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="StringBuilderTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/Text/StringBuilderTests.cs`
 
 ---
 
@@ -363,11 +376,11 @@ Covers all implemented methods: E/PI, Abs(double+int), Min/Max(int+double), Clam
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 392 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 435 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Convert tests: read `include/System/Convert.hpp` (or the src/ counterpart) to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/ConvertTests.cs`, and write tests in `tests/System/ConvertTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ConvertTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is StringBuilder tests: read `include/System/Text/StringBuilder.hpp` to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/Text/StringBuilderTests.cs`, and write tests in `tests/System/Text/StringBuilderTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="StringBuilderTests.*"`. Update NEXT.md when done.

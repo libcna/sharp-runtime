@@ -1,0 +1,259 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+
+#include "System/Convert.hpp"
+
+using System::Convert;
+
+// ---------------------------------------------------------------------------
+// ToInt32
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToInt32FromString) {
+    // Explicit std::string to avoid const char* → bool implicit conversion
+    EXPECT_EQ(Convert::ToInt32(std::string("42")),  42);
+    EXPECT_EQ(Convert::ToInt32(std::string("-7")), -7);
+    EXPECT_EQ(Convert::ToInt32(std::string("0")),   0);
+}
+
+TEST(ConvertTests, ToInt32FromStringInvalidThrows) {
+    EXPECT_THROW(Convert::ToInt32(std::string("abc")),   std::exception);
+    EXPECT_THROW(Convert::ToInt32(std::string("")),      std::exception);
+    EXPECT_THROW(Convert::ToInt32(std::string("1.5")),   std::exception);
+}
+
+TEST(ConvertTests, ToInt32FromBool) {
+    EXPECT_EQ(Convert::ToInt32(true),  1);
+    EXPECT_EQ(Convert::ToInt32(false), 0);
+}
+
+TEST(ConvertTests, ToInt32FromDouble) {
+    EXPECT_EQ(Convert::ToInt32(3.7),  3);   // truncates
+    EXPECT_EQ(Convert::ToInt32(-2.9), -2);
+    EXPECT_EQ(Convert::ToInt32(0.0),  0);
+}
+
+TEST(ConvertTests, ToInt32FromDoubleOverflowThrows) {
+    EXPECT_THROW(Convert::ToInt32(3e10), std::exception);
+}
+
+TEST(ConvertTests, ToInt32FromInt) {
+    EXPECT_EQ(Convert::ToInt32(42), 42);
+}
+
+TEST(ConvertTests, ToInt32FromLong) {
+    EXPECT_EQ(Convert::ToInt32(static_cast<int64_t>(100)), 100);
+}
+
+TEST(ConvertTests, ToInt32FromLongOverflowThrows) {
+    EXPECT_THROW(Convert::ToInt32(static_cast<int64_t>(3000000000LL)), std::exception);
+}
+
+TEST(ConvertTests, ToInt32FromByte) {
+    EXPECT_EQ(Convert::ToInt32(static_cast<uint8_t>(200)), 200);
+}
+
+// ---------------------------------------------------------------------------
+// ToInt32 with base
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToInt32Base16) {
+    EXPECT_EQ(Convert::ToInt32("ff", 16), 255);
+    EXPECT_EQ(Convert::ToInt32("FF", 16), 255);
+    EXPECT_EQ(Convert::ToInt32("10", 16), 16);
+}
+
+TEST(ConvertTests, ToInt32Base2) {
+    EXPECT_EQ(Convert::ToInt32("1010", 2), 10);
+    EXPECT_EQ(Convert::ToInt32("11111111", 2), 255);
+}
+
+TEST(ConvertTests, ToInt32Base8) {
+    EXPECT_EQ(Convert::ToInt32("17",  8), 15);
+    EXPECT_EQ(Convert::ToInt32("377", 8), 255);
+}
+
+TEST(ConvertTests, ToInt32Base10) {
+    EXPECT_EQ(Convert::ToInt32("42", 10), 42);
+}
+
+// ---------------------------------------------------------------------------
+// ToInt64
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToInt64FromString) {
+    EXPECT_EQ(Convert::ToInt64("1000000000000"), 1000000000000LL);
+    EXPECT_EQ(Convert::ToInt64("-1"),            -1LL);
+}
+
+TEST(ConvertTests, ToInt64FromStringInvalidThrows) {
+    EXPECT_THROW(Convert::ToInt64("abc"), std::exception);
+    EXPECT_THROW(Convert::ToInt64(""),    std::exception);
+}
+
+TEST(ConvertTests, ToInt64FromInt) {
+    EXPECT_EQ(Convert::ToInt64(42), 42LL);
+}
+
+TEST(ConvertTests, ToInt64FromDouble) {
+    EXPECT_EQ(Convert::ToInt64(3.7), 3LL);
+}
+
+// ---------------------------------------------------------------------------
+// ToInt16
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToInt16FromString) {
+    EXPECT_EQ(Convert::ToInt16("100"),   100);
+    EXPECT_EQ(Convert::ToInt16("-32768"), -32768);
+}
+
+TEST(ConvertTests, ToInt16FromInt) {
+    EXPECT_EQ(Convert::ToInt16(32767), 32767);
+}
+
+TEST(ConvertTests, ToInt16OverflowThrows) {
+    EXPECT_THROW(Convert::ToInt16(32768), std::exception);
+    EXPECT_THROW(Convert::ToInt16("40000"), std::exception);
+}
+
+// ---------------------------------------------------------------------------
+// ToDouble
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToDoubleFromString) {
+    EXPECT_NEAR(Convert::ToDouble("3.14"), 3.14, 1e-10);
+    EXPECT_NEAR(Convert::ToDouble("-1.5"), -1.5, 1e-10);
+    EXPECT_NEAR(Convert::ToDouble("0"),    0.0,  1e-15);
+}
+
+TEST(ConvertTests, ToDoubleFromStringInvalidThrows) {
+    EXPECT_THROW(Convert::ToDouble("abc"), std::exception);
+    EXPECT_THROW(Convert::ToDouble(""),    std::exception);
+}
+
+TEST(ConvertTests, ToDoubleFromInt) {
+    EXPECT_NEAR(Convert::ToDouble(42), 42.0, 1e-15);
+}
+
+TEST(ConvertTests, ToDoubleFromLong) {
+    EXPECT_NEAR(Convert::ToDouble(static_cast<int64_t>(1000000000000LL)), 1e12, 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// ToSingle
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToSingleFromString) {
+    EXPECT_NEAR(static_cast<double>(Convert::ToSingle("3.14")), 3.14, 1e-5);
+}
+
+TEST(ConvertTests, ToSingleFromDouble) {
+    EXPECT_NEAR(static_cast<double>(Convert::ToSingle(3.14)), 3.14, 1e-5);
+}
+
+TEST(ConvertTests, ToSingleFromInt) {
+    EXPECT_NEAR(static_cast<double>(Convert::ToSingle(42)), 42.0, 1e-5);
+}
+
+// ---------------------------------------------------------------------------
+// ToByte
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToByteFromInt) {
+    EXPECT_EQ(Convert::ToByte(200), 200u);
+    EXPECT_EQ(Convert::ToByte(0),   0u);
+    EXPECT_EQ(Convert::ToByte(255), 255u);
+}
+
+TEST(ConvertTests, ToByteFromIntOverflowThrows) {
+    EXPECT_THROW(Convert::ToByte(256),  std::exception);
+    EXPECT_THROW(Convert::ToByte(-1),   std::exception);
+}
+
+TEST(ConvertTests, ToByteFromString) {
+    EXPECT_EQ(Convert::ToByte("200"), 200u);
+}
+
+// ---------------------------------------------------------------------------
+// ToBoolean
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToBooleanFromInt) {
+    EXPECT_TRUE(Convert::ToBoolean(1));
+    EXPECT_TRUE(Convert::ToBoolean(-1));
+    EXPECT_FALSE(Convert::ToBoolean(0));
+}
+
+TEST(ConvertTests, ToBooleanFromString) {
+    EXPECT_TRUE(Convert::ToBoolean("True"));
+    EXPECT_TRUE(Convert::ToBoolean("true"));
+    EXPECT_TRUE(Convert::ToBoolean("1"));
+    EXPECT_FALSE(Convert::ToBoolean("False"));
+    EXPECT_FALSE(Convert::ToBoolean("false"));
+    EXPECT_FALSE(Convert::ToBoolean("0"));
+}
+
+TEST(ConvertTests, ToBooleanFromStringInvalidThrows) {
+    EXPECT_THROW(Convert::ToBoolean("yes"),  std::exception);
+    EXPECT_THROW(Convert::ToBoolean(""),     std::exception);
+}
+
+// ---------------------------------------------------------------------------
+// ToString
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToStringFromInt) {
+    EXPECT_EQ(Convert::ToString(42),   "42");
+    EXPECT_EQ(Convert::ToString(-7),   "-7");
+    EXPECT_EQ(Convert::ToString(0),    "0");
+}
+
+TEST(ConvertTests, ToStringFromLong) {
+    EXPECT_EQ(Convert::ToString(static_cast<int64_t>(1000000000000LL)), "1000000000000");
+}
+
+TEST(ConvertTests, ToStringFromBool) {
+    EXPECT_EQ(Convert::ToString(true),  "True");
+    EXPECT_EQ(Convert::ToString(false), "False");
+}
+
+TEST(ConvertTests, ToStringFromChar) {
+    EXPECT_EQ(Convert::ToString('A'), "A");
+    EXPECT_EQ(Convert::ToString('z'), "z");
+}
+
+TEST(ConvertTests, ToStringFromByte) {
+    EXPECT_EQ(Convert::ToString(static_cast<uint8_t>(200)), "200");
+}
+
+// ---------------------------------------------------------------------------
+// ToString with base
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToStringBase16) {
+    EXPECT_EQ(Convert::ToString(255, 16), "ff");
+    EXPECT_EQ(Convert::ToString(0,   16), "0");
+    EXPECT_EQ(Convert::ToString(16,  16), "10");
+}
+
+TEST(ConvertTests, ToStringBase2) {
+    EXPECT_EQ(Convert::ToString(10,  2), "1010");
+    EXPECT_EQ(Convert::ToString(255, 2), "11111111");
+    EXPECT_EQ(Convert::ToString(0,   2), "0");
+}
+
+TEST(ConvertTests, ToStringBase8) {
+    EXPECT_EQ(Convert::ToString(255, 8), "377");
+    EXPECT_EQ(Convert::ToString(15,  8), "17");
+}
+
+TEST(ConvertTests, ToStringBase10) {
+    EXPECT_EQ(Convert::ToString(42, 10), "42");
+}
+
+TEST(ConvertTests, ToStringInvalidBaseThrows) {
+    EXPECT_THROW(Convert::ToString(42, 3), std::exception);
+}
