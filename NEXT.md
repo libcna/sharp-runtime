@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 9*
+*Last updated: 2026-06-07 (branch: develop) — session 10*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 599 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 599` ✅
+- **All 671 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 671` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,13 @@
 ---
 
 ## 3. Recent changes
+
+**Session 19 (Queue/Stack/LinkedList/SortedSet tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Collections/Generic/QueueStackTests.cpp` | New — 34 tests: Queue (Enqueue/Dequeue/Peek/FIFO order/Contains/Clear/ToArray/EnqueueAfterDequeue/stress-1000), Stack (Push/Pop/Peek/LIFO order/Contains/Clear/ToArray-top-first/PushAfterPop/stress-1000), both with empty-throws and string specialisations |
+| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList (AddFirst/AddLast/getFirst/getLastProperty/RemoveFirst/RemoveLast-empty-noop/Remove-value/Contains/Clear/range-for order), SortedSet (Add bool-return/dup/Contains/Remove/Min+MaxProperty/sorted-iteration/ToVector/Clear/UnionWith/IntersectWith/ExceptWith/IsSubsetOf/IsSupersetOf/GetViewBetween/string-alphabetic) |
 
 **Session 18 (generic collections tests + IEnumerable bug fix):**
 
@@ -423,11 +430,16 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 
 ---
 
-### Task 1 (was Task 19) — Add tests for Queue<T> and Stack<T>
-**Goal:** Verify `System::Collections::Generic::Queue<T>` and `Stack<T>` — Enqueue/Dequeue/Peek (Queue); Push/Pop/Peek (Stack); Count, Contains, Clear, ToArray.
-**Files:** `include/System/Collections/Generic/Queue.hpp`, `Stack.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="QueueTests.*:StackTests.*"`
-**Note:** Check the headers first — if they don't exist, create them (header-only, backed by `std::queue` / `std::stack` / `std::deque`). The existing LinkedList.hpp may also be a candidate.
+### ~~Task 1 (was Task 19) — Add tests for Queue<T>, Stack<T>, LinkedList<T>, SortedSet<T>~~ DONE ✅
+72 tests across two files — all pass. Queue/Stack stress 1000 elements; LinkedList RemoveFirst/RemoveLast empty-noop; SortedSet set-algebra and GetViewBetween bounds.
+
+---
+
+### Task 1 (was Task 20) — Add tests for primitive type boxes: Int16, UInt16, Byte, SByte, Boolean, Char, Single, Double
+**Goal:** Verify Parse/TryParse/ToString/MaxValue/MinValue for the remaining numeric boxes, plus Char static helpers (IsLetter/IsDigit/ToUpper/ToLower) and Boolean (TrueString/FalseString/Parse).
+**Files:** `include/System/Int16.hpp`, `UInt16.hpp`, `Byte.hpp` (already tested as part of Convert), `SByte.hpp`, `Boolean.hpp`, `Char.hpp`, `Single.hpp`, `Double.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="Int16Tests.*:UInt16Tests.*:SByteTests.*:BooleanTests.*:CharTests.*:SingleTests.*:DoubleTests.*"`
+**Note:** Int32/Int64/UInt32 are already tested in `PrimitiveTypeTests.cpp`. Add the new tests to that file or create `tests/System/PrimitiveTypeTests2.cpp`.
 
 ---
 
@@ -439,11 +451,11 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 599 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 671 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Queue/Stack tests: check whether `include/System/Collections/Generic/Queue.hpp` and `Stack.hpp` exist; if not, create them (header-only, .NET API). Then write tests in `tests/System/Collections/Generic/QueueStackTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="QueueTests.*:StackTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is primitive box tests: read `include/System/Int16.hpp`, `UInt16.hpp`, `SByte.hpp`, `Boolean.hpp`, `Char.hpp`, `Single.hpp`, `Double.hpp` to understand the API, then write tests in `tests/System/PrimitiveTypeTests2.cpp` (Int32/Int64/UInt32 already tested in PrimitiveTypeTests.cpp). Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="Int16Tests.*:UInt16Tests.*:SByteTests.*:BooleanTests.*:CharTests.*:SingleTests.*:DoubleTests.*"`. Update NEXT.md when done.
