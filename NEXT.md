@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 10*
+*Last updated: 2026-06-07 (branch: develop) — session 11*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 671 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 671` ✅
+- **All 769 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 769` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 20 (primitive box tests — Int16, UInt16, SByte, Boolean, Char, Single, Double):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests: Int16/UInt16/SByte (constants, Parse boundary+overflow+invalid, TryParse, ToString); Boolean (TrueString/FalseString, Parse case-insensitive, TryParse, ToString); Char/char16_t (IsLetter/Digit/LetterOrDigit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse single/multi-throws/empty-throws, ToString, surrogate helpers, ConvertToUtf32); Single/Double (MaxValue/MinValue/Epsilon, NaN/Infinity constants, IsNaN/IsInfinity/IsPositive-NegativeInfinity/IsFinite/IsNormal, Parse/TryParse/ToString) |
 
 **Session 19 (Queue/Stack/LinkedList/SortedSet tests):**
 
@@ -435,11 +441,16 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 
 ---
 
-### Task 1 (was Task 20) — Add tests for primitive type boxes: Int16, UInt16, Byte, SByte, Boolean, Char, Single, Double
-**Goal:** Verify Parse/TryParse/ToString/MaxValue/MinValue for the remaining numeric boxes, plus Char static helpers (IsLetter/IsDigit/ToUpper/ToLower) and Boolean (TrueString/FalseString/Parse).
-**Files:** `include/System/Int16.hpp`, `UInt16.hpp`, `Byte.hpp` (already tested as part of Convert), `SByte.hpp`, `Boolean.hpp`, `Char.hpp`, `Single.hpp`, `Double.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="Int16Tests.*:UInt16Tests.*:SByteTests.*:BooleanTests.*:CharTests.*:SingleTests.*:DoubleTests.*"`
-**Note:** Int32/Int64/UInt32 are already tested in `PrimitiveTypeTests.cpp`. Add the new tests to that file or create `tests/System/PrimitiveTypeTests2.cpp`.
+### ~~Task 1 (was Task 20) — Add tests for primitive type boxes: Int16, UInt16, SByte, Boolean, Char, Single, Double~~ DONE ✅
+98 tests in `tests/System/PrimitiveTypeTests2.cpp` — all pass.
+
+---
+
+### Task 1 (was Task 21) — Add tests for System::Text::Encoding (UTF-8, ASCII)
+**Goal:** Verify `System::Text::Encoding` — UTF8/ASCII singletons, GetEncoding(), GetBytes(string), GetString(bytes), GetByteCount, GetCharCount, round-trip UTF-8↔string.
+**Files:** `include/System/Text/Encoding.hpp` (check what's implemented first)
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
+**Note:** Check the header first — if the encoding API is stub/minimal, consider testing `System::Diagnostics::Stopwatch` instead (which is likely more fully implemented).
 
 ---
 
@@ -451,11 +462,11 @@ Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on r
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 671 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 769 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is primitive box tests: read `include/System/Int16.hpp`, `UInt16.hpp`, `SByte.hpp`, `Boolean.hpp`, `Char.hpp`, `Single.hpp`, `Double.hpp` to understand the API, then write tests in `tests/System/PrimitiveTypeTests2.cpp` (Int32/Int64/UInt32 already tested in PrimitiveTypeTests.cpp). Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="Int16Tests.*:UInt16Tests.*:SByteTests.*:BooleanTests.*:CharTests.*:SingleTests.*:DoubleTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Text::Encoding tests: read `include/System/Text/Encoding.hpp` to see what's implemented, then write tests in `tests/System/Text/EncodingTests.cpp`. If Encoding is a stub, switch to `System::Diagnostics::Stopwatch` (`include/System/Diagnostics/Stopwatch.hpp`) and write tests in `tests/System/Diagnostics/StopwatchTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"` (or `"StopwatchTests.*"`). Update NEXT.md when done.
