@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 11*
+*Last updated: 2026-06-07 (branch: develop) — session 12*
 
 ---
 
@@ -30,10 +30,10 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 769 tests pass:** `./build/SharpRuntimeTests` → `769 tests from 40 test suites` ✅
+- **All 784 tests pass:** `./build/SharpRuntimeTests` → `784 tests from 41 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
-### What is tested (769 tests across 40 suites)
+### What is tested (784 tests across 41 suites)
 | Suite file | Tests |
 |------------|-------|
 | `PrimitiveTypeTests.cpp` | Int32, Int64, UInt32 (18) |
@@ -59,14 +59,14 @@
 | `Collections/Generic/LinkedListSortedSetTests.cpp` | LinkedList, SortedSet (38) |
 | `Numerics/BigIntegerTests.cpp` | BigInteger (45) |
 | `Numerics/ComplexTests.cpp` | Complex (38) |
+| `Diagnostics/StopwatchTests.cpp` | Stopwatch (15) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Diagnostics::Stopwatch` — **next target A**
-2. `System::Text::Encoding` (UTF8/ASCII) — **next target B**
-3. `System::Diagnostics::Debug` / `Trace`
-4. `System::TimeZoneInfo`
-5. `System::Uri`
-6. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
+1. `System::Text::Encoding` (UTF8/ASCII) — **next target**
+2. `System::Diagnostics::Debug` / `Trace`
+3. `System::TimeZoneInfo`
+4. `System::Uri`
+5. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -81,26 +81,24 @@
 
 ## 3. Recent changes (last 3 sessions)
 
+**Session 21 (Stopwatch tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+sleep+Stop, elapsed grows while running, StartNew() already-running, Reset() zeros+stops, Reset()-while-running, Restart() zeros+starts, Stop-on-stopped idempotent, Start-on-running idempotent, getElapsedProperty() ticks == getElapsedTicks, accumulates across multiple Start/Stop cycles. Fixed: test used non-existent `getTotalTicksProperty()` → corrected to `getTicksProperty()`. |
+
 **Session 20 (primitive box tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests covering Int16/UInt16/SByte (Parse boundary+overflow+invalid, TryParse, ToString), Boolean (TrueString/FalseString, Parse case-insensitive, TryParse), Char/char16_t (IsLetter/Digit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse, surrogate helpers, ConvertToUtf32), Single/Double (NaN/Infinity constants, IsNaN/IsInfinity/IsFinite/IsNormal, Parse/TryParse) |
+| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests: Int16/UInt16/SByte (Parse boundary+overflow+invalid, TryParse, ToString), Boolean (TrueString/FalseString, Parse case-insensitive, TryParse), Char/char16_t (IsLetter/Digit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse, surrogate helpers, ConvertToUtf32), Single/Double (NaN/Infinity constants, IsNaN/IsInfinity/IsFinite/IsNormal, Parse/TryParse) |
 
 **Session 19 (Queue, Stack, LinkedList, SortedSet tests):**
 
 | File(s) | Change |
 |---------|--------|
 | `tests/System/Collections/Generic/QueueStackTests.cpp` | New — 34 tests: Queue FIFO/Contains/Clear/ToArray/stress-1000; Stack LIFO/Contains/Clear/ToArray-top-first/stress-1000 |
-| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList AddFirst/AddLast/getFirst/getLastProperty/RemoveFirst/RemoveLast-noop/Remove-value/Contains/Clear/range-for; SortedSet Add-bool-return/Min+Max/sorted-iteration/ToVector/set-algebra/GetViewBetween |
-
-**Session 18 (List, Dictionary, HashSet tests + IEnumerable/List bug fix):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Collections/Generic/IEnumerable.hpp` | Bugfix — removed duplicate `GetEnumerator()` with conflicting return type; covariant override handles it |
-| `include/System/Collections/Generic/List.hpp` | Bugfix — removed illegal qualified-name method definition inside class body |
-| `tests/System/Collections/Generic/CollectionsTests.cpp` | New — 52 tests for List, Dictionary, HashSet |
+| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList/SortedSet with set-algebra, GetViewBetween, range-for |
 
 *For older session history see `git log --oneline`.*
 
@@ -196,40 +194,11 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 21: Stopwatch + Encoding
+## 7. Next task — Task 22: Encoding (UTF8/ASCII)
 
-Do **both** in one session. Both headers are fully implemented and ready to test.
+~~Task 21 (Stopwatch) — DONE ✅ — 15 tests in `tests/System/Diagnostics/StopwatchTests.cpp`~~
 
-### A. Stopwatch — `tests/System/Diagnostics/StopwatchTests.cpp`
-
-Header: `include/System/Diagnostics/Stopwatch.hpp` (fully header-only, no .cpp needed)
-
-API summary:
-- `Stopwatch()` — default ctor, not running, zero elapsed
-- `Start()` / `Stop()` — `getIsRunningProperty()` toggles; elapsed accumulates across Stop/Start cycles
-- `Reset()` — stops and zeros elapsed; `Restart()` — zeros + starts immediately
-- `StartNew()` — static factory, returns an already-running stopwatch
-- `getElapsedMillisecondsProperty()` — ms since start (int64)
-- `getElapsedTicksProperty()` — .NET ticks (100 ns units, int64)
-- `getElapsedProperty()` — `System::TimeSpan` (ticks == getElapsedTicks)
-
-Suggested test coverage:
-- Default ctor: `getIsRunningProperty() == false`, `getElapsedMillisecondsProperty() == 0`
-- `Start()` → `getIsRunningProperty() == true`
-- `Stop()` → `getIsRunningProperty() == false`
-- Elapsed > 0 after Start + tiny `std::this_thread::sleep_for(1ms)` + Stop
-- `StartNew()` → `getIsRunningProperty() == true`
-- `Reset()` after running → not running, elapsed == 0
-- `Restart()` → `getIsRunningProperty() == true`; `Reset()` then `Start()` produces the same result
-- Stop on already-stopped: no crash, elapsed unchanged
-- `getElapsedProperty().getTicksProperty() == getElapsedTicksProperty()`
-
-**Create directory first:** `mkdir -p tests/System/Diagnostics`
-**Run:** `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"`
-
----
-
-### B. Encoding — `tests/System/Text/EncodingTests.cpp`
+### Encoding — `tests/System/Text/EncodingTests.cpp`
 
 Header: `include/System/Text/Encoding.hpp` (factory methods implemented in `src/`)
 
@@ -246,13 +215,11 @@ Suggested test coverage:
 - `ASCII()->GetBytes("ABC")` == `{65, 66, 67}`
 - `UTF8()->GetBytes("hello")` == `{104, 101, 108, 108, 111}`
 - Round-trip: `GetString(GetBytes("hello world").data(), 0, n)` == `"hello world"` for both UTF8 and ASCII
-- Empty string: `GetBytes("")` is empty; `GetString(nullptr or empty, 0, 0)` == `""`
+- Empty string: `GetBytes("")` is empty
 
 **Run:** `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
 
----
-
-After both: run `./build/SharpRuntimeTests` — must show 769+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 21 done, add Task 22).
+After: run full suite `./build/SharpRuntimeTests` — must show 784+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 22 done, add Task 23).
 
 ---
 
@@ -263,19 +230,17 @@ After both: run `./build/SharpRuntimeTests` — must show 769+ passing, 0 failin
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 769 tests)
+- **No merge to master** until test coverage is substantially broader (currently 784 tests)
 
 ---
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 21 covers two targets this session: **Stopwatch** and **Encoding**.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 22 is `System::Text::Encoding` tests.
 >
-> **Step 1 — Stopwatch:** Read `include/System/Diagnostics/Stopwatch.hpp`. Create directory `tests/System/Diagnostics/` with `mkdir -p`. Write `tests/System/Diagnostics/StopwatchTests.cpp`. Include `<thread>` and `<chrono>` for the sleep-based elapsed test. See section 7A for full API and suggested test list.
->
-> **Step 2 — Encoding:** Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp`. See section 7B for full API and suggested test list.
+> Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp` covering: UTF8()/ASCII() return non-null shared_ptr, UTF8 encoding name == "utf-8", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") == {104,101,108,108,111}, round-trip GetString(GetBytes("hello world").data(), 0, n) == "hello world" for both encodings, empty string edge case.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run new tests: `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*:EncodingTests.*"`
-> Run full suite: `./build/SharpRuntimeTests` — must show 769+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 21 done, add Task 22.
+> Run: `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
+> Full suite: `./build/SharpRuntimeTests` — must show 784+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 22 done, add Task 23.
