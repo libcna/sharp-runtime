@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 462 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 462` ✅
+- **All 485 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 485` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 15 (DateTime tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/DateTimeTests.cpp` | New — 23 tests: default ctor (zero ticks), from-ticks ctor (including .NET vector 999999999999999999), Add/Subtract with TimeSpan (day/hour/second/roundtrip), Subtract(DateTime)→TimeSpan (positive/zero/negative), all comparison operators, getTimeOfDayProperty (boundary/midday/range), getNowProperty sanity (> UnixEpochTicks, monotonic), ToString format, chained arithmetic |
 
 **Session 14 (StringBuilder tests):**
 
@@ -372,11 +378,17 @@ Covers constructors, all Append overloads (string/char*/char/int/double/bool), A
 
 ---
 
-### Task 1 (was Task 15) — Add tests for DateTime
-**Goal:** Verify `System::DateTime` construction, Now, properties (Year/Month/Day/Hour/Minute/Second), Add methods, ToString, comparisons.
-**Files:** `include/System/DateTime.hpp` or `src/System/DateTime.cpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DateTimeTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/tests/System/DateTimeTests.cs`
+### ~~Task 1 (was Task 15) — Add tests for DateTime~~ DONE ✅
+23 tests in `tests/System/DateTimeTests.cpp` — all pass.
+Covers tick-based construction, Add/Subtract(TimeSpan), Subtract(DateTime)→TimeSpan, comparison operators, getTimeOfDayProperty, getNowProperty sanity, ToString, chained arithmetic.
+Note: implementation is tick-only; no Year/Month/Day accessors exist yet.
+
+---
+
+### Task 1 (was Task 16) — Add tests for Exception hierarchy
+**Goal:** Verify `System::Exception` and its subclasses (ArgumentException, ArgumentNullException, InvalidOperationException, NotImplementedException, OverflowException, FormatException, etc.) — construction, Message, InnerException, ToString.
+**Files:** `include/System/Exception.hpp`, `include/System/ArgumentException.hpp`, etc.
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ExceptionTests.*"`
 
 ---
 
@@ -388,11 +400,11 @@ Covers constructors, all Append overloads (string/char*/char/int/double/bool), A
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 462 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 485 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is DateTime tests: read `include/System/DateTime.hpp` (or `src/System/DateTime.cpp`) to understand the implementation, check reference vectors in `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/tests/`, and write tests in `tests/System/DateTimeTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="DateTimeTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Exception hierarchy tests: read the exception headers in `include/System/` (Exception.hpp, ArgumentException.hpp, InvalidOperationException.hpp, etc.) to understand what's implemented, then write tests in `tests/System/ExceptionTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ExceptionTests.*"`. Update NEXT.md when done.
