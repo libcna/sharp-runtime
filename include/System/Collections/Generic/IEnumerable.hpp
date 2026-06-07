@@ -22,11 +22,7 @@ namespace System::Collections::Generic
         ~IEnumerable() override = default;
 
         /// Returns a typed enumerator that iterates through the collection.
+        /// Covariant override: IEnumerator<T> derives from System::Collections::IEnumerator.
         [[nodiscard]] virtual IEnumerator<T>* GetEnumerator() = 0;
-
-        System::Collections::IEnumerator* GetEnumerator() override
-        {
-            return GetEnumerator();
-        }
     };
 }

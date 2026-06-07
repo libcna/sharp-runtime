@@ -97,11 +97,6 @@ namespace System::Collections::Generic
             return new Enumerator(items_);
         }
 
-        System::Collections::IEnumerator* System::Collections::IEnumerable::GetEnumerator() override
-        {
-            return GetEnumerator();
-        }
-
         /// Returns the underlying std::vector for STL interop.
         [[nodiscard]] const std::vector<T>& ToVector() const { return items_; }
         [[nodiscard]] std::vector<T>& ToVector() { return items_; }
