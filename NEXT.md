@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 331 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 331` ✅
+- **All 355 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 355` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 11 (Guid tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/GuidTests.cpp` | New — 24 tests: Empty constant, default ctor, Parse/ToString roundtrip, braces/parentheses formats, invalid throws, byte-array ctor, equality/ordering, NewGuid RFC 4122 v4 compliance (version nibble, variant bits), NewGuid uniqueness stress (20 consecutive GUIDs all different) |
 
 **Session 10 (Complex tests):**
 
@@ -323,11 +329,17 @@ Covers constants, construction, arithmetic, equality, Conjugate, Abs, Sqrt(−1)
 
 ---
 
-### Task 1 (was Task 11) — Add tests for Guid
-**Goal:** Verify `System::Guid` parsing, ToString, equality, Empty, and NewGuid format.
-**Files:** `include/System/Guid.hpp` or `src/System/Guid.cpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="GuidTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/GuidTests.cs`
+### ~~Task 1 (was Task 11) — Add tests for Guid~~ DONE ✅
+24 tests in `tests/System/GuidTests.cpp` — all pass.
+Covers Empty, Parse/ToString roundtrip, braces/parentheses formats, invalid throws, byte-array ctor, equality/ordering, NewGuid RFC 4122 v4 bits, NewGuid uniqueness stress.
+
+---
+
+### Task 1 (was Task 12) — Add tests for Math static methods
+**Goal:** Verify `System::Math` correctness (Abs, Min, Max, Pow, Sqrt, Floor, Ceiling, Round, Log, Sin, Cos, Tan, Atan2, Clamp, Sign, Truncate).
+**Files:** `include/System/Math.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="MathTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/MathTests.cs`
 
 ---
 
@@ -339,11 +351,11 @@ Covers constants, construction, arithmetic, equality, Conjugate, Abs, Sqrt(−1)
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 331 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 355 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Guid tests: read `include/System/Guid.hpp` (or `src/System/Guid.cpp`) to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/GuidTests.cs`, and write tests in `tests/System/GuidTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="GuidTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Math tests: read `include/System/Math.hpp` to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/MathTests.cs`, and write tests in `tests/System/MathTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="MathTests.*"`. Update NEXT.md when done.
