@@ -32,8 +32,10 @@
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
 - **All 1437 tests pass:** `./build/SharpRuntimeTests` → `1437 tests from 122 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
+- 44 test files in `tests/System/`
 
-### What is tested (997 tests across 50 suites)
+### What IS tested (1437 tests, 44 files)
+
 | Suite file | Tests |
 |------------|-------|
 | `PrimitiveTypeTests.cpp` | Int32, Int64, UInt32 (18) |
@@ -82,11 +84,17 @@
 | `IO/Compression/CompressionTests.cpp` | CompressionMode/ZipArchiveMode enums + GZipStream/DeflateStream + ZipArchive stubs (35) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Net::Sockets` (TcpClient/UdpClient — stubs only) — **next target**
-2. `System::IO` remaining types (BinaryReader/BinaryWriter, File, Path)
-3. `System::Collections::Concurrent` (ConcurrentDictionary, BlockingCollection)
+
+1. **`System::Net::Sockets`** — TcpClient, UdpClient (stubs — verify enums + NotImplementedException) → **Task 33**
+2. **`System::IO` remaining** — BinaryReader, BinaryWriter, File, Path, FileStream, StreamReader, StreamWriter, BufferedStream, Directory, DirectoryInfo, FileInfo, DriveInfo + enums (FileMode, FileAccess, FileShare, FileAttributes, SeekOrigin, SearchOption, …) + IO exceptions → **Task 33**
+3. **`System::Collections::Concurrent`** — ConcurrentDictionary, ConcurrentQueue, ConcurrentStack → **Task 34**
+4. **`System::Collections::ObjectModel`** — ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary → **Task 34**
+5. **`System::Collections::Specialized`** — NameValueCollection, StringCollection, BitVector32, … → **Task 34**
+6. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
+7. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
 
 ### What does NOT work yet (implementation gaps)
+
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
 - **XmlReader / XmlWriter:** throw `NotImplementedException` — awaiting tinyxml2/pugixml
 - **TcpClient / UdpClient:** throw `NotImplementedException` — awaiting POSIX/Winsock
@@ -97,103 +105,36 @@
 
 ---
 
-## 3. Recent changes (last 6 sessions)
+## 3. Recent changes (last 3 sessions)
 
-**Session 23 (Xml + IO::Compression):**
+**Session 23 — Task 32 (Xml + IO::Compression):**
 
-| File(s) | Change |
-|---------|--------|
+| File | Change |
+|------|--------|
 | `tests/System/Xml/XmlTests.cpp` | New — 55 tests: ReadState/XmlNodeType enums, XmlReader/XmlWriter stub-throws, XName/XAttribute/XElement/XDocument/XDeclaration |
 | `tests/System/IO/Compression/CompressionTests.cpp` | New — 35 tests: CompressionMode/ZipArchiveMode enums, GZipStream/DeflateStream CanRead/CanWrite/Flush/Close + stub-throws, ZipArchive/ZipArchiveEntry stub-throws |
 
-Notes: `XDocument::Save` declared but not defined — excluded. Vexing-parse for `ZipArchive(ptr)` fixed with block-statement `{ ZipArchive z(ptr); }`. `[[nodiscard]]` stub callers wrapped with `(void)`.
+Notes: `XDocument::Save` declared but not defined — excluded. Vexing-parse `ZipArchive(ptr)` fixed with `{ ZipArchive z(ptr); }`. `[[nodiscard]]` stub callers wrapped with `(void)`. `XElement(XName("name"), "val")` required — two-arg `const char*` constructor missing.
 
-**Session 22 (Runtime + Security):**
+**Session 22 — Task 31 (Runtime + Security):**
 
-| File(s) | Change |
-|---------|--------|
-| `include/System/Runtime/InteropServices/InteropAttributes.hpp` | Fix: fully-qualify `CharSet` and `CallingConvention` member type references to eliminate `-Wchanges-meaning` errors |
+| File | Change |
+|------|--------|
+| `include/System/Runtime/InteropServices/InteropAttributes.hpp` | Fix: fully-qualify `CharSet` and `CallingConvention` member type references (`-Wchanges-meaning`) |
 | `tests/System/Runtime/RuntimeTests.cpp` | New — 60 tests: CompilerServices/GCSettings/InteropServices enums+attributes/Versioning/ExternalException |
 | `tests/System/Security/SecurityTests.cpp` | New — 25 tests: SecurityAttributes/SecurityException/CryptographicException |
 
-**Session 21 (Buffers + ComponentModel):**
+**Session 21 — Task 30 (Buffers + ComponentModel):**
 
-| File(s) | Change |
-|---------|--------|
-| `include/System/Buffers/ArrayPool.hpp` | Fix: move `SharedArrayPool` outside `ArrayPool` class — eliminates incomplete-type warning |
+| File | Change |
+|------|--------|
+| `include/System/Buffers/ArrayPool.hpp` | Fix: move `SharedArrayPool<T>` outside `ArrayPool<T>` — eliminates incomplete-type inheritance warning |
 | `tests/System/Buffers/BuffersTests.cpp` | New — 29 tests: ArrayPool/OperationStatus/StandardFormat |
 | `tests/System/ComponentModel/ComponentModelTests.cpp` | New — 39 tests: 9 attribute types + INotifyPropertyChanged/Changing |
 
-Note: `DefaultValueAttribute.hpp` excluded from ComponentModel tests — its `DefaultValueAttribute` class conflicts with the same name in `DescriptionAttribute.hpp`. Test uses `std::string("…")` explicitly to bypass `bool`-vs-`std::string` overload ambiguity for `const char*` args.
+Note: `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` — tests include only the latter. `DefaultValueAttribute(std::string("…"))` needed to avoid `const char*` → `bool` over `std::string` overload resolution.
 
-**Session 20 (System::Net):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Net/NetTests.cpp` | New — 67 tests: IPAddress/IPEndPoint/HttpStatusCode/WebUtility |
-
-Note: `IPEndPoint::MinPort`/`MaxPort` are `static const` without `inline` definition — tests use `static_cast<int>()` to avoid ODR link error.
-
-**Session 19 (Globalization):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Globalization/GlobalizationTests.cpp` | New — 69 tests: CultureInfo/NumberFormatInfo/RegionInfo/StringInfo/UnicodeCategory |
-
-Note: `Calendar.hpp` and `ISOWeek.hpp` excluded from tests — they reference `DateTime` properties (`getYearProperty`, `getDayOfWeekProperty`, `AddDays`, etc.) that are not yet declared in `DateTime.hpp`.
-
-**Session 18 (Array/Buffer/Tuple):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/ArrayTests.cpp` | New — 26 tests |
-| `tests/System/BufferTests.cpp` | New — 15 tests |
-| `tests/System/TupleTests.cpp` | New — 20 tests (Tuple2/3/4) |
-
-**Session 17 (BitConverter/Console/Environment/Version):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Console.hpp` | Fix: remove nonexistent `using SharpRuntime::doublecs` |
-| `tests/System/BitConverterTests.cpp` | New — 23 tests |
-| `tests/System/ConsoleTests.cpp` | New — 17 tests |
-| `tests/System/EnvironmentTests.cpp` | New — 8 tests |
-| `tests/System/VersionTests.cpp` | New — 19 tests |
-
-**Session 16 (Threading tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Threading/ThreadingTests.cpp` | New — 49 tests: Thread/Interlocked/Monitor/Mutex/Semaphore/SemaphoreSlim/ManualResetEvent/AutoResetEvent/CancellationToken/SpinLock/Volatile/Timeout |
-
-**Session 15 (Uri implementation + tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Uri.hpp` | New — header-only URI parser (scheme/host/port/path/query/fragment/userInfo; UriKind; TryCreate) |
-| `tests/System/UriTests.cpp` | New — 34 tests |
-
-**Session 14 (TimeZoneInfo fix + tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/TimeZoneInfo.hpp` | Fix: `TimeSpan::Zero()` → `TimeSpan::Zero`; `make_shared` → `new` (private ctor) |
-| `tests/System/TimeZoneInfoTests.cpp` | New — 27 tests |
-
-**Session 13 (Debug + Trace tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Diagnostics/DebugTraceTests.cpp` | New — 22 tests |
-
-**Session 12 (Stopwatch + Encoding tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests |
-| `tests/System/Text/EncodingTests.cpp` | New — 14 tests |
-
-*For older session history see `git log --oneline`.*
+*For older history see `git log --oneline`.*
 
 ---
 
@@ -212,6 +153,8 @@ Note: `Calendar.hpp` and `ISOWeek.hpp` excluded from tests — they reference `D
 | **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs |
 | **risky** | `SharpRuntime::charcs = char16_t` — some headers cast to `wint_t`; not identity on all platforms |
 | **known warning** | `Char.hpp:16` emits "null character in literal" — cosmetic, does not affect behaviour |
+| **excluded** | `Calendar.hpp` + `ISOWeek.hpp` reference `DateTime` properties not yet in `DateTime.hpp` |
+| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` — duplicate class def |
 
 ---
 
@@ -236,7 +179,7 @@ include/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
 src/                                    ← .cpp for types needing it (exceptions, Guid, DateTime, Encoding, etc.)
-tests/System/                           ← GoogleTest suites (built, 997 tests pass)
+tests/System/                           ← GoogleTest suites (44 files, 1437 tests)
 vendor/googletest/                      ← bundled test framework
 vendor/nlohmann/json.hpp                ← nlohmann/json 3.10.4 (MIT)
 ```
@@ -287,55 +230,61 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 33: Net::Sockets + IO remaining
+## 7. Next tasks
 
-~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
-~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
-~~Task 23 (TimeZoneInfo fix + tests) — DONE ✅ — 27 new tests, total 847~~
-~~Task 24 (Uri implementation + tests) — DONE ✅ — 34 new tests, total 881~~
-~~Task 25 (Threading tests) — DONE ✅ — 49 new tests, total 930~~
-~~Task 26 (BitConverter/Console/Environment/Version) — DONE ✅ — 67 new tests, total 997~~
-~~Task 27 (Array/Buffer/Tuple) — DONE ✅ — 61 new tests, total 1058~~
-~~Task 28 (Globalization) — DONE ✅ — 69 new tests, total 1127~~
-~~Task 29 (System::Net) — DONE ✅ — 67 new tests, total 1194~~
-~~Task 30 (Buffers + ComponentModel) — DONE ✅ — 68 new tests, total 1262~~
-~~Task 31 (Runtime + Security) — DONE ✅ — 85 new tests, total 1347~~
-~~Task 32 (Xml + IO::Compression) — DONE ✅ — 90 new tests, total 1437~~
+### Task 33 — Net::Sockets + IO remaining ← NEXT
 
-### Batch: Net::Sockets + IO remaining
+**Net::Sockets** (`include/System/Net/Sockets/`):
+- `TcpClient.hpp`, `UdpClient.hpp` — stubs, test: constructor throws `NotImplementedException`
+- Check for any enums (SocketType, AddressFamily, SocketShutdown, etc.)
 
-Headers to read first:
-- Scan `include/System/Net/Sockets/` for available types
-- Scan `include/System/IO/` for untested types (BinaryReader, BinaryWriter, File, Path)
+**IO remaining** (`include/System/IO/`):
+- IO enums (all are likely simple): `FileMode`, `FileAccess`, `FileShare`, `FileAttributes`, `FileOptions`, `SeekOrigin`, `SearchOption`, `SearchTarget`, `MatchCasing`, `MatchType`, `HandleInheritability`, `UnixFileMode`
+- IO exceptions: `IOException`, `FileNotFoundException`, `DirectoryNotFoundException`, `EndOfStreamException`, `PathTooLongException`, `FileLoadException`, `InvalidDataException`
+- Real implementations (if present): `Path`, `File`, `Directory`, `BinaryReader`, `BinaryWriter`, `StreamReader`, `StreamWriter`, `BufferedStream`, `FileStream`, `FileInfo`, `DirectoryInfo`, `DriveInfo`
 
-Write test files:
-- `tests/System/Net/Sockets/SocketsTests.cpp` (stub verification + any enums)
-- Tests for remaining IO types if they have real implementation
+**Approach:** scan each header → enum values work + any stub methods throw `NotImplementedException` + any real methods verified functionally.
 
-**Run:** filter by new suite names before full run.
+**Target:** 1500+ tests passing, 0 failing. Commit + update NEXT.md.
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 33 done, add Task 34).
+---
+
+### Task 34 — Collections remaining
+
+- `Collections/Concurrent/`: ConcurrentDictionary, ConcurrentQueue, ConcurrentStack
+- `Collections/ObjectModel/`: ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary, KeyedCollection
+- `Collections/Specialized/`: NameValueCollection, StringCollection, BitVector32, HybridDictionary, ListDictionary, StringDictionary, OrderedDictionary
+
+---
+
+### Task 35 — Diagnostics + Text remaining
+
+- `Diagnostics/` remaining: DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame stubs, UnreachableException
+- `Text/` remaining: Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs
 
 ---
 
 ## 8. Do not do yet
 
-- **No broad header refactor** — changing naming conventions across 448 files would break CNA and all dependents
+- **No broad header refactor** — changing naming conventions across 444 files would break CNA and all dependents
 - **No LINQ (System.Linq/Enumerable)** — use `std::ranges` algorithms in ported code instead
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 997 tests)
+- **No merge to master** until test coverage is substantially broader (currently 1437 tests / 444 headers)
 
 ---
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 33 is Net::Sockets + remaining IO types.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Scan `include/System/Net/Sockets/` and `include/System/IO/` to see what's untested. Write test files for stub verification (enums + NotImplementedException checks) and any fully-implemented IO types.
+> Read NEXT.md section 7 — **Task 33** is next: Net::Sockets + IO remaining types.
 >
-> Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run new tests with appropriate filter.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 33 done, add Task 34.
+> Scan `include/System/Net/Sockets/` (TcpClient, UdpClient — stubs) and `include/System/IO/` (enums, exceptions, File/Path/BinaryReader/Writer/StreamReader/Writer/Directory/etc.). Write test files:
+> - `tests/System/Net/Sockets/SocketsTests.cpp`
+> - `tests/System/IO/IOTests.cpp` (or split by subarea)
+>
+> Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
+> Run new tests with filter, then full suite: `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 33 done, add Task 36 if needed.
