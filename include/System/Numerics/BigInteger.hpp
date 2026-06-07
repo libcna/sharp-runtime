@@ -21,8 +21,8 @@ namespace System::Numerics {
      * Self-contained implementation using sign + base-10^9 magnitude vector.
      * Partial C++ counterpart of .NET System.Numerics.BigInteger.
      *
-     * @note Status: Partial — +/-/*/comparisons/ToString/Parse implemented;
-     *   division, modulo and bit operations are not yet implemented.
+     * @note Status: Partial — add, sub, mul, comparisons, ToString, Parse implemented;
+     *   division, modulo, and bit operations are not yet implemented.
      */
     class BigInteger {
         bool                   negative_ = false;

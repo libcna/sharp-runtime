@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 248 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 248` ✅
+- **All 293 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 293` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,13 @@
 ---
 
 ## 3. Recent changes
+
+**Session 9 (BigInteger tests + header bugfix):**
+
+| File(s) | Change |
+|---------|--------|
+| `include/System/Numerics/BigInteger.hpp` | Bugfix — comment contained `*/` inside `/** */` block, prematurely ending it; replaced `+/-/*/comparisons` with prose |
+| `tests/System/Numerics/BigIntegerTests.cpp` | New — 45 tests: constants, constructors, Parse/ToString, add/sub/mul with official .NET vectors (uint64Max+1, uint64Max^2, large 81-digit arithmetic), comparison, unary minus, Abs, stress roundtrip |
 
 **Session 8 (Decimal 128-bit precision):**
 
@@ -298,11 +305,17 @@ nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()
 
 ---
 
-### Task 1 (was Task 9) — Add tests for BigInteger
-**Goal:** Verify the base-10⁹ `BigInteger` implementation handles large values correctly.
-**Files:** `include/System/Numerics/BigInteger.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="BigIntegerTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Numerics.BigInteger/tests/`
+### ~~Task 1 (was Task 9) — Add tests for BigInteger~~ DONE ✅
+45 tests in `tests/System/Numerics/BigIntegerTests.cpp` — all pass.
+Also fixed: `BigInteger.hpp` comment at line 24 contained `*/` inside a `/** */` block (from `+/-/*/comparisons`), which prematurely ended the comment and caused the entire header to fail to compile.
+
+---
+
+### Task 1 (was Task 10) — Add tests for Complex
+**Goal:** Verify `System::Numerics::Complex` arithmetic (add, sub, mul, div, magnitude, phase, conjugate).
+**Files:** `include/System/Numerics/Complex.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ComplexTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime.Numerics/tests/`
 
 ---
 
@@ -314,11 +327,11 @@ nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 248 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 293 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is BigInteger tests: read `include/System/Numerics/BigInteger.hpp` to understand the current base-10⁹ implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Numerics.BigInteger/tests/`, and write tests in `tests/System/Numerics/BigIntegerTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="BigIntegerTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Complex tests: read `include/System/Numerics/Complex.hpp` to understand the current implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime.Numerics/tests/`, and write tests in `tests/System/Numerics/ComplexTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ComplexTests.*"`. Update NEXT.md when done.
