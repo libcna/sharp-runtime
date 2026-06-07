@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 19*
+*Last updated: 2026-06-07 (branch: develop) — session 20*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1127 tests pass:** `./build/SharpRuntimeTests` → `1127 tests from 58 test suites` ✅
+- **All 1194 tests pass:** `./build/SharpRuntimeTests` → `1194 tests from 62 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -73,11 +73,12 @@
 | `BufferTests.cpp` | Buffer (15) |
 | `TupleTests.cpp` | Tuple2/Tuple3/Tuple4 (20) |
 | `Globalization/GlobalizationTests.cpp` | CultureInfo/NumberFormatInfo/RegionInfo/StringInfo/UnicodeCategory (69) |
+| `Net/NetTests.cpp` | IPAddress/IPEndPoint/HttpStatusCode/WebUtility (67) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Net` (IPAddress, HttpStatusCode) — **next target**
-2. `System::Buffers` (ArrayPool, OperationStatus)
-3. `System::ComponentModel` (attributes, INotifyPropertyChanged)
+1. `System::Buffers` (ArrayPool, OperationStatus) — **next target**
+2. `System::ComponentModel` (attributes, INotifyPropertyChanged)
+3. `System::Runtime` (CompilerServices, InteropServices)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -91,6 +92,14 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 20 (System::Net):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Net/NetTests.cpp` | New — 67 tests: IPAddress/IPEndPoint/HttpStatusCode/WebUtility |
+
+Note: `IPEndPoint::MinPort`/`MaxPort` are `static const` without `inline` definition — tests use `static_cast<int>()` to avoid ODR link error.
 
 **Session 19 (Globalization):**
 
@@ -245,7 +254,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 29: Net
+## 7. Next task — Task 30: Buffers + ComponentModel
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -255,20 +264,21 @@ find include -name "*.hpp" | wc -l
 ~~Task 26 (BitConverter/Console/Environment/Version) — DONE ✅ — 67 new tests, total 997~~
 ~~Task 27 (Array/Buffer/Tuple) — DONE ✅ — 61 new tests, total 1058~~
 ~~Task 28 (Globalization) — DONE ✅ — 69 new tests, total 1127~~
+~~Task 29 (System::Net) — DONE ✅ — 67 new tests, total 1194~~
 
-### Batch: Net
+### Batch: Buffers + ComponentModel
 
 Headers to read first:
-- `include/System/Net/IPAddress.hpp`
-- `include/System/Net/HttpStatusCode.hpp`
-- Scan `include/System/Net/` for other implemented types
+- Scan `include/System/Buffers/` for implemented types
+- Scan `include/System/ComponentModel/` for implemented types
 
 Write test files:
-- `tests/System/Net/NetTests.cpp` (or split by type)
+- `tests/System/Buffers/BuffersTests.cpp` (if types are non-trivial)
+- `tests/System/ComponentModel/ComponentModelTests.cpp` (if types are non-trivial)
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="IPAddressTests.*:HttpStatusCodeTests.*"`
+**Run:** filter by new suite names before full run.
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1127+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 29 done, add Task 30).
+After: run full suite `./build/SharpRuntimeTests` — must show 1194+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 30 done, add Task 31).
 
 ---
 
@@ -285,11 +295,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 1127+ passing, 0
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 29 is System::Net.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 30 is Buffers + ComponentModel.
 >
-> Scan `include/System/Net/` to see what's implemented. Write test files for IPAddress, HttpStatusCode, and any other types that compile cleanly. Use `--gtest_filter="IPAddressTests.*:HttpStatusCodeTests.*"` (or broader) to verify before the full run.
+> Scan `include/System/Buffers/` and `include/System/ComponentModel/` to see what's implemented. Write test files for any types that have real implementation and compile cleanly.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run new tests with filter above.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1127+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 29 done, add Task 30.
+> Run new tests with appropriate filter.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1194+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 30 done, add Task 31.
