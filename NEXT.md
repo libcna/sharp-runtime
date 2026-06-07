@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 12*
+*Last updated: 2026-06-07 (branch: develop) — session 13*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 798 tests pass:** `./build/SharpRuntimeTests` → `798 tests from 42 test suites` ✅
+- **All 820 tests pass:** `./build/SharpRuntimeTests` → `820 tests from 43 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (798 tests across 42 suites)
@@ -61,12 +61,12 @@
 | `Numerics/BigIntegerTests.cpp` | BigInteger (45) |
 | `Numerics/ComplexTests.cpp` | Complex (38) |
 | `Diagnostics/StopwatchTests.cpp` | Stopwatch (15) |
+| `Diagnostics/DebugTraceTests.cpp` | Debug + Trace (22) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Diagnostics::Debug` / `Trace` — **next target**
-2. `System::TimeZoneInfo`
-3. `System::Uri`
-4. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
+1. `System::TimeZoneInfo` — **next target**
+2. `System::Uri`
+3. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -80,6 +80,12 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 13 (Debug + Trace tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Diagnostics/DebugTraceTests.cpp` | New — 22 tests: Debug::Write/WriteLine (char\*/string/empty), Debug::Assert(true) all three overloads; Trace::Write/WriteLine/TraceInformation/TraceWarning/TraceError, Trace::Assert(true/false/no-message), Trace::Fail, Trace::Flush |
 
 **Session 12 (Stopwatch + Encoding tests):**
 
@@ -195,26 +201,28 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 22: Debug / Trace
+## 7. Next task — Task 23: TimeZoneInfo
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests (15 Stopwatch + 14 Encoding), total 798~~
+~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
 
-### `System::Diagnostics::Debug` and `Trace` — `tests/System/Diagnostics/DebugTraceTests.cpp`
+### `System::TimeZoneInfo` — `tests/System/TimeZoneInfoTests.cpp`
 
 Headers to read first:
-- `include/System/Diagnostics/Debug.hpp`
-- `include/System/Diagnostics/Trace.hpp`
+- `include/System/TimeZoneInfo.hpp`
 
 Typical API to test (mirror .NET):
-- `Debug::WriteLine(string)` / `Trace::WriteLine(string)` — must not throw
-- `Debug::Assert(true)` — must not throw; `Debug::Assert(false)` — may throw or abort (check actual impl)
-- `Debug::Write(string)` / `Debug::WriteIf(bool, string)` / `Debug::WriteLineIf(bool, string)`
-- `Trace::Write(string)` / `Trace::WriteIf(bool, string)` / `Trace::WriteLineIf(bool, string)`
-- If listener collection is exposed: `Debug::Listeners` / `Trace::Listeners` non-null
+- `TimeZoneInfo::Utc` — non-null / valid UTC zone
+- `TimeZoneInfo::Local` — non-null
+- `TimeZoneInfo::FindSystemTimeZoneById("UTC")` — returns UTC zone, Id == "UTC"
+- `TimeZoneInfo::getIdProperty()` — returns non-empty string
+- `TimeZoneInfo::getDisplayNameProperty()` / `getStandardNameProperty()` — non-empty
+- `TimeZoneInfo::IsAmbiguousTime(...)` / `IsDaylightSavingTime(...)` — for UTC returns false
+- `TimeZoneInfo::ConvertTime(dateTime, fromZone, toZone)` — UTC→UTC identity
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="DebugTraceTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="TimeZoneInfoTests.*"`
 
-After: run full suite `./build/SharpRuntimeTests` — must show 798+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 22 done, add Task 23).
+After: run full suite `./build/SharpRuntimeTests` — must show 820+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 23 done, add Task 24).
 
 ---
 
@@ -231,11 +239,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 798+ passing, 0 
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 22 is `System::Diagnostics::Debug` and `Trace` tests.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 23 is `System::TimeZoneInfo` tests.
 >
-> Read `include/System/Diagnostics/Debug.hpp` and `include/System/Diagnostics/Trace.hpp`. Write `tests/System/Diagnostics/DebugTraceTests.cpp` covering the API that is actually implemented (not-throwing Write/WriteLine, Assert(true), etc). Use `--gtest_filter="DebugTraceTests.*"` to verify before the full run.
+> Read `include/System/TimeZoneInfo.hpp`. Write `tests/System/TimeZoneInfoTests.cpp` covering the API that is actually implemented. Use `--gtest_filter="TimeZoneInfoTests.*"` to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
-> Run new tests: `./build/SharpRuntimeTests --gtest_filter="DebugTraceTests.*"`
-> Run full suite: `./build/SharpRuntimeTests` — must show 798+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 22 done, add Task 23.
+> Run new tests: `./build/SharpRuntimeTests --gtest_filter="TimeZoneInfoTests.*"`
+> Run full suite: `./build/SharpRuntimeTests` — must show 820+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 23 done, add Task 24.
