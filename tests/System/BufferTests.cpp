@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include <vector>
+#include "System/Buffer.hpp"
+
+using System::Buffer;
+using SharpRuntime::bytecs;
+using SharpRuntime::intcs;
+
+// ---------------------------------------------------------------------------
+// BlockCopy — raw pointer overload
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, BlockCopy_RawPointer_CopiesBytes) {
+    uint8_t src[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    uint8_t dst[4] = {0x00, 0x00, 0x00, 0x00};
+    Buffer::BlockCopy(src, 0, dst, 0, 4);
+    EXPECT_EQ(dst[0], 0xAA);
+    EXPECT_EQ(dst[1], 0xBB);
+    EXPECT_EQ(dst[2], 0xCC);
+    EXPECT_EQ(dst[3], 0xDD);
+}
+
+TEST(BufferTests, BlockCopy_RawPointer_SrcOffset) {
+    uint8_t src[4] = {0x01, 0x02, 0x03, 0x04};
+    uint8_t dst[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    Buffer::BlockCopy(src, 2, dst, 0, 2);
+    EXPECT_EQ(dst[0], 0x03);
+    EXPECT_EQ(dst[1], 0x04);
+    EXPECT_EQ(dst[2], 0xFF);  // untouched
+}
+
+TEST(BufferTests, BlockCopy_RawPointer_DstOffset) {
+    uint8_t src[2] = {0xAB, 0xCD};
+    uint8_t dst[4] = {0x00, 0x00, 0x00, 0x00};
+    Buffer::BlockCopy(src, 0, dst, 2, 2);
+    EXPECT_EQ(dst[0], 0x00);  // untouched
+    EXPECT_EQ(dst[1], 0x00);  // untouched
+    EXPECT_EQ(dst[2], 0xAB);
+    EXPECT_EQ(dst[3], 0xCD);
+}
+
+TEST(BufferTests, BlockCopy_RawPointer_Int32Array) {
+    int32_t src[2] = {0x12345678, static_cast<int32_t>(0x9ABCDEF0)};
+    int32_t dst[2] = {0, 0};
+    Buffer::BlockCopy(src, 0, dst, 0, 8);
+    EXPECT_EQ(dst[0], 0x12345678);
+    EXPECT_EQ(dst[1], static_cast<int32_t>(0x9ABCDEF0));
+}
+
+// ---------------------------------------------------------------------------
+// BlockCopy — vector<bytecs> overload
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, BlockCopy_Vector_FullCopy) {
+    std::vector<bytecs> src = {1, 2, 3, 4};
+    std::vector<bytecs> dst(4, 0);
+    Buffer::BlockCopy(src, 0, dst, 0, 4);
+    EXPECT_EQ(dst, src);
+}
+
+TEST(BufferTests, BlockCopy_Vector_SrcOffset) {
+    std::vector<bytecs> src = {10, 20, 30, 40};
+    std::vector<bytecs> dst(4, 0);
+    Buffer::BlockCopy(src, 1, dst, 0, 3);
+    EXPECT_EQ(dst[0], 20);
+    EXPECT_EQ(dst[1], 30);
+    EXPECT_EQ(dst[2], 40);
+}
+
+TEST(BufferTests, BlockCopy_Vector_DstOffset) {
+    std::vector<bytecs> src = {0xAA, 0xBB};
+    std::vector<bytecs> dst = {0x00, 0x00, 0x00, 0x00};
+    Buffer::BlockCopy(src, 0, dst, 2, 2);
+    EXPECT_EQ(dst[0], 0x00);
+    EXPECT_EQ(dst[1], 0x00);
+    EXPECT_EQ(dst[2], 0xAA);
+    EXPECT_EQ(dst[3], 0xBB);
+}
+
+// ---------------------------------------------------------------------------
+// ByteLength
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, ByteLength_ByteVector_EqualsSizeInBytes) {
+    std::vector<bytecs> v = {1, 2, 3, 4};
+    EXPECT_EQ(Buffer::ByteLength(v), 4);
+}
+
+TEST(BufferTests, ByteLength_Int32Vector_IsFourTimesCount) {
+    std::vector<int32_t> v = {0, 0, 0};
+    EXPECT_EQ(Buffer::ByteLength(v), 12);
+}
+
+TEST(BufferTests, ByteLength_Int64Vector_IsEightTimesCount) {
+    std::vector<int64_t> v = {0, 0};
+    EXPECT_EQ(Buffer::ByteLength(v), 16);
+}
+
+TEST(BufferTests, ByteLength_EmptyVector_IsZero) {
+    std::vector<int32_t> v;
+    EXPECT_EQ(Buffer::ByteLength(v), 0);
+}
+
+// ---------------------------------------------------------------------------
+// GetByte / SetByte
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, GetByte_LittleEndian_FirstByteOfInt32) {
+    std::vector<int32_t> v = {0x01020304};
+    // On a little-endian system byte 0 is the LSB
+    bytecs b0 = Buffer::GetByte(v, 0);
+    bytecs b3 = Buffer::GetByte(v, 3);
+    EXPECT_EQ(b0 + (static_cast<int>(b3) << 24), 0x01020304 & 0xFF000000 | b0);
+    // Just verify the round-trip rather than a platform-specific value:
+    EXPECT_EQ(static_cast<int>(b0) | (static_cast<int>(Buffer::GetByte(v, 1)) << 8) |
+              (static_cast<int>(Buffer::GetByte(v, 2)) << 16) |
+              (static_cast<int>(Buffer::GetByte(v, 3)) << 24), 0x01020304);
+}
+
+TEST(BufferTests, SetByte_ModifiesCorrectByte) {
+    std::vector<bytecs> v = {0xAA, 0xBB, 0xCC};
+    Buffer::SetByte(v, 1, 0xFF);
+    EXPECT_EQ(v[0], 0xAA);
+    EXPECT_EQ(v[1], 0xFF);
+    EXPECT_EQ(v[2], 0xCC);
+}
+
+TEST(BufferTests, GetByte_AfterSetByte_RoundTrip) {
+    std::vector<bytecs> v = {0x00, 0x00, 0x00};
+    Buffer::SetByte(v, 2, 0x42);
+    EXPECT_EQ(Buffer::GetByte(v, 2), 0x42);
+}
+
+TEST(BufferTests, SetByte_FirstByte) {
+    std::vector<bytecs> v = {0x01, 0x02};
+    Buffer::SetByte(v, 0, 0xDE);
+    EXPECT_EQ(Buffer::GetByte(v, 0), 0xDE);
+}
