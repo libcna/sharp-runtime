@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 18*
+*Last updated: 2026-06-07 (branch: develop) — session 19*
 
 ---
 
@@ -30,7 +30,7 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1058 tests pass:** `./build/SharpRuntimeTests` → `1058 tests from 53 test suites` ✅
+- **All 1127 tests pass:** `./build/SharpRuntimeTests` → `1127 tests from 58 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What is tested (997 tests across 50 suites)
@@ -72,11 +72,12 @@
 | `ArrayTests.cpp` | Array (26) |
 | `BufferTests.cpp` | Buffer (15) |
 | `TupleTests.cpp` | Tuple2/Tuple3/Tuple4 (20) |
+| `Globalization/GlobalizationTests.cpp` | CultureInfo/NumberFormatInfo/RegionInfo/StringInfo/UnicodeCategory (69) |
 
 ### What is NOT yet tested (priority order)
-1. `System::Globalization` (CultureInfo, NumberFormatInfo) — **next target**
-2. `System::Net` (IPAddress, HttpStatusCode)
-3. `System::Buffers` (ArrayPool, OperationStatus)
+1. `System::Net` (IPAddress, HttpStatusCode) — **next target**
+2. `System::Buffers` (ArrayPool, OperationStatus)
+3. `System::ComponentModel` (attributes, INotifyPropertyChanged)
 
 ### What does NOT work yet (implementation gaps)
 - **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
@@ -90,6 +91,14 @@
 ---
 
 ## 3. Recent changes (last 6 sessions)
+
+**Session 19 (Globalization):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Globalization/GlobalizationTests.cpp` | New — 69 tests: CultureInfo/NumberFormatInfo/RegionInfo/StringInfo/UnicodeCategory |
+
+Note: `Calendar.hpp` and `ISOWeek.hpp` excluded from tests — they reference `DateTime` properties (`getYearProperty`, `getDayOfWeekProperty`, `AddDays`, etc.) that are not yet declared in `DateTime.hpp`.
 
 **Session 18 (Array/Buffer/Tuple):**
 
@@ -236,7 +245,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-## 7. Next task — Task 28: Globalization
+## 7. Next task — Task 29: Net
 
 ~~Task 21 (Stopwatch + Encoding) — DONE ✅ — 29 new tests, total 798~~
 ~~Task 22 (Debug + Trace) — DONE ✅ — 22 new tests, total 820~~
@@ -245,21 +254,21 @@ find include -name "*.hpp" | wc -l
 ~~Task 25 (Threading tests) — DONE ✅ — 49 new tests, total 930~~
 ~~Task 26 (BitConverter/Console/Environment/Version) — DONE ✅ — 67 new tests, total 997~~
 ~~Task 27 (Array/Buffer/Tuple) — DONE ✅ — 61 new tests, total 1058~~
+~~Task 28 (Globalization) — DONE ✅ — 69 new tests, total 1127~~
 
-### Batch: Globalization
+### Batch: Net
 
 Headers to read first:
-- `include/System/Globalization/CultureInfo.hpp`
-- `include/System/Globalization/NumberFormatInfo.hpp`
-- Scan `include/System/Globalization/` for other implemented types
+- `include/System/Net/IPAddress.hpp`
+- `include/System/Net/HttpStatusCode.hpp`
+- Scan `include/System/Net/` for other implemented types
 
 Write test files:
-- `tests/System/Globalization/CultureInfoTests.cpp`
-- `tests/System/Globalization/NumberFormatInfoTests.cpp` (or combined)
+- `tests/System/Net/NetTests.cpp` (or split by type)
 
-**Run:** `./build/SharpRuntimeTests --gtest_filter="CultureInfoTests.*:NumberFormatInfoTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="IPAddressTests.*:HttpStatusCodeTests.*"`
 
-After: run full suite `./build/SharpRuntimeTests` — must show 1058+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 28 done, add Task 29).
+After: run full suite `./build/SharpRuntimeTests` — must show 1127+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 29 done, add Task 30).
 
 ---
 
@@ -276,11 +285,11 @@ After: run full suite `./build/SharpRuntimeTests` — must show 1058+ passing, 0
 
 ## 9. Resume prompt
 
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 28 is Globalization.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 29 is System::Net.
 >
-> Scan `include/System/Globalization/` to see what's implemented. Write test files for CultureInfo, NumberFormatInfo, and any other types that have real implementation. Use `--gtest_filter="CultureInfoTests.*:NumberFormatInfoTests.*"` (or a broader filter) to verify before the full run.
+> Scan `include/System/Net/` to see what's implemented. Write test files for IPAddress, HttpStatusCode, and any other types that compile cleanly. Use `--gtest_filter="IPAddressTests.*:HttpStatusCodeTests.*"` (or broader) to verify before the full run.
 >
 > Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
 > Run new tests with filter above.
-> Run full suite: `./build/SharpRuntimeTests` — must show 1058+ passing, 0 failing.
-> Commit, then update NEXT.md: bump test count, mark Task 28 done, add Task 29.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1127+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 29 done, add Task 30.
