@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 293 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 293` ✅
+- **All 331 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 331` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 10 (Complex tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Numerics/ComplexTests.cpp` | New — 38 tests: constants (Zero/One/ImaginaryOne), construction + property access, all arithmetic (+/-/*/÷/unary−), equality, Conjugate, AbsD, Sqrt (including √−1 = i), Euler's identity via Exp, Log/Exp roundtrip, Sin/Cos + sin²+cos²=1, ToString |
 
 **Session 9 (BigInteger tests + header bugfix):**
 
@@ -311,11 +317,17 @@ Also fixed: `BigInteger.hpp` comment at line 24 contained `*/` inside a `/** */`
 
 ---
 
-### Task 1 (was Task 10) — Add tests for Complex
-**Goal:** Verify `System::Numerics::Complex` arithmetic (add, sub, mul, div, magnitude, phase, conjugate).
-**Files:** `include/System/Numerics/Complex.hpp`
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ComplexTests.*"`
-**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime.Numerics/tests/`
+### ~~Task 1 (was Task 10) — Add tests for Complex~~ DONE ✅
+38 tests in `tests/System/Numerics/ComplexTests.cpp` — all pass.
+Covers constants, construction, arithmetic, equality, Conjugate, Abs, Sqrt(−1)=i, Euler's identity, Log/Exp roundtrip, sin²+cos²=1.
+
+---
+
+### Task 1 (was Task 11) — Add tests for Guid
+**Goal:** Verify `System::Guid` parsing, ToString, equality, Empty, and NewGuid format.
+**Files:** `include/System/Guid.hpp` or `src/System/Guid.cpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="GuidTests.*"`
+**Reference vectors:** `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/GuidTests.cs`
 
 ---
 
@@ -327,11 +339,11 @@ Also fixed: `BigInteger.hpp` comment at line 24 contained `*/` inside a `/** */`
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 293 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 331 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Complex tests: read `include/System/Numerics/Complex.hpp` to understand the current implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime.Numerics/tests/`, and write tests in `tests/System/Numerics/ComplexTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ComplexTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Guid tests: read `include/System/Guid.hpp` (or `src/System/Guid.cpp`) to understand the implementation, check reference vectors at `/rv/tmp/runtime/src/libraries/System.Runtime/tests/System/GuidTests.cs`, and write tests in `tests/System/GuidTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="GuidTests.*"`. Update NEXT.md when done.
