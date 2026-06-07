@@ -33,7 +33,7 @@
 - **All 997 tests pass:** `./build/SharpRuntimeTests` → `997 tests from 50 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
-### What is tested (798 tests across 42 suites)
+### What is tested (997 tests across 50 suites)
 | Suite file | Tests |
 |------------|-------|
 | `PrimitiveTypeTests.cpp` | Int32, Int64, UInt32 (18) |
@@ -86,7 +86,7 @@
 
 ---
 
-## 3. Recent changes (last 3 sessions)
+## 3. Recent changes (last 6 sessions)
 
 **Session 17 (BitConverter/Console/Environment/Version):**
 
@@ -102,47 +102,34 @@
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/Threading/ThreadingTests.cpp` | New — 49 tests: Thread (Sleep/Join/lambda/Name/IsBackground/CurrentThread), Interlocked (Increment/Decrement/Add/Exchange/CompareExchange/Read for int32+int64), Monitor (Enter/Exit/TryEnter), Mutex (WaitOne/Release/TryLock), Semaphore/SemaphoreSlim, ManualResetEvent/AutoResetEvent (Set/Reset/WaitOne), CancellationToken/Source (Cancel propagates), SpinLock (Enter/TryEnter/Exit), Volatile (Write/Read), Timeout::Infinite |
+| `tests/System/Threading/ThreadingTests.cpp` | New — 49 tests: Thread/Interlocked/Monitor/Mutex/Semaphore/SemaphoreSlim/ManualResetEvent/AutoResetEvent/CancellationToken/SpinLock/Volatile/Timeout |
 
 **Session 15 (Uri implementation + tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `include/System/Uri.hpp` | New — header-only URI parser: scheme/host/port (default per scheme)/path/query/fragment/userInfo/authority/loopback; UriKind enum; TryCreate; relative URI support; equality operators |
-| `tests/System/UriTests.cpp` | New — 34 tests: http/https/ftp parsing, default ports, explicit port, query/fragment, pathAndQuery, userInfo, authority, loopback, relative URIs, UriKind validation, TryCreate (valid/invalid), equality |
+| `include/System/Uri.hpp` | New — header-only URI parser (scheme/host/port/path/query/fragment/userInfo; UriKind; TryCreate) |
+| `tests/System/UriTests.cpp` | New — 34 tests |
 
 **Session 14 (TimeZoneInfo fix + tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `include/System/TimeZoneInfo.hpp` | Fix: `TimeSpan::Zero()` → `TimeSpan::Zero` (static value); `make_shared<TimeZoneInfo>` → `new TimeZoneInfo` (private ctor) |
-| `tests/System/TimeZoneInfoTests.cpp` | New — 27 tests: Utc/Local properties (id/displayName/standardName/daylightName/offset/supportsDst), instance methods (IsDaylightSavingTime/GetUtcOffset/IsAmbiguousTime/IsInvalidTime/ConvertTimeToUtc), FindSystemTimeZoneById (valid + throws), GetSystemTimeZones (count, non-null), CreateCustomTimeZone (id/displayName/standardName/noDst/+offset/-offset), ConvertTimeBySystemTimeZoneId (valid + throws) |
+| `include/System/TimeZoneInfo.hpp` | Fix: `TimeSpan::Zero()` → `TimeSpan::Zero`; `make_shared` → `new` (private ctor) |
+| `tests/System/TimeZoneInfoTests.cpp` | New — 27 tests |
 
 **Session 13 (Debug + Trace tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/Diagnostics/DebugTraceTests.cpp` | New — 22 tests: Debug::Write/WriteLine (char\*/string/empty), Debug::Assert(true) all three overloads; Trace::Write/WriteLine/TraceInformation/TraceWarning/TraceError, Trace::Assert(true/false/no-message), Trace::Fail, Trace::Flush |
+| `tests/System/Diagnostics/DebugTraceTests.cpp` | New — 22 tests |
 
 **Session 12 (Stopwatch + Encoding tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+sleep+Stop, elapsed grows while running, StartNew() already-running, Reset() zeros+stops, Reset()-while-running, Restart() zeros+starts, Stop-on-stopped idempotent, Start-on-running idempotent, getElapsedProperty() ticks == getElapsedTicks, accumulates across multiple Start/Stop cycles |
-| `tests/System/Text/EncodingTests.cpp` | New — 14 tests: UTF8/ASCII/Unicode factory non-null, UTF8 name == "utf-8", ASCII name contains "ascii", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct bytes, round-trip GetString(GetBytes(s)) for both encodings, empty string edge cases, GetString with non-zero offset |
-
-**Session 20 (primitive box tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests: Int16/UInt16/SByte (Parse boundary+overflow+invalid, TryParse, ToString), Boolean (TrueString/FalseString, Parse case-insensitive, TryParse), Char/char16_t (IsLetter/Digit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse, surrogate helpers, ConvertToUtf32), Single/Double (NaN/Infinity constants, IsNaN/IsInfinity/IsFinite/IsNormal, Parse/TryParse) |
-
-**Session 19 (Queue, Stack, LinkedList, SortedSet tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Collections/Generic/QueueStackTests.cpp` | New — 34 tests: Queue FIFO/Contains/Clear/ToArray/stress-1000; Stack LIFO/Contains/Clear/ToArray-top-first/stress-1000 |
-| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList/SortedSet with set-algebra, GetViewBetween, range-for |
+| `tests/System/Diagnostics/StopwatchTests.cpp` | New — 15 tests |
+| `tests/System/Text/EncodingTests.cpp` | New — 14 tests |
 
 *For older session history see `git log --oneline`.*
 
@@ -187,7 +174,7 @@ include/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
 src/                                    ← .cpp for types needing it (exceptions, Guid, DateTime, Encoding, etc.)
-tests/System/                           ← GoogleTest suites (built, 798 tests pass)
+tests/System/                           ← GoogleTest suites (built, 997 tests pass)
 vendor/googletest/                      ← bundled test framework
 vendor/nlohmann/json.hpp                ← nlohmann/json 3.10.4 (MIT)
 ```
@@ -272,7 +259,7 @@ After: run full suite `./build/SharpRuntimeTests` — must show 997+ passing, 0 
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 798 tests)
+- **No merge to master** until test coverage is substantially broader (currently 997 tests)
 
 ---
 
