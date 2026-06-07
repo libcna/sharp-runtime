@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 485 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 485` ✅
+- **All 518 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 518` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -63,6 +63,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 16 (Exception hierarchy tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/ExceptionTests.cpp` | New — 33 tests: Exception (message/what/is-std::exception), SystemException, ArgumentException (message/paramName), ArgumentNullException, ArgumentOutOfRangeException, OverflowException (is-ArithmeticException), FormatException, InvalidOperationException, NotImplementedException, NotSupportedException, NullReferenceException, ObjectDisposedException (is-InvalidOperationException), cross-hierarchy catch tests (all catchable as std::exception, ArgumentNullException caught as Exception) |
 
 **Session 15 (DateTime tests):**
 
@@ -385,10 +391,16 @@ Note: implementation is tick-only; no Year/Month/Day accessors exist yet.
 
 ---
 
-### Task 1 (was Task 16) — Add tests for Exception hierarchy
-**Goal:** Verify `System::Exception` and its subclasses (ArgumentException, ArgumentNullException, InvalidOperationException, NotImplementedException, OverflowException, FormatException, etc.) — construction, Message, InnerException, ToString.
-**Files:** `include/System/Exception.hpp`, `include/System/ArgumentException.hpp`, etc.
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="ExceptionTests.*"`
+### ~~Task 1 (was Task 16) — Add tests for Exception hierarchy~~ DONE ✅
+33 tests in `tests/System/ExceptionTests.cpp` — all pass.
+Covers 11 exception types: message, what(), inheritance chains (all catchable as std::exception and appropriate base classes), cross-hierarchy catch test.
+
+---
+
+### Task 1 (was Task 17) — Add tests for IO/Stream types
+**Goal:** Verify `System::IO::MemoryStream` (Write, Read, Seek, Position, Length, ToArray) and `System::IO::StringReader`/`StringWriter` if present.
+**Files:** `include/System/IO/MemoryStream.hpp`, `include/System/IO/StringReader.hpp`, `include/System/IO/StringWriter.hpp`
+**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="MemoryStreamTests.*|StringReader*"`
 
 ---
 
@@ -400,11 +412,11 @@ Note: implementation is tick-only; no Year/Month/Day accessors exist yet.
 - **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
 - **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 485 tests
+- **No merge to master** until the test suite has broad coverage beyond the existing 518 tests
 - **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
 
 ---
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is Exception hierarchy tests: read the exception headers in `include/System/` (Exception.hpp, ArgumentException.hpp, InvalidOperationException.hpp, etc.) to understand what's implemented, then write tests in `tests/System/ExceptionTests.cpp`. Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="ExceptionTests.*"`. Update NEXT.md when done.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is IO stream tests: find what IO stream types exist under `include/System/IO/` (MemoryStream, StringReader, StringWriter, BinaryReader, BinaryWriter), read their headers to understand the API, and write tests in `tests/System/IO/StreamTests.cpp` (or separate files per type). Build with `cmake --build build --parallel 4`, run with `./build/SharpRuntimeTests --gtest_filter="MemoryStream*"`. Update NEXT.md when done.
