@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 5*
+*Last updated: 2026-06-07 (branch: develop) — session 6*
 
 ---
 
@@ -31,7 +31,7 @@
 ### Tests
 - **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 137 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 137` ✅
+- **All 173 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 173` ✅
 - GoogleTest is present at `vendor/googletest/`
 
 ### What works
@@ -64,6 +64,12 @@
 ---
 
 ## 3. Recent changes
+
+**Session 6 (encoder tests):**
+
+| File(s) | Change |
+|---------|--------|
+| `tests/System/Text/EncodingWebTests.cpp` | New — 36 tests for HtmlEncoder (13), UrlEncoder (13), JavaScriptEncoder (10); vectors sourced from the official .NET runtime tests |
 
 **Session 5 (PriorityQueue tests + official hash vectors):**
 
@@ -261,21 +267,20 @@ Covers: empty-queue throws, single-element Peek/Dequeue, min-heap ordering, nega
 
 ---
 
-### Task 1 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder
-**Goal:** Verify `&`, `<`, `>`, `"`, `'` are correctly escaped; URL percent-encoding roundtrips.
-**Files:** New `tests/System/Text/EncodingWebTests.cpp`
-**Command:** `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`
+### ~~Task 1 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder~~ DONE ✅
+36 tests in `tests/System/Text/EncodingWebTests.cpp` — all pass.
+Covers HtmlEncoder (5 special chars + composites from official .NET tests), UrlEncoder (unreserved chars, percent-encoding, Decode roundtrip, + handling), JavaScriptEncoder (backslash, quote, newline, control chars, composite).
 
 ---
 
-### Task 2 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
+### Task 1 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()
 **Goal:** Replace the raw-text stub with actual parse logic using a bundled parser (e.g., nlohmann/json in `vendor/`).
 **Files:** `include/System/Text/Json/JsonDocument.hpp`, `include/System/Text/Json/JsonElement.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="JsonTests.*"`
 
 ---
 
-### Task 3 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
+### Task 2 (was Task 8) — Add Decimal 128-bit precision using `__int128` or compiler intrinsics
 **Goal:** Replace the double-backed `Decimal` with a fixed-point representation matching .NET semantics.
 **Files:** `include/System/Decimal.hpp`
 **Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="DecimalTests.*"`
@@ -297,4 +302,4 @@ Covers: empty-queue throws, single-element Peek/Dequeue, min-heap ordering, nega
 
 ## 10. Resume prompt
 
-> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries` — check `System.Text.Encodings.Web/` there for reference behavior before writing any tests. Then inspect `include/System/Text/Encodings/Web/HtmlEncoder.hpp` and `UrlEncoder.hpp`. Create `tests/System/Text/EncodingWebTests.cpp` verifying HTML escape of `&`, `<`, `>`, `"`, `'`; URL percent-encoding of unsafe characters; and JavaScriptEncoder basics. Build with `cmake --build build --parallel 4`, run `./build/SharpRuntimeTests --gtest_filter="EncodingWebTests.*"`, and report the result. After finishing, update NEXT.md.
+> Read NEXT.md first. The .NET runtime source is at `/rv/tmp/runtime/src/libraries`. Task 1 in section 8 is JSON parsing: check `System.Text.Json/` in the runtime source for reference behavior, then look at `include/System/Text/Json/JsonDocument.hpp` and `JsonElement.hpp` to understand the current stub. The goal is to replace the raw-text stub with real parsing using a header-only library (nlohmann/json or similar) added to `vendor/`. Check what is already in `vendor/` before adding anything. Build with `cmake --build build --parallel 4`, write tests in `tests/System/Text/JsonTests.cpp`, run them, and update NEXT.md.
