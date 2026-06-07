@@ -9,16 +9,15 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** systematic porting of .NET BCL types — waves 1–20 completed. Coverage is now very broad (448 header files). Focus is shifting from breadth to correctness and test coverage.
+**Current phase:** systematic test coverage expansion. Porting (waves 1–20) is largely complete. Focus is now writing GoogleTest suites to verify every ported type.
 
 **Key architectural decisions:**
-- All new types are **header-only** `.hpp`; `.cpp` only for older/complex types (Exception hierarchy, Guid, DateTime, Convert, BinaryReader/Writer, etc.)
+- All new types are **header-only** `.hpp`; `.cpp` only for older/complex types (Exception hierarchy, Guid, DateTime, Convert, BinaryReader/Writer, Encoding, etc.)
 - CMake `GLOB_RECURSE` auto-discovers all `src/*.cpp` — no manual registration needed for new `.cpp` files
 - Namespace: `System`, `System::IO`, `System::Collections::Generic`, etc. using C++17 nested syntax
 - Property naming convention: `getXxxProperty()` / `setXxxProperty()` for all `.NET`-style properties
-- Primitive typedefs live in `SharpRuntime::` (`intcs = int32_t`, `bytecs = uint8_t`, etc.) and are re-exported in `System::` classes as constants/statics
+- Primitive typedefs live in `SharpRuntime::` (`intcs = int32_t`, `bytecs = uint8_t`, `shortcs = int16_t`, `charcs = char16_t`, etc.)
 - Immutable collections use `shared_ptr<const std::container<T>>` — mutations return new instances
-- Streaming hash algorithms (XxHash32/64) buffer partial blocks internally
 
 ---
 
@@ -27,243 +26,116 @@
 ### Build
 - **Clean build:** `cmake --build build --parallel 4` → `[100%] Built target SHARP_RUNTIME` ✅
 - Output: `build/libSHARP_RUNTIME.a`
+- One pre-existing warning: `Char.hpp:16` — null character in `u' '` literal (cosmetic, harmless)
 
 ### Tests
-- **Test files exist:** `tests/System/EventHandlerTests.cpp`, `RandomTests.cpp`, `TimeSpanTests.cpp`
-- **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` ✅
-- **All 769 tests pass:** `ctest --output-on-failure` → `100% tests passed, 0 tests failed out of 769` ✅
+- **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
+- **All 769 tests pass:** `./build/SharpRuntimeTests` → `769 tests from 40 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
 
-### What works
-- 448 header files covering most of the .NET BCL surface used by XNA/game code
-- All headers compile cleanly with `-std=c++23`
-- Full `System::` namespace: exceptions, Math, Convert, DateTime/TimeSpan, Guid, String, Collections, IO, Threading, Text, Globalization, Diagnostics, Numerics, Buffers, Security, Net, Xml.Linq, Text.Json, Runtime.CompilerServices, Runtime.InteropServices
-- `System.Collections.Immutable`: all 8 types (ImmutableArray, ImmutableList, ImmutableDictionary, ImmutableHashSet, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableQueue, ImmutableStack)
-- Hashing: CRC32, XxHash32, XxHash64 (full streaming)
-- Threading: Thread, Monitor, Mutex, Semaphore/Slim, ManualResetEvent, AutoResetEvent, Interlocked, Timer, CancellationToken, SpinLock, ReaderWriterLockSlim, Barrier, CountdownEvent
-- Threading.Tasks: Task, TaskT, TaskCompletionSource, ValueTask, Parallel
-- Primitive boxes: Int16/Int32/Int64, UInt16/UInt32/UInt64, SByte, Byte, Char, Boolean, Single, Double, Decimal (128-bit fixed-point: 96-bit mantissa + scale 0–28 + sign)
-- Collections.Generic: PriorityQueue, SortedSet (added), full interfaces
-- ComponentModel: INotifyPropertyChanged, INotifyPropertyChanging, DataAnnotations, Category/Browsable/ReadOnly/DisplayName attributes
-- Text.Json.Serialization: JsonPropertyName, JsonIgnore, JsonConverter, JsonPolymorphic, JsonDerivedType, etc.
-- Runtime.InteropServices: StructLayout, FieldOffset, MarshalAs, DllImport, ComVisible, Guid, In, Out, Optional
-- Diagnostics.CodeAnalysis: full nullable analysis + StringSyntax attributes
-- Runtime.Versioning: TargetFramework, SupportedOSPlatform, UnsupportedOSPlatform, etc.
-- Text.Encodings.Web: HtmlEncoder, JavaScriptEncoder, UrlEncoder
+### What is tested (769 tests across 40 suites)
+| Suite file | Tests |
+|------------|-------|
+| `PrimitiveTypeTests.cpp` | Int32, Int64, UInt32 (18) |
+| `PrimitiveTypeTests2.cpp` | Int16, UInt16, SByte, Boolean, Char, Single, Double (98) |
+| `DecimalTests.cpp` | Decimal 128-bit (47) |
+| `MathTests.cpp` | Math static methods (37) |
+| `ConvertTests.cpp` | Convert static methods (43) |
+| `GuidTests.cpp` | Guid (24) |
+| `DateTimeTests.cpp` | DateTime + TimeSpan (23) |
+| `TimeSpanTests.cpp` | TimeSpan (existing) |
+| `RandomTests.cpp` | Random (existing) |
+| `EventHandlerTests.cpp` | EventHandler (existing) |
+| `ExceptionTests.cpp` | 11 exception types (33) |
+| `Text/StringBuilderTests.cpp` | StringBuilder (27) |
+| `Text/EncodingWebTests.cpp` | HtmlEncoder, UrlEncoder, JavaScriptEncoder (36) |
+| `Text/JsonTests.cpp` | JsonDocument / JsonElement (28) |
+| `IO/HashingTests.cpp` | CRC32, XxHash32, XxHash64 (27) |
+| `IO/StreamTests.cpp` | MemoryStream, StringReader, StringWriter (29) |
+| `Collections/ImmutableCollectionTests.cpp` | ImmutableArray, ImmutableList, ImmutableDictionary (33) |
+| `Collections/PriorityQueueTests.cpp` | PriorityQueue (20) |
+| `Collections/Generic/CollectionsTests.cpp` | List, Dictionary, HashSet (52) |
+| `Collections/Generic/QueueStackTests.cpp` | Queue, Stack (34) |
+| `Collections/Generic/LinkedListSortedSetTests.cpp` | LinkedList, SortedSet (38) |
+| `Numerics/BigIntegerTests.cpp` | BigInteger (45) |
+| `Numerics/ComplexTests.cpp` | Complex (38) |
 
-### What does NOT work yet
-- ~~**Tests cannot be run** (`SHARP_RUNTIME_BUILD_TESTS=OFF` in cache)~~ — **DONE: 39/39 pass** ✅
-- **GZipStream / DeflateStream:** throw `NotImplementedException` — awaiting zlib/miniz integration
-- **ZipArchive:** throws `NotImplementedException` — awaiting miniz/libzip
+### What is NOT yet tested (priority order)
+1. `System::Diagnostics::Stopwatch` — **next target A**
+2. `System::Text::Encoding` (UTF8/ASCII) — **next target B**
+3. `System::Diagnostics::Debug` / `Trace`
+4. `System::TimeZoneInfo`
+5. `System::Uri`
+6. `System::Threading` primitives (Thread, Monitor, Mutex, Semaphore, etc.)
+
+### What does NOT work yet (implementation gaps)
+- **GZipStream / DeflateStream / ZipArchive:** throw `NotImplementedException` — awaiting zlib/miniz
 - **XmlReader / XmlWriter:** throw `NotImplementedException` — awaiting tinyxml2/pugixml
 - **TcpClient / UdpClient:** throw `NotImplementedException` — awaiting POSIX/Winsock
-- **JsonDocument::Parse:** ~~returns a stub~~ **DONE** — uses nlohmann/json 3.10.4 ✅
 - **Task/TaskT:** use `std::async(std::launch::async)`, not a full threadpool scheduler
+- **Thread::CurrentThread():** returns a proxy struct, not a real `Thread` — no `Join()` / `IsAlive`
+- **BigInteger::TryParse:** not yet implemented
+- **AppDomain / AppContext / GC:** stubs only
 
 ---
 
-## 3. Recent changes
+## 3. Recent changes (last 3 sessions)
 
-**Session 20 (primitive box tests — Int16, UInt16, SByte, Boolean, Char, Single, Double):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests: Int16/UInt16/SByte (constants, Parse boundary+overflow+invalid, TryParse, ToString); Boolean (TrueString/FalseString, Parse case-insensitive, TryParse, ToString); Char/char16_t (IsLetter/Digit/LetterOrDigit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse single/multi-throws/empty-throws, ToString, surrogate helpers, ConvertToUtf32); Single/Double (MaxValue/MinValue/Epsilon, NaN/Infinity constants, IsNaN/IsInfinity/IsPositive-NegativeInfinity/IsFinite/IsNormal, Parse/TryParse/ToString) |
-
-**Session 19 (Queue/Stack/LinkedList/SortedSet tests):**
+**Session 20 (primitive box tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/Collections/Generic/QueueStackTests.cpp` | New — 34 tests: Queue (Enqueue/Dequeue/Peek/FIFO order/Contains/Clear/ToArray/EnqueueAfterDequeue/stress-1000), Stack (Push/Pop/Peek/LIFO order/Contains/Clear/ToArray-top-first/PushAfterPop/stress-1000), both with empty-throws and string specialisations |
-| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList (AddFirst/AddLast/getFirst/getLastProperty/RemoveFirst/RemoveLast-empty-noop/Remove-value/Contains/Clear/range-for order), SortedSet (Add bool-return/dup/Contains/Remove/Min+MaxProperty/sorted-iteration/ToVector/Clear/UnionWith/IntersectWith/ExceptWith/IsSubsetOf/IsSupersetOf/GetViewBetween/string-alphabetic) |
+| `tests/System/PrimitiveTypeTests2.cpp` | New — 98 tests covering Int16/UInt16/SByte (Parse boundary+overflow+invalid, TryParse, ToString), Boolean (TrueString/FalseString, Parse case-insensitive, TryParse), Char/char16_t (IsLetter/Digit/WhiteSpace/Upper/Lower/Punctuation/Control, ToUpper/ToLower, GetNumericValue, Parse, surrogate helpers, ConvertToUtf32), Single/Double (NaN/Infinity constants, IsNaN/IsInfinity/IsFinite/IsNormal, Parse/TryParse) |
 
-**Session 18 (generic collections tests + IEnumerable bug fix):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Collections/Generic/IEnumerable.hpp` | Bugfix — declared two `GetEnumerator()` overloads with identical parameters but different return types (illegal in C++). The non-generic overload is unnecessary: `IEnumerator<T>` derives from `IEnumerator`, so the typed declaration is already a valid covariant return-type override. Removed duplicate. |
-| `include/System/Collections/Generic/List.hpp` | Bugfix — removed the second `GetEnumerator()` body using a qualified name (`System::Collections::IEnumerable::GetEnumerator()`) that C++ does not allow inside a class definition |
-| `tests/System/Collections/Generic/CollectionsTests.cpp` | New — 52 tests: List<int/string> (default ctor, Add, Contains, operator[], Remove/true/false/first-only, IndexOf, Insert, RemoveAt, Clear, ToVector, ctor-from-vector, range-for); Dictionary<string,int>/<int,string> (Add, ContainsKey, dup-Add-throws, TryGetValue found/not-found, operator[] write/overwrite, const-operator[]-throws, Remove true/false, Count, Clear, range-for); HashSet<int/string> (Add true/false, Contains, Remove true/false, Count, Clear, UnionWith/IntersectWith/ExceptWith with overlap and disjoint cases, ToArray, range-for) |
-
-**Session 17 (IO stream tests):**
+**Session 19 (Queue, Stack, LinkedList, SortedSet tests):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/IO/StreamTests.cpp` | New — 29 tests: MemoryStream (default empty+writable, WriteByte, Write with offset, GetBuffer copy, ToArray ref, read-only from buffer ctor, Read/partial/at-end, write→read roundtrip), StringReader (Peek non-advancing, Read advancing, -1 at end, ReadLine, CR stripping, ReadToEnd, partial-then-rest), StringWriter (empty, Write, multi-Write, GetStringBuilder alias, idempotent ToString) |
+| `tests/System/Collections/Generic/QueueStackTests.cpp` | New — 34 tests: Queue FIFO/Contains/Clear/ToArray/stress-1000; Stack LIFO/Contains/Clear/ToArray-top-first/stress-1000 |
+| `tests/System/Collections/Generic/LinkedListSortedSetTests.cpp` | New — 38 tests: LinkedList AddFirst/AddLast/getFirst/getLastProperty/RemoveFirst/RemoveLast-noop/Remove-value/Contains/Clear/range-for; SortedSet Add-bool-return/Min+Max/sorted-iteration/ToVector/set-algebra/GetViewBetween |
 
-**Session 16 (Exception hierarchy tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/ExceptionTests.cpp` | New — 33 tests: Exception (message/what/is-std::exception), SystemException, ArgumentException (message/paramName), ArgumentNullException, ArgumentOutOfRangeException, OverflowException (is-ArithmeticException), FormatException, InvalidOperationException, NotImplementedException, NotSupportedException, NullReferenceException, ObjectDisposedException (is-InvalidOperationException), cross-hierarchy catch tests (all catchable as std::exception, ArgumentNullException caught as Exception) |
-
-**Session 15 (DateTime tests):**
+**Session 18 (List, Dictionary, HashSet tests + IEnumerable/List bug fix):**
 
 | File(s) | Change |
 |---------|--------|
-| `tests/System/DateTimeTests.cpp` | New — 23 tests: default ctor (zero ticks), from-ticks ctor (including .NET vector 999999999999999999), Add/Subtract with TimeSpan (day/hour/second/roundtrip), Subtract(DateTime)→TimeSpan (positive/zero/negative), all comparison operators, getTimeOfDayProperty (boundary/midday/range), getNowProperty sanity (> UnixEpochTicks, monotonic), ToString format, chained arithmetic |
+| `include/System/Collections/Generic/IEnumerable.hpp` | Bugfix — removed duplicate `GetEnumerator()` with conflicting return type; covariant override handles it |
+| `include/System/Collections/Generic/List.hpp` | Bugfix — removed illegal qualified-name method definition inside class body |
+| `tests/System/Collections/Generic/CollectionsTests.cpp` | New — 52 tests for List, Dictionary, HashSet |
 
-**Session 14 (StringBuilder tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Text/StringBuilderTests.cpp` | New — 27 tests: default ctor, ctor with initial value, Append (string/char*/char/int/double/bool), AppendLine (no-arg, with string, twice), fluent chaining, Length, Empty, Clear, ToString, stress (1000 chars, 10000-char string) |
-
-**Session 13 (Convert tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/ConvertTests.cpp` | New — 43 tests: ToInt32 (string, bool, double, float, int, long, byte, overflow, base 2/8/10/16), ToInt64 (string, int, double), ToInt16 (string, int, overflow), ToDouble (string, int, long), ToSingle (string, double, int), ToByte (int, overflow, string), ToBoolean (int, string true/false variants, invalid), ToString (int, long, bool, char, byte, base 2/8/10/16, invalid base). Note: const char* → bool implicit conversion requires explicit std::string{} wrapping for ToInt32 (which has both bool and string overloads) |
-
-**Session 12 (Math tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/MathTests.cpp` | New — 37 tests: E/PI constants, Abs (double + int), Min/Max (int + double), Clamp (int + double), Floor/Ceiling/Round with official .NET vectors, Sqrt, Pow (including fractional exponent), Sin/Cos/Tan at canonical angles, Pythagorean identity sin²+cos²=1 for 5 angles |
-
-**Session 11 (Guid tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/GuidTests.cpp` | New — 24 tests: Empty constant, default ctor, Parse/ToString roundtrip, braces/parentheses formats, invalid throws, byte-array ctor, equality/ordering, NewGuid RFC 4122 v4 compliance (version nibble, variant bits), NewGuid uniqueness stress (20 consecutive GUIDs all different) |
-
-**Session 10 (Complex tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Numerics/ComplexTests.cpp` | New — 38 tests: constants (Zero/One/ImaginaryOne), construction + property access, all arithmetic (+/-/*/÷/unary−), equality, Conjugate, AbsD, Sqrt (including √−1 = i), Euler's identity via Exp, Log/Exp roundtrip, Sin/Cos + sin²+cos²=1, ToString |
-
-**Session 9 (BigInteger tests + header bugfix):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Numerics/BigInteger.hpp` | Bugfix — comment contained `*/` inside `/** */` block, prematurely ending it; replaced `+/-/*/comparisons` with prose |
-| `tests/System/Numerics/BigIntegerTests.cpp` | New — 45 tests: constants, constructors, Parse/ToString, add/sub/mul with official .NET vectors (uint64Max+1, uint64Max^2, large 81-digit arithmetic), comparison, unary minus, Abs, stress roundtrip |
-
-**Session 8 (Decimal 128-bit precision):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Decimal.hpp` | Complete rewrite — 96-bit mantissa using `unsigned __int128`, scale 0–28, sign bit; 192-bit multiplication via `uint192` struct; full Parse/ToString, arithmetic, comparison, math methods (Abs/Truncate/Floor/Ceiling/Round) |
-| `tests/System/DecimalTests.cpp` | New — 47 tests: constants, Parse/ToString roundtrip, 0.1+0.2==0.3 precision test, all arithmetic operators, comparison, math methods, conversions |
-
-**Session 7 (real JSON parsing via nlohmann/json):**
-
-| File(s) | Change |
-|---------|--------|
-| `vendor/nlohmann/json.hpp` | New — nlohmann/json 3.10.4 (copied from mesh-craft vendor; MIT license) |
-| `CMakeLists.txt` | Add `vendor/` to `target_include_directories` so `#include "nlohmann/json.hpp"` works |
-| `include/System/Text/Json/JsonDocument.hpp` | Rewritten — `Parse()` now uses `nlohmann::json::parse()` and recursively builds the `JsonElement` tree; `ParseValue()` delegates to `Parse()` |
-| `tests/System/Text/JsonTests.cpp` | New — 28 tests covering all JSON value kinds, object/array nesting, error handling, Dispose |
-
-**Session 6 (encoder tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Text/EncodingWebTests.cpp` | New — 36 tests for HtmlEncoder (13), UrlEncoder (13), JavaScriptEncoder (10); vectors sourced from the official .NET runtime tests |
-
-**Session 5 (PriorityQueue tests + official hash vectors):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Collections/PriorityQueueTests.cpp` | New — 20 tests for PriorityQueue min-heap (ordering, edge cases, EnqueueRange, Clear, 1000-element stress) |
-| `tests/System/IO/HashingTests.cpp` | Extended — 3 new tests using official .NET runtime test vectors for CRC32, XxHash32, XxHash64 |
-
-**Note:** The .NET runtime source is available at `/rv/tmp/runtime/src/libraries` — use it for official test vectors before writing any new hash/collection tests.
-
-**Session 4 (immutable collection tests):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/Collections/ImmutableCollectionTests.cpp` | New — 33 tests for ImmutableArray, ImmutableList, ImmutableDictionary |
-
-**Session 3 (hashing tests + bug fix):**
-
-| File(s) | Change |
-|---------|--------|
-| `tests/System/IO/HashingTests.cpp` | New — 24 tests for Crc32, XxHash32, XxHash64 (spec vectors, streaming, Reset, seed variation) |
-| `include/System/IO/Hashing/Crc32.hpp`, `XxHash32.hpp`, `XxHash64.hpp` | Bug fix — added `using NonCryptographicHashAlgorithm::Append;` to expose vector overload hidden by the override |
-
-**Waves 16–20 (session 2):**
-
-| File(s) | Change |
-|---------|--------|
-| `include/System/Int16.hpp`, `UInt16.hpp`, `UInt32.hpp`, `UInt64.hpp`, `SByte.hpp`, `Byte.hpp` | New — primitive type boxes with MaxValue/MinValue/Parse/TryParse |
-| `include/System/Int32.hpp` | Updated — filled in MaxValue/MinValue/Parse/TryParse (was empty) |
-| `include/System/Char.hpp` | New — IsLetter/IsDigit/IsSurrogate/ToUpper/ToLower/GetNumericValue |
-| `include/System/Boolean.hpp` | New — TrueString/FalseString, Parse/TryParse |
-| `include/System/Single.hpp`, `Double.hpp` | New — NaN/Infinity/Epsilon constants, IsNaN/IsFinite/Parse |
-| `include/System/Decimal.hpp` | New — double-backed stub with full arithmetic operators |
-| `include/System/Collections/Generic/PriorityQueue.hpp` | New — min-heap, Enqueue/Dequeue/TryDequeue/TryPeek |
-| `include/System/Collections/Generic/SortedSet.hpp` | New — wraps `std::set`, GetViewBetween/UnionWith/IntersectWith |
-| `include/System/Collections/Specialized/ListDictionary.hpp` | New — ordered key-value list |
-| `include/System/Collections/ObjectModel/ReadOnlyObservableCollection.hpp` | New |
-| `include/System/Threading/Tasks/Task.hpp` | New — `std::async`-backed Task/TaskT |
-| `include/System/Threading/Tasks/TaskCompletionSource.hpp` | New — `std::promise`-backed |
-| `include/System/Threading/Tasks/ValueTask.hpp` | New |
-| `include/System/Threading/Tasks/Parallel.hpp` | New — For/ForEach/Invoke |
-| `include/System/Threading/CountdownEvent.hpp`, `Barrier.hpp` | New |
-| `include/System/Threading/Thread.hpp` | Modified — added `CurrentThread()` proxy |
-| `include/System/Text/Encodings/Web/HtmlEncoder.hpp`, `UrlEncoder.hpp`, `JavaScriptEncoder.hpp` | New |
-| `include/System/Text/Json/Serialization/JsonSerializationAttributes.hpp` | New |
-| `include/System/ComponentModel/INotifyPropertyChanging.hpp` | New |
-| `include/System/ComponentModel/CategoryAttribute.hpp` | New — Category/Browsable/ReadOnly/DisplayName/TypeConverter/Designer |
-| `include/System/ComponentModel/DataAnnotations/DataAnnotationAttributes.hpp` | New |
-| `include/System/Runtime/InteropServices/InteropAttributes.hpp` | New |
-| `include/System/Runtime/Versioning/VersioningAttributes.hpp` | New |
-| `include/System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp` | New |
-| `include/System/Numerics/GenericMathInterfaces.hpp` | New — INumber/IFloatingPoint/IBinaryInteger stubs |
-| `include/System/ISpanFormattable.hpp`, `ISpanParsable.hpp` | New |
-| `DOTNET_PORTING_PLAN.md` | Updated — all completed namespaces/types marked ✅ DONE |
+*For older session history see `git log --oneline`.*
 
 ---
 
-## 4. Current blocker / main problem
-
-**No critical blocker.** The test suite is now enabled and all 39 tests pass.
-
-- `cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON && cmake --build build --parallel 4` — ✅ clean
-- `cd build && ctest --output-on-failure` — ✅ `100% tests passed, 0 tests failed out of 39`
-
-**Next focus:** expand test coverage — hashing, immutable collections (see section 8).
-
----
-
-## 5. Known bugs and limitations
+## 4. Known bugs and limitations
 
 | Status | Issue |
 |--------|-------|
-| ~~**confirmed**~~ **fixed** | `Decimal` is now 128-bit fixed-point (96-bit mantissa, scale 0–28, sign); 0.1+0.2==0.3 passes; 47 tests cover full API |
-| **confirmed** | `Task` / `TaskT` use `std::async(std::launch::async)` — spawns a raw OS thread per task, no threadpool |
-| ~~**confirmed**~~ **fixed** | `JsonDocument::Parse()` now uses nlohmann/json 3.10.4 (vendor/nlohmann/json.hpp) to build a full `JsonElement` tree; 28 tests cover primitives, objects, arrays, nesting, error handling, and Dispose |
+| **confirmed** | `Task` / `TaskT` use `std::async(std::launch::async)` — raw OS thread per task, no threadpool |
 | **confirmed** | `XmlReader` / `XmlWriter` throw `NotImplementedException` always |
 | **confirmed** | `GZipStream`, `DeflateStream`, `ZipArchive` throw `NotImplementedException` always |
 | **confirmed** | `TcpClient`, `UdpClient` throw `NotImplementedException` always |
-| ~~**incomplete**~~ **fixed** | Test suite is now built and all 39 tests pass (`SHARP_RUNTIME_BUILD_TESTS=ON`) |
-| **incomplete** | `Thread::CurrentThread()` returns a proxy struct, not a full `Thread` object — cannot `Join()` or check `IsAlive` on it |
-| **incomplete** | `Char::Parse(string)` only works for 1-byte ASCII chars — does not handle multi-byte UTF-8 sequences |
+| **incomplete** | `Thread::CurrentThread()` returns a proxy struct — cannot `Join()` or check `IsAlive` |
+| **incomplete** | `Char::Parse(string)` only handles 1-byte ASCII — no multi-byte UTF-8 |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` only knows UTC, Local, and a handful of hardcoded zones |
-| **incomplete** | `BigInteger` uses a base-10⁹ representation — correct but slower than binary; `TryParse` not present |
-| **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs with no real implementation |
-| ~~**needs verification**~~ **verified** | `XxHash32` / `XxHash64` spec test vectors pass (empty-string canonical values); streaming == one-shot confirmed for short, medium, and 100-byte inputs |
-| ~~**needs verification**~~ **verified** | `CRC32` lookup table correct — standard test vector `"123456789"` → `0xCBF43926` passes |
-| ~~**needs verification**~~ **verified** | `ImmutableArray`, `ImmutableList`, `ImmutableDictionary` — 33 tests covering Add/Remove/SetItem/Insert/Sort/Contains/IndexOf/Clear; all operations confirmed to return new instances and leave originals unchanged |
-| **risky assumption** | `SharpRuntime::charcs = char16_t` — some headers cast char16_t to/from `wint_t` which may not be identity on all platforms |
+| **incomplete** | `BigInteger::TryParse` not implemented |
+| **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs |
+| **risky** | `SharpRuntime::charcs = char16_t` — some headers cast to `wint_t`; not identity on all platforms |
+| **known warning** | `Char.hpp:16` emits "null character in literal" — cosmetic, does not affect behaviour |
 
 ---
 
-## 6. Architecture notes
+## 5. Architecture notes
 
 ### Module layout
 ```
 include/
-  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs (intcs, bytecs, etc.)
+  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs (intcs, bytecs, shortcs, charcs, etc.)
   System/                               ← root namespace: exceptions, Math, Convert, ...
   System/Collections/                   ← Generic/, Concurrent/, Immutable/, ObjectModel/, Specialized/
-  System/IO/                            ← Stream, File, BinaryReader/Writer, Compression/, Hashing/, IsolatedStorage/
-  System/Text/                          ← StringBuilder, Encoding, Rune, Unicode/, RegularExpressions/, Json/, Encodings/
+  System/IO/                            ← Stream, File, BinaryReader/Writer, Compression/, Hashing/
+  System/Text/                          ← StringBuilder, Encoding, Rune, Json/, Encodings/Web/
   System/Threading/                     ← Thread, Monitor, Mutex, ..., Tasks/
-  System/Numerics/                      ← BigInteger, Complex, BFloat16, GenericMathInterfaces
+  System/Numerics/                      ← BigInteger, Complex, GenericMathInterfaces
   System/Diagnostics/                   ← Debug, Trace, Stopwatch, CodeAnalysis/
   System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ...
   System/Runtime/                       ← CompilerServices/, InteropServices/, Versioning/
@@ -271,237 +143,139 @@ include/
   System/Xml/                           ← XmlReader, XmlWriter, Linq/
   System/ComponentModel/                ← attributes, INotifyPropertyChanged, DataAnnotations/
   System/Security/                      ← exceptions, security attributes
-  System/Buffers/                       ← ArrayPool, StandardFormat, IMemoryOwner, OperationStatus
-src/                                    ← .cpp for types that need it (exceptions, Guid, DateTime, BinaryReader, etc.)
-tests/System/                           ← GoogleTest suites (currently not built)
+  System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
+src/                                    ← .cpp for types needing it (exceptions, Guid, DateTime, Encoding, etc.)
+tests/System/                           ← GoogleTest suites (built, 769 tests pass)
 vendor/googletest/                      ← bundled test framework
+vendor/nlohmann/json.hpp                ← nlohmann/json 3.10.4 (MIT)
 ```
 
 ### Invariants that must not be broken
-1. **All new types are header-only** — only add a `.cpp` if there is a genuine ODR or compile-time reason (e.g., a non-inline `inline` static that would cause linker errors)
-2. **Property naming:** always `getXxxProperty()` / `setXxxProperty()` — never bare public fields for ported .NET properties
-3. **SPDX header on every file** — three lines: MIT license, Robert Vokac copyright, .NET Foundation attribution
-4. **Namespace syntax:** `namespace System::Collections::Generic {` — C++17 nested form, never nested braces
+1. **All new types are header-only** — only add `.cpp` if there is a genuine ODR or compile-time reason
+2. **Property naming:** always `getXxxProperty()` / `setXxxProperty()` — never bare public fields
+3. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET Foundation attribution
+4. **Namespace syntax:** `namespace System::Collections::Generic {` — C++17 nested form
 5. **`SharpRuntime::intcs` not `int`** in public APIs that mirror .NET `int` parameters
-6. **Build must stay clean** — `cmake --build build --parallel 4` must produce zero errors and zero warnings before any commit
-7. **`inline` statics** in headers for ODR-safe static members (e.g., `Decimal::Zero`, `Rune::ReplacementChar`, CRC32 lookup table)
+6. **Build must stay clean** — zero errors, zero warnings before any commit
+7. **`inline` statics** in headers for ODR-safe static members
 
 ### API compatibility rules
 - Method names mirror .NET exactly (PascalCase)
-- Template parameter names mirror .NET exactly (`TKey`, `TValue`, `TElement`, `TPriority`, etc.)
-- Static factory methods preferred over constructors where .NET uses them (`Empty()`, `Create()`, `Default()`)
-- `Shared()` for pool singletons, `Default()` for options singletons
+- Template parameter names: `TKey`, `TValue`, `TElement`, `TPriority`, etc.
+- Static factory methods preferred where .NET uses them (`Empty()`, `Create()`, `Default()`)
 
 ---
 
-## 7. Useful commands
+## 6. Useful commands
 
 ```bash
-# Configure (first time or to enable tests)
-cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON
-
 # Build
 cmake --build build --parallel 4
 
-# Run tests (after configuring with SHARP_RUNTIME_BUILD_TESTS=ON)
-cd build && ctest --output-on-failure
-
-# Run tests directly
+# Run all tests
 ./build/SharpRuntimeTests
 
-# Run a single test suite
-./build/SharpRuntimeTests --gtest_filter="TimeSpanTests.*"
+# Run a single suite
+./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"
+
+# Run multiple suites
+./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*:EncodingTests.*"
+
+# Check for warnings/errors
+cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
+
+# Git log
+git log --oneline -15
+
+# Count test files
+find tests -name "*.cpp" | wc -l
 
 # Count header files
 find include -name "*.hpp" | wc -l
-
-# Check build is clean (no errors, no warnings)
-cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
-
-# See recent git log
-git log --oneline -15
-
-# Check what is on develop vs master
-git diff master..develop --stat
 ```
 
 ---
 
-## 8. Next smallest tasks
+## 7. Next task — Task 21: Stopwatch + Encoding
 
-### ~~Task 1 — Enable and run the test suite~~ DONE ✅
-All 39 tests pass. `SHARP_RUNTIME_BUILD_TESTS=ON` is now in the build cache.
+Do **both** in one session. Both headers are fully implemented and ready to test.
 
----
+### A. Stopwatch — `tests/System/Diagnostics/StopwatchTests.cpp`
 
-### ~~Task 1 (was Task 2) — Add tests for Int32/Int64/UInt32 primitive boxes~~ DONE ✅
-18 tests in `tests/System/PrimitiveTypeTests.cpp` — all pass.
-Also fixed: `Int64` was missing Parse/TryParse (added). `UInt32::Parse` silently truncated overflow on 64-bit (fixed with range check).
+Header: `include/System/Diagnostics/Stopwatch.hpp` (fully header-only, no .cpp needed)
 
----
+API summary:
+- `Stopwatch()` — default ctor, not running, zero elapsed
+- `Start()` / `Stop()` — `getIsRunningProperty()` toggles; elapsed accumulates across Stop/Start cycles
+- `Reset()` — stops and zeros elapsed; `Restart()` — zeros + starts immediately
+- `StartNew()` — static factory, returns an already-running stopwatch
+- `getElapsedMillisecondsProperty()` — ms since start (int64)
+- `getElapsedTicksProperty()` — .NET ticks (100 ns units, int64)
+- `getElapsedProperty()` — `System::TimeSpan` (ticks == getElapsedTicks)
 
-### ~~Task 1 (was Task 3) — Add tests for XxHash32/XxHash64/CRC32~~ DONE ✅
-24 tests in `tests/System/IO/HashingTests.cpp` — all pass.
-Also fixed: `XxHash32`, `XxHash64`, and `Crc32` were missing `using NonCryptographicHashAlgorithm::Append;`, which hid the base-class vector overload (the static `HashToUInt32/64` methods were also affected). Fixed with a one-line `using` declaration in each header.
+Suggested test coverage:
+- Default ctor: `getIsRunningProperty() == false`, `getElapsedMillisecondsProperty() == 0`
+- `Start()` → `getIsRunningProperty() == true`
+- `Stop()` → `getIsRunningProperty() == false`
+- Elapsed > 0 after Start + tiny `std::this_thread::sleep_for(1ms)` + Stop
+- `StartNew()` → `getIsRunningProperty() == true`
+- `Reset()` after running → not running, elapsed == 0
+- `Restart()` → `getIsRunningProperty() == true`; `Reset()` then `Start()` produces the same result
+- Stop on already-stopped: no crash, elapsed unchanged
+- `getElapsedProperty().getTicksProperty() == getElapsedTicksProperty()`
 
----
-
-### ~~Task 1 (was Task 4) — Add tests for ImmutableArray/ImmutableList/ImmutableDictionary~~ DONE ✅
-33 tests in `tests/System/Collections/ImmutableCollectionTests.cpp` — all pass.
-All operations confirmed immutable: originals unchanged, mutations return new instances.
-
----
-
-### ~~Task 1 (was Task 5) — Add tests for PriorityQueue<T,P>~~ DONE ✅
-20 tests in `tests/System/Collections/PriorityQueueTests.cpp` — all pass.
-Covers: empty-queue throws, single-element Peek/Dequeue, min-heap ordering, negative/equal priorities, TryDequeue/TryPeek, EnqueueRange, Clear, 1000-element stress.
-
----
-
-### ~~Task 1 (was Task 6) — Add tests for HtmlEncoder / UrlEncoder~~ DONE ✅
-36 tests in `tests/System/Text/EncodingWebTests.cpp` — all pass.
-Covers HtmlEncoder (5 special chars + composites from official .NET tests), UrlEncoder (unreserved chars, percent-encoding, Decode roundtrip, + handling), JavaScriptEncoder (backslash, quote, newline, control chars, composite).
+**Create directory first:** `mkdir -p tests/System/Diagnostics`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"`
 
 ---
 
-### ~~Task 1 (was Task 7) — Wire up real JSON parsing in JsonDocument::Parse()~~ DONE ✅
-nlohmann/json 3.10.4 added to `vendor/nlohmann/json.hpp`. `JsonDocument::Parse()` now builds a full `JsonElement` tree. 28 tests in `tests/System/Text/JsonTests.cpp` — all pass.
+### B. Encoding — `tests/System/Text/EncodingTests.cpp`
 
----
+Header: `include/System/Text/Encoding.hpp` (factory methods implemented in `src/`)
 
-### ~~Task 1 (was Task 8) — Add Decimal 128-bit precision using `__int128`~~ DONE ✅
-47 tests in `tests/System/DecimalTests.cpp` — all pass. 0.1 + 0.2 == 0.3 exactly. MaxValue/MinValue correct. Full arithmetic, comparison, and math methods implemented.
-
----
-
-### ~~Task 1 (was Task 9) — Add tests for BigInteger~~ DONE ✅
-45 tests in `tests/System/Numerics/BigIntegerTests.cpp` — all pass.
-Also fixed: `BigInteger.hpp` comment at line 24 contained `*/` inside a `/** */` block (from `+/-/*/comparisons`), which prematurely ended the comment and caused the entire header to fail to compile.
-
----
-
-### ~~Task 1 (was Task 10) — Add tests for Complex~~ DONE ✅
-38 tests in `tests/System/Numerics/ComplexTests.cpp` — all pass.
-Covers constants, construction, arithmetic, equality, Conjugate, Abs, Sqrt(−1)=i, Euler's identity, Log/Exp roundtrip, sin²+cos²=1.
-
----
-
-### ~~Task 1 (was Task 11) — Add tests for Guid~~ DONE ✅
-24 tests in `tests/System/GuidTests.cpp` — all pass.
-Covers Empty, Parse/ToString roundtrip, braces/parentheses formats, invalid throws, byte-array ctor, equality/ordering, NewGuid RFC 4122 v4 bits, NewGuid uniqueness stress.
-
----
-
-### ~~Task 1 (was Task 12) — Add tests for Math static methods~~ DONE ✅
-37 tests in `tests/System/MathTests.cpp` — all pass.
-Covers all implemented methods: E/PI, Abs(double+int), Min/Max(int+double), Clamp(int+double), Floor/Ceiling/Round, Sqrt, Pow, Sin/Cos/Tan, Pythagorean identity.
-
----
-
-### ~~Task 1 (was Task 13) — Add tests for Convert static methods~~ DONE ✅
-43 tests in `tests/System/ConvertTests.cpp` — all pass.
-Covers ToInt32/64/16, ToDouble, ToSingle, ToByte, ToBoolean, ToString — all overloads, base conversions (2/8/10/16), and overflow/format exceptions.
-**Note:** When `Convert` has both `bool` and `string` overloads for the same function (e.g. `ToInt32`), `const char*` literals must be wrapped in `std::string{}` to avoid the built-in `const char* → bool` implicit conversion taking priority.
-
----
-
-### ~~Task 1 (was Task 14) — Add tests for StringBuilder~~ DONE ✅
-27 tests in `tests/System/Text/StringBuilderTests.cpp` — all pass.
-Covers constructors, all Append overloads (string/char*/char/int/double/bool), AppendLine, fluent chaining, Length, Empty, Clear, ToString, large-input stress.
-
----
-
-### ~~Task 1 (was Task 15) — Add tests for DateTime~~ DONE ✅
-23 tests in `tests/System/DateTimeTests.cpp` — all pass.
-Covers tick-based construction, Add/Subtract(TimeSpan), Subtract(DateTime)→TimeSpan, comparison operators, getTimeOfDayProperty, getNowProperty sanity, ToString, chained arithmetic.
-Note: implementation is tick-only; no Year/Month/Day accessors exist yet.
-
----
-
-### ~~Task 1 (was Task 16) — Add tests for Exception hierarchy~~ DONE ✅
-33 tests in `tests/System/ExceptionTests.cpp` — all pass.
-Covers 11 exception types: message, what(), inheritance chains (all catchable as std::exception and appropriate base classes), cross-hierarchy catch test.
-
----
-
-### ~~Task 1 (was Task 17) — Add tests for IO/Stream types~~ DONE ✅
-29 tests in `tests/System/IO/StreamTests.cpp` — all pass.
-Covers MemoryStream (writable, read-only, Write/Read/WriteByte, roundtrip), StringReader (Peek/Read/ReadLine/ReadToEnd), StringWriter (Write/ToString/GetStringBuilder).
-
----
-
-### ~~Task 1 (was Task 18) — Add tests for Collections.Generic (List, Dictionary, HashSet)~~ DONE ✅
-52 tests in `tests/System/Collections/Generic/CollectionsTests.cpp` — all pass.
-Also fixed: `IEnumerable.hpp` had a duplicate `GetEnumerator()` conflicting on return type (C++ rejects same-name same-params different-return overloads); `List.hpp` had an illegal qualified-name method definition inside a class body. Both removed — covariant return types handle the override automatically.
-
----
-
-### ~~Task 1 (was Task 19) — Add tests for Queue<T>, Stack<T>, LinkedList<T>, SortedSet<T>~~ DONE ✅
-72 tests across two files — all pass. Queue/Stack stress 1000 elements; LinkedList RemoveFirst/RemoveLast empty-noop; SortedSet set-algebra and GetViewBetween bounds.
-
----
-
-### ~~Task 1 (was Task 20) — Add tests for primitive type boxes: Int16, UInt16, SByte, Boolean, Char, Single, Double~~ DONE ✅
-98 tests in `tests/System/PrimitiveTypeTests2.cpp` — all pass.
-
----
-
-### Task 1 (was Task 21) — Add tests for Stopwatch and Encoding
-
-Do **both** in one session — both headers are fully implemented.
-
-#### A. Stopwatch — `tests/System/Diagnostics/StopwatchTests.cpp`
-Header: `include/System/Diagnostics/Stopwatch.hpp` (fully header-only)
-API:
-- `Stopwatch()` default ctor — not running, zero elapsed
-- `Start()` / `Stop()` — `getIsRunningProperty()` toggles; `getElapsedMillisecondsProperty()` accumulates
-- `Reset()` — stops and zeros elapsed
-- `Restart()` — resets + starts immediately
-- `StartNew()` — static factory, returns a running stopwatch
-- `getElapsedTicksProperty()` — .NET ticks (100 ns units)
-- `getElapsedProperty()` — returns `System::TimeSpan`
-
-Suggested tests: default ctor (not running, zero elapsed), Start sets isRunning, Stop clears isRunning, elapsed > 0 after Start+small delay+Stop, StartNew is running, Reset zeros elapsed, Restart is running after call, Stop-stop is idempotent (no crash), getElapsed returns TimeSpan with ticks == getElapsedTicks.
-
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"`
-
-#### B. Encoding — `tests/System/Text/EncodingTests.cpp`
-Header: `include/System/Text/Encoding.hpp` (factory methods in a .cpp)
-API:
-- `Encoding::UTF8()` → shared_ptr, `getEncodingNameProperty()` == `"utf-8"`
-- `Encoding::ASCII()` → shared_ptr, name contains `"ascii"` or `"us-ascii"`
-- `GetBytes(string)` → `vector<uint8_t>`
+API summary:
+- `Encoding::UTF8()` → `shared_ptr<Encoding>`, `getEncodingNameProperty()` == `"utf-8"`
+- `Encoding::ASCII()` → `shared_ptr<Encoding>`, name contains `"ascii"`
+- `GetBytes(const string& str)` → `vector<uint8_t>`
 - `GetString(const uint8_t* data, int index, int count)` → `string`
-- Round-trip: `GetString(GetBytes("hello").data(), 0, n)` == `"hello"`
 
-Suggested tests: UTF8/ASCII singletons not null, UTF8 name, ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct for ASCII range, GetString round-trip for both encodings.
+Suggested test coverage:
+- `UTF8()` returns non-null
+- `ASCII()` returns non-null
+- `UTF8()->getEncodingNameProperty() == "utf-8"`
+- `ASCII()->GetBytes("ABC")` == `{65, 66, 67}`
+- `UTF8()->GetBytes("hello")` == `{104, 101, 108, 108, 111}`
+- Round-trip: `GetString(GetBytes("hello world").data(), 0, n)` == `"hello world"` for both UTF8 and ASCII
+- Empty string: `GetBytes("")` is empty; `GetString(nullptr or empty, 0, 0)` == `""`
 
-**Command:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="EncodingTests.*:StopwatchTests.*"`
+**Run:** `./build/SharpRuntimeTests --gtest_filter="EncodingTests.*"`
 
 ---
 
-## 9. Do not do yet
+After both: run `./build/SharpRuntimeTests` — must show 769+ passing, 0 failing. Then update NEXT.md (bump count, mark Task 21 done, add Task 22).
+
+---
+
+## 8. Do not do yet
 
 - **No broad header refactor** — changing naming conventions across 448 files would break CNA and all dependents
-- **No LINQ (System.Linq/Enumerable)** — the plan explicitly excludes it; use `std::ranges` algorithms in ported code
-- **No zlib/tinyxml2/pugixml integration** until the test suite passes cleanly — adding external deps while tests are broken creates noise
-- **No changes to `SharpRuntime::` primitive typedefs** — these are API foundations used by hundreds of headers
+- **No LINQ (System.Linq/Enumerable)** — use `std::ranges` algorithms in ported code instead
+- **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
+- **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No changes to the `getXxxProperty()` / `setXxxProperty()` convention** without updating all existing usages
-- **No merge to master** until the test suite has broad coverage beyond the existing 769 tests
-- **No new API design discussions** in code — use conversation or DOTNET_PORTING_PLAN.md instead
+- **No merge to master** until test coverage is substantially broader (currently 769 tests)
 
 ---
 
-## 10. Resume prompt
+## 9. Resume prompt
 
-> Read NEXT.md first. The working directory is `/rv/data/development/github.com/openeggbert/sharp-runtime`. Task 1 in section 8 covers two targets this session: **Stopwatch** and **Encoding**.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Read NEXT.md section 7 — Task 21 covers two targets this session: **Stopwatch** and **Encoding**.
 >
-> 1. Read `include/System/Diagnostics/Stopwatch.hpp`. Write `tests/System/Diagnostics/StopwatchTests.cpp` covering: default ctor (not running, zero elapsed), Start/Stop toggling isRunning, elapsed accumulates after Start+Stop, StartNew() is already running, Reset() zeros and stops, Restart() zeros and starts, Stop-on-stopped is idempotent, getElapsedProperty() == TimeSpan with same ticks as getElapsedTicks. The directory `tests/System/Diagnostics/` likely does not exist — create it with `mkdir -p`.
+> **Step 1 — Stopwatch:** Read `include/System/Diagnostics/Stopwatch.hpp`. Create directory `tests/System/Diagnostics/` with `mkdir -p`. Write `tests/System/Diagnostics/StopwatchTests.cpp`. Include `<thread>` and `<chrono>` for the sleep-based elapsed test. See section 7A for full API and suggested test list.
 >
-> 2. Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp` covering: UTF8()/ASCII() return non-null shared_ptr, UTF8 encoding name == "utf-8", ASCII GetBytes("ABC") == {65,66,67}, UTF8 GetBytes("hello") correct bytes, GetString round-trip for both encodings.
+> **Step 2 — Encoding:** Read `include/System/Text/Encoding.hpp`. Write `tests/System/Text/EncodingTests.cpp`. See section 7B for full API and suggested test list.
 >
-> Build: `cmake --build build --parallel 4`
-> Run: `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*:EncodingTests.*"`
-> Then run full suite: `./build/SharpRuntimeTests` — must be 769+ passing, 0 failing.
-> Update NEXT.md when done (bump test count, mark Task 21 done, add Task 22).
+> Build: `cmake --build build --parallel 4` (must be clean — zero errors, zero warnings)
+> Run new tests: `./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*:EncodingTests.*"`
+> Run full suite: `./build/SharpRuntimeTests` — must show 769+ passing, 0 failing.
+> Commit, then update NEXT.md: bump test count, mark Task 21 done, add Task 22.
