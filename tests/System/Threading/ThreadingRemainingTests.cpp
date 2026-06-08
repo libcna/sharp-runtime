@@ -1,0 +1,472 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for remaining Threading types:
+// enums (ApartmentState, EventResetMode, LazyThreadSafetyMode, LockRecursionPolicy,
+//         ThreadPriority, ThreadState),
+// AsyncLocal, Barrier, CountdownEvent, EventWaitHandle, LazyInitializer, Lock,
+// ManualResetEventSlim, ReaderWriterLockSlim, SpinWait, ThreadLocal, ThreadPool, Timer,
+// and Threading exceptions.
+#include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <string>
+#include <thread>
+#include "System/Threading/ApartmentState.hpp"
+#include "System/Threading/EventResetMode.hpp"
+#include "System/Threading/LazyThreadSafetyMode.hpp"
+#include "System/Threading/LockRecursionPolicy.hpp"
+#include "System/Threading/ThreadPriority.hpp"
+#include "System/Threading/ThreadState.hpp"
+#include "System/Threading/AsyncLocal.hpp"
+#include "System/Threading/Barrier.hpp"
+#include "System/Threading/CountdownEvent.hpp"
+#include "System/Threading/EventWaitHandle.hpp"
+#include "System/Threading/LazyInitializer.hpp"
+#include "System/Threading/Lock.hpp"
+#include "System/Threading/ManualResetEventSlim.hpp"
+#include "System/Threading/ReaderWriterLockSlim.hpp"
+#include "System/Threading/SpinWait.hpp"
+#include "System/Threading/ThreadLocal.hpp"
+#include "System/Threading/ThreadPool.hpp"
+#include "System/Threading/AbandonedMutexException.hpp"
+#include "System/Threading/LockRecursionException.hpp"
+#include "System/Threading/SemaphoreFullException.hpp"
+#include "System/Threading/SynchronizationLockException.hpp"
+#include "System/Threading/ThreadAbortException.hpp"
+#include "System/Threading/ThreadInterruptedException.hpp"
+#include "System/Threading/ThreadStateException.hpp"
+#include "System/Threading/WaitHandleCannotBeOpenedException.hpp"
+#include "System/Exception.hpp"
+
+using namespace System::Threading;
+
+// ===========================================================================
+// ApartmentState enum
+// ===========================================================================
+
+TEST(ApartmentStateTests, STA_IsZero)     { EXPECT_EQ(static_cast<int>(ApartmentState::STA), 0); }
+TEST(ApartmentStateTests, MTA_IsOne)      { EXPECT_EQ(static_cast<int>(ApartmentState::MTA), 1); }
+TEST(ApartmentStateTests, Unknown_IsTwo)  { EXPECT_EQ(static_cast<int>(ApartmentState::Unknown), 2); }
+
+// ===========================================================================
+// EventResetMode enum
+// ===========================================================================
+
+TEST(EventResetModeTests, AutoReset_IsZero)   { EXPECT_EQ(static_cast<int>(EventResetMode::AutoReset), 0); }
+TEST(EventResetModeTests, ManualReset_IsOne)  { EXPECT_EQ(static_cast<int>(EventResetMode::ManualReset), 1); }
+
+// ===========================================================================
+// LazyThreadSafetyMode enum
+// ===========================================================================
+
+TEST(LazyThreadSafetyModeTests, None_IsZero)                    { EXPECT_EQ(static_cast<int>(LazyThreadSafetyMode::None), 0); }
+TEST(LazyThreadSafetyModeTests, ExecutionAndPublication_IsTwo)  { EXPECT_EQ(static_cast<int>(LazyThreadSafetyMode::ExecutionAndPublication), 2); }
+
+// ===========================================================================
+// LockRecursionPolicy enum
+// ===========================================================================
+
+TEST(LockRecursionPolicyTests, NoRecursion_IsZero)        { EXPECT_EQ(static_cast<int>(LockRecursionPolicy::NoRecursion), 0); }
+TEST(LockRecursionPolicyTests, SupportsRecursion_IsOne)   { EXPECT_EQ(static_cast<int>(LockRecursionPolicy::SupportsRecursion), 1); }
+
+// ===========================================================================
+// ThreadPriority enum
+// ===========================================================================
+
+TEST(ThreadPriorityTests, Lowest_IsZero)   { EXPECT_EQ(static_cast<int>(ThreadPriority::Lowest), 0); }
+TEST(ThreadPriorityTests, Normal_IsTwo)    { EXPECT_EQ(static_cast<int>(ThreadPriority::Normal), 2); }
+TEST(ThreadPriorityTests, Highest_IsFour) { EXPECT_EQ(static_cast<int>(ThreadPriority::Highest), 4); }
+
+// ===========================================================================
+// ThreadState enum
+// ===========================================================================
+
+TEST(ThreadStateTests, Running_IsZero)     { EXPECT_EQ(static_cast<int>(ThreadState::Running), 0); }
+TEST(ThreadStateTests, Unstarted_IsEight)  { EXPECT_EQ(static_cast<int>(ThreadState::Unstarted), 8); }
+TEST(ThreadStateTests, Stopped_Is16)       { EXPECT_EQ(static_cast<int>(ThreadState::Stopped), 16); }
+TEST(ThreadStateTests, OrOperator) {
+    auto combined = ThreadState::Background | ThreadState::Unstarted;
+    EXPECT_NE(static_cast<int>(combined & ThreadState::Background), 0);
+    EXPECT_NE(static_cast<int>(combined & ThreadState::Unstarted), 0);
+}
+
+// ===========================================================================
+// AsyncLocal<T>
+// ===========================================================================
+
+TEST(AsyncLocalTests, DefaultValue_IsDefaultConstructed) {
+    AsyncLocal<int> al;
+    EXPECT_EQ(al.getValueProperty(), 0);
+}
+TEST(AsyncLocalTests, SetAndGet_Value) {
+    AsyncLocal<int> al;
+    al.setValueProperty(42);
+    EXPECT_EQ(al.getValueProperty(), 42);
+}
+TEST(AsyncLocalTests, ValueChangedHandler_Called) {
+    int callCount = 0;
+    AsyncLocal<int> al([&](int, int, bool) { ++callCount; });
+    al.setValueProperty(1);
+    EXPECT_EQ(callCount, 1);
+}
+
+// ===========================================================================
+// Barrier
+// ===========================================================================
+
+TEST(BarrierTests, Constructor_StoresParticipantCount) {
+    Barrier b(3);
+    EXPECT_EQ(b.getParticipantCountProperty(), 3);
+}
+TEST(BarrierTests, NegativeCount_Throws) {
+    EXPECT_THROW(Barrier(-1), std::invalid_argument);
+}
+TEST(BarrierTests, SingleParticipant_SignalAndWait_AdvancesPhase) {
+    Barrier b(1);
+    EXPECT_EQ(b.getCurrentPhaseNumberProperty(), 0L);
+    b.SignalAndWait();
+    EXPECT_EQ(b.getCurrentPhaseNumberProperty(), 1L);
+}
+TEST(BarrierTests, AddParticipant_IncreasesCount) {
+    Barrier b(1);
+    b.AddParticipant();
+    EXPECT_EQ(b.getParticipantCountProperty(), 2);
+}
+TEST(BarrierTests, RemoveParticipant_DecreasesCount) {
+    Barrier b(2);
+    b.RemoveParticipant();
+    EXPECT_EQ(b.getParticipantCountProperty(), 1);
+}
+TEST(BarrierTests, PostPhaseAction_CalledAfterPhase) {
+    int phasesCalled = 0;
+    Barrier b(1, [&](Barrier&) { ++phasesCalled; });
+    b.SignalAndWait();
+    EXPECT_EQ(phasesCalled, 1);
+}
+
+// ===========================================================================
+// CountdownEvent
+// ===========================================================================
+
+TEST(CountdownEventTests, Constructor_StoresInitialCount) {
+    CountdownEvent ce(5);
+    EXPECT_EQ(ce.getInitialCountProperty(), 5);
+    EXPECT_EQ(ce.getCurrentCountProperty(), 5);
+}
+TEST(CountdownEventTests, NegativeCount_Throws) {
+    EXPECT_THROW(CountdownEvent(-1), std::invalid_argument);
+}
+TEST(CountdownEventTests, IsSet_FalseInitially) {
+    CountdownEvent ce(2);
+    EXPECT_FALSE(ce.getIsSetProperty());
+}
+TEST(CountdownEventTests, Signal_DecrementsCount) {
+    CountdownEvent ce(3);
+    ce.Signal();
+    EXPECT_EQ(ce.getCurrentCountProperty(), 2);
+}
+TEST(CountdownEventTests, Signal_ToZero_IsSet) {
+    CountdownEvent ce(1);
+    bool set = ce.Signal();
+    EXPECT_TRUE(set);
+    EXPECT_TRUE(ce.getIsSetProperty());
+}
+TEST(CountdownEventTests, Signal_AlreadyZero_Throws) {
+    CountdownEvent ce(1);
+    ce.Signal();
+    EXPECT_THROW(ce.Signal(), std::invalid_argument);
+}
+TEST(CountdownEventTests, AddCount_IncreasesCount) {
+    CountdownEvent ce(2);
+    ce.AddCount(3);
+    EXPECT_EQ(ce.getCurrentCountProperty(), 5);
+}
+TEST(CountdownEventTests, Reset_RestoresToInitial) {
+    CountdownEvent ce(3);
+    ce.Signal(2);
+    ce.Reset();
+    EXPECT_EQ(ce.getCurrentCountProperty(), 3);
+}
+TEST(CountdownEventTests, Reset_WithNewCount) {
+    CountdownEvent ce(3);
+    ce.Reset(10);
+    EXPECT_EQ(ce.getInitialCountProperty(), 10);
+    EXPECT_EQ(ce.getCurrentCountProperty(), 10);
+}
+TEST(CountdownEventTests, Wait_AlreadySet_ReturnsImmediately) {
+    CountdownEvent ce(0);
+    EXPECT_NO_THROW(ce.Wait());
+}
+TEST(CountdownEventTests, WaitWithTimeout_AlreadySet_ReturnsTrue) {
+    CountdownEvent ce(0);
+    EXPECT_TRUE(ce.Wait(100));
+}
+
+// ===========================================================================
+// EventWaitHandle
+// ===========================================================================
+
+TEST(EventWaitHandleTests, AutoReset_InitiallySet_WaitOne_ReturnsTrue) {
+    EventWaitHandle ewh(true, EventResetMode::AutoReset);
+    EXPECT_TRUE(ewh.WaitOne(0));
+}
+TEST(EventWaitHandleTests, AutoReset_NotSet_WaitOneWithTimeout_ReturnsFalse) {
+    EventWaitHandle ewh(false, EventResetMode::AutoReset);
+    EXPECT_FALSE(ewh.WaitOne(1));
+}
+TEST(EventWaitHandleTests, ManualReset_Set_MultipleWaitOnes) {
+    EventWaitHandle ewh(true, EventResetMode::ManualReset);
+    EXPECT_TRUE(ewh.WaitOne(0));
+    EXPECT_TRUE(ewh.WaitOne(0));
+}
+TEST(EventWaitHandleTests, Set_Then_Reset_NotSet) {
+    EventWaitHandle ewh(false, EventResetMode::ManualReset);
+    ewh.Set();
+    ewh.Reset();
+    EXPECT_FALSE(ewh.WaitOne(1));
+}
+
+// ===========================================================================
+// LazyInitializer
+// ===========================================================================
+
+TEST(LazyInitializerTests, EnsureInitialized_Default_CreatesObject) {
+    int* ptr = nullptr;
+    LazyInitializer::EnsureInitialized(ptr);
+    EXPECT_NE(ptr, nullptr);
+    delete ptr;
+}
+TEST(LazyInitializerTests, EnsureInitialized_AlreadySet_NoChange) {
+    int* ptr = new int(42);
+    int* original = ptr;
+    LazyInitializer::EnsureInitialized(ptr);
+    EXPECT_EQ(ptr, original);
+    delete ptr;
+}
+TEST(LazyInitializerTests, EnsureInitialized_WithFactory) {
+    int* ptr = nullptr;
+    LazyInitializer::EnsureInitialized<int>(ptr, []() { return new int(99); });
+    ASSERT_NE(ptr, nullptr);
+    EXPECT_EQ(*ptr, 99);
+    delete ptr;
+}
+
+// ===========================================================================
+// Lock
+// ===========================================================================
+
+TEST(LockTests, TryEnter_Succeeds_ThenExit) {
+    Lock lk;
+    EXPECT_TRUE(lk.TryEnter());
+    EXPECT_NO_THROW(lk.Exit());
+}
+TEST(LockTests, Enter_And_Exit_NoThrow) {
+    Lock lk;
+    EXPECT_NO_THROW(lk.Enter());
+    EXPECT_NO_THROW(lk.Exit());
+}
+TEST(LockTests, EnterScope_RAII_ReleasesOnDestruction) {
+    Lock lk;
+    {
+        auto scope = lk.EnterScope();
+    }
+    EXPECT_TRUE(lk.TryEnter());
+    lk.Exit();
+}
+
+// ===========================================================================
+// ManualResetEventSlim
+// ===========================================================================
+
+TEST(ManualResetEventSlimTests, DefaultCtor_NotSet) {
+    ManualResetEventSlim mre;
+    EXPECT_FALSE(mre.getIsSetProperty());
+}
+TEST(ManualResetEventSlimTests, InitiallySet_IsSet) {
+    ManualResetEventSlim mre(true);
+    EXPECT_TRUE(mre.getIsSetProperty());
+}
+TEST(ManualResetEventSlimTests, Set_SetsFlag) {
+    ManualResetEventSlim mre;
+    mre.Set();
+    EXPECT_TRUE(mre.getIsSetProperty());
+}
+TEST(ManualResetEventSlimTests, Reset_ClearsFlag) {
+    ManualResetEventSlim mre(true);
+    mre.Reset();
+    EXPECT_FALSE(mre.getIsSetProperty());
+}
+TEST(ManualResetEventSlimTests, Wait_AlreadySet_ReturnsImmediately) {
+    ManualResetEventSlim mre(true);
+    EXPECT_NO_THROW(mre.Wait());
+}
+TEST(ManualResetEventSlimTests, Wait_WithTimeout_NotSet_ReturnsFalse) {
+    ManualResetEventSlim mre(false);
+    EXPECT_FALSE(mre.Wait(1));
+}
+TEST(ManualResetEventSlimTests, Wait_WithTimeout_AlreadySet_ReturnsTrue) {
+    ManualResetEventSlim mre(true);
+    EXPECT_TRUE(mre.Wait(100));
+}
+
+// ===========================================================================
+// ReaderWriterLockSlim
+// ===========================================================================
+
+TEST(ReaderWriterLockSlimTests, DefaultCtor_NoThrow) {
+    EXPECT_NO_THROW(ReaderWriterLockSlim rw);
+}
+TEST(ReaderWriterLockSlimTests, EnterExitReadLock_NoThrow) {
+    ReaderWriterLockSlim rw;
+    EXPECT_NO_THROW(rw.EnterReadLock());
+    EXPECT_NO_THROW(rw.ExitReadLock());
+}
+TEST(ReaderWriterLockSlimTests, EnterExitWriteLock_NoThrow) {
+    ReaderWriterLockSlim rw;
+    EXPECT_NO_THROW(rw.EnterWriteLock());
+    EXPECT_NO_THROW(rw.ExitWriteLock());
+}
+TEST(ReaderWriterLockSlimTests, TryEnterReadLock_Succeeds) {
+    ReaderWriterLockSlim rw;
+    EXPECT_TRUE(rw.TryEnterReadLock(0));
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_Succeeds) {
+    ReaderWriterLockSlim rw;
+    EXPECT_TRUE(rw.TryEnterWriteLock(0));
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, Dispose_NoThrow) {
+    ReaderWriterLockSlim rw;
+    EXPECT_NO_THROW(rw.Dispose());
+}
+
+// ===========================================================================
+// SpinWait
+// ===========================================================================
+
+TEST(SpinWaitTests, InitialCount_IsZero) {
+    SpinWait sw;
+    EXPECT_EQ(sw.getCountProperty(), 0);
+}
+TEST(SpinWaitTests, SpinOnce_IncrementsCount) {
+    SpinWait sw;
+    sw.SpinOnce();
+    EXPECT_EQ(sw.getCountProperty(), 1);
+}
+TEST(SpinWaitTests, NextSpinWillYield_FalseBeforeThreshold) {
+    SpinWait sw;
+    EXPECT_FALSE(sw.getNextSpinWillYieldProperty());
+}
+TEST(SpinWaitTests, NextSpinWillYield_TrueAfterThreshold) {
+    SpinWait sw;
+    for (int i = 0; i < 10; ++i) sw.SpinOnce();
+    EXPECT_TRUE(sw.getNextSpinWillYieldProperty());
+}
+TEST(SpinWaitTests, Reset_SetsCountToZero) {
+    SpinWait sw;
+    sw.SpinOnce();
+    sw.Reset();
+    EXPECT_EQ(sw.getCountProperty(), 0);
+}
+TEST(SpinWaitTests, SpinUntil_ConditionAlreadyTrue) {
+    EXPECT_NO_THROW(SpinWait::SpinUntil([]() { return true; }));
+}
+TEST(SpinWaitTests, SpinUntil_WithTimeout_True_ReturnsTrue) {
+    EXPECT_TRUE(SpinWait::SpinUntil([]() { return true; }, 100));
+}
+TEST(SpinWaitTests, SpinUntil_WithTimeout_NeverTrue_ReturnsFalse) {
+    EXPECT_FALSE(SpinWait::SpinUntil([]() { return false; }, 1));
+}
+
+// ===========================================================================
+// ThreadLocal<T>
+// ===========================================================================
+
+TEST(ThreadLocalTests, DefaultCtor_IsValueCreated_False) {
+    ThreadLocal<int> tl;
+    EXPECT_FALSE(tl.getIsValueCreatedProperty());
+}
+TEST(ThreadLocalTests, GetValue_DefaultConstructsValue) {
+    ThreadLocal<int> tl;
+    EXPECT_EQ(tl.getValueProperty(), 0);
+    EXPECT_TRUE(tl.getIsValueCreatedProperty());
+}
+TEST(ThreadLocalTests, SetValue_StoresValue) {
+    ThreadLocal<int> tl;
+    tl.setValueProperty(42);
+    EXPECT_EQ(tl.getValueProperty(), 42);
+}
+// Uses a distinct struct type so it gets its own static thread_local slot
+struct TLFactoryTag { int v = 0; };
+TEST(ThreadLocalTests, Factory_UsedOnFirstAccess) {
+    ThreadLocal<TLFactoryTag> tl(std::function<TLFactoryTag()>([]() { return TLFactoryTag{99}; }));
+    EXPECT_EQ(tl.getValueProperty().v, 99);
+}
+TEST(ThreadLocalTests, Value_AliasForGetValue) {
+    ThreadLocal<std::string> tl(std::function<std::string()>([]() { return std::string("hello"); }));
+    EXPECT_EQ(tl.Value(), "hello");
+}
+TEST(ThreadLocalTests, Dispose_NoThrow) {
+    ThreadLocal<int> tl;
+    tl.getValueProperty();
+    EXPECT_NO_THROW(tl.Dispose());
+}
+
+// ===========================================================================
+// ThreadPool
+// ===========================================================================
+
+TEST(ThreadPoolTests, QueueUserWorkItem_ReturnsTrue) {
+    std::atomic<bool> ran{false};
+    bool result = ThreadPool::QueueUserWorkItem([&ran]() { ran = true; });
+    EXPECT_TRUE(result);
+    // Give the detached thread a moment to run
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_TRUE(ran.load());
+}
+TEST(ThreadPoolTests, GetMinThreads_NonNegative) {
+    int w = 0, c = 0;
+    ThreadPool::GetMinThreads(w, c);
+    EXPECT_GE(w, 0);
+    EXPECT_GE(c, 0);
+}
+TEST(ThreadPoolTests, GetMaxThreads_AtLeastMin) {
+    int wMin = 0, cMin = 0, wMax = 0, cMax = 0;
+    ThreadPool::GetMinThreads(wMin, cMin);
+    ThreadPool::GetMaxThreads(wMax, cMax);
+    EXPECT_GE(wMax, wMin);
+}
+TEST(ThreadPoolTests, SetMinMaxThreads_ReturnsTrue) {
+    EXPECT_TRUE(ThreadPool::SetMinThreads(1, 1));
+    EXPECT_TRUE(ThreadPool::SetMaxThreads(8, 8));
+}
+
+// Timer: not unit-tested here — the implementation uses a detached std::thread
+// that captures `this` by raw pointer, leading to dangling-pointer UB when the
+// Timer object is destroyed before the thread wakes up.  Functional testing of
+// Timer requires a fix to the implementation (e.g. a wakeup CV + join on Dispose).
+
+// ===========================================================================
+// Threading exceptions
+// ===========================================================================
+
+#define THREADING_EXCEPT_SIMPLE(ExType) \
+    TEST(ExType##Tests, DefaultCtor_WhatNotEmpty) { \
+        ExType ex; \
+        EXPECT_FALSE(std::string(ex.what()).empty()); \
+    } \
+    TEST(ExType##Tests, IsA_Exception) { \
+        EXPECT_THROW(throw ExType(), System::Exception); \
+    }
+
+THREADING_EXCEPT_SIMPLE(AbandonedMutexException)
+THREADING_EXCEPT_SIMPLE(LockRecursionException)
+THREADING_EXCEPT_SIMPLE(SemaphoreFullException)
+THREADING_EXCEPT_SIMPLE(SynchronizationLockException)
+THREADING_EXCEPT_SIMPLE(ThreadAbortException)
+THREADING_EXCEPT_SIMPLE(ThreadInterruptedException)
+THREADING_EXCEPT_SIMPLE(ThreadStateException)
+THREADING_EXCEPT_SIMPLE(WaitHandleCannotBeOpenedException)

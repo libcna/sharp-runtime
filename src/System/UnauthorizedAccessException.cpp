@@ -10,7 +10,7 @@
 namespace System {
 
     UnauthorizedAccessException::UnauthorizedAccessException()
-        : SystemException() {
+        : SystemException("Attempted to perform an unauthorized operation.") {
     }
 
     UnauthorizedAccessException::UnauthorizedAccessException(const char* str)

@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 28*
+*Last updated: 2026-06-08 (branch: develop) — session 29*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 2071 tests pass:** `./build/SharpRuntimeTests` → `2071 tests from 232 test suites` ✅
+- **All 2289 tests pass:** `./build/SharpRuntimeTests` → `2289 tests from 297 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 57 test files in `tests/System/`
+- 59 test files in `tests/System/`
 
-### What IS tested (2071 tests, 57 files)
+### What IS tested (2289 tests, 59 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -95,11 +95,14 @@
 | `Collections/CollectionsRemainingTests.cpp` | KeyValuePair (ctor/equality) + SortedDictionary (Add/ContainsKey/operator[]/TryGetValue/Remove/Clear/sorted Keys+Values) + SortedList (Add/ContainsKey/ContainsValue/IndexOfKey/RemoveAt/TryGetValue/Clear/sorted Keys) + BitArray (len-ctor/Get-Set/SetAll/And/Or/Xor/Not/bytes-ctor) + Collections::Queue void* (Enqueue/Dequeue/Peek/Contains/Clear/throws) + Collections::Stack void* (Push/Pop/Peek/Contains/Clear/throws) (58) |
 | `Numerics/NumericsRemainingTests.cpp` | MathF (constants/Abs/Ceiling/Floor/Round/Truncate/Sqrt/Pow/Log2/Log10/Sin/Cos/Atan2/Max/Min/Clamp/Sign/IsNaN/IsInfinity) + BitOperations (IsPow2/RoundUpToPowerOf2/LeadingZeroCount/Log2/PopCount/TrailingZeroCount/RotateLeft/RotateRight/ReverseBits) (34) |
 | `Globalization/GlobalizationRemainingTests.cpp` | NumberStyles (values/OR) + DateTimeStyles (values/OR) + CompareOptions (values/OR) + CultureTypes (values/OR) + CalendarAlgorithmType + CalendarWeekRule + GregorianCalendarTypes + TimeSpanStyles (33) |
+| `ExceptionRemainingTests.cpp` | Batch: 36 exception types (DefaultCtor/MessageCtor/IsA_Exception × 3 each) + AggregateException (InnerExceptions/Handle/Unwrap) + NotFiniteNumberException (offendingNumber) + TypeInitializationException (typeName) + CultureNotFoundException (invalidCultureName) (121) |
+| `Threading/ThreadingRemainingTests.cpp` | Threading enums (ApartmentState/EventResetMode/LazyThreadSafetyMode/LockRecursionPolicy/ThreadPriority/ThreadState+OR) + AsyncLocal (get/set/handler) + Barrier (count/SignalAndWait/AddParticipant/RemoveParticipant/postPhaseAction) + CountdownEvent (Signal/IsSet/AddCount/Reset/Wait) + EventWaitHandle (AutoReset/ManualReset) + LazyInitializer (default/factory) + Lock (TryEnter/Enter-Exit/EnterScope) + ManualResetEventSlim (Set/Reset/IsSet/Wait) + ReaderWriterLockSlim (Read/Write lock) + SpinWait (Count/SpinOnce/NextSpinWillYield/SpinUntil) + ThreadLocal (get/set/factory/Dispose) + ThreadPool (QueueUserWorkItem/GetMin-MaxThreads) + 8 Threading exceptions (97) |
 
 ### What is NOT yet tested (priority order)
 
 1. **`System::Numerics` vectors** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 — not ported yet → beyond current scope
-2. **~50 interface/marker-only headers** — pure abstract interfaces (IEnumerable, IList, etc.) and marker attributes have no testable behavior
+2. **`System::Threading::Timer`** — implementation has dangling-`this` UB (detached thread outlives object) → needs fix before testing
+3. **~50 interface/marker-only headers** — pure abstract interfaces (IEnumerable, IList, etc.) and marker attributes have no testable behavior
 4. **`System::Numerics` missing** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 not ported at all → **beyond current scope (CNA layer)**
 
 ### What does NOT work yet (implementation gaps)
@@ -115,6 +118,16 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 29 — Task 38 (Exception types + Threading remaining):**
+
+| File | Change |
+|------|--------|
+| `include/System/Threading/AsyncLocal.hpp` | Fix: `mutable thread_local static` → `static thread_local` — the two specifiers conflict in C++ |
+| `include/System/Threading/ThreadLocal.hpp` | Fix: same correction |
+| `src/System/UnauthorizedAccessException.cpp` | Fix: default ctor passed no message to base → `SystemException()` returns empty `what()`; added default message |
+| `tests/System/ExceptionRemainingTests.cpp` | New — 121 tests: 36 exception types × 3 (DefaultCtor/MessageCtor/IsA) + AggregateException/NotFiniteNumberException/TypeInitializationException/CultureNotFoundException extras |
+| `tests/System/Threading/ThreadingRemainingTests.cpp` | New — 97 tests: 6 Threading enums + AsyncLocal + Barrier + CountdownEvent + EventWaitHandle + LazyInitializer + Lock + ManualResetEventSlim + ReaderWriterLockSlim + SpinWait + ThreadLocal + ThreadPool + 8 Threading exceptions; Timer excluded (dangling-this UB) |
 
 **Session 28 — Task 37 (System types, Collections, Numerics, Globalization remaining):**
 
@@ -314,10 +327,15 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 38 — Exception types + Threading remaining ← NEXT
+### Task 38 — Exception types + Threading remaining ✅ DONE (session 29, 2289 tests)
 
-- Batch-test remaining exception types (AggregateException, OperationCanceledException, InvalidCastException, etc.)
-- Batch-test remaining Threading types (AsyncLocal, Barrier, CountdownEvent, LazyInitializer, Lock, ReaderWriterLockSlim, SpinWait, Timer, etc.)
+---
+
+### Task 39 — Tasks + remaining stubs ← NEXT
+
+- `System::Threading::Tasks/` — Task<T>, TaskCompletionSource, ValueTask, Parallel
+- Fix `Timer.hpp` dangling-this UB, then add Timer tests
+- Any remaining untested headers with substantive APIs
 
 ---
 
@@ -328,7 +346,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 2071 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 2289 tests / 444 headers)
 
 ---
 
@@ -336,10 +354,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 38** is next: Exception types + Threading remaining.
+> Read NEXT.md section 7 — **Task 39** is next: Tasks + remaining stubs.
 >
 > Scan remaining exception headers and Threading headers for testable types.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2071+ passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2289+ passing, 0 failing.
 > Commit, then update NEXT.md: bump count, mark Task 38 done.

@@ -9,7 +9,7 @@ namespace System::Threading {
 
     template<typename T>
     class ThreadLocal : public System::IDisposable {
-        mutable thread_local static T* storage_;
+        static thread_local T* storage_;
         std::function<T()> factory_;
         bool trackAllValues_ = false;
 

@@ -10,7 +10,7 @@ namespace System::Threading {
     // In C++ without async/await this reduces to thread-local storage.
     template<typename T>
     class AsyncLocal {
-        mutable thread_local static T value_;
+        static thread_local T value_;
         std::function<void(T, T, bool)> valueChangedHandler_;
 
     public:
