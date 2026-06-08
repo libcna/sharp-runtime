@@ -107,11 +107,6 @@ namespace System::Collections::ObjectModel
             return new Enumerator(items_);
         }
 
-        System::Collections::IEnumerator* System::Collections::IEnumerable::GetEnumerator() override
-        {
-            return GetEnumerator();
-        }
-
         auto begin()        { return items_.begin(); }
         auto end()          { return items_.end(); }
         [[nodiscard]] auto begin() const { return items_.cbegin(); }

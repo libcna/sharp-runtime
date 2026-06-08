@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 24*
+*Last updated: 2026-06-08 (branch: develop) — session 25*
 
 ---
 
@@ -30,9 +30,9 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1610 tests pass:** `./build/SharpRuntimeTests` → `1610 tests from 160 test suites` ✅
+- **All 1732 tests pass:** `./build/SharpRuntimeTests` → `1732 tests from 175 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 47 test files in `tests/System/`
+- 50 test files in `tests/System/`
 
 ### What IS tested (1437 tests, 44 files)
 
@@ -85,14 +85,16 @@
 | `Net/Sockets/SocketsTests.cpp` | TcpClient/TcpListener/UdpClient stub-throws + constructors (20) |
 | `IO/IOTests.cpp` | IO enums (FileMode/FileAccess/FileShare/FileAttributes/FileOptions/SeekOrigin/SearchOption/SearchTarget/MatchCasing/MatchType/HandleInheritability/UnixFileMode) + IO exceptions + IsolatedStorageScope + EnumerationOptions/FileStreamOptions/DriveType/DriveInfo (78) |
 | `IO/IOStreamTests.cpp` | Path + File + FileInfo + Directory/DirectoryInfo + BinaryReader/Writer + StreamReader/Writer + BufferedStream + FileStream + IsolatedStorageFile (75) |
+| `Collections/ConcurrentTests.cpp` | ConcurrentDictionary + ConcurrentQueue + ConcurrentStack (35) |
+| `Collections/ObjectModelTests.cpp` | Collection + ReadOnlyCollection + ReadOnlyDictionary + NotifyCollectionChangedAction + ObservableCollection (53) |
+| `Collections/SpecializedTests.cpp` | NameValueCollection + StringCollection + BitVector32 + HybridDictionary + ListDictionary + StringDictionary + OrderedDictionary (34) |
 
 ### What is NOT yet tested (priority order)
 
-1. **`System::Collections::Concurrent`** — ConcurrentDictionary, ConcurrentQueue, ConcurrentStack → **Task 34**
-2. **`System::Collections::ObjectModel`** — ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary → **Task 34**
-3. **`System::Collections::Specialized`** — NameValueCollection, StringCollection, BitVector32, … → **Task 34**
-4. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
-5. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
+1. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
+2. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
+3. **`System::Collections::Immutable` remaining** — ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack → **Task 36**
+4. **`System::Numerics` missing** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 not ported at all → **beyond current scope (CNA layer)**
 
 ### What does NOT work yet (implementation gaps)
 
@@ -107,6 +109,17 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 25 — Task 34 (Collections remaining):**
+
+| File | Change |
+|------|--------|
+| `include/System/Collections/ObjectModel/Collection.hpp` | Fix: remove invalid qualified `IEnumerable::GetEnumerator` definition — caused error on first template instantiation |
+| `include/System/Collections/ObjectModel/ReadOnlyCollection.hpp` | Fix: same removal |
+| `include/System/Collections/ObjectModel/ObservableCollection.hpp` | Fix: ambiguous constructor call when T=int — construct args explicitly |
+| `tests/System/Collections/ConcurrentTests.cpp` | New — 35 tests: ConcurrentDictionary (TryAdd/Get/Remove/Update/GetOrAdd/AddOrUpdate/ContainsKey/Clear/Keys/Values) + ConcurrentQueue (Enqueue/TryDequeue/TryPeek/Count/Clear) + ConcurrentStack (Push/TryPop/TryPeek/TryPopRange/Clear) |
+| `tests/System/Collections/ObjectModelTests.cpp` | New — 53 tests: Collection/ReadOnlyCollection/ReadOnlyDictionary functional + NotifyCollectionChangedAction enum + ObservableCollection with event handler |
+| `tests/System/Collections/SpecializedTests.cpp` | New — 34 tests: NameValueCollection/StringCollection/BitVector32/HybridDictionary/ListDictionary/StringDictionary/OrderedDictionary |
 
 **Session 24 — Task 33 (Net::Sockets + IO remaining):**
 
@@ -245,7 +258,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 34 — Collections remaining ← NEXT
+### Task 34 — Collections remaining ✅ DONE (session 25, 1732 tests)
 
 - `Collections/Concurrent/`: ConcurrentDictionary, ConcurrentQueue, ConcurrentStack
 - `Collections/ObjectModel/`: ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary, KeyedCollection
@@ -253,7 +266,7 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 35 — Diagnostics + Text remaining
+### Task 35 — Diagnostics + Text remaining ← NEXT
 
 - `Diagnostics/` remaining: DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame stubs, UnreachableException
 - `Text/` remaining: Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs
@@ -275,10 +288,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 34** is next: Collections remaining.
+> Read NEXT.md section 7 — **Task 35** is next: Diagnostics + Text remaining.
 >
-> Scan `include/System/Collections/Concurrent/`, `include/System/Collections/ObjectModel/`, `include/System/Collections/Specialized/`. Write test files covering enums + stub-throws + functional methods.
+> Scan `include/System/Diagnostics/` (DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException) and `include/System/Text/` (Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs).
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 1610+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 34 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1732+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 35 done.

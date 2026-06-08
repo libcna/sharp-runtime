@@ -59,7 +59,10 @@ namespace System::Collections::ObjectModel {
         void Add(const T& item) override {
             intcs idx = this->getCountProperty();
             Collection<T>::Add(item);
-            Notify(NotifyCollectionChangedEventArgs<T>(NotifyCollectionChangedAction::Add, item, idx));
+            NotifyCollectionChangedEventArgs<T> addArgs(NotifyCollectionChangedAction::Add);
+            addArgs.NewItems = {item};
+            addArgs.NewStartingIndex = idx;
+            Notify(addArgs);
         }
 
         bool Remove(const T& item) override {
