@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-07 (branch: develop) — session 23*
+*Last updated: 2026-06-08 (branch: develop) — session 24*
 
 ---
 
@@ -30,9 +30,9 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1437 tests pass:** `./build/SharpRuntimeTests` → `1437 tests from 122 test suites` ✅
+- **All 1610 tests pass:** `./build/SharpRuntimeTests` → `1610 tests from 160 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 44 test files in `tests/System/`
+- 47 test files in `tests/System/`
 
 ### What IS tested (1437 tests, 44 files)
 
@@ -82,16 +82,17 @@
 | `Security/SecurityTests.cpp` | SecurityAttributes/SecurityException/CryptographicException (25) |
 | `Xml/XmlTests.cpp` | ReadState/XmlNodeType enums + XmlReader/XmlWriter stubs + Linq types (55) |
 | `IO/Compression/CompressionTests.cpp` | CompressionMode/ZipArchiveMode enums + GZipStream/DeflateStream + ZipArchive stubs (35) |
+| `Net/Sockets/SocketsTests.cpp` | TcpClient/TcpListener/UdpClient stub-throws + constructors (20) |
+| `IO/IOTests.cpp` | IO enums (FileMode/FileAccess/FileShare/FileAttributes/FileOptions/SeekOrigin/SearchOption/SearchTarget/MatchCasing/MatchType/HandleInheritability/UnixFileMode) + IO exceptions + IsolatedStorageScope + EnumerationOptions/FileStreamOptions/DriveType/DriveInfo (78) |
+| `IO/IOStreamTests.cpp` | Path + File + FileInfo + Directory/DirectoryInfo + BinaryReader/Writer + StreamReader/Writer + BufferedStream + FileStream + IsolatedStorageFile (75) |
 
 ### What is NOT yet tested (priority order)
 
-1. **`System::Net::Sockets`** — TcpClient, UdpClient (stubs — verify enums + NotImplementedException) → **Task 33**
-2. **`System::IO` remaining** — BinaryReader, BinaryWriter, File, Path, FileStream, StreamReader, StreamWriter, BufferedStream, Directory, DirectoryInfo, FileInfo, DriveInfo + enums (FileMode, FileAccess, FileShare, FileAttributes, SeekOrigin, SearchOption, …) + IO exceptions → **Task 33**
-3. **`System::Collections::Concurrent`** — ConcurrentDictionary, ConcurrentQueue, ConcurrentStack → **Task 34**
-4. **`System::Collections::ObjectModel`** — ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary → **Task 34**
-5. **`System::Collections::Specialized`** — NameValueCollection, StringCollection, BitVector32, … → **Task 34**
-6. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
-7. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
+1. **`System::Collections::Concurrent`** — ConcurrentDictionary, ConcurrentQueue, ConcurrentStack → **Task 34**
+2. **`System::Collections::ObjectModel`** — ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary → **Task 34**
+3. **`System::Collections::Specialized`** — NameValueCollection, StringCollection, BitVector32, … → **Task 34**
+4. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
+5. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
 
 ### What does NOT work yet (implementation gaps)
 
@@ -106,6 +107,14 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 24 — Task 33 (Net::Sockets + IO remaining):**
+
+| File | Change |
+|------|--------|
+| `tests/System/Net/Sockets/SocketsTests.cpp` | New — 20 tests: TcpClient/TcpListener/UdpClient constructors + stub-throws |
+| `tests/System/IO/IOTests.cpp` | New — 78 tests: all IO enums (FileMode/FileAccess/FileShare/FileAttributes/FileOptions/SeekOrigin/SearchOption/SearchTarget/MatchCasing/MatchType/HandleInheritability/UnixFileMode) + IO exceptions (IOException/FileNotFoundException/DirectoryNotFoundException/EndOfStreamException/PathTooLongException/FileLoadException/InvalidDataException) + IsolatedStorageScope + EnumerationOptions/FileStreamOptions/DriveType/DriveInfo |
+| `tests/System/IO/IOStreamTests.cpp` | New — 75 tests: Path (string ops), File (write/read/copy/move/delete), FileInfo, Directory/DirectoryInfo, BinaryReader/Writer roundtrip (int8–64/float/double/string/bool), StreamWriter/Reader, BufferedStream delegation, FileStream write+read, IsolatedStorageFile |
 
 **Session 23 — Task 32 (Xml + IO::Compression):**
 
@@ -232,24 +241,11 @@ find include -name "*.hpp" | wc -l
 
 ## 7. Next tasks
 
-### Task 33 — Net::Sockets + IO remaining ← NEXT
-
-**Net::Sockets** (`include/System/Net/Sockets/`):
-- `TcpClient.hpp`, `UdpClient.hpp` — stubs, test: constructor throws `NotImplementedException`
-- Check for any enums (SocketType, AddressFamily, SocketShutdown, etc.)
-
-**IO remaining** (`include/System/IO/`):
-- IO enums (all are likely simple): `FileMode`, `FileAccess`, `FileShare`, `FileAttributes`, `FileOptions`, `SeekOrigin`, `SearchOption`, `SearchTarget`, `MatchCasing`, `MatchType`, `HandleInheritability`, `UnixFileMode`
-- IO exceptions: `IOException`, `FileNotFoundException`, `DirectoryNotFoundException`, `EndOfStreamException`, `PathTooLongException`, `FileLoadException`, `InvalidDataException`
-- Real implementations (if present): `Path`, `File`, `Directory`, `BinaryReader`, `BinaryWriter`, `StreamReader`, `StreamWriter`, `BufferedStream`, `FileStream`, `FileInfo`, `DirectoryInfo`, `DriveInfo`
-
-**Approach:** scan each header → enum values work + any stub methods throw `NotImplementedException` + any real methods verified functionally.
-
-**Target:** 1500+ tests passing, 0 failing. Commit + update NEXT.md.
+### Task 33 — Net::Sockets + IO remaining ✅ DONE (session 24, 1610 tests)
 
 ---
 
-### Task 34 — Collections remaining
+### Task 34 — Collections remaining ← NEXT
 
 - `Collections/Concurrent/`: ConcurrentDictionary, ConcurrentQueue, ConcurrentStack
 - `Collections/ObjectModel/`: ObservableCollection, ReadOnlyCollection, ReadOnlyDictionary, KeyedCollection
@@ -279,12 +275,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 33** is next: Net::Sockets + IO remaining types.
+> Read NEXT.md section 7 — **Task 34** is next: Collections remaining.
 >
-> Scan `include/System/Net/Sockets/` (TcpClient, UdpClient — stubs) and `include/System/IO/` (enums, exceptions, File/Path/BinaryReader/Writer/StreamReader/Writer/Directory/etc.). Write test files:
-> - `tests/System/Net/Sockets/SocketsTests.cpp`
-> - `tests/System/IO/IOTests.cpp` (or split by subarea)
+> Scan `include/System/Collections/Concurrent/`, `include/System/Collections/ObjectModel/`, `include/System/Collections/Specialized/`. Write test files covering enums + stub-throws + functional methods.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run new tests with filter, then full suite: `./build/SharpRuntimeTests` — must show 1437+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 33 done, add Task 36 if needed.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1610+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 34 done.
