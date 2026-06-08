@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 26*
+*Last updated: 2026-06-08 (branch: develop) — session 27*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1824 tests pass:** `./build/SharpRuntimeTests` → `1824 tests from 193 test suites` ✅
+- **All 1884 tests pass:** `./build/SharpRuntimeTests` → `1884 tests from 198 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 52 test files in `tests/System/`
+- 53 test files in `tests/System/`
 
-### What IS tested (1824 tests, 52 files)
+### What IS tested (1884 tests, 53 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -90,10 +90,12 @@
 | `Collections/SpecializedTests.cpp` | NameValueCollection + StringCollection + BitVector32 + HybridDictionary + ListDictionary + StringDictionary + OrderedDictionary (34) |
 | `Diagnostics/DiagnosticsRemainingTests.cpp` | DebuggerBrowsableState/Attribute + DebuggerDisplayAttribute + StackFrame + StackTrace + UnreachableException + marker attrs (29) |
 | `Text/TextRemainingTests.cpp` | NormalizationForm + CompositeFormat + Rune (full) + UTF7/UTF32/Latin1Encoding + Encoder/Decoder + Regex/Match/MatchCollection (63) |
+| `Collections/ImmutableRemainingTests.cpp` | ImmutableHashSet (Create/Contains/Add/Remove/Clear/Union/Intersect/Except/IsSubsetOf) + ImmutableQueue (Enqueue/Peek/Dequeue/DequeueWithValue/Clear) + ImmutableSortedDictionary (Add/ContainsKey/TryGetValue/SetItem/Remove/Clear/Keys/Values) + ImmutableSortedSet (Create/Contains/Add/Remove/Clear/Min/Max/Union/Intersect/Except/IsSubsetOf/Iteration) + ImmutableStack (Push/Peek/Pop/PopWithValue/Clear/Iteration) (60) |
 
 ### What is NOT yet tested (priority order)
 
-1. **`System::Collections::Immutable` remaining** — ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack → **Task 36**
+1. **`System::Numerics` vectors** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 — not ported yet → beyond current scope
+2. **`System::Net::Http`** — HttpClient, HttpRequestMessage, HttpResponseMessage stubs → **Task 37 (if present)**
 4. **`System::Numerics` missing** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 not ported at all → **beyond current scope (CNA layer)**
 
 ### What does NOT work yet (implementation gaps)
@@ -109,6 +111,12 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 27 — Task 36 (Collections::Immutable remaining):**
+
+| File | Change |
+|------|--------|
+| `tests/System/Collections/ImmutableRemainingTests.cpp` | New — 60 tests: ImmutableHashSet (13), ImmutableQueue (9), ImmutableSortedDictionary (14), ImmutableSortedSet (14), ImmutableStack (12) — all fully functional, immutability verified by checking original count after mutation methods |
 
 **Session 26 — Task 35 (Diagnostics + Text remaining):**
 
@@ -282,9 +290,17 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 36 — Collections::Immutable remaining ← NEXT
+### Task 36 — Collections::Immutable remaining ✅ DONE (session 27, 1884 tests)
 
 - `Collections/Immutable/` remaining: ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack
+
+---
+
+### Task 37 — Net::Http + any remaining stubs ← NEXT
+
+- Scan `include/System/Net/Http/` for HttpClient, HttpRequestMessage, HttpResponseMessage
+- Scan remaining untested headers across all namespaces
+- Write tests for whatever stubs/types remain uncovered
 
 ---
 
@@ -295,7 +311,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 1824 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 1884 tests / 444 headers)
 
 ---
 
@@ -303,10 +319,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 36** is next: Collections::Immutable remaining.
+> Read NEXT.md section 7 — **Task 37** is next: Net::Http + any remaining stubs.
 >
-> Scan `include/System/Collections/Immutable/` for ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack headers.
+> Scan `include/System/Net/Http/` and any other untested headers for remaining types.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 1824+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 36 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1884+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 37 done.
