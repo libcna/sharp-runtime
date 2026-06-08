@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 31*
+*Last updated: 2026-06-08 (branch: develop) — session 32*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 2482 tests pass:** `./build/SharpRuntimeTests` → `2482 tests from 337 test suites` ✅
+- **All 2543 tests pass:** `./build/SharpRuntimeTests` → `2543 tests from 367 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 62 test files in `tests/`
+- 63 test files in `tests/`
 
-### What IS tested (2482 tests, 62 files)
+### What IS tested (2543 tests, 63 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -100,6 +100,7 @@
 | `Threading/Tasks/TasksTests.cpp` | Task (DefaultCtor/CompletedTask/Run/FromException/FromCanceled/Delay) + TaskT (Run/FromResult/Throwing) + TaskCompletionSource<int> (SetResult/TrySet/SetException/SetCanceled 9 tests) + TaskCompletionSource<void> (5 tests) + ValueTask (DefaultCtor/CompletedTask/FromException/GetAwaiter/FromTask) + ValueTaskT (FromResult/FromException/DefaultCtor) + Parallel::For/ForEach/Invoke + ParallelLoopState::Stop (44) |
 | `Task39RemainingTests.cpp` | SynchronizationContext (getCurrent/Post/Send/null/SetContext) + PeriodicTimer (Dispose→false/shortTick) + WaitHandle constants (WaitTimeout=258/InvalidHandle=-1) + ASCIIEncoding (name/GetBytes/GetString/empty) + UnicodeEncoding (name/twoBytesPerChar/RoundTrip/empty) + UTF8Encoding (name/GetBytes/GetString/empty) + EncodingInfo (codePage/name/displayName/GetEncoding) + ReadOnlyObservableCollection (Count/op[]/Contains/isEmpty/RangeFor) + ReadOnlySet (Count/Contains/RangeFor) + CollectionExtensions (GetValueOrDefault×2/TryAdd×2/Remove×2/AsReadOnly) + StoragePaths (NoThrow/NonEmpty) + Experimental::Property (get/set/readonly/implicit) (48) |
 | `Task40Tests.cpp` | Span/ReadOnlySpan (ctor/Length/IsEmpty/op[]/Slice/RangeFor) + Half (FromSingle/ToSingle/statics/comparison) + Int128 (add/sub/mul/neg/ToString/cmp/statics) + UInt128 (add/mul/ToString/cmp/statics) + DateTimeOffset (ctor/DateTime/Offset/equality/ToString) + TimeOnly (ctor/props/ToString/comparison) + DBNull (singleton/ToString) + FormattableString (ctor/args/ToString/Invariant) + OperatingSystem (Platform/Version/IsLinux/IsWindows/VersionString) + BFloat16 (Zero/One/NegOne/arithmetic/IsNaN/IsInfinity/comparison/negate) + DivisionRounding enum + StringComparer (Ordinal/OrdinalIgnoreCase/Compare/Equals/Hash) + Progress (Report/AddHandler) + UnicodeRange/UnicodeRanges (Create/BMP ranges) + CancellationTokenRegistration (isActive/Dispose/Unregister) + KeyNotFoundException (ctor/message/isSystemException) + ReferenceEqualityComparer (pointer identity/hash/singleton) + ReadOnlyProperty (get/implicit) (101) |
+| `Task41Tests.cpp` | IntPtr/UIntPtr (Zero/value/IsZero/equality/void*) + DaylightTime (ctor/props) + DigitShapes/SortVersion + DecoderFallback (Replacement/Exception/singleton) + EncoderFallback (Replacement/Exception) + Win32Exception (errorCode/message/isException) + DataAnnotations (Validation/Required/Range/StringLength/Max-MinLength/RegularExpression 10 tests) + JsonSerializerOptions (defaults/set/get) + JsonNamingPolicy/JsonCommentHandling/JsonNumberHandling/JsonValueKind enums + JsonSerializationAttributes (PropertyName/Ignore/Converter/Order) + JsonSerializer (Serialize throws/Deserialize parses) + DictionaryEntry (key/value) + PropertyDescriptorCollection (count=0) + Prop macros (DDATA/DGETTER/IDATA/IGETTER inline class test) (61) |
 
 ### What is NOT yet tested (priority order)
 
@@ -121,6 +122,14 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 32 — Task 41 (IntPtr/UIntPtr, Fallbacks, DataAnnotations, Json enums/attrs, Prop macros + more):**
+
+| File | Change |
+|------|--------|
+| `include/System/IntPtr.hpp` | Fix: `IntPtr::Zero{0}` ambiguous between `IntPtr(intptr_t)` and `IntPtr(void*)` — added explicit `intptr_t(0)` cast |
+| `include/System/UIntPtr.hpp` | Fix: same — `uintptr_t(0)` cast |
+| `tests/Task41Tests.cpp` | New — 61 tests: IntPtr/UIntPtr, DaylightTime, DigitShapes, SortVersion, DecoderFallback/EncoderFallback, Win32Exception, DataAnnotations (7 attribute types), JsonSerializerOptions, Json enums (Naming/Comment/Number/ValueKind), JsonSerializationAttributes (5 types), JsonSerializer, DictionaryEntry, PropertyDescriptorCollection, Prop macros (DDATA/DGETTER/IDATA/IGETTER) |
 
 **Session 31 — Task 40 (Span, Half, Int128/UInt128, DateTimeOffset, TimeOnly + 13 more types):**
 
@@ -364,21 +373,22 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 41 — Remaining untested headers ← NEXT
+### Task 41 — IntPtr/UIntPtr, Fallbacks, DataAnnotations, Json enums/attrs, Prop macros ✅ DONE (session 32, 2543 tests)
 
-Remaining ~36 headers with substantive testable behavior (rough priority):
-- `SharpRuntime/Prop.hpp` — macro-based DDATA/DGETTER properties: test via inline struct using the macros
-- `System/Text/Json/JsonSerializer.hpp` + `JsonSerializerOptions.hpp` — if non-stub
-- `System/IO/Hashing/NonCryptographicHashAlgorithm.hpp` — abstract base
-- `System/IO/IsolatedStorage/IsolatedStorage.hpp` — abstract base
-- `System/Collections/ObjectModel/KeyedCollection.hpp` — abstract template
-- `System/ComponentModel/Win32Exception.hpp` — exception tests
-- `System/ComponentModel/DataAnnotations/DataAnnotationAttributes.hpp`
-- `System/Globalization/DaylightTime.hpp`, `DigitShapes.hpp`, `SortVersion.hpp`
-- `System/Text/DecoderFallback.hpp` / `EncoderFallback.hpp`
-- `System/IntPtr.hpp` / `System/UIntPtr.hpp`
+- 61 tests: IntPtr/UIntPtr, DaylightTime, DigitShapes, SortVersion, DecoderFallback, EncoderFallback, Win32Exception, DataAnnotations (7 types), JsonSerializerOptions, 4 Json enums, 5 JsonSerializationAttributes, JsonSerializer, DictionaryEntry, PropertyDescriptorCollection, Prop macros
+- Fixed `IntPtr.hpp`/`UIntPtr.hpp` pre-existing ambiguity: `Zero{0}` → explicit typed casts
+
+---
+
+### Task 42 — Final untested headers ← NEXT
+
+Most remaining headers are pure interfaces/markers (I*, Serializable, Obsolete, etc.) with no testable behavior.
+Headers still worth covering:
 - Fix `Threading::Timer` dangling-this UB, then add Timer tests
-- Consider porting Calendar.hpp / ISOWeek.hpp (excluded — reference DateTime properties not yet in DateTime.hpp)
+- `System/IO/Hashing/NonCryptographicHashAlgorithm.hpp` — verify CRC32/XxHash inherit from it
+- `System/Globalization/GregorianCalendar.hpp` — if it has testable behavior
+- Survey final ~20 headers; add tests where real behavior exists
+- After Task 42: merge `develop` → `master`
 
 ---
 
@@ -389,7 +399,7 @@ Remaining ~36 headers with substantive testable behavior (rough priority):
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 2482 tests / 449 headers)
+- **No merge to master** until test coverage is substantially broader (currently 2543 tests / 449 headers)
 
 ---
 
@@ -397,12 +407,8 @@ Remaining ~36 headers with substantive testable behavior (rough priority):
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
->
-> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
->
-> Read NEXT.md section 7 — **Task 41** is next: remaining untested headers.
+> Read NEXT.md section 7 — **Task 42** is next: final untested headers + Timer fix.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2482+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 40 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2543+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 41 done.

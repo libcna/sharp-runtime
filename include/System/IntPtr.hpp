@@ -34,5 +34,5 @@ namespace System
         [[nodiscard]] bool IsZero() const { return value == 0; }
     };
 
-    inline const IntPtr IntPtr::Zero{0};
+    inline const IntPtr IntPtr::Zero{intptr_t(0)};
 }

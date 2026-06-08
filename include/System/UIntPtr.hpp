@@ -31,6 +31,6 @@ namespace System {
         [[nodiscard]] bool IsZero() const { return value == 0; }
     };
 
-    inline const UIntPtr UIntPtr::Zero{0};
+    inline const UIntPtr UIntPtr::Zero{uintptr_t(0)};
 
 } // namespace System
