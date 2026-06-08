@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 29*
+*Last updated: 2026-06-08 (branch: develop) — session 30*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 2289 tests pass:** `./build/SharpRuntimeTests` → `2289 tests from 297 test suites` ✅
+- **All 2381 tests pass:** `./build/SharpRuntimeTests` → `2381 tests from 317 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 59 test files in `tests/System/`
+- 61 test files in `tests/System/`
 
-### What IS tested (2289 tests, 59 files)
+### What IS tested (2381 tests, 61 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -97,6 +97,8 @@
 | `Globalization/GlobalizationRemainingTests.cpp` | NumberStyles (values/OR) + DateTimeStyles (values/OR) + CompareOptions (values/OR) + CultureTypes (values/OR) + CalendarAlgorithmType + CalendarWeekRule + GregorianCalendarTypes + TimeSpanStyles (33) |
 | `ExceptionRemainingTests.cpp` | Batch: 36 exception types (DefaultCtor/MessageCtor/IsA_Exception × 3 each) + AggregateException (InnerExceptions/Handle/Unwrap) + NotFiniteNumberException (offendingNumber) + TypeInitializationException (typeName) + CultureNotFoundException (invalidCultureName) (121) |
 | `Threading/ThreadingRemainingTests.cpp` | Threading enums (ApartmentState/EventResetMode/LazyThreadSafetyMode/LockRecursionPolicy/ThreadPriority/ThreadState+OR) + AsyncLocal (get/set/handler) + Barrier (count/SignalAndWait/AddParticipant/RemoveParticipant/postPhaseAction) + CountdownEvent (Signal/IsSet/AddCount/Reset/Wait) + EventWaitHandle (AutoReset/ManualReset) + LazyInitializer (default/factory) + Lock (TryEnter/Enter-Exit/EnterScope) + ManualResetEventSlim (Set/Reset/IsSet/Wait) + ReaderWriterLockSlim (Read/Write lock) + SpinWait (Count/SpinOnce/NextSpinWillYield/SpinUntil) + ThreadLocal (get/set/factory/Dispose) + ThreadPool (QueueUserWorkItem/GetMin-MaxThreads) + 8 Threading exceptions (97) |
+| `Threading/Tasks/TasksTests.cpp` | Task (DefaultCtor/CompletedTask/Run/FromException/FromCanceled/Delay) + TaskT (Run/FromResult/Throwing) + TaskCompletionSource<int> (SetResult/TrySet/SetException/SetCanceled 9 tests) + TaskCompletionSource<void> (5 tests) + ValueTask (DefaultCtor/CompletedTask/FromException/GetAwaiter/FromTask) + ValueTaskT (FromResult/FromException/DefaultCtor) + Parallel::For/ForEach/Invoke + ParallelLoopState::Stop (44) |
+| `Task39RemainingTests.cpp` | SynchronizationContext (getCurrent/Post/Send/null/SetContext) + PeriodicTimer (Dispose→false/shortTick) + WaitHandle constants (WaitTimeout=258/InvalidHandle=-1) + ASCIIEncoding (name/GetBytes/GetString/empty) + UnicodeEncoding (name/twoBytesPerChar/RoundTrip/empty) + UTF8Encoding (name/GetBytes/GetString/empty) + EncodingInfo (codePage/name/displayName/GetEncoding) + ReadOnlyObservableCollection (Count/op[]/Contains/isEmpty/RangeFor) + ReadOnlySet (Count/Contains/RangeFor) + CollectionExtensions (GetValueOrDefault×2/TryAdd×2/Remove×2/AsReadOnly) + StoragePaths (NoThrow/NonEmpty) + Experimental::Property (get/set/readonly/implicit) (48) |
 
 ### What is NOT yet tested (priority order)
 
@@ -118,6 +120,14 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 30 — Task 39 (Tasks + remaining stubs):**
+
+| File | Change |
+|------|--------|
+| `include/System/Threading/PeriodicTimer.hpp` | Fix: `getTotalMilliseconds()` → `getTotalMillisecondsProperty()` — pre-existing typo caused linker error on first use |
+| `tests/System/Threading/Tasks/TasksTests.cpp` | New — 44 tests: Task/TaskT/TaskCompletionSource<int>/TaskCompletionSource<void>/ValueTask/ValueTaskT/Parallel::For+ForEach+Invoke/ParallelLoopState |
+| `tests/Task39RemainingTests.cpp` | New — 48 tests: SynchronizationContext/PeriodicTimer/WaitHandle constants/ASCIIEncoding/UnicodeEncoding/UTF8Encoding/EncodingInfo/ReadOnlyObservableCollection/ReadOnlySet/CollectionExtensions/StoragePaths/Experimental::Property |
 
 **Session 29 — Task 38 (Exception types + Threading remaining):**
 
@@ -331,11 +341,20 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 39 — Tasks + remaining stubs ← NEXT
+### Task 39 — Tasks + remaining stubs ✅ DONE (session 30, 2381 tests)
 
-- `System::Threading::Tasks/` — Task<T>, TaskCompletionSource, ValueTask, Parallel
-- Fix `Timer.hpp` dangling-this UB, then add Timer tests
-- Any remaining untested headers with substantive APIs
+- `System::Threading::Tasks/` — Task, TaskT, TaskCompletionSource<int/void>, ValueTask, ValueTaskT, Parallel, ParallelLoopState (44 tests)
+- SynchronizationContext, PeriodicTimer, WaitHandle constants, ASCIIEncoding, UnicodeEncoding, UTF8Encoding, EncodingInfo, ReadOnlyObservableCollection, ReadOnlySet, CollectionExtensions, StoragePaths, Experimental::Property (48 tests)
+- Fixed pre-existing `PeriodicTimer.hpp` bug: `getTotalMilliseconds()` → `getTotalMillisecondsProperty()`
+
+---
+
+### Task 40 — Vector math + remaining headers ← NEXT
+
+- `System::Numerics/` — Vector2, Vector3, Vector4, Matrix3x2, Matrix4x4 (not ported; may need new headers)
+- Fix `Threading::Timer` dangling-this UB (thread captures raw `this`; object may be destroyed before thread wakes)
+- Any interface/marker headers with concrete testable behavior not yet covered
+- Consider porting Calendar.hpp / ISOWeek.hpp (currently excluded — reference DateTime properties not yet in DateTime.hpp)
 
 ---
 
@@ -346,7 +365,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 2289 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 2381 tests / 444 headers)
 
 ---
 
@@ -354,10 +373,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 39** is next: Tasks + remaining stubs.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Scan remaining exception headers and Threading headers for testable types.
+> Read NEXT.md section 7 — **Task 40** is next: Vector math + remaining headers.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2289+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 38 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2381+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 39 done.

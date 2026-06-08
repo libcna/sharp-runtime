@@ -19,7 +19,7 @@ namespace System::Threading {
 
     public:
         explicit PeriodicTimer(const System::TimeSpan& period)
-            : period_(static_cast<long long>(period.getTotalMilliseconds())),
+            : period_(static_cast<long long>(period.getTotalMillisecondsProperty())),
               next_(std::chrono::steady_clock::now() + period_) {}
 
         // Blocks until the next tick or disposal. Returns false if the timer has been disposed.

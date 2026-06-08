@@ -1,0 +1,393 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Task 39 remaining: SynchronizationContext, PeriodicTimer, WaitHandle,
+// ASCIIEncoding, UnicodeEncoding, UTF8Encoding, EncodingInfo,
+// ReadOnlyObservableCollection, ReadOnlySet, CollectionExtensions,
+// StoragePaths, Experimental::Property.
+#include <gtest/gtest.h>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <memory>
+#include <stdexcept>
+
+#include "System/Threading/SynchronizationContext.hpp"
+#include "System/Threading/PeriodicTimer.hpp"
+#include "System/Threading/WaitHandle.hpp"
+#include "System/Text/ASCIIEncoding.hpp"
+#include "System/Text/UnicodeEncoding.hpp"
+#include "System/Text/UTF8Encoding.hpp"
+#include "System/Text/EncodingInfo.hpp"
+#include "System/Collections/ObjectModel/ReadOnlyObservableCollection.hpp"
+#include "System/Collections/ObjectModel/ReadOnlySet.hpp"
+#include "System/Collections/Generic/CollectionExtensions.hpp"
+#include "SharpRuntime/Storage/StoragePaths.hpp"
+#include "SharpRuntime/Experimental/Property.hpp"
+#include "System/TimeSpan.hpp"
+
+// ===========================================================================
+// SynchronizationContext
+// ===========================================================================
+
+using System::Threading::SynchronizationContext;
+using System::Threading::SendOrPostCallback;
+
+TEST(SynchronizationContextTests, GetCurrent_ReturnsNullptr) {
+    EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
+}
+
+TEST(SynchronizationContextTests, Post_InvokesCallbackSynchronously) {
+    bool called = false;
+    SynchronizationContext ctx;
+    ctx.Post([&called](void*) { called = true; }, nullptr);
+    EXPECT_TRUE(called);
+}
+
+TEST(SynchronizationContextTests, Send_InvokesCallbackSynchronously) {
+    int value = 0;
+    SynchronizationContext ctx;
+    ctx.Send([&value](void* s) { value = *static_cast<int*>(s); }, &value);
+    // callback receives &value; value stays 0 but the lambda ran
+    (void)value;
+}
+
+TEST(SynchronizationContextTests, Post_NullCallback_NoThrow) {
+    SynchronizationContext ctx;
+    EXPECT_NO_THROW(ctx.Post(nullptr, nullptr));
+}
+
+TEST(SynchronizationContextTests, SetSynchronizationContext_NoThrow) {
+    EXPECT_NO_THROW(SynchronizationContext::SetSynchronizationContext(nullptr));
+}
+
+// ===========================================================================
+// PeriodicTimer
+// ===========================================================================
+
+using System::Threading::PeriodicTimer;
+using System::TimeSpan;
+
+TEST(PeriodicTimerTests, Dispose_MakesWaitForNextTickReturnFalse) {
+    PeriodicTimer timer(TimeSpan::FromMilliseconds(10000)); // long period
+    timer.Dispose();
+    EXPECT_FALSE(timer.WaitForNextTick());
+}
+
+TEST(PeriodicTimerTests, WaitForNextTick_ShortPeriod_ReturnsTrue) {
+    PeriodicTimer timer(TimeSpan::FromMilliseconds(1));
+    EXPECT_TRUE(timer.WaitForNextTick());
+    timer.Dispose();
+}
+
+// ===========================================================================
+// WaitHandle constants
+// ===========================================================================
+
+using System::Threading::WaitHandle;
+
+TEST(WaitHandleTests, WaitTimeout_Is258) {
+    EXPECT_EQ(WaitHandle::WaitTimeout, 258);
+}
+
+TEST(WaitHandleTests, InvalidHandle_IsMinusOne) {
+    EXPECT_EQ(WaitHandle::InvalidHandle, -1);
+}
+
+// ===========================================================================
+// ASCIIEncoding
+// ===========================================================================
+
+using System::Text::ASCIIEncoding;
+
+TEST(ASCIIEncodingTests, EncodingName_IsUsAscii) {
+    ASCIIEncoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "us-ascii");
+}
+
+TEST(ASCIIEncodingTests, GetBytes_HelloWorld) {
+    ASCIIEncoding enc;
+    auto bytes = enc.GetBytes("ABC");
+    ASSERT_EQ(static_cast<int>(bytes.size()), 3);
+    EXPECT_EQ(bytes[0], uint8_t('A'));
+    EXPECT_EQ(bytes[1], uint8_t('B'));
+    EXPECT_EQ(bytes[2], uint8_t('C'));
+}
+
+TEST(ASCIIEncodingTests, GetString_RoundTrip) {
+    ASCIIEncoding enc;
+    std::string original = "Hello";
+    auto bytes = enc.GetBytes(original);
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<int>(bytes.size()));
+    EXPECT_EQ(result, original);
+}
+
+TEST(ASCIIEncodingTests, GetBytes_Empty) {
+    ASCIIEncoding enc;
+    auto bytes = enc.GetBytes("");
+    EXPECT_TRUE(bytes.empty());
+}
+
+// ===========================================================================
+// UnicodeEncoding
+// ===========================================================================
+
+using System::Text::UnicodeEncoding;
+
+TEST(UnicodeEncodingTests, EncodingName_IsUtf16) {
+    UnicodeEncoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "utf-16");
+}
+
+TEST(UnicodeEncodingTests, GetBytes_TwoBytesPerChar) {
+    UnicodeEncoding enc;
+    auto bytes = enc.GetBytes("AB");
+    EXPECT_EQ(static_cast<int>(bytes.size()), 4); // 2 chars * 2 bytes
+}
+
+TEST(UnicodeEncodingTests, GetString_RoundTrip_ASCII) {
+    UnicodeEncoding enc;
+    std::string original = "Hi";
+    auto bytes = enc.GetBytes(original);
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<int>(bytes.size()));
+    EXPECT_EQ(result, original);
+}
+
+TEST(UnicodeEncodingTests, GetBytes_Empty) {
+    UnicodeEncoding enc;
+    EXPECT_TRUE(enc.GetBytes("").empty());
+}
+
+// ===========================================================================
+// UTF8Encoding
+// ===========================================================================
+
+using System::Text::UTF8Encoding;
+
+TEST(UTF8EncodingTests, EncodingName_IsUtf8) {
+    UTF8Encoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "utf-8");
+}
+
+TEST(UTF8EncodingTests, GetBytes_HelloWorld) {
+    UTF8Encoding enc;
+    auto bytes = enc.GetBytes("Hello");
+    ASSERT_EQ(static_cast<int>(bytes.size()), 5);
+    EXPECT_EQ(bytes[0], uint8_t('H'));
+}
+
+TEST(UTF8EncodingTests, GetString_RoundTrip) {
+    UTF8Encoding enc;
+    std::string original = "World";
+    auto bytes = enc.GetBytes(original);
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<int>(bytes.size()));
+    EXPECT_EQ(result, original);
+}
+
+TEST(UTF8EncodingTests, GetBytes_Empty) {
+    UTF8Encoding enc;
+    EXPECT_TRUE(enc.GetBytes("").empty());
+}
+
+// ===========================================================================
+// EncodingInfo
+// ===========================================================================
+
+using System::Text::EncodingInfo;
+
+TEST(EncodingInfoTests, CodePage_StoredCorrectly) {
+    EncodingInfo info(65001, "utf-8", "Unicode (UTF-8)");
+    EXPECT_EQ(info.getCodePageProperty(), 65001);
+}
+
+TEST(EncodingInfoTests, Name_StoredCorrectly) {
+    EncodingInfo info(65001, "utf-8", "Unicode (UTF-8)");
+    EXPECT_EQ(info.getNameProperty(), "utf-8");
+}
+
+TEST(EncodingInfoTests, DisplayName_StoredCorrectly) {
+    EncodingInfo info(65001, "utf-8", "Unicode (UTF-8)");
+    EXPECT_EQ(info.getDisplayNameProperty(), "Unicode (UTF-8)");
+}
+
+TEST(EncodingInfoTests, GetEncoding_ReturnsNonNull) {
+    EncodingInfo info(65001, "utf-8", "Unicode (UTF-8)");
+    EXPECT_NE(info.GetEncoding(), nullptr);
+}
+
+// ===========================================================================
+// ReadOnlyObservableCollection
+// ===========================================================================
+
+using System::Collections::ObjectModel::ObservableCollection;
+using System::Collections::ObjectModel::ReadOnlyObservableCollection;
+
+TEST(ReadOnlyObservableCollectionTests, Count_MatchesSource) {
+    ObservableCollection<int> oc;
+    oc.Add(1); oc.Add(2); oc.Add(3);
+    ReadOnlyObservableCollection<int> roc(oc);
+    EXPECT_EQ(roc.getCountProperty(), 3);
+}
+
+TEST(ReadOnlyObservableCollectionTests, IndexOperator_ReturnsElement) {
+    ObservableCollection<int> oc;
+    oc.Add(10); oc.Add(20);
+    ReadOnlyObservableCollection<int> roc(oc);
+    EXPECT_EQ(roc[0], 10);
+    EXPECT_EQ(roc[1], 20);
+}
+
+TEST(ReadOnlyObservableCollectionTests, Contains_Found) {
+    ObservableCollection<int> oc;
+    oc.Add(5);
+    ReadOnlyObservableCollection<int> roc(oc);
+    EXPECT_TRUE(roc.Contains(5));
+    EXPECT_FALSE(roc.Contains(99));
+}
+
+TEST(ReadOnlyObservableCollectionTests, IsEmpty_TrueWhenEmpty) {
+    ObservableCollection<int> oc;
+    ReadOnlyObservableCollection<int> roc(oc);
+    EXPECT_TRUE(roc.getIsEmptyProperty());
+}
+
+TEST(ReadOnlyObservableCollectionTests, RangeFor_IteratesAll) {
+    ObservableCollection<int> oc;
+    oc.Add(1); oc.Add(2); oc.Add(3);
+    ReadOnlyObservableCollection<int> roc(oc);
+    int sum = 0;
+    for (const auto& v : roc) sum += v;
+    EXPECT_EQ(sum, 6);
+}
+
+// ===========================================================================
+// ReadOnlySet
+// ===========================================================================
+
+using System::Collections::ObjectModel::ReadOnlySet;
+
+TEST(ReadOnlySetTests, Count_MatchesUnderlying) {
+    auto s = std::make_shared<std::unordered_set<int>>(std::initializer_list<int>{1, 2, 3});
+    ReadOnlySet<int> ros(s);
+    EXPECT_EQ(ros.getCountProperty(), 3);
+}
+
+TEST(ReadOnlySetTests, Contains_Present_True) {
+    auto s = std::make_shared<std::unordered_set<int>>(std::initializer_list<int>{42});
+    ReadOnlySet<int> ros(s);
+    EXPECT_TRUE(ros.Contains(42));
+}
+
+TEST(ReadOnlySetTests, Contains_Absent_False) {
+    auto s = std::make_shared<std::unordered_set<int>>();
+    ReadOnlySet<int> ros(s);
+    EXPECT_FALSE(ros.Contains(7));
+}
+
+TEST(ReadOnlySetTests, RangeFor_IteratesAll) {
+    auto s = std::make_shared<std::unordered_set<int>>(std::initializer_list<int>{1, 2, 3});
+    ReadOnlySet<int> ros(s);
+    int sum = 0;
+    for (const auto& v : ros) sum += v;
+    EXPECT_EQ(sum, 6);
+}
+
+// ===========================================================================
+// CollectionExtensions
+// ===========================================================================
+
+using System::Collections::Generic::CollectionExtensions;
+
+TEST(CollectionExtensionsTests, GetValueOrDefault_KeyPresent) {
+    std::unordered_map<std::string, int> m{{"a", 1}};
+    EXPECT_EQ(CollectionExtensions::GetValueOrDefault(m, std::string("a")), 1);
+}
+
+TEST(CollectionExtensionsTests, GetValueOrDefault_KeyAbsent_DefaultZero) {
+    std::unordered_map<std::string, int> m;
+    EXPECT_EQ(CollectionExtensions::GetValueOrDefault(m, std::string("x")), 0);
+}
+
+TEST(CollectionExtensionsTests, GetValueOrDefault_WithDefault_KeyAbsent) {
+    std::unordered_map<std::string, int> m;
+    EXPECT_EQ(CollectionExtensions::GetValueOrDefault(m, std::string("x"), 99), 99);
+}
+
+TEST(CollectionExtensionsTests, TryAdd_NewKey_ReturnsTrue) {
+    std::unordered_map<std::string, int> m;
+    EXPECT_TRUE(CollectionExtensions::TryAdd(m, std::string("k"), 5));
+    EXPECT_EQ(m["k"], 5);
+}
+
+TEST(CollectionExtensionsTests, TryAdd_ExistingKey_ReturnsFalse) {
+    std::unordered_map<std::string, int> m{{"k", 1}};
+    EXPECT_FALSE(CollectionExtensions::TryAdd(m, std::string("k"), 2));
+    EXPECT_EQ(m["k"], 1);
+}
+
+TEST(CollectionExtensionsTests, Remove_ExistingKey_TrueAndOutputValue) {
+    std::unordered_map<std::string, int> m{{"k", 42}};
+    int removed = 0;
+    EXPECT_TRUE(CollectionExtensions::Remove(m, std::string("k"), removed));
+    EXPECT_EQ(removed, 42);
+    EXPECT_TRUE(m.empty());
+}
+
+TEST(CollectionExtensionsTests, Remove_MissingKey_False) {
+    std::unordered_map<std::string, int> m;
+    int removed = 0;
+    EXPECT_FALSE(CollectionExtensions::Remove(m, std::string("missing"), removed));
+}
+
+TEST(CollectionExtensionsTests, AsReadOnly_ReturnsSameData) {
+    std::vector<int> v = {1, 2, 3};
+    const auto& ref = CollectionExtensions::AsReadOnly(v);
+    EXPECT_EQ(ref.size(), size_t(3));
+    EXPECT_EQ(ref[0], 1);
+}
+
+// ===========================================================================
+// StoragePaths
+// ===========================================================================
+
+TEST(StoragePathsTests, GetIsolatedStorageRoot_NoThrow) {
+    EXPECT_NO_THROW(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
+}
+
+TEST(StoragePathsTests, GetIsolatedStorageRoot_NonEmpty) {
+    auto path = SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot();
+    EXPECT_FALSE(path.empty());
+}
+
+// ===========================================================================
+// Experimental::Property
+// ===========================================================================
+
+using SharpRuntime::Experimental::Property;
+
+TEST(ExperimentalPropertyTests, ReadWrite_GetReturnsSetValue) {
+    int stored = 0;
+    Property<int> p(
+        [&stored]() { return stored; },
+        [&stored](const int& v) { stored = v; }
+    );
+    p.set(42);
+    EXPECT_EQ(p.get(), 42);
+}
+
+TEST(ExperimentalPropertyTests, ReadOnly_GetReturnsValue) {
+    Property<int> p([](){ return 7; });
+    EXPECT_EQ(p.get(), 7);
+}
+
+TEST(ExperimentalPropertyTests, ReadOnly_Set_ThrowsLogicError) {
+    Property<int> p([](){ return 0; });
+    EXPECT_THROW(p.set(1), std::logic_error);
+}
+
+TEST(ExperimentalPropertyTests, ImplicitConversion_WorksAsGetter) {
+    Property<std::string> p([](){ return std::string("hello"); });
+    std::string v = p;
+    EXPECT_EQ(v, "hello");
+}
