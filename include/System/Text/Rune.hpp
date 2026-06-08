@@ -88,6 +88,6 @@ namespace System::Text {
         bool operator>=(const Rune& o) const { return value_ >= o.value_; }
     };
 
-    inline const Rune Rune::ReplacementChar{0xFFFD};
+    inline const Rune Rune::ReplacementChar{uint32_t(0xFFFD)};
 
 } // namespace System::Text

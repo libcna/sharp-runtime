@@ -1,0 +1,205 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for remaining Diagnostics types: DebuggerDisplayAttribute,
+// DebuggerBrowsableAttribute, StackFrame, StackTrace, UnreachableException,
+// and the marker-only debugger attributes.
+#include <gtest/gtest.h>
+#include <string>
+#include "System/Diagnostics/DebuggerDisplayAttribute.hpp"
+#include "System/Diagnostics/DebuggerBrowsableAttribute.hpp"
+#include "System/Diagnostics/StackFrame.hpp"
+#include "System/Diagnostics/StackTrace.hpp"
+#include "System/Diagnostics/UnreachableException.hpp"
+#include "System/Diagnostics/DebuggerHiddenAttribute.hpp"
+#include "System/Diagnostics/DebuggerStepThroughAttribute.hpp"
+#include "System/Diagnostics/DebuggerNonUserCodeAttribute.hpp"
+#include "System/Diagnostics/DebuggerStepperBoundaryAttribute.hpp"
+
+using System::Diagnostics::DebuggerDisplayAttribute;
+using System::Diagnostics::DebuggerBrowsableAttribute;
+using System::Diagnostics::DebuggerBrowsableState;
+using System::Diagnostics::StackFrame;
+using System::Diagnostics::StackTrace;
+using System::Diagnostics::UnreachableException;
+using System::Diagnostics::DebuggerHiddenAttribute;
+using System::Diagnostics::DebuggerStepThroughAttribute;
+using System::Diagnostics::DebuggerNonUserCodeAttribute;
+
+// ===========================================================================
+// DebuggerBrowsableState
+// ===========================================================================
+
+TEST(DebuggerBrowsableStateTests, Never_IsZero) {
+    EXPECT_EQ(static_cast<int>(DebuggerBrowsableState::Never), 0);
+}
+
+TEST(DebuggerBrowsableStateTests, Collapsed_IsTwo) {
+    EXPECT_EQ(static_cast<int>(DebuggerBrowsableState::Collapsed), 2);
+}
+
+TEST(DebuggerBrowsableStateTests, RootHidden_IsThree) {
+    EXPECT_EQ(static_cast<int>(DebuggerBrowsableState::RootHidden), 3);
+}
+
+// ===========================================================================
+// DebuggerBrowsableAttribute
+// ===========================================================================
+
+TEST(DebuggerBrowsableAttributeTests, Constructor_StoresState) {
+    DebuggerBrowsableAttribute attr(DebuggerBrowsableState::Never);
+    EXPECT_EQ(attr.getStateProperty(), DebuggerBrowsableState::Never);
+}
+
+TEST(DebuggerBrowsableAttributeTests, Collapsed_State) {
+    DebuggerBrowsableAttribute attr(DebuggerBrowsableState::Collapsed);
+    EXPECT_EQ(attr.getStateProperty(), DebuggerBrowsableState::Collapsed);
+}
+
+// ===========================================================================
+// DebuggerDisplayAttribute
+// ===========================================================================
+
+TEST(DebuggerDisplayAttributeTests, Constructor_StoresValue) {
+    DebuggerDisplayAttribute attr("{Count}");
+    EXPECT_EQ(attr.getValueProperty(), "{Count}");
+}
+
+TEST(DebuggerDisplayAttributeTests, DefaultName_Empty) {
+    DebuggerDisplayAttribute attr("val");
+    EXPECT_TRUE(attr.getNameProperty().empty());
+}
+
+TEST(DebuggerDisplayAttributeTests, SetName_GetName) {
+    DebuggerDisplayAttribute attr("val");
+    attr.setNameProperty("MyName");
+    EXPECT_EQ(attr.getNameProperty(), "MyName");
+}
+
+TEST(DebuggerDisplayAttributeTests, SetType_GetType) {
+    DebuggerDisplayAttribute attr("val");
+    attr.setTypeProperty("MyType");
+    EXPECT_EQ(attr.getTypeProperty(), "MyType");
+}
+
+// ===========================================================================
+// StackFrame
+// ===========================================================================
+
+TEST(StackFrameTests, DefaultCtor_EmptyFileName) {
+    StackFrame sf;
+    EXPECT_TRUE(sf.getFileNameProperty().empty());
+}
+
+TEST(StackFrameTests, Constructor_StoresFileName) {
+    StackFrame sf("main.cpp", 42);
+    EXPECT_EQ(sf.getFileNameProperty(), "main.cpp");
+}
+
+TEST(StackFrameTests, Constructor_StoresLineNumber) {
+    StackFrame sf("file.cpp", 10, 5);
+    EXPECT_EQ(sf.getFileLineNumberProperty(), 10);
+}
+
+TEST(StackFrameTests, Constructor_StoresColumnNumber) {
+    StackFrame sf("file.cpp", 10, 5);
+    EXPECT_EQ(sf.getFileColumnNumberProperty(), 5);
+}
+
+TEST(StackFrameTests, DefaultILOffset_IsMinusOne) {
+    StackFrame sf;
+    EXPECT_EQ(sf.getILOffsetProperty(), StackFrame::OFFSET_UNKNOWN);
+}
+
+TEST(StackFrameTests, ToString_EmptyFile_ReturnsUnknown) {
+    StackFrame sf;
+    EXPECT_EQ(sf.ToString(), "<unknown>");
+}
+
+TEST(StackFrameTests, ToString_WithFile_ContainsFileName) {
+    StackFrame sf("app.cpp", 100);
+    std::string s = sf.ToString();
+    EXPECT_NE(s.find("app.cpp"), std::string::npos);
+}
+
+TEST(StackFrameTests, ToString_ContainsLineNumber) {
+    StackFrame sf("app.cpp", 100);
+    std::string s = sf.ToString();
+    EXPECT_NE(s.find("100"), std::string::npos);
+}
+
+// ===========================================================================
+// StackTrace
+// ===========================================================================
+
+TEST(StackTraceTests, DefaultCtor_FrameCountZero) {
+    StackTrace st;
+    EXPECT_EQ(st.getFrameCountProperty(), 0);
+}
+
+TEST(StackTraceTests, Constructor_WithFrames_StoresCount) {
+    std::vector<StackFrame> frames = {StackFrame("a.cpp", 1), StackFrame("b.cpp", 2)};
+    StackTrace st(frames);
+    EXPECT_EQ(st.getFrameCountProperty(), 2);
+}
+
+TEST(StackTraceTests, GetFrame_ValidIndex) {
+    std::vector<StackFrame> frames = {StackFrame("x.cpp", 5)};
+    StackTrace st(frames);
+    const StackFrame* f = st.GetFrame(0);
+    ASSERT_NE(f, nullptr);
+    EXPECT_EQ(f->getFileNameProperty(), "x.cpp");
+}
+
+TEST(StackTraceTests, GetFrame_OutOfRange_ReturnsNull) {
+    StackTrace st;
+    EXPECT_EQ(st.GetFrame(0), nullptr);
+}
+
+TEST(StackTraceTests, GetFrames_ReturnsAllFrames) {
+    std::vector<StackFrame> frames = {StackFrame("a.cpp", 1), StackFrame("b.cpp", 2)};
+    StackTrace st(frames);
+    EXPECT_EQ(st.GetFrames().size(), 2u);
+}
+
+TEST(StackTraceTests, ToString_ContainsAt) {
+    std::vector<StackFrame> frames = {StackFrame("main.cpp", 42)};
+    StackTrace st(frames);
+    std::string s = st.ToString();
+    EXPECT_NE(s.find("at"), std::string::npos);
+}
+
+// ===========================================================================
+// UnreachableException
+// ===========================================================================
+
+TEST(UnreachableExceptionTests, DefaultCtor_WhatNotEmpty) {
+    UnreachableException ex;
+    EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(UnreachableExceptionTests, MessageCtor_WhatContainsMessage) {
+    UnreachableException ex("should not reach here");
+    EXPECT_NE(std::string(ex.what()).find("should not reach here"), std::string::npos);
+}
+
+TEST(UnreachableExceptionTests, IsA_Exception) {
+    EXPECT_THROW(throw UnreachableException(), System::Exception);
+}
+
+// ===========================================================================
+// Marker-only debugger attributes (just instantiation)
+// ===========================================================================
+
+TEST(DebuggerMarkerAttributesTests, DebuggerHiddenAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(DebuggerHiddenAttribute{});
+}
+
+TEST(DebuggerMarkerAttributesTests, DebuggerStepThroughAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(DebuggerStepThroughAttribute{});
+}
+
+TEST(DebuggerMarkerAttributesTests, DebuggerNonUserCodeAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(DebuggerNonUserCodeAttribute{});
+}

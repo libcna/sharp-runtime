@@ -1,0 +1,416 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for remaining Text types: NormalizationForm, CompositeFormat, Rune,
+// UTF7/UTF32/Latin1Encoding, Encoder, Decoder, Regex/Match/MatchCollection.
+#include <gtest/gtest.h>
+#include <memory>
+#include <string>
+#include <vector>
+#include "System/Text/NormalizationForm.hpp"
+#include "System/Text/CompositeFormat.hpp"
+#include "System/Text/Rune.hpp"
+#include "System/Text/UTF7Encoding.hpp"
+#include "System/Text/UTF32Encoding.hpp"
+#include "System/Text/Latin1Encoding.hpp"
+#include "System/Text/Encoder.hpp"
+#include "System/Text/Decoder.hpp"
+#include "System/Text/Encoding.hpp"
+#include "System/Text/RegularExpressions/Regex.hpp"
+#include "System/Text/RegularExpressions/Match.hpp"
+#include "System/Text/RegularExpressions/MatchCollection.hpp"
+
+using System::Text::NormalizationForm;
+using System::Text::CompositeFormat;
+using System::Text::Rune;
+using System::Text::UTF7Encoding;
+using System::Text::UTF32Encoding;
+using System::Text::Latin1Encoding;
+using System::Text::Encoder;
+using System::Text::Decoder;
+using System::Text::Encoding;
+using System::Text::RegularExpressions::Regex;
+using System::Text::RegularExpressions::Match;
+using System::Text::RegularExpressions::MatchCollection;
+
+// ===========================================================================
+// NormalizationForm
+// ===========================================================================
+
+TEST(NormalizationFormTests, FormC_IsOne) {
+    EXPECT_EQ(static_cast<int>(NormalizationForm::FormC), 1);
+}
+
+TEST(NormalizationFormTests, FormD_IsTwo) {
+    EXPECT_EQ(static_cast<int>(NormalizationForm::FormD), 2);
+}
+
+TEST(NormalizationFormTests, FormKC_IsFive) {
+    EXPECT_EQ(static_cast<int>(NormalizationForm::FormKC), 5);
+}
+
+TEST(NormalizationFormTests, FormKD_IsSix) {
+    EXPECT_EQ(static_cast<int>(NormalizationForm::FormKD), 6);
+}
+
+// ===========================================================================
+// CompositeFormat
+// ===========================================================================
+
+TEST(CompositeFormatTests, Parse_SinglePlaceholder_MinArgCountOne) {
+    auto cf = CompositeFormat::Parse("Hello, {0}!");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 1);
+}
+
+TEST(CompositeFormatTests, Parse_ThreePlaceholders_MinArgCountThree) {
+    auto cf = CompositeFormat::Parse("{0} {1} {2}");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 3);
+}
+
+TEST(CompositeFormatTests, Parse_NoPlaceholders_MinArgCountZero) {
+    auto cf = CompositeFormat::Parse("no placeholders here");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 0);
+}
+
+TEST(CompositeFormatTests, getFormatProperty_ReturnsOriginal) {
+    auto cf = CompositeFormat::Parse("{0} world");
+    EXPECT_EQ(cf.getFormatProperty(), "{0} world");
+}
+
+TEST(CompositeFormatTests, Parse_RepeatedIndex_MinArgCountOne) {
+    auto cf = CompositeFormat::Parse("{0} and {0} again");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 1);
+}
+
+// ===========================================================================
+// Rune
+// ===========================================================================
+
+TEST(RuneTests, Constructor_ValidASCII_StoresValue) {
+    Rune r(0x41u);
+    EXPECT_EQ(r.getValueProperty(), 0x41u);
+}
+
+TEST(RuneTests, CharConstructor_Works) {
+    Rune r('A');
+    EXPECT_EQ(r.getValueProperty(), 65u);
+}
+
+TEST(RuneTests, Constructor_SurrogateCodePoint_Throws) {
+    EXPECT_THROW(Rune{0xD800u}, std::out_of_range);
+}
+
+TEST(RuneTests, Constructor_BeyondMaxCodePoint_Throws) {
+    EXPECT_THROW(Rune{0x200000u}, std::out_of_range);
+}
+
+TEST(RuneTests, IsAscii_True_ForLatinLetter) {
+    Rune r('Z');
+    EXPECT_TRUE(r.getIsAsciiProperty());
+    EXPECT_TRUE(Rune::IsAscii(r));
+}
+
+TEST(RuneTests, IsAscii_False_ForHighCodePoint) {
+    Rune r(0x00E9u); // é
+    EXPECT_FALSE(r.getIsAsciiProperty());
+}
+
+TEST(RuneTests, IsBmp_True_ForBmpChar) {
+    Rune r(0x20ACu); // €
+    EXPECT_TRUE(r.getIsBmpProperty());
+}
+
+TEST(RuneTests, IsBmp_False_ForSupplementaryChar) {
+    Rune r(0x1F600u); // 😀
+    EXPECT_FALSE(r.getIsBmpProperty());
+}
+
+TEST(RuneTests, Utf8SequenceLength_1_ForASCII) {
+    EXPECT_EQ(Rune(0x41u).getUtf8SequenceLengthProperty(), 1);
+}
+
+TEST(RuneTests, Utf8SequenceLength_2_ForLatin1Ext) {
+    EXPECT_EQ(Rune(0x00E9u).getUtf8SequenceLengthProperty(), 2);
+}
+
+TEST(RuneTests, Utf8SequenceLength_3_ForBMP) {
+    EXPECT_EQ(Rune(0x20ACu).getUtf8SequenceLengthProperty(), 3);
+}
+
+TEST(RuneTests, Utf8SequenceLength_4_ForSMP) {
+    EXPECT_EQ(Rune(0x1F600u).getUtf8SequenceLengthProperty(), 4);
+}
+
+TEST(RuneTests, Utf16SequenceLength_1_ForBMP) {
+    EXPECT_EQ(Rune(0x20ACu).getUtf16SequenceLengthProperty(), 1);
+}
+
+TEST(RuneTests, Utf16SequenceLength_2_ForSMP) {
+    EXPECT_EQ(Rune(0x1F600u).getUtf16SequenceLengthProperty(), 2);
+}
+
+TEST(RuneTests, IsValid_True_False) {
+    EXPECT_TRUE(Rune::IsValid(0x41u));
+    EXPECT_FALSE(Rune::IsValid(0xD800u));
+    EXPECT_FALSE(Rune::IsValid(0x200000u));
+}
+
+TEST(RuneTests, IsLetter_True_False) {
+    EXPECT_TRUE(Rune::IsLetter(Rune('A')));
+    EXPECT_FALSE(Rune::IsLetter(Rune('1')));
+}
+
+TEST(RuneTests, IsDigit_True_False) {
+    EXPECT_TRUE(Rune::IsDigit(Rune('5')));
+    EXPECT_FALSE(Rune::IsDigit(Rune('A')));
+}
+
+TEST(RuneTests, IsWhiteSpace_True_False) {
+    EXPECT_TRUE(Rune::IsWhiteSpace(Rune(' ')));
+    EXPECT_FALSE(Rune::IsWhiteSpace(Rune('A')));
+}
+
+TEST(RuneTests, ToUpper_LowercaseToUpper) {
+    EXPECT_EQ(Rune::ToUpper(Rune('a')).getValueProperty(), static_cast<uint32_t>('A'));
+}
+
+TEST(RuneTests, ToLower_UppercaseToLower) {
+    EXPECT_EQ(Rune::ToLower(Rune('Z')).getValueProperty(), static_cast<uint32_t>('z'));
+}
+
+TEST(RuneTests, ToString_ASCIIChar) {
+    EXPECT_EQ(Rune('A').ToString(), "A");
+}
+
+TEST(RuneTests, Equality_SameCodePoint) {
+    EXPECT_TRUE(Rune('X') == Rune(0x58u));
+}
+
+TEST(RuneTests, ReplacementChar_ValueIsFFFD) {
+    EXPECT_EQ(Rune::ReplacementChar.getValueProperty(), 0xFFFDu);
+}
+
+// ===========================================================================
+// UTF7Encoding
+// ===========================================================================
+
+TEST(UTF7EncodingTests, EncodingName_IsUtf7) {
+    UTF7Encoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "utf-7");
+}
+
+TEST(UTF7EncodingTests, CodePage_Is65000) {
+    UTF7Encoding enc;
+    EXPECT_EQ(enc.getCodePageProperty(), 65000);
+}
+
+TEST(UTF7EncodingTests, GetBytes_ASCII_SameBytes) {
+    UTF7Encoding enc;
+    auto bytes = enc.GetBytes("ABC");
+    ASSERT_EQ(bytes.size(), 3u);
+    EXPECT_EQ(bytes[0], uint8_t('A'));
+    EXPECT_EQ(bytes[2], uint8_t('C'));
+}
+
+TEST(UTF7EncodingTests, AllowOptionals_DefaultFalse) {
+    UTF7Encoding enc;
+    EXPECT_FALSE(enc.getAllowOptionals());
+}
+
+// ===========================================================================
+// UTF32Encoding
+// ===========================================================================
+
+TEST(UTF32EncodingTests, EncodingName_IsUtf32) {
+    UTF32Encoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "utf-32");
+}
+
+TEST(UTF32EncodingTests, CodePage_Is12000) {
+    UTF32Encoding enc;
+    EXPECT_EQ(enc.getCodePageProperty(), 12000);
+}
+
+TEST(UTF32EncodingTests, GetBytes_WithBOM_SizeIs8ForSingleChar) {
+    UTF32Encoding enc(false, true);
+    auto bytes = enc.GetBytes("A");
+    EXPECT_EQ(bytes.size(), 8u);
+}
+
+TEST(UTF32EncodingTests, GetBytes_NoBOM_SizeIs4ForSingleChar) {
+    UTF32Encoding enc(false, false);
+    auto bytes = enc.GetBytes("A");
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(bytes[0], uint8_t('A'));
+    EXPECT_EQ(bytes[1], 0u);
+    EXPECT_EQ(bytes[2], 0u);
+    EXPECT_EQ(bytes[3], 0u);
+}
+
+// ===========================================================================
+// Latin1Encoding
+// ===========================================================================
+
+TEST(Latin1EncodingTests, EncodingName_IsIso88591) {
+    Latin1Encoding enc;
+    EXPECT_EQ(enc.getEncodingNameProperty(), "iso-8859-1");
+}
+
+TEST(Latin1EncodingTests, CodePage_Is28591) {
+    Latin1Encoding enc;
+    EXPECT_EQ(enc.getCodePageProperty(), 28591);
+}
+
+TEST(Latin1EncodingTests, GetBytes_ASCIIString) {
+    Latin1Encoding enc;
+    auto bytes = enc.GetBytes("ABC");
+    ASSERT_EQ(bytes.size(), 3u);
+    EXPECT_EQ(bytes[0], uint8_t('A'));
+}
+
+TEST(Latin1EncodingTests, GetString_Roundtrip) {
+    Latin1Encoding enc;
+    auto bytes = enc.GetBytes("hello");
+    auto result = enc.GetString(bytes.data(), 0, static_cast<int32_t>(bytes.size()));
+    EXPECT_EQ(result, "hello");
+}
+
+// ===========================================================================
+// Encoder
+// ===========================================================================
+
+TEST(EncoderTests, GetBytes_UTF8_MatchesEncoding) {
+    Encoder enc(Encoding::UTF8());
+    auto bytes = enc.GetBytes("hi");
+    EXPECT_EQ(bytes.size(), 2u);
+    EXPECT_EQ(bytes[0], uint8_t('h'));
+}
+
+TEST(EncoderTests, GetByteCount_MatchesByteCount) {
+    Encoder enc(Encoding::UTF8());
+    EXPECT_EQ(enc.GetByteCount("hello"), 5);
+}
+
+TEST(EncoderTests, Reset_NoThrow) {
+    Encoder enc(Encoding::UTF8());
+    EXPECT_NO_THROW(enc.Reset());
+}
+
+// ===========================================================================
+// Decoder
+// ===========================================================================
+
+TEST(DecoderTests, GetString_FromBytes_RoundtripASCII) {
+    Decoder dec(Encoding::UTF8());
+    std::string original = "sharp";
+    auto bytes = Encoding::UTF8()->GetBytes(original);
+    auto result = dec.GetString(bytes.data(), 0, static_cast<int32_t>(bytes.size()));
+    EXPECT_EQ(result, original);
+}
+
+TEST(DecoderTests, GetString_FromVector) {
+    Decoder dec(Encoding::UTF8());
+    std::string original = "test";
+    auto bytes = Encoding::UTF8()->GetBytes(original);
+    auto result = dec.GetString(bytes);
+    EXPECT_EQ(result, original);
+}
+
+TEST(DecoderTests, Reset_NoThrow) {
+    Decoder dec(Encoding::UTF8());
+    EXPECT_NO_THROW(dec.Reset());
+}
+
+// ===========================================================================
+// Regex
+// ===========================================================================
+
+TEST(RegexTests, IsMatch_MatchingPattern_True) {
+    Regex r("\\d+");
+    EXPECT_TRUE(r.IsMatch("abc123"));
+}
+
+TEST(RegexTests, IsMatch_NoMatch_False) {
+    Regex r("\\d+");
+    EXPECT_FALSE(r.IsMatch("abcdef"));
+}
+
+TEST(RegexTests, Match__Success_ReturnsMatchedValue) {
+    Regex r("\\d+");
+    Match m = r.Match_("abc 42 xyz");
+    EXPECT_TRUE(m.getSuccessProperty());
+    EXPECT_EQ(m.getValueProperty(), "42");
+}
+
+TEST(RegexTests, Match__NoMatch_SuccessFalse) {
+    Regex r("\\d+");
+    Match m = r.Match_("no digits here");
+    EXPECT_FALSE(m.getSuccessProperty());
+}
+
+TEST(RegexTests, Matches_ReturnsAllMatches) {
+    Regex r("\\d+");
+    MatchCollection mc = r.Matches("1 22 333");
+    EXPECT_EQ(mc.getCountProperty(), 3);
+}
+
+TEST(RegexTests, Replace_ReplacesAll) {
+    Regex r("world");
+    std::string result = r.Replace("hello world world", "C++");
+    EXPECT_EQ(result.find("world"), std::string::npos);
+    EXPECT_NE(result.find("C++"), std::string::npos);
+}
+
+TEST(RegexTests, Static_IsMatch_True) {
+    EXPECT_TRUE(Regex::IsMatch("foo bar", "bar"));
+}
+
+TEST(RegexTests, Static_Replace) {
+    std::string result = Regex::Replace("hello world", "world", "regex");
+    EXPECT_EQ(result, "hello regex");
+}
+
+TEST(RegexTests, Static_Split) {
+    auto parts = Regex::Split("a,b,c", ",");
+    ASSERT_EQ(parts.size(), 3u);
+    EXPECT_EQ(parts[0], "a");
+    EXPECT_EQ(parts[2], "c");
+}
+
+// ===========================================================================
+// Match
+// ===========================================================================
+
+TEST(MatchTests, Empty_SuccessFalse) {
+    const Match& m = Match::Empty();
+    EXPECT_FALSE(m.getSuccessProperty());
+    EXPECT_EQ(m.getValueProperty(), "");
+    EXPECT_EQ(m.getIndexProperty(), -1);
+    EXPECT_EQ(m.getLengthProperty(), 0);
+}
+
+TEST(MatchTests, FromRegex_IndexAndLength) {
+    Regex r("\\d+");
+    Match m = r.Match_("abc123def");
+    EXPECT_TRUE(m.getSuccessProperty());
+    EXPECT_EQ(m.getIndexProperty(), 3);
+    EXPECT_EQ(m.getLengthProperty(), 3);
+}
+
+// ===========================================================================
+// MatchCollection
+// ===========================================================================
+
+TEST(MatchCollectionTests, DefaultCtor_CountZero) {
+    MatchCollection mc;
+    EXPECT_EQ(mc.getCountProperty(), 0);
+}
+
+TEST(MatchCollectionTests, OperatorBracket_ReturnsMatch) {
+    Regex r("[a-z]");
+    MatchCollection mc = r.Matches("a1b2");
+    EXPECT_EQ(mc.getCountProperty(), 2);
+    EXPECT_EQ(mc[0].getValueProperty(), "a");
+    EXPECT_EQ(mc[1].getValueProperty(), "b");
+}

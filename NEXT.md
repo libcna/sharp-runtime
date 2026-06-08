@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 25*
+*Last updated: 2026-06-08 (branch: develop) — session 26*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1732 tests pass:** `./build/SharpRuntimeTests` → `1732 tests from 175 test suites` ✅
+- **All 1824 tests pass:** `./build/SharpRuntimeTests` → `1824 tests from 193 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 50 test files in `tests/System/`
+- 52 test files in `tests/System/`
 
-### What IS tested (1437 tests, 44 files)
+### What IS tested (1824 tests, 52 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -88,12 +88,12 @@
 | `Collections/ConcurrentTests.cpp` | ConcurrentDictionary + ConcurrentQueue + ConcurrentStack (35) |
 | `Collections/ObjectModelTests.cpp` | Collection + ReadOnlyCollection + ReadOnlyDictionary + NotifyCollectionChangedAction + ObservableCollection (53) |
 | `Collections/SpecializedTests.cpp` | NameValueCollection + StringCollection + BitVector32 + HybridDictionary + ListDictionary + StringDictionary + OrderedDictionary (34) |
+| `Diagnostics/DiagnosticsRemainingTests.cpp` | DebuggerBrowsableState/Attribute + DebuggerDisplayAttribute + StackFrame + StackTrace + UnreachableException + marker attrs (29) |
+| `Text/TextRemainingTests.cpp` | NormalizationForm + CompositeFormat + Rune (full) + UTF7/UTF32/Latin1Encoding + Encoder/Decoder + Regex/Match/MatchCollection (63) |
 
 ### What is NOT yet tested (priority order)
 
-1. **`System::Diagnostics` remaining** — DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException → **Task 35**
-2. **`System::Text` remaining** — Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs → **Task 35**
-3. **`System::Collections::Immutable` remaining** — ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack → **Task 36**
+1. **`System::Collections::Immutable` remaining** — ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack → **Task 36**
 4. **`System::Numerics` missing** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 not ported at all → **beyond current scope (CNA layer)**
 
 ### What does NOT work yet (implementation gaps)
@@ -109,6 +109,15 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 26 — Task 35 (Diagnostics + Text remaining):**
+
+| File | Change |
+|------|--------|
+| `include/System/Text/Rune.hpp` | Fix: `ReplacementChar{0xFFFD}` → `{uint32_t(0xFFFD)}` — ambiguous ctor between `Rune(uint32_t)` and `Rune(char)` resolved by explicit cast |
+| `include/System/Text/Encoding.hpp` | Fix: add `virtual int getCodePageProperty() const` — UTF32Encoding/Latin1Encoding used `override` on non-virtual base method |
+| `tests/System/Diagnostics/DiagnosticsRemainingTests.cpp` | New — 29 tests: DebuggerBrowsableState enum, DebuggerBrowsable/DisplayAttribute, StackFrame (file/line/col/ToString), StackTrace (count/GetFrame/GetFrames/ToString), UnreachableException, marker attrs (Hidden/StepThrough/NonUserCode) |
+| `tests/System/Text/TextRemainingTests.cpp` | New — 63 tests: NormalizationForm enum, CompositeFormat (parse/getFormat), Rune (valid/invalid/ASCII/BMP/utf8Len/utf16Len/IsValid/IsLetter/IsDigit/IsWhitespace/ToUpper/ToLower/ToString/equality/ReplacementChar), UTF7Encoding, UTF32Encoding (BOM/noBOM byte sizes), Latin1Encoding, Encoder (GetBytes/GetByteCount/Reset), Decoder (GetString ptr+vec/Reset), Regex (IsMatch/Match_/Matches/Replace/static forms/Split), Match (Empty/FromRegex), MatchCollection |
 
 **Session 25 — Task 34 (Collections remaining):**
 
@@ -266,10 +275,16 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 35 — Diagnostics + Text remaining ← NEXT
+### Task 35 — Diagnostics + Text remaining ✅ DONE (session 26, 1824 tests)
 
 - `Diagnostics/` remaining: DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame stubs, UnreachableException
 - `Text/` remaining: Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs
+
+---
+
+### Task 36 — Collections::Immutable remaining ← NEXT
+
+- `Collections/Immutable/` remaining: ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack
 
 ---
 
@@ -280,7 +295,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 1437 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 1824 tests / 444 headers)
 
 ---
 
@@ -288,10 +303,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 35** is next: Diagnostics + Text remaining.
+> Read NEXT.md section 7 — **Task 36** is next: Collections::Immutable remaining.
 >
-> Scan `include/System/Diagnostics/` (DebuggerDisplayAttribute, DebuggerBrowsableAttribute, StackTrace/StackFrame, UnreachableException) and `include/System/Text/` (Rune, NormalizationForm, CompositeFormat, UTF7/UTF32/Latin1Encoding, Encoder/Decoder, RegularExpressions stubs).
+> Scan `include/System/Collections/Immutable/` for ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary, ImmutableSortedSet, ImmutableStack headers.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 1732+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 35 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 1824+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 36 done.

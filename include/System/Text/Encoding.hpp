@@ -51,6 +51,9 @@ namespace System::Text
         /** @brief Gets the name of the encoding (e.g. "utf-8", "us-ascii"). */
         [[nodiscard]] virtual std::string getEncodingNameProperty() const { return "utf-8"; }
 
+        /** @brief Gets the code page identifier for this encoding. */
+        [[nodiscard]] virtual int getCodePageProperty() const { return 65001; }
+
     protected:
         Encoding() = default;
     };
