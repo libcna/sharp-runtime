@@ -29,15 +29,15 @@ namespace System::Numerics {
         constexpr explicit BFloat16(uint16_t rawBits) : bits_(rawBits) {}
         explicit BFloat16(float v) : bits_(fromFloat(v)) {}
 
-        static BFloat16 Zero()        { return BFloat16(0); }
-        static BFloat16 One()         { return BFloat16(0x3F80u); }
-        static BFloat16 NegativeOne() { return BFloat16(0xBF80u); }
-        static BFloat16 MaxValue()    { return BFloat16(0x7F7Fu); }
-        static BFloat16 MinValue()    { return BFloat16(0xFF7Fu); }
-        static BFloat16 Epsilon()     { return BFloat16(0x0001u); }
-        static BFloat16 NaN()         { return BFloat16(0x7FC0u); }
-        static BFloat16 PositiveInfinity() { return BFloat16(0x7F80u); }
-        static BFloat16 NegativeInfinity() { return BFloat16(0xFF80u); }
+        static BFloat16 Zero()        { return BFloat16(uint16_t(0)); }
+        static BFloat16 One()         { return BFloat16(uint16_t(0x3F80u)); }
+        static BFloat16 NegativeOne() { return BFloat16(uint16_t(0xBF80u)); }
+        static BFloat16 MaxValue()    { return BFloat16(uint16_t(0x7F7Fu)); }
+        static BFloat16 MinValue()    { return BFloat16(uint16_t(0xFF7Fu)); }
+        static BFloat16 Epsilon()     { return BFloat16(uint16_t(0x0001u)); }
+        static BFloat16 NaN()         { return BFloat16(uint16_t(0x7FC0u)); }
+        static BFloat16 PositiveInfinity() { return BFloat16(uint16_t(0x7F80u)); }
+        static BFloat16 NegativeInfinity() { return BFloat16(uint16_t(0xFF80u)); }
 
         [[nodiscard]] uint16_t getBitsProperty() const { return bits_; }
 

@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 30*
+*Last updated: 2026-06-08 (branch: develop) — session 31*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 2381 tests pass:** `./build/SharpRuntimeTests` → `2381 tests from 317 test suites` ✅
+- **All 2482 tests pass:** `./build/SharpRuntimeTests` → `2482 tests from 337 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 61 test files in `tests/System/`
+- 62 test files in `tests/`
 
-### What IS tested (2381 tests, 61 files)
+### What IS tested (2482 tests, 62 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -99,6 +99,7 @@
 | `Threading/ThreadingRemainingTests.cpp` | Threading enums (ApartmentState/EventResetMode/LazyThreadSafetyMode/LockRecursionPolicy/ThreadPriority/ThreadState+OR) + AsyncLocal (get/set/handler) + Barrier (count/SignalAndWait/AddParticipant/RemoveParticipant/postPhaseAction) + CountdownEvent (Signal/IsSet/AddCount/Reset/Wait) + EventWaitHandle (AutoReset/ManualReset) + LazyInitializer (default/factory) + Lock (TryEnter/Enter-Exit/EnterScope) + ManualResetEventSlim (Set/Reset/IsSet/Wait) + ReaderWriterLockSlim (Read/Write lock) + SpinWait (Count/SpinOnce/NextSpinWillYield/SpinUntil) + ThreadLocal (get/set/factory/Dispose) + ThreadPool (QueueUserWorkItem/GetMin-MaxThreads) + 8 Threading exceptions (97) |
 | `Threading/Tasks/TasksTests.cpp` | Task (DefaultCtor/CompletedTask/Run/FromException/FromCanceled/Delay) + TaskT (Run/FromResult/Throwing) + TaskCompletionSource<int> (SetResult/TrySet/SetException/SetCanceled 9 tests) + TaskCompletionSource<void> (5 tests) + ValueTask (DefaultCtor/CompletedTask/FromException/GetAwaiter/FromTask) + ValueTaskT (FromResult/FromException/DefaultCtor) + Parallel::For/ForEach/Invoke + ParallelLoopState::Stop (44) |
 | `Task39RemainingTests.cpp` | SynchronizationContext (getCurrent/Post/Send/null/SetContext) + PeriodicTimer (Dispose→false/shortTick) + WaitHandle constants (WaitTimeout=258/InvalidHandle=-1) + ASCIIEncoding (name/GetBytes/GetString/empty) + UnicodeEncoding (name/twoBytesPerChar/RoundTrip/empty) + UTF8Encoding (name/GetBytes/GetString/empty) + EncodingInfo (codePage/name/displayName/GetEncoding) + ReadOnlyObservableCollection (Count/op[]/Contains/isEmpty/RangeFor) + ReadOnlySet (Count/Contains/RangeFor) + CollectionExtensions (GetValueOrDefault×2/TryAdd×2/Remove×2/AsReadOnly) + StoragePaths (NoThrow/NonEmpty) + Experimental::Property (get/set/readonly/implicit) (48) |
+| `Task40Tests.cpp` | Span/ReadOnlySpan (ctor/Length/IsEmpty/op[]/Slice/RangeFor) + Half (FromSingle/ToSingle/statics/comparison) + Int128 (add/sub/mul/neg/ToString/cmp/statics) + UInt128 (add/mul/ToString/cmp/statics) + DateTimeOffset (ctor/DateTime/Offset/equality/ToString) + TimeOnly (ctor/props/ToString/comparison) + DBNull (singleton/ToString) + FormattableString (ctor/args/ToString/Invariant) + OperatingSystem (Platform/Version/IsLinux/IsWindows/VersionString) + BFloat16 (Zero/One/NegOne/arithmetic/IsNaN/IsInfinity/comparison/negate) + DivisionRounding enum + StringComparer (Ordinal/OrdinalIgnoreCase/Compare/Equals/Hash) + Progress (Report/AddHandler) + UnicodeRange/UnicodeRanges (Create/BMP ranges) + CancellationTokenRegistration (isActive/Dispose/Unregister) + KeyNotFoundException (ctor/message/isSystemException) + ReferenceEqualityComparer (pointer identity/hash/singleton) + ReadOnlyProperty (get/implicit) (101) |
 
 ### What is NOT yet tested (priority order)
 
@@ -120,6 +121,13 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 31 — Task 40 (Span, Half, Int128/UInt128, DateTimeOffset, TimeOnly + 13 more types):**
+
+| File | Change |
+|------|--------|
+| `include/System/Numerics/BFloat16.hpp` | Fix: factory methods used ambiguous `BFloat16(int)` calls — added explicit `uint16_t(...)` casts |
+| `tests/Task40Tests.cpp` | New — 101 tests: Span/ReadOnlySpan, Half, Int128, UInt128, DateTimeOffset, TimeOnly, DBNull, FormattableString, OperatingSystem, BFloat16, DivisionRounding, StringComparer, Progress, UnicodeRange/Ranges, CancellationTokenRegistration, KeyNotFoundException, ReferenceEqualityComparer, ReadOnlyProperty |
 
 **Session 30 — Task 39 (Tasks + remaining stubs):**
 
@@ -349,12 +357,28 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 40 — Vector math + remaining headers ← NEXT
+### Task 40 — Span, Half, Int128/UInt128, DateTimeOffset, TimeOnly + 13 more ✅ DONE (session 31, 2482 tests)
 
-- `System::Numerics/` — Vector2, Vector3, Vector4, Matrix3x2, Matrix4x4 (not ported; may need new headers)
-- Fix `Threading::Timer` dangling-this UB (thread captures raw `this`; object may be destroyed before thread wakes)
-- Any interface/marker headers with concrete testable behavior not yet covered
-- Consider porting Calendar.hpp / ISOWeek.hpp (currently excluded — reference DateTime properties not yet in DateTime.hpp)
+- 101 tests across 18 previously untested types
+- Fixed pre-existing `BFloat16.hpp` ambiguous ctor bug: `BFloat16(0)` → `BFloat16(uint16_t(0))`
+
+---
+
+### Task 41 — Remaining untested headers ← NEXT
+
+Remaining ~36 headers with substantive testable behavior (rough priority):
+- `SharpRuntime/Prop.hpp` — macro-based DDATA/DGETTER properties: test via inline struct using the macros
+- `System/Text/Json/JsonSerializer.hpp` + `JsonSerializerOptions.hpp` — if non-stub
+- `System/IO/Hashing/NonCryptographicHashAlgorithm.hpp` — abstract base
+- `System/IO/IsolatedStorage/IsolatedStorage.hpp` — abstract base
+- `System/Collections/ObjectModel/KeyedCollection.hpp` — abstract template
+- `System/ComponentModel/Win32Exception.hpp` — exception tests
+- `System/ComponentModel/DataAnnotations/DataAnnotationAttributes.hpp`
+- `System/Globalization/DaylightTime.hpp`, `DigitShapes.hpp`, `SortVersion.hpp`
+- `System/Text/DecoderFallback.hpp` / `EncoderFallback.hpp`
+- `System/IntPtr.hpp` / `System/UIntPtr.hpp`
+- Fix `Threading::Timer` dangling-this UB, then add Timer tests
+- Consider porting Calendar.hpp / ISOWeek.hpp (excluded — reference DateTime properties not yet in DateTime.hpp)
 
 ---
 
@@ -365,7 +389,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 2381 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 2482 tests / 449 headers)
 
 ---
 
@@ -375,8 +399,10 @@ find include -name "*.hpp" | wc -l
 >
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 40** is next: Vector math + remaining headers.
+> Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
+>
+> Read NEXT.md section 7 — **Task 41** is next: remaining untested headers.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2381+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 39 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2482+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 40 done.
