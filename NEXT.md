@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 27*
+*Last updated: 2026-06-08 (branch: develop) — session 28*
 
 ---
 
@@ -30,11 +30,11 @@
 
 ### Tests
 - **Tests ARE built:** `SHARP_RUNTIME_BUILD_TESTS=ON` in CMake cache ✅
-- **All 1884 tests pass:** `./build/SharpRuntimeTests` → `1884 tests from 198 test suites` ✅
+- **All 2071 tests pass:** `./build/SharpRuntimeTests` → `2071 tests from 232 test suites` ✅
 - GoogleTest is present at `vendor/googletest/`
-- 53 test files in `tests/System/`
+- 57 test files in `tests/System/`
 
-### What IS tested (1884 tests, 53 files)
+### What IS tested (2071 tests, 57 files)
 
 | Suite file | Tests |
 |------------|-------|
@@ -91,11 +91,15 @@
 | `Diagnostics/DiagnosticsRemainingTests.cpp` | DebuggerBrowsableState/Attribute + DebuggerDisplayAttribute + StackFrame + StackTrace + UnreachableException + marker attrs (29) |
 | `Text/TextRemainingTests.cpp` | NormalizationForm + CompositeFormat + Rune (full) + UTF7/UTF32/Latin1Encoding + Encoder/Decoder + Regex/Match/MatchCollection (63) |
 | `Collections/ImmutableRemainingTests.cpp` | ImmutableHashSet (Create/Contains/Add/Remove/Clear/Union/Intersect/Except/IsSubsetOf) + ImmutableQueue (Enqueue/Peek/Dequeue/DequeueWithValue/Clear) + ImmutableSortedDictionary (Add/ContainsKey/TryGetValue/SetItem/Remove/Clear/Keys/Values) + ImmutableSortedSet (Create/Contains/Add/Remove/Clear/Min/Max/Union/Intersect/Except/IsSubsetOf/Iteration) + ImmutableStack (Push/Peek/Pop/PopWithValue/Clear/Iteration) (60) |
+| `SystemTypesRemainingTests.cpp` | System enums (StringComparison/StringSplitOptions+op/MidpointRounding/DayOfWeek/DateTimeKind/TypeCode/PlatformID/EnvironmentVariableTarget) + Nullable (HasValue/GetValue/GetValueOrDefault/opBool/equality/nullopt) + Lazy (default/factory/singleCall/Value alias) + HashCode (Add/ToHashCode/Combine 1-4) + ArraySegment (ctor/operator[]/Slice/throws) + Index (FromStart/FromEnd/GetOffset/statics) + Range (All/StartAt/EndAt/GetOffsetAndLength) + ValueTuple1-4 (store/equality) + DateOnly (ctor/props/ToString/ordering) + WeakReference/WeakReferenceT (IsAlive/TryGetTarget) (82) |
+| `Collections/CollectionsRemainingTests.cpp` | KeyValuePair (ctor/equality) + SortedDictionary (Add/ContainsKey/operator[]/TryGetValue/Remove/Clear/sorted Keys+Values) + SortedList (Add/ContainsKey/ContainsValue/IndexOfKey/RemoveAt/TryGetValue/Clear/sorted Keys) + BitArray (len-ctor/Get-Set/SetAll/And/Or/Xor/Not/bytes-ctor) + Collections::Queue void* (Enqueue/Dequeue/Peek/Contains/Clear/throws) + Collections::Stack void* (Push/Pop/Peek/Contains/Clear/throws) (58) |
+| `Numerics/NumericsRemainingTests.cpp` | MathF (constants/Abs/Ceiling/Floor/Round/Truncate/Sqrt/Pow/Log2/Log10/Sin/Cos/Atan2/Max/Min/Clamp/Sign/IsNaN/IsInfinity) + BitOperations (IsPow2/RoundUpToPowerOf2/LeadingZeroCount/Log2/PopCount/TrailingZeroCount/RotateLeft/RotateRight/ReverseBits) (34) |
+| `Globalization/GlobalizationRemainingTests.cpp` | NumberStyles (values/OR) + DateTimeStyles (values/OR) + CompareOptions (values/OR) + CultureTypes (values/OR) + CalendarAlgorithmType + CalendarWeekRule + GregorianCalendarTypes + TimeSpanStyles (33) |
 
 ### What is NOT yet tested (priority order)
 
 1. **`System::Numerics` vectors** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 — not ported yet → beyond current scope
-2. **`System::Net::Http`** — HttpClient, HttpRequestMessage, HttpResponseMessage stubs → **Task 37 (if present)**
+2. **~50 interface/marker-only headers** — pure abstract interfaces (IEnumerable, IList, etc.) and marker attributes have no testable behavior
 4. **`System::Numerics` missing** — Vector2/Vector3/Vector4, Matrix3x2, Matrix4x4 not ported at all → **beyond current scope (CNA layer)**
 
 ### What does NOT work yet (implementation gaps)
@@ -111,6 +115,16 @@
 ---
 
 ## 3. Recent changes (last 3 sessions)
+
+**Session 28 — Task 37 (System types, Collections, Numerics, Globalization remaining):**
+
+| File | Change |
+|------|--------|
+| `include/System/Lazy.hpp` | Fix: `isValueCreated_` → `mutable` — field is set inside a `const` method via `call_once` lambda |
+| `tests/System/SystemTypesRemainingTests.cpp` | New — 82 tests: System enums (8 groups), Nullable, Lazy, HashCode, ArraySegment, Index, Range, ValueTuple 1–4, DateOnly, WeakReference/WeakReferenceT |
+| `tests/System/Collections/CollectionsRemainingTests.cpp` | New — 58 tests: KeyValuePair, SortedDictionary, SortedList, BitArray, non-generic Queue/Stack |
+| `tests/System/Numerics/NumericsRemainingTests.cpp` | New — 34 tests: MathF (20) + BitOperations (14) |
+| `tests/System/Globalization/GlobalizationRemainingTests.cpp` | New — 33 tests: NumberStyles/DateTimeStyles/CompareOptions/CultureTypes + 4 enum groups |
 
 **Session 27 — Task 36 (Collections::Immutable remaining):**
 
@@ -296,11 +310,14 @@ find include -name "*.hpp" | wc -l
 
 ---
 
-### Task 37 — Net::Http + any remaining stubs ← NEXT
+### Task 37 — System types, Collections, Numerics, Globalization remaining ✅ DONE (session 28, 2071 tests)
 
-- Scan `include/System/Net/Http/` for HttpClient, HttpRequestMessage, HttpResponseMessage
-- Scan remaining untested headers across all namespaces
-- Write tests for whatever stubs/types remain uncovered
+---
+
+### Task 38 — Exception types + Threading remaining ← NEXT
+
+- Batch-test remaining exception types (AggregateException, OperationCanceledException, InvalidCastException, etc.)
+- Batch-test remaining Threading types (AsyncLocal, Barrier, CountdownEvent, LazyInitializer, Lock, ReaderWriterLockSlim, SpinWait, Timer, etc.)
 
 ---
 
@@ -311,7 +328,7 @@ find include -name "*.hpp" | wc -l
 - **No zlib/tinyxml2/pugixml integration** until the test suite has stable broad coverage
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundations used by hundreds of headers
 - **No split of header-only types into .cpp** unless there is a demonstrated linker ODR failure
-- **No merge to master** until test coverage is substantially broader (currently 1884 tests / 444 headers)
+- **No merge to master** until test coverage is substantially broader (currently 2071 tests / 444 headers)
 
 ---
 
@@ -319,10 +336,10 @@ find include -name "*.hpp" | wc -l
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md section 7 — **Task 37** is next: Net::Http + any remaining stubs.
+> Read NEXT.md section 7 — **Task 38** is next: Exception types + Threading remaining.
 >
-> Scan `include/System/Net/Http/` and any other untested headers for remaining types.
+> Scan remaining exception headers and Threading headers for testable types.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 1884+ passing, 0 failing.
-> Commit, then update NEXT.md: bump count, mark Task 37 done.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2071+ passing, 0 failing.
+> Commit, then update NEXT.md: bump count, mark Task 38 done.

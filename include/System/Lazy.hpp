@@ -15,7 +15,7 @@ namespace System {
         mutable std::once_flag flag_;
         mutable std::optional<T> value_;
         std::function<T()> factory_;
-        bool isValueCreated_ = false;
+        mutable bool isValueCreated_ = false;
 
     public:
         // Default-constructible T: uses T() as factory.

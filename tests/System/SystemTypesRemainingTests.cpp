@@ -1,0 +1,434 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for: System enums, Nullable, Lazy, HashCode, ArraySegment,
+//            Index, Range, ValueTuple, DateOnly, WeakReference.
+#include <gtest/gtest.h>
+#include <memory>
+#include <string>
+#include <vector>
+#include "System/StringComparison.hpp"
+#include "System/StringSplitOptions.hpp"
+#include "System/MidpointRounding.hpp"
+#include "System/DayOfWeek.hpp"
+#include "System/DateTimeKind.hpp"
+#include "System/TypeCode.hpp"
+#include "System/PlatformID.hpp"
+#include "System/EnvironmentVariableTarget.hpp"
+#include "System/Nullable.hpp"
+#include "System/Lazy.hpp"
+#include "System/HashCode.hpp"
+#include "System/ArraySegment.hpp"
+#include "System/Index.hpp"
+#include "System/Range.hpp"
+#include "System/ValueTuple.hpp"
+#include "System/DateOnly.hpp"
+#include "System/WeakReference.hpp"
+
+using System::StringComparison;
+using System::StringSplitOptions;
+using System::MidpointRounding;
+using System::DayOfWeek;
+using System::DateTimeKind;
+using System::TypeCode;
+using System::PlatformID;
+using System::EnvironmentVariableTarget;
+using System::Nullable;
+using System::Lazy;
+using System::HashCode;
+using System::ArraySegment;
+using System::Index;
+using System::Range;
+using System::ValueTuple1;
+using System::ValueTuple2;
+using System::ValueTuple3;
+using System::ValueTuple4;
+using System::MakeValueTuple;
+using System::DateOnly;
+using System::WeakReference;
+using System::WeakReferenceT;
+
+// ===========================================================================
+// StringComparison
+// ===========================================================================
+
+TEST(StringComparisonTests, Ordinal_IsFour) {
+    EXPECT_EQ(static_cast<int>(StringComparison::Ordinal), 4);
+}
+TEST(StringComparisonTests, OrdinalIgnoreCase_IsFive) {
+    EXPECT_EQ(static_cast<int>(StringComparison::OrdinalIgnoreCase), 5);
+}
+TEST(StringComparisonTests, CurrentCulture_IsZero) {
+    EXPECT_EQ(static_cast<int>(StringComparison::CurrentCulture), 0);
+}
+
+// ===========================================================================
+// StringSplitOptions
+// ===========================================================================
+
+TEST(StringSplitOptionsTests, None_IsZero) {
+    EXPECT_EQ(static_cast<int>(StringSplitOptions::None), 0);
+}
+TEST(StringSplitOptionsTests, RemoveEmptyEntries_IsOne) {
+    EXPECT_EQ(static_cast<int>(StringSplitOptions::RemoveEmptyEntries), 1);
+}
+TEST(StringSplitOptionsTests, TrimEntries_IsTwo) {
+    EXPECT_EQ(static_cast<int>(StringSplitOptions::TrimEntries), 2);
+}
+TEST(StringSplitOptionsTests, OrOperator) {
+    auto combined = StringSplitOptions::RemoveEmptyEntries | StringSplitOptions::TrimEntries;
+    EXPECT_EQ(static_cast<int>(combined), 3);
+}
+
+// ===========================================================================
+// MidpointRounding
+// ===========================================================================
+
+TEST(MidpointRoundingTests, ToEven_IsZero)              { EXPECT_EQ(static_cast<int>(MidpointRounding::ToEven), 0); }
+TEST(MidpointRoundingTests, AwayFromZero_IsOne)          { EXPECT_EQ(static_cast<int>(MidpointRounding::AwayFromZero), 1); }
+TEST(MidpointRoundingTests, ToPositiveInfinity_IsFour)   { EXPECT_EQ(static_cast<int>(MidpointRounding::ToPositiveInfinity), 4); }
+
+// ===========================================================================
+// DayOfWeek
+// ===========================================================================
+
+TEST(DayOfWeekTests, Sunday_IsZero)    { EXPECT_EQ(static_cast<int>(DayOfWeek::Sunday), 0); }
+TEST(DayOfWeekTests, Monday_IsOne)     { EXPECT_EQ(static_cast<int>(DayOfWeek::Monday), 1); }
+TEST(DayOfWeekTests, Saturday_IsSix)   { EXPECT_EQ(static_cast<int>(DayOfWeek::Saturday), 6); }
+
+// ===========================================================================
+// DateTimeKind
+// ===========================================================================
+
+TEST(DateTimeKindTests, Unspecified_IsZero) { EXPECT_EQ(static_cast<int>(DateTimeKind::Unspecified), 0); }
+TEST(DateTimeKindTests, Utc_IsOne)          { EXPECT_EQ(static_cast<int>(DateTimeKind::Utc), 1); }
+TEST(DateTimeKindTests, Local_IsTwo)        { EXPECT_EQ(static_cast<int>(DateTimeKind::Local), 2); }
+
+// ===========================================================================
+// TypeCode
+// ===========================================================================
+
+TEST(TypeCodeTests, Empty_IsZero)    { EXPECT_EQ(static_cast<int>(TypeCode::Empty), 0); }
+TEST(TypeCodeTests, Boolean_IsThree) { EXPECT_EQ(static_cast<int>(TypeCode::Boolean), 3); }
+TEST(TypeCodeTests, Int32_IsNine)    { EXPECT_EQ(static_cast<int>(TypeCode::Int32), 9); }
+TEST(TypeCodeTests, String_Is18)     { EXPECT_EQ(static_cast<int>(TypeCode::String), 18); }
+TEST(TypeCodeTests, DateTime_Is16)   { EXPECT_EQ(static_cast<int>(TypeCode::DateTime), 16); }
+
+// ===========================================================================
+// PlatformID
+// ===========================================================================
+
+TEST(PlatformIDTests, Win32NT_IsTwo) { EXPECT_EQ(static_cast<int>(PlatformID::Win32NT), 2); }
+TEST(PlatformIDTests, Unix_IsFour)   { EXPECT_EQ(static_cast<int>(PlatformID::Unix), 4); }
+
+// ===========================================================================
+// EnvironmentVariableTarget
+// ===========================================================================
+
+TEST(EnvironmentVariableTargetTests, Process_IsZero)  { EXPECT_EQ(static_cast<int>(EnvironmentVariableTarget::Process), 0); }
+TEST(EnvironmentVariableTargetTests, Machine_IsTwo)   { EXPECT_EQ(static_cast<int>(EnvironmentVariableTarget::Machine), 2); }
+
+// ===========================================================================
+// Nullable<T>
+// ===========================================================================
+
+TEST(NullableTests, Default_HasValueFalse) {
+    Nullable<int> n;
+    EXPECT_FALSE(n.getHasValueProperty());
+}
+TEST(NullableTests, ValueCtor_HasValueTrue) {
+    Nullable<int> n(42);
+    EXPECT_TRUE(n.getHasValueProperty());
+    EXPECT_EQ(n.getValueProperty(), 42);
+}
+TEST(NullableTests, GetValue_NoValue_Throws) {
+    Nullable<int> n;
+    EXPECT_THROW(n.getValueProperty(), std::runtime_error);
+}
+TEST(NullableTests, GetValueOrDefault_NoValue_ReturnsDefault) {
+    Nullable<int> n;
+    EXPECT_EQ(n.GetValueOrDefault(), 0);
+}
+TEST(NullableTests, GetValueOrDefault_WithFallback) {
+    Nullable<int> n;
+    EXPECT_EQ(n.GetValueOrDefault(99), 99);
+}
+TEST(NullableTests, GetValueOrDefault_HasValue_ReturnsValue) {
+    Nullable<int> n(7);
+    EXPECT_EQ(n.GetValueOrDefault(99), 7);
+}
+TEST(NullableTests, OperatorBool_True_False) {
+    Nullable<int> yes(1);
+    Nullable<int> no;
+    EXPECT_TRUE(static_cast<bool>(yes));
+    EXPECT_FALSE(static_cast<bool>(no));
+}
+TEST(NullableTests, Equality_BothHaveValue) {
+    EXPECT_EQ(Nullable<int>(5), Nullable<int>(5));
+    EXPECT_NE(Nullable<int>(5), Nullable<int>(6));
+}
+TEST(NullableTests, Equality_NulloptComparison) {
+    Nullable<int> n;
+    EXPECT_TRUE(n == std::nullopt);
+    Nullable<int> m(1);
+    EXPECT_FALSE(m == std::nullopt);
+}
+
+// ===========================================================================
+// Lazy<T>
+// ===========================================================================
+
+TEST(LazyTests, DefaultCtor_NotCreatedYet) {
+    Lazy<int> lz;
+    EXPECT_FALSE(lz.getIsValueCreatedProperty());
+}
+TEST(LazyTests, GetValue_CreatesOnFirstAccess) {
+    Lazy<int> lz([]() { return 42; });
+    EXPECT_FALSE(lz.getIsValueCreatedProperty());
+    EXPECT_EQ(lz.getValueProperty(), 42);
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
+}
+TEST(LazyTests, GetValue_SameValueOnRepeatedAccess) {
+    int callCount = 0;
+    Lazy<int> lz([&]() { ++callCount; return 7; });
+    EXPECT_EQ(lz.getValueProperty(), 7);
+    EXPECT_EQ(lz.getValueProperty(), 7);
+    EXPECT_EQ(callCount, 1);
+}
+TEST(LazyTests, Value_AliasForGetValue) {
+    Lazy<std::string> lz([]() { return std::string("hello"); });
+    EXPECT_EQ(lz.Value(), "hello");
+}
+
+// ===========================================================================
+// HashCode
+// ===========================================================================
+
+TEST(HashCodeTests, Combine1_SameValueSameHash) {
+    EXPECT_EQ(HashCode::Combine(42), HashCode::Combine(42));
+}
+TEST(HashCodeTests, Combine1_DifferentValueDifferentHash) {
+    EXPECT_NE(HashCode::Combine(1), HashCode::Combine(2));
+}
+TEST(HashCodeTests, Combine2_Works) {
+    int h1 = HashCode::Combine(1, 2);
+    int h2 = HashCode::Combine(1, 2);
+    EXPECT_EQ(h1, h2);
+    EXPECT_NE(h1, HashCode::Combine(2, 1));
+}
+TEST(HashCodeTests, Combine3_Works) {
+    int h = HashCode::Combine(1, 2, 3);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3));
+}
+TEST(HashCodeTests, Combine4_Works) {
+    int h = HashCode::Combine(1, 2, 3, 4);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4));
+    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 5));
+}
+TEST(HashCodeTests, AddAndToHashCode) {
+    HashCode hc;
+    hc.Add(10);
+    hc.Add(20);
+    HashCode hc2;
+    hc2.Add(10);
+    hc2.Add(20);
+    EXPECT_EQ(hc.ToHashCode(), hc2.ToHashCode());
+}
+
+// ===========================================================================
+// ArraySegment<T>
+// ===========================================================================
+
+TEST(ArraySegmentTests, FullArray_OffsetZeroCountFull) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v);
+    EXPECT_EQ(seg.getOffsetProperty(), 0);
+    EXPECT_EQ(seg.getCountProperty(), 5);
+}
+TEST(ArraySegmentTests, PartialSegment_CorrectOffsetCount) {
+    std::vector<int> v = {10, 20, 30, 40};
+    ArraySegment<int> seg(v, 1, 2);
+    EXPECT_EQ(seg.getOffsetProperty(), 1);
+    EXPECT_EQ(seg.getCountProperty(), 2);
+}
+TEST(ArraySegmentTests, OperatorBracket_ReadsCorrectElement) {
+    std::vector<int> v = {10, 20, 30, 40};
+    ArraySegment<int> seg(v, 1, 3);
+    EXPECT_EQ(seg[0], 20);
+    EXPECT_EQ(seg[2], 40);
+}
+TEST(ArraySegmentTests, OperatorBracket_OutOfRange_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    ArraySegment<int> seg(v, 0, 2);
+    EXPECT_THROW(seg[5], std::out_of_range);
+}
+TEST(ArraySegmentTests, Slice_SubSegment) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v, 1, 4);
+    ArraySegment<int> sliced = seg.Slice(1, 2);
+    EXPECT_EQ(sliced.getOffsetProperty(), 2);
+    EXPECT_EQ(sliced.getCountProperty(), 2);
+    EXPECT_EQ(sliced[0], 3);
+}
+TEST(ArraySegmentTests, OutOfRangeCtor_Throws) {
+    std::vector<int> v = {1, 2};
+    EXPECT_THROW((ArraySegment<int>(v, 0, 10)), std::out_of_range);
+}
+
+// ===========================================================================
+// Index
+// ===========================================================================
+
+TEST(IndexTests, FromStart_ValueAndNotFromEnd) {
+    Index idx = Index::FromStart(3);
+    EXPECT_EQ(idx.getValueProperty(), 3);
+    EXPECT_FALSE(idx.getIsFromEndProperty());
+}
+TEST(IndexTests, FromEnd_IsFromEnd) {
+    Index idx = Index::FromEnd(2);
+    EXPECT_EQ(idx.getValueProperty(), 2);
+    EXPECT_TRUE(idx.getIsFromEndProperty());
+}
+TEST(IndexTests, GetOffset_FromStart) {
+    Index idx = Index::FromStart(2);
+    EXPECT_EQ(idx.GetOffset(10), 2);
+}
+TEST(IndexTests, GetOffset_FromEnd) {
+    Index idx = Index::FromEnd(2);
+    EXPECT_EQ(idx.GetOffset(10), 8);
+}
+TEST(IndexTests, Start_OffsetZero) {
+    EXPECT_EQ(Index::Start().GetOffset(5), 0);
+}
+TEST(IndexTests, End_OffsetEqualsLength) {
+    EXPECT_EQ(Index::End().GetOffset(5), 5);
+}
+TEST(IndexTests, NegativeValue_Throws) {
+    EXPECT_THROW(Index(-1), std::out_of_range);
+}
+
+// ===========================================================================
+// Range
+// ===========================================================================
+
+TEST(RangeTests, All_StartsAtZeroEndsAtLength) {
+    Range r = Range::All();
+    auto [offset, length] = r.GetOffsetAndLength(10);
+    EXPECT_EQ(offset, 0);
+    EXPECT_EQ(length, 10);
+}
+TEST(RangeTests, StartAt_CorrectOffsetAndLength) {
+    Range r = Range::StartAt(Index::FromStart(3));
+    auto [offset, length] = r.GetOffsetAndLength(10);
+    EXPECT_EQ(offset, 3);
+    EXPECT_EQ(length, 7);
+}
+TEST(RangeTests, EndAt_CorrectOffsetAndLength) {
+    Range r = Range::EndAt(Index::FromStart(5));
+    auto [offset, length] = r.GetOffsetAndLength(10);
+    EXPECT_EQ(offset, 0);
+    EXPECT_EQ(length, 5);
+}
+TEST(RangeTests, ExplicitRange_CorrectValues) {
+    Range r(Index::FromStart(2), Index::FromStart(7));
+    auto [offset, length] = r.GetOffsetAndLength(10);
+    EXPECT_EQ(offset, 2);
+    EXPECT_EQ(length, 5);
+}
+
+// ===========================================================================
+// ValueTuple
+// ===========================================================================
+
+TEST(ValueTupleTests, Tuple1_StoresAndCompares) {
+    auto t1 = MakeValueTuple(42);
+    auto t2 = MakeValueTuple(42);
+    EXPECT_EQ(t1.Item1, 42);
+    EXPECT_TRUE(t1 == t2);
+}
+TEST(ValueTupleTests, Tuple2_StoresAndCompares) {
+    auto t = MakeValueTuple(1, std::string("hi"));
+    EXPECT_EQ(t.Item1, 1);
+    EXPECT_EQ(t.Item2, "hi");
+    EXPECT_NE(t, MakeValueTuple(1, std::string("bye")));
+}
+TEST(ValueTupleTests, Tuple3_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3);
+    EXPECT_EQ(t.Item3, 3);
+    EXPECT_TRUE(t == MakeValueTuple(1, 2, 3));
+}
+TEST(ValueTupleTests, Tuple4_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3, 4);
+    EXPECT_EQ(t.Item4, 4);
+    EXPECT_FALSE(t == MakeValueTuple(1, 2, 3, 0));
+}
+
+// ===========================================================================
+// DateOnly
+// ===========================================================================
+
+TEST(DateOnlyTests, DefaultCtor_YearMonthDayOne) {
+    DateOnly d;
+    EXPECT_EQ(d.getYearProperty(), 1);
+    EXPECT_EQ(d.getMonthProperty(), 1);
+    EXPECT_EQ(d.getDayProperty(), 1);
+}
+TEST(DateOnlyTests, Constructor_StoresYearMonthDay) {
+    DateOnly d(2026, 6, 8);
+    EXPECT_EQ(d.getYearProperty(), 2026);
+    EXPECT_EQ(d.getMonthProperty(), 6);
+    EXPECT_EQ(d.getDayProperty(), 8);
+}
+TEST(DateOnlyTests, ToString_Format) {
+    DateOnly d(2026, 1, 5);
+    EXPECT_EQ(d.ToString(), "2026-01-05");
+}
+TEST(DateOnlyTests, Equality) {
+    EXPECT_EQ(DateOnly(2000, 1, 1), DateOnly(2000, 1, 1));
+    EXPECT_NE(DateOnly(2000, 1, 1), DateOnly(2000, 1, 2));
+}
+TEST(DateOnlyTests, Ordering) {
+    EXPECT_LT(DateOnly(2000, 1, 1), DateOnly(2000, 1, 2));
+    EXPECT_GT(DateOnly(2001, 1, 1), DateOnly(2000, 12, 31));
+}
+
+// ===========================================================================
+// WeakReference / WeakReferenceT<T>
+// ===========================================================================
+
+TEST(WeakReferenceTests, IsAlive_True_WhenTargetAlive) {
+    auto sp = std::make_shared<int>(42);
+    WeakReference wr(sp);
+    EXPECT_TRUE(wr.getIsAliveProperty());
+}
+TEST(WeakReferenceTests, IsAlive_False_AfterTargetExpired) {
+    WeakReference wr;
+    {
+        auto sp = std::make_shared<int>(1);
+        wr.setTargetProperty(sp);
+    }
+    EXPECT_FALSE(wr.getIsAliveProperty());
+}
+TEST(WeakReferenceTests, TryGetTarget_Success) {
+    auto sp = std::make_shared<int>(7);
+    WeakReference wr(sp);
+    std::shared_ptr<void> out;
+    EXPECT_TRUE(wr.TryGetTarget(out));
+    EXPECT_NE(out, nullptr);
+}
+TEST(WeakReferenceTTests, TryGetTarget_Generic) {
+    auto sp = std::make_shared<std::string>("hello");
+    WeakReferenceT<std::string> wr(sp);
+    std::shared_ptr<std::string> out;
+    EXPECT_TRUE(wr.TryGetTarget(out));
+    EXPECT_EQ(*out, "hello");
+}
+TEST(WeakReferenceTTests, IsAlive_False_AfterExpiry) {
+    WeakReferenceT<int> wr;
+    {
+        auto sp = std::make_shared<int>(99);
+        wr.SetTarget(sp);
+    }
+    EXPECT_FALSE(wr.getIsAliveProperty());
+}
