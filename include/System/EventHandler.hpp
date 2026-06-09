@@ -9,6 +9,7 @@
 // This is intentional, because C++ has no equivalent of the C# "event" keyword.
 // The goal is to keep ported XNA/.NET code visually as close as possible to the original C# source.
 
+#include <algorithm>
 #include <functional>
 #include <vector>
 #include <utility>
@@ -79,11 +80,12 @@ namespace System
          */
         using HandlerType = std::function<void(Object* sender, const TEventArgs& e)>;
 
+        /// Token type returned by Add(); used to remove a specific handler via Remove().
+        using Token = std::size_t;
+
     private:
-        /**
-         * @brief Internal list of subscribed handlers.
-         */
-        std::vector<HandlerType> handlers;
+        std::vector<std::pair<Token, HandlerType>> handlers_;
+        Token nextToken_ = 0;
 
     public:
         /**
@@ -100,25 +102,49 @@ namespace System
          * @brief Adds a new subscribed handler.
          *
          * This operator is used to mimic the common C# event subscription style
-         * as closely as possible.
+         * as closely as possible. The token is discarded; use Add() when you need
+         * to remove the handler later.
          *
          * @param handler Handler to add.
          * @return Reference to this instance.
          */
         EventHandler& operator+=(HandlerType handler)
         {
-            handlers.push_back(std::move(handler));
+            Add(std::move(handler));
             return *this;
         }
 
         /**
-         * @brief Adds a new subscribed handler.
+         * @brief Adds a new subscribed handler and returns a removal token.
+         *
+         * Pass the returned token to Remove() to unsubscribe this specific handler.
          *
          * @param handler Handler to add.
+         * @return Token that identifies this subscription.
          */
-        void Add(HandlerType handler)
+        Token Add(HandlerType handler)
         {
-            handlers.push_back(std::move(handler));
+            const Token token = nextToken_++;
+            handlers_.emplace_back(token, std::move(handler));
+            return token;
+        }
+
+        /**
+         * @brief Removes the handler identified by the given token.
+         *
+         * Has no effect if the token is not found (already removed or never added).
+         *
+         * @param token Token returned by Add().
+         */
+        void Remove(Token token)
+        {
+            handlers_.erase(
+                std::remove_if(handlers_.begin(), handlers_.end(),
+                    [token](const std::pair<Token, HandlerType>& entry) {
+                        return entry.first == token;
+                    }),
+                handlers_.end()
+            );
         }
 
         /**
@@ -126,7 +152,7 @@ namespace System
          */
         void Clear()
         {
-            handlers.clear();
+            handlers_.clear();
         }
 
         /**
@@ -136,7 +162,7 @@ namespace System
          */
         [[nodiscard]] bool Empty() const
         {
-            return handlers.empty();
+            return handlers_.empty();
         }
 
         /**
@@ -146,7 +172,7 @@ namespace System
          */
         [[nodiscard]] std::size_t Size() const
         {
-            return handlers.size();
+            return handlers_.size();
         }
 
         /**
@@ -159,9 +185,9 @@ namespace System
          */
         void Raise(Object* sender, const TEventArgs& e)
         {
-            for (auto& handler : handlers)
+            for (auto& entry : handlers_)
             {
-                handler(sender, e);
+                entry.second(sender, e);
             }
         }
 
