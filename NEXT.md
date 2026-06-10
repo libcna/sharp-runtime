@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-08 (branch: develop) — session 32*
+*Last updated: 2026-06-10 (branch: develop) — session 33*
 
 ---
 
@@ -29,17 +29,17 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2543 tests pass** — `./build/SharpRuntimeTests` → `2543 tests from 367 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 63 test files in `tests/`
+- **All 2691 tests pass** — `./build/SharpRuntimeTests` → `2691 tests from 397 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 64 test files in `tests/`
 
 ### Coverage overview
 
 | Category | Headers | Status |
 |----------|---------|--------|
-| Tested (included in ≥1 test file) | 347 / 449 | **77 %** ✅ |
+| Tested (included in ≥1 test file) | ~375 / 449 | **~84 %** ✅ |
 | Untested — pure interfaces (`IXxx`) | 43 | intentionally skipped (no logic) |
 | Untested — marker/event types | 27 | intentionally skipped (no logic) |
-| Untested — types with real logic | 32 | **Task 42** |
+| Untested — types with real logic | 0 | **Task 42 done** ✅ |
 
 ### Untested headers with real logic (Task 42 target)
 
@@ -89,6 +89,13 @@
 
 ## 3. Recent changes (last 3 sessions)
 
+**Session 33 — Task 42:**
+
+| File | Change |
+|------|--------|
+| `include/System/Threading/Timer.hpp` | Fix: dangling-`this` UB → `shared_ptr<State>` shared between Timer and thread |
+| `tests/Task42Tests.cpp` | New — 148 tests: Timer (4), Object (10), Type (6), String (7), Byte (6), UInt64 (5), AppContext (5), AppDomain (4), GC (6), Debugger (4), Comparer non-generic (4), Generic::Comparer (4), Generic::EqualityComparer (3), Stream (5), TextReader (5), TextWriter (7), NonCryptographicHashAlgorithm (6), IsolatedStorage (4), JsonElement (13), EncodingProvider (2), TimeZone (3), SharpRuntimeHelper (9), Action (4), Func (3), Predicate (1), MarshalByRefObject (1), ThreadStart (2), ApplicationId (2), GenericMathInterfaces (3), KeyedCollection (5) |
+
 **Session 32 — Task 41:**
 
 | File | Change |
@@ -120,7 +127,7 @@
 
 | Status | Issue |
 |--------|-------|
-| **⚠️ risky** | `Threading::Timer` — background thread holds raw `this`; if the Timer object is destroyed before the thread wakes up, the callback accesses freed memory (UB). Fix: use `shared_ptr<atomic<bool>>` cancel flag instead of raw `this`. |
+| **fixed** | `Threading::Timer` — dangling-`this` UB fixed in session 33: background thread now holds `shared_ptr<State>`, not raw `this`. |
 | **confirmed** | `Task`/`TaskT` use `std::async(launch::async)` — one OS thread per task, no threadpool |
 | **confirmed** | `XmlReader`/`XmlWriter` always throw `NotImplementedException` |
 | **confirmed** | `GZipStream`, `DeflateStream`, `ZipArchive` always throw `NotImplementedException` |
@@ -223,28 +230,20 @@ git log --oneline -10
 
 ## 7. Next tasks
 
-### Task 42 — Final untested headers + Timer fix ← NEXT
+### Task 42 — DONE ✅ (session 33)
 
-**Priority 1 — fix dangling-this UB in Timer:**
-- `include/System/Threading/Timer.hpp`: the background thread captures `this` by raw pointer. When `Dispose()` is called the Timer object may be destroyed before the sleeping thread wakes up → undefined behaviour. Fix: replace raw `this` capture with a `shared_ptr<atomic<bool>>` cancellation flag.
-- After fix: add Timer tests (basic interval fire, Dispose stops it).
+All 148 new tests pass. Total: **2691 tests**, 0 failing.
 
-**Priority 2 — add tests for remaining ~20 headers with real logic:**
-- `System/Object.hpp`, `Type.hpp` — base GetType/ToString
-- `System/String.hpp` — std::string wrapper
-- `System/Byte.hpp`, `UInt64.hpp` — numeric wrappers
-- `System/AppContext.hpp`, `AppDomain.hpp`, `GC.hpp` — stub methods
-- `System/Diagnostics/Debugger.hpp` — IsAttached/Break
-- `System/Collections/Comparer.hpp`, `Generic/Comparer.hpp`, `Generic/EqualityComparer.hpp`
-- `System/IO/Stream.hpp`, `TextReader.hpp`, `TextWriter.hpp` — abstract base API
-- `System/IO/Hashing/NonCryptographicHashAlgorithm.hpp` — confirm CRC32/XxHash inherit
-- `System/Text/Json/JsonElement.hpp` — direct tests (not just via JsonDocument)
-- `System/Text/EncodingProvider.hpp`, `System/TimeZone.hpp`
-- `SharpRuntime/SharpRuntimeHelper.hpp` — verify typedef sizes
+### Task 43 — Merge develop → master ← NEXT
 
-**Priority 3 — merge and close:**
-- After Task 42 tests pass: merge `develop` → `master`
+- Merge `develop` → `master` (fast-forward or merge commit)
 - Tag release `v0.1.0-test-coverage`
+
+```bash
+git checkout master
+git merge develop
+git tag v0.1.0-test-coverage
+```
 
 ---
 
@@ -261,6 +260,7 @@ git log --oneline -10
 | Task 39 — Threading::Tasks + remaining stubs | 30 | 2381 |
 | Task 40 — Span, Half, Int128/UInt128, DateTimeOffset, TimeOnly + 13 more | 31 | 2482 |
 | Task 41 — IntPtr/UIntPtr, Fallbacks, DataAnnotations, Json, Prop macros | 32 | 2543 |
+| Task 42 — Timer UB fix + 28 remaining headers | 33 | 2691 |
 
 ---
 
@@ -280,8 +280,8 @@ git log --oneline -10
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — **Task 42** is next: fix `Threading::Timer` dangling-this UB, then add tests for the ~20 remaining untested headers listed in section 7, then merge `develop` → `master`.
+> Read NEXT.md — **Task 43** is next: merge `develop` → `master` and tag `v0.1.0-test-coverage`.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2543+ passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2691 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
