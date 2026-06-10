@@ -285,3 +285,156 @@ TEST(BigIntegerTests, MultiplyLargeAndVerify) {
     std::string expected = "1" + std::string(30, '0');
     EXPECT_EQ(p.ToString(), expected);
 }
+
+// ---------------------------------------------------------------------------
+// TryParse (new)
+// ---------------------------------------------------------------------------
+
+TEST(BigIntegerTests, TryParse_ValidPositive) {
+    BigInteger r;
+    EXPECT_TRUE(BigInteger::TryParse("12345", r));
+    EXPECT_EQ(r.ToString(), "12345");
+}
+
+TEST(BigIntegerTests, TryParse_ValidNegative) {
+    BigInteger r;
+    EXPECT_TRUE(BigInteger::TryParse("-99999999999999999999", r));
+    EXPECT_EQ(r.ToString(), "-99999999999999999999");
+}
+
+TEST(BigIntegerTests, TryParse_Zero) {
+    BigInteger r;
+    EXPECT_TRUE(BigInteger::TryParse("0", r));
+    EXPECT_TRUE(r.getIsZeroProperty());
+}
+
+TEST(BigIntegerTests, TryParse_EmptyString_ReturnsFalse) {
+    BigInteger r;
+    EXPECT_FALSE(BigInteger::TryParse("", r));
+}
+
+TEST(BigIntegerTests, TryParse_NonNumeric_ReturnsFalse) {
+    BigInteger r;
+    EXPECT_FALSE(BigInteger::TryParse("123abc", r));
+}
+
+TEST(BigIntegerTests, TryParse_SignOnly_ReturnsFalse) {
+    BigInteger r;
+    EXPECT_FALSE(BigInteger::TryParse("-", r));
+}
+
+// ---------------------------------------------------------------------------
+// Division (new)
+// ---------------------------------------------------------------------------
+
+TEST(BigIntegerTests, Divide_SimplePositive) {
+    BigInteger a(100), b(7);
+    EXPECT_EQ((a / b).ToString(), "14");
+}
+
+TEST(BigIntegerTests, Divide_Exact) {
+    BigInteger a(42), b(6);
+    EXPECT_EQ((a / b).ToString(), "7");
+}
+
+TEST(BigIntegerTests, Divide_LargeBySmall) {
+    BigInteger a = BigInteger::Parse("123456789012345678901234567890");
+    BigInteger b(1000000000);
+    BigInteger q = a / b;
+    // Verify: q * b + (a % b) == a
+    EXPECT_EQ(q * b + (a % b), a);
+}
+
+TEST(BigIntegerTests, Divide_NegativeDividend) {
+    BigInteger a(-17), b(5);
+    // .NET semantics: truncate toward zero → -17/5 = -3
+    EXPECT_EQ((a / b).ToString(), "-3");
+}
+
+TEST(BigIntegerTests, Divide_NegativeDivisor) {
+    BigInteger a(17), b(-5);
+    EXPECT_EQ((a / b).ToString(), "-3");
+}
+
+TEST(BigIntegerTests, Divide_BothNegative) {
+    BigInteger a(-17), b(-5);
+    EXPECT_EQ((a / b).ToString(), "3");
+}
+
+TEST(BigIntegerTests, Divide_ByZero_Throws) {
+    BigInteger a(10), z(0);
+    EXPECT_THROW((void)(a / z), std::overflow_error);
+}
+
+TEST(BigIntegerTests, Divide_LargeByLarge) {
+    BigInteger a = BigInteger::Parse("999999999999999999999999999999");
+    BigInteger b = BigInteger::Parse("999999999999999");
+    BigInteger q = a / b;
+    // Verify reconstruction
+    EXPECT_EQ(q * b + (a % b), a);
+}
+
+// ---------------------------------------------------------------------------
+// Modulo (new)
+// ---------------------------------------------------------------------------
+
+TEST(BigIntegerTests, Modulo_Simple) {
+    BigInteger a(17), b(5);
+    EXPECT_EQ((a % b).ToString(), "2");
+}
+
+TEST(BigIntegerTests, Modulo_Exact) {
+    BigInteger a(12), b(4);
+    EXPECT_EQ((a % b).ToString(), "0");
+}
+
+TEST(BigIntegerTests, Modulo_NegativeDividend) {
+    // .NET: remainder has the sign of the dividend
+    BigInteger a(-17), b(5);
+    EXPECT_EQ((a % b).ToString(), "-2");
+}
+
+TEST(BigIntegerTests, Modulo_ByZero_Throws) {
+    BigInteger a(10), z(0);
+    EXPECT_THROW((void)(a % z), std::overflow_error);
+}
+
+TEST(BigIntegerTests, Modulo_Large) {
+    BigInteger a = BigInteger::Parse("123456789012345678901234567890");
+    BigInteger b = BigInteger::Parse("999999999");
+    BigInteger r = a % b;
+    EXPECT_TRUE(r >= BigInteger(0));
+    EXPECT_TRUE(r < b);
+}
+
+// ---------------------------------------------------------------------------
+// Compound assignment (new)
+// ---------------------------------------------------------------------------
+
+TEST(BigIntegerTests, DivAssign) {
+    BigInteger a(100);
+    a /= BigInteger(7);
+    EXPECT_EQ(a.ToString(), "14");
+}
+
+TEST(BigIntegerTests, ModAssign) {
+    BigInteger a(17);
+    a %= BigInteger(5);
+    EXPECT_EQ(a.ToString(), "2");
+}
+
+// ---------------------------------------------------------------------------
+// Division/Modulo identity: a == (a/b)*b + (a%b)
+// ---------------------------------------------------------------------------
+
+TEST(BigIntegerTests, DivModIdentity_Positive) {
+    BigInteger a = BigInteger::Parse("98765432109876543210");
+    BigInteger b = BigInteger::Parse("123456789");
+    EXPECT_EQ((a / b) * b + (a % b), a);
+}
+
+TEST(BigIntegerTests, DivModIdentity_NegativeDividend) {
+    BigInteger a = BigInteger::Parse("-98765432109876543210");
+    BigInteger b = BigInteger::Parse("123456789");
+    EXPECT_EQ((a / b) * b + (a % b), a);
+}

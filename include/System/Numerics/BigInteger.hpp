@@ -2,10 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <algorithm>
 #include <cstdint>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -18,171 +15,139 @@ namespace System::Numerics {
     /**
      * @brief Represents an arbitrarily large signed integer.
      *
-     * Self-contained implementation using sign + base-10^9 magnitude vector.
+     * Uses sign-magnitude representation with a base-10^9 digit vector
+     * (least-significant limb first).
+     *
      * Partial C++ counterpart of .NET System.Numerics.BigInteger.
      *
-     * @note Status: Partial — add, sub, mul, comparisons, ToString, Parse implemented;
-     *   division, modulo, and bit operations are not yet implemented.
+     * @note Status: Full arithmetic — add, subtract, multiply, divide, modulo,
+     *   comparisons, ToString, Parse, TryParse all implemented.
+     *   Bitwise operations are not implemented.
      */
     class BigInteger {
-        bool                   negative_ = false;
-        std::vector<uint32_t>  mag_;       // base 10^9, least significant first
+        bool                  negative_ = false;
+        std::vector<uint32_t> mag_;   ///< Base-10^9 limbs, least-significant first.
 
-        static constexpr uint32_t BASE = 1000000000u;
+        static constexpr uint32_t BASE = 1000000000u; ///< 10^9
 
-        void trim() {
-            while (mag_.size() > 1 && mag_.back() == 0) mag_.pop_back();
-            if (mag_.size() == 1 && mag_[0] == 0) negative_ = false;
-        }
+        // ------------------------------------------------------------------
+        // Private magnitude helpers (defined in BigInteger.cpp)
+        // ------------------------------------------------------------------
+        void trim();
 
-        static int cmpMag(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-            if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
-            for (int i = static_cast<int>(a.size())-1; i >= 0; --i)
-                if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
-            return 0;
-        }
+        static int  cmpMag(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b);
+        static std::vector<uint32_t> addMag(const std::vector<uint32_t>& a,
+                                            const std::vector<uint32_t>& b);
+        static std::vector<uint32_t> subMag(const std::vector<uint32_t>& a,
+                                            const std::vector<uint32_t>& b);
+        static std::vector<uint32_t> mulMag(const std::vector<uint32_t>& a,
+                                            const std::vector<uint32_t>& b);
+        static std::vector<uint32_t> divMagByLimb(const std::vector<uint32_t>& a,
+                                                   uint32_t b, uint32_t& rem);
+        /// Knuth Algorithm D: divide magnitude a by b (b has ≥2 limbs).
+        /// Returns {quotient, remainder} magnitudes.
+        static std::pair<std::vector<uint32_t>, std::vector<uint32_t>>
+               divmodMag(std::vector<uint32_t> a, std::vector<uint32_t> b);
 
-        static std::vector<uint32_t> addMag(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-            std::vector<uint32_t> r;
-            uint64_t carry = 0;
-            for (size_t i = 0; i < std::max(a.size(), b.size()) || carry; ++i) {
-                uint64_t sum = carry;
-                if (i < a.size()) sum += a[i];
-                if (i < b.size()) sum += b[i];
-                r.push_back(static_cast<uint32_t>(sum % BASE));
-                carry = sum / BASE;
-            }
-            return r;
-        }
-
-        static std::vector<uint32_t> subMag(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-            // assumes |a| >= |b|
-            std::vector<uint32_t> r;
-            int64_t borrow = 0;
-            for (size_t i = 0; i < a.size(); ++i) {
-                int64_t d = static_cast<int64_t>(a[i]) - borrow - (i < b.size() ? b[i] : 0);
-                if (d < 0) { d += BASE; borrow = 1; } else { borrow = 0; }
-                r.push_back(static_cast<uint32_t>(d));
-            }
-            while (r.size() > 1 && r.back() == 0) r.pop_back();
-            return r;
-        }
-
-        static std::vector<uint32_t> mulMag(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-            std::vector<uint32_t> r(a.size() + b.size(), 0);
-            for (size_t i = 0; i < a.size(); ++i) {
-                uint64_t carry = 0;
-                for (size_t j = 0; j < b.size() || carry; ++j) {
-                    uint64_t cur = static_cast<uint64_t>(r[i+j]) + carry;
-                    if (j < b.size()) cur += static_cast<uint64_t>(a[i]) * b[j];
-                    r[i+j] = static_cast<uint32_t>(cur % BASE);
-                    carry = cur / BASE;
-                }
-            }
-            while (r.size() > 1 && r.back() == 0) r.pop_back();
-            return r;
-        }
-
-        static std::vector<uint32_t> fromLong(uint64_t v) {
-            std::vector<uint32_t> r;
-            if (v == 0) { r.push_back(0); return r; }
-            while (v) { r.push_back(static_cast<uint32_t>(v % BASE)); v /= BASE; }
-            return r;
-        }
+        static std::vector<uint32_t> fromUInt64(uint64_t v);
 
     public:
-        BigInteger() : mag_({0}) {}
+        // ------------------------------------------------------------------
+        // Constructors
+        // ------------------------------------------------------------------
 
-        BigInteger(intcs v) {
-            negative_ = v < 0;
-            mag_ = fromLong(negative_ ? static_cast<uint64_t>(-(int64_t)v) : static_cast<uint64_t>(v));
-        }
+        /// @brief Initialises to zero.
+        BigInteger();
 
-        BigInteger(longcs v) {
-            negative_ = v < 0;
-            mag_ = fromLong(negative_ ? static_cast<uint64_t>(-v) : static_cast<uint64_t>(v));
-        }
+        /// @brief Constructs from a signed 32-bit integer.
+        BigInteger(intcs v);  // NOLINT(*-explicit-*)
 
-        [[nodiscard]] bool getIsZeroProperty()     const { return mag_.size() == 1 && mag_[0] == 0; }
-        [[nodiscard]] bool getIsOneProperty()      const { return !negative_ && mag_.size() == 1 && mag_[0] == 1; }
-        [[nodiscard]] bool getIsNegativeProperty() const { return negative_; }
+        /// @brief Constructs from a signed 64-bit integer.
+        BigInteger(longcs v); // NOLINT(*-explicit-*)
 
-        [[nodiscard]] int Sign() const { return getIsZeroProperty() ? 0 : (negative_ ? -1 : 1); }
+        // ------------------------------------------------------------------
+        // Properties
+        // ------------------------------------------------------------------
 
-        static BigInteger Parse(const std::string& s) {
-            BigInteger r;
-            bool neg = (!s.empty() && s[0] == '-');
-            size_t start = (neg || (!s.empty() && s[0] == '+')) ? 1 : 0;
-            std::vector<uint32_t> m;
-            // parse right-to-left in chunks of 9 digits
-            int i = static_cast<int>(s.size());
-            while (i > static_cast<int>(start)) {
-                int from = std::max(static_cast<int>(start), i-9);
-                std::string chunk = s.substr(from, i-from);
-                m.push_back(static_cast<uint32_t>(std::stoul(chunk)));
-                i = from;
-            }
-            if (m.empty()) m.push_back(0);
-            r.mag_ = m;
-            r.negative_ = neg;
-            r.trim();
-            return r;
-        }
+        /// @brief Returns @c true if the value is zero.
+        [[nodiscard]] bool getIsZeroProperty()     const;
 
-        [[nodiscard]] std::string ToString() const {
-            if (getIsZeroProperty()) return "0";
-            std::string s;
-            for (int i = static_cast<int>(mag_.size())-1; i >= 0; --i) {
-                if (s.empty()) s += std::to_string(mag_[i]);
-                else {
-                    std::string chunk = std::to_string(mag_[i]);
-                    s += std::string(9 - chunk.size(), '0') + chunk;
-                }
-            }
-            return negative_ ? "-" + s : s;
-        }
+        /// @brief Returns @c true if the value is one.
+        [[nodiscard]] bool getIsOneProperty()      const;
 
-        BigInteger operator-() const { BigInteger r(*this); if (!getIsZeroProperty()) r.negative_ = !negative_; return r; }
-        BigInteger Abs() const { BigInteger r(*this); r.negative_ = false; return r; }
+        /// @brief Returns @c true if the value is negative.
+        [[nodiscard]] bool getIsNegativeProperty() const;
 
-        BigInteger operator+(const BigInteger& o) const {
-            if (negative_ == o.negative_) { BigInteger r; r.negative_ = negative_; r.mag_ = addMag(mag_, o.mag_); r.trim(); return r; }
-            int c = cmpMag(mag_, o.mag_);
-            if (c == 0) return BigInteger(0);
-            BigInteger r;
-            if (c > 0) { r.negative_ = negative_; r.mag_ = subMag(mag_, o.mag_); }
-            else        { r.negative_ = o.negative_; r.mag_ = subMag(o.mag_, mag_); }
-            r.trim(); return r;
-        }
+        /// @brief Returns -1, 0, or +1 for negative, zero, positive.
+        [[nodiscard]] int Sign() const;
 
-        BigInteger operator-(const BigInteger& o) const { return *this + (-o); }
+        // ------------------------------------------------------------------
+        // Parse / ToString
+        // ------------------------------------------------------------------
 
-        BigInteger operator*(const BigInteger& o) const {
-            BigInteger r;
-            r.negative_ = negative_ != o.negative_;
-            r.mag_ = mulMag(mag_, o.mag_);
-            r.trim();
-            return r;
-        }
+        /**
+         * @brief Parses a decimal integer string (optional leading '+'/'-').
+         *
+         * @throws std::invalid_argument on malformed input.
+         */
+        static BigInteger Parse(const std::string& s);
 
-        bool operator==(const BigInteger& o) const { return negative_ == o.negative_ && mag_ == o.mag_; }
-        bool operator!=(const BigInteger& o) const { return !(*this == o); }
-        bool operator< (const BigInteger& o) const {
-            if (negative_ != o.negative_) return negative_;
-            int c = cmpMag(mag_, o.mag_);
-            return negative_ ? c > 0 : c < 0;
-        }
-        bool operator<=(const BigInteger& o) const { return !(o < *this); }
-        bool operator> (const BigInteger& o) const { return o < *this; }
-        bool operator>=(const BigInteger& o) const { return !(*this < o); }
+        /**
+         * @brief Attempts to parse a decimal integer string.
+         *
+         * @param s       Input string.
+         * @param result  Receives the parsed value on success.
+         * @return @c true on success, @c false if the string is malformed.
+         */
+        static bool TryParse(const std::string& s, BigInteger& result);
 
-        static const BigInteger Zero;
-        static const BigInteger One;
-        static const BigInteger MinusOne;
+        /// @brief Returns the decimal string representation.
+        [[nodiscard]] std::string ToString() const;
+
+        // ------------------------------------------------------------------
+        // Arithmetic operators
+        // ------------------------------------------------------------------
+        BigInteger operator-() const;
+        BigInteger Abs()       const;
+
+        BigInteger operator+(const BigInteger& o) const;
+        BigInteger operator-(const BigInteger& o) const;
+        BigInteger operator*(const BigInteger& o) const;
+
+        /**
+         * @brief Integer division (truncates toward zero, mirrors .NET).
+         * @throws std::overflow_error if @p o is zero.
+         */
+        BigInteger operator/(const BigInteger& o) const;
+
+        /**
+         * @brief Remainder after integer division (sign follows dividend, mirrors .NET).
+         * @throws std::overflow_error if @p o is zero.
+         */
+        BigInteger operator%(const BigInteger& o) const;
+
+        BigInteger& operator+=(const BigInteger& o);
+        BigInteger& operator-=(const BigInteger& o);
+        BigInteger& operator*=(const BigInteger& o);
+        BigInteger& operator/=(const BigInteger& o);
+        BigInteger& operator%=(const BigInteger& o);
+
+        // ------------------------------------------------------------------
+        // Comparison operators
+        // ------------------------------------------------------------------
+        bool operator==(const BigInteger& o) const;
+        bool operator!=(const BigInteger& o) const;
+        bool operator< (const BigInteger& o) const;
+        bool operator<=(const BigInteger& o) const;
+        bool operator> (const BigInteger& o) const;
+        bool operator>=(const BigInteger& o) const;
+
+        // ------------------------------------------------------------------
+        // Manifest constants
+        // ------------------------------------------------------------------
+        static const BigInteger Zero;     ///< 0
+        static const BigInteger One;      ///< 1
+        static const BigInteger MinusOne; ///< -1
     };
-
-    inline const BigInteger BigInteger::Zero    {  0 };
-    inline const BigInteger BigInteger::One     {  1 };
-    inline const BigInteger BigInteger::MinusOne{ -1 };
 
 } // namespace System::Numerics
