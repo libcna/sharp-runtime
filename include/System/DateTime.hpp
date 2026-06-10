@@ -180,6 +180,46 @@ namespace System {
         [[nodiscard]] DateTime Add(const TimeSpan& value) const;
 
         /**
+         * @brief Returns a new DateTime with the specified number of whole days added.
+         *
+         * @param days Number of days to add (may be negative).
+         * @return A new DateTime.
+         */
+        [[nodiscard]] DateTime AddDays(int days) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of hours added.
+         *
+         * @param hours Number of hours to add (may be negative).
+         * @return A new DateTime.
+         */
+        [[nodiscard]] DateTime AddHours(int hours) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of minutes added.
+         *
+         * @param minutes Number of minutes to add (may be negative).
+         * @return A new DateTime.
+         */
+        [[nodiscard]] DateTime AddMinutes(int minutes) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of seconds added.
+         *
+         * @param seconds Number of seconds to add (may be negative).
+         * @return A new DateTime.
+         */
+        [[nodiscard]] DateTime AddSeconds(int seconds) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of milliseconds added.
+         *
+         * @param milliseconds Number of milliseconds to add (may be negative).
+         * @return A new DateTime.
+         */
+        [[nodiscard]] DateTime AddMilliseconds(int milliseconds) const;
+
+        /**
          * @brief Subtracts the specified time span from this instance.
          *
          * @param value Time span to subtract.

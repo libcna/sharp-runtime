@@ -117,6 +117,26 @@ namespace System {
         return DateTime(ticks_ + value.getTicksProperty());
     }
 
+    DateTime DateTime::AddDays(int days) const {
+        return DateTime(ticks_ + static_cast<longcs>(days) * TicksPerDay);
+    }
+
+    DateTime DateTime::AddHours(int hours) const {
+        return DateTime(ticks_ + static_cast<longcs>(hours) * TicksPerHour);
+    }
+
+    DateTime DateTime::AddMinutes(int minutes) const {
+        return DateTime(ticks_ + static_cast<longcs>(minutes) * TicksPerMinute);
+    }
+
+    DateTime DateTime::AddSeconds(int seconds) const {
+        return DateTime(ticks_ + static_cast<longcs>(seconds) * TicksPerSecond);
+    }
+
+    DateTime DateTime::AddMilliseconds(int milliseconds) const {
+        return DateTime(ticks_ + static_cast<longcs>(milliseconds) * TicksPerMillisecond);
+    }
+
     DateTime DateTime::Subtract(const TimeSpan& value) const {
         return DateTime(ticks_ - value.getTicksProperty());
     }
