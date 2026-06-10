@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-10 (branch: develop) — session 34*
+*Last updated: 2026-06-10 (branch: develop) — session 35*
 
 ---
 
@@ -9,66 +9,72 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** test coverage essentially complete. Remaining work is filling implementation gaps (XmlReader/Writer, TcpClient/UdpClient, ZipArchive) and namespace-by-namespace audit.
+**Current phase:** all major implementation gaps are filled. The three previously stubbed subsystems (compression, XML, zip) are now working. Remaining work is a namespace-by-namespace quality/completeness audit.
 
 **Key architectural decisions:**
-- Complex types have `.hpp` declarations + `.cpp` bodies; simple types remain header-only
+- Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
 - CMake `GLOB_RECURSE` auto-discovers all `src/*.cpp` — no manual registration needed
-- Namespace: `System`, `System::IO`, `System::Collections::Generic`, etc. using C++17 nested syntax
-- Property naming convention: `getXxxProperty()` / `setXxxProperty()` for all `.NET`-style properties
-- Primitive typedefs live in `SharpRuntime::` (`intcs = int32_t`, `bytecs = uint8_t`, `shortcs = int16_t`, `charcs = char16_t`, etc.)
-- Immutable collections use `shared_ptr<const std::container<T>>` — mutations return new instances
+- Namespace: `System`, `System::IO`, etc. using C++17 nested syntax
+- Property naming: `getXxxProperty()` / `setXxxProperty()`
+- Primitives in `SharpRuntime::` (`intcs = int32_t`, `bytecs = uint8_t`, `shortcs = int16_t`, `charcs = char16_t`, etc.)
+- Immutable collections use `shared_ptr<const std::container<T>>`
 
 ---
 
 ## 2. Current status
 
 ### Build
-- **Clean build:** `cmake --build build --parallel 4` → `[100%] Built target SHARP_RUNTIME` ✅
+- **Clean build:** `cmake --build build --parallel 4` ✅
 - Output: `build/libSHARP_RUNTIME.a`
+- Languages: CXX + C (C needed for vendored miniz)
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2828 tests pass** — `./build/SharpRuntimeTests` → `2828 tests from 413 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 65 test files in `tests/`
+- **All 2851 tests pass** — `./build/SharpRuntimeTests` → `2851 tests from 415 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 67 test files in `tests/`
+
+### Vendored libraries
+
+| Library | Location | Version | Use |
+|---------|----------|---------|-----|
+| GoogleTest | `vendor/googletest/` | bundled | test framework |
+| nlohmann/json | `vendor/nlohmann/json.hpp` | 3.10.4 | `System::Text::Json` |
+| tinyxml2 | `vendor/tinyxml2/` | master | `System::Xml::XmlReader/XmlWriter` |
+| miniz | `vendor/miniz/` | master | `System::IO::Compression::ZipArchive` |
 
 ### Coverage overview
 
-| Category | Headers | Status |
-|----------|---------|--------|
-| Tested (included in ≥1 test file) | ~390 / 449 | **~87 %** ✅ |
-| Untested — pure interfaces (`IXxx`) | 43 | intentionally skipped (no logic) |
-| Untested — marker/event types | 27 | intentionally skipped (no logic) |
+| Category | Count | Status |
+|----------|-------|--------|
+| Tested headers | ~390 / 449 | **~87%** ✅ |
+| Untested — pure interfaces (`IXxx`) | 43 | intentionally skipped |
+| Untested — marker/event types | 27 | intentionally skipped |
 | Untested — types with real logic | ~0 | ✅ |
 
 ---
 
-## 3. Recent changes (last 3 sessions)
+## 3. Implementation status per subsystem
 
-**Session 34 — GZipStream / DeflateStream + audits:**
-
-| File | Change |
-|------|--------|
-| `include/System/IO/Compression/GZipStream.hpp` | Rewritten: PIMPL (`ZlibGZipState`), full Doxygen, declarations only |
-| `src/System/IO/Compression/GZipStream.cpp` | New — zlib `inflateInit2(16+MAX_WBITS)` / `deflateInit2(16+MAX_WBITS)`; 64 KB buffers; Z_FINISH on Close |
-| `include/System/IO/Compression/DeflateStream.hpp` | Rewritten: PIMPL (`ZlibDeflateState`), full Doxygen |
-| `src/System/IO/Compression/DeflateStream.cpp` | New — raw DEFLATE (`-MAX_WBITS`); XNB-compatible |
-| `tests/CompressionTests.cpp` | New — 22 round-trip and property tests |
-| `tests/System/IO/Compression/CompressionTests.cpp` | Updated — 4 stub `NotImplementedException` tests replaced with correct-behaviour tests |
-| `CMakeLists.txt` | Added `find_package(ZLIB REQUIRED)` + `target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB)` |
-| `include/System/DateTime.hpp` + `src/System/DateTime.cpp` | Added Year/Month/Day/Hour/Minute/Second/Millisecond/DayOfWeek/DayOfYear properties; constructors (y,m,d), (y,m,d,h,m,s), (y,m,d,h,m,s,ms); AddDays/Hours/Minutes/Seconds/Milliseconds; Today; ISO-8601 ToString |
-| `tests/DateTimePropertiesTests.cpp` | New — 32 tests |
-| `tests/CalendarTests.cpp` | New — 60 tests: Calendar (28), GregorianCalendar (10), ISOWeek (13), DateTimeAdd (9) |
-| `include/System/Decimal.hpp` + `src/System/Decimal.cpp` | Moved all method bodies to .cpp |
-| `include/System/Uri.hpp` + `src/System/Uri.cpp` | Moved all method bodies to .cpp |
-| `include/System/Numerics/BigInteger.hpp` + `src/System/Numerics/BigInteger.cpp` | Moved bodies; added `operator/`, `operator%`, `operator/=`, `operator%=`, `TryParse`; Knuth Algorithm D division |
-| `tests/System/Numerics/BigIntegerTests.cpp` | +23 tests: TryParse (6), division (9), modulo (5), compound assignment (2), identity (2) |
-| `include/System/Threading/Timer.hpp` | Fix: dangling-`this` UB → `shared_ptr<State>` |
-| `tests/Task42Tests.cpp` | New — 148 tests covering 28 previously untested types |
-
-**Session 33 — Task 42 (final header coverage):** see `git log --oneline`
-
-**Session 32 — Task 41:** see `git log --oneline`
+| Subsystem | Status | Notes |
+|-----------|--------|-------|
+| `System::IO::Compression::GZipStream` | ✅ DONE | zlib, PIMPL, 64KB buffers, Z_FINISH |
+| `System::IO::Compression::DeflateStream` | ✅ DONE | raw DEFLATE (-MAX_WBITS), XNB-compatible |
+| `System::IO::Compression::ZipArchive` | ✅ DONE | miniz, Read+Create mode, PIMPL |
+| `System::Xml::XmlReader` | ✅ DONE | tinyxml2 DOM cursor, event list |
+| `System::Xml::XmlWriter` | ✅ DONE | tinyxml2 DOM builder + XMLPrinter |
+| `System::DateTime` | ✅ DONE | Year/Month/Day/etc. properties, Add*, Today, ISO-8601 ToString |
+| `System::Decimal` | ✅ DONE | full arithmetic, moved to .cpp |
+| `System::Uri` | ✅ DONE | full parsing, moved to .cpp |
+| `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
+| `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
+| `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
+| `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
+| `System::Net::Sockets::TcpClient/UdpClient` | ❌ STUB | throws NotImplementedException |
+| `System::Xml::XmlReader/XmlWriter (SAX)` | ✅ DONE | DOM-cursor, not true SAX |
+| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no threadpool |
+| `System::Threading::Thread` | ⚠️ PARTIAL | no `Join()` / `IsAlive` |
+| `System::AppDomain/AppContext/GC` | ⚠️ STUB | minimal stubs only |
+| `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones |
 
 ---
 
@@ -76,16 +82,14 @@
 
 | Status | Issue |
 |--------|-------|
-| **confirmed** | `Task`/`TaskT` use `std::async(launch::async)` — one OS thread per task, no threadpool |
-| **confirmed** | `XmlReader`/`XmlWriter` always throw `NotImplementedException` — needs tinyxml2/pugixml |
-| **confirmed** | `ZipArchive` always throws `NotImplementedException` — needs miniz/libzip |
-| **confirmed** | `TcpClient`, `UdpClient` always throw `NotImplementedException` — needs POSIX/Winsock |
-| **incomplete** | `Thread::CurrentThread()` returns proxy — no `Join()` / `IsAlive` |
-| **incomplete** | `Char::Parse(string)` — only 1-byte ASCII; no multi-byte UTF-8 |
-| **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — only UTC, Local, and a few hardcoded zones |
-| **incomplete** | `AppDomain`, `AppContext`, `GC` are stubs |
-| **known warning** | `Char.hpp:16` — null character in literal (cosmetic) |
-| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` (duplicate class def) |
+| **confirmed** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
+| **confirmed** | `TcpClient`, `UdpClient` — always throw `NotImplementedException` |
+| **incomplete** | `Thread::CurrentThread()` — returns proxy, no `Join()` / `IsAlive` |
+| **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
+| **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
+| **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
+| **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic) |
+| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` (duplicate class name) |
 
 ---
 
@@ -94,43 +98,41 @@
 ### Module layout
 ```
 include/
-  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs (intcs, bytecs, shortcs, charcs, etc.)
-  SharpRuntime/Prop.hpp                 ← DDATA/DGETTER/IDATA/IGETTER property macros
-  System/                               ← root namespace: exceptions, Math, Convert, ...
+  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs
+  SharpRuntime/Prop.hpp                 ← DDATA/DGETTER/IDATA/IGETTER macros
+  System/                               ← exceptions, Math, Convert, DateTime, Decimal, Uri, ...
   System/Collections/                   ← Generic/, Concurrent/, Immutable/, ObjectModel/, Specialized/
   System/IO/                            ← Stream, File, BinaryReader/Writer, Compression/, Hashing/
   System/Text/                          ← StringBuilder, Encoding, Rune, Json/, Encodings/Web/
-  System/Threading/                     ← Thread, Monitor, Mutex, ..., Tasks/
+  System/Threading/                     ← Thread, Monitor, Mutex, Timer, ..., Tasks/
   System/Numerics/                      ← BigInteger, Complex, BFloat16, BitOperations, MathF
   System/Diagnostics/                   ← Debug, Trace, Stopwatch, CodeAnalysis/
-  System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ...
+  System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ISOWeek, ...
   System/Runtime/                       ← CompilerServices/, InteropServices/, Versioning/
   System/Net/                           ← IPAddress, IPEndPoint, HttpStatusCode, Sockets/
   System/Xml/                           ← XmlReader, XmlWriter, Linq/
   System/ComponentModel/                ← attributes, INotifyPropertyChanged, DataAnnotations/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
-src/                                    ← .cpp for types needing it (exceptions, Guid, DateTime, Encoding, Decimal, Uri, BigInteger, GZipStream, DeflateStream, etc.)
-tests/                                  ← GoogleTest suites (65 files, 2828 tests)
-vendor/googletest/                      ← bundled test framework
-vendor/nlohmann/json.hpp                ← nlohmann/json 3.10.4 (MIT)
+src/                                    ← .cpp for complex types
+  System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, ...
+  System/Numerics/BigInteger.cpp
+  System/IO/Compression/GZipStream.cpp, DeflateStream.cpp, ZipArchive.cpp
+  System/Xml/XmlReader.cpp, XmlWriter.cpp
+vendor/
+  googletest/, nlohmann/, tinyxml2/, miniz/
+tests/                                  ← 67 GoogleTest files, 2851 tests
 ```
 
 ### Invariants that must not be broken
-1. **Complex types get `.hpp` + `.cpp` split** — move bodies to `.cpp` whenever the header grows unwieldy or causes ODR issues
-2. **Property naming:** always `getXxxProperty()` / `setXxxProperty()` — never bare public fields
-3. **Doxygen on all public declarations** — every public method/class/member in `.hpp` must have a `///` or `/** */` doc comment
-4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET Foundation attribution
+1. **Complex types get `.hpp` + `.cpp` split** — move bodies to `.cpp` when header grows unwieldy
+2. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`
+3. **Doxygen on all public declarations** — every public method/class in `.hpp` must have `///` or `/** */`
+4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution
 5. **Namespace syntax:** `namespace System::Collections::Generic {` — C++17 nested form
-6. **`SharpRuntime::intcs` not `int`** in public APIs that mirror .NET `int` parameters
-7. **Build must stay clean** — zero errors, zero warnings before any commit
-8. **`inline` statics** in headers for ODR-safe static members; non-inline in `.cpp`
-9. **`static thread_local`** (not `mutable thread_local static`) for thread-local storage in templates
-
-### API compatibility rules
-- Method names mirror .NET exactly (PascalCase)
-- Template parameter names: `TKey`, `TValue`, `TElement`, `TPriority`, etc.
-- Static factory methods preferred where .NET uses them (`Empty()`, `Create()`, `Default()`)
+6. **`SharpRuntime::intcs` not `int`** in public APIs mirroring .NET `int` parameters
+7. **Zero errors, zero warnings** before any commit
+8. **`inline` statics in headers**; non-inline in `.cpp`
 
 ---
 
@@ -143,13 +145,10 @@ cmake --build build --parallel 4
 # Run all tests
 ./build/SharpRuntimeTests
 
-# Run a single suite
-./build/SharpRuntimeTests --gtest_filter="StopwatchTests.*"
+# Run specific suite
+./build/SharpRuntimeTests --gtest_filter="ZipArchive*"
 
-# Run multiple suites
-./build/SharpRuntimeTests --gtest_filter="GZipStream*:DeflateStream*"
-
-# Check for errors/warnings only
+# Errors/warnings only
 cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 
 # Find untested headers
@@ -177,50 +176,44 @@ git log --oneline -10
 
 ## 7. Next tasks
 
-### Task 44 — XmlReader / XmlWriter via tinyxml2 or pugixml
+### Task 46 — Namespace audit pass ← NEXT
 
-Both headers currently throw `NotImplementedException`. Options:
-- **tinyxml2** — single `.cpp`, MIT, minimal API, easiest to embed
-- **pugixml** — single header + `.cpp`, MIT, more complete XPath support
+Go namespace by namespace, file by file. For each namespace:
+1. List all headers
+2. Check each header compiles when included alone (no missing deps)
+3. Move any header-only bodies > ~100 lines to `.cpp`
+4. Fill any stubs that are needed by CNA
 
-Steps:
-1. Drop vendor into `vendor/tinyxml2/` (or pugixml)
-2. Add to CMakeLists: `add_subdirectory(vendor/tinyxml2)` + link
-3. Implement `XmlReader` (SAX-style forward-only) and `XmlWriter` (element/attribute output)
-4. Add round-trip tests
+**Priority order (most needed by CNA first):**
 
-### Task 45 — ZipArchive via miniz
+| Namespace | Priority | Why |
+|-----------|----------|-----|
+| `System::Globalization` | HIGH | `CultureInfo`, `NumberFormatInfo` used by string formatting |
+| `System::Text` | HIGH | `StringBuilder` edge cases, `Encoding` gaps |
+| `System::Collections::Generic` | MEDIUM | check `SortedDictionary`, `LinkedList` completeness |
+| `System::Net` | LOW | `IPAddress`, `HttpStatusCode` (data only, no real networking) |
+| `System::Threading` | LOW | `Thread::Join/IsAlive`, `ThreadPool` stub |
 
-`ZipArchive` stub at `include/System/IO/Compression/ZipArchive.hpp`. miniz is a single-file
-public-domain zlib/zip implementation — already used by some game engines.
+### Task 47 — Fix DefaultValueAttribute conflict
 
-Steps:
-1. Drop `vendor/miniz/miniz.h` + `miniz.c`
-2. Implement `ZipArchive::GetEntry`, `CreateEntry`, `Entries` over miniz
-3. Add read + create tests
+`include/System/ComponentModel/DefaultValueAttribute.hpp` and
+`include/System/ComponentModel/DescriptionAttribute.hpp` define the same class name.
+Fix by renaming or merging.
 
-### Task 46 — Namespace audit pass (ongoing)
+### Task 48 — TcpClient / UdpClient (POSIX)
 
-Go namespace by namespace, file by file:
-- Verify each header compiles cleanly when included alone
-- Move any remaining header-only bodies > ~100 lines to `.cpp`
-- Fill implementation stubs that are needed by CNA
-
-Priority order (most needed by CNA):
-1. `System::Globalization` — `CultureInfo`, `NumberFormatInfo`
-2. `System::Text` — `StringBuilder` edge cases, `Encoding` completeness
-3. `System::Collections::Generic` — `SortedDictionary`, `LinkedList` completeness
-4. `System::Net` — `IPAddress`, `HttpStatusCode` (read-only, no actual networking)
+Lowest priority — not needed for the game engine itself, but needed for any networking feature.
+Only implement if CNA requires it.
 
 ---
 
 ## 8. Constraints / do not do
 
-- **No merge to master or tags** without explicit per-action user approval
-- **No broad header refactor** — changing naming conventions across 449 files would break CNA and all dependents
-- **No LINQ (System.Linq/Enumerable)** — use `std::ranges` algorithms in ported code instead
-- **No changes to `SharpRuntime::` primitive typedefs** — API foundation used by hundreds of headers
-- **No port of Vector2/3/4, Matrix3x2/4x4** — these belong to the CNA layer, not sharp-runtime
+- **No merge to master or tags** without explicit per-action user approval; push only to `develop`
+- **No broad header refactor** — naming conventions touch 449 files, would break CNA
+- **No LINQ** — use `std::ranges` in ported code instead
+- **No changes to `SharpRuntime::` primitive typedefs** — API foundation
+- **No port of Vector2/3/4, Matrix3x2/4x4** — CNA layer, not sharp-runtime
 
 ---
 
@@ -228,9 +221,10 @@ Priority order (most needed by CNA):
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — see section 7 for next tasks.
+> Read NEXT.md — **Task 46** is next: namespace-by-namespace audit starting with
+> `System::Globalization` and `System::Text`.
 >
-> Build: `cmake --build build --parallel 4` (zero errors, zero warnings)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2828 passing, 0 failing.
+> Build: `cmake --build build --parallel 4` (zero errors, zero warnings, C + CXX)
+> Run full suite: `./build/SharpRuntimeTests` — must show 2851 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
