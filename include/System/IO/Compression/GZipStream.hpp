@@ -3,76 +3,93 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/IO/Stream.hpp"
-#include "System/NotImplementedException.hpp"
 #include "System/IO/Compression/CompressionMode.hpp"
-
-// NOTE: Full implementation requires a zlib-compatible library (zlib, miniz, or zlib-ng).
-// To implement:
-//   1. Add zlib or miniz as a dependency.
-//      - zlib:  find_package(ZLIB REQUIRED) + target_link_libraries(SHARP_RUNTIME ZLIB::ZLIB)
-//      - miniz: drop miniz.h into the project (single-header, public domain / MIT)
-//   2. Replace the throw statements in Read() and Write() with calls to:
-//      - Decompress: inflateInit2(..., 16+MAX_WBITS) / inflate() / inflateEnd()  [gzip header]
-//      - Compress:   deflateInit2(..., ..., 16+MAX_WBITS, ...) / deflate() / deflateEnd()
-//   3. Add #include <zlib.h> (or "miniz.h") and keep state in z_stream members.
+#include <memory>
 
 namespace System::IO::Compression {
+
+    struct ZlibGZipState; ///< Opaque zlib state; defined in GZipStream.cpp.
 
     /**
      * @brief Provides methods for compressing and decompressing streams using the GZip format.
      *
+     * Wraps a zlib inflate/deflate context.  The GZip format includes a 10-byte
+     * header and CRC-32 trailer, making output interoperable with gzip(1).
+     *
      * Partial C++ counterpart of .NET System.IO.Compression.GZipStream.
      *
-     * @note Status: Stub — Read/Write throw NotImplementedException.
-     *   See the comment at the top of this file for what is needed to implement.
+     * @note Status: IMPLEMENTED — requires system zlib (linked via ZLIB::ZLIB CMake target).
      */
     class GZipStream : public Stream {
-        Stream*         inner_;
-        CompressionMode mode_;
-        bool            leaveOpen_;
+        Stream*                        inner_;
+        CompressionMode                mode_;
+        bool                           leaveOpen_;
+        std::unique_ptr<ZlibGZipState> state_;
+
     public:
         /**
-         * @param stream    The stream to wrap for compress/decompress.
-         * @param mode      CompressionMode::Compress or ::Decompress.
-         * @param leaveOpen When true, inner stream is not closed on destruction.
+         * @brief Constructs a GZipStream wrapping @p stream.
+         *
+         * @param stream    The underlying stream for compressed data.
+         * @param mode      @c CompressionMode::Compress or @c ::Decompress.
+         * @param leaveOpen When @c true the inner stream is not closed on destruction.
+         *
+         * @throws std::runtime_error if zlib initialisation fails.
          */
-        GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen = false)
-            : inner_(stream), mode_(mode), leaveOpen_(leaveOpen) {}
+        GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen = false);
 
-        ~GZipStream() override {
-            if (!leaveOpen_ && inner_) inner_->Close();
-        }
+        ~GZipStream() override;
 
-        [[nodiscard]] bool getCanReadProperty()  const override { return mode_ == CompressionMode::Decompress; }
-        [[nodiscard]] bool getCanWriteProperty() const override { return mode_ == CompressionMode::Compress; }
+        /// @brief Returns @c true when mode is Decompress.
+        [[nodiscard]] bool getCanReadProperty()  const override;
 
-        SharpRuntime::intcs Read(SharpRuntime::bytecs* /*buffer*/,
-                                 SharpRuntime::intcs  /*offset*/,
-                                 SharpRuntime::intcs  /*count*/) override {
-            throw NotImplementedException(
-                "GZipStream::Read is not implemented. "
-                "Requires zlib (inflate with 16+MAX_WBITS) or miniz. "
-                "See include/System/IO/Compression/GZipStream.hpp for integration notes.");
-        }
+        /// @brief Returns @c true when mode is Compress.
+        [[nodiscard]] bool getCanWriteProperty() const override;
 
-        void Write(const SharpRuntime::bytecs* /*buffer*/,
-                   SharpRuntime::intcs         /*offset*/,
-                   SharpRuntime::intcs         /*count*/) override {
-            throw NotImplementedException(
-                "GZipStream::Write is not implemented. "
-                "Requires zlib (deflate with 16+MAX_WBITS) or miniz. "
-                "See include/System/IO/Compression/GZipStream.hpp for integration notes.");
-        }
+        /// @brief Not supported — always throws NotImplementedException.
+        [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override;
 
-        [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override {
-            throw NotImplementedException("GZipStream does not support seeking.");
-        }
+        /**
+         * @brief Decompresses bytes from the inner stream into @p buffer.
+         *
+         * Only valid when mode is @c CompressionMode::Decompress.
+         *
+         * @param buffer Destination array.
+         * @param offset Starting index in @p buffer.
+         * @param count  Maximum number of bytes to read.
+         * @return Number of bytes written; 0 when the compressed stream is exhausted.
+         */
+        SharpRuntime::intcs Read(SharpRuntime::bytecs* buffer,
+                                 SharpRuntime::intcs   offset,
+                                 SharpRuntime::intcs   count) override;
 
-        void Flush() override {}
+        /**
+         * @brief Compresses @p count bytes from @p buffer and writes to the inner stream.
+         *
+         * Only valid when mode is @c CompressionMode::Compress.
+         *
+         * @param buffer Source array.
+         * @param offset Starting index in @p buffer.
+         * @param count  Number of bytes to compress.
+         */
+        void Write(const SharpRuntime::bytecs* buffer,
+                   SharpRuntime::intcs          offset,
+                   SharpRuntime::intcs          count) override;
 
-        void Close() override {
-            if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
-        }
+        /**
+         * @brief Flushes any pending compressed data using @c Z_SYNC_FLUSH.
+         *
+         * No-op in Decompress mode.
+         */
+        void Flush() override;
+
+        /**
+         * @brief Finalises compression (@c Z_FINISH), writes remaining output, then
+         *        optionally closes the inner stream.
+         *
+         * Safe to call multiple times.
+         */
+        void Close() override;
     };
 
 } // namespace System::IO::Compression

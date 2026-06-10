@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(SHARP_RUNTIME LANGUAGES CXX)
 
+find_package(ZLIB REQUIRED)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -25,6 +27,8 @@ target_include_directories(SHARP_RUNTIME
 # On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
 # which require SDL3 headers and library.  SDL3 is provided by the parent project
 # (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
+target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB)
+
 if(ANDROID AND TARGET SDL3::SDL3)
     target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
 elseif(ANDROID AND TARGET SDL3::SDL3-static)

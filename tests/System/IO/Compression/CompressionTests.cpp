@@ -78,18 +78,18 @@ TEST(GZipStreamTests, DecompressMode_CanWrite_False) {
     EXPECT_FALSE(gz.getCanWriteProperty());
 }
 
-TEST(GZipStreamTests, Read_ThrowsNotImplemented) {
+TEST(GZipStreamTests, Read_EmptyStream_ReturnsZero) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
     SharpRuntime::bytecs buf[4] = {};
-    EXPECT_THROW(gz.Read(buf, 0, 4), NotImplementedException);
+    EXPECT_EQ(gz.Read(buf, 0, 4), 0);
 }
 
-TEST(GZipStreamTests, Write_ThrowsNotImplemented) {
+TEST(GZipStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
-    SharpRuntime::bytecs buf[4] = {};
-    EXPECT_THROW(gz.Write(buf, 0, 4), NotImplementedException);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_NO_THROW(gz.Write(buf, 0, 4));
 }
 
 TEST(GZipStreamTests, Flush_DoesNotThrow) {
@@ -132,18 +132,18 @@ TEST(DeflateStreamTests, DecompressMode_CanWrite_False) {
     EXPECT_FALSE(ds.getCanWriteProperty());
 }
 
-TEST(DeflateStreamTests, Read_ThrowsNotImplemented) {
+TEST(DeflateStreamTests, Read_EmptyStream_ReturnsZero) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
     SharpRuntime::bytecs buf[4] = {};
-    EXPECT_THROW(ds.Read(buf, 0, 4), NotImplementedException);
+    EXPECT_EQ(ds.Read(buf, 0, 4), 0);
 }
 
-TEST(DeflateStreamTests, Write_ThrowsNotImplemented) {
+TEST(DeflateStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
-    SharpRuntime::bytecs buf[4] = {};
-    EXPECT_THROW(ds.Write(buf, 0, 4), NotImplementedException);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_NO_THROW(ds.Write(buf, 0, 4));
 }
 
 TEST(DeflateStreamTests, Flush_DoesNotThrow) {
