@@ -2,16 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <memory>
 #include <string>
-#include "System/NotImplementedException.hpp"
-
-// NOTE: Full implementation requires an XML library such as tinyxml2 or pugixml.
-// To implement:
-//   - tinyxml2 (MIT, single .cpp + .h): https://github.com/leethomason/tinyxml2
-//     Use tinyxml2::XMLDocument / XMLElement / XMLAttribute.
-//   - pugixml (MIT): https://pugixml.org/
-//     Use pugi::xml_document / xml_node / xml_attribute.
-// XNA content pipeline uses XML for XNB descriptor files; this is the entry point for that feature.
+#include <vector>
+#include <utility>
 
 namespace System::Xml {
 
@@ -25,59 +19,116 @@ namespace System::Xml {
         XmlDeclaration = 17
     };
 
+    struct XmlReaderState; ///< Opaque tinyxml2 state; defined in XmlReader.cpp.
+
     /**
      * @brief Represents a reader that provides fast, non-cached, forward-only access to XML data.
      *
+     * Implemented as a DOM-cursor over a tinyxml2 document tree.  The entire
+     * document is parsed on creation; @c Read() advances a flat event list
+     * built from the DOM.
+     *
      * Partial C++ counterpart of .NET System.Xml.XmlReader.
      *
-     * @note Status: Stub — all methods throw NotImplementedException.
-     *   See comment at top of this file for integration with tinyxml2 or pugixml.
+     * @note Status: IMPLEMENTED — backed by vendored tinyxml2.
      */
     class XmlReader {
+        std::unique_ptr<XmlReaderState> state_;
+
     public:
-        virtual ~XmlReader() = default;
+        /// @brief Internal constructor used by factory methods; prefer @c Create() / @c CreateFromString().
+        explicit XmlReader(std::unique_ptr<XmlReaderState> s);
 
-        [[nodiscard]] virtual XmlNodeType getNodeTypeProperty() const {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml. See header for details.");
-        }
-        [[nodiscard]] virtual std::string getNameProperty() const {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        [[nodiscard]] virtual std::string getValueProperty() const {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        [[nodiscard]] virtual bool getIsEmptyElementProperty() const {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
+        ~XmlReader();
 
-        virtual bool Read() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        virtual void Close() {}
+        /// @brief Returns the type of the current node.
+        [[nodiscard]] XmlNodeType getNodeTypeProperty() const;
 
-        virtual bool MoveToElement() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        virtual bool MoveToNextAttribute() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
+        /// @brief Returns the qualified name of the current node.
+        [[nodiscard]] std::string getNameProperty() const;
 
-        [[nodiscard]] virtual std::string GetAttribute(const std::string&) const {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        [[nodiscard]] virtual std::string ReadElementContentAsString() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        virtual void ReadStartElement() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
-        virtual void ReadEndElement() {
-            throw NotImplementedException("XmlReader requires tinyxml2 or pugixml.");
-        }
+        /// @brief Returns the text value of the current node (Text/CDATA/Comment).
+        [[nodiscard]] std::string getValueProperty() const;
 
-        static XmlReader* Create(const std::string& /*inputUri*/) {
-            throw NotImplementedException("XmlReader::Create requires tinyxml2 or pugixml.");
-        }
+        /// @brief Returns @c true if the current element has no child nodes.
+        [[nodiscard]] bool getIsEmptyElementProperty() const;
+
+        /// @brief Returns the current read state.
+        [[nodiscard]] ReadState getReadStateProperty() const;
+
+        /**
+         * @brief Advances the reader to the next node.
+         *
+         * @return @c true if a node was read; @c false at end of document.
+         */
+        bool Read();
+
+        /**
+         * @brief Moves the cursor back to the element node after iterating attributes.
+         *
+         * @return @c true if the reader is positioned on an element.
+         */
+        bool MoveToElement();
+
+        /**
+         * @brief Moves to the next attribute of the current element.
+         *
+         * @return @c true if there was a next attribute to move to.
+         */
+        bool MoveToNextAttribute();
+
+        /**
+         * @brief Returns the value of an attribute by name on the current element.
+         *
+         * @param name Attribute local name.
+         * @return Attribute value, or empty string if not found.
+         */
+        [[nodiscard]] std::string GetAttribute(const std::string& name) const;
+
+        /**
+         * @brief Reads the text content of the current element and advances past its end-element.
+         *
+         * @return The concatenated text content.
+         */
+        std::string ReadElementContentAsString();
+
+        /**
+         * @brief Verifies that the current node is an element and advances the reader.
+         *
+         * @throws std::runtime_error if the current node is not an element.
+         */
+        void ReadStartElement();
+
+        /**
+         * @brief Verifies that the current node is an end-element and advances the reader.
+         *
+         * @throws std::runtime_error if the current node is not an end-element.
+         */
+        void ReadEndElement();
+
+        /// @brief Closes the reader and releases resources.
+        void Close();
+
+        /**
+         * @brief Creates an XmlReader that reads from a file path or raw XML content.
+         *
+         * If @p inputUri looks like a file path (contains '/' or '\' or ends with
+         * ".xml") the file is loaded; otherwise treated as raw XML text.
+         *
+         * @param inputUri  File path or raw XML text.
+         * @return Heap-allocated XmlReader; caller owns the pointer.
+         * @throws std::runtime_error on parse error.
+         */
+        static XmlReader* Create(const std::string& inputUri);
+
+        /**
+         * @brief Creates an XmlReader that parses @p xmlContent as raw XML.
+         *
+         * @param xmlContent  Well-formed XML text.
+         * @return Heap-allocated XmlReader; caller owns the pointer.
+         * @throws std::runtime_error on parse error.
+         */
+        static XmlReader* CreateFromString(const std::string& xmlContent);
     };
 
 } // namespace System::Xml

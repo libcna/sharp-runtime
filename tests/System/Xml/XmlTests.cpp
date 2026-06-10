@@ -71,78 +71,232 @@ TEST(XmlNodeTypeTests, XmlDeclaration_Is17) {
 }
 
 // ===========================================================================
-// XmlReader stub — throws, except Close()
+// XmlReader — tinyxml2-backed implementation
 // ===========================================================================
 
-struct ConcreteXmlReader : XmlReader {};
+static const char* kSimpleXml =
+    "<root attr=\"hello\"><child>text</child><empty/></root>";
 
-TEST(XmlReaderTests, Read_ThrowsNotImplemented) {
-    ConcreteXmlReader r;
-    EXPECT_THROW(r.Read(), NotImplementedException);
+TEST(XmlReaderTests, CreateFromString_DoesNotThrow) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    EXPECT_NE(r, nullptr);
 }
 
-TEST(XmlReaderTests, GetNodeType_ThrowsNotImplemented) {
-    ConcreteXmlReader r;
-    EXPECT_THROW((void)r.getNodeTypeProperty(), NotImplementedException);
+TEST(XmlReaderTests, FirstRead_ReturnsTrueAndElementNode) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    EXPECT_TRUE(r->Read());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
 }
 
-TEST(XmlReaderTests, GetName_ThrowsNotImplemented) {
-    ConcreteXmlReader r;
-    EXPECT_THROW((void)r.getNameProperty(), NotImplementedException);
+TEST(XmlReaderTests, FirstElement_NameIsRoot) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read();
+    EXPECT_EQ(r->getNameProperty(), "root");
 }
 
-TEST(XmlReaderTests, GetAttribute_ThrowsNotImplemented) {
-    ConcreteXmlReader r;
-    EXPECT_THROW((void)r.GetAttribute("attr"), NotImplementedException);
+TEST(XmlReaderTests, GetAttribute_ReturnsValue) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read(); // <root>
+    EXPECT_EQ(r->GetAttribute("attr"), "hello");
+}
+
+TEST(XmlReaderTests, GetAttribute_Missing_ReturnsEmpty) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read();
+    EXPECT_EQ(r->GetAttribute("nonexistent"), "");
+}
+
+TEST(XmlReaderTests, ReadSequence_ChildElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read(); // <root>
+    r->Read(); // <child>
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+    EXPECT_EQ(r->getNameProperty(), "child");
+}
+
+TEST(XmlReaderTests, ReadSequence_TextNode) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read(); // <root>
+    r->Read(); // <child>
+    r->Read(); // text
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Text);
+    EXPECT_EQ(r->getValueProperty(), "text");
+}
+
+TEST(XmlReaderTests, ReadSequence_EndElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read(); // <root>
+    r->Read(); // <child>
+    r->Read(); // text
+    r->Read(); // </child>
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "child");
+}
+
+TEST(XmlReaderTests, EmptyElement_IsEmptyElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
+    r->Read(); // <root>
+    r->Read(); // <child>
+    r->Read(); // text
+    r->Read(); // </child>
+    r->Read(); // <empty/>
+    EXPECT_EQ(r->getNameProperty(), "empty");
+    EXPECT_TRUE(r->getIsEmptyElementProperty());
+}
+
+TEST(XmlReaderTests, ReadPastEnd_ReturnsFalse) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x/>"));
+    while (r->Read()) {}
+    EXPECT_FALSE(r->Read());
+    EXPECT_EQ(r->getReadStateProperty(), ReadState::EndOfFile);
+}
+
+TEST(XmlReaderTests, InitialState_IsInitial) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x/>"));
+    EXPECT_EQ(r->getReadStateProperty(), ReadState::Initial);
 }
 
 TEST(XmlReaderTests, Close_DoesNotThrow) {
-    ConcreteXmlReader r;
-    EXPECT_NO_THROW(r.Close());
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x/>"));
+    EXPECT_NO_THROW(r->Close());
 }
 
-TEST(XmlReaderTests, Create_ThrowsNotImplemented) {
-    EXPECT_THROW(XmlReader::Create("file.xml"), NotImplementedException);
+TEST(XmlReaderTests, MoveToNextAttribute_IteratesAttributes) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<el a=\"1\" b=\"2\"/>"));
+    r->Read(); // <el>
+    EXPECT_TRUE(r->MoveToNextAttribute());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Attribute);
+    EXPECT_EQ(r->getNameProperty(), "a");
+    EXPECT_EQ(r->getValueProperty(), "1");
+    EXPECT_TRUE(r->MoveToNextAttribute());
+    EXPECT_EQ(r->getNameProperty(), "b");
+    EXPECT_FALSE(r->MoveToNextAttribute()); // no more
+}
+
+TEST(XmlReaderTests, MoveToElement_AfterAttributes) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<el a=\"1\"/>"));
+    r->Read();
+    r->MoveToNextAttribute();
+    EXPECT_TRUE(r->MoveToElement());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+}
+
+TEST(XmlReaderTests, XmlDeclaration_NodeType) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<?xml version=\"1.0\"?><root/>"));
+    r->Read(); // declaration
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::XmlDeclaration);
+}
+
+TEST(XmlReaderTests, ReadElementContentAsString_ReturnsText) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<msg>hello world</msg>"));
+    r->Read(); // <msg>
+    std::string text = r->ReadElementContentAsString();
+    EXPECT_EQ(text, "hello world");
 }
 
 // ===========================================================================
-// XmlWriter stub — throws, except Flush() and Close()
+// XmlWriter — tinyxml2-backed implementation
 // ===========================================================================
 
-struct ConcreteXmlWriter : XmlWriter {};
-
-TEST(XmlWriterTests, WriteStartDocument_ThrowsNotImplemented) {
-    ConcreteXmlWriter w;
-    EXPECT_THROW(w.WriteStartDocument(), NotImplementedException);
+TEST(XmlWriterTests, CreateToString_DoesNotThrow) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    EXPECT_NE(w, nullptr);
 }
 
-TEST(XmlWriterTests, WriteStartElement_ThrowsNotImplemented) {
-    ConcreteXmlWriter w;
-    EXPECT_THROW(w.WriteStartElement("root"), NotImplementedException);
+TEST(XmlWriterTests, SimpleElement_ToString_ContainsTag) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteEndElement();
+    EXPECT_NE(w->ToString().find("<root"), std::string::npos);
 }
 
-TEST(XmlWriterTests, WriteAttributeString_ThrowsNotImplemented) {
-    ConcreteXmlWriter w;
-    EXPECT_THROW(w.WriteAttributeString("key", "value"), NotImplementedException);
+TEST(XmlWriterTests, WriteAttributeString_InOutput) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("el");
+    w->WriteAttributeString("key", "val");
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find("key=\"val\""), std::string::npos);
 }
 
-TEST(XmlWriterTests, WriteString_ThrowsNotImplemented) {
-    ConcreteXmlWriter w;
-    EXPECT_THROW(w.WriteString("text"), NotImplementedException);
+TEST(XmlWriterTests, WriteString_InOutput) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("msg");
+    w->WriteString("hello");
+    w->WriteEndElement();
+    EXPECT_NE(w->ToString().find("hello"), std::string::npos);
+}
+
+TEST(XmlWriterTests, WriteElementString_ShortForm) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteElementString("name", "Alice");
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find("<name>Alice</name>"), std::string::npos);
+}
+
+TEST(XmlWriterTests, WriteStartDocument_AddsDeclaration) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartDocument();
+    w->WriteStartElement("root");
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find("<?xml"), std::string::npos);
+}
+
+TEST(XmlWriterTests, WriteComment_InOutput) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteComment("a comment");
+    w->WriteEndElement();
+    EXPECT_NE(w->ToString().find("a comment"), std::string::npos);
+}
+
+TEST(XmlWriterTests, NestedElements_InOutput) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteStartElement("child");
+    w->WriteEndElement();
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find("<child"), std::string::npos);
+    EXPECT_NE(out.find("</root>"), std::string::npos);
 }
 
 TEST(XmlWriterTests, Flush_DoesNotThrow) {
-    ConcreteXmlWriter w;
-    EXPECT_NO_THROW(w.Flush());
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    EXPECT_NO_THROW(w->Flush());
 }
 
 TEST(XmlWriterTests, Close_DoesNotThrow) {
-    ConcreteXmlWriter w;
-    EXPECT_NO_THROW(w.Close());
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteEndElement();
+    EXPECT_NO_THROW(w->Close());
 }
 
-TEST(XmlWriterTests, Create_ThrowsNotImplemented) {
-    EXPECT_THROW(XmlWriter::Create("out.xml"), NotImplementedException);
+// ===========================================================================
+// Round-trip: write then read back
+// ===========================================================================
+
+TEST(XmlRoundTripTests, WriteAndReadBack) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("data");
+    w->WriteAttributeString("version", "2");
+    w->WriteElementString("item", "value1");
+    w->WriteEndElement();
+    std::string xml = w->ToString();
+
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(xml));
+    r->Read(); // <data>
+    EXPECT_EQ(r->getNameProperty(), "data");
+    EXPECT_EQ(r->GetAttribute("version"), "2");
+    r->Read(); // <item>
+    EXPECT_EQ(r->getNameProperty(), "item");
+    std::string text = r->ReadElementContentAsString();
+    EXPECT_EQ(text, "value1");
 }
 
 // ===========================================================================

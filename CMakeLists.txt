@@ -14,6 +14,10 @@ file(GLOB_RECURSE SHARP_RUNTIME_SOURCES CONFIGURE_DEPENDS
         "src/*.cpp"
 )
 
+# Vendored tinyxml2 (two-file library, MIT licence)
+add_library(tinyxml2 STATIC vendor/tinyxml2/tinyxml2.cpp)
+target_include_directories(tinyxml2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinyxml2)
+
 add_library(SHARP_RUNTIME STATIC
         ${SHARP_RUNTIME_SOURCES}
 )
@@ -27,7 +31,7 @@ target_include_directories(SHARP_RUNTIME
 # On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
 # which require SDL3 headers and library.  SDL3 is provided by the parent project
 # (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
-target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB)
+target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2)
 
 if(ANDROID AND TARGET SDL3::SDL3)
     target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
