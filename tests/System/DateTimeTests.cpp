@@ -179,14 +179,18 @@ TEST(DateTimeTests, NowMonotonicallyIncreases) {
 // ---------------------------------------------------------------------------
 
 TEST(DateTimeTests, ToStringContainsTicks) {
+    // ToString() now returns ISO-8601 style "YYYY-MM-DD HH:MM:SS"
+    // 123456789 ticks = ~12 seconds from .NET epoch 0001-01-01
     DateTime dt(123456789LL);
     std::string s = dt.ToString();
-    EXPECT_NE(s.find("123456789"), std::string::npos);
+    EXPECT_NE(s.find("0001"), std::string::npos);  // year
+    EXPECT_NE(s.find("00:00:12"), std::string::npos); // ~12 seconds
 }
 
 TEST(DateTimeTests, ToStringZeroTicks) {
+    // DateTime(0) == 0001-01-01 00:00:00
     std::string s = DateTime().ToString();
-    EXPECT_NE(s.find("0"), std::string::npos);
+    EXPECT_EQ(s, "0001-01-01 00:00:00");
 }
 
 // ---------------------------------------------------------------------------

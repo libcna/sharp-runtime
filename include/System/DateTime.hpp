@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Created by robertvokac on 6/7/25.
+// Created by robertvokac on 5/25/25.
 //
 
 #pragma once
@@ -11,92 +11,224 @@
 
 #include "System/Object.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/DayOfWeek.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
     using SharpRuntime::longcs;
+    using SharpRuntime::intcs;
 
     /**
-     * @brief Represents an instant in time, expressed as the number of ticks.
+     * @brief Represents an instant in time, expressed as the number of 100-nanosecond
+     * ticks since the .NET epoch (0001-01-01 00:00:00).
      *
-     * This is a partial C++ counterpart of the .NET System::DateTime structure.
+     * Partial C++ counterpart of .NET System.DateTime.
      *
-     * @note Status: Partial.
-     * @note This implementation currently focuses on tick storage and basic arithmetic.
+     * @note Status: Partial — calendar component properties (Year, Month, Day, …) and
+     *   three-argument constructors were added in session 33. DateTimeKind is not stored.
      */
     class DateTime : public Object {
     private:
         longcs ticks_;
 
+        static constexpr longcs TicksPerMillisecond = 10000LL;
+        static constexpr longcs TicksPerSecond      = 10000000LL;
+        static constexpr longcs TicksPerMinute      = 600000000LL;
+        static constexpr longcs TicksPerHour        = 36000000000LL;
+        static constexpr longcs TicksPerDay         = 864000000000LL;
+        /// Ticks from the .NET epoch (0001-01-01) to the Unix epoch (1970-01-01).
+        static constexpr longcs UnixEpochTicks      = 621355968000000000LL;
+
+        /**
+         * @brief Decomposes ticks_ into a UTC std::tm using the C standard library.
+         *
+         * Uses floor division so that pre-1970 (negative Unix-timestamp) dates are
+         * decomposed correctly.
+         */
+        [[nodiscard]] std::tm toTm() const;
+
+        /**
+         * @brief Converts a calendar date and time to a tick count measured from the
+         * .NET epoch (0001-01-01 00:00:00).
+         *
+         * @param year         Year (1–9999).
+         * @param month        Month (1–12).
+         * @param day          Day of month (1–31, validated against the given month).
+         * @param hour         Hour (0–23). Default 0.
+         * @param minute       Minute (0–59). Default 0.
+         * @param second       Second (0–59). Default 0.
+         * @param millisecond  Millisecond (0–999). Default 0.
+         * @throws std::out_of_range if any component is out of the valid range.
+         */
+        static longcs dateToTicks(int year, int month, int day,
+                                   int hour = 0, int minute = 0,
+                                   int second = 0, int millisecond = 0);
+
     public:
         /**
-         * @brief Initializes a new instance with zero ticks.
+         * @brief Initializes a new instance with zero ticks (0001-01-01 00:00:00).
          */
         DateTime();
 
         /**
          * @brief Initializes a new instance with the specified number of ticks.
          *
-         * @param ticks A date and time expressed in 100-nanosecond ticks.
+         * @param ticks A date and time expressed in 100-nanosecond ticks since
+         *              the .NET epoch (0001-01-01 00:00:00).
          */
         explicit DateTime(longcs ticks);
 
         /**
-         * @brief Gets the number of ticks represented by this instance.
+         * @brief Initializes a new instance with the specified year, month, and day.
          *
-         * @return Tick count.
+         * @param year   Year (1–9999).
+         * @param month  Month (1–12).
+         * @param day    Day of month (1–max for the given month/year).
+         * @throws std::out_of_range if any component is out of range.
+         */
+        DateTime(int year, int month, int day);
+
+        /**
+         * @brief Initializes a new instance with date and time components.
+         *
+         * @param year    Year (1–9999).
+         * @param month   Month (1–12).
+         * @param day     Day of month.
+         * @param hour    Hour (0–23).
+         * @param minute  Minute (0–59).
+         * @param second  Second (0–59).
+         * @throws std::out_of_range if any component is out of range.
+         */
+        DateTime(int year, int month, int day, int hour, int minute, int second);
+
+        /**
+         * @brief Initializes a new instance with date, time, and millisecond components.
+         *
+         * @param year         Year (1–9999).
+         * @param month        Month (1–12).
+         * @param day          Day of month.
+         * @param hour         Hour (0–23).
+         * @param minute       Minute (0–59).
+         * @param second       Second (0–59).
+         * @param millisecond  Millisecond (0–999).
+         * @throws std::out_of_range if any component is out of range.
+         */
+        DateTime(int year, int month, int day,
+                 int hour, int minute, int second, int millisecond);
+
+        /**
+         * @brief Gets the number of 100-nanosecond ticks since the .NET epoch.
+         *
+         * @return Tick count (0 = 0001-01-01 00:00:00).
          */
         [[nodiscard]] longcs getTicksProperty() const;
 
         /**
-         * @brief Adds the specified time span to the current DateTime.
+         * @brief Gets the year component of this instance (1–9999).
+         */
+        [[nodiscard]] int getYearProperty() const;
+
+        /**
+         * @brief Gets the month component of this instance (1–12).
+         */
+        [[nodiscard]] int getMonthProperty() const;
+
+        /**
+         * @brief Gets the day-of-month component of this instance (1–31).
+         */
+        [[nodiscard]] int getDayProperty() const;
+
+        /**
+         * @brief Gets the hour component of this instance (0–23).
+         */
+        [[nodiscard]] int getHourProperty() const;
+
+        /**
+         * @brief Gets the minute component of this instance (0–59).
+         */
+        [[nodiscard]] int getMinuteProperty() const;
+
+        /**
+         * @brief Gets the second component of this instance (0–59).
+         */
+        [[nodiscard]] int getSecondProperty() const;
+
+        /**
+         * @brief Gets the millisecond component of this instance (0–999).
+         */
+        [[nodiscard]] int getMillisecondProperty() const;
+
+        /**
+         * @brief Gets the day of the week represented by this instance.
+         *
+         * @return DayOfWeek enumeration value (Sunday = 0, …, Saturday = 6).
+         */
+        [[nodiscard]] DayOfWeek getDayOfWeekProperty() const;
+
+        /**
+         * @brief Gets the day of the year represented by this instance (1–366).
+         */
+        [[nodiscard]] int getDayOfYearProperty() const;
+
+        /**
+         * @brief Adds the specified time span to this instance.
          *
          * @param value Time span to add.
-         * @return A new DateTime instance.
+         * @return A new DateTime that is the sum of this instance and @p value.
          */
         [[nodiscard]] DateTime Add(const TimeSpan& value) const;
 
         /**
-         * @brief Subtracts the specified time span from the current DateTime.
+         * @brief Subtracts the specified time span from this instance.
          *
          * @param value Time span to subtract.
-         * @return A new DateTime instance.
+         * @return A new DateTime that is this instance minus @p value.
          */
         [[nodiscard]] DateTime Subtract(const TimeSpan& value) const;
 
         /**
-         * @brief Subtracts another DateTime from the current DateTime.
+         * @brief Subtracts another DateTime from this instance.
          *
-         * @param value Another DateTime.
-         * @return The time interval between the two instances.
+         * @param value The DateTime to subtract.
+         * @return A TimeSpan representing the interval between the two values.
          */
         [[nodiscard]] TimeSpan Subtract(const DateTime& value) const;
 
         /**
- * @brief Gets the current local date and time.
- *
- * @return Current local DateTime represented in .NET-compatible ticks.
- *
- * @note Status: PARTIAL
- * @note This currently stores ticks compatible with .NET DateTime.Ticks,
- *       but does not store DateTimeKind.
- */
+         * @brief Gets the current local date and time.
+         *
+         * @return Current local DateTime expressed in .NET-compatible ticks.
+         * @note DateTimeKind is not stored; the value reflects UTC-based system time.
+         */
         [[nodiscard]] static DateTime getNowProperty();
+
+        /**
+         * @brief Gets the current date with the time component set to midnight (00:00:00).
+         *
+         * @return Today's date at 00:00:00.
+         */
+        [[nodiscard]] static DateTime getTodayProperty();
+
+        /**
+         * @brief Gets the time-of-day component of this instance as a TimeSpan.
+         *
+         * @return A TimeSpan representing the time elapsed since midnight.
+         */
         [[nodiscard]] TimeSpan getTimeOfDayProperty() const;
 
         /**
-         * @brief Returns a string representation of the current instance.
+         * @brief Returns an ISO-8601-style string representation: "YYYY-MM-DD HH:MM:SS".
          *
-         * @return String representation.
+         * @return Formatted date/time string.
          */
         [[nodiscard]] std::string ToString() const override;
 
         [[nodiscard]] bool operator==(const DateTime& other) const;
         [[nodiscard]] bool operator!=(const DateTime& other) const;
-        [[nodiscard]] bool operator<(const DateTime& other) const;
+        [[nodiscard]] bool operator<(const DateTime& other)  const;
         [[nodiscard]] bool operator<=(const DateTime& other) const;
-        [[nodiscard]] bool operator>(const DateTime& other) const;
+        [[nodiscard]] bool operator>(const DateTime& other)  const;
         [[nodiscard]] bool operator>=(const DateTime& other) const;
         GetTypeNameHPP()
     };
