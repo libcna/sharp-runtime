@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// GZipStream and DeflateStream Read/Write throw NotImplementedException (awaiting zlib/miniz).
-// ZipArchive constructor throws. CompressionMode and ZipArchiveMode enums are fully implemented.
 #include <gtest/gtest.h>
 #include "System/NotImplementedException.hpp"
 #include "System/IO/Compression/CompressionMode.hpp"
@@ -11,6 +8,9 @@
 #include "System/IO/Compression/DeflateStream.hpp"
 #include "System/IO/Compression/ZipArchive.hpp"
 #include "System/IO/MemoryStream.hpp"
+#include <miniz/miniz.h>
+#include <vector>
+#include <cstdint>
 
 using System::NotImplementedException;
 using System::IO::Compression::CompressionMode;
@@ -159,43 +159,178 @@ TEST(DeflateStreamTests, Close_DoesNotThrow) {
 }
 
 // ===========================================================================
-// ZipArchive
+// ZipArchiveMode enum
 // ===========================================================================
 
-TEST(ZipArchiveTests, StreamConstructor_ThrowsNotImplemented) {
-    MemoryStream ms;
-    Stream* ptr = &ms;
-    EXPECT_THROW({ ZipArchive z(ptr); }, NotImplementedException);
+TEST(ZipArchiveModeTests2, Read_IsZero) {
+    EXPECT_EQ(static_cast<int>(ZipArchiveMode::Read), 0);
 }
 
-TEST(ZipArchiveTests, StringConstructor_ThrowsNotImplemented) {
-    EXPECT_THROW({ ZipArchive z(std::string("archive.zip")); }, NotImplementedException);
+TEST(ZipArchiveModeTests2, Create_IsOne) {
+    EXPECT_EQ(static_cast<int>(ZipArchiveMode::Create), 1);
 }
 
-TEST(ZipArchiveTests, StringConstructor_WithMode_ThrowsNotImplemented) {
-    EXPECT_THROW({ ZipArchive z(std::string("archive.zip"), ZipArchiveMode::Create); }, NotImplementedException);
+TEST(ZipArchiveModeTests2, Update_IsTwo) {
+    EXPECT_EQ(static_cast<int>(ZipArchiveMode::Update), 2);
 }
 
 // ===========================================================================
-// ZipArchiveEntry (all methods stub)
+// Helper: build a test zip in memory using miniz directly
 // ===========================================================================
 
-TEST(ZipArchiveEntryTests, GetName_ThrowsNotImplemented) {
-    ZipArchiveEntry e;
-    EXPECT_THROW((void)e.getNameProperty(), NotImplementedException);
+static std::vector<uint8_t> makeTestZip() {
+    mz_zip_archive zip{};
+    mz_zip_writer_init_heap(&zip, 0, 4096);
+    const char* data1 = "Hello, ZipArchive!";
+    const char* data2 = "Second entry content.";
+    mz_zip_writer_add_mem(&zip, "hello.txt",   data1, strlen(data1), MZ_DEFAULT_COMPRESSION);
+    mz_zip_writer_add_mem(&zip, "dir/two.txt", data2, strlen(data2), MZ_DEFAULT_COMPRESSION);
+    void* buf = nullptr; size_t sz = 0;
+    mz_zip_writer_finalize_heap_archive(&zip, &buf, &sz);
+    mz_zip_writer_end(&zip);
+    std::vector<uint8_t> result(reinterpret_cast<uint8_t*>(buf),
+                                 reinterpret_cast<uint8_t*>(buf) + sz);
+    mz_free(buf);
+    return result;
 }
 
-TEST(ZipArchiveEntryTests, GetFullName_ThrowsNotImplemented) {
+// ===========================================================================
+// ZipArchiveEntry — default-constructed (invalid)
+// ===========================================================================
+
+TEST(ZipArchiveEntryTests, DefaultConstructed_IsInvalid) {
     ZipArchiveEntry e;
-    EXPECT_THROW((void)e.getFullNameProperty(), NotImplementedException);
+    EXPECT_FALSE(e.IsValid());
 }
 
-TEST(ZipArchiveEntryTests, GetLength_ThrowsNotImplemented) {
+TEST(ZipArchiveEntryTests, DefaultConstructed_NameIsEmpty) {
     ZipArchiveEntry e;
-    EXPECT_THROW((void)e.getLengthProperty(), NotImplementedException);
+    EXPECT_EQ(e.getNameProperty(), "");
 }
 
-TEST(ZipArchiveEntryTests, Delete_ThrowsNotImplemented) {
+TEST(ZipArchiveEntryTests, DefaultConstructed_LengthIsZero) {
     ZipArchiveEntry e;
-    EXPECT_THROW(e.Delete(), NotImplementedException);
+    EXPECT_EQ(e.getLengthProperty(), 0LL);
+}
+
+// ===========================================================================
+// ZipArchive — read from stream
+// ===========================================================================
+
+TEST(ZipArchiveTests, OpenFromStream_DoesNotThrow) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    EXPECT_NO_THROW(ZipArchive z(&ms));
+}
+
+TEST(ZipArchiveTests, Entries_Count) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    EXPECT_EQ(z.getEntriesProperty().size(), 2u);
+}
+
+TEST(ZipArchiveTests, Entries_Names) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto entries = z.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 2u);
+    // entries[0] = "hello.txt", entries[1] = "dir/two.txt"
+    EXPECT_EQ(entries[0].getFullNameProperty(), "hello.txt");
+    EXPECT_EQ(entries[1].getFullNameProperty(), "dir/two.txt");
+}
+
+TEST(ZipArchiveTests, Entries_BaseName) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto entries = z.getEntriesProperty();
+    EXPECT_EQ(entries[1].getNameProperty(), "two.txt");
+}
+
+TEST(ZipArchiveTests, Entries_Length) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto entries = z.getEntriesProperty();
+    EXPECT_EQ(entries[0].getLengthProperty(), (long long)strlen("Hello, ZipArchive!"));
+}
+
+TEST(ZipArchiveTests, GetEntry_Found) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto e = z.GetEntry("hello.txt");
+    EXPECT_TRUE(e.IsValid());
+    EXPECT_EQ(e.getNameProperty(), "hello.txt");
+}
+
+TEST(ZipArchiveTests, GetEntry_NotFound_Invalid) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto e = z.GetEntry("nonexistent.txt");
+    EXPECT_FALSE(e.IsValid());
+}
+
+TEST(ZipArchiveTests, Open_ReadsContent) {
+    auto bytes = makeTestZip();
+    MemoryStream ms(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z(&ms);
+    auto e = z.GetEntry("hello.txt");
+    ASSERT_TRUE(e.IsValid());
+    std::unique_ptr<System::IO::Stream> s(e.Open());
+    ASSERT_NE(s, nullptr);
+    std::vector<uint8_t> buf(64);
+    int n = s->Read(buf.data(), 0, static_cast<int>(buf.size()));
+    std::string text(buf.begin(), buf.begin() + n);
+    EXPECT_EQ(text, "Hello, ZipArchive!");
+}
+
+// ===========================================================================
+// ZipArchive — create mode (file-based round-trip)
+// ===========================================================================
+
+TEST(ZipArchiveTests, CreateAndReadBack_RoundTrip) {
+    const char* tmpPath = "/tmp/sharpruntimetest.zip";
+
+    // Create
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Create);
+        auto entry = z.CreateEntry("greeting.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'H','i','!'};
+        s->Write(data, 0, 3);
+        // z is disposed at end of scope → flushes zip file
+    }
+
+    // Read back
+    ZipArchive z2(tmpPath, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "greeting.txt");
+
+    std::unique_ptr<System::IO::Stream> s(entries[0].Open());
+    uint8_t out[8]{};
+    int n = s->Read(out, 0, 8);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(out[0], 'H');
+    EXPECT_EQ(out[1], 'i');
+    EXPECT_EQ(out[2], '!');
+}
+
+TEST(ZipArchiveTests, CreateMultipleEntries) {
+    const char* tmpPath = "/tmp/sharpruntimetest2.zip";
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Create);
+        for (int i = 0; i < 3; ++i) {
+            auto e = z.CreateEntry("file" + std::to_string(i) + ".txt");
+            std::unique_ptr<System::IO::Stream> s(e.Open());
+            uint8_t byte = static_cast<uint8_t>('A' + i);
+            s->Write(&byte, 0, 1);
+        }
+    }
+    ZipArchive z2(tmpPath, ZipArchiveMode::Read);
+    EXPECT_EQ(z2.getEntriesProperty().size(), 3u);
 }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(SHARP_RUNTIME LANGUAGES CXX)
+project(SHARP_RUNTIME LANGUAGES CXX C)
 
 find_package(ZLIB REQUIRED)
 
@@ -18,6 +18,15 @@ file(GLOB_RECURSE SHARP_RUNTIME_SOURCES CONFIGURE_DEPENDS
 add_library(tinyxml2 STATIC vendor/tinyxml2/tinyxml2.cpp)
 target_include_directories(tinyxml2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinyxml2)
 
+# Vendored miniz (multi-file library, MIT/public domain)
+add_library(miniz STATIC
+    vendor/miniz/miniz.c
+    vendor/miniz/miniz_tdef.c
+    vendor/miniz/miniz_tinfl.c
+    vendor/miniz/miniz_zip.c
+)
+target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniz)
+
 add_library(SHARP_RUNTIME STATIC
         ${SHARP_RUNTIME_SOURCES}
 )
@@ -31,7 +40,7 @@ target_include_directories(SHARP_RUNTIME
 # On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
 # which require SDL3 headers and library.  SDL3 is provided by the parent project
 # (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
-target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2)
+target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2 miniz)
 
 if(ANDROID AND TARGET SDL3::SDL3)
     target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
