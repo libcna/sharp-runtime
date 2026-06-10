@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -21,12 +22,19 @@ namespace System::Threading {
      * @note Status: Partial — no thread-pool; uses std::thread.
      */
     class Timer {
-        std::function<void(void*)> callback_;
-        void*                      state_    = nullptr;
-        intcs                      dueTime_  = 0;
-        intcs                      period_   = 0;
-        std::atomic<bool>          running_  = false;
-        std::thread                thread_;
+        // Shared state owned jointly by the Timer and the background thread.
+        // Using shared_ptr ensures the State outlives the Timer object even after
+        // Dispose() detaches the thread — eliminates the dangling-this UB.
+        struct State {
+            std::atomic<bool>          running{false};
+            std::function<void(void*)> callback;
+            void*                      arg     = nullptr;
+            std::atomic<intcs>         dueTime{0};
+            std::atomic<intcs>         period{0};
+        };
+
+        std::shared_ptr<State> state_;
+        std::thread            thread_;
 
     public:
         /**
@@ -36,10 +44,14 @@ namespace System::Threading {
          * @param period     Interval between invocations, in milliseconds. 0 = fire once.
          */
         Timer(std::function<void(void*)> callback, void* state, intcs dueTime, intcs period)
-            : callback_(std::move(callback)), state_(state), dueTime_(dueTime), period_(period)
+            : state_(std::make_shared<State>())
         {
-            running_ = true;
-            thread_ = std::thread([this]() { run(); });
+            state_->callback = std::move(callback);
+            state_->arg      = state;
+            state_->dueTime  = dueTime;
+            state_->period   = period;
+            state_->running  = true;
+            thread_ = std::thread([s = state_]() { run(s); });
         }
 
         ~Timer() { Dispose(); }
@@ -49,22 +61,23 @@ namespace System::Threading {
 
         /** @brief Changes the timer's due time and period. Pass -1 to disable. */
         void Change(intcs dueTime, intcs period) {
-            dueTime_ = dueTime;
-            period_  = period;
+            state_->dueTime = dueTime;
+            state_->period  = period;
         }
 
         void Dispose() {
-            running_ = false;
+            if (state_) state_->running = false;
             if (thread_.joinable()) thread_.detach();
         }
 
     private:
-        void run() {
-            if (dueTime_ > 0) std::this_thread::sleep_for(std::chrono::milliseconds(dueTime_));
-            while (running_) {
-                if (callback_) callback_(state_);
-                if (period_ <= 0) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(period_));
+        static void run(std::shared_ptr<State> s) {
+            if (s->dueTime > 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(s->dueTime.load()));
+            while (s->running) {
+                if (s->callback) s->callback(s->arg);
+                if (s->period <= 0) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(s->period.load()));
             }
         }
     };
