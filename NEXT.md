@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 36*
+*Last updated: 2026-06-11 (branch: develop) — session 37*
 
 ---
 
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2980 tests pass** — `./build/SharpRuntimeTests` → `2980 tests from 443 test suites` ✅
+- **All 2988 tests pass** — `./build/SharpRuntimeTests` → `2988 tests from 443 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
@@ -48,8 +48,7 @@
 |----------|-------|--------|
 | Tested headers | ~404 / 449 | **~90%** ✅ |
 | Untested — pure interfaces (`IXxx`) | 42 | intentionally skipped |
-| Untested — `DefaultValueAttribute` | 1 | Task 47 conflict (name collision) |
-| Untested — `EqualityComparer.hpp` | 1 | Task 49 — dual-definition conflict with Comparer.hpp |
+| Untested — pure interfaces only | 42 | intentionally skipped |
 | Untested — types with real logic | ~0 | ✅ |
 
 ---
@@ -90,8 +89,6 @@
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
 | **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
 | **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic) |
-| **design flaw** | `EqualityComparer<T>` is defined TWICE: pointer-based API in `EqualityComparer.hpp` and value-based API in `Comparer.hpp` — see Task 49 |
-| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` (duplicate class name) — see Task 47 |
 
 ---
 
@@ -188,26 +185,22 @@ All namespaces audited. Added 129 new tests (2851 → 2980). Gaps resolved:
 - Diagnostics: ConditionalAttribute, DebuggableAttribute, DebuggerTypeProxy/Visualizer, CodeAnalysis (12 types)
 - Events: EventArgs, AssemblyLoadEventArgs, ResolveEventArgs, UnhandledExceptionEventArgs, ThreadExceptionEventArgs
 
-### Task 47 — Fix DefaultValueAttribute conflict ← NEXT
+### Task 47 — Fix DefaultValueAttribute conflict ✅ DONE (session 37)
 
-`include/System/ComponentModel/DefaultValueAttribute.hpp` and
-`include/System/ComponentModel/DescriptionAttribute.hpp` define the same class name.
-Fix by renaming or merging.
+Removed the stub `DefaultValueAttribute` struct from `DescriptionAttribute.hpp`.
+`DefaultValueAttribute.hpp` is now the single authoritative definition (backed by
+`std::any`, inherits from `System::Attribute`). Updated 5 tests to use
+`getValueProperty()` / `any_cast`; added 5 more covering `float`, `char`, `long`,
+type-check, and IS-A verification.
 
-### Task 49 — Fix EqualityComparer dual-definition
+### Task 49 — Fix EqualityComparer dual-definition ✅ DONE (session 37)
 
-`include/System/Collections/Generic/EqualityComparer.hpp` defines
-`EqualityComparer<T>` with a pointer-based `Equals(T*, T*)` API and
-`shared_ptr<> Default()`. `Comparer.hpp` defines a SECOND `EqualityComparer<T>`
-with value-based `Equals(T&, T&)` and `const T& Default()`.
-They cannot be included together.
+`EqualityComparer.hpp` rewritten as single canonical definition: value-based
+`Equals(const T&, const T&)`, `const-ref Default()`, and `shared_ptr<> Create()`
+factory. Duplicate removed from `Comparer.hpp` (now just `#include`s the canonical
+file). Added 3 new tests for `Create()` and singleton identity.
 
-Fix options:
-1. Remove the block from `Comparer.hpp` and make `EqualityComparer.hpp` the
-   single authoritative definition (preferred), updating existing tests.
-2. Rename one to avoid the conflict.
-
-### Task 48 — TcpClient / UdpClient (POSIX)
+### Task 48 — TcpClient / UdpClient (POSIX) ← NEXT (if needed)
 
 Lowest priority — not needed for the game engine itself, but needed for any networking feature.
 Only implement if CNA requires it.
@@ -228,8 +221,9 @@ Only implement if CNA requires it.
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — **Task 47** is next: fix DefaultValueAttribute / DescriptionAttribute class name conflict.
-> **Task 49** is next after that: resolve EqualityComparer dual-definition between Comparer.hpp and EqualityComparer.hpp.
+> Read NEXT.md — Tasks 46, 47, 49 are done. The known header conflicts are resolved.
+> All 2988 tests pass. Next work is Task 48 (TcpClient/UdpClient, only if CNA requires it)
+> or any new bugs/gaps discovered during porting.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings, C + CXX)
 > Run full suite: `./build/SharpRuntimeTests` — must show 2851 passing, 0 failing.
