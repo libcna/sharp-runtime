@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-10 (branch: develop) — session 35*
+*Last updated: 2026-06-11 (branch: develop) — session 36*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** all major implementation gaps are filled. The three previously stubbed subsystems (compression, XML, zip) are now working. Remaining work is a namespace-by-namespace quality/completeness audit.
+**Current phase:** Task 46 namespace audit is largely complete. All subsystems are now tested. Remaining work: fix the `EqualityComparer` dual-definition conflict (Task 49), fix the `DefaultValueAttribute` conflict (Task 47), and optionally implement networking (Task 48).
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -30,8 +30,8 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2851 tests pass** — `./build/SharpRuntimeTests` → `2851 tests from 415 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 67 test files in `tests/`
+- **All 2980 tests pass** — `./build/SharpRuntimeTests` → `2980 tests from 443 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
 
@@ -46,9 +46,10 @@
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Tested headers | ~390 / 449 | **~87%** ✅ |
-| Untested — pure interfaces (`IXxx`) | 43 | intentionally skipped |
-| Untested — marker/event types | 27 | intentionally skipped |
+| Tested headers | ~404 / 449 | **~90%** ✅ |
+| Untested — pure interfaces (`IXxx`) | 42 | intentionally skipped |
+| Untested — `DefaultValueAttribute` | 1 | Task 47 conflict (name collision) |
+| Untested — `EqualityComparer.hpp` | 1 | Task 49 — dual-definition conflict with Comparer.hpp |
 | Untested — types with real logic | ~0 | ✅ |
 
 ---
@@ -89,7 +90,8 @@
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
 | **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
 | **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic) |
-| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` (duplicate class name) |
+| **design flaw** | `EqualityComparer<T>` is defined TWICE: pointer-based API in `EqualityComparer.hpp` and value-based API in `Comparer.hpp` — see Task 49 |
+| **excluded** | `DefaultValueAttribute.hpp` conflicts with `DescriptionAttribute.hpp` (duplicate class name) — see Task 47 |
 
 ---
 
@@ -176,29 +178,34 @@ git log --oneline -10
 
 ## 7. Next tasks
 
-### Task 46 — Namespace audit pass ← NEXT
+### Task 46 — Namespace audit pass ✅ DONE (session 36)
 
-Go namespace by namespace, file by file. For each namespace:
-1. List all headers
-2. Check each header compiles when included alone (no missing deps)
-3. Move any header-only bodies > ~100 lines to `.cpp`
-4. Fill any stubs that are needed by CNA
+All namespaces audited. Added 129 new tests (2851 → 2980). Gaps resolved:
+- StringBuilder: added `Insert`, `Remove`, `Replace`, `Append(long)`
+- Globalization: DaylightTime, SortVersion tested; stale Calendar comment fixed
+- Text::Unicode: UnicodeRange/UnicodeRanges tested
+- System attributes: Attribute, AttributeTargets, AttributeUsageAttribute, CLSCompliantAttribute, ObsoleteAttribute, marker attributes
+- Diagnostics: ConditionalAttribute, DebuggableAttribute, DebuggerTypeProxy/Visualizer, CodeAnalysis (12 types)
+- Events: EventArgs, AssemblyLoadEventArgs, ResolveEventArgs, UnhandledExceptionEventArgs, ThreadExceptionEventArgs
 
-**Priority order (most needed by CNA first):**
-
-| Namespace | Priority | Why |
-|-----------|----------|-----|
-| `System::Globalization` | HIGH | `CultureInfo`, `NumberFormatInfo` used by string formatting |
-| `System::Text` | HIGH | `StringBuilder` edge cases, `Encoding` gaps |
-| `System::Collections::Generic` | MEDIUM | check `SortedDictionary`, `LinkedList` completeness |
-| `System::Net` | LOW | `IPAddress`, `HttpStatusCode` (data only, no real networking) |
-| `System::Threading` | LOW | `Thread::Join/IsAlive`, `ThreadPool` stub |
-
-### Task 47 — Fix DefaultValueAttribute conflict
+### Task 47 — Fix DefaultValueAttribute conflict ← NEXT
 
 `include/System/ComponentModel/DefaultValueAttribute.hpp` and
 `include/System/ComponentModel/DescriptionAttribute.hpp` define the same class name.
 Fix by renaming or merging.
+
+### Task 49 — Fix EqualityComparer dual-definition
+
+`include/System/Collections/Generic/EqualityComparer.hpp` defines
+`EqualityComparer<T>` with a pointer-based `Equals(T*, T*)` API and
+`shared_ptr<> Default()`. `Comparer.hpp` defines a SECOND `EqualityComparer<T>`
+with value-based `Equals(T&, T&)` and `const T& Default()`.
+They cannot be included together.
+
+Fix options:
+1. Remove the block from `Comparer.hpp` and make `EqualityComparer.hpp` the
+   single authoritative definition (preferred), updating existing tests.
+2. Rename one to avoid the conflict.
 
 ### Task 48 — TcpClient / UdpClient (POSIX)
 
@@ -221,8 +228,8 @@ Only implement if CNA requires it.
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — **Task 46** is next: namespace-by-namespace audit starting with
-> `System::Globalization` and `System::Text`.
+> Read NEXT.md — **Task 47** is next: fix DefaultValueAttribute / DescriptionAttribute class name conflict.
+> **Task 49** is next after that: resolve EqualityComparer dual-definition between Comparer.hpp and EqualityComparer.hpp.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings, C + CXX)
 > Run full suite: `./build/SharpRuntimeTests` — must show 2851 passing, 0 failing.
