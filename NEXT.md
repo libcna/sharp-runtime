@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 38*
+*Last updated: 2026-06-11 (branch: develop) — session 38 / Task 50*
 
 ---
 
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2995 tests pass** — `./build/SharpRuntimeTests` → `2995 tests from 444 test suites` ✅
+- **All 2999 tests pass** — `./build/SharpRuntimeTests` → `2999 tests from 444 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
@@ -73,7 +73,7 @@
 | `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX SOCK_DGRAM, send/recvfrom |
 | `System::Net::Sockets::NetworkStream` | ✅ DONE | wraps socket fd as `System::IO::Stream` |
 | `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no threadpool |
-| `System::Threading::Thread` | ⚠️ PARTIAL | no `Join()` / `IsAlive` |
+| `System::Threading::Thread` | ✅ DONE | `Join()`, `IsAlive`, `Start()`, `ManagedThreadId` |
 | `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones only |
 | `System::AppDomain/AppContext/GC` | ⚠️ STUB | minimal stubs only |
 
@@ -83,7 +83,7 @@
 
 | Status | Issue |
 |--------|-------|
-| **incomplete** | `Thread::CurrentThread()` — returns proxy, no `Join()` / `IsAlive` |
+| **by design** | `Thread::Start()` — no-op; thread starts eagerly in constructor (documented) |
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
 | **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
@@ -182,18 +182,18 @@ git log --oneline -10
 | 47 | 37 | Fix `DefaultValueAttribute` duplicate in `DescriptionAttribute.hpp` | +5 |
 | 49 | 37 | Fix `EqualityComparer` dual-definition; canonical `.hpp` + `Comparer.hpp` includes it | +3 |
 | 48 | 38 | Implement `TcpClient/TcpListener/UdpClient/NetworkStream` via POSIX sockets | 2988 → 2995 |
+| 50 | 38 | `Thread::Start()` (no-op, .NET compat) + `getManagedThreadIdProperty()` instance | 2995 → 2999 |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-### Task 50 — `Thread::Join()` / `IsAlive` (when CNA needs it)
+### Task 50 — `Thread::Start()` / `getManagedThreadIdProperty()` ✅ DONE (session 38)
 
-`System::Threading::Thread` wraps `std::thread` but is missing `Join()` and `IsAlive`.
-- Add `std::thread t_` member (or wrap existing handle)
-- `Join()` → `t_.join()`
-- `IsAlive` → `t_.joinable()`
-- Update `Thread::CurrentThread()` to return a meaningful proxy
+`Join()` and `IsAlive` were already implemented. Added:
+- `Start()` — no-op for .NET API compatibility (thread starts eagerly in constructor)
+- `getManagedThreadIdProperty()` — instance method, unique incrementing ID per Thread
+- `inline static std::atomic<intcs> nextManagedId_` — counter in header
 
 ### Task 51 — `XxHash32` / `XxHash64` → move to `.cpp` (optional cleanup)
 
@@ -227,9 +227,10 @@ for asset path resolution. `GC` can stay a no-op stub indefinitely.
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46, 47, 48, 49 are all done. All 2995 tests pass. Zero errors, zero warnings.
+> Read NEXT.md — Tasks 46, 47, 48, 49, 50 are all done. All 2999 tests pass. Zero errors, zero warnings.
 > Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is implemented via POSIX sockets.
-> Remaining gaps: `Thread::Join/IsAlive`, `TimeZoneInfo`, `AppDomain/GC` — implement only when CNA needs them.
+> Thread::Start() and ManagedThreadId are implemented.
+> Remaining gaps: `TimeZoneInfo`, `AppDomain/GC` — implement only when CNA needs them.
 >
 > Build: `cmake --build build --parallel 4`
 > Run full suite: `./build/SharpRuntimeTests` — must show 2995 passing, 0 failing.
