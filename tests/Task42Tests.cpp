@@ -505,6 +505,28 @@ TEST(EqualityComparerTests, Default_GetHashCode_Consistent) {
     EXPECT_EQ(eq.GetHashCode(7), eq.GetHashCode(7));
 }
 
+TEST(EqualityComparerTests, Create_CustomEquals) {
+    using EC = System::Collections::Generic::EqualityComparer<int>;
+    auto custom = EC::Create([](const int& a, const int& b) { return (a % 2) == (b % 2); });
+    EXPECT_TRUE(custom->Equals(2, 4));  // both even
+    EXPECT_FALSE(custom->Equals(1, 2)); // odd vs even
+}
+
+TEST(EqualityComparerTests, Create_CustomHashCode) {
+    using EC = System::Collections::Generic::EqualityComparer<int>;
+    auto custom = EC::Create(
+        [](const int& a, const int& b) { return a == b; },
+        [](const int& v) { return static_cast<size_t>(v * 31); });
+    EXPECT_EQ(custom->GetHashCode(5), static_cast<size_t>(155));
+}
+
+TEST(EqualityComparerTests, Default_ReturnsSameInstanceEveryCall) {
+    using EC = System::Collections::Generic::EqualityComparer<int>;
+    const EC& a = EC::Default();
+    const EC& b = EC::Default();
+    EXPECT_EQ(&a, &b);
+}
+
 // ===========================================================================
 // IO::Stream — abstract base (concrete stub)
 // ===========================================================================
