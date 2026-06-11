@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** Task 46 namespace audit is largely complete. All subsystems are now tested. Remaining work: fix the `EqualityComparer` dual-definition conflict (Task 49), fix the `DefaultValueAttribute` conflict (Task 47), and optionally implement networking (Task 48).
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). Networking done. Remaining gaps are low-priority stubs (`Thread::Join`, `TimeZoneInfo`, `AppDomain/GC`) that can be addressed when CNA actually needs them.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -47,7 +47,7 @@
 | Category | Count | Status |
 |----------|-------|--------|
 | Tested headers | ~408 / 449 | **~91%** ✅ |
-| Untested — pure interfaces (`IXxx`) | 42 | intentionally skipped |
+| Untested — pure interfaces (`IXxx`) | ~42 | intentionally skipped |
 | Untested — types with real logic | ~0 | ✅ |
 
 ---
@@ -56,24 +56,26 @@
 
 | Subsystem | Status | Notes |
 |-----------|--------|-------|
-| `System::IO::Compression::GZipStream` | ✅ DONE | zlib, PIMPL, 64KB buffers, Z_FINISH |
+| `System::IO::Compression::GZipStream` | ✅ DONE | zlib, PIMPL, 64KB buffers |
 | `System::IO::Compression::DeflateStream` | ✅ DONE | raw DEFLATE (-MAX_WBITS), XNB-compatible |
 | `System::IO::Compression::ZipArchive` | ✅ DONE | miniz, Read+Create mode, PIMPL |
 | `System::Xml::XmlReader` | ✅ DONE | tinyxml2 DOM cursor, event list |
 | `System::Xml::XmlWriter` | ✅ DONE | tinyxml2 DOM builder + XMLPrinter |
-| `System::DateTime` | ✅ DONE | Year/Month/Day/etc. properties, Add*, Today, ISO-8601 ToString |
-| `System::Decimal` | ✅ DONE | full arithmetic, moved to .cpp |
-| `System::Uri` | ✅ DONE | full parsing, moved to .cpp |
+| `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
+| `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
+| `System::Text::StringBuilder` | ✅ DONE | Insert, Remove, Replace, Append(long) |
+| `System::DateTime` | ✅ DONE | Year/Month/Day/etc., Add*, Today, ISO-8601 ToString |
+| `System::Decimal` | ✅ DONE | full arithmetic |
+| `System::Uri` | ✅ DONE | full parsing |
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
-| `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
-| `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
-| `System::Net::Sockets::TcpClient/UdpClient` | ✅ DONE | POSIX sockets (Linux/macOS) |
-| `System::Xml::XmlReader/XmlWriter (SAX)` | ✅ DONE | DOM-cursor, not true SAX |
+| `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX sockets, port-0 auto-assign |
+| `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX SOCK_DGRAM, send/recvfrom |
+| `System::Net::Sockets::NetworkStream` | ✅ DONE | wraps socket fd as `System::IO::Stream` |
 | `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no threadpool |
 | `System::Threading::Thread` | ⚠️ PARTIAL | no `Join()` / `IsAlive` |
+| `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones only |
 | `System::AppDomain/AppContext/GC` | ⚠️ STUB | minimal stubs only |
-| `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones |
 
 ---
 
@@ -81,13 +83,12 @@
 
 | Status | Issue |
 |--------|-------|
-| **confirmed** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
-| **resolved** | `TcpClient`, `UdpClient` — now implemented via POSIX sockets (Task 48) |
 | **incomplete** | `Thread::CurrentThread()` — returns proxy, no `Join()` / `IsAlive` |
-| **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
+| **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
 | **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
-| **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic) |
+| **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
+| **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic, harmless) |
 
 ---
 
@@ -96,16 +97,16 @@
 ### Module layout
 ```
 include/
-  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs
+  SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs (intcs, bytecs, …)
   SharpRuntime/Prop.hpp                 ← DDATA/DGETTER/IDATA/IGETTER macros
-  System/                               ← exceptions, Math, Convert, DateTime, Decimal, Uri, ...
+  System/                               ← exceptions, Math, Convert, DateTime, Decimal, Uri, …
   System/Collections/                   ← Generic/, Concurrent/, Immutable/, ObjectModel/, Specialized/
   System/IO/                            ← Stream, File, BinaryReader/Writer, Compression/, Hashing/
   System/Text/                          ← StringBuilder, Encoding, Rune, Json/, Encodings/Web/
-  System/Threading/                     ← Thread, Monitor, Mutex, Timer, ..., Tasks/
+  System/Threading/                     ← Thread, Monitor, Mutex, Timer, …, Tasks/
   System/Numerics/                      ← BigInteger, Complex, BFloat16, BitOperations, MathF
   System/Diagnostics/                   ← Debug, Trace, Stopwatch, CodeAnalysis/
-  System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ISOWeek, ...
+  System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ISOWeek, …
   System/Runtime/                       ← CompilerServices/, InteropServices/, Versioning/
   System/Net/                           ← IPAddress, IPEndPoint, HttpStatusCode, Sockets/
   System/Xml/                           ← XmlReader, XmlWriter, Linq/
@@ -113,13 +114,14 @@ include/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
 src/                                    ← .cpp for complex types
-  System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, ...
+  System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, …
   System/Numerics/BigInteger.cpp
   System/IO/Compression/GZipStream.cpp, DeflateStream.cpp, ZipArchive.cpp
+  System/Net/Sockets/TcpClient.cpp, UdpClient.cpp, NetworkStream.cpp
   System/Xml/XmlReader.cpp, XmlWriter.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 67 GoogleTest files, 2851 tests
+tests/                                  ← 74 GoogleTest files, 2995 tests
 ```
 
 ### Invariants that must not be broken
@@ -144,7 +146,7 @@ cmake --build build --parallel 4
 ./build/SharpRuntimeTests
 
 # Run specific suite
-./build/SharpRuntimeTests --gtest_filter="ZipArchive*"
+./build/SharpRuntimeTests --gtest_filter="TcpClient*"
 
 # Errors/warnings only
 cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
@@ -172,45 +174,46 @@ git log --oneline -10
 
 ---
 
-## 7. Next tasks
+## 7. Completed tasks (changelog)
 
-### Task 46 — Namespace audit pass ✅ DONE (session 36)
-
-All namespaces audited. Added 129 new tests (2851 → 2980). Gaps resolved:
-- StringBuilder: added `Insert`, `Remove`, `Replace`, `Append(long)`
-- Globalization: DaylightTime, SortVersion tested; stale Calendar comment fixed
-- Text::Unicode: UnicodeRange/UnicodeRanges tested
-- System attributes: Attribute, AttributeTargets, AttributeUsageAttribute, CLSCompliantAttribute, ObsoleteAttribute, marker attributes
-- Diagnostics: ConditionalAttribute, DebuggableAttribute, DebuggerTypeProxy/Visualizer, CodeAnalysis (12 types)
-- Events: EventArgs, AssemblyLoadEventArgs, ResolveEventArgs, UnhandledExceptionEventArgs, ThreadExceptionEventArgs
-
-### Task 47 — Fix DefaultValueAttribute conflict ✅ DONE (session 37)
-
-Removed the stub `DefaultValueAttribute` struct from `DescriptionAttribute.hpp`.
-`DefaultValueAttribute.hpp` is now the single authoritative definition (backed by
-`std::any`, inherits from `System::Attribute`). Updated 5 tests to use
-`getValueProperty()` / `any_cast`; added 5 more covering `float`, `char`, `long`,
-type-check, and IS-A verification.
-
-### Task 49 — Fix EqualityComparer dual-definition ✅ DONE (session 37)
-
-`EqualityComparer.hpp` rewritten as single canonical definition: value-based
-`Equals(const T&, const T&)`, `const-ref Default()`, and `shared_ptr<> Create()`
-factory. Duplicate removed from `Comparer.hpp` (now just `#include`s the canonical
-file). Added 3 new tests for `Create()` and singleton identity.
-
-### Task 48 — TcpClient / UdpClient (POSIX) ✅ DONE (session 38)
-
-Implemented POSIX socket wrappers (+7 tests, 2988 → 2995):
-- `NetworkStream` (new): wraps a socket fd as `System::IO::Stream`; `recv()`/`send()`/`close()`
-- `TcpClient`: `Connect(host, port)` via `getaddrinfo`+`connect()`, `Connect(IPEndPoint)` via `sockaddr_in`+`connect()`, `GetStream()` via `dup()`, `Available()` via `ioctl(FIONREAD)`
-- `TcpListener`: `Start()` via `bind()`+`listen()`, `Stop()`, `AcceptTcpClient()` via `accept()`; port-0 auto-assign supported
-- `UdpClient`: `socket(SOCK_DGRAM)` in all constructors; `Connect()` via POSIX `connect()`; `Send()` via `send()`; `Receive()` via `recvfrom()`
-- Tests: DNS failure, connection refused, TcpListener start/stop, UDP connect, NetworkStream read/write round-trip via `socketpair`
+| Task | Session | Description | Tests Δ |
+|------|---------|-------------|---------|
+| 46 | 36 | Namespace audit — Globalization, Text::Unicode, attributes, Diagnostics, events | 2851 → 2980 |
+| 47 | 37 | Fix `DefaultValueAttribute` duplicate in `DescriptionAttribute.hpp` | +5 |
+| 49 | 37 | Fix `EqualityComparer` dual-definition; canonical `.hpp` + `Comparer.hpp` includes it | +3 |
+| 48 | 38 | Implement `TcpClient/TcpListener/UdpClient/NetworkStream` via POSIX sockets | 2988 → 2995 |
 
 ---
 
-## 8. Constraints / do not do
+## 8. Next tasks (priority order)
+
+### Task 50 — `Thread::Join()` / `IsAlive` (when CNA needs it)
+
+`System::Threading::Thread` wraps `std::thread` but is missing `Join()` and `IsAlive`.
+- Add `std::thread t_` member (or wrap existing handle)
+- `Join()` → `t_.join()`
+- `IsAlive` → `t_.joinable()`
+- Update `Thread::CurrentThread()` to return a meaningful proxy
+
+### Task 51 — `XxHash32` / `XxHash64` → move to `.cpp` (optional cleanup)
+
+Both are non-template concrete classes with algorithm bodies currently in headers.
+Low priority — no build issue, just cosmetic hygiene.
+
+### Task 52 — `TimeZoneInfo` expansion (when CNA needs it)
+
+Currently only UTC, Local, and a few hardcoded zones are supported.
+Full implementation would require reading `/etc/localtime` or the IANA tz database.
+Only needed if game code does timezone-aware date arithmetic.
+
+### Task 53 — `AppDomain` / `AppContext` / `GC` (when CNA needs it)
+
+These are stubs. The game engine likely needs `AppDomain.CurrentDomain.BaseDirectory`
+for asset path resolution. `GC` can stay a no-op stub indefinitely.
+
+---
+
+## 9. Constraints / do not do
 
 - **No merge to master or tags** without explicit per-action user approval; push only to `develop`
 - **No broad header refactor** — naming conventions touch 449 files, would break CNA
@@ -220,15 +223,15 @@ Implemented POSIX socket wrappers (+7 tests, 2988 → 2995):
 
 ---
 
-## 9. Resume prompt
+## 10. Resume prompt
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46, 47, 48, 49 are all done. All known header conflicts are resolved.
-> All 2995 tests pass. Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is now
-> implemented via POSIX sockets. Next work is any new bugs/gaps discovered during porting.
+> Read NEXT.md — Tasks 46, 47, 48, 49 are all done. All 2995 tests pass. Zero errors, zero warnings.
+> Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is implemented via POSIX sockets.
+> Remaining gaps: `Thread::Join/IsAlive`, `TimeZoneInfo`, `AppDomain/GC` — implement only when CNA needs them.
 >
-> Build: `cmake --build build --parallel 4` (zero errors, zero warnings, C + CXX)
-> Run full suite: `./build/SharpRuntimeTests` — must show 2851 passing, 0 failing.
+> Build: `cmake --build build --parallel 4`
+> Run full suite: `./build/SharpRuntimeTests` — must show 2995 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
