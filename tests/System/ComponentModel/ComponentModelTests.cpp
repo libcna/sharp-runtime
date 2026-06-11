@@ -2,10 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Note: DefaultValueAttribute.hpp is excluded — it redefines DefaultValueAttribute already
-// present in DescriptionAttribute.hpp, causing a redefinition error in the same TU.
 #include <gtest/gtest.h>
+#include <any>
 #include "System/ComponentModel/Attribute.hpp"
+#include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
 #include "System/ComponentModel/CategoryAttribute.hpp"
 #include "System/ComponentModel/INotifyPropertyChanged.hpp"
@@ -51,32 +51,59 @@ TEST(DescriptionAttributeTests, EmptyDescription) {
 }
 
 // ===========================================================================
-// DefaultValueAttribute (from DescriptionAttribute.hpp)
+// DefaultValueAttribute
 // ===========================================================================
 
 TEST(DefaultValueAttributeTests, Constructor_String) {
     DefaultValueAttribute attr(std::string("default"));
-    EXPECT_EQ(attr.Value, "default");
+    EXPECT_EQ(std::any_cast<std::string>(attr.getValueProperty()), "default");
 }
 
 TEST(DefaultValueAttributeTests, Constructor_Int) {
     DefaultValueAttribute attr(42);
-    EXPECT_EQ(attr.Value, "42");
+    EXPECT_EQ(std::any_cast<int>(attr.getValueProperty()), 42);
 }
 
 TEST(DefaultValueAttributeTests, Constructor_Double) {
     DefaultValueAttribute attr(3.14);
-    EXPECT_FALSE(attr.Value.empty());
+    EXPECT_DOUBLE_EQ(std::any_cast<double>(attr.getValueProperty()), 3.14);
+}
+
+TEST(DefaultValueAttributeTests, Constructor_Float) {
+    DefaultValueAttribute attr(1.5f);
+    EXPECT_FLOAT_EQ(std::any_cast<float>(attr.getValueProperty()), 1.5f);
 }
 
 TEST(DefaultValueAttributeTests, Constructor_BoolTrue) {
     DefaultValueAttribute attr(true);
-    EXPECT_EQ(attr.Value, "true");
+    EXPECT_TRUE(std::any_cast<bool>(attr.getValueProperty()));
 }
 
 TEST(DefaultValueAttributeTests, Constructor_BoolFalse) {
     DefaultValueAttribute attr(false);
-    EXPECT_EQ(attr.Value, "false");
+    EXPECT_FALSE(std::any_cast<bool>(attr.getValueProperty()));
+}
+
+TEST(DefaultValueAttributeTests, Constructor_Char) {
+    DefaultValueAttribute attr('X');
+    EXPECT_EQ(std::any_cast<char>(attr.getValueProperty()), 'X');
+}
+
+TEST(DefaultValueAttributeTests, Constructor_Long) {
+    DefaultValueAttribute attr(100L);
+    EXPECT_EQ(std::any_cast<long>(attr.getValueProperty()), 100L);
+}
+
+TEST(DefaultValueAttributeTests, ValueHasType_AfterStringCtor) {
+    DefaultValueAttribute attr(std::string("test"));
+    EXPECT_EQ(attr.getValueProperty().type(), typeid(std::string));
+}
+
+TEST(DefaultValueAttributeTests, IsA_SystemAttribute) {
+    DefaultValueAttribute attr(0);
+    System::Attribute& base = attr;
+    (void)base;
+    SUCCEED();
 }
 
 // ===========================================================================

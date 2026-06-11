@@ -18,19 +18,5 @@ namespace System::ComponentModel {
         explicit DescriptionAttribute(const std::string& description) : Description(description) {}
     };
 
-    /**
-     * @brief Specifies the default value for a property.
-     *
-     * Metadata-only stub. Partial C++ counterpart of .NET System.ComponentModel.DefaultValueAttribute.
-     *
-     * @note Status: Stub — stores value as string only; no reflection integration.
-     */
-    struct DefaultValueAttribute {
-        std::string Value;
-        explicit DefaultValueAttribute(const std::string& value) : Value(value) {}
-        explicit DefaultValueAttribute(int value)    : Value(std::to_string(value)) {}
-        explicit DefaultValueAttribute(double value) : Value(std::to_string(value)) {}
-        explicit DefaultValueAttribute(bool value)   : Value(value ? "true" : "false") {}
-    };
 
 } // namespace System::ComponentModel
