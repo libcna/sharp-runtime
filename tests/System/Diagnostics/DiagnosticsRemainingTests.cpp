@@ -4,7 +4,8 @@
 //
 // Tests for remaining Diagnostics types: DebuggerDisplayAttribute,
 // DebuggerBrowsableAttribute, StackFrame, StackTrace, UnreachableException,
-// and the marker-only debugger attributes.
+// the marker-only debugger attributes, ConditionalAttribute,
+// DebuggableAttribute, DebuggerTypeProxyAttribute, DebuggerVisualizerAttribute.
 #include <gtest/gtest.h>
 #include <string>
 #include "System/Diagnostics/DebuggerDisplayAttribute.hpp"
@@ -16,6 +17,12 @@
 #include "System/Diagnostics/DebuggerStepThroughAttribute.hpp"
 #include "System/Diagnostics/DebuggerNonUserCodeAttribute.hpp"
 #include "System/Diagnostics/DebuggerStepperBoundaryAttribute.hpp"
+#include "System/Diagnostics/ConditionalAttribute.hpp"
+#include "System/Diagnostics/DebuggableAttribute.hpp"
+#include "System/Diagnostics/DebuggerTypeProxyAttribute.hpp"
+#include "System/Diagnostics/DebuggerVisualizerAttribute.hpp"
+#include "System/Diagnostics/StackTraceHiddenAttribute.hpp"
+#include "System/Diagnostics/DebuggerDisableUserUnhandledExceptionsAttribute.hpp"
 
 using System::Diagnostics::DebuggerDisplayAttribute;
 using System::Diagnostics::DebuggerBrowsableAttribute;
@@ -202,4 +209,99 @@ TEST(DebuggerMarkerAttributesTests, DebuggerStepThroughAttribute_DefaultCtor) {
 
 TEST(DebuggerMarkerAttributesTests, DebuggerNonUserCodeAttribute_DefaultCtor) {
     EXPECT_NO_THROW(DebuggerNonUserCodeAttribute{});
+}
+
+TEST(DebuggerMarkerAttributesTests, StackTraceHiddenAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(System::Diagnostics::StackTraceHiddenAttribute{});
+}
+
+TEST(DebuggerMarkerAttributesTests, DebuggerDisableUserUnhandledExceptionsAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(System::Diagnostics::DebuggerDisableUserUnhandledExceptionsAttribute{});
+}
+
+// ===========================================================================
+// ConditionalAttribute
+// ===========================================================================
+
+TEST(ConditionalAttributeTests, ConditionString_Stored) {
+    System::Diagnostics::ConditionalAttribute attr("DEBUG");
+    EXPECT_EQ(attr.getConditionStringProperty(), "DEBUG");
+}
+
+TEST(ConditionalAttributeTests, ConditionString_EmptyAllowed) {
+    System::Diagnostics::ConditionalAttribute attr("");
+    EXPECT_TRUE(attr.getConditionStringProperty().empty());
+}
+
+// ===========================================================================
+// DebuggableAttribute
+// ===========================================================================
+
+TEST(DebuggableAttributeTests, BoolCtor_TrackingEnabled) {
+    System::Diagnostics::DebuggableAttribute attr(true, false);
+    EXPECT_TRUE(attr.getIsJITTrackingEnabledProperty());
+}
+
+TEST(DebuggableAttributeTests, BoolCtor_OptimizerDisabled) {
+    System::Diagnostics::DebuggableAttribute attr(false, true);
+    EXPECT_TRUE(attr.getIsJITOptimizerDisabledProperty());
+}
+
+TEST(DebuggableAttributeTests, BoolCtor_BothFalse_ModeIsNone) {
+    System::Diagnostics::DebuggableAttribute attr(false, false);
+    EXPECT_EQ(attr.getDebuggingFlagsProperty(),
+              System::Diagnostics::DebuggableAttribute::DebuggingModes::None);
+}
+
+TEST(DebuggableAttributeTests, ModeCtor_StoresMode) {
+    using DM = System::Diagnostics::DebuggableAttribute::DebuggingModes;
+    System::Diagnostics::DebuggableAttribute attr(DM::DisableOptimizations);
+    EXPECT_EQ(attr.getDebuggingFlagsProperty(), DM::DisableOptimizations);
+}
+
+// ===========================================================================
+// DebuggerTypeProxyAttribute
+// ===========================================================================
+
+TEST(DebuggerTypeProxyAttributeTests, Constructor_StoresProxyTypeName) {
+    System::Diagnostics::DebuggerTypeProxyAttribute attr("MyProxy");
+    EXPECT_EQ(attr.getProxyTypeNameProperty(), "MyProxy");
+}
+
+TEST(DebuggerTypeProxyAttributeTests, Target_DefaultEmpty) {
+    System::Diagnostics::DebuggerTypeProxyAttribute attr("P");
+    EXPECT_TRUE(attr.getTargetProperty().empty());
+}
+
+TEST(DebuggerTypeProxyAttributeTests, SetTarget_Stored) {
+    System::Diagnostics::DebuggerTypeProxyAttribute attr("P");
+    attr.setTargetProperty("T");
+    EXPECT_EQ(attr.getTargetProperty(), "T");
+}
+
+// ===========================================================================
+// DebuggerVisualizerAttribute
+// ===========================================================================
+
+TEST(DebuggerVisualizerAttributeTests, SingleArgCtor_StoresVisualizerName) {
+    System::Diagnostics::DebuggerVisualizerAttribute attr("MyViz");
+    EXPECT_EQ(attr.getVisualizerTypeNameProperty(), "MyViz");
+    EXPECT_TRUE(attr.getVisualizerObjectSourceTypeNameProperty().empty());
+}
+
+TEST(DebuggerVisualizerAttributeTests, TwoArgCtor_StoresSourceTypeName) {
+    System::Diagnostics::DebuggerVisualizerAttribute attr("Viz", "Source");
+    EXPECT_EQ(attr.getVisualizerObjectSourceTypeNameProperty(), "Source");
+}
+
+TEST(DebuggerVisualizerAttributeTests, SetDescription_Stored) {
+    System::Diagnostics::DebuggerVisualizerAttribute attr("V");
+    attr.setDescriptionProperty("My description");
+    EXPECT_EQ(attr.getDescriptionProperty(), "My description");
+}
+
+TEST(DebuggerVisualizerAttributeTests, SetTarget_Stored) {
+    System::Diagnostics::DebuggerVisualizerAttribute attr("V");
+    attr.setTargetProperty("T");
+    EXPECT_EQ(attr.getTargetProperty(), "T");
 }
