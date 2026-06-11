@@ -3,13 +3,18 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
 // Tests for event-related types: EventArgs, AssemblyLoadEventArgs,
-// ResolveEventArgs, UnhandledExceptionEventArgs.
+// ResolveEventArgs, UnhandledExceptionEventArgs, ThreadExceptionEventArgs,
+// and event handler type aliases.
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include "System/EventArgs.hpp"
 #include "System/AssemblyLoadEventArgs.hpp"
 #include "System/ResolveEventArgs.hpp"
 #include "System/UnhandledExceptionEventArgs.hpp"
+#include "System/UnhandledExceptionEventHandler.hpp"
+#include "System/ResolveEventHandler.hpp"
+#include "System/AsyncCallback.hpp"
+#include "System/Threading/ThreadExceptionEventArgs.hpp"
 
 using System::EventArgs;
 using System::AssemblyLoadEventArgs;
@@ -86,4 +91,49 @@ TEST(UnhandledExceptionEventArgsTests, ExceptionObject_Stored) {
 TEST(UnhandledExceptionEventArgsTests, NullException_Stored) {
     UnhandledExceptionEventArgs args(nullptr, false);
     EXPECT_EQ(args.getExceptionObjectProperty(), nullptr);
+}
+
+// ===========================================================================
+// ThreadExceptionEventArgs
+// ===========================================================================
+
+TEST(ThreadExceptionEventArgsTests, Constructor_StoresException) {
+    auto ex = std::make_exception_ptr(std::runtime_error("thread error"));
+    System::Threading::ThreadExceptionEventArgs args(ex);
+    EXPECT_NE(args.getExceptionProperty(), nullptr);
+}
+
+TEST(ThreadExceptionEventArgsTests, NullException_Stored) {
+    System::Threading::ThreadExceptionEventArgs args(nullptr);
+    EXPECT_EQ(args.getExceptionProperty(), nullptr);
+}
+
+TEST(ThreadExceptionEventArgsTests, IsA_EventArgs) {
+    auto ex = std::make_exception_ptr(std::runtime_error("err"));
+    System::Threading::ThreadExceptionEventArgs args(ex);
+    System::EventArgs& base = args;
+    (void)base;
+    SUCCEED();
+}
+
+// ===========================================================================
+// Event handler type aliases (compile-time check)
+// ===========================================================================
+
+TEST(EventHandlerTypeTests, UnhandledExceptionEventHandler_Callable) {
+    bool called = false;
+    System::UnhandledExceptionEventHandler handler = [&](void*, System::UnhandledExceptionEventArgs&) {
+        called = true;
+    };
+    System::UnhandledExceptionEventArgs args(nullptr, false);
+    handler(nullptr, args);
+    EXPECT_TRUE(called);
+}
+
+TEST(EventHandlerTypeTests, ResolveEventHandler_Callable) {
+    System::ResolveEventHandler handler = [](void*, System::ResolveEventArgs& a) -> std::string {
+        return a.getNameProperty();
+    };
+    System::ResolveEventArgs args("MyAssembly");
+    EXPECT_EQ(handler(nullptr, args), "MyAssembly");
 }

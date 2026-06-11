@@ -5,6 +5,7 @@
 // Note: DefaultValueAttribute.hpp is excluded — it redefines DefaultValueAttribute already
 // present in DescriptionAttribute.hpp, causing a redefinition error in the same TU.
 #include <gtest/gtest.h>
+#include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
 #include "System/ComponentModel/CategoryAttribute.hpp"
 #include "System/ComponentModel/INotifyPropertyChanged.hpp"
@@ -26,6 +27,14 @@ using System::ComponentModel::INotifyPropertyChanged;
 using System::ComponentModel::INotifyPropertyChanging;
 using System::ComponentModel::PropertyChangedEventArgs;
 using System::ComponentModel::PropertyChangingEventArgs;
+
+// ===========================================================================
+// ComponentModel::Attribute (base stub)
+// ===========================================================================
+
+TEST(ComponentModelAttributeTests, DefaultCtor_NoThrow) {
+    EXPECT_NO_THROW(System::ComponentModel::Attribute{});
+}
 
 // ===========================================================================
 // DescriptionAttribute
