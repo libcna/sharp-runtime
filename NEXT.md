@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 38 / Task 51*
+*Last updated: 2026-06-11 (branch: develop) — session 38*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). Networking done. Remaining gaps are low-priority stubs (`Thread::Join`, `TimeZoneInfo`, `AppDomain/GC`) that can be addressed when CNA actually needs them.
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Remaining gaps are low-priority stubs (`TimeZoneInfo`, `AppDomain/GC`) — implement only when CNA actually needs them.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -59,6 +59,7 @@
 | `System::IO::Compression::GZipStream` | ✅ DONE | zlib, PIMPL, 64KB buffers |
 | `System::IO::Compression::DeflateStream` | ✅ DONE | raw DEFLATE (-MAX_WBITS), XNB-compatible |
 | `System::IO::Compression::ZipArchive` | ✅ DONE | miniz, Read+Create mode, PIMPL |
+| `System::IO::Hashing::XxHash32/XxHash64` | ✅ DONE | hpp→cpp split done (Task 51) |
 | `System::Xml::XmlReader` | ✅ DONE | tinyxml2 DOM cursor, event list |
 | `System::Xml::XmlWriter` | ✅ DONE | tinyxml2 DOM builder + XMLPrinter |
 | `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
@@ -69,11 +70,11 @@
 | `System::Uri` | ✅ DONE | full parsing |
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
+| `System::Threading::Thread` | ✅ DONE | Join, IsAlive, Start (no-op), ManagedThreadId |
 | `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX sockets, port-0 auto-assign |
 | `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX SOCK_DGRAM, send/recvfrom |
 | `System::Net::Sockets::NetworkStream` | ✅ DONE | wraps socket fd as `System::IO::Stream` |
-| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no threadpool |
-| `System::Threading::Thread` | ✅ DONE | `Join()`, `IsAlive`, `Start()`, `ManagedThreadId` |
+| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool |
 | `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones only |
 | `System::AppDomain/AppContext/GC` | ⚠️ STUB | minimal stubs only |
 
@@ -113,15 +114,16 @@ include/
   System/ComponentModel/                ← attributes, INotifyPropertyChanged, DataAnnotations/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
-src/                                    ← .cpp for complex types
+src/                                    ← .cpp for all non-template complex types (migration complete)
   System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, …
   System/Numerics/BigInteger.cpp
   System/IO/Compression/GZipStream.cpp, DeflateStream.cpp, ZipArchive.cpp
+  System/IO/Hashing/XxHash32.cpp, XxHash64.cpp
   System/Net/Sockets/TcpClient.cpp, UdpClient.cpp, NetworkStream.cpp
   System/Xml/XmlReader.cpp, XmlWriter.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 74 GoogleTest files, 2995 tests
+tests/                                  ← 74 GoogleTest files, 2999 tests
 ```
 
 ### Invariants that must not be broken
@@ -180,38 +182,31 @@ git log --oneline -10
 |------|---------|-------------|---------|
 | 46 | 36 | Namespace audit — Globalization, Text::Unicode, attributes, Diagnostics, events | 2851 → 2980 |
 | 47 | 37 | Fix `DefaultValueAttribute` duplicate in `DescriptionAttribute.hpp` | +5 |
-| 49 | 37 | Fix `EqualityComparer` dual-definition; canonical `.hpp` + `Comparer.hpp` includes it | +3 |
+| 49 | 37 | Fix `EqualityComparer` dual-definition; canonical `.hpp`, `Comparer.hpp` includes it | +3 |
 | 48 | 38 | Implement `TcpClient/TcpListener/UdpClient/NetworkStream` via POSIX sockets | 2988 → 2995 |
-| 50 | 38 | `Thread::Start()` (no-op, .NET compat) + `getManagedThreadIdProperty()` instance | 2995 → 2999 |
-| 51 | 38 | Move `XxHash32` / `XxHash64` implementations to `.cpp`; headers declarations only | — |
+| 50 | 38 | `Thread::Start()` (no-op, .NET compat) + `getManagedThreadIdProperty()` on instance | 2995 → 2999 |
+| 51 | 38 | Move `XxHash32`/`XxHash64` bodies to `.cpp`; hpp→cpp migration now complete | — |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-### Task 50 — `Thread::Start()` / `getManagedThreadIdProperty()` ✅ DONE (session 38)
+### Task 52 — `AppDomain.CurrentDomain.BaseDirectory` (when CNA needs it)
 
-`Join()` and `IsAlive` were already implemented. Added:
-- `Start()` — no-op for .NET API compatibility (thread starts eagerly in constructor)
-- `getManagedThreadIdProperty()` — instance method, unique incrementing ID per Thread
-- `inline static std::atomic<intcs> nextManagedId_` — counter in header
+`AppDomain` and `AppContext` are stubs. The most likely real need is
+`AppDomain.CurrentDomain.BaseDirectory` for asset path resolution in the game engine.
+`GC` can stay a no-op stub indefinitely.
 
-### Task 51 — `XxHash32` / `XxHash64` → move to `.cpp` ✅ DONE (session 38)
-
-Both classes split into header-only declarations + `src/System/IO/Hashing/*.cpp`.
-`constexpr` constants stay in header; all method bodies (constructor, Reset, Append,
-GetCurrentHash, private helpers) moved to .cpp. No test changes needed.
-
-### Task 52 — `TimeZoneInfo` expansion (when CNA needs it)
+### Task 53 — `TimeZoneInfo` expansion (when CNA needs it)
 
 Currently only UTC, Local, and a few hardcoded zones are supported.
-Full implementation would require reading `/etc/localtime` or the IANA tz database.
+Full implementation requires reading `/etc/localtime` or the IANA tz database.
 Only needed if game code does timezone-aware date arithmetic.
 
-### Task 53 — `AppDomain` / `AppContext` / `GC` (when CNA needs it)
+### Task 54 — `Char::Parse` / UTF-8 multi-byte support (when CNA needs it)
 
-These are stubs. The game engine likely needs `AppDomain.CurrentDomain.BaseDirectory`
-for asset path resolution. `GC` can stay a no-op stub indefinitely.
+`Char::Parse(string)` currently handles 1-byte ASCII only. Multi-byte UTF-8
+decoding needed if game content uses non-ASCII characters in string parsing paths.
 
 ---
 
@@ -231,10 +226,12 @@ for asset path resolution. `GC` can stay a no-op stub indefinitely.
 >
 > Read NEXT.md — Tasks 46–51 are all done. All 2999 tests pass. Zero errors, zero warnings.
 > Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is implemented via POSIX sockets.
-> Thread::Start() and ManagedThreadId are implemented. XxHash32/64 moved to .cpp.
-> Remaining gaps: `TimeZoneInfo`, `AppDomain/GC` — implement only when CNA needs them.
+> Thread::Start() and ManagedThreadId implemented. XxHash32/64 moved to .cpp.
+> hpp→cpp migration is complete for all non-template types.
+> Remaining gaps: `AppDomain/BaseDirectory`, `TimeZoneInfo`, `Char::Parse UTF-8` —
+> implement only when CNA actually needs them.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 2995 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 2999 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
