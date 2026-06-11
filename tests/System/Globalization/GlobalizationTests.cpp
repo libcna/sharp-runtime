@@ -2,9 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Note: Calendar.hpp and ISOWeek.hpp are excluded — they reference DateTime properties
-// (getYearProperty, getDayOfWeekProperty, AddDays, etc.) that are not yet declared in
-// DateTime.hpp; including them triggers compilation errors.
+// Note: Calendar.hpp, GregorianCalendar.hpp, and ISOWeek.hpp are tested in tests/CalendarTests.cpp.
 #include <gtest/gtest.h>
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
