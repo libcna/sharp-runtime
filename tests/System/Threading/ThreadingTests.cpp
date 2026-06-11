@@ -63,6 +63,34 @@ TEST(ThreadingTests, Thread_IsBackground_RoundTrip) {
     t.Join();
 }
 
+TEST(ThreadingTests, Thread_Start_IsNoOp_DoesNotThrow) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_NO_THROW(t.Start());
+    t.Join();
+}
+
+TEST(ThreadingTests, Thread_ManagedThreadId_IsPositive) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_GT(t.getManagedThreadIdProperty(), 0);
+    t.Join();
+}
+
+TEST(ThreadingTests, Thread_ManagedThreadId_UniqueAcrossThreads) {
+    Thread t1([]{ Thread::Sleep(0); });
+    Thread t2([]{ Thread::Sleep(0); });
+    EXPECT_NE(t1.getManagedThreadIdProperty(), t2.getManagedThreadIdProperty());
+    t1.Join();
+    t2.Join();
+}
+
+TEST(ThreadingTests, Thread_IsAlive_TrueWhileRunning) {
+    std::atomic<bool> hold{true};
+    Thread t([&hold]{ while (hold.load()) Thread::Sleep(1); });
+    EXPECT_TRUE(t.getIsAliveProperty());
+    hold.store(false);
+    t.Join();
+}
+
 // ---------------------------------------------------------------------------
 // Interlocked — int32
 // ---------------------------------------------------------------------------
