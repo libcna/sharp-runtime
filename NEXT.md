@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 38 / Task 50*
+*Last updated: 2026-06-11 (branch: develop) — session 38 / Task 51*
 
 ---
 
@@ -183,6 +183,7 @@ git log --oneline -10
 | 49 | 37 | Fix `EqualityComparer` dual-definition; canonical `.hpp` + `Comparer.hpp` includes it | +3 |
 | 48 | 38 | Implement `TcpClient/TcpListener/UdpClient/NetworkStream` via POSIX sockets | 2988 → 2995 |
 | 50 | 38 | `Thread::Start()` (no-op, .NET compat) + `getManagedThreadIdProperty()` instance | 2995 → 2999 |
+| 51 | 38 | Move `XxHash32` / `XxHash64` implementations to `.cpp`; headers declarations only | — |
 
 ---
 
@@ -195,10 +196,11 @@ git log --oneline -10
 - `getManagedThreadIdProperty()` — instance method, unique incrementing ID per Thread
 - `inline static std::atomic<intcs> nextManagedId_` — counter in header
 
-### Task 51 — `XxHash32` / `XxHash64` → move to `.cpp` (optional cleanup)
+### Task 51 — `XxHash32` / `XxHash64` → move to `.cpp` ✅ DONE (session 38)
 
-Both are non-template concrete classes with algorithm bodies currently in headers.
-Low priority — no build issue, just cosmetic hygiene.
+Both classes split into header-only declarations + `src/System/IO/Hashing/*.cpp`.
+`constexpr` constants stay in header; all method bodies (constructor, Reset, Append,
+GetCurrentHash, private helpers) moved to .cpp. No test changes needed.
 
 ### Task 52 — `TimeZoneInfo` expansion (when CNA needs it)
 
@@ -227,9 +229,9 @@ for asset path resolution. `GC` can stay a no-op stub indefinitely.
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46, 47, 48, 49, 50 are all done. All 2999 tests pass. Zero errors, zero warnings.
+> Read NEXT.md — Tasks 46–51 are all done. All 2999 tests pass. Zero errors, zero warnings.
 > Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is implemented via POSIX sockets.
-> Thread::Start() and ManagedThreadId are implemented.
+> Thread::Start() and ManagedThreadId are implemented. XxHash32/64 moved to .cpp.
 > Remaining gaps: `TimeZoneInfo`, `AppDomain/GC` — implement only when CNA needs them.
 >
 > Build: `cmake --build build --parallel 4`
