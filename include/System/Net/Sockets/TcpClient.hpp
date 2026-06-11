@@ -3,16 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include <memory>
+#include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
-#include "System/NotImplementedException.hpp"
-
-// NOTE: Full implementation requires POSIX sockets (Linux/macOS) or Winsock2 (Windows).
-// To implement:
-//   Linux/macOS: #include <sys/socket.h>, <netinet/in.h>, <arpa/inet.h>, <unistd.h>
-//     socket() / connect() / send() / recv() / close()
-//   Windows:     #include <winsock2.h>, <ws2tcpip.h>
-//     WSAStartup / socket / connect / send / recv / closesocket
-// Wrap the raw socket fd in a NetworkStream and expose it via GetStream().
+#include "System/Net/Sockets/NetworkStream.hpp"
 
 namespace System::Net::Sockets {
 
@@ -20,57 +14,70 @@ namespace System::Net::Sockets {
      * @brief Provides client connections for TCP network services.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.TcpClient.
+     * Implemented using POSIX sockets (Linux/macOS).
      *
-     * @note Status: Stub — all methods throw NotImplementedException.
-     *   See the comment at the top of this file for POSIX/Winsock integration notes.
+     * @note Status: Implemented — POSIX (Linux/macOS) only.
      */
     class TcpClient {
+        int  fd_        = -1;
+        bool connected_ = false;
+
+        /// @brief Constructs a TcpClient that already owns a connected socket fd (used by TcpListener).
+        explicit TcpClient(int connectedFd);
+        friend class TcpListener;
+
     public:
-        TcpClient() = default;
-        explicit TcpClient(const IPEndPoint&) {}
+        TcpClient();
+        explicit TcpClient(const IPEndPoint& localEP);
+        ~TcpClient();
 
-        void Connect(const std::string& /*hostname*/, int /*port*/) {
-            throw NotImplementedException(
-                "TcpClient::Connect is not implemented. "
-                "Requires POSIX sockets (connect/send/recv) or Winsock2. "
-                "See include/System/Net/Sockets/TcpClient.hpp for integration notes.");
-        }
+        /// @brief Connects to a remote host by name and port.
+        void Connect(const std::string& hostname, int port);
 
-        void Connect(const IPEndPoint&) {
-            throw NotImplementedException("TcpClient::Connect requires POSIX sockets or Winsock2.");
-        }
+        /// @brief Connects to the specified remote endpoint.
+        void Connect(const IPEndPoint& remoteEP);
 
-        void Close() {}
+        /// @brief Closes the underlying socket.
+        void Close();
 
-        [[nodiscard]] bool getConnectedProperty() const { return false; }
+        /// @brief Returns true when a connection has been established.
+        [[nodiscard]] bool getConnectedProperty() const { return connected_; }
 
-        [[nodiscard]] int Available() const {
-            throw NotImplementedException("TcpClient::Available requires POSIX sockets or Winsock2.");
-        }
+        /// @brief Returns the number of bytes available to read without blocking.
+        [[nodiscard]] int Available() const;
+
+        /// @brief Returns a NetworkStream for reading and writing (dup-ed fd).
+        [[nodiscard]] std::shared_ptr<NetworkStream> GetStream() const;
     };
 
     /**
      * @brief Listens for connections from TCP network clients.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.TcpListener.
+     * Implemented using POSIX sockets (Linux/macOS).
      *
-     * @note Status: Stub — see TcpClient.hpp for integration notes.
+     * @note Status: Implemented — POSIX (Linux/macOS) only.
      */
     class TcpListener {
+        int        fd_    = -1;
+        IPEndPoint local_;
+
     public:
-        explicit TcpListener(const IPEndPoint&) {}
-        TcpListener(const IPAddress&, int /*port*/) {}
+        explicit TcpListener(const IPEndPoint& localEP);
+        TcpListener(const IPAddress& addr, int port);
+        ~TcpListener();
 
-        void Start() {
-            throw NotImplementedException(
-                "TcpListener::Start requires POSIX sockets (bind/listen/accept) or Winsock2.");
-        }
+        /// @brief Starts listening for incoming connections (bind + listen).
+        void Start();
 
-        TcpClient AcceptTcpClient() {
-            throw NotImplementedException("TcpListener::AcceptTcpClient requires POSIX sockets or Winsock2.");
-        }
+        /// @brief Stops listening and closes the socket.
+        void Stop();
 
-        void Stop() {}
+        /// @brief Accepts a pending connection (blocks until a client connects).
+        TcpClient AcceptTcpClient();
+
+        /// @brief Returns the local endpoint (valid after Start()).
+        [[nodiscard]] const IPEndPoint& getLocalEndpointProperty() const { return local_; }
     };
 
 } // namespace System::Net::Sockets

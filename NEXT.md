@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 37*
+*Last updated: 2026-06-11 (branch: develop) — session 38*
 
 ---
 
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2988 tests pass** — `./build/SharpRuntimeTests` → `2988 tests from 443 test suites` ✅
+- **All 2995 tests pass** — `./build/SharpRuntimeTests` → `2995 tests from 444 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
@@ -46,9 +46,8 @@
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Tested headers | ~404 / 449 | **~90%** ✅ |
+| Tested headers | ~408 / 449 | **~91%** ✅ |
 | Untested — pure interfaces (`IXxx`) | 42 | intentionally skipped |
-| Untested — pure interfaces only | 42 | intentionally skipped |
 | Untested — types with real logic | ~0 | ✅ |
 
 ---
@@ -69,7 +68,7 @@
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
 | `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
 | `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
-| `System::Net::Sockets::TcpClient/UdpClient` | ❌ STUB | throws NotImplementedException |
+| `System::Net::Sockets::TcpClient/UdpClient` | ✅ DONE | POSIX sockets (Linux/macOS) |
 | `System::Xml::XmlReader/XmlWriter (SAX)` | ✅ DONE | DOM-cursor, not true SAX |
 | `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no threadpool |
 | `System::Threading::Thread` | ⚠️ PARTIAL | no `Join()` / `IsAlive` |
@@ -83,7 +82,7 @@
 | Status | Issue |
 |--------|-------|
 | **confirmed** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
-| **confirmed** | `TcpClient`, `UdpClient` — always throw `NotImplementedException` |
+| **resolved** | `TcpClient`, `UdpClient` — now implemented via POSIX sockets (Task 48) |
 | **incomplete** | `Thread::CurrentThread()` — returns proxy, no `Join()` / `IsAlive` |
 | **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
@@ -200,10 +199,14 @@ type-check, and IS-A verification.
 factory. Duplicate removed from `Comparer.hpp` (now just `#include`s the canonical
 file). Added 3 new tests for `Create()` and singleton identity.
 
-### Task 48 — TcpClient / UdpClient (POSIX) ← NEXT (if needed)
+### Task 48 — TcpClient / UdpClient (POSIX) ✅ DONE (session 38)
 
-Lowest priority — not needed for the game engine itself, but needed for any networking feature.
-Only implement if CNA requires it.
+Implemented POSIX socket wrappers (+7 tests, 2988 → 2995):
+- `NetworkStream` (new): wraps a socket fd as `System::IO::Stream`; `recv()`/`send()`/`close()`
+- `TcpClient`: `Connect(host, port)` via `getaddrinfo`+`connect()`, `Connect(IPEndPoint)` via `sockaddr_in`+`connect()`, `GetStream()` via `dup()`, `Available()` via `ioctl(FIONREAD)`
+- `TcpListener`: `Start()` via `bind()`+`listen()`, `Stop()`, `AcceptTcpClient()` via `accept()`; port-0 auto-assign supported
+- `UdpClient`: `socket(SOCK_DGRAM)` in all constructors; `Connect()` via POSIX `connect()`; `Send()` via `send()`; `Receive()` via `recvfrom()`
+- Tests: DNS failure, connection refused, TcpListener start/stop, UDP connect, NetworkStream read/write round-trip via `socketpair`
 
 ---
 
@@ -221,9 +224,9 @@ Only implement if CNA requires it.
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46, 47, 49 are done. The known header conflicts are resolved.
-> All 2988 tests pass. Next work is Task 48 (TcpClient/UdpClient, only if CNA requires it)
-> or any new bugs/gaps discovered during porting.
+> Read NEXT.md — Tasks 46, 47, 48, 49 are all done. All known header conflicts are resolved.
+> All 2995 tests pass. Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is now
+> implemented via POSIX sockets. Next work is any new bugs/gaps discovered during porting.
 >
 > Build: `cmake --build build --parallel 4` (zero errors, zero warnings, C + CXX)
 > Run full suite: `./build/SharpRuntimeTests` — must show 2851 passing, 0 failing.

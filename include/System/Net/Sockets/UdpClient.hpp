@@ -4,14 +4,9 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
-#include "System/NotImplementedException.hpp"
-
-// NOTE: Full implementation requires POSIX sockets (Linux/macOS) or Winsock2 (Windows).
-// To implement:
-//   Linux/macOS: socket(AF_INET, SOCK_DGRAM, 0) / bind / sendto / recvfrom / close
-//   Windows:     WSAStartup / socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) / bind / sendto / recvfrom / closesocket
-// See TcpClient.hpp for general socket integration notes.
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Net::Sockets {
 
@@ -19,37 +14,44 @@ namespace System::Net::Sockets {
      * @brief Provides UDP network services.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.UdpClient.
+     * Implemented using POSIX sockets (Linux/macOS).
      *
-     * @note Status: Stub — all methods throw NotImplementedException.
-     *   See the comment at the top of this file for POSIX/Winsock integration notes.
+     * @note Status: Implemented — POSIX (Linux/macOS) only.
      */
     class UdpClient {
+        int              fd_        = -1;
+        Net::IPEndPoint  remote_{Net::IPAddress::Any, 0};
+        bool             hasRemote_ = false;
+
     public:
-        UdpClient() = default;
-        explicit UdpClient(int /*port*/) {}
-        explicit UdpClient(const IPEndPoint&) {}
+        /// @brief Creates a UDP socket without binding to a specific port.
+        UdpClient();
 
-        void Connect(const std::string& /*hostname*/, int /*port*/) {
-            throw NotImplementedException(
-                "UdpClient::Connect is not implemented. "
-                "Requires POSIX sockets (sendto/recvfrom) or Winsock2. "
-                "See include/System/Net/Sockets/UdpClient.hpp for integration notes.");
-        }
+        /// @brief Creates a UDP socket bound to the given local port.
+        explicit UdpClient(int port);
 
-        void Connect(const IPEndPoint&) {
-            throw NotImplementedException("UdpClient::Connect requires POSIX sockets or Winsock2.");
-        }
+        /// @brief Creates a UDP socket bound to the given local endpoint.
+        explicit UdpClient(const Net::IPEndPoint& localEP);
 
-        int Send(const std::vector<SharpRuntime::bytecs>& /*dgram*/, int /*bytes*/) {
-            throw NotImplementedException("UdpClient::Send requires POSIX sockets or Winsock2.");
-        }
+        ~UdpClient();
 
-        std::vector<SharpRuntime::bytecs> Receive(IPEndPoint& /*remoteEP*/) {
-            throw NotImplementedException("UdpClient::Receive requires POSIX sockets or Winsock2.");
-        }
+        /// @brief Sets the default remote host/port for subsequent Send calls.
+        void Connect(const std::string& hostname, int port);
 
-        void Close() {}
-        [[nodiscard]] bool getClientProperty() const { return false; }
+        /// @brief Sets the default remote endpoint for subsequent Send calls.
+        void Connect(const Net::IPEndPoint& remoteEP);
+
+        /// @brief Sends a datagram to the default remote endpoint (must call Connect first).
+        int Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes);
+
+        /// @brief Receives a UDP datagram; fills remoteEP with the sender's endpoint.
+        std::vector<SharpRuntime::bytecs> Receive(Net::IPEndPoint& remoteEP);
+
+        /// @brief Closes the underlying socket.
+        void Close();
+
+        /// @brief Returns true when the socket is open.
+        [[nodiscard]] bool getClientProperty() const { return fd_ >= 0; }
     };
 
 } // namespace System::Net::Sockets
