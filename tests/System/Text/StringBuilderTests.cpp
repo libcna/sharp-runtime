@@ -210,3 +210,115 @@ TEST(StringBuilderTests, AppendLargeString) {
     EXPECT_EQ(sb.getLengthProperty(), 10000);
     EXPECT_EQ(sb.ToString(), big);
 }
+
+// ---------------------------------------------------------------------------
+// Append(longcs)
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, AppendLong_Positive) {
+    StringBuilder sb;
+    sb.Append(int64_t(9876543210LL));
+    EXPECT_EQ(sb.ToString(), "9876543210");
+}
+
+TEST(StringBuilderTests, AppendLong_Negative) {
+    StringBuilder sb;
+    sb.Append(int64_t(-1LL));
+    EXPECT_EQ(sb.ToString(), "-1");
+}
+
+TEST(StringBuilderTests, AppendLong_Zero) {
+    StringBuilder sb;
+    sb.Append(int64_t(0LL));
+    EXPECT_EQ(sb.ToString(), "0");
+}
+
+// ---------------------------------------------------------------------------
+// Insert
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, Insert_AtStart) {
+    StringBuilder sb("world");
+    sb.Insert(0, std::string("hello "));
+    EXPECT_EQ(sb.ToString(), "hello world");
+}
+
+TEST(StringBuilderTests, Insert_AtEnd) {
+    StringBuilder sb("hello");
+    sb.Insert(5, std::string("!"));
+    EXPECT_EQ(sb.ToString(), "hello!");
+}
+
+TEST(StringBuilderTests, Insert_InMiddle) {
+    StringBuilder sb("helo");
+    sb.Insert(3, std::string("l"));
+    EXPECT_EQ(sb.ToString(), "hello");
+}
+
+TEST(StringBuilderTests, Insert_EmptyString_NoChange) {
+    StringBuilder sb("abc");
+    sb.Insert(1, std::string(""));
+    EXPECT_EQ(sb.ToString(), "abc");
+}
+
+// ---------------------------------------------------------------------------
+// Remove
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, Remove_FromStart) {
+    StringBuilder sb("hello world");
+    sb.Remove(0, 6);
+    EXPECT_EQ(sb.ToString(), "world");
+}
+
+TEST(StringBuilderTests, Remove_FromMiddle) {
+    StringBuilder sb("hello world");
+    sb.Remove(5, 6);
+    EXPECT_EQ(sb.ToString(), "hello");
+}
+
+TEST(StringBuilderTests, Remove_SingleChar) {
+    StringBuilder sb("abc");
+    sb.Remove(1, 1);
+    EXPECT_EQ(sb.ToString(), "ac");
+}
+
+TEST(StringBuilderTests, Remove_ZeroCount_NoChange) {
+    StringBuilder sb("abc");
+    sb.Remove(1, 0);
+    EXPECT_EQ(sb.ToString(), "abc");
+}
+
+// ---------------------------------------------------------------------------
+// Replace
+// ---------------------------------------------------------------------------
+
+TEST(StringBuilderTests, Replace_SingleOccurrence) {
+    StringBuilder sb("hello world");
+    sb.Replace("world", "C++");
+    EXPECT_EQ(sb.ToString(), "hello C++");
+}
+
+TEST(StringBuilderTests, Replace_MultipleOccurrences) {
+    StringBuilder sb("aXbXcX");
+    sb.Replace("X", "-");
+    EXPECT_EQ(sb.ToString(), "a-b-c-");
+}
+
+TEST(StringBuilderTests, Replace_NoOccurrence_NoChange) {
+    StringBuilder sb("hello");
+    sb.Replace("xyz", "abc");
+    EXPECT_EQ(sb.ToString(), "hello");
+}
+
+TEST(StringBuilderTests, Replace_WithEmptyString_RemovesAll) {
+    StringBuilder sb("abcabc");
+    sb.Replace("b", "");
+    EXPECT_EQ(sb.ToString(), "acac");
+}
+
+TEST(StringBuilderTests, Replace_ChainedWithAppend) {
+    StringBuilder sb;
+    sb.Append("foo bar foo").Replace("foo", "baz");
+    EXPECT_EQ(sb.ToString(), "baz bar baz");
+}

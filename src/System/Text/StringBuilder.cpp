@@ -91,4 +91,32 @@ namespace System::Text
     {
         return buffer.empty();
     }
+
+    StringBuilder& StringBuilder::Append(SharpRuntime::longcs value)
+    {
+        buffer += std::to_string(value);
+        return *this;
+    }
+
+    StringBuilder& StringBuilder::Insert(intcs index, const std::string& value)
+    {
+        buffer.insert(static_cast<size_t>(index), value);
+        return *this;
+    }
+
+    StringBuilder& StringBuilder::Remove(intcs startIndex, intcs count)
+    {
+        buffer.erase(static_cast<size_t>(startIndex), static_cast<size_t>(count));
+        return *this;
+    }
+
+    StringBuilder& StringBuilder::Replace(const std::string& oldValue, const std::string& newValue)
+    {
+        size_t pos = 0;
+        while ((pos = buffer.find(oldValue, pos)) != std::string::npos) {
+            buffer.replace(pos, oldValue.size(), newValue);
+            pos += newValue.size();
+        }
+        return *this;
+    }
 }

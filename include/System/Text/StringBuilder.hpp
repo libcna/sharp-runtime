@@ -174,5 +174,40 @@ namespace System::Text
          * @note Status: IMPLEMENTED
          */
         [[nodiscard]] bool Empty() const;
+
+        /**
+         * @brief Appends the string representation of the specified 64-bit integer value.
+         *
+         * @param value Long integer value to append.
+         * @return Reference to this instance.
+         */
+        StringBuilder& Append(SharpRuntime::longcs value);
+
+        /**
+         * @brief Inserts the specified string at the given character position.
+         *
+         * @param index Zero-based position at which to insert.
+         * @param value String to insert.
+         * @return Reference to this instance.
+         */
+        StringBuilder& Insert(intcs index, const std::string& value);
+
+        /**
+         * @brief Removes a range of characters from this instance.
+         *
+         * @param startIndex Zero-based position of the first character to remove.
+         * @param count Number of characters to remove.
+         * @return Reference to this instance.
+         */
+        StringBuilder& Remove(intcs startIndex, intcs count);
+
+        /**
+         * @brief Replaces all occurrences of a specified string with another string.
+         *
+         * @param oldValue The string to replace.
+         * @param newValue The string that replaces @p oldValue.
+         * @return Reference to this instance.
+         */
+        StringBuilder& Replace(const std::string& oldValue, const std::string& newValue);
     };
 }
