@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-12 (branch: develop) — session 39 (final)*
+*Last updated: 2026-06-12 (branch: develop) — session 40 (final)*
 
 ---
 
@@ -30,8 +30,8 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 3010 tests pass** — `./build/SharpRuntimeTests` → `3010 tests from 444 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
+- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 465 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 77 test files in `tests/`
 
 ### Vendored libraries
 
@@ -188,13 +188,21 @@ git log --oneline -10
 | 52 | 39 | `AppDomain.BaseDirectory` + `AppContext.getBaseDirProperty()` via `/proc/self/exe` | 2999 → 3001 |
 | 53 | 39 | `TimeZoneInfo::Local()` real offset; `FindSystemTimeZoneById()` IANA via `/usr/share/zoneinfo` | 3001 → 3004 |
 | 54 | 39 | `Char::Parse` + `Char::ToString` full UTF-8 multi-byte support (1–3 byte BMP) | 3004 → 3010 |
+| 55–69 | 40 | Gap analysis + implement: Argb/Rgba, ArrayList, Hashtable, RandomAccess, Ascii, TextInfo, TextElementEnumerator, SortKey, CompareInfo, CharUnicodeInfo, DateTimeFormatInfo, JulianCalendar, ThaiBuddhistCalendar, TaiwanCalendar, PersianCalendar, Vector2/3/4, Matrix3x2/4x4, Quaternion, Plane | 3010 → 3080 |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-No planned tasks — all identified gaps (Tasks 46–54) are implemented.
-Next tasks will be defined when CNA integration reveals missing API surface.
+Gap analysis against .NET CoreLib completed (session 40). Tasks below cover all missing non-internal public types found.
+
+All tasks 55–69 completed in session 40.
+
+Remaining open questions (awaiting user decision):
+| Task | Description | Complexity |
+|------|-------------|------------|
+| 70 | `HebrewCalendar`, `HijriCalendar`, `JapaneseCalendar`, `KoreanCalendar`, `UmAlQuraCalendar`, lunisolar variants | very complex |
+| 71 | `IdnMapping` — Punycode/IDNA internationalized domain names | very complex |
 
 ---
 
@@ -204,7 +212,7 @@ Next tasks will be defined when CNA integration reveals missing API surface.
 - **No broad header refactor** — naming conventions touch 449 files, would break CNA
 - **No LINQ** — use `std::ranges` in ported code instead
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundation
-- **No port of Vector2/3/4, Matrix3x2/4x4** — CNA layer, not sharp-runtime
+- **Port Vector2/3/4, Matrix3x2/4x4, Plane, Quaternion** — sharp-runtime implements these (Tasks 68–69)
 
 ---
 
