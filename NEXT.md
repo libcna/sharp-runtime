@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Remaining gaps are low-priority stubs (`GC`) — implement only when CNA actually needs them.
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Session 41 was focused on portability and quality fixes — all POSIX-only includes have been removed from public headers, Windows and Emscripten paths added to `.cpp` files. Remaining portability items are listed in §8.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -18,6 +18,7 @@
 - Property naming: `getXxxProperty()` / `setXxxProperty()`
 - Primitives in `SharpRuntime::` (`intcs = int32_t`, `bytecs = uint8_t`, `shortcs = int16_t`, `charcs = char16_t`, etc.)
 - Immutable collections use `shared_ptr<const std::container<T>>`
+- Platform policy: POSIX includes belong only in `.cpp` files behind `#ifdef _WIN32` / `#elif defined(__EMSCRIPTEN__)` / `#else` guards; never in public `.hpp` headers
 
 ---
 
@@ -27,11 +28,12 @@
 - **Clean build:** `cmake --build build --parallel 4` ✅
 - Output: `build/libSHARP_RUNTIME.a`
 - Languages: CXX + C (C needed for vendored miniz)
-- One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
+- Zero errors, zero warnings
 
 ### Tests
-- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 466 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 77 test files in `tests/`
+- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 465 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
+- CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 
 ### Vendored libraries
 
@@ -59,25 +61,40 @@
 | `System::IO::Compression::GZipStream` | ✅ DONE | zlib, PIMPL, 64KB buffers |
 | `System::IO::Compression::DeflateStream` | ✅ DONE | raw DEFLATE (-MAX_WBITS), XNB-compatible |
 | `System::IO::Compression::ZipArchive` | ✅ DONE | miniz, Read+Create mode, PIMPL |
-| `System::IO::Hashing::XxHash32/XxHash64` | ✅ DONE | hpp→cpp split done (Task 51) |
+| `System::IO::Hashing::XxHash32/XxHash64` | ✅ DONE | hpp→cpp split done |
+| `System::IO::RandomAccess` | ✅ DONE | POSIX pread/pwrite; Win32 OVERLAPPED ReadFile/WriteFile; Emscripten throws |
 | `System::Xml::XmlReader` | ✅ DONE | tinyxml2 DOM cursor, event list |
 | `System::Xml::XmlWriter` | ✅ DONE | tinyxml2 DOM builder + XMLPrinter |
 | `System::Xml::Linq` | ✅ DONE | XName, XAttribute, XElement, XDocument |
 | `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
 | `System::Text::StringBuilder` | ✅ DONE | Insert, Remove, Replace, Append(long) |
-| `System::DateTime` | ✅ DONE | Year/Month/Day/etc., Add*, Today, ISO-8601 ToString |
+| `System::DateTime` | ✅ DONE | Year/Month/Day/etc., Add*, Today, ISO-8601 ToString; gmtime_r/gmtime_s guarded |
 | `System::Decimal` | ✅ DONE | full arithmetic |
 | `System::Uri` | ✅ DONE | full parsing |
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
+| `System::Numerics::Vector2/3/4` | ✅ DONE | constants, operators, Dot/Cross/Normalize/Lerp/Clamp |
+| `System::Numerics::Matrix3x2/4x4` | ✅ DONE | full transforms, Invert |
+| `System::Numerics::Quaternion` | ✅ DONE | Slerp, CreateFrom*, Conjugate, Inverse |
+| `System::Numerics::Plane` | ✅ DONE | CreateFromVertices, Dot, Normalize, Transform |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
-| `System::Threading::Thread` | ✅ DONE | Join, IsAlive, Start() starts once (throws on second call), ManagedThreadId |
+| `System::Threading::Thread` | ✅ DONE | deferred start — Start() once; 2nd call throws; Join, IsAlive, ManagedThreadId |
+| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool; safe shared_ptr<State>; no Emscripten guard yet |
 | `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
 | `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
 | `System::Net::Sockets::NetworkStream` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
-| `System::IO::RandomAccess` | ✅ DONE | POSIX pread/pwrite; Win32 OVERLAPPED ReadFile/WriteFile; Emscripten throws |
-| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool; data race fixed via shared_ptr state |
 | `System::TimeZoneInfo` | ✅ DONE | POSIX localtime_r; Windows GetTimeZoneInformation; Emscripten returns UTC |
 | `System::AppDomain/AppContext` | ✅ DONE | Linux /proc/self/exe; macOS _NSGetExecutablePath; Windows GetModuleFileNameW; Emscripten ./ |
+| `System::Environment` | ✅ DONE | GetCurrentDirectory + ProcessorCount in .cpp with Win/POSIX/Emscripten guards |
+| `System::Globalization::PersianCalendar` | ✅ DONE | Solar Hijri, 12053-day cycle, base 1600 |
+| `System::Globalization::JulianCalendar` | ✅ DONE | leap year: year % 4 == 0 |
+| `System::Globalization::ThaiBuddhistCalendar` | ✅ DONE | +543 |
+| `System::Globalization::TaiwanCalendar` | ✅ DONE | −1911 |
+| `System::Globalization::CompareInfo` | ✅ DONE | Compare, IsPrefix/IsSuffix, IndexOf, GetSortKey |
+| `System::Globalization::CharUnicodeInfo` | ✅ DONE | GetDecimalDigitValue, GetNumericValue, GetUnicodeCategory |
+| `System::Globalization::DateTimeFormatInfo` | ✅ DONE | invariant defaults, MonthNames, DayNames, format patterns |
+| `System::Collections::ArrayList` | ✅ DONE | std::vector<std::any> wrapper, full IList |
+| `System::Collections::Hashtable` | ✅ DONE | std::unordered_map<string,any> wrapper, IDictionary |
+| `System::Text::Ascii` | ✅ DONE | IsValid, ToUpper/Lower, Trim, EqualsIgnoreCase |
 | `System::GC` | ⚠️ STUB | no-op stub only |
 
 ---
@@ -87,7 +104,11 @@
 | Status | Issue |
 |--------|-------|
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
+| **incomplete** | `Task`/`TaskT` — no Emscripten guard; `std::async` without pthreads will fail on Wasm |
 | **incomplete** | `GC` — no-op stub only |
+| **Windows limitation** | `TcpClient::GetStream()` — no socket dup on Windows (transfers ownership instead of dup-ing fd) |
+| **Windows limitation** | `TimeZoneInfo::FindSystemTimeZoneById()` — throws for IANA IDs on Windows (no IANA→Windows mapping) |
+| **untested** | Winsock2 and Emscripten paths compiled but never run — build-time correct, runtime untested |
 
 ---
 
@@ -98,12 +119,13 @@
 include/
   SharpRuntime/SharpRuntimeHelper.hpp   ← primitive typedefs (intcs, bytecs, …)
   SharpRuntime/Prop.hpp                 ← DDATA/DGETTER/IDATA/IGETTER macros
+  SharpRuntime/Storage/StoragePaths.hpp ← platform storage root (Android/Emscripten/desktop)
   System/                               ← exceptions, Math, Convert, DateTime, Decimal, Uri, …
   System/Collections/                   ← Generic/, Concurrent/, Immutable/, ObjectModel/, Specialized/
   System/IO/                            ← Stream, File, BinaryReader/Writer, Compression/, Hashing/
   System/Text/                          ← StringBuilder, Encoding, Rune, Json/, Encodings/Web/
   System/Threading/                     ← Thread, Monitor, Mutex, Timer, …, Tasks/
-  System/Numerics/                      ← BigInteger, Complex, BFloat16, BitOperations, MathF
+  System/Numerics/                      ← BigInteger, Complex, BFloat16, BitOperations, MathF, Vector*, Matrix*, Quaternion, Plane
   System/Diagnostics/                   ← Debug, Trace, Stopwatch, CodeAnalysis/
   System/Globalization/                 ← CultureInfo, NumberFormatInfo, Calendar, ISOWeek, …
   System/Runtime/                       ← CompilerServices/, InteropServices/, Versioning/
@@ -112,17 +134,25 @@ include/
   System/ComponentModel/                ← attributes, INotifyPropertyChanged, DataAnnotations/
   System/Security/                      ← exceptions, security attributes
   System/Buffers/                       ← ArrayPool, IMemoryOwner, OperationStatus
-src/                                    ← .cpp for all non-template complex types (migration complete)
-  System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, …
+src/                                    ← .cpp for all non-template complex types (73 files)
+  System/DateTime.cpp, Decimal.cpp, Uri.cpp, Guid.cpp, Environment.cpp, …
   System/Numerics/BigInteger.cpp
   System/IO/Compression/GZipStream.cpp, DeflateStream.cpp, ZipArchive.cpp
   System/IO/Hashing/XxHash32.cpp, XxHash64.cpp
+  System/IO/RandomAccess.cpp            ← POSIX/Win32/Emscripten guarded
   System/Net/Sockets/TcpClient.cpp, UdpClient.cpp, NetworkStream.cpp
   System/Xml/XmlReader.cpp, XmlWriter.cpp
+  SharpRuntime/Storage/StoragePaths.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 74 GoogleTest files, 3010 tests
+tests/                                  ← 74 GoogleTest files, 3080 tests
 ```
+
+### Platform portability rules (enforced)
+- No POSIX headers (`<unistd.h>`, `<sys/socket.h>`, etc.) in public `.hpp` files — ever
+- All platform branches in `.cpp` files: `#if defined(_WIN32)` / `#elif defined(__EMSCRIPTEN__)` / `#else` (POSIX)
+- Unsupported platforms throw `System::PlatformNotSupportedException` — never silently fail
+- `<windows.h>` always preceded by `#define WIN32_LEAN_AND_MEAN` and `#define NOMINMAX`
 
 ### Invariants that must not be broken
 1. **Complex types get `.hpp` + `.cpp` split** — move bodies to `.cpp` when header grows unwieldy
@@ -188,18 +218,26 @@ git log --oneline -10
 | 53 | 39 | `TimeZoneInfo::Local()` real offset; `FindSystemTimeZoneById()` IANA via `/usr/share/zoneinfo` | 3001 → 3004 |
 | 54 | 39 | `Char::Parse` + `Char::ToString` full UTF-8 multi-byte support (1–3 byte BMP) | 3004 → 3010 |
 | 55–69 | 40 | Gap analysis + implement: Argb/Rgba, ArrayList, Hashtable, RandomAccess, Ascii, TextInfo, TextElementEnumerator, SortKey, CompareInfo, CharUnicodeInfo, DateTimeFormatInfo, JulianCalendar, ThaiBuddhistCalendar, TaiwanCalendar, PersianCalendar, Vector2/3/4, Matrix3x2/4x4, Quaternion, Plane | 3010 → 3080 |
-| 72 | 41 | Portability+quality fixes: Char.hpp NUL warning, Thread deferred-start (Start() once; 2nd throws), Task data race (shared_ptr<State>), CMakeLists.txt GTest guard, CLAUDE.md, NEXT.md honest status | — |
-| 73 | 41 | Portability: Networking (Winsock2+Emscripten paths), RandomAccess (Win32 OVERLAPPED), AppDomain (Win/macOS/Emscripten), TimeZoneInfo (Win/Emscripten), public headers free of POSIX includes | — |
+| 72 | 41 | Quality: Char.hpp NUL warning fixed; Thread deferred-start (Start() once; 2nd throws); Task data race fixed (shared_ptr<State>); CMakeLists.txt fatal error if GTest missing; CLAUDE.md created | — |
+| 73 | 41 | Portability: Networking (Winsock2+Emscripten), RandomAccess (Win32 OVERLAPPED ReadFile/WriteFile), AppDomain (Win/macOS/Emscripten), TimeZoneInfo (Win/Emscripten); all POSIX includes removed from public headers | — |
+| 74 | 41 | Portability: `Environment.hpp` — GetCurrentDirectory + getProcessorCountProperty moved to `Environment.cpp`; `<windows.h>` kept out of public header | — |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-Gap analysis against .NET CoreLib completed (session 40). Tasks below cover all missing non-internal public types found.
+### Portability — remaining items (continue next session)
 
-All tasks 55–69 completed in session 40.
+| Task | Description | Complexity | Notes |
+|------|-------------|------------|-------|
+| 75 | `Task`/`TaskT` — add Emscripten guard: throw `PlatformNotSupportedException` since `std::async` requires pthreads | small | Without pthreads, Wasm build crashes at runtime |
+| 76 | CMake: add strict warning flags — `-Wall -Wextra` (GCC/Clang) / `/W4` (MSVC) | small | Catch future portability regressions at compile time |
+| 77 | `TimeZoneInfo::FindSystemTimeZoneById()` — add basic IANA→Windows name mapping table for ~30 common zones | medium | Current Windows path throws for any IANA ID |
+| 78 | Emscripten build test — set up `emcmake cmake` build in CI or local verification | medium | Code compiles on Linux but Emscripten paths have never been run |
+| 79 | Windows build test — verify Winsock2 path compiles and links with MSVC or mingw-w64 | medium | Same situation as Emscripten |
 
-Remaining open questions (awaiting user decision):
+### Calendar types — awaiting user decision
+
 | Task | Description | Complexity |
 |------|-------------|------------|
 | 70 | `HebrewCalendar`, `HijriCalendar`, `JapaneseCalendar`, `KoreanCalendar`, `UmAlQuraCalendar`, lunisolar variants | very complex |
@@ -213,7 +251,7 @@ Remaining open questions (awaiting user decision):
 - **No broad header refactor** — naming conventions touch 449 files, would break CNA
 - **No LINQ** — use `std::ranges` in ported code instead
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundation
-- **Port Vector2/3/4, Matrix3x2/4x4, Plane, Quaternion** — sharp-runtime implements these (Tasks 68–69)
+- **No POSIX includes in public `.hpp` headers** — all platform code belongs in `.cpp` files
 
 ---
 
@@ -221,15 +259,24 @@ Remaining open questions (awaiting user decision):
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46–54 are all done. All 3010 tests pass. Zero errors, zero warnings.
-> Networking (TcpClient/TcpListener/UdpClient/NetworkStream) implemented via POSIX sockets.
-> Thread::Start() and ManagedThreadId implemented. XxHash32/64 moved to .cpp.
-> AppDomain.BaseDirectory and AppContext.getBaseDirProperty() return real exe directory.
-> TimeZoneInfo::Local() reads real system offset; FindSystemTimeZoneById() resolves IANA zones.
-> Char::Parse and ToString support full UTF-8 multi-byte (BMP). hpp→cpp migration complete.
-> No further planned tasks — next gaps will emerge from CNA integration.
+> Read NEXT.md and CLAUDE.md before starting.
+>
+> Current state: 3080 tests pass, zero warnings. Session 41 completed portability fixes (Tasks 72–74):
+> - All POSIX includes removed from public `.hpp` headers
+> - Networking: POSIX + Winsock2 + Emscripten guards in `.cpp`
+> - RandomAccess: Win32 OVERLAPPED ReadFile/WriteFile + Emscripten throw
+> - AppDomain: Win/macOS/Linux/Emscripten paths
+> - TimeZoneInfo: Win/POSIX/Emscripten paths
+> - Environment: moved platform code to `Environment.cpp`
+> - Thread: deferred start, Start() throws on 2nd call
+> - Task: data race fixed via shared_ptr<State>
+> - CMakeLists.txt: fatal error if googletest missing
+> - CLAUDE.md: platform policy and non-negotiable rules documented
+>
+> Next priority: Task 75 (Task/TaskT Emscripten guard), Task 76 (CMake strict warnings).
+> See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3010 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3080 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
