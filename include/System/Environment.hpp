@@ -82,30 +82,16 @@ namespace System {
         static inline const std::string NewLine = "\n";
 #endif
 
-        [[nodiscard]] static std::string GetCurrentDirectory() {
-            char buf[4096];
-#ifdef _WIN32
-            if (GetCurrentDirectoryA(sizeof(buf), buf)) return std::string(buf);
-#else
-            if (getcwd(buf, sizeof(buf))) return std::string(buf);
-#endif
-            return "";
-        }
+        /// @brief Returns the current working directory (platform-specific implementation in .cpp).
+        [[nodiscard]] static std::string GetCurrentDirectory();
 
         [[nodiscard]] static std::string GetEnvironmentVariable(const std::string& name) {
             const char* val = std::getenv(name.c_str());
             return val ? std::string(val) : std::string();
         }
 
-        [[nodiscard]] static SharpRuntime::intcs getProcessorCountProperty() {
-#ifdef _WIN32
-            SYSTEM_INFO si; GetSystemInfo(&si);
-            return static_cast<SharpRuntime::intcs>(si.dwNumberOfProcessors);
-#else
-            long n = sysconf(_SC_NPROCESSORS_ONLN);
-            return n > 0 ? static_cast<SharpRuntime::intcs>(n) : 1;
-#endif
-        }
+        /// @brief Returns the number of logical processors (platform-specific implementation in .cpp).
+        [[nodiscard]] static SharpRuntime::intcs getProcessorCountProperty();
 
         static void Exit(SharpRuntime::intcs exitCode) { std::exit(exitCode); }
         static void FailFast(const std::string&)       { std::abort(); }
