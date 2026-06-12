@@ -342,6 +342,36 @@ TEST(CharTests, ToStringChar) {
     EXPECT_EQ(Char::ToString(u'z'), "z");
 }
 
+TEST(CharTests, Parse_TwoByte_UTF8) {
+    // "é" = U+00E9 = 0xC3 0xA9 in UTF-8
+    EXPECT_EQ(Char::Parse("\xC3\xA9"), u'é');
+}
+
+TEST(CharTests, Parse_ThreeByte_UTF8) {
+    // "€" = U+20AC = 0xE2 0x82 0xAC in UTF-8
+    EXPECT_EQ(Char::Parse("\xE2\x82\xAC"), u'€');
+}
+
+TEST(CharTests, Parse_TwoByte_UTF8_TwoCharsThrows) {
+    // "éé" = two code points — must throw
+    EXPECT_THROW(Char::Parse("\xC3\xA9\xC3\xA9"), std::invalid_argument);
+}
+
+TEST(CharTests, ToString_TwoByte_UTF8) {
+    // Round-trip: char16_t U+00E9 → UTF-8 "é"
+    EXPECT_EQ(Char::ToString(u'é'), "\xC3\xA9");
+}
+
+TEST(CharTests, ToString_ThreeByte_UTF8) {
+    // Round-trip: char16_t U+20AC → UTF-8 "€"
+    EXPECT_EQ(Char::ToString(u'€'), "\xE2\x82\xAC");
+}
+
+TEST(CharTests, Parse_ToString_RoundTrip_Multibyte) {
+    char16_t orig = u'č'; // 'č' U+010D
+    EXPECT_EQ(Char::Parse(Char::ToString(orig)), orig);
+}
+
 TEST(CharTests, IsHighSurrogate) {
     EXPECT_TRUE(Char::IsHighSurrogate(static_cast<char16_t>(0xD800)));
     EXPECT_TRUE(Char::IsHighSurrogate(static_cast<char16_t>(0xDBFF)));
