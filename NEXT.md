@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-11 (branch: develop) — session 38*
+*Last updated: 2026-06-12 (branch: develop) — session 39*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Remaining gaps are low-priority stubs (`TimeZoneInfo`, `AppDomain/GC`) — implement only when CNA actually needs them.
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Remaining gaps are low-priority stubs (`TimeZoneInfo`, `GC`) — implement only when CNA actually needs them.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 2999 tests pass** — `./build/SharpRuntimeTests` → `2999 tests from 444 test suites` ✅
+- **All 3001 tests pass** — `./build/SharpRuntimeTests` → `3001 tests from 444 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
@@ -76,7 +76,8 @@
 | `System::Net::Sockets::NetworkStream` | ✅ DONE | wraps socket fd as `System::IO::Stream` |
 | `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool |
 | `System::TimeZoneInfo` | ⚠️ PARTIAL | UTC, Local, few hardcoded zones only |
-| `System::AppDomain/AppContext/GC` | ⚠️ STUB | minimal stubs only |
+| `System::AppDomain/AppContext` | ✅ DONE | BaseDirectory via /proc/self/exe (Task 52) |
+| `System::GC` | ⚠️ STUB | no-op stub only |
 
 ---
 
@@ -87,7 +88,7 @@
 | **by design** | `Thread::Start()` — no-op; thread starts eagerly in constructor (documented) |
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
 | **incomplete** | `TimeZoneInfo::FindSystemTimeZoneById()` — UTC, Local, few hardcoded zones |
-| **incomplete** | `AppDomain`, `AppContext`, `GC` — stubs only |
+| **incomplete** | `GC` — no-op stub only |
 | **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
 | **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic, harmless) |
 
@@ -123,7 +124,7 @@ src/                                    ← .cpp for all non-template complex ty
   System/Xml/XmlReader.cpp, XmlWriter.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 74 GoogleTest files, 2999 tests
+tests/                                  ← 74 GoogleTest files, 3001 tests
 ```
 
 ### Invariants that must not be broken
@@ -186,16 +187,11 @@ git log --oneline -10
 | 48 | 38 | Implement `TcpClient/TcpListener/UdpClient/NetworkStream` via POSIX sockets | 2988 → 2995 |
 | 50 | 38 | `Thread::Start()` (no-op, .NET compat) + `getManagedThreadIdProperty()` on instance | 2995 → 2999 |
 | 51 | 38 | Move `XxHash32`/`XxHash64` bodies to `.cpp`; hpp→cpp migration now complete | — |
+| 52 | 39 | `AppDomain.BaseDirectory` + `AppContext.getBaseDirProperty()` via `/proc/self/exe` | 2999 → 3001 |
 
 ---
 
 ## 8. Next tasks (priority order)
-
-### Task 52 — `AppDomain.CurrentDomain.BaseDirectory` (when CNA needs it)
-
-`AppDomain` and `AppContext` are stubs. The most likely real need is
-`AppDomain.CurrentDomain.BaseDirectory` for asset path resolution in the game engine.
-`GC` can stay a no-op stub indefinitely.
 
 ### Task 53 — `TimeZoneInfo` expansion (when CNA needs it)
 
@@ -224,14 +220,14 @@ decoding needed if game content uses non-ASCII characters in string parsing path
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46–51 are all done. All 2999 tests pass. Zero errors, zero warnings.
-> Networking (TcpClient/TcpListener/UdpClient/NetworkStream) is implemented via POSIX sockets.
+> Read NEXT.md — Tasks 46–52 are all done. All 3001 tests pass. Zero errors, zero warnings.
+> Networking (TcpClient/TcpListener/UdpClient/NetworkStream) implemented via POSIX sockets.
 > Thread::Start() and ManagedThreadId implemented. XxHash32/64 moved to .cpp.
-> hpp→cpp migration is complete for all non-template types.
-> Remaining gaps: `AppDomain/BaseDirectory`, `TimeZoneInfo`, `Char::Parse UTF-8` —
-> implement only when CNA actually needs them.
+> AppDomain.BaseDirectory and AppContext.getBaseDirProperty() return real exe directory.
+> hpp→cpp migration complete for all non-template types.
+> Remaining gaps: `TimeZoneInfo`, `Char::Parse UTF-8` — implement only when CNA actually needs them.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 2999 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3001 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
