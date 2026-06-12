@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include "System/IO/RandomAccess.hpp"
+#include <stdexcept>
+
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <io.h>       // _get_osfhandle, _chsize_s
+namespace {
+    // CRT fd → Win32 HANDLE
+    inline HANDLE hOf(int fd) { return reinterpret_cast<HANDLE>(_get_osfhandle(fd)); }
+}
+#elif defined(__EMSCRIPTEN__)
+#  include "System/PlatformNotSupportedException.hpp"
+#else
+#  include <unistd.h>   // pread, pwrite, lseek, ftruncate, fsync
+#endif
+
+namespace System::IO {
+
+int64_t RandomAccess::GetLength(int fd) {
+#if defined(__EMSCRIPTEN__)
+    throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
+#elif defined(_WIN32)
+    LARGE_INTEGER sz{};
+    if (!GetFileSizeEx(hOf(fd), &sz))
+        throw std::runtime_error("RandomAccess::GetLength failed");
+    return static_cast<int64_t>(sz.QuadPart);
+#else
+    off_t pos = lseek(fd, 0, SEEK_CUR);
+    off_t len = lseek(fd, 0, SEEK_END);
+    lseek(fd, pos, SEEK_SET);
+    return static_cast<int64_t>(len);
+#endif
+}
+
+void RandomAccess::SetLength(int fd, int64_t length) {
+#if defined(__EMSCRIPTEN__)
+    throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
+#elif defined(_WIN32)
+    LARGE_INTEGER li{};
+    li.QuadPart = length;
+    if (!SetFilePointerEx(hOf(fd), li, nullptr, FILE_BEGIN) || !SetEndOfFile(hOf(fd)))
+        throw std::runtime_error("RandomAccess::SetLength failed");
+#else
+    if (ftruncate(fd, static_cast<off_t>(length)) != 0)
+        throw std::runtime_error("RandomAccess::SetLength failed");
+#endif
+}
+
+intcs RandomAccess::Read(int fd, std::vector<bytecs>& buffer, int64_t fileOffset) {
+    return Read(fd, buffer.data(), static_cast<intcs>(buffer.size()), fileOffset);
+}
+
+intcs RandomAccess::Read(int fd, bytecs* buffer, intcs count, int64_t fileOffset) {
+#if defined(__EMSCRIPTEN__)
+    throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
+#elif defined(_WIN32)
+    OVERLAPPED ov{};
+    ov.Offset     = static_cast<DWORD>(fileOffset & 0xFFFFFFFFLL);
+    ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
+    DWORD nRead = 0;
+    if (!ReadFile(hOf(fd), buffer, static_cast<DWORD>(count), &nRead, &ov))
+        throw std::runtime_error("RandomAccess::Read failed");
+    return static_cast<intcs>(nRead);
+#else
+    ssize_t n = pread(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
+    if (n < 0) throw std::runtime_error("RandomAccess::Read failed");
+    return static_cast<intcs>(n);
+#endif
+}
+
+void RandomAccess::Write(int fd, const std::vector<bytecs>& buffer, int64_t fileOffset) {
+    Write(fd, buffer.data(), static_cast<intcs>(buffer.size()), fileOffset);
+}
+
+void RandomAccess::Write(int fd, const bytecs* buffer, intcs count, int64_t fileOffset) {
+#if defined(__EMSCRIPTEN__)
+    throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
+#elif defined(_WIN32)
+    OVERLAPPED ov{};
+    ov.Offset     = static_cast<DWORD>(fileOffset & 0xFFFFFFFFLL);
+    ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
+    DWORD nWritten = 0;
+    if (!WriteFile(hOf(fd), buffer, static_cast<DWORD>(count), &nWritten, &ov))
+        throw std::runtime_error("RandomAccess::Write failed");
+#else
+    ssize_t n = pwrite(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
+    if (n < 0) throw std::runtime_error("RandomAccess::Write failed");
+#endif
+}
+
+void RandomAccess::FlushToDisk(int fd) {
+#if defined(__EMSCRIPTEN__)
+    throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
+#elif defined(_WIN32)
+    if (!FlushFileBuffers(hOf(fd)))
+        throw std::runtime_error("RandomAccess::FlushToDisk failed");
+#else
+    if (fsync(fd) != 0) throw std::runtime_error("RandomAccess::FlushToDisk failed");
+#endif
+}
+
+} // namespace System::IO

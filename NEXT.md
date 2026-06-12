@@ -71,13 +71,13 @@
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
 | `System::Threading::Thread` | ✅ DONE | Join, IsAlive, Start() starts once (throws on second call), ManagedThreadId |
-| `System::Net::Sockets::TcpClient/TcpListener` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
-| `System::Net::Sockets::UdpClient` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
-| `System::Net::Sockets::NetworkStream` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
-| `System::IO::RandomAccess` | ⚠️ POSIX-only | pread/pwrite/fsync — Linux/macOS only |
+| `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
+| `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
+| `System::Net::Sockets::NetworkStream` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
+| `System::IO::RandomAccess` | ✅ DONE | POSIX pread/pwrite; Win32 OVERLAPPED ReadFile/WriteFile; Emscripten throws |
 | `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool; data race fixed via shared_ptr state |
-| `System::TimeZoneInfo` | ⚠️ POSIX-only | Local() reads real offset; FindSystemTimeZoneById() via /usr/share/zoneinfo (POSIX) |
-| `System::AppDomain/AppContext` | ⚠️ Linux-only | BaseDirectory via /proc/self/exe — Linux only |
+| `System::TimeZoneInfo` | ✅ DONE | POSIX localtime_r; Windows GetTimeZoneInformation; Emscripten returns UTC |
+| `System::AppDomain/AppContext` | ✅ DONE | Linux /proc/self/exe; macOS _NSGetExecutablePath; Windows GetModuleFileNameW; Emscripten ./ |
 | `System::GC` | ⚠️ STUB | no-op stub only |
 
 ---
@@ -86,10 +86,6 @@
 
 | Status | Issue |
 |--------|-------|
-| **POSIX-only** | `TcpClient`, `TcpListener`, `UdpClient`, `NetworkStream` — POSIX sockets; needs Winsock for Windows |
-| **POSIX-only** | `RandomAccess` — `pread`/`pwrite`/`fsync`; needs Win32 for Windows |
-| **Linux-only** | `AppDomain/AppContext.BaseDirectory` — `/proc/self/exe` |
-| **POSIX-only** | `TimeZoneInfo.FindSystemTimeZoneById` — `/usr/share/zoneinfo` |
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
 | **incomplete** | `GC` — no-op stub only |
 
@@ -193,6 +189,7 @@ git log --oneline -10
 | 54 | 39 | `Char::Parse` + `Char::ToString` full UTF-8 multi-byte support (1–3 byte BMP) | 3004 → 3010 |
 | 55–69 | 40 | Gap analysis + implement: Argb/Rgba, ArrayList, Hashtable, RandomAccess, Ascii, TextInfo, TextElementEnumerator, SortKey, CompareInfo, CharUnicodeInfo, DateTimeFormatInfo, JulianCalendar, ThaiBuddhistCalendar, TaiwanCalendar, PersianCalendar, Vector2/3/4, Matrix3x2/4x4, Quaternion, Plane | 3010 → 3080 |
 | 72 | 41 | Portability+quality fixes: Char.hpp NUL warning, Thread deferred-start (Start() once; 2nd throws), Task data race (shared_ptr<State>), CMakeLists.txt GTest guard, CLAUDE.md, NEXT.md honest status | — |
+| 73 | 41 | Portability: Networking (Winsock2+Emscripten paths), RandomAccess (Win32 OVERLAPPED), AppDomain (Win/macOS/Emscripten), TimeZoneInfo (Win/Emscripten), public headers free of POSIX includes | — |
 
 ---
 

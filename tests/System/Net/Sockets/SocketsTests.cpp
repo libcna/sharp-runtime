@@ -4,14 +4,17 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <stdexcept>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include "System/NotSupportedException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/NetworkStream.hpp"
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/Net/Sockets/UdpClient.hpp"
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#  include <sys/socket.h>
+#  include <sys/un.h>
+#  include <unistd.h>
+#endif
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
@@ -158,11 +161,12 @@ TEST(UdpClientTests, Close_NoThrow) {
 }
 
 // ===========================================================================
-// NetworkStream
+// NetworkStream — POSIX-only tests (socketpair is not available on Windows/Emscripten)
 // ===========================================================================
 
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
 TEST(NetworkStreamTests, CanRead_True) {
-    // Use a socket pair so we have valid fds.
     int fds[2];
     ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     NetworkStream ns(fds[0]);
@@ -213,3 +217,5 @@ TEST(NetworkStreamTests, CanRead_False_AfterClose) {
     ns.Close();
     EXPECT_FALSE(ns.getCanReadProperty());
 }
+
+#endif // !_WIN32 && !__EMSCRIPTEN__
