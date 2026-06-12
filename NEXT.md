@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-12 (branch: develop) — session 40 (final)*
+*Last updated: 2026-06-12 (branch: develop) — session 41*
 
 ---
 
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 465 test suites` ✅
+- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 466 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 77 test files in `tests/`
 
 ### Vendored libraries
@@ -70,13 +70,14 @@
 | `System::Uri` | ✅ DONE | full parsing |
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
-| `System::Threading::Thread` | ✅ DONE | Join, IsAlive, Start (no-op), ManagedThreadId |
-| `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX sockets, port-0 auto-assign |
-| `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX SOCK_DGRAM, send/recvfrom |
-| `System::Net::Sockets::NetworkStream` | ✅ DONE | wraps socket fd as `System::IO::Stream` |
-| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool |
-| `System::TimeZoneInfo` | ✅ DONE | Local() reads real offset; FindSystemTimeZoneById() resolves IANA via zoneinfo (Task 53) |
-| `System::AppDomain/AppContext` | ✅ DONE | BaseDirectory via /proc/self/exe (Task 52) |
+| `System::Threading::Thread` | ✅ DONE | Join, IsAlive, Start() starts once (throws on second call), ManagedThreadId |
+| `System::Net::Sockets::TcpClient/TcpListener` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
+| `System::Net::Sockets::UdpClient` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
+| `System::Net::Sockets::NetworkStream` | ⚠️ POSIX-only | Linux/macOS only; needs Winsock for Windows |
+| `System::IO::RandomAccess` | ⚠️ POSIX-only | pread/pwrite/fsync — Linux/macOS only |
+| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool; data race fixed via shared_ptr state |
+| `System::TimeZoneInfo` | ⚠️ POSIX-only | Local() reads real offset; FindSystemTimeZoneById() via /usr/share/zoneinfo (POSIX) |
+| `System::AppDomain/AppContext` | ⚠️ Linux-only | BaseDirectory via /proc/self/exe — Linux only |
 | `System::GC` | ⚠️ STUB | no-op stub only |
 
 ---
@@ -85,10 +86,12 @@
 
 | Status | Issue |
 |--------|-------|
-| **by design** | `Thread::Start()` — no-op; thread starts eagerly in constructor (documented) |
+| **POSIX-only** | `TcpClient`, `TcpListener`, `UdpClient`, `NetworkStream` — POSIX sockets; needs Winsock for Windows |
+| **POSIX-only** | `RandomAccess` — `pread`/`pwrite`/`fsync`; needs Win32 for Windows |
+| **Linux-only** | `AppDomain/AppContext.BaseDirectory` — `/proc/self/exe` |
+| **POSIX-only** | `TimeZoneInfo.FindSystemTimeZoneById` — `/usr/share/zoneinfo` |
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
 | **incomplete** | `GC` — no-op stub only |
-| **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic, harmless) |
 
 ---
 
@@ -189,6 +192,7 @@ git log --oneline -10
 | 53 | 39 | `TimeZoneInfo::Local()` real offset; `FindSystemTimeZoneById()` IANA via `/usr/share/zoneinfo` | 3001 → 3004 |
 | 54 | 39 | `Char::Parse` + `Char::ToString` full UTF-8 multi-byte support (1–3 byte BMP) | 3004 → 3010 |
 | 55–69 | 40 | Gap analysis + implement: Argb/Rgba, ArrayList, Hashtable, RandomAccess, Ascii, TextInfo, TextElementEnumerator, SortKey, CompareInfo, CharUnicodeInfo, DateTimeFormatInfo, JulianCalendar, ThaiBuddhistCalendar, TaiwanCalendar, PersianCalendar, Vector2/3/4, Matrix3x2/4x4, Quaternion, Plane | 3010 → 3080 |
+| 72 | 41 | Portability+quality fixes: Char.hpp NUL warning, Thread deferred-start (Start() once; 2nd throws), Task data race (shared_ptr<State>), CMakeLists.txt GTest guard, CLAUDE.md, NEXT.md honest status | — |
 
 ---
 

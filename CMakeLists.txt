@@ -49,6 +49,11 @@ elseif(ANDROID AND TARGET SDL3::SDL3-static)
 endif()
 
 if(SHARP_RUNTIME_BUILD_TESTS)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/googletest/CMakeLists.txt")
+        message(FATAL_ERROR
+            "vendor/googletest is missing.\n"
+            "Run: git submodule update --init --recursive")
+    endif()
     add_subdirectory(vendor/googletest)
 
     enable_testing()
