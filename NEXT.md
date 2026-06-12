@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-12 (branch: develop) — session 39*
+*Last updated: 2026-06-12 (branch: develop) — session 39 (final)*
 
 ---
 
@@ -30,7 +30,7 @@
 - One pre-existing cosmetic warning: `Char.hpp:16` — null character in `u' '` literal (harmless)
 
 ### Tests
-- **All 3004 tests pass** — `./build/SharpRuntimeTests` → `3004 tests from 444 test suites` ✅
+- **All 3010 tests pass** — `./build/SharpRuntimeTests` → `3010 tests from 444 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 
 ### Vendored libraries
@@ -87,9 +87,7 @@
 |--------|-------|
 | **by design** | `Thread::Start()` — no-op; thread starts eagerly in constructor (documented) |
 | **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
-| **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
 | **incomplete** | `GC` — no-op stub only |
-| **incomplete** | `Char::Parse(string)` — 1-byte ASCII only, no multi-byte UTF-8 |
 | **known warning** | `Char.hpp:16` — null character in `u' '` literal (cosmetic, harmless) |
 
 ---
@@ -124,7 +122,7 @@ src/                                    ← .cpp for all non-template complex ty
   System/Xml/XmlReader.cpp, XmlWriter.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 74 GoogleTest files, 3004 tests
+tests/                                  ← 74 GoogleTest files, 3010 tests
 ```
 
 ### Invariants that must not be broken
@@ -189,15 +187,14 @@ git log --oneline -10
 | 51 | 38 | Move `XxHash32`/`XxHash64` bodies to `.cpp`; hpp→cpp migration now complete | — |
 | 52 | 39 | `AppDomain.BaseDirectory` + `AppContext.getBaseDirProperty()` via `/proc/self/exe` | 2999 → 3001 |
 | 53 | 39 | `TimeZoneInfo::Local()` real offset; `FindSystemTimeZoneById()` IANA via `/usr/share/zoneinfo` | 3001 → 3004 |
+| 54 | 39 | `Char::Parse` + `Char::ToString` full UTF-8 multi-byte support (1–3 byte BMP) | 3004 → 3010 |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-### Task 54 — `Char::Parse` / UTF-8 multi-byte support (when CNA needs it)
-
-`Char::Parse(string)` currently handles 1-byte ASCII only. Multi-byte UTF-8
-decoding needed if game content uses non-ASCII characters in string parsing paths.
+No planned tasks — all identified gaps (Tasks 46–54) are implemented.
+Next tasks will be defined when CNA integration reveals missing API surface.
 
 ---
 
@@ -215,15 +212,15 @@ decoding needed if game content uses non-ASCII characters in string parsing path
 
 > Working directory: `/rv/data/development/github.com/openeggbert/sharp-runtime`. Branch: `develop`.
 >
-> Read NEXT.md — Tasks 46–53 are all done. All 3004 tests pass. Zero errors, zero warnings.
+> Read NEXT.md — Tasks 46–54 are all done. All 3010 tests pass. Zero errors, zero warnings.
 > Networking (TcpClient/TcpListener/UdpClient/NetworkStream) implemented via POSIX sockets.
 > Thread::Start() and ManagedThreadId implemented. XxHash32/64 moved to .cpp.
 > AppDomain.BaseDirectory and AppContext.getBaseDirProperty() return real exe directory.
 > TimeZoneInfo::Local() reads real system offset; FindSystemTimeZoneById() resolves IANA zones.
-> hpp→cpp migration complete for all non-template types.
-> Remaining gap: `Char::Parse UTF-8` — implement only when CNA actually needs it.
+> Char::Parse and ToString support full UTF-8 multi-byte (BMP). hpp→cpp migration complete.
+> No further planned tasks — next gaps will emerge from CNA integration.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3004 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3010 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
