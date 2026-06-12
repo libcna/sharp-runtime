@@ -332,7 +332,14 @@ TEST(UInt64Tests, ToString) {
 // ===========================================================================
 
 TEST(AppContextTests, BaseDirProperty) {
-    EXPECT_EQ(System::AppContext::getBaseDirProperty(), ".");
+    const auto& dir = System::AppContext::getBaseDirProperty();
+    EXPECT_FALSE(dir.empty());
+    EXPECT_EQ(dir.back(), '/');
+}
+
+TEST(AppContextTests, BaseDirProperty_MatchesAppDomain) {
+    EXPECT_EQ(System::AppContext::getBaseDirProperty(),
+              System::AppDomain::CurrentDomain().getBaseDirectoryProperty());
 }
 
 TEST(AppContextTests, SetGetData_RoundTrip) {
@@ -375,6 +382,10 @@ TEST(AppDomainTests, FriendlyName_NotEmpty) {
 
 TEST(AppDomainTests, BaseDirectory_NotEmpty) {
     EXPECT_FALSE(System::AppDomain::CurrentDomain().getBaseDirectoryProperty().empty());
+}
+
+TEST(AppDomainTests, BaseDirectory_EndsWithSlash) {
+    EXPECT_EQ(System::AppDomain::CurrentDomain().getBaseDirectoryProperty().back(), '/');
 }
 
 TEST(AppDomainTests, SetGetData_Stubs_NoThrow) {
