@@ -49,8 +49,10 @@ TEST(TimeZoneInfoTests, Local_DisplayName_NonEmpty) {
     EXPECT_FALSE(TimeZoneInfo::Local().getDisplayNameProperty().empty());
 }
 
-TEST(TimeZoneInfoTests, Local_BaseUtcOffset_IsZero) {
-    EXPECT_TRUE(TimeZoneInfo::Local().getBaseUtcOffsetProperty() == TimeSpan::Zero);
+TEST(TimeZoneInfoTests, Local_BaseUtcOffset_InValidRange) {
+    double hours = TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTotalHoursProperty();
+    EXPECT_GE(hours, -14.0);
+    EXPECT_LE(hours,  14.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +103,25 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_UTC_HasCorrectId) {
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_Unknown_ThrowsInvalidArgument) {
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America/Unknown"),
                  std::invalid_argument);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_PathTraversal_Throws) {
+    EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("../../etc/passwd"),
+                 std::invalid_argument);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EuropePrague_OffsetInRange) {
+    auto tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    double hours = tz->getBaseUtcOffsetProperty().getTotalHoursProperty();
+    // CET=+1, CEST=+2
+    EXPECT_GE(hours, 1.0);
+    EXPECT_LE(hours, 2.0);
+}
+
+TEST(TimeZoneInfoTests, FindSystemTimeZoneById_AmericaNewYork_NegativeOffset) {
+    auto tz = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    double hours = tz->getBaseUtcOffsetProperty().getTotalHoursProperty();
+    EXPECT_LT(hours, 0.0);
 }
 
 // ---------------------------------------------------------------------------
