@@ -17,10 +17,17 @@ The goal of this project is to provide a lightweight, .NET-inspired foundation l
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
-Sharp Runtime is **partly based on the .NET runtime**
-([dotnet/runtime](https://github.com/dotnet/runtime), MIT License, Copyright .NET Foundation and Contributors).
-The public API design of `System::*` types (class names, method signatures, namespace structure) follows the .NET standard library.
-The C++ implementation is original work by Robert Vokac and contributors.
+## Attribution
+
+Sharp Runtime is **partly derived from the .NET runtime**
+([dotnet/runtime](https://github.com/dotnet/runtime), MIT License, © .NET Foundation and Contributors).
+
+Specifically:
+- The **public API design** of `System::*` types — class names, method signatures, namespace structure, and enum values — is based on the .NET standard library.
+- Some **algorithmic implementations** (number formatting, date/time arithmetic, Unicode handling, etc.) are informed by or translated from the dotnet/runtime source code.
+- The **C++ implementation** (headers, `.cpp` bodies, CMake build, tests) is original work by Robert Vokac and contributors.
+
+The dotnet/runtime source is available at https://github.com/dotnet/runtime under the MIT License.
 
 ---
 
