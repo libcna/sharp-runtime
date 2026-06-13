@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 58*
+*Last updated: 2026-06-13 (branch: develop) — session 59*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. Session 54 added String methods (ToUpper, ToLower, IndexOf, LastIndexOf, PadLeft, PadRight), Math completeness (Log2, Sinh/Cosh/Tanh, IEEERemainder, DivRem, BigMul, ScaleB, Tau constant), and Convert hex helpers (ToHexString, FromHexString). Session 55 fixed `TaskT::FromResult` — it previously called the async constructor (which throws on Emscripten); now uses a private pre-completed constructor, safe on all platforms. Task/TaskT now fully DONE. Session 56 added `System::Linq` (header-only, 19 operators: Where/Select/First/FirstOrDefault/LastOrDefault/Any/All/Count/ToList/Sum/Min/Max/OrderBy/OrderByDescending/Distinct/Reverse/Skip/Take/Concat/Contains), enhanced `String::Format` with format specifiers (`{0:X}`, `{0:D3}`, `{0:F2}`, `{0:G}`, `{0:E}`) and multi-arg overloads, completed `Random` (seeded constructor, `NextDouble`, `NextBytes`), and added `Stopwatch::Frequency` and `IsHighResolution`. Session 57 completed `List<T>` (Sort/Reverse/AddRange/InsertRange/GetRange/ToArray/Find/FindAll/FindIndex/FindLastIndex/RemoveAll/ForEach/Exists/TrueForAll/BinarySearch), added `String::Split(vector<char>)` and `String::Split(string)` overloads, and refreshed COVERAGE.md statistics (PARTIAL ~60→~1, STUB ~15→~1). Session 58 added `DateTime::ToString(format)` (single-pass scanner supporting all standard tokens), `DateTime::Parse`/`TryParse` (ISO-8601 with optional time and fractional seconds), `Dictionary<K,V>` completion (`TryAdd`, `ContainsValue`, `GetValueOrDefault`, `getKeysProperty`, `getValuesProperty`), and `StringBuilder::AppendFormat` (8 overloads delegating to `String::Format`). 3406 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. Session 54 added String methods (ToUpper, ToLower, IndexOf, LastIndexOf, PadLeft, PadRight), Math completeness (Log2, Sinh/Cosh/Tanh, IEEERemainder, DivRem, BigMul, ScaleB, Tau constant), and Convert hex helpers (ToHexString, FromHexString). Session 55 fixed `TaskT::FromResult` — it previously called the async constructor (which throws on Emscripten); now uses a private pre-completed constructor, safe on all platforms. Task/TaskT now fully DONE. Session 56 added `System::Linq` (header-only, 19 operators: Where/Select/First/FirstOrDefault/LastOrDefault/Any/All/Count/ToList/Sum/Min/Max/OrderBy/OrderByDescending/Distinct/Reverse/Skip/Take/Concat/Contains), enhanced `String::Format` with format specifiers (`{0:X}`, `{0:D3}`, `{0:F2}`, `{0:G}`, `{0:E}`) and multi-arg overloads, completed `Random` (seeded constructor, `NextDouble`, `NextBytes`), and added `Stopwatch::Frequency` and `IsHighResolution`. Session 57 completed `List<T>` (Sort/Reverse/AddRange/InsertRange/GetRange/ToArray/Find/FindAll/FindIndex/FindLastIndex/RemoveAll/ForEach/Exists/TrueForAll/BinarySearch), added `String::Split(vector<char>)` and `String::Split(string)` overloads, and refreshed COVERAGE.md statistics (PARTIAL ~60→~1, STUB ~15→~1). Session 58 added `DateTime::ToString(format)` (single-pass scanner supporting all standard tokens), `DateTime::Parse`/`TryParse` (ISO-8601 with optional time and fractional seconds), `Dictionary<K,V>` completion (`TryAdd`, `ContainsValue`, `GetValueOrDefault`, `getKeysProperty`, `getValuesProperty`), and `StringBuilder::AppendFormat` (8 overloads delegating to `String::Format`). Session 59 completed `TimeSpan` (`Parse`/`TryParse`, `ToString(format)`), `DateOnly` (`AddDays`/`AddMonths`/`AddYears` via JDN arithmetic, `FromDateTime`, `Parse`/`TryParse`, `ToString(format)`), `TimeOnly` (`AddHours`/`AddMinutes` modular, `FromTimeSpan`/`ToTimeSpan`, `FromDateTime`, `Parse`/`TryParse`, `ToString(format)`), `HashSet<T>` set algebra (`SetEquals`, `SymmetricExceptWith`, `IsSubsetOf`/`IsSupersetOf`/`IsProperSubsetOf`/`IsProperSupersetOf`), and `String::Format` `bool`/`char` overloads. 3459 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -31,8 +31,8 @@
 - Zero errors, zero warnings
 
 ### Tests
-- **All 3406 tests pass** — `./build/SharpRuntimeTests` → `3406 tests from 480 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 75 test files in `tests/`
+- **All 3459 tests pass** — `./build/SharpRuntimeTests` → `3459 tests from 480 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 77 test files in `tests/`
 - CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 
 ### Vendored libraries
@@ -69,6 +69,9 @@
 | `System::Text::Json` | ✅ DONE | backed by nlohmann/json |
 | `System::Text::StringBuilder` | ✅ DONE | Insert, Remove, Replace, Append(long), AppendFormat (8 overloads) |
 | `System::DateTime` | ✅ DONE | Year/Month/Day/etc., Add*, Today/Now, ISO-8601 ToString, ToString(format), Parse, TryParse; gmtime_r/gmtime_s guarded |
+| `System::DateOnly` | ✅ DONE | AddDays/AddMonths/AddYears (JDN), FromDateTime, Parse, TryParse, ToString(format) |
+| `System::TimeOnly` | ✅ DONE | AddHours/AddMinutes (modular), FromTimeSpan/ToTimeSpan, FromDateTime, Parse, TryParse, ToString(format) |
+| `System::TimeSpan` | ✅ DONE | From*/Duration/Add/Subtract/Multiply/Divide; Parse, TryParse, ToString(format) |
 | `System::Decimal` | ✅ DONE | full arithmetic |
 | `System::Uri` | ✅ DONE | full parsing |
 | `System::Numerics::BigInteger` | ✅ DONE | +/−/×/÷/%, TryParse, Knuth Algorithm D |
@@ -145,7 +148,7 @@ src/                                    ← .cpp for all non-template complex ty
   SharpRuntime/Storage/StoragePaths.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 76 GoogleTest files, 3406 tests
+tests/                                  ← 77 GoogleTest files, 3459 tests
 ```
 
 ### Platform portability rules (enforced)
@@ -253,6 +256,7 @@ git log --oneline -10
 | 89 | 56 | `System::Linq` (new, header-only): Where/Select/First/FirstOrDefault/LastOrDefault/Any/All/Count/ToList/Sum/Min/Max/OrderBy/OrderByDescending/Distinct/Reverse/Skip/Take/Concat/Contains; `String::Format` specifiers ({0:X}/{0:D3}/{0:F2}/{0:G}/{0:E}) + multi-arg; `Random`: seeded ctor/NextDouble/NextBytes; `Stopwatch`: Frequency/IsHighResolution | +65 |
 | 90 | 57 | `List<T>`: Sort/Reverse/AddRange/InsertRange/GetRange/ToArray/Find/FindAll/FindIndex/FindLastIndex/RemoveAll/ForEach/Exists/TrueForAll/BinarySearch; `String::Split(vector<char>)`/`Split(string)`; COVERAGE.md stats refreshed (PARTIAL ~60→~1, STUB ~15→~1) | +27 |
 | 91 | 58 | `DateTime::ToString(format)` (single-pass scanner), `DateTime::Parse`/`TryParse` (ISO-8601 + optional time/ms); `Dictionary<K,V>`: TryAdd/ContainsValue/GetValueOrDefault/getKeysProperty/getValuesProperty; `StringBuilder::AppendFormat` (8 overloads delegating to String::Format) | +34 |
+| 92 | 59 | `TimeSpan`: Parse/TryParse/ToString(format); `DateOnly`: AddDays/AddMonths/AddYears (JDN), FromDateTime, Parse/TryParse, ToString(format); `TimeOnly`: AddHours/AddMinutes (modular), FromTimeSpan/ToTimeSpan, FromDateTime, Parse/TryParse, ToString(format); `HashSet<T>`: SetEquals/SymmetricExceptWith/IsSubsetOf/IsSupersetOf/IsProperSubsetOf/IsProperSupersetOf; `String::Format` bool/char overloads | +53 |
 
 ---
 
@@ -302,8 +306,9 @@ All fixable gaps resolved. Remaining known limitations (intentionally out of sco
 > Session 56: `System::Linq` (19 operators, header-only); `String::Format` specifiers + multi-arg; `Random` seeded ctor/NextDouble/NextBytes; `Stopwatch` Frequency/IsHighResolution (+65 tests).
 > Session 57: `List<T>` completed (Sort/Reverse/AddRange/InsertRange/GetRange/ToArray/Find/FindAll/FindIndex/FindLastIndex/RemoveAll/ForEach/Exists/TrueForAll/BinarySearch); `String::Split(vector<char>)`/`Split(string)`; COVERAGE.md stats refreshed (+27 tests).
 > Session 58: `DateTime::ToString(format)` (single-pass scanner), `DateTime::Parse`/`TryParse` (ISO-8601 + optional time/fractional seconds); `Dictionary<K,V>` (TryAdd/ContainsValue/GetValueOrDefault/getKeysProperty/getValuesProperty); `StringBuilder::AppendFormat` (8 overloads) (+34 tests).
+> Session 59: `TimeSpan` Parse/TryParse/ToString(format); `DateOnly` AddDays/AddMonths/AddYears/FromDateTime/Parse/TryParse/ToString(format); `TimeOnly` AddHours/AddMinutes/FromTimeSpan/ToTimeSpan/FromDateTime/Parse/TryParse/ToString(format); `HashSet<T>` SetEquals/SymmetricExceptWith/IsSubsetOf/IsSupersetOf/IsProperSubsetOf/IsProperSupersetOf; `String::Format` bool/char overloads (+53 tests).
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3406 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3459 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
