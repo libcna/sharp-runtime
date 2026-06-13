@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <climits>
 #include <cwctype>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -64,7 +65,9 @@ public:
     }
 
     static UnicodeCategory GetUnicodeCategory(intcs codePoint) {
-        wchar_t wc = static_cast<wchar_t>(codePoint);
+        // wchar_t is 16-bit on Windows; clamp non-BMP code points to avoid narrowing UB.
+        wchar_t wc = (codePoint >= 0 && codePoint <= WCHAR_MAX)
+                     ? static_cast<wchar_t>(codePoint) : L'\0';
         if (std::iswupper(wc)) return UnicodeCategory::UppercaseLetter;
         if (std::iswlower(wc)) return UnicodeCategory::LowercaseLetter;
         if (std::iswdigit(wc)) return UnicodeCategory::DecimalDigitNumber;
