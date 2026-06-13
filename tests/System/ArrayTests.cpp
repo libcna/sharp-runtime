@@ -211,3 +211,52 @@ TEST(ArrayTests, Clear_ZeroLength_NoChange) {
     Array::Clear(v, 0, 0);
     EXPECT_EQ(v, (std::vector<int>{5, 6, 7}));
 }
+
+// --- BinarySearch ---
+
+TEST(ArrayTests, BinarySearch_Found_ReturnsIndex) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    EXPECT_EQ(Array::BinarySearch(v, 5), 2);
+}
+
+TEST(ArrayTests, BinarySearch_FirstElement) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    EXPECT_EQ(Array::BinarySearch(v, 1), 0);
+}
+
+TEST(ArrayTests, BinarySearch_LastElement) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    EXPECT_EQ(Array::BinarySearch(v, 9), 4);
+}
+
+TEST(ArrayTests, BinarySearch_NotFound_NegativeComplement) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    int r = Array::BinarySearch(v, 4);
+    EXPECT_LT(r, 0); // not found → negative
+}
+
+TEST(ArrayTests, BinarySearch_EmptyVector_ReturnsNegative) {
+    std::vector<int> v;
+    EXPECT_LT(Array::BinarySearch(v, 1), 0);
+}
+
+// --- Fill ---
+
+TEST(ArrayTests, Fill_EntireVector) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    Array::Fill(v, 0);
+    EXPECT_EQ(v, (std::vector<int>{0, 0, 0, 0, 0}));
+}
+
+TEST(ArrayTests, Fill_Range) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    Array::Fill(v, 9, 1, 3);
+    EXPECT_EQ(v, (std::vector<int>{1, 9, 9, 9, 5}));
+}
+
+TEST(ArrayTests, Fill_StringVector) {
+    std::vector<std::string> v(3);
+    Array::Fill(v, std::string("x"));
+    EXPECT_EQ(v[0], "x");
+    EXPECT_EQ(v[2], "x");
+}

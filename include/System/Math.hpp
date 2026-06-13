@@ -255,5 +255,32 @@ namespace System
 
         /// @brief Returns @p x multiplied by 2 raised to the power @p n (scalbn).
         [[nodiscard]] static double ScaleB(double x, intcs n);
+
+        /// @brief Returns the cube root of @p x.
+        [[nodiscard]] static double Cbrt(double x);
+
+        /// @brief Returns the angle whose hyperbolic cosine is @p d.
+        [[nodiscard]] static double Acosh(double d);
+
+        /// @brief Returns the angle whose hyperbolic sine is @p d.
+        [[nodiscard]] static double Asinh(double d);
+
+        /// @brief Returns the angle whose hyperbolic tangent is @p d.
+        [[nodiscard]] static double Atanh(double d);
+
+        /// @brief Rounds @p value to @p digits decimal places using banker's rounding.
+        [[nodiscard]] static double Round(double value, intcs digits);
+
+        /// @brief Returns a value with the magnitude of @p x and the sign of @p y.
+        [[nodiscard]] static double CopySign(double x, double y);
+
+        /// @brief Returns the smallest value greater than @p x.
+        [[nodiscard]] static double BitIncrement(double x);
+
+        /// @brief Returns the largest value less than @p x.
+        [[nodiscard]] static double BitDecrement(double x);
+
+        /// @brief Returns @p x × @p y + @p z computed as a single fused operation.
+        [[nodiscard]] static double FusedMultiplyAdd(double x, double y, double z);
     };
 }

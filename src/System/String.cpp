@@ -372,4 +372,20 @@ namespace System
         return value + std::string(static_cast<size_t>(totalWidth) - value.size(), paddingChar);
     }
 
+    SharpRuntime::intcs String::IndexOfAny(const std::string& value, const std::vector<char>& anyOf)
+    {
+        for (SharpRuntime::intcs i = 0; i < static_cast<SharpRuntime::intcs>(value.size()); ++i)
+            for (char c : anyOf)
+                if (value[static_cast<size_t>(i)] == c) return i;
+        return -1;
+    }
+
+    SharpRuntime::intcs String::LastIndexOfAny(const std::string& value, const std::vector<char>& anyOf)
+    {
+        for (SharpRuntime::intcs i = static_cast<SharpRuntime::intcs>(value.size()) - 1; i >= 0; --i)
+            for (char c : anyOf)
+                if (value[static_cast<size_t>(i)] == c) return i;
+        return -1;
+    }
+
 }

@@ -135,5 +135,9 @@ namespace System::Text
         /// @brief Appends a formatted string with two double arguments.
         StringBuilder& AppendFormat(const std::string& format, double arg0, double arg1)
             { return Append(System::String::Format(format, arg0, arg1)); }
+
+        /// @brief Appends elements of @p values joined by @p separator.
+        StringBuilder& AppendJoin(const std::string& separator, const std::vector<std::string>& values)
+            { return Append(System::String::Join(separator, values)); }
     };
 }

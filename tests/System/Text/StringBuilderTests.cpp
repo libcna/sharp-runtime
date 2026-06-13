@@ -373,3 +373,25 @@ TEST(StringBuilderTests, AppendFormat_Chained) {
       .AppendFormat(" y={0}", 2);
     EXPECT_EQ(sb.ToString(), "x=1 y=2");
 }
+
+// --- AppendJoin ---
+TEST(StringBuilderTests, AppendJoin_CommaSeparated) {
+    StringBuilder sb;
+    sb.AppendJoin(", ", {"a", "b", "c"});
+    EXPECT_EQ(sb.ToString(), "a, b, c");
+}
+TEST(StringBuilderTests, AppendJoin_SingleElement) {
+    StringBuilder sb;
+    sb.AppendJoin("-", {"only"});
+    EXPECT_EQ(sb.ToString(), "only");
+}
+TEST(StringBuilderTests, AppendJoin_EmptyList) {
+    StringBuilder sb;
+    sb.AppendJoin(",", {});
+    EXPECT_EQ(sb.ToString(), "");
+}
+TEST(StringBuilderTests, AppendJoin_Chained) {
+    StringBuilder sb;
+    sb.Append("ids: ").AppendJoin("|", {"1", "2", "3"});
+    EXPECT_EQ(sb.ToString(), "ids: 1|2|3");
+}

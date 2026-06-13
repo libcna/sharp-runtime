@@ -167,6 +167,12 @@ namespace System
         /// @brief Returns the zero-based index of the last occurrence of @p ch in @p value, or -1 if not found.
         static SharpRuntime::intcs LastIndexOf(const std::string& value, char ch);
 
+        /// @brief Returns the zero-based index of the first occurrence of any character in @p anyOf, or -1.
+        static SharpRuntime::intcs IndexOfAny(const std::string& value, const std::vector<char>& anyOf);
+
+        /// @brief Returns the zero-based index of the last occurrence of any character in @p anyOf, or -1.
+        static SharpRuntime::intcs LastIndexOfAny(const std::string& value, const std::vector<char>& anyOf);
+
         /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);
 

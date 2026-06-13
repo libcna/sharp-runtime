@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace System
@@ -157,4 +158,20 @@ namespace System
     {
         return std::scalbn(x, n);
     }
+
+    double Math::Cbrt(double x)       { return std::cbrt(x); }
+    double Math::Acosh(double d)      { return std::acosh(d); }
+    double Math::Asinh(double d)      { return std::asinh(d); }
+    double Math::Atanh(double d)      { return std::atanh(d); }
+
+    double Math::Round(double value, intcs digits)
+    {
+        double factor = std::pow(10.0, static_cast<double>(digits));
+        return std::round(value * factor) / factor;
+    }
+
+    double Math::CopySign(double x, double y)           { return std::copysign(x, y); }
+    double Math::BitIncrement(double x)                 { return std::nextafter(x, std::numeric_limits<double>::infinity()); }
+    double Math::BitDecrement(double x)                 { return std::nextafter(x, -std::numeric_limits<double>::infinity()); }
+    double Math::FusedMultiplyAdd(double x, double y, double z) { return std::fma(x, y, z); }
 }

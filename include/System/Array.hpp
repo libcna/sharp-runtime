@@ -99,6 +99,34 @@ namespace System {
             for (intcs i = index; i < index + length; ++i)
                 array[i] = T{};
         }
+
+        /// Searches a sorted @p array for @p value using binary search.
+        /// @return Zero-based index if found; bitwise complement of insertion point otherwise.
+        template<typename T>
+        static intcs BinarySearch(const std::vector<T>& array, const T& value) {
+            intcs lo = 0, hi = static_cast<intcs>(array.size()) - 1;
+            while (lo <= hi) {
+                intcs mid = lo + (hi - lo) / 2;
+                if (array[static_cast<size_t>(mid)] == value) return mid;
+                if (array[static_cast<size_t>(mid)] < value)  lo = mid + 1;
+                else                                           hi = mid - 1;
+            }
+            return ~lo; // bitwise complement of insertion point
+        }
+
+        /// Sets every element in @p array to @p value.
+        /// @param array Vector to fill.
+        /// @param value Value to assign to every element.
+        template<typename T>
+        static void Fill(std::vector<T>& array, const T& value) {
+            std::fill(array.begin(), array.end(), value);
+        }
+
+        /// Sets @p length elements in @p array starting at @p startIndex to @p value.
+        template<typename T>
+        static void Fill(std::vector<T>& array, const T& value, intcs startIndex, intcs count) {
+            std::fill(array.begin() + startIndex, array.begin() + startIndex + count, value);
+        }
     };
 
 } // namespace System

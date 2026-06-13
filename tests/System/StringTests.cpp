@@ -316,3 +316,28 @@ TEST(StringTests, Format_Char) {
 TEST(StringTests, Format_CharInSentence) {
     EXPECT_EQ(String::Format("key={0}", 'Z'), "key=Z");
 }
+
+// --- IndexOfAny ---
+TEST(StringTests, IndexOfAny_Found_FirstChar) {
+    EXPECT_EQ(String::IndexOfAny("hello,world", {',', '.', '!'}), 5);
+}
+TEST(StringTests, IndexOfAny_Found_SecondInList) {
+    EXPECT_EQ(String::IndexOfAny("hello world", {'x', ' '}), 5);
+}
+TEST(StringTests, IndexOfAny_NotFound) {
+    EXPECT_EQ(String::IndexOfAny("hello", {',', '.'}), -1);
+}
+TEST(StringTests, IndexOfAny_Empty) {
+    EXPECT_EQ(String::IndexOfAny("", {'a'}), -1);
+}
+
+// --- LastIndexOfAny ---
+TEST(StringTests, LastIndexOfAny_Found) {
+    EXPECT_EQ(String::LastIndexOfAny("hello,world,end", {','}), 11);
+}
+TEST(StringTests, LastIndexOfAny_MultipleChars) {
+    EXPECT_EQ(String::LastIndexOfAny("abc.def/ghi", {'.', '/'}), 7);
+}
+TEST(StringTests, LastIndexOfAny_NotFound) {
+    EXPECT_EQ(String::LastIndexOfAny("hello", {'x', 'z'}), -1);
+}

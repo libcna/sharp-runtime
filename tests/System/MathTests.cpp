@@ -338,3 +338,55 @@ TEST(MathTests, ScaleB_Basic) {
 TEST(MathTests, ScaleB_Negative) {
     EXPECT_NEAR(Math::ScaleB(8.0, -3), 1.0, kEps);
 }
+
+// ---------------------------------------------------------------------------
+// Cbrt
+// ---------------------------------------------------------------------------
+TEST(MathTests, Cbrt_PositivePerfect) { EXPECT_NEAR(Math::Cbrt(27.0),  3.0, 1e-10); }
+TEST(MathTests, Cbrt_NegativeValue)   { EXPECT_NEAR(Math::Cbrt(-8.0), -2.0, 1e-10); }
+TEST(MathTests, Cbrt_Zero)            { EXPECT_EQ(Math::Cbrt(0.0), 0.0); }
+
+// ---------------------------------------------------------------------------
+// Acosh / Asinh / Atanh
+// ---------------------------------------------------------------------------
+TEST(MathTests, Acosh_One)     { EXPECT_NEAR(Math::Acosh(1.0),   0.0,         1e-10); }
+TEST(MathTests, Acosh_Larger)  { EXPECT_NEAR(Math::Acosh(std::cosh(2.0)), 2.0, 1e-10); }
+TEST(MathTests, Asinh_Zero)    { EXPECT_NEAR(Math::Asinh(0.0),   0.0,         1e-10); }
+TEST(MathTests, Asinh_RoundTrip) { EXPECT_NEAR(Math::Asinh(std::sinh(1.5)), 1.5, 1e-10); }
+TEST(MathTests, Atanh_Zero)    { EXPECT_NEAR(Math::Atanh(0.0),   0.0,         1e-10); }
+TEST(MathTests, Atanh_RoundTrip) { EXPECT_NEAR(Math::Atanh(std::tanh(0.7)), 0.7, 1e-10); }
+
+// ---------------------------------------------------------------------------
+// Round(value, digits)
+// ---------------------------------------------------------------------------
+TEST(MathTests, Round_TwoDigits)   { EXPECT_NEAR(Math::Round(3.14159, 2), 3.14, 1e-10); }
+TEST(MathTests, Round_ZeroDigits)  { EXPECT_NEAR(Math::Round(2.7, 0),     3.0,  1e-10); }
+TEST(MathTests, Round_ThreeDigits) { EXPECT_NEAR(Math::Round(1.2345, 3),  1.235, 1e-6); }
+
+// ---------------------------------------------------------------------------
+// CopySign
+// ---------------------------------------------------------------------------
+TEST(MathTests, CopySign_PositiveMag_NegativeSign) { EXPECT_EQ(Math::CopySign(3.0, -1.0), -3.0); }
+TEST(MathTests, CopySign_NegativeMag_PositiveSign) { EXPECT_EQ(Math::CopySign(-5.0, 1.0),  5.0); }
+
+// ---------------------------------------------------------------------------
+// BitIncrement / BitDecrement
+// ---------------------------------------------------------------------------
+TEST(MathTests, BitIncrement_GreaterThanOriginal) {
+    double x = 1.0;
+    EXPECT_GT(Math::BitIncrement(x), x);
+}
+TEST(MathTests, BitDecrement_LessThanOriginal) {
+    double x = 1.0;
+    EXPECT_LT(Math::BitDecrement(x), x);
+}
+
+// ---------------------------------------------------------------------------
+// FusedMultiplyAdd
+// ---------------------------------------------------------------------------
+TEST(MathTests, FusedMultiplyAdd_Basic) {
+    EXPECT_NEAR(Math::FusedMultiplyAdd(2.0, 3.0, 4.0), 10.0, 1e-10);
+}
+TEST(MathTests, FusedMultiplyAdd_Zero) {
+    EXPECT_NEAR(Math::FusedMultiplyAdd(0.0, 99.0, 7.0), 7.0, 1e-10);
+}
