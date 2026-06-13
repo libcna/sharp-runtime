@@ -41,7 +41,7 @@
 | `ArgumentNullException.hpp` | `IGNORE` | Exception marker |
 | `ArgumentOutOfRangeException.hpp` | `IGNORE` | Exception marker |
 | `ArithmeticException.hpp` | `IGNORE` | Exception marker |
-| `Array.hpp` | `PARTIAL` | Missing: `CreateInstance`, `ConvertAll`, `Exists`, `TrueForAll`, `Find`, `FindAll`, `FindIndex`, `FindLast`, `FindLastIndex`, `ForEach`, `ConstrainedCopy`, `AsReadOnly` |
+| `Array.hpp` | `PARTIAL` | Missing: `CreateInstance`, `ConstrainedCopy`; ConvertAll/Exists/Find/FindLast/FindAll/FindIndex/FindLastIndex/ForEach/TrueForAll/LastIndexOf added session 68 |
 | `ArraySegment.hpp` | `TO_CHECK` | Needs audit |
 | `ArrayTypeMismatchException.hpp` | `IGNORE` | Exception marker |
 | `AssemblyLoadEventArgs.hpp` | `IGNORE` | Event args |
@@ -54,7 +54,7 @@
 | `Boolean.hpp` | `PARTIAL` | Missing: `TryParse(span)`, `ToString(IFormatProvider)` — minor |
 | `Buffer.hpp` | `TO_CHECK` | BlockCopy, ByteLength, GetByte, SetByte |
 | `Byte.hpp` | `PARTIAL` | Has Parse/TryParse/MinValue/MaxValue — missing `ToString(format)` |
-| `Char.hpp` | `PARTIAL` | Missing: `IsAscii`, `IsAsciiDigit`, `IsAsciiLetter`, `IsAsciiLetterOrDigit`, `IsAsciiUpper`, `IsAsciiLower`, `GetUnicodeCategory` |
+| `Char.hpp` | `PARTIAL` | ASCII helpers added session 68; still missing: `GetUnicodeCategory` |
 | `CLSCompliantAttribute.hpp` | `IGNORE` | Attribute marker |
 | `Console.hpp` | `PARTIAL` | Has Write/WriteLine; missing `Read`, `ReadKey`, `BackgroundColor`, `ForegroundColor`, `ResetColor`, `SetCursorPosition`, `CursorLeft/Top`, `WindowWidth/Height` |
 | `Convert.hpp` | `PARTIAL` | All numeric conversions done; missing `ToSByte`, `ToDecimal`, `ChangeType` |
@@ -69,7 +69,7 @@
 | `Double.hpp` | `PARTIAL` | Has Parse/TryParse/IsNaN etc. — missing `ToString(format)` |
 | `DuplicateWaitObjectException.hpp` | `IGNORE` | Exception marker |
 | `EntryPointNotFoundException.hpp` | `IGNORE` | Exception marker |
-| `Environment.hpp` | `PARTIAL` | GetCurrentDirectory, ProcessorCount — missing `GetEnvironmentVariable`, `SetEnvironmentVariable`, `GetEnvironmentVariables`, `MachineName`, `UserName`, `OSVersion`, `NewLine` |
+| `Environment.hpp` | `PARTIAL` | GetEnvironmentVariable/NewLine/MachineName/UserName/TickCount64 added session 68; still missing: SetEnvironmentVariable, GetEnvironmentVariables, OSVersion |
 | `EnvironmentVariableTarget.hpp` | `IGNORE` | Enum |
 | `EventArgs.hpp` | `IGNORE` | Base class |
 | `EventHandler.hpp` | `IGNORE` | Delegate typedef |
@@ -81,7 +81,7 @@
 | `FormattableString.hpp` | `STUB` | Not really applicable in C++ |
 | `Func.hpp` | `PORTED` | Typedef for std::function |
 | `GC.hpp` | `STUB` | No-op stubs — intentional |
-| `Guid.hpp` | `PARTIAL` | NewGuid, ToString, ToByteArray — missing `Parse`, `TryParse`, `Empty`, `op==`, constructor from string |
+| `Guid.hpp` | `PORTED` | Parse, TryParse, ToString(format), op==, constructor from string added session 68 |
 | `Half.hpp` | `TO_CHECK` | 16-bit float — needs audit |
 | `HashCode.hpp` | `TO_CHECK` | Combine, Add — needs audit |
 | `IAsyncDisposable.hpp` | `IGNORE` | Interface |
@@ -610,24 +610,25 @@
 
 ## Priority queue for TO_CHECK / PARTIAL files (game dev relevance)
 
-### HIGH priority (most used in XNA/game code)
-1. `Random` — add `NextInt64()` overloads
-2. `Math` — add `DivRem(long)`, `MaxMagnitude`, `MinMagnitude`
-3. `MathF` — add `IsFinite`, `IsNormal`, `IsSubnormal`, `ScaleB`
-4. `List<T>` — add `EnsureCapacity`, `TrimExcess`, `getCapacityProperty`, `ConvertAll`, `AsReadOnly`
-5. `Dictionary<K,V>` — add `EnsureCapacity`, `TrimExcess`, `Remove(key, out value)`
-6. `HashSet<T>` — add `EnsureCapacity`, `TrimExcess`
-7. `Char` — add `IsAscii`, `IsAsciiDigit`, `IsAsciiLetter` etc.
-8. `Environment` — add `GetEnvironmentVariable`, `NewLine`, `MachineName`
-9. `Array` — add `ConvertAll`, `Exists`, `Find`, `FindAll`, `FindIndex`, `ForEach`, `TrueForAll`
-10. `Guid` — add `Parse`, `TryParse`, string constructor
+### HIGH priority — ✅ ALL DONE (session 68)
+1. `Random::NextInt64` — ✅ done session 68
+2. `Math::DivRem(long)/MaxMagnitude/MinMagnitude` — ✅ done session 68
+3. `MathF::IsFinite/IsNormal/IsSubnormal/ScaleB` — ✅ done session 68 (+IsNegative/MaxMagnitude/MinMagnitude)
+4. `List<T>::EnsureCapacity/TrimExcess/ConvertAll/AsReadOnly` — ✅ done session 68
+5. `Dictionary<K,V>::Remove(key,val)/EnsureCapacity/TrimExcess` — ✅ done session 68
+6. `HashSet<T>::EnsureCapacity/TrimExcess` — ✅ done session 68
+7. `Char` ASCII helpers — ✅ done session 68
+8. `Environment::GetEnvironmentVariable/MachineName/UserName` — ✅ done session 68
+9. `Array` functional methods — ✅ done session 68
+10. `Guid::Parse/TryParse/ToString(format)` — ✅ done session 68
 
-### MEDIUM priority
-- `StringBuilder` — `AppendFormat(3-arg)`, `getCapacityProperty`, `EnsureCapacity`
-- `LinkedList` — node-based `AddBefore`/`AddAfter`
-- `Version` — Parse, Compare, ToString
-- `HashCode` — Combine(T1,T2,...) overloads
-- `Int32/Int64/Double/Single` — `ToString(format)` overloads
+### MEDIUM priority — partially done (session 68)
+- `StringBuilder::AppendFormat(3-arg)/EnsureCapacity` — ✅ done session 68
+- `Int32/Int64/Double/Single::ToString(format)` — ✅ done session 68
+- `String::Empty/ToUpperInvariant/CompareOrdinal/Format(float)` — ✅ done session 68
+- `LinkedList` — node-based `AddBefore`/`AddAfter` — TODO
+- `Version` — Parse, Compare, ToString — TODO
+- `HashCode` — Combine(T1,T2,...) overloads — TODO
 
 ### LOW priority (not relevant for game dev)
 - `ConcurrentDictionary` detailed audit
