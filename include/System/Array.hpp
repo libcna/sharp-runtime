@@ -14,29 +14,26 @@ namespace System {
 
     using SharpRuntime::intcs;
 
-    /**
-     * @brief Provides static methods for creating, manipulating, searching,
-     * and sorting arrays.
-     *
-     * Partial C++ counterpart of .NET System.Array.
-     *
-     * @note Status: Partial
-     */
+    /// <summary>
+    /// Provides static methods for creating, manipulating, searching,
+    /// and sorting arrays.
+    ///
+    /// Partial C++ counterpart of .NET System.Array.
+    /// </summary>
     class Array {
     public:
         Array() = delete;
 
-        /**
-         * @brief Sorts the elements in a vector using the default comparer.
-         */
+        /// Sorts all elements of @p array using the default less-than comparator.
+        /// @param array Vector to sort in place.
         template<typename T>
         static void Sort(std::vector<T>& array) {
             std::sort(array.begin(), array.end());
         }
 
-        /**
-         * @brief Sorts the elements in a vector using the specified comparison.
-         */
+        /// Sorts all elements of @p array using the specified comparison function.
+        /// @param array Vector to sort in place.
+        /// @param comparison Function returning negative/zero/positive for a < b / a == b / a > b.
         template<typename T>
         static void Sort(std::vector<T>& array, std::function<int(const T&, const T&)> comparison) {
             std::sort(array.begin(), array.end(), [&](const T& a, const T& b) {
@@ -44,9 +41,12 @@ namespace System {
             });
         }
 
-        /**
-         * @brief Copies a range of elements from one vector to another.
-         */
+        /// Copies @p length elements from @p src starting at @p srcIndex into @p dst starting at @p dstIndex.
+        /// @param src Source vector.
+        /// @param srcIndex Start index in the source.
+        /// @param dst Destination vector (must already be sized).
+        /// @param dstIndex Start index in the destination.
+        /// @param length Number of elements to copy.
         template<typename T>
         static void Copy(const std::vector<T>& src, intcs srcIndex,
                          std::vector<T>& dst, intcs dstIndex, intcs length) {
@@ -54,27 +54,28 @@ namespace System {
                 dst[dstIndex + i] = src[srcIndex + i];
         }
 
-        /**
-         * @brief Copies from raw C-array to vector.
-         */
+        /// Copies @p length elements from raw C-array @p src into @p dst using memcpy.
+        /// @param src Source pointer.
+        /// @param srcIndex Offset into @p src.
+        /// @param dst Destination pointer.
+        /// @param dstIndex Offset into @p dst.
+        /// @param length Number of elements to copy.
         template<typename T>
         static void Copy(const T* src, intcs srcIndex, T* dst, intcs dstIndex, intcs length) {
             std::memcpy(dst + dstIndex, src + srcIndex, static_cast<size_t>(length) * sizeof(T));
         }
 
-        /**
-         * @brief Changes the size of the vector to the specified new size,
-         * preserving existing elements.
-         */
+        /// Resizes @p array to @p newSize, preserving existing elements and default-initializing new ones.
+        /// @param array Vector to resize.
+        /// @param newSize Target element count.
         template<typename T>
         static void Resize(std::vector<T>& array, intcs newSize) {
             array.resize(static_cast<size_t>(newSize));
         }
 
-        /**
-         * @brief Searches for the specified element and returns the index of
-         * its first occurrence in the vector.
-         */
+        /// Returns the zero-based index of the first element equal to @p value, or -1 if not found.
+        /// @param array Vector to search.
+        /// @param value Value to find.
         template<typename T>
         static intcs IndexOf(const std::vector<T>& array, const T& value) {
             for (intcs i = 0; i < static_cast<intcs>(array.size()); ++i)
@@ -82,18 +83,17 @@ namespace System {
             return -1;
         }
 
-        /**
-         * @brief Reverses the sequence of the elements in the entire vector.
-         */
+        /// Reverses the order of all elements in @p array in place.
+        /// @param array Vector to reverse.
         template<typename T>
         static void Reverse(std::vector<T>& array) {
             std::reverse(array.begin(), array.end());
         }
 
-        /**
-         * @brief Sets a range of elements in the vector to the default value
-         * of each element type.
-         */
+        /// Resets @p length elements in @p array to the default value of T, starting at @p index.
+        /// @param array Vector whose elements will be cleared.
+        /// @param index Zero-based start index.
+        /// @param length Number of elements to reset.
         template<typename T>
         static void Clear(std::vector<T>& array, intcs index, intcs length) {
             for (intcs i = index; i < index + length; ++i)

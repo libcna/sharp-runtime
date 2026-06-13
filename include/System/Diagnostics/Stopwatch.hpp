@@ -12,14 +12,12 @@ namespace System::Diagnostics {
 
     using SharpRuntime::longcs;
 
-    /**
-     * @brief Provides a set of methods and properties that you can use to
-     * accurately measure elapsed time.
-     *
-     * Partial C++ counterpart of .NET System.Diagnostics.Stopwatch.
-     *
-     * @note Status: Implemented
-     */
+    /// @brief Provides a set of methods and properties that you can use to
+    /// accurately measure elapsed time.
+    ///
+    /// Partial C++ counterpart of .NET System.Diagnostics.Stopwatch.
+    ///
+    /// @note Status: Implemented
     class Stopwatch {
     private:
         using Clock     = std::chrono::high_resolution_clock;
@@ -30,11 +28,10 @@ namespace System::Diagnostics {
         bool      running_    = false;
 
     public:
+        /// @brief Constructs a stopped Stopwatch with zero elapsed time.
         Stopwatch() = default;
 
-        /**
-         * @brief Starts, or resumes, measuring elapsed time for an interval.
-         */
+        /// @brief Starts, or resumes, measuring elapsed time for an interval.
         void Start() {
             if (!running_) {
                 start_   = Clock::now();
@@ -42,9 +39,7 @@ namespace System::Diagnostics {
             }
         }
 
-        /**
-         * @brief Stops measuring elapsed time for an interval.
-         */
+        /// @brief Stops measuring elapsed time for an interval.
         void Stop() {
             if (running_) {
                 elapsed_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -53,40 +48,39 @@ namespace System::Diagnostics {
             }
         }
 
-        /**
-         * @brief Stops time interval measurement and resets elapsed time to zero.
-         */
+        /// @brief Stops time interval measurement and resets elapsed time to zero.
         void Reset() {
             running_    = false;
             elapsed_ns_ = 0;
         }
 
-        /**
-         * @brief Stops time interval measurement, resets elapsed time to zero,
-         * and starts measuring elapsed time.
-         */
+        /// @brief Stops time interval measurement, resets elapsed time to zero,
+        /// and starts measuring elapsed time.
         void Restart() {
             Reset();
             Start();
         }
 
+        /// @return true if the stopwatch timer is running.
         [[nodiscard]] bool getIsRunningProperty() const { return running_; }
 
+        /// @return Total elapsed time in milliseconds.
         [[nodiscard]] longcs getElapsedMillisecondsProperty() const {
             return currentNs() / 1'000'000LL;
         }
 
+        /// @return Total elapsed time in .NET ticks (100-nanosecond intervals).
         [[nodiscard]] longcs getElapsedTicksProperty() const {
             return currentNs() / 100LL; // .NET ticks = 100 ns
         }
 
+        /// @return Total elapsed time as a TimeSpan.
         [[nodiscard]] System::TimeSpan getElapsedProperty() const {
             return System::TimeSpan::FromTicks(getElapsedTicksProperty());
         }
 
-        /**
-         * @brief Creates and starts a new Stopwatch.
-         */
+        /// @brief Creates and starts a new Stopwatch.
+        /// @return A running Stopwatch instance.
         [[nodiscard]] static Stopwatch StartNew() {
             Stopwatch sw;
             sw.Start();

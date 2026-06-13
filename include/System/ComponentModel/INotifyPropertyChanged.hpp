@@ -33,9 +33,10 @@ namespace System::ComponentModel {
     public:
         virtual ~INotifyPropertyChanged() = default;
 
-        std::vector<PropertyChangedEventHandler> PropertyChanged;
+        std::vector<PropertyChangedEventHandler> PropertyChanged; ///< Subscribers notified after a property changes.
 
     protected:
+        /// Raises the PropertyChanged event for the property named @p propertyName.
         void OnPropertyChanged(const std::string& propertyName) {
             PropertyChangedEventArgs args(propertyName);
             for (auto& h : PropertyChanged) h(this, args);

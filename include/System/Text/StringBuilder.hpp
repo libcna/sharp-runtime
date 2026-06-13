@@ -11,203 +11,102 @@ namespace System::Text
 {
     using SharpRuntime::intcs;
 
-    /**
-     * @brief Provides a mutable string buffer for efficient string construction.
-     *
-     * This class is a lightweight C++ emulation of the .NET
-     * System.Text.StringBuilder class. It is intended primarily
-     * for source-porting convenience and practical use in the
-     * SharpRuntime layer.
-     *
-     * Only a small useful subset of the original .NET API is provided.
-     *
-     * @note Status: PARTIAL
-     */
+    /// <summary>
+    /// Provides a mutable string buffer for efficient string construction.
+    ///
+    /// Lightweight C++ emulation of .NET System.Text.StringBuilder, intended
+    /// primarily for source-porting convenience in the SharpRuntime layer.
+    /// Only a practical subset of the original .NET API is provided.
+    /// </summary>
     class StringBuilder
     {
     private:
-        /**
-         * @brief Internal text buffer.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        std::string buffer;
+        std::string buffer; ///< Internal text buffer.
 
     public:
-        /**
-         * @brief Initializes a new empty instance of the StringBuilder class.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Initializes a new empty instance of the StringBuilder class.
         StringBuilder();
 
-        /**
-         * @brief Initializes a new instance of the StringBuilder class
-         * with the specified initial text.
-         *
-         * @param value Initial text.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Initializes a new instance of the StringBuilder class with the specified initial text.
+        /// @param value Initial text.
         explicit StringBuilder(const std::string& value);
 
-        /**
-         * @brief Removes all characters from the current instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Removes all characters from the current instance.
         void Clear();
 
-        /**
-         * @brief Appends the specified string to this instance.
-         *
-         * @param value String to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the specified string to this instance.
+        /// @param value String to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(const std::string& value);
 
-        /**
-         * @brief Appends the specified null-terminated C string to this instance.
-         *
-         * If @p value is nullptr, nothing is appended.
-         *
-         * @param value C string to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the specified null-terminated C string to this instance.
+        /// If @p value is nullptr, nothing is appended.
+        /// @param value C string to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(const char* value);
 
-        /**
-         * @brief Appends the specified character to this instance.
-         *
-         * @param value Character to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the specified character to this instance.
+        /// @param value Character to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(char value);
 
-        /**
-         * @brief Appends the string representation of the specified integer value.
-         *
-         * @param value Integer value to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the string representation of the specified integer value.
+        /// @param value Integer value to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(intcs value);
 
-        /**
-         * @brief Appends the string representation of the specified double value.
-         *
-         * @param value Double value to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the string representation of the specified double value.
+        /// @param value Double value to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(double value);
 
-        /**
-         * @brief Appends the string representation of the specified boolean value.
-         *
-         * The appended text is "True" or "False" to better match .NET behavior.
-         *
-         * @param value Boolean value to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the string representation of the specified boolean value.
+        /// The appended text is "True" or "False" to match .NET behavior.
+        /// @param value Boolean value to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(bool value);
 
-        /**
-         * @brief Appends a line terminator to this instance.
-         *
-         * This method appends '\n'.
-         *
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends a line terminator (newline) to this instance.
+        /// @return Reference to this instance.
         StringBuilder& AppendLine();
 
-        /**
-         * @brief Appends the specified string followed by a line terminator.
-         *
-         * This method appends the string and then '\n'.
-         *
-         * @param value String to append.
-         * @return Reference to this instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Appends the specified string followed by a line terminator.
+        /// @param value String to append.
+        /// @return Reference to this instance.
         StringBuilder& AppendLine(const std::string& value);
 
-        /**
-         * @brief Returns the current contents of this instance as a string.
-         *
-         * @return The accumulated string.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns the current contents of this instance as a string.
+        /// @return The accumulated string.
         [[nodiscard]] std::string ToString() const;
 
-        /**
-         * @brief Gets the number of characters contained in this instance.
-         *
-         * This method follows the project's property-porting naming convention
-         * and corresponds conceptually to the .NET Length property.
-         *
-         * @return Number of characters in the internal buffer.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Gets the number of characters in this instance (.NET Length property).
+        /// @return Number of characters in the internal buffer.
         [[nodiscard]] intcs getLengthProperty() const;
 
-        /**
-         * @brief Returns true if the internal buffer is empty.
-         *
-         * @return True if empty, otherwise false.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns true if the internal buffer is empty.
         [[nodiscard]] bool Empty() const;
 
-        /**
-         * @brief Appends the string representation of the specified 64-bit integer value.
-         *
-         * @param value Long integer value to append.
-         * @return Reference to this instance.
-         */
+        /// Appends the string representation of the specified 64-bit integer value.
+        /// @param value Long integer value to append.
+        /// @return Reference to this instance.
         StringBuilder& Append(SharpRuntime::longcs value);
 
-        /**
-         * @brief Inserts the specified string at the given character position.
-         *
-         * @param index Zero-based position at which to insert.
-         * @param value String to insert.
-         * @return Reference to this instance.
-         */
+        /// Inserts the specified string at the given character position.
+        /// @param index Zero-based position at which to insert.
+        /// @param value String to insert.
+        /// @return Reference to this instance.
         StringBuilder& Insert(intcs index, const std::string& value);
 
-        /**
-         * @brief Removes a range of characters from this instance.
-         *
-         * @param startIndex Zero-based position of the first character to remove.
-         * @param count Number of characters to remove.
-         * @return Reference to this instance.
-         */
+        /// Removes a range of characters from this instance.
+        /// @param startIndex Zero-based position of the first character to remove.
+        /// @param count Number of characters to remove.
+        /// @return Reference to this instance.
         StringBuilder& Remove(intcs startIndex, intcs count);
 
-        /**
-         * @brief Replaces all occurrences of a specified string with another string.
-         *
-         * @param oldValue The string to replace.
-         * @param newValue The string that replaces @p oldValue.
-         * @return Reference to this instance.
-         */
+        /// Replaces all occurrences of @p oldValue with @p newValue.
+        /// @param oldValue The string to replace.
+        /// @param newValue The replacement string.
+        /// @return Reference to this instance.
         StringBuilder& Replace(const std::string& oldValue, const std::string& newValue);
     };
 }

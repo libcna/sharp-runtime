@@ -12,92 +12,49 @@ namespace System::IO::IsolatedStorage
 {
     class IsolatedStorageFileStream;
 
-    /**
-     * @brief Represents a scope of isolated storage.
-     *
-     * This is a lightweight practical port of .NET IsolatedStorageFile.
-     *
-     * @note Status: PARTIAL
-     */
+    /// <summary>
+    /// Represents a scope of isolated storage.
+    ///
+    /// Lightweight practical port of .NET IsolatedStorageFile. Isolated storage
+    /// is rooted at a configurable directory; all paths passed to methods are
+    /// interpreted relative to that root.
+    /// </summary>
     class IsolatedStorageFile
     {
     private:
-        /**
-         * @brief Root directory of this isolated storage.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        std::filesystem::path rootDirectory;
+        std::filesystem::path rootDirectory; ///< Root directory of this isolated storage scope.
 
     public:
-        /**
-         * @brief Initializes a new IsolatedStorageFile with the specified root directory.
-         *
-         * @param rootDirectory Root directory path.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Constructs an IsolatedStorageFile rooted at @p rootDirectory.
+        /// @param rootDirectory Absolute or relative path to the storage root.
         explicit IsolatedStorageFile(const std::filesystem::path& rootDirectory);
 
-        /**
-         * @brief Gets an isolated storage scoped to the current application.
-         *
-         * @return Isolated storage instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns an isolated storage scoped to the current application.
+        /// @return IsolatedStorageFile instance.
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForApplication();
 
-        /**
-         * @brief Gets an isolated storage scoped to the current assembly.
-         *
-         * In this practical port, this behaves the same as GetUserStoreForApplication().
-         *
-         * @return Isolated storage instance.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns an isolated storage scoped to the current assembly.
+        /// In this practical port, behaves identically to GetUserStoreForApplication().
+        /// @return IsolatedStorageFile instance.
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForAssembly();
 
-        /**
-         * @brief Returns true if the specified file exists in isolated storage.
-         *
-         * @param relativePath Relative file path.
-         * @return True if the file exists.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns true if the specified relative path exists as a file in isolated storage.
+        /// @param relativePath File path relative to the storage root.
         [[nodiscard]] bool FileExists(const std::string& relativePath) const;
 
-        /**
-         * @brief Opens a file in isolated storage.
-         *
-         * @param relativePath Relative file path.
-         * @param mode File mode.
-         * @return Opened isolated storage file stream.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Opens a file inside isolated storage with the specified mode.
+        /// @param relativePath File path relative to the storage root.
+        /// @param mode Specifies how the file should be opened or created.
+        /// @return Opened IsolatedStorageFileStream.
         [[nodiscard]] IsolatedStorageFileStream OpenFile(
             const std::string& relativePath,
             System::IO::FileMode mode) const;
 
-        /**
-         * @brief Deletes a file from isolated storage.
-         *
-         * @param relativePath Relative file path.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Deletes the specified file from isolated storage.
+        /// @param relativePath File path relative to the storage root.
         void DeleteFile(const std::string& relativePath) const;
 
-        /**
-         * @brief Gets the root directory of this isolated storage.
-         *
-         * @return Root path.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns the root directory path for this isolated storage scope.
         [[nodiscard]] const std::filesystem::path& getRootDirectoryProperty() const;
     };
 }

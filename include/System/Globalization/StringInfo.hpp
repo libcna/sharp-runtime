@@ -7,43 +7,54 @@
 
 namespace System::Globalization {
 
-    class StringInfo {
-        std::string string_;
+/// <summary>Provides iteration over and retrieval of text elements in a string.</summary>
+class StringInfo {
+    std::string string_;
 
-    public:
-        StringInfo() = default;
-        explicit StringInfo(const std::string& str) : string_(str) {}
+public:
+    /// Constructs an empty StringInfo.
+    StringInfo() = default;
+    /// Constructs a StringInfo wrapping @p str.
+    explicit StringInfo(const std::string& str) : string_(str) {}
 
-        [[nodiscard]] const std::string& getStringProperty() const { return string_; }
-        void setStringProperty(const std::string& v)               { string_ = v; }
+    /// @return The underlying string.
+    [[nodiscard]] const std::string& getStringProperty() const { return string_; }
+    /// Sets the underlying string to @p v.
+    void setStringProperty(const std::string& v)               { string_ = v; }
 
-        [[nodiscard]] int getLengthInTextElementsProperty() const {
-            return static_cast<int>(string_.size());
-        }
+    /// @return The number of text elements (bytes in this stub implementation).
+    [[nodiscard]] int getLengthInTextElementsProperty() const {
+        return static_cast<int>(string_.size());
+    }
 
-        [[nodiscard]] std::string SubstringByTextElements(int startingTextElement) const {
-            return string_.substr(startingTextElement);
-        }
+    /// @return Substring starting at text element @p startingTextElement to the end.
+    [[nodiscard]] std::string SubstringByTextElements(int startingTextElement) const {
+        return string_.substr(startingTextElement);
+    }
 
-        [[nodiscard]] std::string SubstringByTextElements(int startingTextElement, int lengthInTextElements) const {
-            return string_.substr(startingTextElement, lengthInTextElements);
-        }
+    /// @return Substring of @p lengthInTextElements elements starting at @p startingTextElement.
+    [[nodiscard]] std::string SubstringByTextElements(int startingTextElement, int lengthInTextElements) const {
+        return string_.substr(startingTextElement, lengthInTextElements);
+    }
 
-        static std::string GetNextTextElement(const std::string& str, int index = 0) {
-            if (index >= static_cast<int>(str.size())) return {};
-            return std::string(1, str[index]);
-        }
+    /// @return The text element at position @p index in @p str (single character in this stub).
+    static std::string GetNextTextElement(const std::string& str, int index = 0) {
+        if (index >= static_cast<int>(str.size())) return {};
+        return std::string(1, str[index]);
+    }
 
-        static int GetNextTextElementLength(const std::string& str, int index = 0) {
-            if (index >= static_cast<int>(str.size())) return 0;
-            return 1;
-        }
+    /// @return The length of the text element at @p index in @p str (always 1 in this stub).
+    static int GetNextTextElementLength(const std::string& str, int index = 0) {
+        if (index >= static_cast<int>(str.size())) return 0;
+        return 1;
+    }
 
-        static std::vector<std::string> ParseCombiningCharacters(const std::string& str) {
-            std::vector<std::string> result;
-            for (char c : str) result.push_back(std::string(1, c));
-            return result;
-        }
-    };
+    /// @return A vector where each entry is a single character from @p str.
+    static std::vector<std::string> ParseCombiningCharacters(const std::string& str) {
+        std::vector<std::string> result;
+        for (char c : str) result.push_back(std::string(1, c));
+        return result;
+    }
+};
 
 } // namespace System::Globalization

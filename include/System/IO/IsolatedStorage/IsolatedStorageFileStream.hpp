@@ -11,89 +11,46 @@
 
 namespace System::IO::IsolatedStorage
 {
-    /**
-     * @brief Represents a file stream inside isolated storage.
-     *
-     * This is a lightweight practical port of .NET IsolatedStorageFileStream.
-     *
-     * @note Status: PARTIAL
-     */
+    /// <summary>
+    /// Represents a file stream inside isolated storage.
+    ///
+    /// Lightweight practical port of .NET IsolatedStorageFileStream backed by
+    /// a std::fstream. Obtain instances via IsolatedStorageFile::OpenFile().
+    /// </summary>
     class IsolatedStorageFileStream
     {
     private:
-        /**
-         * @brief Underlying file stream.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        std::fstream stream;
-
-        /**
-         * @brief Full file path.
-         *
-         * @note Status: IMPLEMENTED
-         */
-        std::filesystem::path fullPath;
+        std::fstream stream; ///< Underlying std::fstream used for I/O.
+        std::filesystem::path fullPath; ///< Absolute path to the file on disk.
 
     public:
-        /**
-         * @brief Opens an isolated storage file stream.
-         *
-         * @param fullPath Full filesystem path.
-         * @param mode File mode.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Opens an isolated storage file stream at @p fullPath with the specified @p mode.
+        /// @param fullPath Absolute filesystem path to the file.
+        /// @param mode Specifies how the file should be opened or created.
         IsolatedStorageFileStream(
             const std::filesystem::path& fullPath,
             System::IO::FileMode mode);
 
-        /**
-         * @brief Closes the stream.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Closes the underlying file stream.
         void Close();
 
-        /**
-         * @brief Reads bytes from the stream.
-         *
-         * @param buffer Destination buffer.
-         * @param offset Offset in destination buffer.
-         * @param count Maximum number of bytes to read.
-         * @return Number of bytes read.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Reads up to @p count bytes from the stream into @p buffer starting at @p offset.
+        /// @param buffer Destination byte buffer.
+        /// @param offset Byte offset within @p buffer at which to begin writing.
+        /// @param count Maximum number of bytes to read.
+        /// @return Number of bytes actually read.
         SharpRuntime::intcs Read(SharpRuntime::bytecs buffer[], SharpRuntime::intcs offset, SharpRuntime::intcs count);
 
-        /**
-         * @brief Writes bytes to the stream.
-         *
-         * @param buffer Source buffer.
-         * @param offset Offset in source buffer.
-         * @param count Number of bytes to write.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Writes @p count bytes from @p buffer (starting at @p offset) to the stream.
+        /// @param buffer Source byte buffer.
+        /// @param offset Byte offset within @p buffer to begin reading.
+        /// @param count Number of bytes to write.
         void Write(const SharpRuntime::bytecs buffer[], SharpRuntime::intcs offset, SharpRuntime::intcs count);
 
-        /**
-         * @brief Gets the length of the file in bytes.
-         *
-         * @return File length in bytes.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns the total length of the file in bytes.
         [[nodiscard]] SharpRuntime::intcs getLengthProperty();
 
-        /**
-         * @brief Returns true if the stream is open.
-         *
-         * @return True if open.
-         *
-         * @note Status: IMPLEMENTED
-         */
+        /// Returns true if the underlying file stream is open.
         [[nodiscard]] bool IsOpen() const;
     };
 }

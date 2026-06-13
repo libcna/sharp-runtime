@@ -10,29 +10,34 @@ namespace System {
 
     using SharpRuntime::intcs;
 
-    /**
-     * @brief Represents the version number of an assembly, operating system,
-     * or the common language runtime.
-     *
-     * Partial C++ counterpart of .NET System.Version.
-     *
-     * @note Status: Implemented
-     */
+    /// <summary>
+    /// Represents a version number with Major, Minor, Build, and Revision components.
+    ///
+    /// Partial C++ counterpart of .NET System.Version.
+    /// </summary>
     class Version {
     public:
-        intcs Major    = 0;
-        intcs Minor    = 0;
-        intcs Build    = -1;
-        intcs Revision = -1;
+        intcs Major    = 0; ///< Major version component.
+        intcs Minor    = 0; ///< Minor version component.
+        intcs Build    = -1; ///< Build number; -1 means not specified.
+        intcs Revision = -1; ///< Revision number; -1 means not specified.
 
+        /// Constructs a Version with all components set to their defaults (0.0).
         Version() = default;
+        /// Constructs a Version with the given major and minor components.
         Version(intcs major, intcs minor) : Major(major), Minor(minor) {}
+        /// Constructs a Version with major, minor, and build components.
         Version(intcs major, intcs minor, intcs build) : Major(major), Minor(minor), Build(build) {}
+        /// Constructs a Version with all four components.
         Version(intcs major, intcs minor, intcs build, intcs revision)
             : Major(major), Minor(minor), Build(build), Revision(revision) {}
 
+        /// Parses a version from a dot-separated string such as "1.2.3.4".
+        /// @param versionString String to parse; must contain at least two components.
         explicit Version(const std::string& versionString) { parse(versionString); }
 
+        /// Returns the version as a dot-separated string, omitting unspecified (negative) components.
+        /// @return String representation, e.g. "1.2" or "1.2.3.4".
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
             oss << Major << '.' << Minor;
@@ -41,11 +46,17 @@ namespace System {
             return oss.str();
         }
 
+        /// Returns true if this version is equal to @p o.
         bool operator==(const Version& o) const { return cmp(o) == 0; }
+        /// Returns true if this version is not equal to @p o.
         bool operator!=(const Version& o) const { return cmp(o) != 0; }
+        /// Returns true if this version is less than @p o.
         bool operator< (const Version& o) const { return cmp(o) <  0; }
+        /// Returns true if this version is less than or equal to @p o.
         bool operator<=(const Version& o) const { return cmp(o) <= 0; }
+        /// Returns true if this version is greater than @p o.
         bool operator> (const Version& o) const { return cmp(o) >  0; }
+        /// Returns true if this version is greater than or equal to @p o.
         bool operator>=(const Version& o) const { return cmp(o) >= 0; }
 
     private:

@@ -21,23 +21,34 @@ namespace System::Globalization {
 /// </summary>
 class HijriCalendar : public Calendar {
 public:
-    static constexpr int HijriEra         = 1;
-    static constexpr int MaxCalendarYear  = 9666;
-    static constexpr int MaxCalendarMonth = 4; // in MaxCalendarYear
+    static constexpr int HijriEra         = 1;   ///< The only era value for this calendar.
+    static constexpr int MaxCalendarYear  = 9666; ///< Maximum supported Hijri year.
+    static constexpr int MaxCalendarMonth = 4;    ///< Last valid month in MaxCalendarYear.
 
+    /// @return Always HijriEra (1).
     [[nodiscard]] int GetEra(const System::DateTime& time) const override;
+    /// @return Always 1 — the Hijri calendar has a single era.
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
+    /// @return The Hijri year corresponding to @p time.
     [[nodiscard]] int  GetYear      (const System::DateTime& time) const override;
+    /// @return The Hijri month (1–12) corresponding to @p time.
     [[nodiscard]] int  GetMonth     (const System::DateTime& time) const override;
+    /// @return The day of the Hijri month corresponding to @p time.
     [[nodiscard]] int  GetDayOfMonth(const System::DateTime& time) const override;
+    /// @return The day of the Hijri year (1–355/354) corresponding to @p time.
     [[nodiscard]] int  GetDayOfYear (const System::DateTime& time) const override;
 
+    /// @return True if @p year is a Hijri leap year (355 days).
     [[nodiscard]] bool IsLeapYear(int year, int era = CurrentEra) const override;
+    /// @return Number of days in the given Hijri month (29 or 30).
     [[nodiscard]] int  GetDaysInMonth(int year, int month, int era = CurrentEra) const override;
+    /// @return Number of days in the given Hijri year (354 or 355).
     [[nodiscard]] int  GetDaysInYear (int year, int era = CurrentEra) const override;
 
+    /// @return A new DateTime offset by @p months Hijri months.
     [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, int months) const override;
+    /// @return A new DateTime offset by @p years Hijri years.
     [[nodiscard]] System::DateTime AddYears (const System::DateTime& time, int years)  const override;
 
 private:

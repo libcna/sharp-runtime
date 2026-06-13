@@ -7,23 +7,30 @@
 
 namespace System::Globalization {
 
-    class SortVersion {
-        int fullVersion_;
-        std::array<uint8_t, 16> sortId_ = {};
+/// <summary>Provides information about the version of Unicode used to compare and order strings.</summary>
+class SortVersion {
+    int fullVersion_;
+    std::array<uint8_t, 16> sortId_ = {};
 
-    public:
-        explicit SortVersion(int fullVersion)
-            : fullVersion_(fullVersion) {}
-        SortVersion(int fullVersion, const std::array<uint8_t, 16>& sortId)
-            : fullVersion_(fullVersion), sortId_(sortId) {}
+public:
+    /// Constructs a SortVersion with the given @p fullVersion and a zeroed sort ID.
+    explicit SortVersion(int fullVersion)
+        : fullVersion_(fullVersion) {}
+    /// Constructs a SortVersion with the given @p fullVersion and @p sortId.
+    SortVersion(int fullVersion, const std::array<uint8_t, 16>& sortId)
+        : fullVersion_(fullVersion), sortId_(sortId) {}
 
-        [[nodiscard]] int getFullVersionProperty() const { return fullVersion_; }
-        [[nodiscard]] const std::array<uint8_t, 16>& getSortIdProperty() const { return sortId_; }
+    /// @return The full version number of the sort tables.
+    [[nodiscard]] int getFullVersionProperty() const { return fullVersion_; }
+    /// @return The globally unique identifier for the sort tables.
+    [[nodiscard]] const std::array<uint8_t, 16>& getSortIdProperty() const { return sortId_; }
 
-        bool operator==(const SortVersion& o) const {
-            return fullVersion_ == o.fullVersion_ && sortId_ == o.sortId_;
-        }
-        bool operator!=(const SortVersion& o) const { return !(*this == o); }
-    };
+    /// @return True if both @p fullVersion and @p sortId are equal.
+    bool operator==(const SortVersion& o) const {
+        return fullVersion_ == o.fullVersion_ && sortId_ == o.sortId_;
+    }
+    /// @return True if either @p fullVersion or @p sortId differs.
+    bool operator!=(const SortVersion& o) const { return !(*this == o); }
+};
 
 } // namespace System::Globalization

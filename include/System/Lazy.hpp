@@ -9,7 +9,11 @@
 
 namespace System {
 
-    // Thread-safe lazy initialization (ExecutionAndPublication mode by default).
+    /// <summary>
+    /// Provides thread-safe lazy initialization (ExecutionAndPublication mode by default).
+    ///
+    /// The value is created exactly once on the first access to getValueProperty() or Value().
+    /// </summary>
     template<typename T>
     class Lazy {
         mutable std::once_flag flag_;
@@ -18,12 +22,17 @@ namespace System {
         mutable bool isValueCreated_ = false;
 
     public:
-        // Default-constructible T: uses T() as factory.
+        /// Constructs a Lazy&lt;T&gt; that uses the default constructor T() as its factory.
         Lazy() : factory_([]() { return T{}; }) {}
 
+        /// Constructs a Lazy&lt;T&gt; with the specified value factory function.
+        /// @param valueFactory Callable that produces the value on first access.
         explicit Lazy(std::function<T()> valueFactory)
             : factory_(std::move(valueFactory)) {}
 
+        /// Gets the lazily initialized value, invoking the factory on the first call.
+        /// Thread-safe: the factory is called at most once.
+        /// @return Const reference to the initialized value.
         [[nodiscard]] const T& getValueProperty() const {
             std::call_once(flag_, [this]() {
                 value_ = factory_();
@@ -32,10 +41,12 @@ namespace System {
             return *value_;
         }
 
+        /// Returns true if the value has already been created.
         [[nodiscard]] bool getIsValueCreatedProperty() const noexcept {
             return isValueCreated_;
         }
 
+        /// Gets the lazily initialized value; equivalent to getValueProperty().
         [[nodiscard]] const T& Value() const { return getValueProperty(); }
     };
 

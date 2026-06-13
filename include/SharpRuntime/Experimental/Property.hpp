@@ -33,29 +33,35 @@ name( [this]() customGetter )
 
 namespace SharpRuntime::Experimental {
     // Template for Property
+    /// Experimental property wrapper that delegates get/set to std::function objects.
+    /// Prefer SharpRuntime::Prop.hpp in production code; this class adds per-instance overhead.
     template <typename T>
     class Property {
     public:
+        /// @param customGetter  Lambda invoked on every read.
+        /// @param customSetter  Lambda invoked on every write (nullptr = read-only).
         Property(std::function<T()> customGetter, std::function<void(const T&)> customSetter = nullptr)
             : getter(customGetter), setter(customSetter) {}
 
-        // Setter (only if a custom setter is provided)
+        /// Writes @p value via the custom setter. Throws std::logic_error if no setter was provided.
         T& operator=(const T& value) {
             if (setter) {
                 setter(value);
             } else {
                 throw std::logic_error("Setter not implemented.");
             }
-            return cachedValue; // Return cached value for chaining
+            return cachedValue;
         }
 
-        // Getter
+        /// Reads the current value via the custom getter.
         operator T() const {
             return getter();
         }
+        /// @return The current value via the custom getter.
         T get() const {
             return getter();
         }
+        /// Writes @p value via the custom setter. Throws std::logic_error if no setter was provided.
         void set(T value) {
             if (setter) {
                 setter(value);

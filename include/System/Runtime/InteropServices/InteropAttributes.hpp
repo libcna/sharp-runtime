@@ -8,19 +8,22 @@
 
 namespace System::Runtime::InteropServices {
 
+    /// Specifies the memory layout of a managed class or struct.
     enum class LayoutKind : int {
-        Sequential = 0,
-        Explicit   = 2,
-        Auto       = 3
+        Sequential = 0, ///< Members laid out sequentially, as they appear in the source.
+        Explicit   = 2, ///< Each member has an explicitly specified offset.
+        Auto       = 3  ///< The runtime chooses the layout automatically.
     };
 
+    /// Specifies the character set used when marshalling strings.
     enum class CharSet : int {
-        None    = 1,
-        Ansi    = 2,
-        Unicode = 3,
-        Auto    = 4
+        None    = 1, ///< Not specified.
+        Ansi    = 2, ///< ANSI (single-byte) strings.
+        Unicode = 3, ///< Unicode (wide) strings.
+        Auto    = 4  ///< Automatically select based on platform.
     };
 
+    /// Specifies the unmanaged type to marshal a managed type to/from.
     enum class UnmanagedType : int {
         Bool       = 2,
         I1         = 3,
@@ -60,87 +63,117 @@ namespace System::Runtime::InteropServices {
         LPUTF8Str  = 48
     };
 
+    /// Specifies the calling convention of an unmanaged entry point.
     enum class CallingConvention : int {
-        Winapi    = 1,
+        Winapi    = 1, ///< Platform default (stdcall on Windows).
         Cdecl     = 2,
         StdCall   = 3,
         ThisCall  = 4,
         FastCall  = 5
     };
 
+    /// Specifies the memory layout model of a managed struct or class for interop.
     class StructLayoutAttribute : public System::Attribute {
     public:
-        LayoutKind Value;
-        int    Pack    = 8;
-        int    Size    = 0;
-        ::System::Runtime::InteropServices::CharSet CharSet = ::System::Runtime::InteropServices::CharSet::Ansi;
+        LayoutKind Value;  ///< The layout kind.
+        int    Pack    = 8; ///< Packing alignment in bytes.
+        int    Size    = 0; ///< Minimum size in bytes (0 = no minimum).
+        ::System::Runtime::InteropServices::CharSet CharSet = ::System::Runtime::InteropServices::CharSet::Ansi; ///< Character set used for embedded strings.
 
+        /// @param layout The desired memory layout kind.
         explicit StructLayoutAttribute(LayoutKind layout) : Value(layout) {}
+
+        /// Integer overload — @param layout is cast to LayoutKind.
         explicit StructLayoutAttribute(int16_t layout)    : Value(static_cast<LayoutKind>(layout)) {}
     };
 
+    /// Specifies the field offset within a struct that uses explicit layout.
     class FieldOffsetAttribute : public System::Attribute {
     public:
-        int Value;
+        int Value; ///< Byte offset of the field from the start of the struct.
+
+        /// @param offset Byte offset from the start of the struct.
         explicit FieldOffsetAttribute(int offset) : Value(offset) {}
     };
 
+    /// Indicates how a managed member should be marshalled to/from unmanaged code.
     class MarshalAsAttribute : public System::Attribute {
     public:
-        UnmanagedType Value;
-        int ArraySubType = 0;
-        std::string MarshalType;
-        std::string MarshalTypeRef;
-        std::string MarshalCookie;
-        int SizeConst     = 0;
-        int SizeParamIndex = 0;
+        UnmanagedType Value;          ///< The unmanaged type to marshal as.
+        int ArraySubType = 0;         ///< Element type for array marshalling.
+        std::string MarshalType;      ///< Fully qualified name of a custom marshaller.
+        std::string MarshalTypeRef;   ///< Type reference for a custom marshaller.
+        std::string MarshalCookie;    ///< Extra string passed to the custom marshaller.
+        int SizeConst     = 0;        ///< Fixed array/string size for ByValArray/ByValTStr.
+        int SizeParamIndex = 0;       ///< Parameter index supplying the array size.
 
+        /// @param t The unmanaged marshalling type.
         explicit MarshalAsAttribute(UnmanagedType t) : Value(t) {}
+
+        /// Integer overload — @param t is cast to UnmanagedType.
         explicit MarshalAsAttribute(int16_t t) : Value(static_cast<UnmanagedType>(t)) {}
     };
 
+    /// Specifies the DLL entry point and calling options for a P/Invoke method.
     class DllImportAttribute : public System::Attribute {
     public:
-        std::string Value;
-        std::string EntryPoint;
-        ::System::Runtime::InteropServices::CharSet            CharSet           = ::System::Runtime::InteropServices::CharSet::None;
-        ::System::Runtime::InteropServices::CallingConvention  CallingConvention = ::System::Runtime::InteropServices::CallingConvention::Winapi;
-        bool               SetLastError      = false;
-        bool               ExactSpelling     = false;
-        bool               PreserveSig       = true;
-        bool               BestFitMapping    = true;
-        bool               ThrowOnUnmappableChar = false;
+        std::string Value;         ///< The name of the DLL to import from.
+        std::string EntryPoint;    ///< Name of the exported function; empty means use the method name.
+        ::System::Runtime::InteropServices::CharSet            CharSet           = ::System::Runtime::InteropServices::CharSet::None;   ///< String marshalling character set.
+        ::System::Runtime::InteropServices::CallingConvention  CallingConvention = ::System::Runtime::InteropServices::CallingConvention::Winapi; ///< Calling convention.
+        bool               SetLastError      = false; ///< Capture GetLastError after the call.
+        bool               ExactSpelling     = false; ///< Disable automatic A/W suffix probing.
+        bool               PreserveSig       = true;  ///< Preserve the signature (no HRESULT transformation).
+        bool               BestFitMapping    = true;  ///< Enable best-fit character mapping.
+        bool               ThrowOnUnmappableChar = false; ///< Throw on unmappable Unicode characters.
 
+        /// @param dllName The name of the native DLL.
         explicit DllImportAttribute(const std::string& dllName) : Value(dllName) {}
     };
 
+    /// Controls the COM visibility of an individual managed type or member.
     class ComVisibleAttribute : public System::Attribute {
     public:
-        bool Value;
+        bool Value; ///< True if visible to COM.
+
+        /// @param visible True to expose the type/member to COM.
         explicit ComVisibleAttribute(bool visible) : Value(visible) {}
     };
 
+    /// Specifies the GUID of the attributed type or interface.
     class GuidAttribute : public System::Attribute {
     public:
-        std::string Value;
+        std::string Value; ///< The GUID string.
+
+        /// @param guid The GUID in registry format (e.g. "00000000-0000-0000-0000-000000000000").
         explicit GuidAttribute(const std::string& guid) : Value(guid) {}
     };
 
+    /// Indicates the COM interface type exposed by a managed interface.
     class InterfaceTypeAttribute : public System::Attribute {
     public:
-        int Value; // ComInterfaceType enum value
+        int Value; ///< ComInterfaceType enum value.
+
+        /// @param interfaceType The ComInterfaceType value.
         explicit InterfaceTypeAttribute(int interfaceType) : Value(interfaceType) {}
     };
 
+    /// Specifies the type of COM interface generated for a class.
     class ClassInterfaceAttribute : public System::Attribute {
     public:
-        int Value; // ClassInterfaceType enum value
+        int Value; ///< ClassInterfaceType enum value.
+
+        /// @param classInterfaceType The ClassInterfaceType value.
         explicit ClassInterfaceAttribute(int classInterfaceType) : Value(classInterfaceType) {}
     };
 
+    /// Marks a parameter as input-only in a COM interop signature.
     class InAttribute  : public System::Attribute {};
+
+    /// Marks a parameter as output-only in a COM interop signature.
     class OutAttribute : public System::Attribute {};
 
+    /// Marks a parameter as optional in a COM interop signature.
     class OptionalAttribute : public System::Attribute {};
 
 } // namespace System::Runtime::InteropServices

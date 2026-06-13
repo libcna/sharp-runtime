@@ -45,10 +45,14 @@ namespace System {
         static int move_count;
 
     public:
+        /// Returns how many times a TimeSpan has been copy-constructed (diagnostic).
         static int getCopyCount();
+        /// Returns how many times a TimeSpan has been move-constructed (diagnostic).
         static int getMoveCount();
 
+        /// Resets the copy-construction counter to zero.
         static void resetCopyCount();
+        /// Resets the move-construction counter to zero.
         static void resetMoveCount();
 
     public:
@@ -102,13 +106,13 @@ namespace System {
         static constexpr longcs TicksPerTenthSecond = TicksPerMillisecond * 100;
 
     public:
-        static const TimeSpan Zero;
+        static const TimeSpan Zero;     ///< A TimeSpan of zero duration.
 
     public:
-        static const TimeSpan MaxValue;
+        static const TimeSpan MaxValue; ///< The maximum representable TimeSpan.
 
     public:
-        static const TimeSpan MinValue;
+        static const TimeSpan MinValue; ///< The minimum representable TimeSpan.
 
     private:
         longcs ticks_internal;
@@ -160,12 +164,16 @@ namespace System {
                  intcs microseconds = 0);
 
     public:
+        /// Copy-assignment operator.
         TimeSpan &operator=(const TimeSpan &);
 
+        /// Copy constructor.
         TimeSpan(const TimeSpan& other);
 
+        /// Move constructor.
         TimeSpan(TimeSpan&& other) noexcept;
 
+        /// Move-assignment operator.
         TimeSpan& operator=(TimeSpan&& other) noexcept;
 
     private:
@@ -173,15 +181,19 @@ namespace System {
                                   intcs microseconds);
 
     public:
+        /// Returns the total number of ticks (100-nanosecond units) in this TimeSpan.
         [[nodiscard]] longcs getTicksProperty() const;
 
     public:
+        /// Returns the days component of this TimeSpan.
         [[nodiscard]] int getDaysProperty() const;
 
     public:
+        /// Returns the hours component of this TimeSpan.
         [[nodiscard]] int getHoursProperty() const;
 
     public:
+        /// Returns the milliseconds component of this TimeSpan.
         [[nodiscard]] intcs getMillisecondsProperty() const;
 
         /**
@@ -196,6 +208,7 @@ namespace System {
          */
 
     public:
+        /// Returns the microseconds component of this TimeSpan.
         [[nodiscard]] intcs getMicrosecondsProperty() const;
 
         /**
@@ -210,21 +223,27 @@ namespace System {
          */
 
     public:
+        /// Returns the nanoseconds component of this TimeSpan.
         [[nodiscard]] intcs getNanosecondsProperty() const;
 
     public:
+        /// Returns the minutes component of this TimeSpan.
         [[nodiscard]] intcs getMinutesProperty() const;
 
     public:
+        /// Returns the seconds component of this TimeSpan.
         [[nodiscard]] intcs getSecondsProperty() const;
 
     public:
+        /// Returns the total number of days, including fractional days.
         [[nodiscard]] double getTotalDaysProperty() const;
 
     public:
+        /// Returns the total number of hours, including fractional hours.
         [[nodiscard]] double getTotalHoursProperty() const;
 
     public:
+        /// Returns the total number of milliseconds, including fractional milliseconds.
         [[nodiscard]] double getTotalMillisecondsProperty() const;
 
         /**
@@ -240,6 +259,7 @@ namespace System {
          */
 
     public:
+        /// Returns the total number of microseconds, including fractional microseconds.
         [[nodiscard]] double getTotalMicrosecondsProperty() const;
 
         /**
@@ -254,12 +274,15 @@ namespace System {
          * while `Nanoseconds` only returns complete nanoseconds.
          */
     public:
+        /// Returns the total number of nanoseconds, including fractional nanoseconds.
         [[nodiscard]] double getTotalNanosecondsProperty() const;
 
     public:
+        /// Returns the total number of minutes, including fractional minutes.
         [[nodiscard]] double getTotalMinutesProperty() const;
 
     public:
+        /// Returns the total number of seconds, including fractional seconds.
         [[nodiscard]] double getTotalSecondsProperty() const;
 
         /**
@@ -298,9 +321,11 @@ namespace System {
         static intcs Compare(const TimeSpan &t1, const TimeSpan &t2);
 
     public:
+        /// @copydoc IComparable::CompareTo
         [[nodiscard]] intcs CompareTo(const TimeSpan &value) const override;
 
     public:
+        /// Returns a TimeSpan that represents the specified number of days.
         static TimeSpan FromDays(double value);
 
         /**
@@ -331,9 +356,11 @@ namespace System {
         [[nodiscard]] bool Equals(const TimeSpan &obj) const override;
 
     public:
+        /// Returns true if @p t1 and @p t2 have the same tick count.
         static bool Equals(const TimeSpan &t1, const TimeSpan &t2);
 
     public:
+        /// Returns a TimeSpan that represents the specified number of hours.
         static TimeSpan FromHours(double value);
 
     private:
@@ -357,30 +384,43 @@ namespace System {
         static TimeSpan FromMilliseconds(double value);
 
     public:
+        /// Returns a TimeSpan that represents the specified number of microseconds.
         static TimeSpan FromMicroseconds(double value);
 
     public:
+        /// Returns a TimeSpan that represents the specified number of minutes.
         static TimeSpan FromMinutes(double value);
 
     public:
+        /// Returns a new TimeSpan with the negated tick value.
         [[nodiscard]] TimeSpan Negate() const;
 
     public:
+        /// Returns a TimeSpan that represents the specified number of seconds.
         static TimeSpan FromSeconds(double value);
 
     public:
+        /// @brief Subtracts @p ts from the current TimeSpan and returns the result.
+        /// @param ts The TimeSpan to subtract.
         [[nodiscard]] TimeSpan Subtract(const TimeSpan &ts) const;
 
     public:
+        /// @brief Returns a new TimeSpan scaled by @p factor.
+        /// @param factor Scalar multiplier.
         TimeSpan Multiply(double factor) const;
 
     public:
+        /// @brief Returns a new TimeSpan divided by scalar @p divisor.
+        /// @param divisor Scalar divisor.
         TimeSpan Divide(double divisor) const;
 
     public:
+        /// @brief Returns the ratio of this TimeSpan to @p ts.
+        /// @param ts Divisor TimeSpan (may be zero, producing infinity or NaN).
         [[nodiscard]] double Divide(const TimeSpan &ts) const;
 
     public:
+        /// Returns a TimeSpan that represents the specified number of ticks.
         static TimeSpan FromTicks(longcs value);
 
         //[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -388,23 +428,30 @@ namespace System {
         static longcs TimeToTicks(intcs hour, intcs minute, intcs second);
 
     public:
+        /// Returns the string representation of this TimeSpan (format: [-]d.hh:mm:ss.fffffff).
         [[nodiscard]] std::string ToString() const;
 
     public:
+        /// Unary minus: returns the negated TimeSpan.
         TimeSpan operator-() const;
 
     public:
+        /// Subtracts @p t2 from this TimeSpan.
         TimeSpan operator-(const TimeSpan &t2) const;
 
     public:
+        /// Unary plus: returns this TimeSpan unchanged.
         TimeSpan operator+() const;
 
     public:
+        /// Adds @p t2 to this TimeSpan.
         TimeSpan operator+(const TimeSpan &t2) const;
 
     public:
+        /// Multiplies this TimeSpan by scalar @p factor.
         TimeSpan operator*(double factor) const;
 
+        /// Divides this TimeSpan by scalar @p divisor.
         TimeSpan operator/(double divisor) const;
 
         // Performing division using floating-point arithmetic allows the result to be infinity,
@@ -415,27 +462,38 @@ namespace System {
         // but it is no less valid than throwing an exception.
 
     public:
+        /// Returns the ratio of this TimeSpan to @p t2 as a double.
         double operator/(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan equals @p t2.
         bool operator==(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan is not equal to @p t2.
         bool operator!=(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan is less than @p t2.
         bool operator<(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan is less than or equal to @p t2.
         bool operator<=(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan is greater than @p t2.
         bool operator>(const TimeSpan &t2) const;
 
     public:
+        /// Returns true if this TimeSpan is greater than or equal to @p t2.
         bool operator>=(const TimeSpan &t2) const;
     };
 
 
+    /// @brief Multiplies a scalar @p factor by a @p timeSpan.
+    /// @param factor Scalar multiplier.
+    /// @param timeSpan The TimeSpan to scale.
+    /// @return A new TimeSpan scaled by @p factor.
     TimeSpan operator*(double factor, const TimeSpan &timeSpan);
 } // System

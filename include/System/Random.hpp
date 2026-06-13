@@ -31,12 +31,17 @@ namespace System {
          */
         Random();
 
+        /// Deleted copy constructor — Random instances are not copyable.
         Random(const Random&) = delete;
+        /// Deleted copy-assignment — Random instances are not copyable.
         Random& operator=(const Random&) = delete;
 
+        /// Move constructor.
         Random(Random&&) noexcept = default;
+        /// Move-assignment operator.
         Random& operator=(Random&&) noexcept = default;
 
+        /// Destructor.
         ~Random() = default;
 
         /**

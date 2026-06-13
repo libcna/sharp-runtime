@@ -21,39 +21,64 @@ namespace System::Numerics {
     struct Complex {
         std::complex<double> value;
 
+        /// Constructs the complex number 0 + 0i.
         Complex() = default;
+        /// Constructs the complex number @p real + @p imaginary * i.
         Complex(double real, double imaginary) : value(real, imaginary) {}
+        /// Constructs from a std::complex<double>.
         explicit Complex(std::complex<double> v) : value(v) {}
 
+        /// @return The real part of this complex number.
         [[nodiscard]] double getRealProperty()      const { return value.real(); }
+        /// @return The imaginary part of this complex number.
         [[nodiscard]] double getImaginaryProperty() const { return value.imag(); }
+        /// @return The magnitude (absolute value) ||z||.
         [[nodiscard]] double getMagnitudeProperty() const { return std::abs(value); }
+        /// @return The phase angle (argument) of this complex number in radians.
         [[nodiscard]] double getPhaseProperty()     const { return std::arg(value); }
 
+        /// Complex addition.
         Complex operator+(const Complex& o) const { return Complex(value + o.value); }
+        /// Complex subtraction.
         Complex operator-(const Complex& o) const { return Complex(value - o.value); }
+        /// Complex multiplication.
         Complex operator*(const Complex& o) const { return Complex(value * o.value); }
+        /// Complex division.
         Complex operator/(const Complex& o) const { return Complex(value / o.value); }
+        /// Unary negation.
         Complex operator-()                 const { return Complex(-value); }
+        /// Equality comparison.
         bool operator==(const Complex& o)   const { return value == o.value; }
+        /// Inequality comparison.
         bool operator!=(const Complex& o)   const { return value != o.value; }
 
+        /// @return The complex conjugate z* = real - imaginary*i.
         [[nodiscard]] Complex Conjugate() const { return Complex(std::conj(value)); }
 
-        static Complex Abs(const Complex& c)   { return Complex(std::abs(c.value), 0); }
-        static double  AbsD(const Complex& c)  { return std::abs(c.value); }
-        static Complex Sqrt(const Complex& c)  { return Complex(std::sqrt(c.value)); }
-        static Complex Exp(const Complex& c)   { return Complex(std::exp(c.value)); }
-        static Complex Log(const Complex& c)   { return Complex(std::log(c.value)); }
-        static Complex Pow(const Complex& b, const Complex& e) { return Complex(std::pow(b.value, e.value)); }
-        static Complex Sin(const Complex& c)   { return Complex(std::sin(c.value)); }
-        static Complex Cos(const Complex& c)   { return Complex(std::cos(c.value)); }
-        static Complex Tan(const Complex& c)   { return Complex(std::tan(c.value)); }
+        /// @return The absolute value of @p c as a real Complex (imaginary part = 0).
+        static Complex Abs(const Complex& c)                          { return Complex(std::abs(c.value), 0); }
+        /// @return The absolute value of @p c as a plain double.
+        static double  AbsD(const Complex& c)                         { return std::abs(c.value); }
+        /// @return The complex square root of @p c.
+        static Complex Sqrt(const Complex& c)                         { return Complex(std::sqrt(c.value)); }
+        /// @return e raised to the power @p c.
+        static Complex Exp(const Complex& c)                          { return Complex(std::exp(c.value)); }
+        /// @return Natural logarithm of @p c.
+        static Complex Log(const Complex& c)                          { return Complex(std::log(c.value)); }
+        /// @return @p b raised to the complex power @p e.
+        static Complex Pow(const Complex& b, const Complex& e)        { return Complex(std::pow(b.value, e.value)); }
+        /// @return Complex sine of @p c.
+        static Complex Sin(const Complex& c)                          { return Complex(std::sin(c.value)); }
+        /// @return Complex cosine of @p c.
+        static Complex Cos(const Complex& c)                          { return Complex(std::cos(c.value)); }
+        /// @return Complex tangent of @p c.
+        static Complex Tan(const Complex& c)                          { return Complex(std::tan(c.value)); }
 
-        static const Complex Zero;
-        static const Complex One;
-        static const Complex ImaginaryOne;
+        static const Complex Zero;         ///< The complex number 0 + 0i.
+        static const Complex One;          ///< The complex number 1 + 0i.
+        static const Complex ImaginaryOne; ///< The complex number 0 + 1i.
 
+        /// @return A string of the form "&lt;real; imaginary&gt;".
         [[nodiscard]] std::string ToString() const {
             auto r = value.real(), i = value.imag();
             return std::string("<") + std::to_string(r) + "; " + std::to_string(i) + ">";

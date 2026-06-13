@@ -7,44 +7,46 @@
 
 namespace System::Threading {
 
-    /**
-     * @brief Represents a thread synchronization event that, when signaled, must be reset manually.
-     *
-     * Wraps std::condition_variable. Partial C++ counterpart of .NET System.Threading.ManualResetEvent.
-     *
-     * @note Status: Implemented
-     */
+    /// Represents a thread synchronization event that, when signaled, must be reset manually.
+    ///
+    /// Wraps std::condition_variable. Partial C++ counterpart of .NET System.Threading.ManualResetEvent.
+    ///
+    /// @note Status: Implemented
     class ManualResetEvent {
         std::mutex              mutex_;
         std::condition_variable cv_;
         bool                    signaled_;
     public:
+        /// @param initialState If true, the event starts in the signaled state.
         explicit ManualResetEvent(bool initialState = false) : signaled_(initialState) {}
 
-        /** @brief Sets the event to signaled, releasing all waiting threads. */
+        /// Sets the event to signaled, releasing all waiting threads.
         void Set() {
             { std::lock_guard<std::mutex> lk(mutex_); signaled_ = true; }
             cv_.notify_all();
         }
 
-        /** @brief Resets the event to non-signaled. */
+        /// Resets the event to non-signaled.
         void Reset() {
             std::lock_guard<std::mutex> lk(mutex_);
             signaled_ = false;
         }
 
-        /** @brief Blocks until the event is signaled. */
+        /// Blocks until the event is signaled.
         void WaitOne() {
             std::unique_lock<std::mutex> lk(mutex_);
             cv_.wait(lk, [this]{ return signaled_; });
         }
 
-        /** @brief Blocks until the event is signaled or timeout elapses. Returns true if signaled. */
+        /// Blocks until the event is signaled or the timeout elapses.
+        /// @param milliseconds Maximum time to wait.
+        /// @return True if the event was signaled before the timeout.
         bool WaitOne(int milliseconds) {
             std::unique_lock<std::mutex> lk(mutex_);
             return cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return signaled_; });
         }
 
+        /// Releases resources (no-op; provided for .NET API compatibility).
         void Close() {}
     };
 

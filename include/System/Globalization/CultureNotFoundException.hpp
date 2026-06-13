@@ -6,17 +6,23 @@
 
 namespace System::Globalization {
 
-    class CultureNotFoundException : public System::ArgumentException {
-        std::string invalidCultureName_;
-    public:
-        CultureNotFoundException() : ArgumentException("Culture is not supported.") {}
-        explicit CultureNotFoundException(const std::string& message) : ArgumentException(message) {}
-        CultureNotFoundException(const std::string& message, const std::string& invalidCultureName)
-            : ArgumentException(message, invalidCultureName), invalidCultureName_(invalidCultureName) {}
-        CultureNotFoundException(const std::string& message, const std::exception& inner)
-            : ArgumentException(message + " | inner: " + inner.what()) {}
+/// <summary>Thrown when a culture identifier is not available on the current platform.</summary>
+class CultureNotFoundException : public System::ArgumentException {
+    std::string invalidCultureName_;
+public:
+    /// Constructs with a default "Culture is not supported." message.
+    CultureNotFoundException() : ArgumentException("Culture is not supported.") {}
+    /// Constructs with a custom @p message.
+    explicit CultureNotFoundException(const std::string& message) : ArgumentException(message) {}
+    /// Constructs with @p message and the @p invalidCultureName that caused the exception.
+    CultureNotFoundException(const std::string& message, const std::string& invalidCultureName)
+        : ArgumentException(message, invalidCultureName), invalidCultureName_(invalidCultureName) {}
+    /// Constructs with @p message and wraps an @p inner exception's what() text.
+    CultureNotFoundException(const std::string& message, const std::exception& inner)
+        : ArgumentException(message + " | inner: " + inner.what()) {}
 
-        [[nodiscard]] const std::string& getInvalidCultureNameProperty() const { return invalidCultureName_; }
-    };
+    /// @return The culture name that could not be found, or empty if not set.
+    [[nodiscard]] const std::string& getInvalidCultureNameProperty() const { return invalidCultureName_; }
+};
 
 } // namespace System::Globalization

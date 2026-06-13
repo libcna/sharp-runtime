@@ -10,54 +10,81 @@ namespace System {
     // Value-semantic tuples (struct layout, not shared_ptr).
     // Mirrors System.ValueTuple<T1>, System.ValueTuple<T1,T2>, etc.
 
+    /// Value-semantic single-element tuple mirroring System.ValueTuple<T1>.
     template<typename T1>
     struct ValueTuple1 {
-        T1 Item1;
+        T1 Item1; ///< The single element.
+        /// Constructs a ValueTuple1 from one value.
         explicit ValueTuple1(T1 item1) : Item1(std::move(item1)) {}
+        /// Returns true if the element compares equal.
         bool operator==(const ValueTuple1& o) const { return Item1 == o.Item1; }
+        /// Returns true if the element differs.
         bool operator!=(const ValueTuple1& o) const { return !(*this == o); }
     };
 
+    /// Value-semantic two-element tuple mirroring System.ValueTuple<T1,T2>.
     template<typename T1, typename T2>
     struct ValueTuple2 {
-        T1 Item1; T2 Item2;
+        T1 Item1; ///< First element.
+        T2 Item2; ///< Second element.
+        /// Constructs a ValueTuple2 from two values.
         ValueTuple2(T1 i1, T2 i2) : Item1(std::move(i1)), Item2(std::move(i2)) {}
+        /// Returns true if all elements compare equal.
         bool operator==(const ValueTuple2& o) const { return Item1 == o.Item1 && Item2 == o.Item2; }
+        /// Returns true if any element differs.
         bool operator!=(const ValueTuple2& o) const { return !(*this == o); }
     };
 
+    /// Value-semantic three-element tuple mirroring System.ValueTuple<T1,T2,T3>.
     template<typename T1, typename T2, typename T3>
     struct ValueTuple3 {
-        T1 Item1; T2 Item2; T3 Item3;
+        T1 Item1; ///< First element.
+        T2 Item2; ///< Second element.
+        T3 Item3; ///< Third element.
+        /// Constructs a ValueTuple3 from three values.
         ValueTuple3(T1 i1, T2 i2, T3 i3)
             : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)) {}
+        /// Returns true if all elements compare equal.
         bool operator==(const ValueTuple3& o) const {
             return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3;
         }
+        /// Returns true if any element differs.
         bool operator!=(const ValueTuple3& o) const { return !(*this == o); }
     };
 
+    /// Value-semantic four-element tuple mirroring System.ValueTuple<T1,T2,T3,T4>.
     template<typename T1, typename T2, typename T3, typename T4>
     struct ValueTuple4 {
-        T1 Item1; T2 Item2; T3 Item3; T4 Item4;
+        T1 Item1; ///< First element.
+        T2 Item2; ///< Second element.
+        T3 Item3; ///< Third element.
+        T4 Item4; ///< Fourth element.
+        /// Constructs a ValueTuple4 from four values.
         ValueTuple4(T1 i1, T2 i2, T3 i3, T4 i4)
             : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)), Item4(std::move(i4)) {}
+        /// Returns true if all elements compare equal.
         bool operator==(const ValueTuple4& o) const {
             return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4;
         }
+        /// Returns true if any element differs.
         bool operator!=(const ValueTuple4& o) const { return !(*this == o); }
     };
 
     // Factory helpers
+
+    /// Creates a ValueTuple1 from one value.
     template<typename T1>
     ValueTuple1<T1> MakeValueTuple(T1 i1) { return ValueTuple1<T1>(std::move(i1)); }
 
+    /// Creates a ValueTuple2 from two values.
     template<typename T1, typename T2>
     ValueTuple2<T1,T2> MakeValueTuple(T1 i1, T2 i2) { return {std::move(i1),std::move(i2)}; }
 
+    /// Creates a ValueTuple3 from three values.
     template<typename T1, typename T2, typename T3>
     ValueTuple3<T1,T2,T3> MakeValueTuple(T1 i1, T2 i2, T3 i3) { return {std::move(i1),std::move(i2),std::move(i3)}; }
 
+    /// Creates a ValueTuple4 from four values.
     template<typename T1, typename T2, typename T3, typename T4>
     ValueTuple4<T1,T2,T3,T4> MakeValueTuple(T1 i1, T2 i2, T3 i3, T4 i4) { return {std::move(i1),std::move(i2),std::move(i3),std::move(i4)}; }
 

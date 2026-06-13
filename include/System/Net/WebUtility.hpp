@@ -8,10 +8,13 @@
 
 namespace System::Net {
 
+    /// Provides static methods for encoding and decoding URLs and HTML strings.
     class WebUtility {
     public:
         WebUtility() = delete;
 
+        /// Encodes special HTML characters in @p value (e.g. '&' becomes "&amp;").
+        /// @return The HTML-encoded string.
         static std::string HtmlEncode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
@@ -28,6 +31,8 @@ namespace System::Net {
             return out;
         }
 
+        /// Decodes HTML entities in @p value back to their character equivalents.
+        /// @return The HTML-decoded string.
         static std::string HtmlDecode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
@@ -48,6 +53,8 @@ namespace System::Net {
             return out;
         }
 
+        /// Percent-encodes @p value for use in a URL (spaces become '+').
+        /// @return The URL-encoded string.
         static std::string UrlEncode(const std::string& value) {
             std::ostringstream oss;
             for (unsigned char c : value) {
@@ -61,6 +68,8 @@ namespace System::Net {
             return oss.str();
         }
 
+        /// Decodes a percent-encoded URL string ('+' becomes space).
+        /// @return The URL-decoded string.
         static std::string UrlDecode(const std::string& value) {
             std::string out;
             for (std::size_t i = 0; i < value.size(); ++i) {

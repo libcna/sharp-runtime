@@ -7,27 +7,35 @@
 
 namespace System::Globalization {
 
-    class GregorianCalendar : public Calendar {
-        GregorianCalendarTypes type_;
+/// <summary>Represents the proleptic Gregorian calendar.</summary>
+class GregorianCalendar : public Calendar {
+    GregorianCalendarTypes type_;
 
-    public:
-        static constexpr int ADEra = 1;
-        static constexpr int MinYear = 1;
-        static constexpr int MaxYear = 9999;
+public:
+    static constexpr int ADEra   = 1;    ///< Anno Domini era identifier.
+    static constexpr int MinYear = 1;    ///< Minimum supported Gregorian year.
+    static constexpr int MaxYear = 9999; ///< Maximum supported Gregorian year.
 
-        GregorianCalendar() : type_(GregorianCalendarTypes::Localized) {}
-        explicit GregorianCalendar(GregorianCalendarTypes type) : type_(type) {}
+    /// Constructs a Localized-type GregorianCalendar.
+    GregorianCalendar() : type_(GregorianCalendarTypes::Localized) {}
+    /// Constructs a GregorianCalendar of the specified @p type.
+    explicit GregorianCalendar(GregorianCalendarTypes type) : type_(type) {}
 
-        [[nodiscard]] GregorianCalendarTypes getCalendarTypeProperty() const { return type_; }
-        void setCalendarTypeProperty(GregorianCalendarTypes t) { type_ = t; }
+    /// @return The Gregorian calendar type (e.g. Localized, USEnglish).
+    [[nodiscard]] GregorianCalendarTypes getCalendarTypeProperty() const { return type_; }
+    /// Sets the Gregorian calendar type to @p t.
+    void setCalendarTypeProperty(GregorianCalendarTypes t) { type_ = t; }
 
-        [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return ADEra; }
-        [[nodiscard]] int GetErasCount() const override { return 1; }
+    /// @return Always ADEra (1).
+    [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return ADEra; }
+    /// @return Always 1 — the Gregorian calendar has a single era.
+    [[nodiscard]] int GetErasCount() const override { return 1; }
 
-        [[nodiscard]] bool IsLeapYear(int year, int era = Calendar::CurrentEra) const override {
-            (void)era;
-            return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-        }
-    };
+    /// @return True if @p year is a Gregorian leap year.
+    [[nodiscard]] bool IsLeapYear(int year, int era = Calendar::CurrentEra) const override {
+        (void)era;
+        return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    }
+};
 
 } // namespace System::Globalization

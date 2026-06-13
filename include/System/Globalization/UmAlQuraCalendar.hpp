@@ -14,23 +14,34 @@ namespace System::Globalization {
 /// </summary>
 class UmAlQuraCalendar : public Calendar {
 public:
-    static constexpr int UmAlQuraEra     = 1;
-    static constexpr int MinCalendarYear = 1318;
-    static constexpr int MaxCalendarYear = 1500;
+    static constexpr int UmAlQuraEra     = 1;    ///< The only era value for this calendar.
+    static constexpr int MinCalendarYear = 1318; ///< Minimum supported Um Al Qura year.
+    static constexpr int MaxCalendarYear = 1500; ///< Maximum supported Um Al Qura year.
 
+    /// @return Always UmAlQuraEra (1).
     [[nodiscard]] int GetEra(const System::DateTime& time) const override;
+    /// @return Always 1 — the Um Al Qura calendar has a single era.
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
+    /// @return The Um Al Qura year corresponding to @p time.
     [[nodiscard]] int  GetYear      (const System::DateTime& time) const override;
+    /// @return The Um Al Qura month (1–12) corresponding to @p time.
     [[nodiscard]] int  GetMonth     (const System::DateTime& time) const override;
+    /// @return The day of the Um Al Qura month corresponding to @p time.
     [[nodiscard]] int  GetDayOfMonth(const System::DateTime& time) const override;
+    /// @return The day of the Um Al Qura year corresponding to @p time.
     [[nodiscard]] int  GetDayOfYear (const System::DateTime& time) const override;
 
+    /// @return True if @p year is an Um Al Qura leap year (355 days).
     [[nodiscard]] bool IsLeapYear   (int year, int era = CurrentEra) const override;
+    /// @return Number of days in the given Um Al Qura month (29 or 30).
     [[nodiscard]] int  GetDaysInMonth (int year, int month, int era = CurrentEra) const override;
+    /// @return Number of days in the given Um Al Qura year (354 or 355).
     [[nodiscard]] int  GetDaysInYear  (int year, int era = CurrentEra) const override;
 
+    /// @return A new DateTime offset by @p months Um Al Qura months.
     [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, int months) const override;
+    /// @return A new DateTime offset by @p years Um Al Qura years.
     [[nodiscard]] System::DateTime AddYears (const System::DateTime& time, int years)  const override;
 
 private:
