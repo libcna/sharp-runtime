@@ -14,7 +14,7 @@ Reference source: dotnet/runtime, MIT License
 | 4 | Common/src/System/ExceptionPolyfills.cs | `System` | `internal` | Polyfill for older TFMs — not needed |
 | 5 | Common/src/System/Experimentals.cs | `System` | `internal` | Experimental API markers — not needed |
 | 6 | Common/src/System/HashCodeRandomization.cs | `System` | `internal` | Hash code randomization — not needed |
-| 7 | Common/src/System/HexConverter.cs | `System` |  | Hex encoding helpers — port |
+| 7 | Common/src/System/HexConverter.cs | `System` | `internal` | Hex encoding helpers — port |
 | 8 | Common/src/System/HResults.cs | `System` | `internal` | Windows HRESULT error codes — not needed |
 | 9 | Common/src/System/LocalAppContextSwitches.Common.cs | `System` | `internal` | Runtime feature switches — not needed in C++ |
 | 10 | Common/src/System/MemoryExtensionsPolyfills.cs | `System` | `internal` | Polyfill for older TFMs — not needed |
@@ -22,9 +22,9 @@ Reference source: dotnet/runtime, MIT License
 | 12 | Common/src/System/Net/LocalAppContextSwitches.Net.cs | `System` | `internal` | Runtime feature switches — not needed in C++ |
 | 13 | Common/src/System/NotImplemented.cs | `System` | `internal` | Internal NotImplemented stubs — not needed |
 | 14 | Common/src/System/NullableBool.cs | `System` | `internal` | Internal nullable bool — not needed |
-| 15 | Common/src/System/Number.Formatting.Common.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 16 | Common/src/System/Number.NumberBuffer.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 17 | Common/src/System/Number.Parsing.Common.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
+| 15 | Common/src/System/Number.Formatting.Common.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 16 | Common/src/System/Number.NumberBuffer.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 17 | Common/src/System/Number.Parsing.Common.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
 | 18 | Common/src/System/Obsoletions.cs | `System` | `internal` | Obsoletions catalog — not needed |
 | 19 | Common/src/System/Sha1ForNonSecretPurposes.cs | `System` | `internal` | Internal SHA1 (non-crypto) — not needed |
 | 20 | Common/src/System/SR.cs | `System` | `internal` | String resources / assembly info — not needed |
@@ -128,7 +128,7 @@ Reference source: dotnet/runtime, MIT License
 | 118 | System.Private.CoreLib/src/System/ArgumentOutOfRangeException.cs | `System` |  | ArgumentOutOfRangeException — ported |
 | 119 | System.Private.CoreLib/src/System/ArithmeticException.cs | `System` |  | ArithmeticException — port |
 | 120 | System.Private.CoreLib/src/System/Array.cs | `System` |  | Array type — partial port (C++ uses std::vector/std::array) |
-| 121 | System.Private.CoreLib/src/System/Array.Enumerators.cs | `System` |  | Array enumerator — port |
+| 121 | System.Private.CoreLib/src/System/Array.Enumerators.cs | `System` | `internal` | Array enumerator — port |
 | 122 | System.Private.CoreLib/src/System/ArraySegment.cs | `System` |  | ArraySegment<T> — port (wraps array slice) |
 | 123 | System.Private.CoreLib/src/System/ArrayTypeMismatchException.cs | `System` |  | ArrayTypeMismatchException — stub |
 | 124 | System.Private.CoreLib/src/System/AssemblyLoadEventArgs.cs | `System` |  | Assembly load event — stub |
@@ -151,7 +151,7 @@ Reference source: dotnet/runtime, MIT License
 | 141 | System.Private.CoreLib/src/System/Context.cs | `System` | `internal` | CLR internal / not applicable in C++ |
 | 142 | System.Private.CoreLib/src/System/Convert.cs | `System` |  | Convert static class — port |
 | 143 | System.Private.CoreLib/src/System/CoreLib.cs | `System` | `internal` | String resources / assembly info — not needed |
-| 144 | System.Private.CoreLib/src/System/CurrentSystemTimeZone.cs | `System` |  | Legacy CurrentSystemTimeZone — stub |
+| 144 | System.Private.CoreLib/src/System/CurrentSystemTimeZone.cs | `System` | `internal` | Legacy CurrentSystemTimeZone — stub |
 | 145 | System.Private.CoreLib/src/System/DataMisalignedException.cs | `System` |  | DataMisalignedException — stub |
 | 146 | System.Private.CoreLib/src/System/DateOnly.cs | `System` |  | Date-only struct — port |
 | 147 | System.Private.CoreLib/src/System/DateTime.cs | `System` |  | DateTime struct — ported in sharp-runtime |
@@ -209,8 +209,8 @@ Reference source: dotnet/runtime, MIT License
 | 199 | System.Private.CoreLib/src/System/GC.cs | `System` |  | GC class — no-op stubs in C++ (no GC needed) |
 | 200 | System.Private.CoreLib/src/System/GCMemoryInfo.cs | `System` |  | GC memory info — stub |
 | 201 | System.Private.CoreLib/src/System/Gen2GcCallback.cs | `System` | `internal` | CLR internal / not applicable in C++ |
-| 202 | System.Private.CoreLib/src/System/Globalization/DateTimeFormat.cs | `System` |  | DateTime formatting internals — port with Globalization |
-| 203 | System.Private.CoreLib/src/System/Globalization/DateTimeParse.cs | `System` |  | DateTime parsing internals — port with Globalization |
+| 202 | System.Private.CoreLib/src/System/Globalization/DateTimeFormat.cs | `System` | `internal` | DateTime formatting internals — port with Globalization |
+| 203 | System.Private.CoreLib/src/System/Globalization/DateTimeParse.cs | `System` | `internal` | DateTime parsing internals — port with Globalization |
 | 204 | System.Private.CoreLib/src/System/Guid.cs | `System` |  | Guid struct — port |
 | 205 | System.Private.CoreLib/src/System/Guid.Unix.cs | `System` | `internal` | POSIX implementation — reference for Linux/macOS build |
 | 206 | System.Private.CoreLib/src/System/Guid.Windows.cs | `System` | `internal` | Windows-specific implementation — not needed |
@@ -281,13 +281,13 @@ Reference source: dotnet/runtime, MIT License
 | 271 | System.Private.CoreLib/src/System/NotSupportedException.cs | `System` |  | NotSupportedException — ported |
 | 272 | System.Private.CoreLib/src/System/Nullable.cs | `System` |  | Nullable<T> — map to std::optional<T> in C++ |
 | 273 | System.Private.CoreLib/src/System/NullReferenceException.cs | `System` |  | NullReferenceException — ported |
-| 274 | System.Private.CoreLib/src/System/Number.BigInteger.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 275 | System.Private.CoreLib/src/System/Number.DiyFp.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 276 | System.Private.CoreLib/src/System/Number.Dragon4.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 277 | System.Private.CoreLib/src/System/Number.Formatting.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 278 | System.Private.CoreLib/src/System/Number.Grisu3.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 279 | System.Private.CoreLib/src/System/Number.NumberToFloatingPointBits.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
-| 280 | System.Private.CoreLib/src/System/Number.Parsing.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
+| 274 | System.Private.CoreLib/src/System/Number.BigInteger.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 275 | System.Private.CoreLib/src/System/Number.DiyFp.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 276 | System.Private.CoreLib/src/System/Number.Dragon4.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 277 | System.Private.CoreLib/src/System/Number.Formatting.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 278 | System.Private.CoreLib/src/System/Number.Grisu3.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 279 | System.Private.CoreLib/src/System/Number.NumberToFloatingPointBits.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
+| 280 | System.Private.CoreLib/src/System/Number.Parsing.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
 | 281 | System.Private.CoreLib/src/System/Object.cs | `System` |  | System.Object base — stub (C++ uses inheritance differently) |
 | 282 | System.Private.CoreLib/src/System/ObjectDisposedException.cs | `System` |  | ObjectDisposedException — ported |
 | 283 | System.Private.CoreLib/src/System/ObsoleteAttribute.cs | `System` |  | ObsoleteAttribute — stub (use [[deprecated]] in C++) |
@@ -321,13 +321,13 @@ Reference source: dotnet/runtime, MIT License
 | 311 | System.Private.CoreLib/src/System/Single.cs | `System` |  | float (32-bit) — port ToString/Parse/formatting |
 | 312 | System.Private.CoreLib/src/System/Span.cs | `System` |  | Span<T> — map to std::span in C++ |
 | 313 | System.Private.CoreLib/src/System/SpanDebugView.cs | `System` | `internal` | Debugger view helper — not needed |
-| 314 | System.Private.CoreLib/src/System/SpanHelpers.BinarySearch.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 315 | System.Private.CoreLib/src/System/SpanHelpers.Byte.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 316 | System.Private.CoreLib/src/System/SpanHelpers.ByteMemOps.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 317 | System.Private.CoreLib/src/System/SpanHelpers.Char.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 318 | System.Private.CoreLib/src/System/SpanHelpers.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 319 | System.Private.CoreLib/src/System/SpanHelpers.Packed.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
-| 320 | System.Private.CoreLib/src/System/SpanHelpers.T.cs | `System` |  | Span internal algorithms — use std::* equivalents in C++ |
+| 314 | System.Private.CoreLib/src/System/SpanHelpers.BinarySearch.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 315 | System.Private.CoreLib/src/System/SpanHelpers.Byte.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 316 | System.Private.CoreLib/src/System/SpanHelpers.ByteMemOps.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 317 | System.Private.CoreLib/src/System/SpanHelpers.Char.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 318 | System.Private.CoreLib/src/System/SpanHelpers.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 319 | System.Private.CoreLib/src/System/SpanHelpers.Packed.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
+| 320 | System.Private.CoreLib/src/System/SpanHelpers.T.cs | `System` | `internal` | Span internal algorithms — use std::* equivalents in C++ |
 | 321 | System.Private.CoreLib/src/System/SR.cs | `System` | `internal` | String resources / assembly info — not needed |
 | 322 | System.Private.CoreLib/src/System/StackOverflowException.cs | `System` |  | CLR stack overflow — stub only |
 | 323 | System.Private.CoreLib/src/System/StartupHookProvider.cs | `System` | `internal` | CLR internal / not applicable in C++ |
@@ -386,10 +386,10 @@ Reference source: dotnet/runtime, MIT License
 | 376 | System.Private.CoreLib/src/System/Void.cs | `System` | `internal` | System.Void — not needed |
 | 377 | System.Private.CoreLib/src/System/WeakReference.cs | `System` |  | WeakReference — port using std::weak_ptr |
 | 378 | System.Private.CoreLib/src/System/WeakReference.T.cs | `System` |  | WeakReference<T> — port using std::weak_ptr |
-| 379 | System.Private.Uri/src/System/DomainNameHelper.cs | `System` |  | DNS domain name helpers — port with Net |
+| 379 | System.Private.Uri/src/System/DomainNameHelper.cs | `System` | `internal` | DNS domain name helpers — port with Net |
 | 380 | System.Private.Uri/src/System/GenericUriParser.cs | `System` |  | Generic URI parser — port |
-| 381 | System.Private.Uri/src/System/IriHelper.cs | `System` |  | IRI helper — port with Uri |
-| 382 | System.Private.Uri/src/System/PercentEncodingHelper.cs | `System` |  | URL percent-encoding — port |
+| 381 | System.Private.Uri/src/System/IriHelper.cs | `System` | `internal` | IRI helper — port with Uri |
+| 382 | System.Private.Uri/src/System/PercentEncodingHelper.cs | `System` | `internal` | URL percent-encoding — port |
 | 383 | System.Private.Uri/src/System/UncNameHelper.cs | `System` | `internal` | UNC path helper — Windows-specific; stub |
 | 384 | System.Private.Uri/src/System/UriBuilder.cs | `System` |  | UriBuilder — port |
 | 385 | System.Private.Uri/src/System/UriCreationOptions.cs | `System` |  | UriCreationOptions — port |
@@ -397,7 +397,7 @@ Reference source: dotnet/runtime, MIT License
 | 387 | System.Private.Uri/src/System/UriEnumTypes.cs | `System` |  | Uri enum types (UriKind etc.) — port |
 | 388 | System.Private.Uri/src/System/UriExt.cs | `System` |  | Uri extension methods — port |
 | 389 | System.Private.Uri/src/System/UriFormatException.cs | `System` |  | UriFormatException — port |
-| 390 | System.Private.Uri/src/System/UriHelper.cs | `System` |  | Uri internal helpers — port with Uri |
+| 390 | System.Private.Uri/src/System/UriHelper.cs | `System` | `internal` | Uri internal helpers — port with Uri |
 | 391 | System.Private.Uri/src/System/UriHostNameType.cs | `System` |  | UriHostNameType enum — port |
 | 392 | System.Private.Uri/src/System/UriParserTemplates.cs | `System` |  | URI parser templates — port |
 | 393 | System.Private.Uri/src/System/UriPartial.cs | `System` |  | UriPartial enum — port |
@@ -409,7 +409,7 @@ Reference source: dotnet/runtime, MIT License
 | 399 | System.Reflection.MetadataLoadContext/src/System/Reflection/DefaultBinder.cs | `System` | `internal` | CLR internal / not applicable in C++ |
 | 400 | System.Reflection.MetadataLoadContext/src/System/ThrowHelper.cs | `System` | `internal` | Internal throw helper — not needed in C++ |
 | 401 | System.Runtime.InteropServices/ref/System.Runtime.InteropServices.cs | `System` |  | Public API surface definition — use as porting reference |
-| 402 | System.Runtime.Numerics/src/System/Number.BigInteger.cs | `System` |  | Number formatting/parsing internals — use std::format / printf in C++ |
+| 402 | System.Runtime.Numerics/src/System/Number.BigInteger.cs | `System` | `internal` | Number formatting/parsing internals — use std::format / printf in C++ |
 | 403 | System.Runtime.Numerics/src/System/Number.Polyfill.cs | `System` | `internal` | Polyfill for older TFMs — not needed |
 | 404 | System.Runtime.Numerics/src/System/ThrowHelper.cs | `System` | `internal` | Internal throw helper — not needed in C++ |
 | 405 | System.Runtime/ref/System.Runtime.cs | `System` |  | Public API surface definition — use as porting reference |
