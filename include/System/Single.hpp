@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -28,16 +30,33 @@ public:
     static bool IsSubnormal(float f)         { return std::fpclassify(f) == FP_SUBNORMAL; }
 
     static float Parse(const std::string& s) {
-        try { return std::stof(s); }
-        catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        if (s == "NaN")       return std::numeric_limits<float>::quiet_NaN();
+        if (s == "Infinity")  return  std::numeric_limits<float>::infinity();
+        if (s == "-Infinity") return -std::numeric_limits<float>::infinity();
+        float result{};
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        if (ec != std::errc{} || ptr != s.data() + s.size())
+            throw std::invalid_argument("Input string was not in a correct format.");
+        return result;
     }
 
     static bool TryParse(const std::string& s, float& result) {
-        try { result = std::stof(s); return true; }
-        catch (...) { result = 0.0f; return false; }
+        if (s == "NaN")       { result = std::numeric_limits<float>::quiet_NaN(); return true; }
+        if (s == "Infinity")  { result =  std::numeric_limits<float>::infinity(); return true; }
+        if (s == "-Infinity") { result = -std::numeric_limits<float>::infinity(); return true; }
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        if (ec != std::errc{} || ptr != s.data() + s.size()) { result = 0.0f; return false; }
+        return true;
     }
 
-    static std::string ToString(float value) { return std::to_string(value); }
+    static std::string ToString(float value) {
+        if (std::isnan(value)) return "NaN";
+        if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+        std::array<char, 64> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        if (ec == std::errc{}) return std::string(buf.data(), ptr);
+        return std::to_string(value);
+    }
 };
 
 } // namespace System

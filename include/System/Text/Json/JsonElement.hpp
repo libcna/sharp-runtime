@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <charconv>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -53,7 +54,10 @@ namespace System::Text::Json {
         [[nodiscard]] double GetDouble() const {
             if (kind_ != JsonValueKind::Number)
                 throw std::runtime_error("Element is not a number.");
-            return std::stod(rawText_);
+            double result{};
+            auto [ptr, ec] = std::from_chars(rawText_.data(), rawText_.data() + rawText_.size(), result);
+            if (ec != std::errc{}) throw std::runtime_error("JSON number cannot be parsed as double.");
+            return result;
         }
 
         /// Returns the value as a boolean (true if kind is True, false otherwise).

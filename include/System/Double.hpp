@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -42,20 +44,37 @@ public:
     /// Returns true if the specified value is subnormal.
     static bool IsSubnormal(double d)         { return std::fpclassify(d) == FP_SUBNORMAL; }
 
-    /// Parses a string to a double; throws on failure.
+    /// Parses a string to a double; throws on failure. Locale-independent (always uses '.').
     static double Parse(const std::string& s) {
-        try { return std::stod(s); }
-        catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        if (s == "NaN")       return std::numeric_limits<double>::quiet_NaN();
+        if (s == "Infinity")  return  std::numeric_limits<double>::infinity();
+        if (s == "-Infinity") return -std::numeric_limits<double>::infinity();
+        double result{};
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        if (ec != std::errc{} || ptr != s.data() + s.size())
+            throw std::invalid_argument("Input string was not in a correct format.");
+        return result;
     }
 
-    /// Attempts to parse a string to a double; returns false on failure.
+    /// Attempts to parse a string to a double; returns false on failure. Locale-independent.
     static bool TryParse(const std::string& s, double& result) {
-        try { result = std::stod(s); return true; }
-        catch (...) { result = 0.0; return false; }
+        if (s == "NaN")       { result = std::numeric_limits<double>::quiet_NaN(); return true; }
+        if (s == "Infinity")  { result =  std::numeric_limits<double>::infinity(); return true; }
+        if (s == "-Infinity") { result = -std::numeric_limits<double>::infinity(); return true; }
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        if (ec != std::errc{} || ptr != s.data() + s.size()) { result = 0.0; return false; }
+        return true;
     }
 
-    /// Converts a double to its string representation.
-    static std::string ToString(double value) { return std::to_string(value); }
+    /// Converts a double to its string representation. Locale-independent (always uses '.').
+    static std::string ToString(double value) {
+        if (std::isnan(value)) return "NaN";
+        if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+        std::array<char, 64> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        if (ec == std::errc{}) return std::string(buf.data(), ptr);
+        return std::to_string(value);
+    }
 };
 
 } // namespace System
