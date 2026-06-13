@@ -1,6 +1,6 @@
 # COVERAGE.md — sharp-runtime .NET API Coverage Analysis
 
-*Generated: 2026-06-13 | Branch: develop | Tests: 3213 passing*
+*Generated: 2026-06-13 | Branch: develop | Tests: 3224 passing*
 
 This document maps which .NET `System.*` namespaces, classes, and methods are present in
 sharp-runtime, and whether each is fully implemented, partial, or a stub.
@@ -288,8 +288,15 @@ All backed by `shared_ptr<const std::container<T>>`:
 ### RandomAccess (DONE — POSIX-only documented)
 `Read`, `Write` — POSIX pread/pwrite; Win32 OVERLAPPED ReadFile/WriteFile; Emscripten throws ✅
 
-### IsolatedStorage (PARTIAL)
-`IsolatedStorageFile`, `IsolatedStorageFileStream`, `IsolatedStorage` — basic ⚠️
+### IsolatedStorage (DONE)
+| Class / Method | Status |
+|----------------|--------|
+| `IsolatedStorageFile` — FileExists, OpenFile, CreateFile, DeleteFile, CopyFile, MoveFile, GetFileNames | ✅ |
+| `IsolatedStorageFile` — DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames | ✅ |
+| `IsolatedStorageFile` — Remove, Close, Dispose | ✅ |
+| `IsolatedStorageFile` — AvailableFreeSpace, UsedSize (via `std::filesystem::space`) | ✅ |
+| `IsolatedStorageFileStream` — Read, Write, Length, Close, IsOpen | ✅ |
+| `IsolatedStorage` (abstract base) — Scope, Close, Remove | ✅ |
 
 ### Enumerations (DONE)
 `FileMode`, `FileAccess`, `FileShare`, `FileAttributes`, `SearchOption`,
@@ -350,7 +357,9 @@ All backed by `shared_ptr<const std::container<T>>`:
 |-------|--------|
 | Task, Task\<T\> | ⚠️ `std::async(launch::async)`, no real threadpool; Emscripten throws |
 | TaskCompletionSource\<T\> | ✅ |
-| Parallel.For | ⚠️ stubs; Emscripten guard |
+| Parallel.For | ✅ `std::async`; MaxDegreeOfParallelism honoured; Emscripten guard |
+| Parallel.ForEach | ✅ by-value capture (ref-capture bug fixed) |
+| Parallel.Invoke | ✅ |
 
 ### Timers (DONE)
 | Class | Status |

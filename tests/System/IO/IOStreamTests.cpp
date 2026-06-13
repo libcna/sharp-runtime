@@ -629,3 +629,99 @@ TEST(IsolatedStorageFileTests, OpenFile_WriteAndDelete_Roundtrip) {
     store.DeleteFile(fname);
     EXPECT_FALSE(store.FileExists(fname));
 }
+
+TEST(IsolatedStorageFileTests, CreateFile_Creates) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_create.dat";
+    { auto s = store.CreateFile(fname); s.Close(); }
+    EXPECT_TRUE(store.FileExists(fname));
+    store.DeleteFile(fname);
+}
+
+TEST(IsolatedStorageFileTests, CopyFile_CopiesContent) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string src = "sharp_rt_iso_src.dat";
+    const std::string dst = "sharp_rt_iso_dst.dat";
+    { auto s = store.CreateFile(src); s.Close(); }
+    store.CopyFile(src, dst);
+    EXPECT_TRUE(store.FileExists(dst));
+    store.DeleteFile(src);
+    store.DeleteFile(dst);
+}
+
+TEST(IsolatedStorageFileTests, MoveFile_MovesFile) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string src = "sharp_rt_iso_mv_src.dat";
+    const std::string dst = "sharp_rt_iso_mv_dst.dat";
+    { auto s = store.CreateFile(src); s.Close(); }
+    store.MoveFile(src, dst);
+    EXPECT_FALSE(store.FileExists(src));
+    EXPECT_TRUE(store.FileExists(dst));
+    store.DeleteFile(dst);
+}
+
+TEST(IsolatedStorageFileTests, GetFileNames_ReturnsCreatedFile) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_list.dat";
+    { auto s = store.CreateFile(fname); s.Close(); }
+    auto names = store.GetFileNames("sharp_rt_iso_list*");
+    EXPECT_FALSE(names.empty());
+    store.DeleteFile(fname);
+}
+
+TEST(IsolatedStorageFileTests, DirectoryExists_FalseForNonExistent) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_FALSE(store.DirectoryExists("sharp_rt_iso_no_such_dir_xyz"));
+}
+
+TEST(IsolatedStorageFileTests, CreateDirectory_DirectoryExists_Delete) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string dir = "sharp_rt_iso_testdir";
+    store.CreateDirectory(dir);
+    EXPECT_TRUE(store.DirectoryExists(dir));
+    store.DeleteDirectory(dir);
+    EXPECT_FALSE(store.DirectoryExists(dir));
+}
+
+TEST(IsolatedStorageFileTests, MoveDirectory_MovesDir) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string src = "sharp_rt_iso_dir_src";
+    const std::string dst = "sharp_rt_iso_dir_dst";
+    store.CreateDirectory(src);
+    store.MoveDirectory(src, dst);
+    EXPECT_FALSE(store.DirectoryExists(src));
+    EXPECT_TRUE(store.DirectoryExists(dst));
+    store.DeleteDirectory(dst);
+}
+
+TEST(IsolatedStorageFileTests, GetDirectoryNames_ReturnsCreatedDir) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string dir = "sharp_rt_iso_listed_dir";
+    store.CreateDirectory(dir);
+    auto names = store.GetDirectoryNames("sharp_rt_iso_listed*");
+    EXPECT_FALSE(names.empty());
+    store.DeleteDirectory(dir);
+}
+
+TEST(IsolatedStorageFileTests, AvailableFreeSpace_Positive) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_GT(store.getAvailableFreeSpaceProperty(), 0);
+}
+
+TEST(IsolatedStorageFileTests, UsedSize_AfterWrite_Positive) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_used.dat";
+    {
+        auto s = store.CreateFile(fname);
+        uint8_t buf[64] = {};
+        s.Write(buf, 0, 64);
+        s.Close();
+    }
+    EXPECT_GE(store.getUsedSizeProperty(), 64);
+    store.DeleteFile(fname);
+}
+
+TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_NO_THROW(store.Dispose());
+}

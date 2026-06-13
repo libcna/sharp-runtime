@@ -2,9 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <future>
+#include <thread>
 #include <vector>
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
@@ -62,10 +64,32 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /// Executes a for loop in parallel, respecting the provided ParallelOptions.
-        static ParallelLoopResult For(int fromInclusive, int toExclusive, const ParallelOptions& /*opts*/,
+        /// Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts.
+        static ParallelLoopResult For(int fromInclusive, int toExclusive, const ParallelOptions& opts,
                                        std::function<void(int)> body) {
-            return For(fromInclusive, toExclusive, std::move(body));
+#if defined(__EMSCRIPTEN__)
+            (void)fromInclusive; (void)toExclusive; (void)opts; (void)body;
+            throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
+#else
+            int maxDeg = opts.MaxDegreeOfParallelism;
+            if (maxDeg <= 0)
+                maxDeg = static_cast<int>(std::thread::hardware_concurrency());
+            if (maxDeg < 1) maxDeg = 1;
+
+            std::vector<std::future<void>> futures;
+            for (int i = fromInclusive; i < toExclusive; ++i) {
+                futures.push_back(std::async(std::launch::async, [body, i]{ body(i); }));
+                // Once we have maxDeg in-flight, drain before adding more.
+                if (static_cast<int>(futures.size()) >= maxDeg) {
+                    for (auto& f : futures) f.get();
+                    futures.clear();
+                }
+            }
+            for (auto& f : futures) f.get();
+            ParallelLoopResult result;
+            result.isCompleted_ = true;
+            return result;
+#endif
         }
 
         /// Executes a foreach loop over source in parallel.
@@ -76,8 +100,9 @@ namespace System::Threading::Tasks {
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
 #else
             std::vector<std::future<void>> futures;
-            for (auto& item : source) {
-                futures.push_back(std::async(std::launch::async, [body, &item]{ body(item); }));
+            // Capture item by value to avoid dangling reference after loop iteration.
+            for (TSource item : source) {
+                futures.push_back(std::async(std::launch::async, [body, item]{ body(item); }));
             }
             for (auto& f : futures) f.get();
             ParallelLoopResult result;
