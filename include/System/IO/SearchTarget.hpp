@@ -5,9 +5,13 @@
 
 namespace System::IO {
 
+    /// Specifies the type of entries returned by a file-system enumeration.
     enum class SearchTarget {
+        /// Return only files.
         Files       = 1,
+        /// Return only directories.
         Directories = 2,
+        /// Return both files and directories.
         Both        = 3,
     };
 

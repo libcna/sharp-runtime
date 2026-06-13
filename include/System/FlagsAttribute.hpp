@@ -5,5 +5,6 @@
 #include "System/Attribute.hpp"
 
 namespace System {
+    /// Indicates that an enumeration can be treated as a bit field (set of flags).
     class FlagsAttribute : public Attribute {};
 } // namespace System

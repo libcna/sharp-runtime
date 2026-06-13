@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-12 (branch: develop) — session 41*
+*Last updated: 2026-06-13 (branch: develop) — session 42*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Session 41 was focused on portability and quality fixes — all POSIX-only includes have been removed from public headers, Windows and Emscripten paths added to `.cpp` files. Remaining portability items are listed in §8.
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–42 focused on portability and quality: POSIX includes removed from public headers; Windows/Emscripten paths added; strict warnings enforced; GCC builtins replaced with C++20 std::bit; `__int128` MSVC guard added; ws2_32 explicit link. Remaining portability items in §8.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -221,20 +221,30 @@ git log --oneline -10
 | 72 | 41 | Quality: Char.hpp NUL warning fixed; Thread deferred-start (Start() once; 2nd throws); Task data race fixed (shared_ptr<State>); CMakeLists.txt fatal error if GTest missing; CLAUDE.md created | — |
 | 73 | 41 | Portability: Networking (Winsock2+Emscripten), RandomAccess (Win32 OVERLAPPED ReadFile/WriteFile), AppDomain (Win/macOS/Emscripten), TimeZoneInfo (Win/Emscripten); all POSIX includes removed from public headers | — |
 | 74 | 41 | Portability: `Environment.hpp` — GetCurrentDirectory + getProcessorCountProperty moved to `Environment.cpp`; `<windows.h>` kept out of public header | — |
+| 75 | 42 | Portability: `Task`/`TaskT` Emscripten guard — throw `PlatformNotSupportedException` (std::async requires pthreads) | — |
+| 76 | 42 | CMake strict warnings: `-Wall -Wextra -Werror` for SHARP_RUNTIME; vendor/ as SYSTEM include; fix FileMode switch; `-Wno-unused-result` for tests | — |
+| 77 | 42 | `TimeZoneInfo::FindSystemTimeZoneById()` — IANA→Windows mapping ~85 zones via `EnumDynamicTimeZoneInformation` | — |
+| P1 | 42 | `Path.cpp` — proper WIN32/POSIX guards for `GetTempFileName`/`mkstemp`/`close` | — |
+| P2 | 42 | `DriveInfo::GetDrives()` — move Win32 API body from header to `DriveInfo.cpp` | — |
+| P3 | 42 | `Parallel`, `ThreadPool`, `Timer` — Emscripten guards for all `std::thread`/`std::async` entry points | — |
+| P4 | 42 | CMakeLists: explicit `ws2_32` link for Windows (GCC/mingw-w64 ignores `#pragma comment`) | — |
+| P5 | 42 | `Int128`, `UInt128`, `Decimal` — `#error` on MSVC (`__int128` is GCC/Clang only) | — |
+| P6 | 42 | `Barrier.hpp` — `long phaseCount_` → `int64_t` (Windows 64-bit: `long` = 32-bit) | — |
+| P7 | 42 | `BitConverter.hpp` — `IsLittleEndian` hardcoded `true` → `std::endian::native == std::endian::little` | — |
+| P8 | 42 | `CharUnicodeInfo.hpp` — `wchar_t` cast guarded by `WCHAR_MAX` (Windows: 16-bit wchar_t) | — |
+| P9 | 42 | `BitOperations.hpp`, `BitVector32.hpp` — replace `__builtin_clz`/`__builtin_popcount` with C++20 `std::countl_zero`/`std::popcount` | — |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-### Portability — remaining items (continue next session)
+### Portability — remaining items
 
 | Task | Description | Complexity | Notes |
 |------|-------------|------------|-------|
-| 75 | `Task`/`TaskT` — add Emscripten guard: throw `PlatformNotSupportedException` since `std::async` requires pthreads | small | Without pthreads, Wasm build crashes at runtime |
-| 76 | CMake: add strict warning flags — `-Wall -Wextra` (GCC/Clang) / `/W4` (MSVC) | small | Catch future portability regressions at compile time |
-| 77 | `TimeZoneInfo::FindSystemTimeZoneById()` — add basic IANA→Windows name mapping table for ~30 common zones | medium | Current Windows path throws for any IANA ID |
-| 78 | Emscripten build test — set up `emcmake cmake` build in CI or local verification | medium | Code compiles on Linux but Emscripten paths have never been run |
-| 79 | Windows build test — verify Winsock2 path compiles and links with MSVC or mingw-w64 | medium | Same situation as Emscripten |
+| 79 | Emscripten build test — `emcmake cmake` build in CI or local | medium | Code paths written but never compiled with emcc |
+| 80 | Windows build test — verify Winsock2 path with MSVC or mingw-w64 | medium | Code paths written but never compiled on Windows |
+| 81 | `Convert::ToDouble` locale safety — `strtod` uses locale decimal separator; fix with `std::from_chars` | small | Rare in practice for game code but technically incorrect |
 
 ### Calendar types — awaiting user decision
 
@@ -261,19 +271,19 @@ git log --oneline -10
 >
 > Read NEXT.md and CLAUDE.md before starting.
 >
-> Current state: 3080 tests pass, zero warnings. Session 41 completed portability fixes (Tasks 72–74):
+> Current state: 3080 tests pass, zero warnings. Sessions 41–42 completed portability sweep:
 > - All POSIX includes removed from public `.hpp` headers
-> - Networking: POSIX + Winsock2 + Emscripten guards in `.cpp`
-> - RandomAccess: Win32 OVERLAPPED ReadFile/WriteFile + Emscripten throw
-> - AppDomain: Win/macOS/Linux/Emscripten paths
-> - TimeZoneInfo: Win/POSIX/Emscripten paths
-> - Environment: moved platform code to `Environment.cpp`
-> - Thread: deferred start, Start() throws on 2nd call
-> - Task: data race fixed via shared_ptr<State>
-> - CMakeLists.txt: fatal error if googletest missing
-> - CLAUDE.md: platform policy and non-negotiable rules documented
+> - Networking: POSIX + Winsock2 + Emscripten guards; ws2_32 explicit CMake link
+> - Task/TaskT, Parallel, ThreadPool, Timer: Emscripten guards (pthreads required)
+> - CMake: -Wall -Wextra -Werror for SHARP_RUNTIME; vendor/ as SYSTEM include
+> - TimeZoneInfo: IANA→Windows mapping ~85 zones via EnumDynamicTimeZoneInformation
+> - DriveInfo, Path, DriveInfo, IsolatedStorageFileStream: platform guards fixed
+> - BitOperations, BitVector32: __builtin_* → C++20 std::bit (MSVC compatible)
+> - Int128/UInt128/Decimal: #error on MSVC (requires __int128)
+> - Barrier: long → int64_t; BitConverter: IsLittleEndian → std::endian
+> - CharUnicodeInfo: wchar_t cast guarded by WCHAR_MAX
 >
-> Next priority: Task 75 (Task/TaskT Emscripten guard), Task 76 (CMake strict warnings).
+> Next: Task 79 (Emscripten build test), Task 80 (Windows build test).
 > See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`

@@ -22,12 +22,15 @@ namespace System::Collections::Generic {
         std::queue<T> queue_;
 
     public:
+        /// Default-constructs an empty Queue.
         Queue() = default;
 
         /**
          * @brief Adds an object to the end of the Queue.
          */
+        /// Adds an object to the end of the Queue (copy).
         void Enqueue(const T& item) { queue_.push(item); }
+        /// Adds an object to the end of the Queue (move).
         void Enqueue(T&& item)      { queue_.push(std::move(item)); }
 
         /**
@@ -48,8 +51,10 @@ namespace System::Collections::Generic {
             return queue_.front();
         }
 
+        /// Gets the number of elements contained in the Queue.
         [[nodiscard]] int getCountProperty() const { return static_cast<int>(queue_.size()); }
 
+        /// Returns true if the Queue contains the specified element.
         [[nodiscard]] bool Contains(const T& item) const {
             std::queue<T> copy = queue_;
             while (!copy.empty()) {
@@ -59,8 +64,10 @@ namespace System::Collections::Generic {
             return false;
         }
 
+        /// Removes all objects from the Queue.
         void Clear() { while (!queue_.empty()) queue_.pop(); }
 
+        /// Copies the Queue elements to a new vector.
         [[nodiscard]] std::vector<T> ToArray() const {
             std::vector<T> result;
             std::queue<T> copy = queue_;

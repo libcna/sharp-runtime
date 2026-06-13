@@ -8,6 +8,7 @@
 
 namespace System::IO::Hashing {
 
+    /// Computes a CRC-32 checksum of a data stream.
     class Crc32 : public NonCryptographicHashAlgorithm {
         uint32_t crc_ = 0xFFFFFFFFu;
 
@@ -26,16 +27,20 @@ namespace System::IO::Hashing {
         }
 
     public:
+        /// Initializes a new Crc32 instance.
         Crc32() : NonCryptographicHashAlgorithm(4) { initTable(); }
 
         using NonCryptographicHashAlgorithm::Append;
+        /// Appends the specified bytes to the running CRC-32 computation.
         void Append(const uint8_t* source, size_t length) override {
             for (size_t i = 0; i < length; ++i)
                 crc_ = table_[(crc_ ^ source[i]) & 0xFF] ^ (crc_ >> 8);
         }
 
+        /// Resets the hash to its initial state.
         void Reset() override { crc_ = 0xFFFFFFFFu; }
 
+        /// Writes the current CRC-32 checksum (little-endian) to dest.
         void GetCurrentHash(uint8_t* dest, size_t /*len*/) override {
             uint32_t result = crc_ ^ 0xFFFFFFFFu;
             dest[0] = static_cast<uint8_t>(result & 0xFF);
@@ -44,10 +49,12 @@ namespace System::IO::Hashing {
             dest[3] = static_cast<uint8_t>((result >> 24) & 0xFF);
         }
 
+        /// Returns the current CRC-32 checksum as a 32-bit unsigned integer.
         [[nodiscard]] uint32_t GetCurrentHashAsUInt32() const {
             return crc_ ^ 0xFFFFFFFFu;
         }
 
+        /// Computes the CRC-32 of a byte vector and returns it as a 32-bit integer.
         static uint32_t HashToUInt32(const std::vector<uint8_t>& source) {
             Crc32 h;
             h.Append(source);

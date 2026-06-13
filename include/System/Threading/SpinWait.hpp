@@ -7,29 +7,37 @@
 
 namespace System::Threading {
 
+    /// Provides support for spin-based waiting.
     class SpinWait {
         SharpRuntime::intcs count_ = 0;
         static constexpr SharpRuntime::intcs YieldThreshold = 10;
 
     public:
+        /// Returns the number of times SpinOnce has been called on this instance.
         [[nodiscard]] SharpRuntime::intcs getCountProperty() const noexcept { return count_; }
+        /// Returns true when the next call to SpinOnce will yield the processor.
         [[nodiscard]] bool getNextSpinWillYieldProperty() const noexcept { return count_ >= YieldThreshold; }
 
+        /// Performs a single spin; yields the processor when the spin count exceeds the threshold.
         void SpinOnce() {
             if (count_ >= YieldThreshold)
                 std::this_thread::yield();
             ++count_;
         }
 
+        /// Performs a single spin, ignoring sleep1Threshold.
         void SpinOnce(SharpRuntime::intcs /*sleep1Threshold*/) { SpinOnce(); }
 
+        /// Resets the spin counter to zero.
         void Reset() noexcept { count_ = 0; }
 
+        /// Spins in a loop until condition returns true.
         static void SpinUntil(std::function<bool()> condition) {
             SpinWait sw;
             while (!condition()) sw.SpinOnce();
         }
 
+        /// Spins until condition returns true or the timeout elapses; returns true on success.
         static bool SpinUntil(std::function<bool()> condition, int millisecondsTimeout) {
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millisecondsTimeout);
             SpinWait sw;

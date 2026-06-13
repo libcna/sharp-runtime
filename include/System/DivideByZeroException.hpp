@@ -17,8 +17,11 @@ namespace System {
      */
     class DivideByZeroException : public ArithmeticException {
     public:
+        /// Initializes a new instance with the default divide-by-zero message.
         DivideByZeroException();
+        /// Initializes a new instance with the specified error message.
         explicit DivideByZeroException(const char* message);
+        /// Initializes a new instance with the specified error message.
         explicit DivideByZeroException(const std::string& message);
     };
 

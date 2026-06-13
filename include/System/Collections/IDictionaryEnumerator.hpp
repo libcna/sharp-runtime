@@ -7,11 +7,16 @@
 
 namespace System::Collections {
 
+    /// Enumerates the elements of a non-generic dictionary.
     class IDictionaryEnumerator : public IEnumerator {
     public:
+        /// Destroys the enumerator.
         virtual ~IDictionaryEnumerator() = default;
+        /// Gets both the key and the value of the current dictionary entry.
         [[nodiscard]] virtual DictionaryEntry getEntryProperty() const = 0;
+        /// Gets the key of the current dictionary entry.
         [[nodiscard]] virtual const void* getKeyProperty() const = 0;
+        /// Gets the value of the current dictionary entry.
         [[nodiscard]] virtual const void* getValueProperty() const = 0;
     };
 

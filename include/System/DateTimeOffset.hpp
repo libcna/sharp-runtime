@@ -71,7 +71,9 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const override;
 
+        /// Returns true if this instance is equal to the specified DateTimeOffset.
         [[nodiscard]] bool operator==(const DateTimeOffset& other) const;
+        /// Returns true if this instance is not equal to the specified DateTimeOffset.
         [[nodiscard]] bool operator!=(const DateTimeOffset& other) const;
         GetTypeNameHPP()
     };

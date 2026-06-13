@@ -7,30 +7,33 @@
 
 namespace System::Collections::Generic {
 
+    /// Provides extension-style utility methods for generic collections.
     class CollectionExtensions {
     public:
+        /// Deleted constructor — all members are static.
         CollectionExtensions() = delete;
 
-        // GetValueOrDefault: returns value or default if key not found.
+        /// Returns the value for the key if it exists, or a default-constructed value otherwise.
         template<typename K, typename V>
         static V GetValueOrDefault(const std::unordered_map<K,V>& dict, const K& key) {
             auto it = dict.find(key);
             return it == dict.end() ? V{} : it->second;
         }
 
+        /// Returns the value for the key if it exists, or the specified default value otherwise.
         template<typename K, typename V>
         static V GetValueOrDefault(const std::unordered_map<K,V>& dict, const K& key, const V& defaultValue) {
             auto it = dict.find(key);
             return it == dict.end() ? defaultValue : it->second;
         }
 
-        // TryAdd: adds only if key not present.
+        /// Adds the key/value pair to the dictionary only if the key is not already present; returns true if added.
         template<typename K, typename V>
         static bool TryAdd(std::unordered_map<K,V>& dict, const K& key, const V& value) {
             return dict.emplace(key, value).second;
         }
 
-        // Remove with out value.
+        /// Removes the entry with the given key and outputs its value; returns true if removed.
         template<typename K, typename V>
         static bool Remove(std::unordered_map<K,V>& dict, const K& key, V& removedValue) {
             auto it = dict.find(key);
@@ -40,7 +43,7 @@ namespace System::Collections::Generic {
             return true;
         }
 
-        // AsReadOnly: wrap a vector (returns a const reference here).
+        /// Returns a const reference to the vector as a read-only wrapper.
         template<typename T>
         static const std::vector<T>& AsReadOnly(const std::vector<T>& list) {
             return list;

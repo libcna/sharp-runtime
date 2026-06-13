@@ -15,7 +15,9 @@ namespace System {
      */
     class ICloneable {
     public:
+        /// Virtual destructor for safe polymorphic destruction.
         virtual ~ICloneable() = default;
+        /// Creates a new object that is a copy of the current instance.
         [[nodiscard]] virtual std::shared_ptr<ICloneable> Clone() const = 0;
     };
 

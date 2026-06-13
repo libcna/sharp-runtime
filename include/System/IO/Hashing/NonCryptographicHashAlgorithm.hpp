@@ -22,22 +22,29 @@ namespace System::IO::Hashing {
     public:
         virtual ~NonCryptographicHashAlgorithm() = default;
 
+        /// Returns the size of the hash produced by this algorithm, in bytes.
         [[nodiscard]] int getHashLengthInBytesProperty() const { return hashLengthInBytes_; }
 
+        /// Appends the given byte data to the data already processed by the algorithm.
         virtual void Append(const uint8_t* source, size_t length) = 0;
+        /// Resets the hash algorithm to its initial state.
         virtual void Reset() = 0;
+        /// Writes the current hash value into destination.
         virtual void GetCurrentHash(uint8_t* destination, size_t length) = 0;
 
+        /// Appends a vector of bytes to the data already processed.
         void Append(const std::vector<uint8_t>& source) {
             Append(source.data(), source.size());
         }
 
+        /// Returns the current hash value as a byte vector.
         [[nodiscard]] std::vector<uint8_t> GetCurrentHash() {
             std::vector<uint8_t> buf(static_cast<size_t>(hashLengthInBytes_));
             GetCurrentHash(buf.data(), buf.size());
             return buf;
         }
 
+        /// Returns the current hash value and resets the algorithm.
         [[nodiscard]] std::vector<uint8_t> GetHashAndReset() {
             auto result = GetCurrentHash();
             Reset();

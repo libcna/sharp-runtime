@@ -18,8 +18,10 @@ namespace System::IO {
     class StringWriter : public TextWriter {
         std::ostringstream buf_;
     public:
+        /// Constructs a StringWriter with an empty buffer.
         StringWriter() = default;
 
+        /// Writes a string to the internal buffer.
         void Write(const std::string& value) override { buf_ << value; }
 
         /** @brief Returns the string written so far. */

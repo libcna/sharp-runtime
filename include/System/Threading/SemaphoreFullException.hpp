@@ -6,10 +6,14 @@
 
 namespace System::Threading {
 
+    /// The exception thrown when the Release method is called on a semaphore whose count is already at the maximum.
     class SemaphoreFullException : public System::SystemException {
     public:
+        /// Initializes a SemaphoreFullException with a default message.
         SemaphoreFullException() : SystemException("Adding the specified count to the semaphore would cause it to exceed its maximum count.") {}
+        /// Initializes a SemaphoreFullException with the specified message.
         explicit SemaphoreFullException(const std::string& message) : SystemException(message) {}
+        /// Initializes a SemaphoreFullException with a message and an inner exception.
         SemaphoreFullException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };

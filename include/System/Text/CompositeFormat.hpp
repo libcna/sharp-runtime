@@ -9,8 +9,7 @@
 
 namespace System::Text {
 
-    // Parsed composite format string (e.g. "Hello, {0}!").
-    // Avoids re-parsing on each use.
+    /// Represents a parsed composite format string (e.g. "Hello, {0}!") that avoids re-parsing on each use.
     class CompositeFormat {
         std::string format_;
         SharpRuntime::intcs minArgCount_ = 0;
@@ -33,6 +32,7 @@ namespace System::Text {
         }
 
     public:
+        /// Parses a composite format string and returns a CompositeFormat instance.
         static CompositeFormat Parse(const std::string& format) {
             CompositeFormat cf;
             cf.format_ = format;
@@ -40,7 +40,9 @@ namespace System::Text {
             return cf;
         }
 
+        /// Gets the original format string.
         [[nodiscard]] const std::string& getFormatProperty() const { return format_; }
+        /// Gets the minimum number of arguments required to satisfy the format string.
         [[nodiscard]] SharpRuntime::intcs getMinimumArgumentCountProperty() const { return minArgCount_; }
     };
 

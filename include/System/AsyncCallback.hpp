@@ -6,5 +6,6 @@
 #include "System/IAsyncResult.hpp"
 
 namespace System {
+    /// Delegate type invoked when an asynchronous operation completes.
     using AsyncCallback = std::function<void(IAsyncResult&)>;
 } // namespace System

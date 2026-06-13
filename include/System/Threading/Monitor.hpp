@@ -16,17 +16,26 @@ namespace System::Threading {
      */
     class Monitor {
     public:
+        /// Prevents instantiation — all members are static.
         Monitor() = delete;
 
+        /// Acquires an exclusive lock on obj (no-op stub).
         static void Enter(void*) {}
+        /// Releases an exclusive lock on obj (no-op stub).
         static void Exit(void*)  {}
+        /// Attempts to acquire an exclusive lock on obj; always returns true in this stub.
         static bool TryEnter(void*) { return true; }
 
+        /// Acquires a lock on obj and sets lockTaken to true.
         static void Enter(void*, bool& lockTaken) { lockTaken = true; }
+        /// Attempts to acquire a lock within the specified timeout; always returns true in this stub.
         static bool TryEnter(void*, int) { return true; }
 
+        /// Releases the lock on obj and blocks until reacquired (no-op stub).
         static void Wait(void*)   {}
+        /// Notifies a thread in the waiting queue to proceed (no-op stub).
         static void Pulse(void*)  {}
+        /// Notifies all threads in the waiting queue to proceed (no-op stub).
         static void PulseAll(void*) {}
     };
 

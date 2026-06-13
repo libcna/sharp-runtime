@@ -5,8 +5,11 @@
 
 namespace System::IO {
 
+    /// Specifies whether the underlying handle is inheritable by child processes.
     enum class HandleInheritability {
+        /// The handle is not inheritable.
         None        = 0,
+        /// The handle is inheritable.
         Inheritable = 1,
     };
 

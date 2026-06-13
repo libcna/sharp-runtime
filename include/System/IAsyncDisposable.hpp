@@ -5,10 +5,12 @@
 
 namespace System {
 
+    /// Provides a mechanism for releasing unmanaged resources asynchronously.
     class IAsyncDisposable {
     public:
+        /// Virtual destructor for safe polymorphic destruction.
         virtual ~IAsyncDisposable() = default;
-        // In C++ we approximate DisposeAsync() with a synchronous Dispose since we have no async/await.
+        /// Releases resources asynchronously (approximated synchronously in this C++ port).
         virtual void DisposeAsync() = 0;
     };
 

@@ -7,11 +7,13 @@
 
 namespace System::Threading {
 
+    /// Provides lazy-initialization routines.
     class LazyInitializer {
     public:
+        /// Prevents instantiation — all members are static.
         LazyInitializer() = delete;
 
-        // Thread-safe lazy initialization using double-checked locking.
+        /// Initializes target using its default constructor if it is null; returns the initialized value.
         template<typename T>
         static T& EnsureInitialized(T*& target) {
             if (!target) {
@@ -22,6 +24,7 @@ namespace System::Threading {
             return *target;
         }
 
+        /// Initializes target using valueFactory if it is null; returns the initialized value.
         template<typename T>
         static T& EnsureInitialized(T*& target, std::function<T*()> valueFactory) {
             if (!target) {

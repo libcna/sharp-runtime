@@ -15,8 +15,11 @@ namespace System::Collections {
      */
     class ICollection : public IEnumerable {
     public:
+        /// Destroys the collection.
         virtual ~ICollection() = default;
+        /// Gets the number of elements contained in the collection.
         [[nodiscard]] virtual int getCountProperty() const = 0;
+        /// Returns true if access to the collection is synchronized (thread-safe).
         [[nodiscard]] virtual bool getIsSynchronizedProperty() const { return false; }
     };
 

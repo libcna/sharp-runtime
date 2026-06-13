@@ -35,13 +35,20 @@ namespace System::IO
 
         ~MemoryStream() override = default;
 
+        /// Reads up to count bytes into buffer at offset; returns bytes actually read.
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
+        /// Writes count bytes from buffer at offset into the memory buffer.
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
+        /// Writes a single byte to the memory buffer.
         void  WriteByte(bytecs value) override;
+        /// Resets the stream position (no-op for MemoryStream).
         void  Close() override;
+        /// No-op for MemoryStream; the buffer is always up to date.
         void  Flush() override {}
 
+        /// Returns the length of the in-memory buffer in bytes.
         [[nodiscard]] intcs getLengthProperty()   const override;
+        /// Returns true if the stream was created as writable.
         [[nodiscard]] bool  getCanWriteProperty() const override { return writable_; }
 
         /** @brief Returns the underlying buffer as a vector. */

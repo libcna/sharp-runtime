@@ -6,9 +6,12 @@
 
 namespace System {
 
+    /// The exception thrown when there is an internal error in the execution engine.
     class ExecutionEngineException : public SystemException {
     public:
+        /// Initializes a new instance with the default engine-error message.
         ExecutionEngineException() : SystemException("Internal error in the runtime.") {}
+        /// Initializes a new instance with the specified error message.
         explicit ExecutionEngineException(const std::string& message) : SystemException(message) {}
     };
 

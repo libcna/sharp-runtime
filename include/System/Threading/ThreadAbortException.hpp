@@ -6,9 +6,12 @@
 
 namespace System::Threading {
 
+    /// The exception thrown when Thread.Abort() is invoked on a thread.
     class ThreadAbortException : public System::SystemException {
     public:
+        /// Initializes a ThreadAbortException with a default message.
         ThreadAbortException() : SystemException("Thread was being aborted.") {}
+        /// Initializes a ThreadAbortException with the specified message.
         explicit ThreadAbortException(const std::string& message) : SystemException(message) {}
     };
 

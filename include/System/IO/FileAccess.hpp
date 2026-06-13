@@ -11,8 +11,11 @@ namespace System::IO {
      * @note Status: Implemented
      */
     enum class FileAccess : int {
+        /// Opens the file for reading only.
         Read      = 1,
+        /// Opens the file for writing only.
         Write     = 2,
+        /// Opens the file for both reading and writing.
         ReadWrite = 3
     };
 

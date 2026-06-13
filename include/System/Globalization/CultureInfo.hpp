@@ -25,11 +25,16 @@ namespace System::Globalization {
             : name_(name), isNeutral_(neutral), isReadOnly_(readOnly) {}
 
     public:
+        /// Constructs a default (empty-name) CultureInfo.
         CultureInfo() : name_(""), isNeutral_(false), isReadOnly_(false) {}
+        /// Constructs a CultureInfo for the given culture name.
         explicit CultureInfo(const std::string& name) : name_(name), isNeutral_(false), isReadOnly_(false) {}
 
+        /// Gets the culture name (e.g. "en-US").
         [[nodiscard]] const std::string& getNameProperty()        const { return name_; }
+        /// Returns true if this is a neutral culture (no region).
         [[nodiscard]] bool               getIsNeutralCultureProperty() const { return isNeutral_; }
+        /// Returns true if this CultureInfo is read-only.
         [[nodiscard]] bool               getIsReadOnlyProperty()  const { return isReadOnly_; }
 
         /**

@@ -8,12 +8,15 @@
 
 namespace System::Text {
 
-    // ISO-8859-1 (Latin-1) encoding. Each byte maps 1:1 to code points U+0000..U+00FF.
+    /// ISO-8859-1 (Latin-1) encoding: each byte maps 1:1 to code points U+0000–U+00FF.
     class Latin1Encoding : public Encoding {
     public:
+        /// Returns the encoding name "iso-8859-1".
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "iso-8859-1"; }
+        /// Returns the code page 28591 (ISO-8859-1).
         [[nodiscard]] int getCodePageProperty() const override { return 28591; }
 
+        /// Encodes a string to Latin-1 bytes.
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> result;
             result.reserve(s.size());
@@ -22,6 +25,7 @@ namespace System::Text {
             return result;
         }
 
+        /// Decodes a Latin-1 byte range to a string.
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                              SharpRuntime::intcs index,
                                              SharpRuntime::intcs count) const override {

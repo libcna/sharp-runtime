@@ -16,8 +16,11 @@ namespace System::IO {
      */
     class IOException : public System::SystemException {
     public:
+        /// Initializes an IOException with a default message.
         IOException();
+        /// Initializes an IOException with the specified C-string message.
         explicit IOException(const char* message);
+        /// Initializes an IOException with the specified message.
         explicit IOException(const std::string& message);
     };
 

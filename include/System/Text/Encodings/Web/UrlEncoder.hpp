@@ -8,6 +8,7 @@
 
 namespace System::Text::Encodings::Web {
 
+    /// Provides URL percent-encoding and decoding (RFC 3986 unreserved characters are not encoded).
     class UrlEncoder {
         static bool isUnreserved(unsigned char c) {
             return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
@@ -15,6 +16,7 @@ namespace System::Text::Encodings::Web {
         }
 
     public:
+        /// Percent-encodes a string, leaving RFC 3986 unreserved characters unchanged.
         static std::string Encode(const std::string& value) {
             std::ostringstream out;
             for (unsigned char c : value) {
@@ -28,6 +30,7 @@ namespace System::Text::Encodings::Web {
             return out.str();
         }
 
+        /// Decodes a percent-encoded URL string.
         static std::string Decode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
@@ -45,6 +48,7 @@ namespace System::Text::Encodings::Web {
             return out;
         }
 
+        /// Returns the default UrlEncoder singleton.
         static const UrlEncoder& Default() {
             static UrlEncoder instance;
             return instance;

@@ -15,7 +15,9 @@ namespace System {
      */
     class IFormattable {
     public:
+        /// Virtual destructor for safe polymorphic destruction.
         virtual ~IFormattable() = default;
+        /// Formats the value of the current instance using the specified format.
         [[nodiscard]] virtual std::string ToString(const std::string& format) const = 0;
     };
 

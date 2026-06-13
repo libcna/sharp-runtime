@@ -7,10 +7,12 @@
 
 namespace System {
 
+    /// Provides a mechanism for retrieving an object to control formatting.
     class IFormatProvider {
     public:
+        /// Virtual destructor for safe polymorphic destruction.
         virtual ~IFormatProvider() = default;
-        // Returns a formatting object for the given type, or nullptr if not supported.
+        /// Returns a formatting object for the given type, or nullptr if not supported.
         [[nodiscard]] virtual void* GetFormat(const std::type_info& formatType) const = 0;
     };
 

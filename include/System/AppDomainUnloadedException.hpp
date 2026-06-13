@@ -6,10 +6,14 @@
 
 namespace System {
 
+    /// The exception thrown when an attempt is made to access an unloaded application domain.
     class AppDomainUnloadedException : public SystemException {
     public:
+        /// Initializes a new instance with the default unloaded AppDomain message.
         AppDomainUnloadedException() : SystemException("Attempted to access an unloaded AppDomain.") {}
+        /// Initializes a new instance with the specified error message.
         explicit AppDomainUnloadedException(const std::string& message) : SystemException(message) {}
+        /// Initializes a new instance with the specified message and inner exception.
         AppDomainUnloadedException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };

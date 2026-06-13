@@ -6,16 +6,22 @@
 
 namespace System::IO {
 
+    /// The exception thrown when a managed assembly is found but cannot be loaded.
     class FileLoadException : public IOException {
         std::string fileName_;
     public:
+        /// Initializes a FileLoadException with a default message.
         FileLoadException() : IOException("Could not load the specified file.") {}
+        /// Initializes a FileLoadException with the specified message.
         explicit FileLoadException(const std::string& message) : IOException(message) {}
+        /// Initializes a FileLoadException with a message and the name of the file that could not be loaded.
         FileLoadException(const std::string& message, const std::string& fileName)
             : IOException(message), fileName_(fileName) {}
+        /// Initializes a FileLoadException with a message and an inner exception.
         FileLoadException(const std::string& message, const std::exception& inner)
             : IOException(message + " | inner: " + inner.what()) {}
 
+        /// Returns the name of the file that could not be loaded.
         [[nodiscard]] const std::string& getFileNameProperty() const { return fileName_; }
     };
 

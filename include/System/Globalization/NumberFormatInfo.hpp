@@ -30,8 +30,10 @@ namespace System::Globalization {
         std::string NegativeInfinitySymbol   = "-Infinity";
         int NumberDecimalDigits              = 2;
 
+        /// Constructs a mutable NumberFormatInfo with invariant defaults.
         NumberFormatInfo() = default;
 
+        /// Returns true if this NumberFormatInfo is read-only.
         [[nodiscard]] bool getIsReadOnlyProperty() const { return isReadOnly_; }
 
         /** @brief Returns the invariant (culture-independent) NumberFormatInfo. */

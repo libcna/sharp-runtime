@@ -35,51 +35,64 @@ namespace System::Collections::ObjectModel
         };
 
     protected:
+        /// The underlying storage for collection items.
         std::vector<T> items_;
 
+        /// Inserts item at the given index into items_; override to customise insertion.
         virtual void InsertItem(int index, const T& item)
         {
             items_.insert(items_.begin() + index, item);
         }
 
+        /// Removes the item at the given index from items_; override to customise removal.
         virtual void RemoveItem(int index)
         {
             items_.erase(items_.begin() + index);
         }
 
+        /// Removes all items from items_; override to customise clearing.
         virtual void ClearItems()
         {
             items_.clear();
         }
 
+        /// Replaces the item at the given index; override to customise replacement.
         virtual void SetItem(int index, const T& item)
         {
             items_[index] = item;
         }
 
     public:
+        /// Default-constructs an empty Collection.
         Collection() = default;
+        /// Destroys the collection.
         ~Collection() override = default;
 
+        /// Gets the number of elements in the collection.
         [[nodiscard]] int getCountProperty() const override
         {
             return static_cast<int>(items_.size());
         }
 
+        /// Returns false because this collection allows modifications.
         [[nodiscard]] bool getIsReadOnlyProperty() const override { return false; }
 
+        /// Adds item to the end of the collection.
         void Add(const T& item) override
         {
             InsertItem(static_cast<int>(items_.size()), item);
         }
 
+        /// Removes all elements from the collection.
         void Clear() override { ClearItems(); }
 
+        /// Returns true if the collection contains the specified item.
         [[nodiscard]] bool Contains(const T& item) const override
         {
             return std::find(items_.begin(), items_.end(), item) != items_.end();
         }
 
+        /// Removes the first occurrence of item; returns true if removed.
         bool Remove(const T& item) override
         {
             auto it = std::find(items_.begin(), items_.end(), item);
@@ -88,9 +101,12 @@ namespace System::Collections::ObjectModel
             return true;
         }
 
+        /// Returns a const reference to the element at the specified index.
         [[nodiscard]] const T& operator[](int index) const override { return items_.at(index); }
+        /// Returns a reference to the element at the specified index.
         T& operator[](int index) override { return items_.at(index); }
 
+        /// Returns the zero-based index of the first occurrence of item, or -1 if not found.
         [[nodiscard]] int IndexOf(const T& item) const override
         {
             auto it = std::find(items_.begin(), items_.end(), item);
@@ -98,18 +114,25 @@ namespace System::Collections::ObjectModel
             return static_cast<int>(it - items_.begin());
         }
 
+        /// Inserts item at the specified index.
         void Insert(int index, const T& item) override { InsertItem(index, item); }
 
+        /// Removes the element at the specified index.
         void RemoveAt(int index) override { RemoveItem(index); }
 
+        /// Returns a new enumerator that iterates through the collection.
         Generic::IEnumerator<T>* GetEnumerator() override
         {
             return new Enumerator(items_);
         }
 
+        /// Returns an iterator to the beginning of the collection.
         auto begin()        { return items_.begin(); }
+        /// Returns an iterator past the end of the collection.
         auto end()          { return items_.end(); }
+        /// Returns a const iterator to the beginning of the collection.
         [[nodiscard]] auto begin() const { return items_.cbegin(); }
+        /// Returns a const iterator past the end of the collection.
         [[nodiscard]] auto end()   const { return items_.cend(); }
     };
 }

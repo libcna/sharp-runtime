@@ -6,10 +6,14 @@
 
 namespace System::Collections::Generic {
 
+    /// Exception thrown when a key is not present in the dictionary.
     class KeyNotFoundException : public System::SystemException {
     public:
+        /// Constructs a KeyNotFoundException with the default message.
         KeyNotFoundException() : SystemException("The given key was not present in the dictionary.") {}
+        /// Constructs a KeyNotFoundException with the specified message.
         explicit KeyNotFoundException(const std::string& message) : SystemException(message) {}
+        /// Constructs a KeyNotFoundException with a message and an inner exception.
         KeyNotFoundException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };

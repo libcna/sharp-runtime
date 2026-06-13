@@ -20,6 +20,7 @@ namespace System {
      */
     class Buffer {
     public:
+        /// Deleted constructor; all members are static.
         Buffer() = delete;
 
         /**
@@ -33,6 +34,7 @@ namespace System {
                         static_cast<size_t>(count));
         }
 
+        /// Copies a range of bytes between two byte vectors.
         static void BlockCopy(const std::vector<bytecs>& src, intcs srcOffset,
                                std::vector<bytecs>& dst, intcs dstOffset, intcs count) {
             std::memcpy(dst.data() + dstOffset,

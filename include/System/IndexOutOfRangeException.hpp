@@ -17,8 +17,11 @@ namespace System {
      */
     class IndexOutOfRangeException : public SystemException {
     public:
+        /// Initializes a new instance with the default index-out-of-range message.
         IndexOutOfRangeException();
+        /// Initializes a new instance with the specified error message.
         explicit IndexOutOfRangeException(const char* message);
+        /// Initializes a new instance with the specified error message.
         explicit IndexOutOfRangeException(const std::string& message);
     };
 

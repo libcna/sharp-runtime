@@ -10,11 +10,15 @@
 
 namespace System {
 
+/// Represents the System.Byte type and its static parse/convert helpers.
 class Byte {
 public:
+    /// The maximum value of a Byte (255).
     static constexpr SharpRuntime::bytecs MaxValue = std::numeric_limits<uint8_t>::max();
+    /// The minimum value of a Byte (0).
     static constexpr SharpRuntime::bytecs MinValue = 0;
 
+    /// Parses a string to a Byte value; throws on failure.
     static SharpRuntime::bytecs Parse(const std::string& s) {
         try {
             int v = std::stoi(s);
@@ -24,11 +28,13 @@ public:
           catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
     }
 
+    /// Attempts to parse a string to a Byte value; returns false on failure.
     static bool TryParse(const std::string& s, SharpRuntime::bytecs& result) {
         try { result = Parse(s); return true; }
         catch (...) { result = 0; return false; }
     }
 
+    /// Converts a Byte value to its string representation.
     static std::string ToString(SharpRuntime::bytecs value) { return std::to_string(value); }
 };
 

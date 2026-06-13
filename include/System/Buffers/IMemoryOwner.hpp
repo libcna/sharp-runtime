@@ -8,10 +8,13 @@
 
 namespace System::Buffers {
 
+    /// Identifies an owner of a memory buffer, providing access to and lifetime management for the buffer.
     template<typename T>
     class IMemoryOwner : public System::IDisposable {
     public:
+        /// Destroys the memory owner and releases associated resources.
         virtual ~IMemoryOwner() = default;
+        /// Returns the memory buffer owned by this instance.
         virtual std::vector<T>& getMemoryProperty() = 0;
     };
 

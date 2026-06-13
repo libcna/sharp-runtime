@@ -17,11 +17,10 @@ namespace System::Collections::Generic {
     template<typename T>
     class IReadOnlyCollection : public IEnumerable<T> {
     public:
+        /// Destroys the collection.
         virtual ~IReadOnlyCollection() = default;
 
-        /**
-         * @brief Gets the number of elements in the collection.
-         */
+        /// Gets the number of elements in the collection.
         [[nodiscard]] virtual int getCountProperty() const = 0;
     };
 

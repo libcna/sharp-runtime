@@ -17,9 +17,12 @@ namespace System {
      * @note Status: Partial — arithmetic not overloaded; use ToSingle/FromSingle for computation.
      */
     struct Half {
+        /// The raw IEEE 754 half-precision bit pattern.
         uint16_t bits = 0;
 
+        /// Initializes a new Half with zero value.
         Half() = default;
+        /// Initializes a new Half from a raw 16-bit bit pattern.
         explicit Half(uint16_t rawBits) : bits(rawBits) {}
 
         /** @brief Converts a 32-bit float to Half. */
@@ -52,21 +55,35 @@ namespace System {
             return result;
         }
 
+        /// Explicit conversion to a 32-bit float.
         explicit operator float() const { return ToSingle(); }
 
+        /// Represents the value zero.
         static const Half Zero;
+        /// Represents Not a Number (NaN).
         static const Half NaN;
+        /// Represents positive infinity.
         static const Half PositiveInfinity;
+        /// Represents negative infinity.
         static const Half NegativeInfinity;
+        /// Represents the largest finite half-precision value (65504).
         static const Half MaxValue;
+        /// Represents the most negative finite half-precision value (-65504).
         static const Half MinValue;
+        /// Represents the smallest positive half-precision value (~5.96e-8).
         static const Half Epsilon;
 
+        /// Returns true if this Half is equal to the specified Half.
         bool operator==(const Half& o) const { return bits == o.bits; }
+        /// Returns true if this Half is not equal to the specified Half.
         bool operator!=(const Half& o) const { return bits != o.bits; }
+        /// Returns true if this Half is less than the specified Half.
         bool operator< (const Half& o) const { return ToSingle() <  o.ToSingle(); }
+        /// Returns true if this Half is less than or equal to the specified Half.
         bool operator<=(const Half& o) const { return ToSingle() <= o.ToSingle(); }
+        /// Returns true if this Half is greater than the specified Half.
         bool operator> (const Half& o) const { return ToSingle() >  o.ToSingle(); }
+        /// Returns true if this Half is greater than or equal to the specified Half.
         bool operator>=(const Half& o) const { return ToSingle() >= o.ToSingle(); }
     };
 

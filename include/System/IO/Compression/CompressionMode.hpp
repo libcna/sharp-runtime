@@ -13,7 +13,9 @@ namespace System::IO::Compression {
      * @note Status: Implemented
      */
     enum class CompressionMode {
+        /// Decompress the stream.
         Decompress = 0,
+        /// Compress the stream.
         Compress   = 1
     };
 

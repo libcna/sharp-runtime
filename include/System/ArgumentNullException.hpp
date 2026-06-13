@@ -17,10 +17,15 @@ namespace System {
      */
     class ArgumentNullException : public ArgumentException {
     public:
+        /// Initializes a new instance with the default null-argument message.
         ArgumentNullException();
+        /// Initializes a new instance with the name of the null parameter.
         explicit ArgumentNullException(const char* paramName);
+        /// Initializes a new instance with the parameter name and a custom message.
         ArgumentNullException(const char* paramName, const char* message);
+        /// Initializes a new instance with the name of the null parameter.
         explicit ArgumentNullException(const std::string& paramName);
+        /// Initializes a new instance with the parameter name and a custom message.
         ArgumentNullException(const std::string& paramName, const std::string& message);
     };
 

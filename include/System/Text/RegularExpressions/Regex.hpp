@@ -20,21 +20,26 @@ namespace System::Text::RegularExpressions {
         std::regex re_;
         std::string pattern_;
     public:
+        /// Constructs a Regex with ECMAScript syntax.
         explicit Regex(const std::string& pattern)
             : re_(pattern, std::regex::ECMAScript), pattern_(pattern) {}
+        /// Constructs a Regex with the given syntax flags.
         Regex(const std::string& pattern, std::regex::flag_type flags)
             : re_(pattern, flags), pattern_(pattern) {}
 
+        /// Returns true if the pattern matches anywhere in the input string.
         [[nodiscard]] bool IsMatch(const std::string& input) const {
             return std::regex_search(input, re_);
         }
 
+        /// Returns the first Match in the input, or an empty Match if none found.
         [[nodiscard]] Match Match_(const std::string& input) const {
             std::smatch m;
             if (std::regex_search(input, m, re_)) return Match(m);
             return Match::Empty();
         }
 
+        /// Returns all non-overlapping matches in the input.
         [[nodiscard]] MatchCollection Matches(const std::string& input) const {
             std::vector<Match> results;
             auto begin = std::sregex_iterator(input.begin(), input.end(), re_);
@@ -44,20 +49,24 @@ namespace System::Text::RegularExpressions {
             return MatchCollection(std::move(results));
         }
 
+        /// Replaces all matches in the input with the replacement string.
         [[nodiscard]] std::string Replace(const std::string& input, const std::string& replacement) const {
             return std::regex_replace(input, re_, replacement);
         }
 
+        /// Returns true if the pattern matches anywhere in the input (static overload).
         [[nodiscard]] static bool IsMatch(const std::string& input, const std::string& pattern) {
             return Regex(pattern).IsMatch(input);
         }
 
+        /// Replaces all pattern matches in the input with the replacement (static overload).
         [[nodiscard]] static std::string Replace(const std::string& input,
                                                   const std::string& pattern,
                                                   const std::string& replacement) {
             return Regex(pattern).Replace(input, replacement);
         }
 
+        /// Splits the input string on occurrences of the pattern.
         [[nodiscard]] static std::vector<std::string> Split(const std::string& input, const std::string& pattern) {
             std::vector<std::string> result;
             std::regex re(pattern);

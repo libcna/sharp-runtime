@@ -21,10 +21,14 @@ namespace System {
         std::array<uint8_t, 16> bytes_;
 
     public:
+        /// Initializes a new Guid with all bytes set to zero.
         Guid();
+        /// Initializes a new Guid from a 16-byte array.
         explicit Guid(const std::array<uint8_t, 16>& bytes);
+        /// Parses a Guid from its canonical string representation.
         explicit Guid(const std::string& guidString);
 
+        /// Represents a Guid whose value is all zeros.
         static const Guid Empty;
 
         /**
@@ -38,10 +42,14 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const;
 
+        /// Returns the underlying 16-byte array of this Guid.
         [[nodiscard]] const std::array<uint8_t, 16>& ToByteArray() const { return bytes_; }
 
+        /// Returns true if this Guid is equal to the specified Guid.
         bool operator==(const Guid& other) const { return bytes_ == other.bytes_; }
+        /// Returns true if this Guid is not equal to the specified Guid.
         bool operator!=(const Guid& other) const { return bytes_ != other.bytes_; }
+        /// Provides an ordering for use in sorted containers.
         bool operator< (const Guid& other) const { return bytes_ <  other.bytes_; }
     };
 

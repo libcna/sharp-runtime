@@ -10,6 +10,7 @@
 
 namespace System {
 
+    /// The exception that represents one or more errors that occur during application execution.
     class AggregateException : public Exception {
         std::vector<std::exception_ptr> innerExceptions_;
 
@@ -34,31 +35,37 @@ namespace System {
         }
 
     public:
+        /// Initializes a new instance with the default aggregate error message.
         AggregateException() : Exception("One or more errors occurred.") {}
+        /// Initializes a new instance with the specified error message.
         explicit AggregateException(const std::string& message) : Exception(message) {}
 
+        /// Initializes a new instance with a collection of inner exceptions.
         explicit AggregateException(std::vector<std::exception_ptr> innerExceptions)
             : Exception(buildMessage(innerExceptions)),
               innerExceptions_(std::move(innerExceptions)) {}
 
+        /// Initializes a new instance with a message and collection of inner exceptions.
         AggregateException(const std::string& message, std::vector<std::exception_ptr> innerExceptions)
             : Exception(message), innerExceptions_(std::move(innerExceptions)) {}
 
+        /// Returns the collection of inner exceptions that caused this aggregate exception.
         [[nodiscard]] const std::vector<std::exception_ptr>& getInnerExceptionsProperty() const {
             return innerExceptions_;
         }
 
+        /// Returns the number of inner exceptions contained in this aggregate exception.
         [[nodiscard]] std::size_t getInnerExceptionCountProperty() const {
             return innerExceptions_.size();
         }
 
-        // Unwrap: if there is a single inner exception, return it; else return this.
+        /// Returns the single inner exception if only one is present, otherwise returns this exception.
         [[nodiscard]] std::exception_ptr Unwrap() const {
             if (innerExceptions_.size() == 1) return innerExceptions_[0];
             return std::make_exception_ptr(*this);
         }
 
-        // Call handler for each inner exception. If handler returns true, exception is handled.
+        /// Invokes a handler on each inner exception; rethrows unhandled ones as a new AggregateException.
         void Handle(std::function<bool(std::exception_ptr)> handler) const {
             std::vector<std::exception_ptr> unhandled;
             for (auto& ep : innerExceptions_) {

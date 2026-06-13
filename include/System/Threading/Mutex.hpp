@@ -17,13 +17,20 @@ namespace System::Threading {
     class Mutex {
         std::mutex mutex_;
     public:
+        /// Constructs an unowned Mutex.
         Mutex() = default;
+        /// Constructs a Mutex, optionally initially owned; the initiallyOwned parameter is ignored.
         explicit Mutex(bool /*initiallyOwned*/) {}
+        /// Constructs a named Mutex (naming is not supported; the name parameter is ignored).
         Mutex(bool /*initiallyOwned*/, const std::string& /*name*/) {}
 
+        /// Acquires the mutex, blocking until it is available.
         void WaitOne() { mutex_.lock(); }
+        /// Attempts to acquire the mutex without blocking; returns true if acquired.
         bool WaitOne(int /*millisecondsTimeout*/) { return mutex_.try_lock(); }
+        /// Releases the mutex.
         void ReleaseMutex() { mutex_.unlock(); }
+        /// Closes the mutex handle.
         void Close() {}
     };
 

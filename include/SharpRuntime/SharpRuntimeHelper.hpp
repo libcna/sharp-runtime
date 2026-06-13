@@ -72,6 +72,7 @@ namespace SharpRuntime
      */
     using charcs = char16_t;
 
+    /// Native pointer-sized unsigned integer, mapped to std::uintptr_t.
     using IntPtr = std::uintptr_t;
 
     /**

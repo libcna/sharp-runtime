@@ -7,9 +7,10 @@
 
 namespace System::Collections {
 
-    // Non-generic Comparer using strcmp for strings, numeric comparison for pointers treated as intptr.
+    /// Non-generic Comparer using strcmp for strings, numeric comparison for pointers treated as intptr.
     class Comparer : public IComparer {
     public:
+        /// Compares two objects by pointer value and returns a negative, zero, or positive integer.
         [[nodiscard]] int Compare(const void* x, const void* y) const override {
             if (x == y) return 0;
             if (!x) return -1;
@@ -18,6 +19,7 @@ namespace System::Collections {
             return x < y ? -1 : 1;
         }
 
+        /// Returns the default Comparer instance.
         static const Comparer& Default() {
             static Comparer instance;
             return instance;

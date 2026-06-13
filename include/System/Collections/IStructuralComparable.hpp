@@ -6,9 +6,12 @@
 
 namespace System::Collections {
 
+    /// Supports structural comparison of objects within a collection.
     class IStructuralComparable {
     public:
+        /// Destroys the comparable object.
         virtual ~IStructuralComparable() = default;
+        /// Compares this object to another using the given comparer and returns an ordering integer.
         [[nodiscard]] virtual int CompareTo(const void* other, const IComparer& comparer) const = 0;
     };
 
