@@ -139,6 +139,94 @@ namespace System {
         /// Returns an empty vector of type T (equivalent of .NET Array.Empty<T>()).
         template<typename T>
         [[nodiscard]] static std::vector<T> Empty() { return {}; }
+
+        /// @brief Converts every element of @p array using @p converter; returns the results as a new vector.
+        template<typename T, typename TOutput>
+        [[nodiscard]] static std::vector<TOutput> ConvertAll(
+                const std::vector<T>& array,
+                std::function<TOutput(const T&)> converter) {
+            std::vector<TOutput> result;
+            result.reserve(array.size());
+            for (const auto& item : array) result.push_back(converter(item));
+            return result;
+        }
+
+        /// @brief Returns true if any element of @p array satisfies @p predicate.
+        template<typename T>
+        [[nodiscard]] static bool Exists(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+            for (const auto& item : array)
+                if (predicate(item)) return true;
+            return false;
+        }
+
+        /// @brief Returns the first element satisfying @p predicate, or default T{} if none found.
+        template<typename T>
+        [[nodiscard]] static T Find(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+            for (const auto& item : array)
+                if (predicate(item)) return item;
+            return T{};
+        }
+
+        /// @brief Returns the last element satisfying @p predicate, or default T{} if none found.
+        template<typename T>
+        [[nodiscard]] static T FindLast(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+            for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
+                if (predicate(array[static_cast<size_t>(i)])) return array[static_cast<size_t>(i)];
+            return T{};
+        }
+
+        /// @brief Returns a new vector of all elements satisfying @p predicate.
+        template<typename T>
+        [[nodiscard]] static std::vector<T> FindAll(
+                const std::vector<T>& array,
+                std::function<bool(const T&)> predicate) {
+            std::vector<T> result;
+            for (const auto& item : array)
+                if (predicate(item)) result.push_back(item);
+            return result;
+        }
+
+        /// @brief Returns the index of the first element satisfying @p predicate, or -1 if none.
+        template<typename T>
+        [[nodiscard]] static intcs FindIndex(
+                const std::vector<T>& array,
+                std::function<bool(const T&)> predicate) {
+            for (intcs i = 0; i < static_cast<intcs>(array.size()); ++i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /// @brief Returns the index of the last element satisfying @p predicate, or -1 if none.
+        template<typename T>
+        [[nodiscard]] static intcs FindLastIndex(
+                const std::vector<T>& array,
+                std::function<bool(const T&)> predicate) {
+            for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /// @brief Applies @p action to every element of @p array.
+        template<typename T>
+        static void ForEach(const std::vector<T>& array, std::function<void(const T&)> action) {
+            for (const auto& item : array) action(item);
+        }
+
+        /// @brief Returns true if all elements of @p array satisfy @p predicate (true for empty).
+        template<typename T>
+        [[nodiscard]] static bool TrueForAll(const std::vector<T>& array, std::function<bool(const T&)> predicate) {
+            for (const auto& item : array)
+                if (!predicate(item)) return false;
+            return true;
+        }
+
+        /// @brief Returns the zero-based index of the last occurrence of @p value in @p array, or -1.
+        template<typename T>
+        [[nodiscard]] static intcs LastIndexOf(const std::vector<T>& array, const T& value) {
+            for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
+                if (array[static_cast<size_t>(i)] == value) return i;
+            return -1;
+        }
     };
 
 } // namespace System

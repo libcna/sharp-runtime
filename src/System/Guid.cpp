@@ -48,6 +48,19 @@ namespace System {
         return Guid(b);
     }
 
+    Guid Guid::Parse(const std::string& s) {
+        return Guid(s); // constructor already validates and throws FormatException
+    }
+
+    bool Guid::TryParse(const std::string& s, Guid& result) {
+        try {
+            result = Guid(s);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
     std::string Guid::ToString() const {
         std::ostringstream oss;
         oss << std::hex << std::setfill('0');
@@ -56,6 +69,19 @@ namespace System {
             oss << std::setw(2) << static_cast<unsigned>(bytes_[i]);
         }
         return oss.str();
+    }
+
+    std::string Guid::ToString(const std::string& format) const {
+        std::string d = ToString(); // "D" format (default with hyphens)
+        if (format == "D" || format.empty()) return d;
+        if (format == "N") {
+            std::string n = d;
+            n.erase(std::remove(n.begin(), n.end(), '-'), n.end());
+            return n;
+        }
+        if (format == "B") return "{" + d + "}";
+        if (format == "P") return "(" + d + ")";
+        throw FormatException("Invalid Guid format specifier.");
     }
 
 } // namespace System

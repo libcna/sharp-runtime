@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "System/Guid.hpp"
+#include "System/FormatException.hpp"
 
 using System::Guid;
 
@@ -180,4 +181,59 @@ TEST(GuidTests, NewGuidMany_AllDiffer) {
     for (int i = 0; i < 20; ++i)
         for (int j = i + 1; j < 20; ++j)
             EXPECT_NE(guids[i], guids[j]) << "Duplicate at " << i << " and " << j;
+}
+
+// ---------------------------------------------------------------------------
+// Parse / TryParse
+// ---------------------------------------------------------------------------
+TEST(GuidTests, Parse_ValidD_RoundTrips) {
+    std::string s = "550e8400-e29b-41d4-a716-446655440000";
+    Guid g = Guid::Parse(s);
+    EXPECT_EQ(g.ToString(), s);
+}
+TEST(GuidTests, Parse_ValidN_Parses) {
+    std::string n = "550e8400e29b41d4a716446655440000";
+    Guid g = Guid::Parse(n);
+    EXPECT_EQ(g.ToString(), "550e8400-e29b-41d4-a716-446655440000");
+}
+TEST(GuidTests, Parse_ValidB_Parses) {
+    Guid g = Guid::Parse("{550e8400-e29b-41d4-a716-446655440000}");
+    EXPECT_EQ(g.ToString(), "550e8400-e29b-41d4-a716-446655440000");
+}
+TEST(GuidTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(Guid::Parse("not-a-guid"), System::FormatException);
+}
+TEST(GuidTests, TryParse_Valid) {
+    Guid g;
+    bool ok = Guid::TryParse("550e8400-e29b-41d4-a716-446655440000", g);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(g.ToString(), "550e8400-e29b-41d4-a716-446655440000");
+}
+TEST(GuidTests, TryParse_Invalid_ReturnsFalse) {
+    Guid g;
+    bool ok = Guid::TryParse("bad-guid", g);
+    EXPECT_FALSE(ok);
+}
+
+// ---------------------------------------------------------------------------
+// ToString(format)
+// ---------------------------------------------------------------------------
+TEST(GuidTests, ToString_D_HasHyphens) {
+    Guid g = Guid::Parse("550e8400-e29b-41d4-a716-446655440000");
+    EXPECT_EQ(g.ToString("D"), "550e8400-e29b-41d4-a716-446655440000");
+}
+TEST(GuidTests, ToString_N_NoHyphens) {
+    Guid g = Guid::Parse("550e8400-e29b-41d4-a716-446655440000");
+    EXPECT_EQ(g.ToString("N"), "550e8400e29b41d4a716446655440000");
+}
+TEST(GuidTests, ToString_B_HasBraces) {
+    Guid g = Guid::Parse("550e8400-e29b-41d4-a716-446655440000");
+    EXPECT_EQ(g.ToString("B"), "{550e8400-e29b-41d4-a716-446655440000}");
+}
+TEST(GuidTests, ToString_P_HasParens) {
+    Guid g = Guid::Parse("550e8400-e29b-41d4-a716-446655440000");
+    EXPECT_EQ(g.ToString("P"), "(550e8400-e29b-41d4-a716-446655440000)");
+}
+TEST(GuidTests, ToString_InvalidFormat_Throws) {
+    EXPECT_THROW(Guid::NewGuid().ToString("X"), System::FormatException);
 }

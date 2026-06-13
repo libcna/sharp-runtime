@@ -36,11 +36,25 @@ namespace System {
          */
         [[nodiscard]] static Guid NewGuid();
 
+        /// @brief Parses a Guid from its string representation. Throws FormatException on invalid input.
+        [[nodiscard]] static Guid Parse(const std::string& s);
+
+        /// @brief Tries to parse a Guid; returns false without throwing if the format is invalid.
+        static bool TryParse(const std::string& s, Guid& result);
+
         /**
          * @brief Returns the string representation in the form
          * "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
          */
         [[nodiscard]] std::string ToString() const;
+
+        /**
+         * @brief Returns the string representation in the specified format.
+         *
+         * Supported formats: "D" (default, with hyphens), "N" (no hyphens),
+         * "B" ({braces}), "P" ((parentheses)).
+         */
+        [[nodiscard]] std::string ToString(const std::string& format) const;
 
         /// Returns the underlying 16-byte array of this Guid.
         [[nodiscard]] const std::array<uint8_t, 16>& ToByteArray() const { return bytes_; }

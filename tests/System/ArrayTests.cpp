@@ -297,3 +297,79 @@ TEST(ArrayTests, IndexOf_StartIndex_Zero_SameAsNoStart) {
     std::vector<int> v = {5, 6, 7};
     EXPECT_EQ(Array::IndexOf(v, 6, 0), 1);
 }
+
+// ---------------------------------------------------------------------------
+// ConvertAll
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, ConvertAll_IntToDouble) {
+    std::vector<int> v = {1, 2, 3};
+    auto r = Array::ConvertAll<int, double>(v, [](const int& x) { return x * 2.0; });
+    EXPECT_EQ(r.size(), 3u);
+    EXPECT_NEAR(r[0], 2.0, 1e-9);
+    EXPECT_NEAR(r[2], 6.0, 1e-9);
+}
+TEST(ArrayTests, ConvertAll_Empty) {
+    std::vector<int> v;
+    auto r = Array::ConvertAll<int, std::string>(v, [](const int& x) { return std::to_string(x); });
+    EXPECT_TRUE(r.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Exists
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, Exists_Found)    { EXPECT_TRUE(Array::Exists<int>({1,2,3}, [](const int& x){return x==2;})); }
+TEST(ArrayTests, Exists_NotFound) { EXPECT_FALSE(Array::Exists<int>({1,2,3}, [](const int& x){return x==9;})); }
+TEST(ArrayTests, Exists_Empty)    { EXPECT_FALSE(Array::Exists<int>({}, [](const int&){return true;})); }
+
+// ---------------------------------------------------------------------------
+// Find / FindLast
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, Find_Found)      { EXPECT_EQ(Array::Find<int>({1,2,3,4}, [](const int& x){return x>2;}), 3); }
+TEST(ArrayTests, Find_NotFound)   { EXPECT_EQ(Array::Find<int>({1,2}, [](const int& x){return x>9;}), 0); }
+TEST(ArrayTests, FindLast_Found)  { EXPECT_EQ(Array::FindLast<int>({1,3,5,2}, [](const int& x){return x%2!=0;}), 5); }
+TEST(ArrayTests, FindLast_NotFound){ EXPECT_EQ(Array::FindLast<int>({2,4}, [](const int& x){return x%2!=0;}), 0); }
+
+// ---------------------------------------------------------------------------
+// FindAll
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, FindAll_Multiple) {
+    std::vector<int> v = {1,2,3,4,5};
+    auto r = Array::FindAll<int>(v, [](const int& x){return x%2==0;});
+    EXPECT_EQ(r.size(), 2u);
+    EXPECT_EQ(r[0], 2);
+    EXPECT_EQ(r[1], 4);
+}
+TEST(ArrayTests, FindAll_None) {
+    auto r = Array::FindAll<int>({1,3,5}, [](const int& x){return x%2==0;});
+    EXPECT_TRUE(r.empty());
+}
+
+// ---------------------------------------------------------------------------
+// FindIndex / FindLastIndex
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, FindIndex_Found)     { EXPECT_EQ(Array::FindIndex<int>({10,20,30}, [](const int& x){return x>15;}), 1); }
+TEST(ArrayTests, FindIndex_NotFound)  { EXPECT_EQ(Array::FindIndex<int>({1,2,3}, [](const int& x){return x>9;}), -1); }
+TEST(ArrayTests, FindLastIndex_Found) { EXPECT_EQ(Array::FindLastIndex<int>({1,2,3,2}, [](const int& x){return x==2;}), 3); }
+
+// ---------------------------------------------------------------------------
+// ForEach
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, ForEach_SumsElements) {
+    std::vector<int> v = {1,2,3,4};
+    int sum = 0;
+    Array::ForEach<int>(v, [&](const int& x){ sum += x; });
+    EXPECT_EQ(sum, 10);
+}
+
+// ---------------------------------------------------------------------------
+// TrueForAll
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, TrueForAll_AllPositive)  { EXPECT_TRUE(Array::TrueForAll<int>({1,2,3}, [](const int& x){return x>0;})); }
+TEST(ArrayTests, TrueForAll_OneNegative)  { EXPECT_FALSE(Array::TrueForAll<int>({1,-1,3}, [](const int& x){return x>0;})); }
+TEST(ArrayTests, TrueForAll_Empty)        { EXPECT_TRUE(Array::TrueForAll<int>({}, [](const int&){return false;})); }
+
+// ---------------------------------------------------------------------------
+// LastIndexOf
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, LastIndexOf_Found)    { EXPECT_EQ(Array::LastIndexOf<int>({1,2,1,3}, 1), 2); }
+TEST(ArrayTests, LastIndexOf_NotFound) { EXPECT_EQ(Array::LastIndexOf<int>({1,2,3}, 9), -1); }
