@@ -22,10 +22,10 @@ namespace System {
             if (value.empty()) throw FormatException("Input string was not in a correct format.");
             errno = 0;
             char* end = nullptr;
-            long result = std::strtol(value.c_str(), &end, base);
+            long long result = std::strtoll(value.c_str(), &end, base);
             if (end == value.c_str() || *end != '\0')
                 throw FormatException("Input string was not in a correct format.");
-            if (errno == ERANGE || result > INT_MAX || result < INT_MIN)
+            if (errno == ERANGE || result > INT32_MAX || result < INT32_MIN)
                 throw OverflowException("Value was either too large or too small for an Int32.");
             return static_cast<intcs>(result);
         }

@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <array>
+#include <charconv>
 #include <iostream>
 #include <string>
 
@@ -46,9 +48,19 @@ namespace System {
         /// Writes the specified 64-bit integer to the standard output stream.
         static void Write(longcs value)              { std::cout << value; }
         /// Writes the specified double to the standard output stream.
-        static void Write(double value)              { std::cout << value; }
+        static void Write(double value) {
+            std::array<char, 64> buf;
+            auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+            if (ec == std::errc{}) std::cout.write(buf.data(), ptr - buf.data());
+            else std::cout << value;
+        }
         /// Writes the specified float to the standard output stream.
-        static void Write(float value)               { std::cout << value; }
+        static void Write(float value) {
+            std::array<char, 32> buf;
+            auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+            if (ec == std::errc{}) std::cout.write(buf.data(), ptr - buf.data());
+            else std::cout << value;
+        }
         /// Writes the specified Boolean to the standard output stream.
         static void Write(bool value)                { std::cout << (value ? "True" : "False"); }
 
@@ -66,9 +78,9 @@ namespace System {
         /// Writes the specified 64-bit integer followed by a line terminator.
         static void WriteLine(longcs v)              { std::cout << v << NewLine; }
         /// Writes the specified double followed by a line terminator.
-        static void WriteLine(double v)              { std::cout << v << NewLine; }
+        static void WriteLine(double v) { Write(v); std::cout << NewLine; }
         /// Writes the specified float followed by a line terminator.
-        static void WriteLine(float v)               { std::cout << v << NewLine; }
+        static void WriteLine(float v)  { Write(v); std::cout << NewLine; }
         /// Writes the specified Boolean followed by a line terminator.
         static void WriteLine(bool v)                { std::cout << (v ? "True" : "False") << NewLine; }
 
