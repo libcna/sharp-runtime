@@ -84,5 +84,50 @@ namespace System
         /// @param width Minimum field width.
         /// @param fill  Padding character (default '0').
         static std::string ToString(SharpRuntime::intcs value, int width, char fill = '0');
+
+        /// @brief Returns true if @p value consists only of whitespace characters (or is empty).
+        static bool IsNullOrWhiteSpace(const std::string& value);
+
+        /// @brief Returns true if @p value ends with @p suffix.
+        static bool EndsWith(const std::string& value, const std::string& suffix);
+
+        /// @brief Returns true if @p value contains @p substr.
+        static bool Contains(const std::string& value, const std::string& substr);
+
+        /// @brief Returns a copy of @p value with every occurrence of @p oldValue replaced by @p newValue.
+        static std::string Replace(const std::string& value, const std::string& oldValue, const std::string& newValue);
+
+        /// @brief Returns a copy of @p value with every occurrence of @p oldChar replaced by @p newChar.
+        static std::string Replace(const std::string& value, char oldChar, char newChar);
+
+        /// @brief Returns the substring of @p value starting at @p startIndex to the end.
+        static std::string Substring(const std::string& value, SharpRuntime::intcs startIndex);
+
+        /// @brief Returns the substring of @p value starting at @p startIndex with the given @p length.
+        static std::string Substring(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length);
+
+        /// @brief Returns a copy of @p value with leading and trailing whitespace removed.
+        static std::string Trim(const std::string& value);
+
+        /// @brief Returns a copy of @p value with leading whitespace removed.
+        static std::string TrimStart(const std::string& value);
+
+        /// @brief Returns a copy of @p value with trailing whitespace removed.
+        static std::string TrimEnd(const std::string& value);
+
+        /// @brief Concatenates two strings.
+        static std::string Concat(const std::string& a, const std::string& b);
+
+        /// @brief Concatenates three strings.
+        static std::string Concat(const std::string& a, const std::string& b, const std::string& c);
+
+        /// @brief Concatenates four strings.
+        static std::string Concat(const std::string& a, const std::string& b, const std::string& c, const std::string& d);
+
+        /// @brief Concatenates all strings in @p values with no separator.
+        static std::string Concat(const std::vector<std::string>& values);
+
+        /// @brief Joins all elements of @p values with @p separator between them.
+        static std::string Join(const std::string& separator, const std::vector<std::string>& values);
     };
 }

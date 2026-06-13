@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for System::String static helpers.
+#include <gtest/gtest.h>
+#include "System/String.hpp"
+
+using System::String;
+
+// --- IsNullOrWhiteSpace ---
+
+TEST(StringTests, IsNullOrWhiteSpace_Empty) {
+    EXPECT_TRUE(String::IsNullOrWhiteSpace(""));
+}
+TEST(StringTests, IsNullOrWhiteSpace_Spaces) {
+    EXPECT_TRUE(String::IsNullOrWhiteSpace("   "));
+}
+TEST(StringTests, IsNullOrWhiteSpace_Tabs) {
+    EXPECT_TRUE(String::IsNullOrWhiteSpace("\t\n\r"));
+}
+TEST(StringTests, IsNullOrWhiteSpace_NotWhitespace) {
+    EXPECT_FALSE(String::IsNullOrWhiteSpace("hello"));
+}
+TEST(StringTests, IsNullOrWhiteSpace_LeadingSpace) {
+    EXPECT_FALSE(String::IsNullOrWhiteSpace("  x"));
+}
+
+// --- EndsWith ---
+
+TEST(StringTests, EndsWith_True) {
+    EXPECT_TRUE(String::EndsWith("hello world", "world"));
+}
+TEST(StringTests, EndsWith_False) {
+    EXPECT_FALSE(String::EndsWith("hello world", "hello"));
+}
+TEST(StringTests, EndsWith_EmptySuffix) {
+    EXPECT_TRUE(String::EndsWith("hello", ""));
+}
+TEST(StringTests, EndsWith_SuffixLonger) {
+    EXPECT_FALSE(String::EndsWith("hi", "hello"));
+}
+TEST(StringTests, EndsWith_ExactMatch) {
+    EXPECT_TRUE(String::EndsWith("abc", "abc"));
+}
+
+// --- Contains ---
+
+TEST(StringTests, Contains_True) {
+    EXPECT_TRUE(String::Contains("hello world", "world"));
+}
+TEST(StringTests, Contains_False) {
+    EXPECT_FALSE(String::Contains("hello", "xyz"));
+}
+TEST(StringTests, Contains_EmptySubstr) {
+    EXPECT_TRUE(String::Contains("hello", ""));
+}
+
+// --- Replace (string) ---
+
+TEST(StringTests, Replace_String_Single) {
+    EXPECT_EQ(String::Replace("hello world", "world", "there"), "hello there");
+}
+TEST(StringTests, Replace_String_Multiple) {
+    EXPECT_EQ(String::Replace("aaa", "a", "b"), "bbb");
+}
+TEST(StringTests, Replace_String_NoMatch) {
+    EXPECT_EQ(String::Replace("hello", "xyz", "abc"), "hello");
+}
+TEST(StringTests, Replace_String_EmptyOld) {
+    EXPECT_EQ(String::Replace("hello", "", "x"), "hello");
+}
+
+// --- Replace (char) ---
+
+TEST(StringTests, Replace_Char) {
+    EXPECT_EQ(String::Replace("hello", 'l', 'r'), "herro");
+}
+TEST(StringTests, Replace_Char_NoMatch) {
+    EXPECT_EQ(String::Replace("hello", 'z', 'x'), "hello");
+}
+
+// --- Substring ---
+
+TEST(StringTests, Substring_FromIndex) {
+    EXPECT_EQ(String::Substring("hello world", 6), "world");
+}
+TEST(StringTests, Substring_FromZero) {
+    EXPECT_EQ(String::Substring("hello", 0), "hello");
+}
+TEST(StringTests, Substring_WithLength) {
+    EXPECT_EQ(String::Substring("hello world", 0, 5), "hello");
+}
+TEST(StringTests, Substring_MiddleWithLength) {
+    EXPECT_EQ(String::Substring("hello world", 6, 5), "world");
+}
+
+// --- Trim ---
+
+TEST(StringTests, Trim_Both) {
+    EXPECT_EQ(String::Trim("  hello  "), "hello");
+}
+TEST(StringTests, Trim_None) {
+    EXPECT_EQ(String::Trim("hello"), "hello");
+}
+TEST(StringTests, Trim_AllWhitespace) {
+    EXPECT_EQ(String::Trim("   "), "");
+}
+TEST(StringTests, TrimStart) {
+    EXPECT_EQ(String::TrimStart("  hello  "), "hello  ");
+}
+TEST(StringTests, TrimEnd) {
+    EXPECT_EQ(String::TrimEnd("  hello  "), "  hello");
+}
+
+// --- Concat ---
+
+TEST(StringTests, Concat_Two) {
+    EXPECT_EQ(String::Concat("foo", "bar"), "foobar");
+}
+TEST(StringTests, Concat_Three) {
+    EXPECT_EQ(String::Concat("a", "b", "c"), "abc");
+}
+TEST(StringTests, Concat_Four) {
+    EXPECT_EQ(String::Concat("a", "b", "c", "d"), "abcd");
+}
+TEST(StringTests, Concat_Vector) {
+    EXPECT_EQ(String::Concat(std::vector<std::string>{"x", "y", "z"}), "xyz");
+}
+TEST(StringTests, Concat_VectorEmpty) {
+    EXPECT_EQ(String::Concat(std::vector<std::string>{}), "");
+}
+
+// --- Join ---
+
+TEST(StringTests, Join_Comma) {
+    EXPECT_EQ(String::Join(", ", {"a", "b", "c"}), "a, b, c");
+}
+TEST(StringTests, Join_Empty) {
+    EXPECT_EQ(String::Join(",", {}), "");
+}
+TEST(StringTests, Join_Single) {
+    EXPECT_EQ(String::Join(",", {"only"}), "only");
+}
+TEST(StringTests, Join_EmptySeparator) {
+    EXPECT_EQ(String::Join("", {"a", "b", "c"}), "abc");
+}

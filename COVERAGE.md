@@ -1,6 +1,6 @@
 # COVERAGE.md — sharp-runtime .NET API Coverage Analysis
 
-*Generated: 2026-06-13 | Branch: develop | Tests: 3171 passing*
+*Generated: 2026-06-13 | Branch: develop | Tests: 3208 passing*
 
 This document maps which .NET `System.*` namespaces, classes, and methods are present in
 sharp-runtime, and whether each is fully implemented, partial, or a stub.
@@ -38,23 +38,27 @@ sharp-runtime, and whether each is fully implemented, partial, or a stub.
 | GetHashCode | ✅ |
 | Equals | ✅ |
 
-### String (PARTIAL)
+### String (DONE)
 | Method | Status |
 |--------|--------|
 | IsNullOrEmpty | ✅ |
 | IsEmpty | ✅ |
+| IsNullOrWhiteSpace | ✅ |
 | StartsWith | ✅ |
+| EndsWith | ✅ |
+| Contains | ✅ |
 | Split(char) | ✅ |
+| Replace(string, string, string) | ✅ |
+| Replace(string, char, char) | ✅ |
+| Substring(string, int) | ✅ |
+| Substring(string, int, int) | ✅ |
+| Trim / TrimStart / TrimEnd | ✅ |
+| Concat(2/3/4 strings) | ✅ |
+| Concat(vector\<string\>) | ✅ |
+| Join(separator, vector\<string\>) | ✅ |
 | Format(format, int) | ✅ |
 | Format(format, string) | ✅ |
 | ToString(int, width, fill) | ✅ |
-| Concat | ❌ missing |
-| Join | ❌ missing |
-| IsNullOrWhiteSpace | ❌ missing |
-| EndsWith | ❌ missing |
-| Replace | ❌ missing |
-| Substring | ❌ missing |
-| Trim / TrimStart / TrimEnd | ❌ missing |
 
 ### Exception hierarchy (DONE)
 All standard exception types are present with `Message` / `what()` / `ToString()`:
@@ -529,7 +533,7 @@ Version attributes ✅
 
 | Gap | Impact | Notes |
 |-----|--------|-------|
-| `String` — Concat, Join, Replace, Trim, Substring, EndsWith, IsNullOrWhiteSpace | Medium | Use `std::string` methods directly in C++ |
+| `String` — Concat, Join, Replace, Trim, Substring, EndsWith, IsNullOrWhiteSpace | ~~Medium~~ | **Fixed in session 50** — all methods implemented ✅ |
 | `Task` / `Parallel` — no real threadpool | Low | `std::async` sufficient for current use cases |
 | `ThreadPool` — stub only | Low | |
 | `Console.ReadLine` — stub | Low | |
