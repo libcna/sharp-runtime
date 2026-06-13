@@ -56,7 +56,7 @@
 | `Byte.hpp` | `PARTIAL` | Has Parse/TryParse/MinValue/MaxValue — missing `ToString(format)` |
 | `Char.hpp` | `PARTIAL` | ASCII helpers added session 68; still missing: `GetUnicodeCategory` |
 | `CLSCompliantAttribute.hpp` | `IGNORE` | Attribute marker |
-| `Console.hpp` | `PARTIAL` | Has Write/WriteLine; missing `Read`, `ReadKey`, `BackgroundColor`, `ForegroundColor`, `ResetColor`, `SetCursorPosition`, `CursorLeft/Top`, `WindowWidth/Height` |
+| `Console.hpp` | `PARTIAL` | ReadLine/Read/Color(ANSI)/ResetColor/Clear/Beep/SetCursorPosition/WindowWidth/WindowHeight added session 69; missing `ReadKey`, `CursorLeft/Top` (not queryable portably) |
 | `Convert.hpp` | `PARTIAL` | All numeric conversions done; missing `ToSByte`, `ToDecimal`, `ChangeType` |
 | `DataMisalignedException.hpp` | `IGNORE` | Exception marker |
 | `DateOnly.hpp` | `PORTED` | AddDays/Months/Years, Parse/TryParse, ToString(format), FromDateTime |
@@ -112,7 +112,7 @@
 | `IServiceProvider.hpp` | `IGNORE` | Interface |
 | `ISpanFormattable.hpp` | `IGNORE` | Interface |
 | `ISpanParsable.hpp` | `IGNORE` | Interface |
-| `Lazy.hpp` | `TO_CHECK` | Lazy initialization |
+| `Lazy.hpp` | `PORTED` | Thread-safe via std::call_once — complete |
 | `Linq.hpp` | `PORTED` | 19 operators; header-only |
 | `MarshalByRefObject.hpp` | `IGNORE` | Base class marker |
 | `Math.hpp` | `PARTIAL` | Missing: `DivRem(long,long)`, `MaxMagnitude`, `MinMagnitude`, `BigMul(long,long,out long)` |
@@ -127,11 +127,11 @@
 | `NotFiniteNumberException.hpp` | `IGNORE` | Exception marker |
 | `NotImplementedException.hpp` | `PORTED` | Exception type used internally |
 | `NotSupportedException.hpp` | `PORTED` | Exception type |
-| `Nullable.hpp` | `TO_CHECK` | Nullable<T> wrapper |
+| `Nullable.hpp` | `PORTED` | Backed by std::optional, HasValue/Value/GetValueOrDefault — complete |
 | `NullReferenceException.hpp` | `IGNORE` | Exception marker |
 | `Object.hpp` | `PARTIAL` | Base class — minimal |
 | `ObsoleteAttribute.hpp` | `IGNORE` | Attribute marker |
-| `OperatingSystem.hpp` | `TO_CHECK` | OS detection |
+| `OperatingSystem.hpp` | `PORTED` | IsWindows/IsLinux/IsMacOS/Platform/Version/VersionString — complete |
 | `OperationCanceledException.hpp` | `IGNORE` | Exception marker |
 | `OutOfMemoryException.hpp` | `IGNORE` | Exception marker |
 | `OverflowException.hpp` | `IGNORE` | Exception marker |
@@ -150,7 +150,7 @@
 | `Span.hpp` | `STUB` | No meaningful Span impl in C++ static lib context |
 | `StackOverflowException.hpp` | `IGNORE` | Exception marker |
 | `String.hpp` | `PARTIAL` | Good coverage; missing `Join(string,T[])` for more types, `GetEnumerator`, `Normalize`, `IsInterned`, `Intern` (N/A) |
-| `StringComparer.hpp` | `TO_CHECK` | |
+| `StringComparer.hpp` | `PORTED` | Ordinal/OrdinalIgnoreCase/InvariantCulture/CurrentCulture — complete |
 | `StringComparison.hpp` | `IGNORE` | Enum |
 | `StringSplitOptions.hpp` | `PORTED` | Enum with None/RemoveEmptyEntries/TrimEntries |
 | `SystemException.hpp` | `IGNORE` | Exception base |
@@ -179,7 +179,7 @@
 | `Uri.hpp` | `PORTED` | Full URI parsing |
 | `ValueTuple.hpp` | `TO_CHECK` | Value tuple |
 | `Version.hpp` | `PORTED` | Parse/TryParse/CompareTo/Equals added session 69 |
-| `WeakReference.hpp` | `TO_CHECK` | Weak reference |
+| `WeakReference.hpp` | `PORTED` | WeakReference + WeakReferenceT<T>, IsAlive/Target/TryGetTarget — complete |
 
 ---
 
@@ -199,7 +199,7 @@
 | File | Status | Notes |
 |------|--------|-------|
 | `ArrayList.hpp` | `PORTED` | std::vector<any> wrapper |
-| `BitArray.hpp` | `TO_CHECK` | Bit operations array |
+| `BitArray.hpp` | `PARTIAL` | HasAllSet/HasAnySet/CopyTo(bool[])/CopyTo(byte[]) added session 69; And/Or/Xor/Not already done |
 | `Comparer.hpp` | `PORTED` | Default comparer |
 | `DictionaryEntry.hpp` | `PORTED` | Key/value pair |
 | `Hashtable.hpp` | `PORTED` | unordered_map<string,any> |

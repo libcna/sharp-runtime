@@ -71,6 +71,29 @@ namespace System::Collections {
             return *this;
         }
 
+        /// Returns true if every bit in the array is set to 1.
+        [[nodiscard]] bool HasAllSet() const {
+            for (bool b : bits_) if (!b) return false;
+            return true;
+        }
+
+        /// Returns true if at least one bit in the array is set to 1.
+        [[nodiscard]] bool HasAnySet() const {
+            for (bool b : bits_) if (b) return true;
+            return false;
+        }
+
+        /// Copies all bits into a bool vector (resized to match).
+        void CopyTo(std::vector<bool>& dest) const { dest = bits_; }
+
+        /// Copies bits packed into bytes (LSB-first per byte) into a byte vector.
+        void CopyTo(std::vector<SharpRuntime::bytecs>& dest) const {
+            size_t byteCount = (bits_.size() + 7) / 8;
+            dest.assign(byteCount, 0);
+            for (size_t i = 0; i < bits_.size(); ++i)
+                if (bits_[i]) dest[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+        }
+
         /// Returns an iterator to the beginning of the bit sequence.
         auto begin() const { return bits_.begin(); }
         /// Returns an iterator past the end of the bit sequence.

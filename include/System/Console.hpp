@@ -5,10 +5,12 @@
 
 #include <array>
 #include <charconv>
+#include <cstdio>
 #include <iostream>
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ConsoleColor.hpp"
 #include "System/String.hpp"
 
 namespace System {
@@ -131,6 +133,70 @@ namespace System {
             std::string line;
             std::getline(std::cin, line);
             return line;
+        }
+
+        /// Reads the next character from the standard input stream, or -1 if no more.
+        [[nodiscard]] static intcs Read() {
+            return std::cin.get();
+        }
+
+        // --- Color ---
+        /// Gets the foreground color of the console.
+        [[nodiscard]] static ConsoleColor getForegroundColorProperty() { return fg_; }
+        /// Gets the background color of the console.
+        [[nodiscard]] static ConsoleColor getBackgroundColorProperty() { return bg_; }
+
+        /// Sets the foreground color using ANSI escape codes.
+        static void setForegroundColorProperty(ConsoleColor color) {
+            fg_ = color;
+            std::cout << ansiColor(static_cast<int>(color), true);
+        }
+
+        /// Sets the background color using ANSI escape codes.
+        static void setBackgroundColorProperty(ConsoleColor color) {
+            bg_ = color;
+            std::cout << ansiColor(static_cast<int>(color), false);
+        }
+
+        /// Resets foreground and background colors to defaults.
+        static void ResetColor() {
+            fg_ = ConsoleColor::White;
+            bg_ = ConsoleColor::Black;
+            std::cout << "\033[0m";
+        }
+
+        // --- Cursor / Window ---
+        /// Sets the cursor position (uses ANSI escape; 0-based left/top).
+        static void SetCursorPosition(intcs left, intcs top) {
+            std::printf("\033[%d;%dH", top + 1, left + 1);
+        }
+
+        /// Clears the console screen using an ANSI escape sequence.
+        static void Clear() { std::cout << "\033[2J\033[1;1H"; }
+
+        /// Returns the cursor's current column (not queryable portably; returns 0).
+        [[nodiscard]] static intcs getCursorLeftProperty()   { return 0; }
+        /// Returns the cursor's current row (not queryable portably; returns 0).
+        [[nodiscard]] static intcs getCursorTopProperty()    { return 0; }
+        /// Returns the console window width in columns (default 80 if not queryable).
+        [[nodiscard]] static intcs getWindowWidthProperty()  { return 80; }
+        /// Returns the console window height in rows (default 24 if not queryable).
+        [[nodiscard]] static intcs getWindowHeightProperty() { return 24; }
+
+        /// Produces a simple console beep via the BEL character.
+        static void Beep() { std::cout << '\a' << std::flush; }
+
+    private:
+        static inline ConsoleColor fg_ = ConsoleColor::White;
+        static inline ConsoleColor bg_ = ConsoleColor::Black;
+
+        static std::string ansiColor(int c, bool fg) {
+            char buf[12];
+            if (c < 8)
+                std::snprintf(buf, sizeof(buf), "\033[%dm", fg ? 30 + c : 40 + c);
+            else
+                std::snprintf(buf, sizeof(buf), "\033[%dm", fg ? 90 + (c - 8) : 100 + (c - 8));
+            return buf;
         }
     };
 

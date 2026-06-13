@@ -254,6 +254,40 @@ TEST(BitArrayTests, BytesCtor_ExpandsToBits) {
     EXPECT_FALSE(ba.Get(1));
     EXPECT_TRUE(ba.Get(15));
 }
+TEST(BitArrayTests, HasAllSet_AllTrue) {
+    BitArray ba(4, true);
+    EXPECT_TRUE(ba.HasAllSet());
+}
+TEST(BitArrayTests, HasAllSet_SomeFalse) {
+    BitArray ba(4, true);
+    ba.Set(2, false);
+    EXPECT_FALSE(ba.HasAllSet());
+}
+TEST(BitArrayTests, HasAnySet_OneBitSet) {
+    BitArray ba(4, false);
+    ba.Set(1, true);
+    EXPECT_TRUE(ba.HasAnySet());
+}
+TEST(BitArrayTests, HasAnySet_AllFalse) {
+    BitArray ba(4, false);
+    EXPECT_FALSE(ba.HasAnySet());
+}
+TEST(BitArrayTests, CopyTo_BoolVector) {
+    BitArray ba(3, false);
+    ba.Set(0, true); ba.Set(2, true);
+    std::vector<bool> v;
+    ba.CopyTo(v);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_TRUE(v[0]); EXPECT_FALSE(v[1]); EXPECT_TRUE(v[2]);
+}
+TEST(BitArrayTests, CopyTo_ByteVector) {
+    BitArray ba(8, false);
+    ba.Set(0, true); ba.Set(1, true); // byte 0 = 0b00000011
+    std::vector<uint8_t> v;
+    ba.CopyTo(v);
+    ASSERT_EQ(v.size(), 1u);
+    EXPECT_EQ(v[0], 0b00000011u);
+}
 
 // ===========================================================================
 // Collections::Queue (void*)

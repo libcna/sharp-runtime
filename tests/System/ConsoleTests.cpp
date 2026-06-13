@@ -117,3 +117,47 @@ TEST(ConsoleTests, WriteLine_Format_IntArg_DoesNotThrow) {
 TEST(ConsoleTests, WriteLine_Format_StringArg_DoesNotThrow) {
     EXPECT_NO_THROW(Console::WriteLine("{0}!", std::string("hi")));
 }
+
+// ---------------------------------------------------------------------------
+// Colors and cursor (new API)
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, SetForegroundColor_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::setForegroundColorProperty(System::ConsoleColor::Red));
+    Console::ResetColor();
+}
+
+TEST(ConsoleTests, SetBackgroundColor_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::setBackgroundColorProperty(System::ConsoleColor::Blue));
+    Console::ResetColor();
+}
+
+TEST(ConsoleTests, GetForegroundColor_AfterSet) {
+    Console::setForegroundColorProperty(System::ConsoleColor::Green);
+    EXPECT_EQ(Console::getForegroundColorProperty(), System::ConsoleColor::Green);
+    Console::ResetColor();
+}
+
+TEST(ConsoleTests, ResetColor_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::ResetColor());
+}
+
+TEST(ConsoleTests, Clear_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Clear());
+}
+
+TEST(ConsoleTests, WindowWidth_Positive) {
+    EXPECT_GT(Console::getWindowWidthProperty(), 0);
+}
+
+TEST(ConsoleTests, WindowHeight_Positive) {
+    EXPECT_GT(Console::getWindowHeightProperty(), 0);
+}
+
+TEST(ConsoleTests, Beep_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Beep());
+}
+
+TEST(ConsoleTests, SetCursorPosition_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::SetCursorPosition(0, 0));
+}
