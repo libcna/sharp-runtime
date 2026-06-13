@@ -5,6 +5,10 @@
 #include <cstdint>
 #include <string>
 
+#if defined(_MSC_VER)
+#  error "Decimal requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
+#endif
+
 namespace System {
 
 /**
