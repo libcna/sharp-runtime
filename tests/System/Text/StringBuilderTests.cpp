@@ -322,3 +322,54 @@ TEST(StringBuilderTests, Replace_ChainedWithAppend) {
     sb.Append("foo bar foo").Replace("foo", "baz");
     EXPECT_EQ(sb.ToString(), "baz bar baz");
 }
+
+// --- AppendFormat ---
+
+TEST(StringBuilderTests, AppendFormat_Int) {
+    StringBuilder sb;
+    sb.AppendFormat("Score: {0}", 42);
+    EXPECT_EQ(sb.ToString(), "Score: 42");
+}
+
+TEST(StringBuilderTests, AppendFormat_Double_Fixed) {
+    StringBuilder sb;
+    sb.AppendFormat("{0:F2}", 3.14159);
+    EXPECT_EQ(sb.ToString(), "3.14");
+}
+
+TEST(StringBuilderTests, AppendFormat_String) {
+    StringBuilder sb;
+    sb.AppendFormat("Hello, {0}!", std::string("world"));
+    EXPECT_EQ(sb.ToString(), "Hello, world!");
+}
+
+TEST(StringBuilderTests, AppendFormat_TwoInts) {
+    StringBuilder sb;
+    sb.AppendFormat("{0}/{1}", 3, 10);
+    EXPECT_EQ(sb.ToString(), "3/10");
+}
+
+TEST(StringBuilderTests, AppendFormat_IntAndString) {
+    StringBuilder sb;
+    sb.AppendFormat("{0}: {1}", 1, std::string("alpha"));
+    EXPECT_EQ(sb.ToString(), "1: alpha");
+}
+
+TEST(StringBuilderTests, AppendFormat_TwoStrings) {
+    StringBuilder sb;
+    sb.AppendFormat("{0} {1}", std::string("foo"), std::string("bar"));
+    EXPECT_EQ(sb.ToString(), "foo bar");
+}
+
+TEST(StringBuilderTests, AppendFormat_TwoDoubles) {
+    StringBuilder sb;
+    sb.AppendFormat("({0:F1},{1:F1})", 1.5, 2.5);
+    EXPECT_EQ(sb.ToString(), "(1.5,2.5)");
+}
+
+TEST(StringBuilderTests, AppendFormat_Chained) {
+    StringBuilder sb;
+    sb.AppendFormat("x={0}", 1)
+      .AppendFormat(" y={0}", 2);
+    EXPECT_EQ(sb.ToString(), "x=1 y=2");
+}

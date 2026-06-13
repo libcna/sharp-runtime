@@ -4,8 +4,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/String.hpp"
 
 namespace System::Text
 {
@@ -108,5 +110,30 @@ namespace System::Text
         /// @param newValue The replacement string.
         /// @return Reference to this instance.
         StringBuilder& Replace(const std::string& oldValue, const std::string& newValue);
+
+        /// @brief Appends a formatted string (delegates to String::Format overloads).
+        StringBuilder& AppendFormat(const std::string& format, SharpRuntime::intcs arg0)
+            { return Append(System::String::Format(format, arg0)); }
+        /// @brief Appends a formatted string with a double argument.
+        StringBuilder& AppendFormat(const std::string& format, double arg0)
+            { return Append(System::String::Format(format, arg0)); }
+        /// @brief Appends a formatted string with a string argument.
+        StringBuilder& AppendFormat(const std::string& format, const std::string& arg0)
+            { return Append(System::String::Format(format, arg0)); }
+        /// @brief Appends a formatted string with two integer arguments.
+        StringBuilder& AppendFormat(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1)
+            { return Append(System::String::Format(format, arg0, arg1)); }
+        /// @brief Appends a formatted string with an integer and a string argument.
+        StringBuilder& AppendFormat(const std::string& format, SharpRuntime::intcs arg0, const std::string& arg1)
+            { return Append(System::String::Format(format, arg0, arg1)); }
+        /// @brief Appends a formatted string with a string and an integer argument.
+        StringBuilder& AppendFormat(const std::string& format, const std::string& arg0, SharpRuntime::intcs arg1)
+            { return Append(System::String::Format(format, arg0, arg1)); }
+        /// @brief Appends a formatted string with two string arguments.
+        StringBuilder& AppendFormat(const std::string& format, const std::string& arg0, const std::string& arg1)
+            { return Append(System::String::Format(format, arg0, arg1)); }
+        /// @brief Appends a formatted string with two double arguments.
+        StringBuilder& AppendFormat(const std::string& format, double arg0, double arg1)
+            { return Append(System::String::Format(format, arg0, arg1)); }
     };
 }

@@ -3,7 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTime.hpp"
+#include "System/FormatException.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -183,6 +186,105 @@ namespace System {
             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
             t.tm_hour, t.tm_min, t.tm_sec);
         return buf;
+    }
+
+    std::string DateTime::ToString(const std::string& format) const
+    {
+        std::string result;
+        result.reserve(format.size() + 8);
+        int yr  = getYearProperty(),   mo  = getMonthProperty(),  dy  = getDayProperty();
+        int hr  = getHourProperty(),   mn  = getMinuteProperty(), sc  = getSecondProperty();
+        int ms  = getMillisecondProperty();
+
+        auto pad = [](int n, int w) -> std::string {
+            std::string s = std::to_string(n);
+            while (static_cast<int>(s.size()) < w) s = "0" + s;
+            return s;
+        };
+
+        size_t i = 0;
+        while (i < format.size()) {
+            char c = format[i];
+            auto run = [&](char ch) {
+                size_t k = i + 1;
+                while (k < format.size() && format[k] == ch) ++k;
+                return static_cast<int>(k - i);
+            };
+            if (c == 'y') {
+                int n = run('y');
+                result += (n >= 4) ? pad(yr, 4) : pad(yr % 100, 2);
+                i += n;
+            } else if (c == 'M') {
+                int n = run('M');
+                result += (n >= 2) ? pad(mo, 2) : std::to_string(mo);
+                i += n;
+            } else if (c == 'd') {
+                int n = run('d');
+                result += (n >= 2) ? pad(dy, 2) : std::to_string(dy);
+                i += n;
+            } else if (c == 'H') {
+                int n = run('H');
+                result += (n >= 2) ? pad(hr, 2) : std::to_string(hr);
+                i += n;
+            } else if (c == 'h') {
+                int n = run('h');
+                int h12 = hr % 12; if (h12 == 0) h12 = 12;
+                result += (n >= 2) ? pad(h12, 2) : std::to_string(h12);
+                i += n;
+            } else if (c == 'm') {
+                int n = run('m');
+                result += (n >= 2) ? pad(mn, 2) : std::to_string(mn);
+                i += n;
+            } else if (c == 's') {
+                int n = run('s');
+                result += (n >= 2) ? pad(sc, 2) : std::to_string(sc);
+                i += n;
+            } else if (c == 'f') {
+                int n = run('f');
+                std::string mss = pad(ms, 3);
+                result += mss.substr(0, static_cast<size_t>(std::min(n, 3)));
+                i += n;
+            } else if (c == '\'') {
+                ++i;
+                while (i < format.size() && format[i] != '\'') result += format[i++];
+                if (i < format.size()) ++i;
+            } else {
+                result += c;
+                ++i;
+            }
+        }
+        return result;
+    }
+
+    bool DateTime::TryParse(const std::string& s, DateTime& result)
+    {
+        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0, ms = 0;
+        // Require at least "yyyy-MM-dd" (10 chars with dashes at [4] and [7])
+        if (s.size() < 10 || s[4] != '-' || s[7] != '-') return false;
+        if (std::sscanf(s.c_str(), "%d-%d-%d", &yr, &mo, &dy) != 3) return false;
+        if (s.size() >= 19 && (s[10] == ' ' || s[10] == 'T')) {
+            if (std::sscanf(s.c_str() + 11, "%d:%d:%d", &hr, &mn, &sc) != 3)
+                hr = mn = sc = 0;
+            if (s.size() >= 23 && s[19] == '.') {
+                std::sscanf(s.c_str() + 20, "%d", &ms);
+                // Normalise fractional digits to milliseconds (3 digits)
+                size_t fracLen = s.size() - 20;
+                while (fracLen < 3) { ms *= 10; ++fracLen; }
+                if (fracLen > 3) { for (size_t k = 3; k < fracLen; ++k) ms /= 10; }
+            }
+        }
+        try {
+            result = DateTime(yr, mo, dy, hr, mn, sc, ms);
+            return true;
+        } catch (...) { return false; }
+    }
+
+    DateTime DateTime::Parse(const std::string& s)
+    {
+        DateTime result;
+        if (!TryParse(s, result))
+            throw FormatException("String was not recognized as a valid DateTime: " + s);
+        return result;
     }
 
     // -------------------------------------------------------------------------

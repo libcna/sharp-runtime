@@ -265,6 +265,19 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const override;
 
+        /// @brief Returns the date/time formatted according to @p format.
+        /// Tokens: yyyy, yy, MM, M, dd, d, HH, H, hh, h, mm, m, ss, s, fff, ff, f.
+        /// Literal text can be enclosed in single quotes.
+        [[nodiscard]] std::string ToString(const std::string& format) const;
+
+        /// @brief Parses a date/time string in ISO-8601 style ("yyyy-MM-dd" or
+        /// "yyyy-MM-dd HH:mm:ss" or "yyyy-MM-ddTHH:mm:ss" or with .fff suffix).
+        /// @throws System::FormatException if the string cannot be parsed.
+        [[nodiscard]] static DateTime Parse(const std::string& s);
+
+        /// @brief Tries to parse a date/time string; returns false without throwing on failure.
+        static bool TryParse(const std::string& s, DateTime& result);
+
         [[nodiscard]] bool operator==(const DateTime& other) const;
         [[nodiscard]] bool operator!=(const DateTime& other) const;
         [[nodiscard]] bool operator<(const DateTime& other)  const;

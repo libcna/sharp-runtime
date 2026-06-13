@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace System::Collections::Generic
 {
@@ -79,6 +80,47 @@ namespace System::Collections::Generic
         auto end()          { return map_.end(); }
         [[nodiscard]] auto begin() const { return map_.cbegin(); }
         [[nodiscard]] auto end()   const { return map_.cend(); }
+
+        /// Adds the key/value pair if the key does not already exist. Returns true if added.
+        bool TryAdd(const TKey& key, const TValue& value)
+        {
+            if (map_.count(key)) return false;
+            map_[key] = value;
+            return true;
+        }
+
+        /// Returns true if any entry has a value equal to @p value (uses operator==).
+        [[nodiscard]] bool ContainsValue(const TValue& value) const
+        {
+            for (const auto& kv : map_)
+                if (kv.second == value) return true;
+            return false;
+        }
+
+        /// Returns the value for @p key, or @p defaultValue if the key is absent.
+        [[nodiscard]] TValue GetValueOrDefault(const TKey& key, const TValue& defaultValue = TValue{}) const
+        {
+            auto it = map_.find(key);
+            return it != map_.end() ? it->second : defaultValue;
+        }
+
+        /// Returns a vector of all keys.
+        [[nodiscard]] std::vector<TKey> getKeysProperty() const
+        {
+            std::vector<TKey> keys;
+            keys.reserve(map_.size());
+            for (const auto& kv : map_) keys.push_back(kv.first);
+            return keys;
+        }
+
+        /// Returns a vector of all values.
+        [[nodiscard]] std::vector<TValue> getValuesProperty() const
+        {
+            std::vector<TValue> vals;
+            vals.reserve(map_.size());
+            for (const auto& kv : map_) vals.push_back(kv.second);
+            return vals;
+        }
 
         /// Returns the underlying std::unordered_map for STL interop.
         [[nodiscard]] const std::unordered_map<TKey, TValue>& ToMap() const { return map_; }

@@ -214,3 +214,100 @@ TEST(DateTimeTests, ChainedAddSubtract) {
                         .Add(TimeSpan::FromSeconds(15.0));
     EXPECT_EQ(result.getTicksProperty(), kUnixEpochTicks + net.getTicksProperty());
 }
+
+// --- ToString(format) ---
+
+TEST(DateTimeTests, ToString_Format_yyyyMMdd) {
+    DateTime dt(2024, 3, 5);
+    EXPECT_EQ(dt.ToString("yyyy-MM-dd"), "2024-03-05");
+}
+
+TEST(DateTimeTests, ToString_Format_HHmmss) {
+    DateTime dt(2024, 1, 1, 9, 5, 7);
+    EXPECT_EQ(dt.ToString("HH:mm:ss"), "09:05:07");
+}
+
+TEST(DateTimeTests, ToString_Format_Full) {
+    DateTime dt(2024, 12, 31, 23, 59, 58);
+    EXPECT_EQ(dt.ToString("yyyy-MM-dd HH:mm:ss"), "2024-12-31 23:59:58");
+}
+
+TEST(DateTimeTests, ToString_Format_ShortDate_US) {
+    DateTime dt(2024, 6, 15);
+    EXPECT_EQ(dt.ToString("MM/dd/yyyy"), "06/15/2024");
+}
+
+TEST(DateTimeTests, ToString_Format_SingleTokens) {
+    DateTime dt(2024, 6, 5, 8, 7, 9);
+    EXPECT_EQ(dt.ToString("M/d/yyyy H:m:s"), "6/5/2024 8:7:9");
+}
+
+TEST(DateTimeTests, ToString_Format_Milliseconds) {
+    DateTime dt(2024, 1, 1, 0, 0, 0, 123);
+    EXPECT_EQ(dt.ToString("HH:mm:ss.fff"), "00:00:00.123");
+}
+
+TEST(DateTimeTests, ToString_Format_Literal) {
+    DateTime dt(2024, 6, 15);
+    EXPECT_EQ(dt.ToString("'Date: 'yyyy-MM-dd"), "Date: 2024-06-15");
+}
+
+TEST(DateTimeTests, ToString_Format_12Hour) {
+    DateTime dt(2024, 1, 1, 13, 0, 0);
+    EXPECT_EQ(dt.ToString("hh:mm"), "01:00");
+}
+
+// --- Parse ---
+
+TEST(DateTimeTests, Parse_DateOnly) {
+    DateTime dt = DateTime::Parse("2024-06-15");
+    EXPECT_EQ(dt.getYearProperty(),  2024);
+    EXPECT_EQ(dt.getMonthProperty(), 6);
+    EXPECT_EQ(dt.getDayProperty(),   15);
+    EXPECT_EQ(dt.getHourProperty(),  0);
+}
+
+TEST(DateTimeTests, Parse_DateAndTime) {
+    DateTime dt = DateTime::Parse("2024-06-15 10:30:45");
+    EXPECT_EQ(dt.getHourProperty(),   10);
+    EXPECT_EQ(dt.getMinuteProperty(), 30);
+    EXPECT_EQ(dt.getSecondProperty(), 45);
+}
+
+TEST(DateTimeTests, Parse_ISO8601_T_Separator) {
+    DateTime dt = DateTime::Parse("2024-06-15T10:30:45");
+    EXPECT_EQ(dt.getHourProperty(), 10);
+}
+
+TEST(DateTimeTests, Parse_WithMilliseconds) {
+    DateTime dt = DateTime::Parse("2024-06-15 10:30:45.123");
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+}
+
+TEST(DateTimeTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(DateTime::Parse("not-a-date"), std::exception);
+}
+
+// --- TryParse ---
+
+TEST(DateTimeTests, TryParse_ValidDate_ReturnsTrue) {
+    DateTime dt;
+    EXPECT_TRUE(DateTime::TryParse("2024-06-15", dt));
+    EXPECT_EQ(dt.getYearProperty(), 2024);
+}
+
+TEST(DateTimeTests, TryParse_ValidDateTime_ReturnsTrue) {
+    DateTime dt;
+    EXPECT_TRUE(DateTime::TryParse("2024-06-15 08:00:00", dt));
+    EXPECT_EQ(dt.getHourProperty(), 8);
+}
+
+TEST(DateTimeTests, TryParse_Invalid_ReturnsFalse) {
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("hello", dt));
+}
+
+TEST(DateTimeTests, TryParse_BadMonth_ReturnsFalse) {
+    DateTime dt;
+    EXPECT_FALSE(DateTime::TryParse("2024-13-01", dt));
+}

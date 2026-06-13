@@ -593,3 +593,70 @@ TEST(ListTests, BinarySearch_NotFound_NegativeResult) {
     lst.Add(1); lst.Add(3); lst.Add(5);
     EXPECT_LT(lst.BinarySearch(2), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Dictionary<K,V> — new methods (session 58)
+// ---------------------------------------------------------------------------
+
+TEST(DictionaryTests, TryAdd_AddsWhenAbsent) {
+    Dictionary<std::string, int> d;
+    EXPECT_TRUE(d.TryAdd("x", 1));
+    EXPECT_EQ(d["x"], 1);
+}
+
+TEST(DictionaryTests, TryAdd_ReturnsFalseWhenPresent) {
+    Dictionary<std::string, int> d;
+    d.Add("x", 1);
+    EXPECT_FALSE(d.TryAdd("x", 99));
+    EXPECT_EQ(d["x"], 1);
+}
+
+TEST(DictionaryTests, ContainsValue_Found) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 42);
+    EXPECT_TRUE(d.ContainsValue(42));
+}
+
+TEST(DictionaryTests, ContainsValue_NotFound) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_FALSE(d.ContainsValue(99));
+}
+
+TEST(DictionaryTests, GetValueOrDefault_Present) {
+    Dictionary<std::string, int> d;
+    d.Add("k", 7);
+    EXPECT_EQ(d.GetValueOrDefault("k", 0), 7);
+}
+
+TEST(DictionaryTests, GetValueOrDefault_Absent) {
+    Dictionary<std::string, int> d;
+    EXPECT_EQ(d.GetValueOrDefault("missing", 42), 42);
+}
+
+TEST(DictionaryTests, GetValueOrDefault_AbsentDefaultDefault) {
+    Dictionary<std::string, int> d;
+    EXPECT_EQ(d.GetValueOrDefault("missing"), 0);
+}
+
+TEST(DictionaryTests, Keys_ContainsAllKeys) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2);
+    auto keys = d.getKeysProperty();
+    EXPECT_EQ(keys.size(), 2u);
+    bool hasA = std::find(keys.begin(), keys.end(), "a") != keys.end();
+    bool hasB = std::find(keys.begin(), keys.end(), "b") != keys.end();
+    EXPECT_TRUE(hasA);
+    EXPECT_TRUE(hasB);
+}
+
+TEST(DictionaryTests, Values_ContainsAllValues) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 10); d.Add("b", 20);
+    auto vals = d.getValuesProperty();
+    EXPECT_EQ(vals.size(), 2u);
+    bool has10 = std::find(vals.begin(), vals.end(), 10) != vals.end();
+    bool has20 = std::find(vals.begin(), vals.end(), 20) != vals.end();
+    EXPECT_TRUE(has10);
+    EXPECT_TRUE(has20);
+}
