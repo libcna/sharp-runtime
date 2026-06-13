@@ -451,3 +451,45 @@ TEST(StringBuilderTests, Append_CharRepeat_Chained) {
     sb.Append('a', 3).Append('b', 2);
     EXPECT_EQ(sb.ToString(), "aaabb");
 }
+
+// --- AppendFormat 3-arg ---
+TEST(StringBuilderTests, AppendFormat_ThreeInts) {
+    StringBuilder sb;
+    sb.AppendFormat("{0}-{1}-{2}", 1, 2, 3);
+    EXPECT_EQ(sb.ToString(), "1-2-3");
+}
+TEST(StringBuilderTests, AppendFormat_ThreeStrings) {
+    StringBuilder sb;
+    sb.AppendFormat("{0}/{1}/{2}", std::string("a"), std::string("b"), std::string("c"));
+    EXPECT_EQ(sb.ToString(), "a/b/c");
+}
+
+// --- Append(StringBuilder) / Equals ---
+TEST(StringBuilderTests, Append_StringBuilder) {
+    StringBuilder a("hello");
+    StringBuilder b(" world");
+    a.Append(b);
+    EXPECT_EQ(a.ToString(), "hello world");
+}
+TEST(StringBuilderTests, Equals_True) {
+    StringBuilder a("abc");
+    StringBuilder b("abc");
+    EXPECT_TRUE(a.Equals(b));
+}
+TEST(StringBuilderTests, Equals_False) {
+    StringBuilder a("abc");
+    StringBuilder b("xyz");
+    EXPECT_FALSE(a.Equals(b));
+}
+
+// --- getCapacityProperty / EnsureCapacity ---
+TEST(StringBuilderTests, EnsureCapacity_ReservesSpace) {
+    StringBuilder sb;
+    sb.EnsureCapacity(500);
+    EXPECT_GE(sb.getCapacityProperty(), 500);
+}
+TEST(StringBuilderTests, EnsureCapacity_DoesNotTruncate) {
+    StringBuilder sb("hello");
+    sb.EnsureCapacity(1000);
+    EXPECT_EQ(sb.ToString(), "hello");
+}

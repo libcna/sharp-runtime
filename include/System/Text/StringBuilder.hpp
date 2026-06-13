@@ -153,5 +153,25 @@ namespace System::Text
         /// @brief Appends elements of @p values joined by @p separator.
         StringBuilder& AppendJoin(const std::string& separator, const std::vector<std::string>& values)
             { return Append(System::String::Join(separator, values)); }
+
+        /// @brief Appends a formatted string with three integer arguments.
+        StringBuilder& AppendFormat(const std::string& format, intcs arg0, intcs arg1, intcs arg2)
+            { return Append(System::String::Format(format, arg0, arg1, arg2)); }
+        /// @brief Appends a formatted string with three string arguments.
+        StringBuilder& AppendFormat(const std::string& format,
+                                    const std::string& arg0, const std::string& arg1, const std::string& arg2)
+            { return Append(System::String::Format(format, arg0, arg1, arg2)); }
+
+        /// @brief Appends the contents of another StringBuilder to this instance.
+        StringBuilder& Append(const StringBuilder& other) { return Append(other.buffer); }
+
+        /// @brief Returns true if the contents of this instance equal those of @p other.
+        [[nodiscard]] bool Equals(const StringBuilder& other) const { return buffer == other.buffer; }
+
+        /// @brief Returns the current capacity of the internal buffer.
+        [[nodiscard]] intcs getCapacityProperty() const { return static_cast<intcs>(buffer.capacity()); }
+
+        /// @brief Ensures the internal buffer has at least @p capacity characters reserved.
+        void EnsureCapacity(intcs capacity) { buffer.reserve(static_cast<std::size_t>(capacity)); }
     };
 }

@@ -5,7 +5,9 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -74,6 +76,33 @@ public:
         auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
         if (ec == std::errc{}) return std::string(buf.data(), ptr);
         return std::to_string(value);
+    }
+
+    /// @brief Converts @p value to a string using format specifier ("F2", "E3", "G", "R").
+    static std::string ToString(float value, const std::string& format) {
+        if (format.empty()) return ToString(value);
+        if (std::isnan(value)) return "NaN";
+        if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+        char type = format[0];
+        int prec = format.size() > 1 ? std::stoi(format.substr(1)) : -1;
+        std::ostringstream oss;
+        oss.imbue(std::locale::classic());
+        if (type == 'F' || type == 'f') {
+            oss << std::fixed << std::setprecision(prec >= 0 ? prec : 2) << value;
+            return oss.str();
+        }
+        if (type == 'E' || type == 'e') {
+            if (type == 'E') oss << std::uppercase;
+            oss << std::scientific << std::setprecision(prec >= 0 ? prec : 6) << value;
+            return oss.str();
+        }
+        if (type == 'G' || type == 'g') {
+            if (prec > 0) oss << std::setprecision(prec);
+            oss << value;
+            return oss.str();
+        }
+        if (type == 'R' || type == 'r') return ToString(value);
+        return ToString(value);
     }
 };
 

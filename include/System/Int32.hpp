@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -36,6 +38,51 @@ public:
 
     /// Converts the 32-bit signed integer @p value to its string representation.
     static std::string ToString(SharpRuntime::intcs value) { return std::to_string(value); }
+
+    /// @brief Converts @p value to a string using the specified format specifier.
+    /// Supported: "X"/"x" (hex), "D"/"d" (decimal with optional width), "G"/"g" (general), "B"/"b" (binary).
+    static std::string ToString(SharpRuntime::intcs value, const std::string& format) {
+        if (format.empty()) return std::to_string(value);
+        char type = format[0];
+        int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+        std::ostringstream oss;
+        if (type == 'X') {
+            oss << std::uppercase << std::hex;
+            if (width > 0) oss << std::setfill('0') << std::setw(width);
+            oss << static_cast<unsigned>(value);
+            return oss.str();
+        }
+        if (type == 'x') {
+            oss << std::hex;
+            if (width > 0) oss << std::setfill('0') << std::setw(width);
+            oss << static_cast<unsigned>(value);
+            return oss.str();
+        }
+        if (type == 'D' || type == 'd') {
+            if (width > 0) {
+                oss << std::dec;
+                std::string s = std::to_string(value);
+                bool neg = value < 0;
+                if (neg) s = s.substr(1);
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return neg ? "-" + s : s;
+            }
+            return std::to_string(value);
+        }
+        if (type == 'G' || type == 'g') return std::to_string(value);
+        if (type == 'B' || type == 'b') {
+            if (value == 0) {
+                std::string r(width > 0 ? static_cast<size_t>(width) : 1, '0');
+                return r;
+            }
+            std::string bits;
+            uint32_t uv = static_cast<uint32_t>(value);
+            while (uv > 0) { bits = (char)('0' + (uv & 1)) + bits; uv >>= 1; }
+            while (static_cast<int>(bits.size()) < width) bits = "0" + bits;
+            return bits;
+        }
+        return std::to_string(value);
+    }
 };
 
 } // namespace System

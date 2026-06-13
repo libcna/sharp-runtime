@@ -614,3 +614,19 @@ TEST(DoubleTests, ToStringContainsDigits) {
     std::string s = Double::ToString(1.0);
     EXPECT_NE(s.find('1'), std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Double::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(DoubleTests, ToString_F2) { EXPECT_EQ(Double::ToString(3.14159, std::string("F2")), "3.14"); }
+TEST(DoubleTests, ToString_F0) { EXPECT_EQ(Double::ToString(3.7, std::string("F0")), "4"); }
+TEST(DoubleTests, ToString_G)  { EXPECT_NE(Double::ToString(3.14, std::string("G")), ""); }
+TEST(DoubleTests, ToString_R)  { EXPECT_NE(Double::ToString(1.5, std::string("R")), ""); }
+TEST(DoubleTests, ToString_NaN_Format) { EXPECT_EQ(Double::ToString(std::numeric_limits<double>::quiet_NaN(), std::string("F2")), "NaN"); }
+
+// ---------------------------------------------------------------------------
+// Single::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(SingleTests, ToString_F2) { EXPECT_EQ(Single::ToString(3.14f, std::string("F2")), "3.14"); }
+TEST(SingleTests, ToString_F0) { EXPECT_EQ(Single::ToString(3.7f, std::string("F0")), "4"); }
+TEST(SingleTests, ToString_NaN_Format) { EXPECT_EQ(Single::ToString(std::numeric_limits<float>::quiet_NaN(), std::string("F2")), "NaN"); }

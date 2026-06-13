@@ -126,3 +126,22 @@ TEST(UInt32Tests, ToString) {
     EXPECT_EQ(UInt32::ToString(0U),          "0");
     EXPECT_EQ(UInt32::ToString(4294967295U), "4294967295");
 }
+
+// ---------------------------------------------------------------------------
+// Int32::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(Int32Tests, ToString_Hex_Uppercase) { EXPECT_EQ(Int32::ToString(255, std::string("X")), "FF"); }
+TEST(Int32Tests, ToString_Hex_Padded)    { EXPECT_EQ(Int32::ToString(255, std::string("X4")), "00FF"); }
+TEST(Int32Tests, ToString_Hex_Lower)     { EXPECT_EQ(Int32::ToString(255, std::string("x")), "ff"); }
+TEST(Int32Tests, ToString_D_NoWidth)     { EXPECT_EQ(Int32::ToString(42, std::string("D")), "42"); }
+TEST(Int32Tests, ToString_D_Padded)      { EXPECT_EQ(Int32::ToString(7, std::string("D3")), "007"); }
+TEST(Int32Tests, ToString_D_Negative)    { EXPECT_EQ(Int32::ToString(-5, std::string("D3")), "-005"); }
+TEST(Int32Tests, ToString_G)             { EXPECT_EQ(Int32::ToString(99, std::string("G")), "99"); }
+TEST(Int32Tests, ToString_B_Basic)       { EXPECT_EQ(Int32::ToString(5, std::string("B")), "101"); }
+TEST(Int32Tests, ToString_B_Padded)      { EXPECT_EQ(Int32::ToString(5, std::string("B8")), "00000101"); }
+
+// ---------------------------------------------------------------------------
+// Int64::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(Int64Tests, ToString_Hex) { EXPECT_EQ(Int64::ToString(255LL, std::string("X")), "FF"); }
+TEST(Int64Tests, ToString_D_Padded) { EXPECT_EQ(Int64::ToString(7LL, std::string("D5")), "00007"); }
