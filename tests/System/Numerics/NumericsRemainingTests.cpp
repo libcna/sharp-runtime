@@ -6,9 +6,11 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "System/MathF.hpp"
+#include "System/MidpointRounding.hpp"
 #include "System/Numerics/BitOperations.hpp"
 
 using System::MathF;
+using System::MidpointRounding;
 using System::Numerics::BitOperations;
 
 // ===========================================================================
@@ -69,9 +71,9 @@ TEST(MathFTests, Clamp_AboveMax) {
     EXPECT_FLOAT_EQ(MathF::Clamp(15.0f, 0.0f, 10.0f), 10.0f);
 }
 TEST(MathFTests, Sign_Positive_Negative_Zero) {
-    EXPECT_FLOAT_EQ(MathF::Sign(3.0f), 1.0f);
-    EXPECT_FLOAT_EQ(MathF::Sign(-3.0f), -1.0f);
-    EXPECT_FLOAT_EQ(MathF::Sign(0.0f), 0.0f);
+    EXPECT_EQ(MathF::Sign(3.0f),  1);
+    EXPECT_EQ(MathF::Sign(-3.0f), -1);
+    EXPECT_EQ(MathF::Sign(0.0f),  0);
 }
 TEST(MathFTests, IsNaN_IsInfinity) {
     EXPECT_TRUE(MathF::IsNaN(std::numeric_limits<float>::quiet_NaN()));
@@ -178,6 +180,21 @@ TEST(MathFTests, FusedMultiplyAdd_Basic) {
 }
 TEST(MathFTests, Round_TwoDigits)  { EXPECT_NEAR(MathF::Round(3.14159f, 2), 3.14f, 1e-5f); }
 TEST(MathFTests, Round_ZeroDigits) { EXPECT_NEAR(MathF::Round(2.7f, 0),     3.0f,  1e-5f); }
+TEST(MathFTests, Round_MidpointRounding_AwayFromZero) {
+    EXPECT_FLOAT_EQ(MathF::Round(2.5f, MidpointRounding::AwayFromZero), 3.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.5f, MidpointRounding::AwayFromZero), -3.0f);
+}
+TEST(MathFTests, Round_MidpointRounding_ToEven) {
+    EXPECT_FLOAT_EQ(MathF::Round(2.5f, MidpointRounding::ToEven), 2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(3.5f, MidpointRounding::ToEven), 4.0f);
+}
+TEST(MathFTests, Round_MidpointRounding_ToZero) {
+    EXPECT_FLOAT_EQ(MathF::Round(2.9f, MidpointRounding::ToZero), 2.0f);
+    EXPECT_FLOAT_EQ(MathF::Round(-2.9f, MidpointRounding::ToZero), -2.0f);
+}
+TEST(MathFTests, Round_Digits_MidpointRounding) {
+    EXPECT_NEAR(MathF::Round(2.345f, 2, MidpointRounding::AwayFromZero), 2.35f, 1e-5f);
+}
 
 // ---------------------------------------------------------------------------
 // IsFinite, IsNormal, IsSubnormal, IsNegative

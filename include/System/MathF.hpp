@@ -4,6 +4,7 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include "System/MidpointRounding.hpp"
 
 namespace System {
 
@@ -83,7 +84,7 @@ namespace System {
             return v < min ? min : (v > max ? max : v);
         }
         /// Returns -1, 0, or 1 indicating the sign of @p x.
-        static float Sign(float x)                 { return x < 0 ? -1.0f : (x > 0 ? 1.0f : 0.0f); }
+        static int Sign(float x)                   { return x < 0.0f ? -1 : (x > 0.0f ? 1 : 0); }
         /// Returns true if @p x is Not-a-Number (NaN).
         static bool IsNaN(float x)                 { return std::isnan(x); }
         /// Returns true if @p x is positive or negative infinity.
@@ -110,10 +111,26 @@ namespace System {
         static float BitDecrement(float x)         { return std::nextafter(x, -std::numeric_limits<float>::infinity()); }
         /// Returns (x * y) + z, computed with a single rounding step.
         static float FusedMultiplyAdd(float x, float y, float z) { return std::fma(x, y, z); }
-        /// Rounds @p x to @p digits decimal places.
+        /// Rounds @p x to @p digits decimal places using away-from-zero midpoint.
         static float Round(float x, int digits)    {
             float factor = std::pow(10.0f, static_cast<float>(digits));
             return std::round(x * factor) / factor;
+        }
+        /// Rounds @p x to an integer using the specified rounding convention.
+        static float Round(float x, MidpointRounding mode) {
+            switch (mode) {
+                case MidpointRounding::ToEven:             return std::nearbyintf(x);
+                case MidpointRounding::AwayFromZero:       return std::roundf(x);
+                case MidpointRounding::ToZero:             return std::truncf(x);
+                case MidpointRounding::ToNegativeInfinity: return std::floorf(x);
+                case MidpointRounding::ToPositiveInfinity: return std::ceilf(x);
+                default:                                   return std::nearbyintf(x);
+            }
+        }
+        /// Rounds @p x to @p digits decimal places using the specified rounding convention.
+        static float Round(float x, int digits, MidpointRounding mode) {
+            float factor = std::pow(10.0f, static_cast<float>(digits));
+            return Round(x * factor, mode) / factor;
         }
         /// Returns true if @p x is finite (not NaN or infinity).
         static bool IsFinite(float x)              { return std::isfinite(x); }
