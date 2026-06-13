@@ -270,6 +270,29 @@ namespace System
         /// @brief Formats a string with a double arg0 and intcs arg1.
         static std::string Format(const std::string& format, double arg0, SharpRuntime::intcs arg1);
 
+        /// @brief The empty string constant (equivalent to "").
+        static const std::string Empty;
+
+        /// @brief Formats a string replacing `{0}` with @p arg0 (single-precision float).
+        static std::string Format(const std::string& format, float arg0);
+
+        /// @brief Formats a string with two long integer arguments.
+        static std::string Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::longcs arg1);
+
+        /// @brief Formats a string with four string arguments.
+        static std::string Format(const std::string& format,
+                                  const std::string& arg0, const std::string& arg1,
+                                  const std::string& arg2, const std::string& arg3);
+
+        /// @brief Returns a locale-invariant uppercase copy of @p value.
+        static std::string ToUpperInvariant(const std::string& value);
+
+        /// @brief Returns a locale-invariant lowercase copy of @p value.
+        static std::string ToLowerInvariant(const std::string& value);
+
+        /// @brief Performs an ordinal (byte-by-byte) comparison of @p a and @p b.
+        static SharpRuntime::intcs CompareOrdinal(const std::string& a, const std::string& b);
+
         /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);
 

@@ -553,3 +553,39 @@ TEST(StringTests, Format_IntAndDouble) {
 TEST(StringTests, Format_DoubleAndInt) {
     EXPECT_EQ(String::Format("{0:F1}/{1}", 2.5, static_cast<SharpRuntime::intcs>(10)), "2.5/10");
 }
+
+// ---------------------------------------------------------------------------
+// String::Empty
+// ---------------------------------------------------------------------------
+TEST(StringTests, Empty_IsEmpty) { EXPECT_EQ(String::Empty, ""); }
+TEST(StringTests, Empty_IsNotNullOrEmpty) { EXPECT_TRUE(String::IsNullOrEmpty(String::Empty)); }
+
+// ---------------------------------------------------------------------------
+// Format(float) / Format(longcs, longcs) / Format(4 strings)
+// ---------------------------------------------------------------------------
+TEST(StringTests, Format_Float) {
+    std::string r = String::Format("{0:F2}", 3.14f);
+    EXPECT_EQ(r, "3.14");
+}
+TEST(StringTests, Format_LongAndLong) {
+    SharpRuntime::longcs a = 100000000000LL, b = 200000000000LL;
+    EXPECT_EQ(String::Format("{0}/{1}", a, b), "100000000000/200000000000");
+}
+TEST(StringTests, Format_FourStrings) {
+    EXPECT_EQ(String::Format("{0}-{1}-{2}-{3}",
+        std::string("a"), std::string("b"), std::string("c"), std::string("d")),
+        "a-b-c-d");
+}
+
+// ---------------------------------------------------------------------------
+// ToUpperInvariant / ToLowerInvariant
+// ---------------------------------------------------------------------------
+TEST(StringTests, ToUpperInvariant_Basic) { EXPECT_EQ(String::ToUpperInvariant("hello"), "HELLO"); }
+TEST(StringTests, ToLowerInvariant_Basic) { EXPECT_EQ(String::ToLowerInvariant("WORLD"), "world"); }
+
+// ---------------------------------------------------------------------------
+// CompareOrdinal
+// ---------------------------------------------------------------------------
+TEST(StringTests, CompareOrdinal_Equal)  { EXPECT_EQ(String::CompareOrdinal("abc", "abc"), 0); }
+TEST(StringTests, CompareOrdinal_Less)   { EXPECT_LT(String::CompareOrdinal("abc", "abd"), 0); }
+TEST(StringTests, CompareOrdinal_Greater){ EXPECT_GT(String::CompareOrdinal("abd", "abc"), 0); }

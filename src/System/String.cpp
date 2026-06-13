@@ -606,4 +606,44 @@ namespace System
         return replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
     }
 
+    const std::string String::Empty{};
+
+    std::string String::Format(const std::string& format, float arg0)
+    {
+        return Format(format, static_cast<double>(arg0));
+    }
+
+    std::string String::Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::longcs arg1)
+    {
+        std::string r = replaceArg(format, 0, std::to_string(arg0));
+        return replaceArg(r, 1, std::to_string(arg1));
+    }
+
+    std::string String::Format(const std::string& format,
+                               const std::string& arg0, const std::string& arg1,
+                               const std::string& arg2, const std::string& arg3)
+    {
+        std::string r = replaceArg(format, 0, arg0);
+        r = replaceArg(r, 1, arg1);
+        r = replaceArg(r, 2, arg2);
+        return replaceArg(r, 3, arg3);
+    }
+
+    std::string String::ToUpperInvariant(const std::string& value)
+    {
+        return ToUpper(value); // ASCII subset is locale-invariant with std::toupper
+    }
+
+    std::string String::ToLowerInvariant(const std::string& value)
+    {
+        return ToLower(value);
+    }
+
+    SharpRuntime::intcs String::CompareOrdinal(const std::string& a, const std::string& b)
+    {
+        if (a < b) return -1;
+        if (a > b) return  1;
+        return 0;
+    }
+
 }
