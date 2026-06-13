@@ -27,6 +27,35 @@ public:
     static bool IsNumber(SharpRuntime::charcs c)       { return std::iswdigit(static_cast<wint_t>(c)) != 0; }
     static bool IsSeparator(SharpRuntime::charcs c)    { return std::iswspace(static_cast<wint_t>(c)) != 0; }
 
+    /// @brief Returns true if @p c is in the ASCII range (U+0000..U+007F).
+    static bool IsAscii(SharpRuntime::charcs c)             { return c < 0x80u; }
+    /// @brief Returns true if @p c is an ASCII decimal digit ('0'–'9').
+    static bool IsAsciiDigit(SharpRuntime::charcs c)        { return c >= u'0' && c <= u'9'; }
+    /// @brief Returns true if @p c is an ASCII uppercase letter ('A'–'Z').
+    static bool IsAsciiUpper(SharpRuntime::charcs c)        { return c >= u'A' && c <= u'Z'; }
+    /// @brief Returns true if @p c is an ASCII lowercase letter ('a'–'z').
+    static bool IsAsciiLower(SharpRuntime::charcs c)        { return c >= u'a' && c <= u'z'; }
+    /// @brief Returns true if @p c is an ASCII letter ('A'–'Z' or 'a'–'z').
+    static bool IsAsciiLetter(SharpRuntime::charcs c)       { return IsAsciiUpper(c) || IsAsciiLower(c); }
+    /// @brief Returns true if @p c is an ASCII letter or decimal digit.
+    static bool IsAsciiLetterOrDigit(SharpRuntime::charcs c){ return IsAsciiLetter(c) || IsAsciiDigit(c); }
+    /// @brief Returns true if @p c is an ASCII uppercase letter ('A'–'Z'). Alias for IsAsciiUpper.
+    static bool IsAsciiLetterUpper(SharpRuntime::charcs c)  { return IsAsciiUpper(c); }
+    /// @brief Returns true if @p c is an ASCII lowercase letter ('a'–'z'). Alias for IsAsciiLower.
+    static bool IsAsciiLetterLower(SharpRuntime::charcs c)  { return IsAsciiLower(c); }
+    /// @brief Returns true if @p c is a valid ASCII hexadecimal digit (0–9, A–F, a–f).
+    static bool IsAsciiHexDigit(SharpRuntime::charcs c) {
+        return IsAsciiDigit(c) || (c >= u'A' && c <= u'F') || (c >= u'a' && c <= u'f');
+    }
+    /// @brief Returns true if @p c is a lowercase ASCII hex digit (0–9, a–f).
+    static bool IsAsciiHexDigitLower(SharpRuntime::charcs c) {
+        return IsAsciiDigit(c) || (c >= u'a' && c <= u'f');
+    }
+    /// @brief Returns true if @p c is an uppercase ASCII hex digit (0–9, A–F).
+    static bool IsAsciiHexDigitUpper(SharpRuntime::charcs c) {
+        return IsAsciiDigit(c) || (c >= u'A' && c <= u'F');
+    }
+
     static bool IsHighSurrogate(SharpRuntime::charcs c) { return c >= 0xD800 && c <= 0xDBFF; }
     static bool IsLowSurrogate(SharpRuntime::charcs c)  { return c >= 0xDC00 && c <= 0xDFFF; }
     static bool IsSurrogate(SharpRuntime::charcs c)     { return c >= 0xD800 && c <= 0xDFFF; }

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdint>
 #include <string>
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -98,6 +99,15 @@ namespace System {
 
         [[nodiscard]] static bool Is64BitProcess() { return sizeof(void*) == 8; }
         [[nodiscard]] static bool Is64BitOperatingSystem() { return Is64BitProcess(); }
+
+        /// @brief Returns the NetBIOS name of the local machine.
+        [[nodiscard]] static std::string getMachineNameProperty();
+
+        /// @brief Returns the user name of the person currently logged on.
+        [[nodiscard]] static std::string getUserNameProperty();
+
+        /// @brief Returns the number of milliseconds elapsed since system startup (64-bit).
+        [[nodiscard]] static SharpRuntime::longcs getTickCount64Property();
     };
 
 } // namespace System

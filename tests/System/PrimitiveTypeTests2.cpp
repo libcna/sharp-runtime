@@ -401,6 +401,46 @@ TEST(CharTests, ConvertToUtf32InvalidThrows) {
 }
 
 // ---------------------------------------------------------------------------
+// ASCII helpers (.NET 7+)
+// ---------------------------------------------------------------------------
+TEST(CharTests, IsAscii_True)  { EXPECT_TRUE(Char::IsAscii(u'A')); }
+TEST(CharTests, IsAscii_False) { EXPECT_FALSE(Char::IsAscii(u'\x80')); }
+
+TEST(CharTests, IsAsciiDigit_True)    { EXPECT_TRUE(Char::IsAsciiDigit(u'5')); }
+TEST(CharTests, IsAsciiDigit_Letter)  { EXPECT_FALSE(Char::IsAsciiDigit(u'a')); }
+
+TEST(CharTests, IsAsciiUpper_True)    { EXPECT_TRUE(Char::IsAsciiUpper(u'Z')); }
+TEST(CharTests, IsAsciiUpper_Lower)   { EXPECT_FALSE(Char::IsAsciiUpper(u'z')); }
+
+TEST(CharTests, IsAsciiLower_True)    { EXPECT_TRUE(Char::IsAsciiLower(u'a')); }
+TEST(CharTests, IsAsciiLower_Upper)   { EXPECT_FALSE(Char::IsAsciiLower(u'A')); }
+
+TEST(CharTests, IsAsciiLetter_Upper)      { EXPECT_TRUE(Char::IsAsciiLetter(u'A')); }
+TEST(CharTests, IsAsciiLetter_Lower)      { EXPECT_TRUE(Char::IsAsciiLetter(u'z')); }
+TEST(CharTests, IsAsciiLetter_Digit)      { EXPECT_FALSE(Char::IsAsciiLetter(u'3')); }
+
+TEST(CharTests, IsAsciiLetterOrDigit_Digit)  { EXPECT_TRUE(Char::IsAsciiLetterOrDigit(u'9')); }
+TEST(CharTests, IsAsciiLetterOrDigit_Letter) { EXPECT_TRUE(Char::IsAsciiLetterOrDigit(u'B')); }
+TEST(CharTests, IsAsciiLetterOrDigit_Space)  { EXPECT_FALSE(Char::IsAsciiLetterOrDigit(u' ')); }
+
+TEST(CharTests, IsAsciiLetterUpper_True)  { EXPECT_TRUE(Char::IsAsciiLetterUpper(u'M')); }
+TEST(CharTests, IsAsciiLetterUpper_Lower) { EXPECT_FALSE(Char::IsAsciiLetterUpper(u'm')); }
+
+TEST(CharTests, IsAsciiLetterLower_True)  { EXPECT_TRUE(Char::IsAsciiLetterLower(u'm')); }
+TEST(CharTests, IsAsciiLetterLower_Upper) { EXPECT_FALSE(Char::IsAsciiLetterLower(u'M')); }
+
+TEST(CharTests, IsAsciiHexDigit_Digit) { EXPECT_TRUE(Char::IsAsciiHexDigit(u'9')); }
+TEST(CharTests, IsAsciiHexDigit_Upper) { EXPECT_TRUE(Char::IsAsciiHexDigit(u'F')); }
+TEST(CharTests, IsAsciiHexDigit_Lower) { EXPECT_TRUE(Char::IsAsciiHexDigit(u'f')); }
+TEST(CharTests, IsAsciiHexDigit_G)     { EXPECT_FALSE(Char::IsAsciiHexDigit(u'G')); }
+
+TEST(CharTests, IsAsciiHexDigitLower_af) { EXPECT_TRUE(Char::IsAsciiHexDigitLower(u'f')); }
+TEST(CharTests, IsAsciiHexDigitLower_AF) { EXPECT_FALSE(Char::IsAsciiHexDigitLower(u'F')); }
+
+TEST(CharTests, IsAsciiHexDigitUpper_AF) { EXPECT_TRUE(Char::IsAsciiHexDigitUpper(u'F')); }
+TEST(CharTests, IsAsciiHexDigitUpper_af) { EXPECT_FALSE(Char::IsAsciiHexDigitUpper(u'f')); }
+
+// ---------------------------------------------------------------------------
 // Single (float)
 // ---------------------------------------------------------------------------
 

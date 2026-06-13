@@ -5,6 +5,7 @@
 #include "System/Environment.hpp"
 
 using System::Environment;
+using SharpRuntime::longcs;
 
 // ---------------------------------------------------------------------------
 // NewLine
@@ -62,4 +63,31 @@ TEST(EnvironmentTests, Is64BitOperatingSystem_ReturnsBool) {
 TEST(EnvironmentTests, Is64BitOS_EqualsIs64BitProcess) {
     // This implementation delegates OS check to process check
     EXPECT_EQ(Environment::Is64BitOperatingSystem(), Environment::Is64BitProcess());
+}
+
+// ---------------------------------------------------------------------------
+// MachineName / UserName / TickCount64
+// ---------------------------------------------------------------------------
+TEST(EnvironmentTests, MachineName_NotEmpty) {
+    std::string name = Environment::getMachineNameProperty();
+    EXPECT_FALSE(name.empty());
+}
+
+TEST(EnvironmentTests, UserName_NotEmpty) {
+    std::string name = Environment::getUserNameProperty();
+    EXPECT_FALSE(name.empty());
+}
+
+TEST(EnvironmentTests, TickCount64_Positive) {
+    SharpRuntime::longcs t = Environment::getTickCount64Property();
+    EXPECT_GT(t, 0LL);
+}
+
+TEST(EnvironmentTests, TickCount64_Advances) {
+    SharpRuntime::longcs t1 = Environment::getTickCount64Property();
+    volatile int sink = 0;
+    for (int i = 0; i < 10000000; ++i) sink += i;
+    SharpRuntime::longcs t2 = Environment::getTickCount64Property();
+    (void)sink;
+    EXPECT_GE(t2, t1);
 }
