@@ -11,6 +11,7 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#  undef GetCurrentDirectory   // windows.h macro collides with our method name
 #elif defined(__EMSCRIPTEN__)
 // Emscripten: POSIX-like; <unistd.h> available
 #  include <unistd.h>

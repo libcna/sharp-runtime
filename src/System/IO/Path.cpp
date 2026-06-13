@@ -10,6 +10,8 @@
 #    define WIN32_LEAN_AND_MEAN
 #  endif
 #  include <windows.h>
+#  undef GetTempPath      // windows.h macro collides with our method name
+#  undef GetTempFileName  // windows.h macro collides with our method name
 #else
 #  include <unistd.h>
 #endif
