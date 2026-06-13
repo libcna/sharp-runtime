@@ -35,7 +35,14 @@ namespace System
          *
          * @note Status: IMPLEMENTED
          */
+        /// @brief Splits @p value on @p delimiter (single character).
         static std::vector<std::string> Split(const std::string& value, char delimiter);
+
+        /// @brief Splits @p value on any character in @p delimiters.
+        static std::vector<std::string> Split(const std::string& value, const std::vector<char>& delimiters);
+
+        /// @brief Splits @p value on a string @p delimiter.
+        static std::vector<std::string> Split(const std::string& value, const std::string& delimiter);
 
         /**
          * @brief Returns true if the specified string is empty.

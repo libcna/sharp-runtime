@@ -1,6 +1,6 @@
 # COVERAGE.md — sharp-runtime .NET API Coverage Analysis
 
-*Generated: 2026-06-13 | Branch: develop | Tests: 3224 passing*
+*Generated: 2026-06-13 | Branch: develop | Tests: 3345 passing (updated session 57)*
 
 This document maps which .NET `System.*` namespaces, classes, and methods are present in
 sharp-runtime, and whether each is fully implemented, partial, or a stub.
@@ -18,13 +18,13 @@ sharp-runtime, and whether each is fully implemented, partial, or a stub.
 |--------|-------|
 | Total public headers | 449 |
 | Headers with .cpp bodies | 79 |
-| Test suites | 479 |
-| Tests passing | 3171 |
-| Tested headers | ~408 (~91%) |
+| Test suites | 480 |
+| Tests passing | 3345 |
+| Tested headers | ~410 (~91%) |
 | Pure interfaces (`IXxx`) — intentionally untested | ~42 |
-| Classes DONE (fully implemented) | ~320 |
-| Classes PARTIAL (80–99%) | ~60 |
-| Classes STUB (<20%) | ~15 |
+| Classes DONE (fully implemented) | ~392 |
+| Classes PARTIAL (80–99%) | ~1 (Regex — named groups require PCRE2) |
+| Classes STUB (<20%) | ~1 (GC — by design, no-op correct in C++) |
 
 ---
 
@@ -60,6 +60,9 @@ sharp-runtime, and whether each is fully implemented, partial, or a stub.
 | IndexOf(string/char) | ✅ |
 | LastIndexOf(string/char) | ✅ |
 | PadLeft / PadRight | ✅ |
+| Split(char) | ✅ |
+| Split(vector\<char\>) — split on any of multiple chars | ✅ |
+| Split(string) — split on a string delimiter | ✅ |
 | Format(format, int) — with `{0:X}`, `{0:D3}` specifiers | ✅ |
 | Format(format, double) — with `{0:F2}`, `{0:G}`, `{0:E}` specifiers | ✅ |
 | Format(format, string) | ✅ |
@@ -245,7 +248,7 @@ Constructors, `Item1`–`Item8` properties, `ToString` ✅
 ### Generic (DONE)
 | Class | Status | Backing |
 |-------|--------|---------|
-| List\<T\> | ✅ | `std::vector<T>` |
+| List\<T\> | ✅ Add/Remove/Clear/Contains/IndexOf/Insert/RemoveAt/Sort/Reverse/Find/FindAll/FindIndex/FindLastIndex/RemoveAll/ForEach/Exists/TrueForAll/AddRange/InsertRange/GetRange/ToArray/BinarySearch | `std::vector<T>` |
 | Dictionary\<K,V\> | ✅ | `std::map<K,V>` |
 | HashSet\<T\> | ✅ | `std::unordered_set<T>` |
 | Queue\<T\>, Stack\<T\> | ✅ | `std::queue`, `std::stack` |

@@ -8,6 +8,42 @@
 
 using System::String;
 
+// --- Split (multi-char / string delimiter) ---
+
+TEST(StringTests, Split_MultiChar_TwoDelimiters) {
+    auto r = String::Split("a,b;c", std::vector<char>{',', ';'});
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "b");
+    EXPECT_EQ(r[2], "c");
+}
+
+TEST(StringTests, Split_MultiChar_NoDelimiterFound) {
+    auto r = String::Split("hello", std::vector<char>{','});
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "hello");
+}
+
+TEST(StringTests, Split_StringDelimiter) {
+    auto r = String::Split("one||two||three", "||");
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "one");
+    EXPECT_EQ(r[1], "two");
+    EXPECT_EQ(r[2], "three");
+}
+
+TEST(StringTests, Split_StringDelimiter_EmptyDelimiter) {
+    auto r = String::Split("hello", "");
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "hello");
+}
+
+TEST(StringTests, Split_StringDelimiter_NoMatch) {
+    auto r = String::Split("hello", "||");
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "hello");
+}
+
 // --- IsNullOrWhiteSpace ---
 
 TEST(StringTests, IsNullOrWhiteSpace_Empty) {

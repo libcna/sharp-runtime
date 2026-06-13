@@ -429,3 +429,167 @@ TEST(HashSetTests, StringHashSet) {
     hs.Remove(std::string("beta"));
     EXPECT_FALSE(hs.Contains(std::string("beta")));
 }
+
+// ---------------------------------------------------------------------------
+// List<T> — new methods (session 57)
+// ---------------------------------------------------------------------------
+
+TEST(ListTests, Sort_DefaultOrder) {
+    List<int> lst;
+    lst.Add(3); lst.Add(1); lst.Add(4); lst.Add(1); lst.Add(5);
+    lst.Sort();
+    EXPECT_EQ(lst[0], 1);
+    EXPECT_EQ(lst[4], 5);
+}
+
+TEST(ListTests, Sort_WithComparison_Descending) {
+    List<int> lst;
+    lst.Add(3); lst.Add(1); lst.Add(2);
+    lst.Sort([](const int& a, const int& b) { return b - a; });
+    EXPECT_EQ(lst[0], 3);
+    EXPECT_EQ(lst[2], 1);
+}
+
+TEST(ListTests, Reverse_ReversesOrder) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    lst.Reverse();
+    EXPECT_EQ(lst[0], 3);
+    EXPECT_EQ(lst[2], 1);
+}
+
+TEST(ListTests, AddRange_FromVector) {
+    List<int> lst;
+    lst.Add(1);
+    lst.AddRange(std::vector<int>{2, 3, 4});
+    EXPECT_EQ(lst.getCountProperty(), 4);
+    EXPECT_EQ(lst[3], 4);
+}
+
+TEST(ListTests, AddRange_FromList) {
+    List<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(3); b.Add(4);
+    a.AddRange(b);
+    EXPECT_EQ(a.getCountProperty(), 4);
+    EXPECT_EQ(a[3], 4);
+}
+
+TEST(ListTests, InsertRange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(4);
+    lst.InsertRange(1, std::vector<int>{2, 3});
+    EXPECT_EQ(lst.getCountProperty(), 4);
+    EXPECT_EQ(lst[1], 2);
+    EXPECT_EQ(lst[2], 3);
+}
+
+TEST(ListTests, GetRange) {
+    List<int> lst;
+    for (int i = 0; i < 5; ++i) lst.Add(i);
+    auto sub = lst.GetRange(1, 3);
+    EXPECT_EQ(sub.getCountProperty(), 3);
+    EXPECT_EQ(sub[0], 1);
+    EXPECT_EQ(sub[2], 3);
+}
+
+TEST(ListTests, ToArray_ReturnsCopy) {
+    List<int> lst;
+    lst.Add(10); lst.Add(20);
+    auto arr = lst.ToArray();
+    EXPECT_EQ(arr.size(), 2u);
+    EXPECT_EQ(arr[1], 20);
+}
+
+TEST(ListTests, Find_Found) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_EQ(lst.Find([](const int& x) { return x > 1; }), 2);
+}
+
+TEST(ListTests, Find_NotFound_ReturnsDefault) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.Find([](const int& x) { return x > 10; }), 0);
+}
+
+TEST(ListTests, FindAll) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    auto evens = lst.FindAll([](const int& x) { return x % 2 == 0; });
+    EXPECT_EQ(evens.getCountProperty(), 2);
+    EXPECT_EQ(evens[0], 2);
+    EXPECT_EQ(evens[1], 4);
+}
+
+TEST(ListTests, FindIndex_Found) {
+    List<int> lst;
+    lst.Add(10); lst.Add(20); lst.Add(30);
+    EXPECT_EQ(lst.FindIndex([](const int& x) { return x == 20; }), 1);
+}
+
+TEST(ListTests, FindIndex_NotFound) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.FindIndex([](const int& x) { return x == 99; }), -1);
+}
+
+TEST(ListTests, FindLastIndex) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(2); lst.Add(3);
+    EXPECT_EQ(lst.FindLastIndex([](const int& x) { return x == 2; }), 2);
+}
+
+TEST(ListTests, RemoveAll_RemovesMatching) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    int removed = lst.RemoveAll([](const int& x) { return x % 2 == 0; });
+    EXPECT_EQ(removed, 2);
+    EXPECT_EQ(lst.getCountProperty(), 2);
+    EXPECT_EQ(lst[0], 1);
+    EXPECT_EQ(lst[1], 3);
+}
+
+TEST(ListTests, ForEach_VisitsAll) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    int sum = 0;
+    lst.ForEach([&sum](const int& x) { sum += x; });
+    EXPECT_EQ(sum, 6);
+}
+
+TEST(ListTests, Exists_True) {
+    List<int> lst;
+    lst.Add(1); lst.Add(5); lst.Add(3);
+    EXPECT_TRUE(lst.Exists([](const int& x) { return x == 5; }));
+}
+
+TEST(ListTests, Exists_False) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    EXPECT_FALSE(lst.Exists([](const int& x) { return x == 99; }));
+}
+
+TEST(ListTests, TrueForAll_True) {
+    List<int> lst;
+    lst.Add(2); lst.Add(4); lst.Add(6);
+    EXPECT_TRUE(lst.TrueForAll([](const int& x) { return x % 2 == 0; }));
+}
+
+TEST(ListTests, TrueForAll_False) {
+    List<int> lst;
+    lst.Add(2); lst.Add(3);
+    EXPECT_FALSE(lst.TrueForAll([](const int& x) { return x % 2 == 0; }));
+}
+
+TEST(ListTests, BinarySearch_Found) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4); lst.Add(5);
+    EXPECT_EQ(lst.BinarySearch(3), 2);
+}
+
+TEST(ListTests, BinarySearch_NotFound_NegativeResult) {
+    List<int> lst;
+    lst.Add(1); lst.Add(3); lst.Add(5);
+    EXPECT_LT(lst.BinarySearch(2), 0);
+}

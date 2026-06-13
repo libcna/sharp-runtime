@@ -33,6 +33,33 @@ namespace System
         return result;
     }
 
+    std::vector<std::string> String::Split(const std::string& value, const std::vector<char>& delimiters)
+    {
+        std::vector<std::string> result;
+        std::string current;
+        for (char c : value) {
+            bool isDelim = false;
+            for (char d : delimiters) if (c == d) { isDelim = true; break; }
+            if (isDelim) { result.push_back(current); current.clear(); }
+            else current += c;
+        }
+        result.push_back(current);
+        return result;
+    }
+
+    std::vector<std::string> String::Split(const std::string& value, const std::string& delimiter)
+    {
+        std::vector<std::string> result;
+        if (delimiter.empty()) { result.push_back(value); return result; }
+        size_t pos = 0, found;
+        while ((found = value.find(delimiter, pos)) != std::string::npos) {
+            result.push_back(value.substr(pos, found - pos));
+            pos = found + delimiter.size();
+        }
+        result.push_back(value.substr(pos));
+        return result;
+    }
+
     bool String::IsEmpty(const std::string& value)
     {
         return value.empty();
