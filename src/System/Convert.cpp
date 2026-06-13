@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cerrno>
+#include <array>
 #include <charconv>
 #include <climits>
 #include <limits>
@@ -106,8 +107,16 @@ namespace System {
 
     std::string Convert::ToString(intcs value)   { return std::to_string(value); }
     std::string Convert::ToString(longcs value)  { return std::to_string(value); }
-    std::string Convert::ToString(double value)  { return std::to_string(value); }
-    std::string Convert::ToString(float value)   { return std::to_string(value); }
+    std::string Convert::ToString(double value) {
+        std::array<char, 64> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(value);
+    }
+    std::string Convert::ToString(float value) {
+        std::array<char, 32> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(value);
+    }
     std::string Convert::ToString(char value)    { return std::string(1, value); }
     std::string Convert::ToString(bytecs value)  { return std::to_string(static_cast<int>(value)); }
 
