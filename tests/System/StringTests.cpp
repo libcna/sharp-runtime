@@ -380,3 +380,56 @@ TEST(StringTests, LastIndexOf_CharStartIndex_Found) {
 TEST(StringTests, LastIndexOf_CharStartIndex_NotFound) {
     EXPECT_EQ(String::LastIndexOf("hello", 'z', 4), -1);
 }
+
+// --- String::Create ---
+TEST(StringTests, Create_RepeatsChar) {
+    EXPECT_EQ(String::Create(5, 'x'), "xxxxx");
+}
+TEST(StringTests, Create_ZeroCount) {
+    EXPECT_EQ(String::Create(0, 'a'), "");
+}
+
+// --- String::Compare ---
+TEST(StringTests, Compare_Equal_ReturnsZero) {
+    EXPECT_EQ(String::Compare("abc", "abc"), 0);
+}
+TEST(StringTests, Compare_Less_ReturnsNegative) {
+    EXPECT_LT(String::Compare("abc", "abd"), 0);
+}
+TEST(StringTests, Compare_Greater_ReturnsPositive) {
+    EXPECT_GT(String::Compare("abd", "abc"), 0);
+}
+TEST(StringTests, Compare_IgnoreCase_Equal) {
+    EXPECT_EQ(String::Compare("Hello", "hello", true), 0);
+}
+TEST(StringTests, Compare_IgnoreCase_Different) {
+    EXPECT_NE(String::Compare("Hello", "world", true), 0);
+}
+
+// --- String::Equals (static) ---
+TEST(StringTests, Equals_SameString_True) {
+    EXPECT_TRUE(String::Equals("foo", "foo"));
+}
+TEST(StringTests, Equals_DifferentString_False) {
+    EXPECT_FALSE(String::Equals("foo", "bar"));
+}
+TEST(StringTests, Equals_IgnoreCase_True) {
+    EXPECT_TRUE(String::Equals("Hello", "HELLO", true));
+}
+TEST(StringTests, Equals_IgnoreCase_False) {
+    EXPECT_FALSE(String::Equals("foo", "bar", true));
+}
+
+// --- String::Format 3-arg ---
+TEST(StringTests, Format_ThreeInts) {
+    EXPECT_EQ(String::Format("{0}/{1}/{2}", 1, 2, 3), "1/2/3");
+}
+TEST(StringTests, Format_ThreeStrings) {
+    EXPECT_EQ(String::Format("{0}-{1}-{2}", std::string("a"), std::string("b"), std::string("c")), "a-b-c");
+}
+
+// --- String::Format longcs ---
+TEST(StringTests, Format_LongArg) {
+    SharpRuntime::longcs big = 9876543210LL;
+    EXPECT_EQ(String::Format("val={0}", big), "val=9876543210");
+}

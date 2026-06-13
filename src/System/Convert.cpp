@@ -173,4 +173,49 @@ namespace System {
         return result;
     }
 
+    static constexpr char kB64Chars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    std::string Convert::ToBase64String(const std::vector<bytecs>& inArray)
+    {
+        std::string out;
+        size_t n = inArray.size();
+        out.reserve(((n + 2) / 3) * 4);
+        for (size_t i = 0; i < n; i += 3) {
+            uint32_t triple = static_cast<uint32_t>(inArray[i]) << 16;
+            if (i + 1 < n) triple |= static_cast<uint32_t>(inArray[i + 1]) << 8;
+            if (i + 2 < n) triple |= static_cast<uint32_t>(inArray[i + 2]);
+            out += kB64Chars[(triple >> 18) & 0x3F];
+            out += kB64Chars[(triple >> 12) & 0x3F];
+            out += (i + 1 < n) ? kB64Chars[(triple >> 6) & 0x3F] : '=';
+            out += (i + 2 < n) ? kB64Chars[triple & 0x3F]        : '=';
+        }
+        return out;
+    }
+
+    std::vector<SharpRuntime::bytecs> Convert::FromBase64String(const std::string& s)
+    {
+        auto b64val = [](char c) -> int {
+            if (c >= 'A' && c <= 'Z') return c - 'A';
+            if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+            if (c >= '0' && c <= '9') return c - '0' + 52;
+            if (c == '+') return 62;
+            if (c == '/') return 63;
+            if (c == '=') return -1;
+            throw FormatException("Invalid Base64 character.");
+            return 0;
+        };
+        if (s.size() % 4 != 0) throw FormatException("Base64 string length must be a multiple of 4.");
+        std::vector<bytecs> out;
+        out.reserve(s.size() / 4 * 3);
+        for (size_t i = 0; i < s.size(); i += 4) {
+            int v0 = b64val(s[i]), v1 = b64val(s[i+1]);
+            int v2 = b64val(s[i+2]), v3 = b64val(s[i+3]);
+            out.push_back(static_cast<bytecs>((v0 << 2) | (v1 >> 4)));
+            if (v2 != -1) out.push_back(static_cast<bytecs>(((v1 & 0xF) << 4) | (v2 >> 2)));
+            if (v3 != -1) out.push_back(static_cast<bytecs>(((v2 & 0x3) << 6) | v3));
+        }
+        return out;
+    }
+
 } // namespace System

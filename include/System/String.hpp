@@ -188,6 +188,30 @@ namespace System
         /// @brief Returns the zero-based index of the last occurrence of @p ch searching backward from @p startIndex, or -1.
         static SharpRuntime::intcs LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex);
 
+        /// @brief Returns a new string of @p count copies of character @p ch.
+        static std::string Create(SharpRuntime::intcs count, char ch);
+
+        /// @brief Compares @p a and @p b ordinally; returns negative/zero/positive.
+        static SharpRuntime::intcs Compare(const std::string& a, const std::string& b);
+
+        /// @brief Compares @p a and @p b with optional case-insensitivity; returns negative/zero/positive.
+        static SharpRuntime::intcs Compare(const std::string& a, const std::string& b, bool ignoreCase);
+
+        /// @brief Returns true if @p a and @p b are equal (case-sensitive).
+        static bool Equals(const std::string& a, const std::string& b);
+
+        /// @brief Returns true if @p a and @p b are equal with optional case-insensitivity.
+        static bool Equals(const std::string& a, const std::string& b, bool ignoreCase);
+
+        /// @brief Formats a string with three integer arguments.
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1, SharpRuntime::intcs arg2);
+
+        /// @brief Formats a string with three string arguments.
+        static std::string Format(const std::string& format, const std::string& arg0, const std::string& arg1, const std::string& arg2);
+
+        /// @brief Formats a string replacing `{0}` with @p arg0 (long integer).
+        static std::string Format(const std::string& format, SharpRuntime::longcs arg0);
+
         /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);
 

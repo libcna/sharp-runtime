@@ -108,6 +108,12 @@ namespace System {
         [[nodiscard]] static std::string ToHexString(const std::vector<bytecs>& inArray);
         /// Converts a hexadecimal string (even number of hex digits) to a byte array.
         [[nodiscard]] static std::vector<SharpRuntime::bytecs> FromHexString(const std::string& s);
+
+        // --- Base64 conversions ---
+        /// Converts a byte array to its Base64-encoded string representation.
+        [[nodiscard]] static std::string ToBase64String(const std::vector<bytecs>& inArray);
+        /// Converts a Base64-encoded string to a byte array.
+        [[nodiscard]] static std::vector<bytecs> FromBase64String(const std::string& s);
     };
 
 } // namespace System

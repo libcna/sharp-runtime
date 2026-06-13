@@ -318,3 +318,62 @@ TEST(ConvertTests, HexRoundTrip) {
     auto restored = Convert::FromHexString(hex);
     EXPECT_EQ(original, restored);
 }
+
+// ---------------------------------------------------------------------------
+// ToBase64String / FromBase64String
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToBase64String_KnownValue) {
+    // "Man" → "TWFu" per RFC 4648
+    std::vector<uint8_t> bytes = {'M', 'a', 'n'};
+    EXPECT_EQ(Convert::ToBase64String(bytes), "TWFu");
+}
+
+TEST(ConvertTests, ToBase64String_Empty) {
+    EXPECT_EQ(Convert::ToBase64String({}), "");
+}
+
+TEST(ConvertTests, ToBase64String_OneByte_HasPadding) {
+    std::vector<uint8_t> bytes = {0x01};
+    std::string b64 = Convert::ToBase64String(bytes);
+    EXPECT_EQ(b64.size() % 4, 0u);
+    EXPECT_EQ(b64.back(), '=');
+}
+
+TEST(ConvertTests, ToBase64String_TwoBytes_HasOnePad) {
+    std::vector<uint8_t> bytes = {0x01, 0x02};
+    std::string b64 = Convert::ToBase64String(bytes);
+    EXPECT_EQ(b64.size() % 4, 0u);
+    EXPECT_EQ(b64.back(), '=');
+}
+
+TEST(ConvertTests, Base64RoundTrip_Short) {
+    std::vector<uint8_t> original = {0xDE, 0xAD, 0xBE, 0xEF};
+    auto b64 = Convert::ToBase64String(original);
+    auto restored = Convert::FromBase64String(b64);
+    EXPECT_EQ(original, restored);
+}
+
+TEST(ConvertTests, Base64RoundTrip_Long) {
+    std::vector<uint8_t> original;
+    for (int i = 0; i < 50; ++i) original.push_back(static_cast<uint8_t>(i));
+    auto b64 = Convert::ToBase64String(original);
+    auto restored = Convert::FromBase64String(b64);
+    EXPECT_EQ(original, restored);
+}
+
+TEST(ConvertTests, FromBase64String_KnownValue) {
+    auto bytes = Convert::FromBase64String("TWFu");
+    EXPECT_EQ(bytes.size(), 3u);
+    EXPECT_EQ(bytes[0], 'M');
+    EXPECT_EQ(bytes[1], 'a');
+    EXPECT_EQ(bytes[2], 'n');
+}
+
+TEST(ConvertTests, FromBase64String_InvalidLength_Throws) {
+    EXPECT_THROW(Convert::FromBase64String("AB"), std::exception);
+}
+
+TEST(ConvertTests, FromBase64String_InvalidChar_Throws) {
+    EXPECT_THROW(Convert::FromBase64String("TW!u"), std::exception);
+}

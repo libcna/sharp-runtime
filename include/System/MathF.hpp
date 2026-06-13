@@ -96,6 +96,25 @@ namespace System {
         /// @param x Dividend.
         /// @param y Divisor.
         static float IEEERemainder(float x, float y) { return std::remainder(x, y); }
+        /// Returns the inverse hyperbolic cosine of @p x.
+        static float Acosh(float x)                { return std::acosh(x); }
+        /// Returns the inverse hyperbolic sine of @p x.
+        static float Asinh(float x)                { return std::asinh(x); }
+        /// Returns the inverse hyperbolic tangent of @p x.
+        static float Atanh(float x)                { return std::atanh(x); }
+        /// Returns a value with the magnitude of @p x and the sign of @p y.
+        static float CopySign(float x, float y)    { return std::copysign(x, y); }
+        /// Returns the smallest float greater than @p x.
+        static float BitIncrement(float x)         { return std::nextafter(x,  std::numeric_limits<float>::infinity()); }
+        /// Returns the largest float less than @p x.
+        static float BitDecrement(float x)         { return std::nextafter(x, -std::numeric_limits<float>::infinity()); }
+        /// Returns (x * y) + z, computed with a single rounding step.
+        static float FusedMultiplyAdd(float x, float y, float z) { return std::fma(x, y, z); }
+        /// Rounds @p x to @p digits decimal places.
+        static float Round(float x, int digits)    {
+            float factor = std::pow(10.0f, static_cast<float>(digits));
+            return std::round(x * factor) / factor;
+        }
     };
 
 } // namespace System

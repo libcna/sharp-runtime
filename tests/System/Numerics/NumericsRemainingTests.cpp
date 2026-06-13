@@ -149,3 +149,32 @@ TEST(BitOperationsTests, ReverseBits_Zero_One) {
     EXPECT_EQ(BitOperations::ReverseBits(uint32_t(1)), 0x80000000u);
     EXPECT_EQ(BitOperations::ReverseBits(uint32_t(0x80000000u)), 1u);
 }
+
+// ---------------------------------------------------------------------------
+// MathF parity: Acosh/Asinh/Atanh, CopySign, BitIncrement/BitDecrement,
+//               FusedMultiplyAdd, Round(float, digits)
+// ---------------------------------------------------------------------------
+
+TEST(MathFTests, Acosh_One)       { EXPECT_NEAR(MathF::Acosh(1.0f), 0.0f, 1e-6f); }
+TEST(MathFTests, Acosh_RoundTrip) { EXPECT_NEAR(MathF::Acosh(std::cosh(2.0f)), 2.0f, 1e-5f); }
+TEST(MathFTests, Asinh_Zero)      { EXPECT_NEAR(MathF::Asinh(0.0f), 0.0f, 1e-6f); }
+TEST(MathFTests, Asinh_RoundTrip) { EXPECT_NEAR(MathF::Asinh(std::sinh(1.0f)), 1.0f, 1e-5f); }
+TEST(MathFTests, Atanh_Zero)      { EXPECT_NEAR(MathF::Atanh(0.0f), 0.0f, 1e-6f); }
+TEST(MathFTests, Atanh_RoundTrip) { EXPECT_NEAR(MathF::Atanh(std::tanh(0.5f)), 0.5f, 1e-5f); }
+
+TEST(MathFTests, CopySign_PosToNeg) { EXPECT_EQ(MathF::CopySign(3.0f, -1.0f), -3.0f); }
+TEST(MathFTests, CopySign_NegToPos) { EXPECT_EQ(MathF::CopySign(-5.0f, 1.0f),  5.0f); }
+
+TEST(MathFTests, BitIncrement_Greater) {
+    float x = 1.0f;
+    EXPECT_GT(MathF::BitIncrement(x), x);
+}
+TEST(MathFTests, BitDecrement_Less) {
+    float x = 1.0f;
+    EXPECT_LT(MathF::BitDecrement(x), x);
+}
+TEST(MathFTests, FusedMultiplyAdd_Basic) {
+    EXPECT_NEAR(MathF::FusedMultiplyAdd(2.0f, 3.0f, 4.0f), 10.0f, 1e-5f);
+}
+TEST(MathFTests, Round_TwoDigits)  { EXPECT_NEAR(MathF::Round(3.14159f, 2), 3.14f, 1e-5f); }
+TEST(MathFTests, Round_ZeroDigits) { EXPECT_NEAR(MathF::Round(2.7f, 0),     3.0f,  1e-5f); }

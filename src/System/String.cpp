@@ -417,4 +417,51 @@ namespace System
         return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
     }
 
+    std::string String::Create(SharpRuntime::intcs count, char ch)
+    {
+        return std::string(static_cast<size_t>(count), ch);
+    }
+
+    SharpRuntime::intcs String::Compare(const std::string& a, const std::string& b)
+    {
+        return static_cast<SharpRuntime::intcs>(a.compare(b));
+    }
+
+    SharpRuntime::intcs String::Compare(const std::string& a, const std::string& b, bool ignoreCase)
+    {
+        if (!ignoreCase) return Compare(a, b);
+        std::string la = ToLower(a), lb = ToLower(b);
+        return static_cast<SharpRuntime::intcs>(la.compare(lb));
+    }
+
+    bool String::Equals(const std::string& a, const std::string& b)
+    {
+        return a == b;
+    }
+
+    bool String::Equals(const std::string& a, const std::string& b, bool ignoreCase)
+    {
+        if (!ignoreCase) return a == b;
+        return ToLower(a) == ToLower(b);
+    }
+
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1, SharpRuntime::intcs arg2)
+    {
+        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
+        r = replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
+        return replaceArg(r, 2, fmtInt(arg2, extractSpec(format, 2)));
+    }
+
+    std::string String::Format(const std::string& format, const std::string& arg0, const std::string& arg1, const std::string& arg2)
+    {
+        std::string r = replaceArg(format, 0, arg0);
+        r = replaceArg(r, 1, arg1);
+        return replaceArg(r, 2, arg2);
+    }
+
+    std::string String::Format(const std::string& format, SharpRuntime::longcs arg0)
+    {
+        return Format(format, std::to_string(arg0));
+    }
+
 }

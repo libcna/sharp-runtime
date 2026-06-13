@@ -395,3 +395,11 @@ TEST(StringBuilderTests, AppendJoin_Chained) {
     sb.Append("ids: ").AppendJoin("|", {"1", "2", "3"});
     EXPECT_EQ(sb.ToString(), "ids: 1|2|3");
 }
+
+// --- AppendFormat(longcs) ---
+TEST(StringBuilderTests, AppendFormat_LongArg) {
+    StringBuilder sb;
+    SharpRuntime::longcs big = 1234567890123LL;
+    sb.AppendFormat("n={0}", big);
+    EXPECT_EQ(sb.ToString(), "n=1234567890123");
+}
