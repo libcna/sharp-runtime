@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 51*
+*Last updated: 2026-06-13 (branch: develop) — session 52*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. 3213 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. 3224 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -247,6 +247,7 @@ git log --oneline -10
 | D2 | 49 | `COVERAGE.md` — full .NET API coverage analysis: namespaces, classes, methods; implemented vs stub vs missing; platform portability table; key gaps summary | — |
 | 84 | 50 | `System::String` — implement missing methods: `IsNullOrWhiteSpace`, `EndsWith`, `Contains`, `Replace` (string+char), `Substring` (1- and 2-arg), `Trim`/`TrimStart`/`TrimEnd`, `Concat` (2/3/4/vector), `Join`; 48 new tests | +37 |
 | 85 | 51 | `NameValueCollection` — `Get()` now comma-joins all values (matches .NET spec); add `Get(int)`, `GetValues(int)` by-index overloads; add `Add(collection)` merge; +5 tests. Fix COVERAGE.md false-stub markings for Console.ReadLine, PeriodicTimer, ThreadPool | +5 |
+| 86 | 52 | `IsolatedStorageFile` — add DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames (glob), CreateFile, CopyFile (2 overloads), MoveFile, GetFileNames (glob), Remove, Close, Dispose, AvailableFreeSpace, UsedSize; +11 tests. Fix `Parallel::ForEach` ref-capture UB; implement `MaxDegreeOfParallelism` in `Parallel::For(opts)` | +11 |
 
 ---
 
@@ -282,8 +283,9 @@ All planned tasks complete. No known remaining feature gaps.
 > Sessions 48–49: Doxygen `///` pass over all headers; all 449 .hpp files confirmed covered. Full .NET API coverage analysis written to `COVERAGE.md`.
 > Session 50: `System::String` completed — IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join (+37 tests).
 > Session 51: `NameValueCollection` completed — Get comma-joins, by-index overloads, Add(collection); COVERAGE.md false-stub corrections (+5 tests).
+> Session 52: `IsolatedStorageFile` completed — directory/file ops, glob search, Remove/Close/Dispose, AvailableFreeSpace/UsedSize (+11 tests). `Parallel::ForEach` ref-capture UB fixed; `MaxDegreeOfParallelism` implemented.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3213 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3224 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
