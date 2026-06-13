@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 42*
+*Last updated: 2026-06-13 (branch: develop) — session 43*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–42 focused on portability and quality: POSIX includes removed from public headers; Windows/Emscripten paths added; strict warnings enforced; GCC builtins replaced with C++20 std::bit; `__int128` MSVC guard added; ws2_32 explicit link. Remaining portability items in §8.
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–43 focused on portability: POSIX includes removed from public headers; Windows/Emscripten paths added; strict warnings enforced; GCC builtins → C++20; `__int128` MSVC guard; ws2_32 explicit link; Emscripten build verified clean; Convert::ToDouble locale-safe. Remaining items: Task 80 (Windows build test), Tasks 70/71 (complex calendars — awaiting decision).
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -233,6 +233,8 @@ git log --oneline -10
 | P7 | 42 | `BitConverter.hpp` — `IsLittleEndian` hardcoded `true` → `std::endian::native == std::endian::little` | — |
 | P8 | 42 | `CharUnicodeInfo.hpp` — `wchar_t` cast guarded by `WCHAR_MAX` (Windows: 16-bit wchar_t) | — |
 | P9 | 42 | `BitOperations.hpp`, `BitVector32.hpp` — replace `__builtin_clz`/`__builtin_popcount` with C++20 `std::countl_zero`/`std::popcount` | — |
+| 79 | 43 | Emscripten build test — fixed all compiler errors/warnings; SHARP_RUNTIME builds clean with emcc | ✅ |
+| 81 | 43 | `Convert::ToDouble` — replace `strtod` with `std::from_chars` (locale-independent); handle NaN/Infinity special strings | ✅ |
 
 ---
 
@@ -242,9 +244,7 @@ git log --oneline -10
 
 | Task | Description | Complexity | Notes |
 |------|-------------|------------|-------|
-| 79 | Emscripten build test — `emcmake cmake` build in CI or local | medium | Code paths written but never compiled with emcc |
-| 80 | Windows build test — verify Winsock2 path with MSVC or mingw-w64 | medium | Code paths written but never compiled on Windows |
-| 81 | `Convert::ToDouble` locale safety — `strtod` uses locale decimal separator; fix with `std::from_chars` | small | Rare in practice for game code but technically incorrect |
+| 80 | Windows build test — verify Winsock2 path with MSVC or mingw-w64 | medium | Code paths written and emcc-verified but not compiled on Windows |
 
 ### Calendar types — awaiting user decision
 
@@ -283,7 +283,9 @@ git log --oneline -10
 > - Barrier: long → int64_t; BitConverter: IsLittleEndian → std::endian
 > - CharUnicodeInfo: wchar_t cast guarded by WCHAR_MAX
 >
-> Next: Task 79 (Emscripten build test), Task 80 (Windows build test).
+> Session 43 completed: Task 79 (Emscripten build — fixed unused params, missing `closeSk`/`validFd`, `long` vs `int64_t`, `sleep_for` guard, `bits/ostream.tcc` removed, `override` fixes), Task 81 (Convert::ToDouble → std::from_chars locale-safe). Docs: Doxygen /// comments added across all public headers.
+>
+> Next: Task 80 (Windows build test with mingw-w64 or MSVC). Tasks 70/71 (HebrewCalendar/HijriCalendar, IdnMapping) await user decision — very complex.
 > See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`
