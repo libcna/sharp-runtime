@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/StringBuilder.hpp"
 
+#include <array>
+#include <charconv>
 #include <sstream>
 #include <utility>
 
@@ -52,9 +54,9 @@ namespace System::Text
 
     StringBuilder& StringBuilder::Append(double value)
     {
-        std::ostringstream oss;
-        oss << value;
-        buffer += oss.str();
+        std::array<char, 64> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        buffer += (ec == std::errc{}) ? std::string(buf.data(), ptr) : std::to_string(value);
         return *this;
     }
 
