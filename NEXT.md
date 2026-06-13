@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 43*
+*Last updated: 2026-06-13 (branch: develop) — session 44*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–43 focused on portability: POSIX includes removed from public headers; Windows/Emscripten paths added; strict warnings enforced; GCC builtins → C++20; `__int128` MSVC guard; ws2_32 explicit link; Emscripten build verified clean; Convert::ToDouble locale-safe. Remaining items: Task 80 (Windows build test), Tasks 70/71 (complex calendars — awaiting decision).
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–44 focused on portability and locale safety: POSIX includes removed from headers; Windows/Emscripten paths added; Emscripten build verified clean; comprehensive locale-safety sweep — all `stod`/`stof`/`to_string(float/double)` replaced with `from_chars`/`to_chars`/`locale::classic()` across Double, Single, Convert, Console, TextWriter, StringBuilder, JsonElement, Numerics, BFloat16. Remaining: Task 80 (Windows build test).
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -235,6 +235,9 @@ git log --oneline -10
 | P9 | 42 | `BitOperations.hpp`, `BitVector32.hpp` — replace `__builtin_clz`/`__builtin_popcount` with C++20 `std::countl_zero`/`std::popcount` | — |
 | 79 | 43 | Emscripten build test — fixed all compiler errors/warnings; SHARP_RUNTIME builds clean with emcc | ✅ |
 | 81 | 43 | `Convert::ToDouble` — replace `strtod` with `std::from_chars` (locale-independent); handle NaN/Infinity special strings | ✅ |
+| P10 | 44 | Locale-safety sweep: `Double/Single::Parse/ToString`, `JsonElement::GetDouble`, `Convert::ToString(float/double)`, `TextWriter::Write(float/double)`, `Console::Write/WriteLine(float/double)`, `StringBuilder::Append(double)`, `BFloat16::ToString` — all `stod`/`stof`/`to_string(float)` → `from_chars`/`to_chars` | ✅ |
+| P11 | 44 | Numerics `ToString()` locale-safety: `Vector2/3/4`, `Quaternion`, `Plane`, `Matrix3x2/4x4`, `Colors::Argb/Rgba` — `ostringstream.imbue(locale::classic())` | ✅ |
+| P12 | 44 | `Convert::parseIntBase`: `strtol` → `strtoll` (long=32-bit on Windows); Emscripten fixes: unused params, `closeSk`/`validFd` namespace, `TimeSpan long→longcs`, `IEnumerable/UTF7Encoding override`, `Task::Delay` Emscripten guard | ✅ |
 
 ---
 
@@ -283,9 +286,9 @@ git log --oneline -10
 > - Barrier: long → int64_t; BitConverter: IsLittleEndian → std::endian
 > - CharUnicodeInfo: wchar_t cast guarded by WCHAR_MAX
 >
-> Session 43 completed: Task 79 (Emscripten build — fixed unused params, missing `closeSk`/`validFd`, `long` vs `int64_t`, `sleep_for` guard, `bits/ostream.tcc` removed, `override` fixes), Task 81 (Convert::ToDouble → std::from_chars locale-safe). Docs: Doxygen /// comments added across all public headers.
+> Sessions 43–44 completed: Task 79 (Emscripten build — all errors fixed), Task 81 (Convert::ToDouble locale-safe), comprehensive locale-safety sweep (Double/Single/JsonElement/Convert/Console/TextWriter/StringBuilder/BFloat16/all Numerics ToString).
 >
-> Next: Task 80 (Windows build test with mingw-w64 or MSVC). Tasks 70/71 (HebrewCalendar/HijriCalendar, IdnMapping) await user decision — very complex.
+> Next: Task 80 (Windows build test with mingw-w64 or MSVC). Tasks 70/71 (HebrewCalendar/HijriCalendar, IdnMapping) await user decision.
 > See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`
