@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 44*
+*Last updated: 2026-06-13 (branch: develop) — session 45*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–44 focused on portability and locale safety: POSIX includes removed from headers; Windows/Emscripten paths added; Emscripten build verified clean; comprehensive locale-safety sweep — all `stod`/`stof`/`to_string(float/double)` replaced with `from_chars`/`to_chars`/`locale::classic()` across Double, Single, Convert, Console, TextWriter, StringBuilder, JsonElement, Numerics, BFloat16. Remaining: Task 80 (Windows build test).
+**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–45 focused on portability and locale safety: POSIX includes removed from headers; Windows/Emscripten paths added; Emscripten build verified clean; comprehensive locale-safety sweep — all `stod`/`stof`/`to_string(float/double)` replaced with `from_chars`/`to_chars`/`locale::classic()` across Double, Single, Convert, Console, TextWriter, StringBuilder, JsonElement, Numerics, BFloat16. Session 45: Task 80 complete — Windows cross-compilation (mingw-w64 14) verified, macro collision bugs in Environment.cpp and Path.cpp fixed. Remaining: Tasks 70/71 (Calendar types, IdnMapping) await user decision.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -238,16 +238,11 @@ git log --oneline -10
 | P10 | 44 | Locale-safety sweep: `Double/Single::Parse/ToString`, `JsonElement::GetDouble`, `Convert::ToString(float/double)`, `TextWriter::Write(float/double)`, `Console::Write/WriteLine(float/double)`, `StringBuilder::Append(double)`, `BFloat16::ToString` — all `stod`/`stof`/`to_string(float)` → `from_chars`/`to_chars` | ✅ |
 | P11 | 44 | Numerics `ToString()` locale-safety: `Vector2/3/4`, `Quaternion`, `Plane`, `Matrix3x2/4x4`, `Colors::Argb/Rgba` — `ostringstream.imbue(locale::classic())` | ✅ |
 | P12 | 44 | `Convert::parseIntBase`: `strtol` → `strtoll` (long=32-bit on Windows); Emscripten fixes: unused params, `closeSk`/`validFd` namespace, `TimeSpan long→longcs`, `IEnumerable/UTF7Encoding override`, `Task::Delay` Emscripten guard | ✅ |
+| 80 | 45 | Windows build test (mingw-w64 14): all 7 Windows-specific `.cpp` files compile clean; fixed `#undef GetCurrentDirectory` in Environment.cpp and `#undef GetTempPath`/`GetTempFileName` in Path.cpp (Win32 macros colliding with our method definitions) | ✅ |
 
 ---
 
 ## 8. Next tasks (priority order)
-
-### Portability — remaining items
-
-| Task | Description | Complexity | Notes |
-|------|-------------|------------|-------|
-| 80 | Windows build test — verify Winsock2 path with MSVC or mingw-w64 | medium | Code paths written and emcc-verified but not compiled on Windows |
 
 ### Calendar types — awaiting user decision
 
@@ -288,7 +283,7 @@ git log --oneline -10
 >
 > Sessions 43–44 completed: Task 79 (Emscripten build — all errors fixed), Task 81 (Convert::ToDouble locale-safe), comprehensive locale-safety sweep (Double/Single/JsonElement/Convert/Console/TextWriter/StringBuilder/BFloat16/all Numerics ToString).
 >
-> Next: Task 80 (Windows build test with mingw-w64 or MSVC). Tasks 70/71 (HebrewCalendar/HijriCalendar, IdnMapping) await user decision.
+> Next: Tasks 70/71 (HebrewCalendar/HijriCalendar, JapaneseCalendar, KoreanCalendar, UmAlQuraCalendar, IdnMapping) await user decision.
 > See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`
