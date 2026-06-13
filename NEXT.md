@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 48*
+*Last updated: 2026-06-13 (branch: develop) — session 49*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. 3171 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage. 3171 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -243,6 +243,7 @@ git log --oneline -10
 | 70 | 46 | KoreanCalendar (year+2333), JapaneseCalendar (5 eras: Meiji/Taisho/Showa/Heisei/Reiwa), HijriCalendar (30-year algorithmic), HebrewCalendar (.NET lookup table 1583-2239, 6 year types), UmAlQuraCalendar (pre-computed table 1318-1500 AH); DateTime Ticks constants made public | ✅ |
 | 71 | 46 | IdnMapping — Punycode/IDNA (RFC 3492): GetAscii() Unicode→ACE, GetUnicode() ACE→Unicode; pure algorithmic, no ICU; UTF-8 I/O; multi-label domain support | ✅ |
 | 82 | 47 | HttpClient (System.Net.Http) — HTTP/1.1 over raw sockets; HttpMethod, HttpContent, StringContent, ByteArrayContent, HttpRequestMessage, HttpResponseMessage, HttpClient; POSIX+Winsock2; chunked+Content-Length; Emscripten throws; async via TaskT | +32 |
+| D1 | 48–49 | Doxygen pass: `///` comments added to `GenericMathInterfaces.hpp` and `String.hpp`; audit confirmed all 449 headers have Doxygen coverage (`///` or `/** */`) | — |
 
 ---
 
@@ -268,24 +269,16 @@ All planned tasks complete. No known remaining feature gaps.
 >
 > Read NEXT.md and CLAUDE.md before starting.
 >
-> Current state: 3080 tests pass, zero warnings. Sessions 41–42 completed portability sweep:
-> - All POSIX includes removed from public `.hpp` headers
-> - Networking: POSIX + Winsock2 + Emscripten guards; ws2_32 explicit CMake link
-> - Task/TaskT, Parallel, ThreadPool, Timer: Emscripten guards (pthreads required)
-> - CMake: -Wall -Wextra -Werror for SHARP_RUNTIME; vendor/ as SYSTEM include
-> - TimeZoneInfo: IANA→Windows mapping ~85 zones via EnumDynamicTimeZoneInformation
-> - DriveInfo, Path, DriveInfo, IsolatedStorageFileStream: platform guards fixed
-> - BitOperations, BitVector32: __builtin_* → C++20 std::bit (MSVC compatible)
-> - Int128/UInt128/Decimal: #error on MSVC (requires __int128)
-> - Barrier: long → int64_t; BitConverter: IsLittleEndian → std::endian
-> - CharUnicodeInfo: wchar_t cast guarded by WCHAR_MAX
+> Current state: 3171 tests pass, zero warnings. All planned subsystems are complete.
 >
-> Sessions 43–44 completed: Task 79 (Emscripten build — all errors fixed), Task 81 (Convert::ToDouble locale-safe), comprehensive locale-safety sweep (Double/Single/JsonElement/Convert/Console/TextWriter/StringBuilder/BFloat16/all Numerics ToString).
->
-> All planned tasks complete. 3132 tests pass. No remaining feature gaps identified.
-> See §8 for full remaining task list.
+> Sessions 41–42 completed portability sweep (POSIX includes, Winsock2, Emscripten guards, CMake strict warnings, TimeZoneInfo IANA mapping, BitOperations C++20, etc.).
+> Sessions 43–44 completed: Emscripten build, locale-safe float I/O throughout, Convert::parseIntBase fix.
+> Session 45: Windows build test (mingw-w64 14), Win32 macro collision fixes.
+> Session 46: KoreanCalendar, JapaneseCalendar, HijriCalendar, HebrewCalendar, UmAlQuraCalendar, IdnMapping (Punycode/IDNA).
+> Session 47: HttpClient (HTTP/1.1), FormUrlEncodedContent.
+> Sessions 48–49: Doxygen `///` pass over all headers; all 449 .hpp files confirmed covered.
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3080 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3171 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
