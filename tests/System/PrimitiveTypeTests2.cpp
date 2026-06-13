@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "System/Byte.hpp"
 #include "System/Int16.hpp"
 #include "System/UInt16.hpp"
 #include "System/SByte.hpp"
@@ -16,6 +17,7 @@
 #include "System/Single.hpp"
 #include "System/Double.hpp"
 
+using System::Byte;
 using System::Int16;
 using System::UInt16;
 using System::SByte;
@@ -630,3 +632,41 @@ TEST(DoubleTests, ToString_NaN_Format) { EXPECT_EQ(Double::ToString(std::numeric
 TEST(SingleTests, ToString_F2) { EXPECT_EQ(Single::ToString(3.14f, std::string("F2")), "3.14"); }
 TEST(SingleTests, ToString_F0) { EXPECT_EQ(Single::ToString(3.7f, std::string("F0")), "4"); }
 TEST(SingleTests, ToString_NaN_Format) { EXPECT_EQ(Single::ToString(std::numeric_limits<float>::quiet_NaN(), std::string("F2")), "NaN"); }
+
+// ---------------------------------------------------------------------------
+// Byte::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(ByteTests, ToString_Hex_Uppercase) { EXPECT_EQ(Byte::ToString(255, std::string("X")), "FF"); }
+TEST(ByteTests, ToString_Hex_Padded)    { EXPECT_EQ(Byte::ToString(10,  std::string("X2")), "0A"); }
+TEST(ByteTests, ToString_Hex_Lower)     { EXPECT_EQ(Byte::ToString(255, std::string("x")), "ff"); }
+TEST(ByteTests, ToString_D_NoWidth)     { EXPECT_EQ(Byte::ToString(42,  std::string("D")), "42"); }
+TEST(ByteTests, ToString_D_Padded)      { EXPECT_EQ(Byte::ToString(7,   std::string("D3")), "007"); }
+TEST(ByteTests, ToString_G)             { EXPECT_EQ(Byte::ToString(99,  std::string("G")), "99"); }
+TEST(ByteTests, ToString_B_Basic)       { EXPECT_EQ(Byte::ToString(5,   std::string("B")), "101"); }
+TEST(ByteTests, ToString_B_Padded)      { EXPECT_EQ(Byte::ToString(5,   std::string("B8")), "00000101"); }
+
+// ---------------------------------------------------------------------------
+// Int16::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(Int16Tests, ToString_Hex_Uppercase) { EXPECT_EQ(Int16::ToString(255, std::string("X")), "FF"); }
+TEST(Int16Tests, ToString_Hex_Padded)    { EXPECT_EQ(Int16::ToString(255, std::string("X4")), "00FF"); }
+TEST(Int16Tests, ToString_D_NoWidth)     { EXPECT_EQ(Int16::ToString(42,  std::string("D")), "42"); }
+TEST(Int16Tests, ToString_D_Padded)      { EXPECT_EQ(Int16::ToString(7,   std::string("D3")), "007"); }
+TEST(Int16Tests, ToString_D_Negative)    { EXPECT_EQ(Int16::ToString(-5,  std::string("D3")), "-005"); }
+TEST(Int16Tests, ToString_G)             { EXPECT_EQ(Int16::ToString(99,  std::string("G")), "99"); }
+
+// ---------------------------------------------------------------------------
+// UInt16::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(UInt16Tests, ToString_Hex_Uppercase) { EXPECT_EQ(UInt16::ToString(65535, std::string("X")), "FFFF"); }
+TEST(UInt16Tests, ToString_Hex_Padded)    { EXPECT_EQ(UInt16::ToString(255,   std::string("X4")), "00FF"); }
+TEST(UInt16Tests, ToString_D_Padded)      { EXPECT_EQ(UInt16::ToString(7,     std::string("D5")), "00007"); }
+TEST(UInt16Tests, ToString_G)             { EXPECT_EQ(UInt16::ToString(100,   std::string("G")), "100"); }
+
+// ---------------------------------------------------------------------------
+// SByte::ToString(format)
+// ---------------------------------------------------------------------------
+TEST(SByteTests, ToString_Hex_Uppercase) { EXPECT_EQ(SByte::ToString(127,  std::string("X")), "7F"); }
+TEST(SByteTests, ToString_D_Padded)      { EXPECT_EQ(SByte::ToString(7,    std::string("D3")), "007"); }
+TEST(SByteTests, ToString_D_Negative)    { EXPECT_EQ(SByte::ToString(-5,   std::string("D3")), "-005"); }
+TEST(SByteTests, ToString_G)             { EXPECT_EQ(SByte::ToString(-128, std::string("G")), "-128"); }

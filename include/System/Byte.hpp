@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -35,7 +37,33 @@ public:
     }
 
     /// Converts a Byte value to its string representation.
-    static std::string ToString(SharpRuntime::bytecs value) { return std::to_string(value); }
+    static std::string ToString(SharpRuntime::bytecs value) { return std::to_string(static_cast<unsigned>(value)); }
+
+    /// Converts @p value to a string using format specifier ("X", "X2", "D", "D3", "G", "B").
+    static std::string ToString(SharpRuntime::bytecs value, const std::string& format) {
+        if (format.empty()) return ToString(value);
+        char type = format[0];
+        int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+        unsigned uv = static_cast<unsigned>(value);
+        std::ostringstream oss;
+        if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << uv; return oss.str(); }
+        if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << uv; return oss.str(); }
+        if (type == 'D' || type == 'd') {
+            std::string s = std::to_string(uv);
+            while (static_cast<int>(s.size()) < width) s = "0" + s;
+            return s;
+        }
+        if (type == 'G' || type == 'g') return ToString(value);
+        if (type == 'B' || type == 'b') {
+            std::string s;
+            for (int i = 7; i >= 0; --i) s += ((uv >> i) & 1) ? '1' : '0';
+            s.erase(0, s.find_first_not_of('0'));
+            if (s.empty()) s = "0";
+            while (static_cast<int>(s.size()) < width) s = "0" + s;
+            return s;
+        }
+        return ToString(value);
+    }
 };
 
 } // namespace System

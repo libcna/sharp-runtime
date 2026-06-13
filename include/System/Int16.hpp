@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -41,6 +43,24 @@ public:
 
     /// Converts the 16-bit signed integer @p value to its string representation.
     static std::string ToString(SharpRuntime::shortcs value) { return std::to_string(value); }
+
+    /// Converts @p value to a string using format specifier ("X", "X4", "D", "D5", "G").
+    static std::string ToString(SharpRuntime::shortcs value, const std::string& format) {
+        if (format.empty()) return ToString(value);
+        char type = format[0];
+        int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+        std::ostringstream oss;
+        if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
+        if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
+        if (type == 'D' || type == 'd') {
+            bool neg = value < 0;
+            std::string s = std::to_string(neg ? -static_cast<int>(value) : static_cast<int>(value));
+            while (static_cast<int>(s.size()) < width) s = "0" + s;
+            return neg ? "-" + s : s;
+        }
+        if (type == 'G' || type == 'g') return ToString(value);
+        return ToString(value);
+    }
 };
 
 } // namespace System
