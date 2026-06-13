@@ -8,7 +8,9 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cerrno>
+#include <charconv>
 #include <climits>
+#include <limits>
 #include <sstream>
 #include <iomanip>
 #include <bitset>
@@ -70,11 +72,17 @@ namespace System {
 
     double Convert::ToDouble(const std::string& value) {
         if (value.empty()) throw FormatException();
-        errno = 0;
-        char* end = nullptr;
-        double result = std::strtod(value.c_str(), &end);
-        if (end == value.c_str() || *end != '\0') throw FormatException();
-        if (errno == ERANGE) throw OverflowException();
+        // Handle .NET special string representations
+        if (value == "NaN")       return std::numeric_limits<double>::quiet_NaN();
+        if (value == "Infinity")  return  std::numeric_limits<double>::infinity();
+        if (value == "-Infinity") return -std::numeric_limits<double>::infinity();
+        double result{};
+        // from_chars is locale-independent (always uses '.' as decimal separator)
+        auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), result);
+        if (ec == std::errc::invalid_argument || ptr != value.data() + value.size())
+            throw FormatException();
+        if (ec == std::errc::result_out_of_range)
+            throw OverflowException();
         return result;
     }
 
