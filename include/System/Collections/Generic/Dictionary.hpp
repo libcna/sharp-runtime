@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cmath>
 #include <unordered_map>
 #include <stdexcept>
 #include <string>
@@ -120,6 +121,28 @@ namespace System::Collections::Generic
             vals.reserve(map_.size());
             for (const auto& kv : map_) vals.push_back(kv.second);
             return vals;
+        }
+
+        /// @brief Removes the entry for @p key and copies the associated value to @p value. Returns true if found.
+        bool Remove(const TKey& key, TValue& value)
+        {
+            auto it = map_.find(key);
+            if (it == map_.end()) return false;
+            value = std::move(it->second);
+            map_.erase(it);
+            return true;
+        }
+
+        /// @brief Ensures the bucket count is sufficient for at least @p capacity entries without rehashing.
+        void EnsureCapacity(int capacity)
+        {
+            map_.reserve(static_cast<std::size_t>(capacity));
+        }
+
+        /// @brief Reduces memory usage by setting the load factor to current size.
+        void TrimExcess()
+        {
+            map_.rehash(static_cast<std::size_t>(std::ceil(static_cast<double>(map_.size()) / map_.max_load_factor())));
         }
 
         /// Returns the underlying std::unordered_map for STL interop.

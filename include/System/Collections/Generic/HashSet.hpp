@@ -110,6 +110,12 @@ namespace System::Collections::Generic {
             return IsSupersetOf(other) && !SetEquals(other);
         }
 
+        /// @brief Ensures the bucket count supports at least @p capacity elements without rehashing.
+        void EnsureCapacity(int capacity) { set_.reserve(static_cast<std::size_t>(capacity)); }
+
+        /// @brief Reduces memory usage to match the current element count.
+        void TrimExcess() { set_.rehash(set_.size()); }
+
         /// Returns an iterator to the beginning of the HashSet.
         auto begin()       { return set_.begin(); }
         /// Returns an iterator past the end of the HashSet.

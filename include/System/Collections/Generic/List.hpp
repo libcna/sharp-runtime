@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "System/Collections/Generic/IList.hpp"
+#include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 
 namespace System::Collections::Generic
 {
@@ -229,6 +230,51 @@ namespace System::Collections::Generic
             for (int i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
+        }
+
+        /// @brief Returns the current capacity of the internal storage.
+        [[nodiscard]] int getCapacityProperty() const {
+            return static_cast<int>(items_.capacity());
+        }
+
+        /// @brief Ensures the internal storage can hold at least @p capacity elements without reallocation.
+        void EnsureCapacity(int capacity) {
+            if (capacity > static_cast<int>(items_.capacity()))
+                items_.reserve(static_cast<std::size_t>(capacity));
+        }
+
+        /// @brief Reduces the internal storage to fit the current element count.
+        void TrimExcess() { items_.shrink_to_fit(); }
+
+        /// @brief Returns a new List<TOutput> by applying @p converter to each element.
+        template<typename TOutput>
+        [[nodiscard]] List<TOutput> ConvertAll(std::function<TOutput(const T&)> converter) const {
+            List<TOutput> result;
+            result.EnsureCapacity(static_cast<int>(items_.size()));
+            for (const auto& item : items_) result.Add(converter(item));
+            return result;
+        }
+
+        /// @brief Returns a read-only wrapper around this list's current elements.
+        [[nodiscard]] System::Collections::ObjectModel::ReadOnlyCollection<T> AsReadOnly() const {
+            return System::Collections::ObjectModel::ReadOnlyCollection<T>(items_);
+        }
+
+        /// @brief Returns the last element satisfying @p predicate, or default T{} if none.
+        [[nodiscard]] T FindLast(std::function<bool(const T&)> predicate) const {
+            for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
+                if (predicate(items_[static_cast<size_t>(i)])) return items_[static_cast<size_t>(i)];
+            return T{};
+        }
+
+        /// @brief Removes @p count elements starting at @p index.
+        void RemoveRange(int index, int count) {
+            items_.erase(items_.begin() + index, items_.begin() + index + count);
+        }
+
+        /// @brief Reverses the elements in the range [@p index, @p index + @p count).
+        void Reverse(int index, int count) {
+            std::reverse(items_.begin() + index, items_.begin() + index + count);
         }
     };
 }

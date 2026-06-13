@@ -665,6 +665,45 @@ TEST(DictionaryTests, Values_ContainsAllValues) {
     EXPECT_TRUE(has20);
 }
 
+// ---------------------------------------------------------------------------
+// Remove(key, out value)
+// ---------------------------------------------------------------------------
+TEST(DictionaryTests, Remove_WithValue_ReturnsValue) {
+    Dictionary<std::string, int> d;
+    d.Add("x", 42);
+    int v = 0;
+    bool removed = d.Remove(std::string("x"), v);
+    EXPECT_TRUE(removed);
+    EXPECT_EQ(v, 42);
+    EXPECT_FALSE(d.ContainsKey("x"));
+}
+TEST(DictionaryTests, Remove_WithValue_NotFound_ReturnsFalse) {
+    Dictionary<std::string, int> d;
+    int v = 99;
+    bool removed = d.Remove(std::string("missing"), v);
+    EXPECT_FALSE(removed);
+    EXPECT_EQ(v, 99);
+}
+
+// ---------------------------------------------------------------------------
+// EnsureCapacity / TrimExcess
+// ---------------------------------------------------------------------------
+TEST(DictionaryTests, EnsureCapacity_AllowsInserts) {
+    Dictionary<int, int> d;
+    d.EnsureCapacity(100);
+    for (int i = 0; i < 100; ++i) d.Add(i, i * 2);
+    EXPECT_EQ(d.getCountProperty(), 100);
+}
+TEST(DictionaryTests, TrimExcess_DoesNotLoseEntries) {
+    Dictionary<int, int> d;
+    d.EnsureCapacity(1000);
+    d.Add(1, 10); d.Add(2, 20);
+    d.TrimExcess();
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_TRUE(d.ContainsKey(1));
+    EXPECT_TRUE(d.ContainsKey(2));
+}
+
 // ===========================================================================
 // HashSet<T> — additional set operations
 // ===========================================================================
@@ -729,6 +768,25 @@ TEST(HashSetTests, IsProperSupersetOf) {
     b.Add(1); b.Add(2);
     EXPECT_TRUE(a.IsProperSupersetOf(b));
     EXPECT_FALSE(b.IsProperSupersetOf(a));
+}
+
+// ---------------------------------------------------------------------------
+// EnsureCapacity / TrimExcess
+// ---------------------------------------------------------------------------
+TEST(HashSetTests, EnsureCapacity_AllowsInserts) {
+    HashSet<int> s;
+    s.EnsureCapacity(200);
+    for (int i = 0; i < 200; ++i) s.Add(i);
+    EXPECT_EQ(s.getCountProperty(), 200);
+}
+TEST(HashSetTests, TrimExcess_DoesNotLoseEntries) {
+    HashSet<int> s;
+    s.EnsureCapacity(1000);
+    s.Add(1); s.Add(2); s.Add(3);
+    s.TrimExcess();
+    EXPECT_EQ(s.getCountProperty(), 3);
+    EXPECT_TRUE(s.Contains(1));
+    EXPECT_TRUE(s.Contains(3));
 }
 
 // ===========================================================================
@@ -863,4 +921,100 @@ TEST(ListTests, LastIndexOf_WithStartIndex) {
     List<int> lst;
     lst.Add(1); lst.Add(2); lst.Add(1); lst.Add(2);
     EXPECT_EQ(lst.LastIndexOf(2, 2), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Capacity management
+// ---------------------------------------------------------------------------
+TEST(ListTests, EnsureCapacity_SetsAtLeast) {
+    List<int> lst;
+    lst.EnsureCapacity(100);
+    EXPECT_GE(lst.getCapacityProperty(), 100);
+}
+TEST(ListTests, EnsureCapacity_SmallerThanCurrent_NoOp) {
+    List<int> lst;
+    lst.EnsureCapacity(50);
+    int cap = lst.getCapacityProperty();
+    lst.EnsureCapacity(10);
+    EXPECT_EQ(lst.getCapacityProperty(), cap);
+}
+TEST(ListTests, TrimExcess_ReducesCapacity) {
+    List<int> lst;
+    lst.EnsureCapacity(1000);
+    lst.Add(1); lst.Add(2);
+    lst.TrimExcess();
+    EXPECT_LE(lst.getCapacityProperty(), 4);
+}
+
+// ---------------------------------------------------------------------------
+// ConvertAll
+// ---------------------------------------------------------------------------
+TEST(ListTests, ConvertAll_IntToDouble) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    auto result = lst.ConvertAll<double>([](const int& x) { return static_cast<double>(x) * 1.5; });
+    EXPECT_EQ(result.getCountProperty(), 3);
+    EXPECT_NEAR(result[0], 1.5, 1e-9);
+    EXPECT_NEAR(result[1], 3.0, 1e-9);
+    EXPECT_NEAR(result[2], 4.5, 1e-9);
+}
+
+// ---------------------------------------------------------------------------
+// AsReadOnly
+// ---------------------------------------------------------------------------
+TEST(ListTests, AsReadOnly_CountMatches) {
+    List<int> lst;
+    lst.Add(10); lst.Add(20);
+    const auto ro = lst.AsReadOnly();
+    EXPECT_EQ(ro.getCountProperty(), 2);
+    EXPECT_EQ(ro[0], 10);
+    EXPECT_EQ(ro[1], 20);
+}
+TEST(ListTests, AsReadOnly_IsReadOnly) {
+    List<int> lst;
+    lst.Add(1);
+    auto ro = lst.AsReadOnly();
+    EXPECT_TRUE(ro.getIsReadOnlyProperty());
+}
+
+// ---------------------------------------------------------------------------
+// FindLast
+// ---------------------------------------------------------------------------
+TEST(ListTests, FindLast_Found) {
+    List<int> lst;
+    lst.Add(1); lst.Add(3); lst.Add(5); lst.Add(2);
+    int v = lst.FindLast([](const int& x) { return x % 2 != 0; });
+    EXPECT_EQ(v, 5);
+}
+TEST(ListTests, FindLast_NotFound_ReturnsDefault) {
+    List<int> lst;
+    lst.Add(2); lst.Add(4);
+    int v = lst.FindLast([](const int& x) { return x % 2 != 0; });
+    EXPECT_EQ(v, 0);
+}
+
+// ---------------------------------------------------------------------------
+// RemoveRange
+// ---------------------------------------------------------------------------
+TEST(ListTests, RemoveRange_Middle) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4); lst.Add(5);
+    lst.RemoveRange(1, 3);
+    EXPECT_EQ(lst.getCountProperty(), 2);
+    EXPECT_EQ(lst[0], 1);
+    EXPECT_EQ(lst[1], 5);
+}
+
+// ---------------------------------------------------------------------------
+// Reverse(int, int)
+// ---------------------------------------------------------------------------
+TEST(ListTests, Reverse_Subrange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4); lst.Add(5);
+    lst.Reverse(1, 3);
+    EXPECT_EQ(lst[0], 1);
+    EXPECT_EQ(lst[1], 4);
+    EXPECT_EQ(lst[2], 3);
+    EXPECT_EQ(lst[3], 2);
+    EXPECT_EQ(lst[4], 5);
 }
