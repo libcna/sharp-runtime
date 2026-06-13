@@ -7,13 +7,18 @@
 
 namespace System
 {
-    /// Provides access to services identified by their runtime type.
+    /** @brief Provides access to services identified by their runtime type. */
     class IServiceProvider
     {
     public:
         virtual ~IServiceProvider() = default;
 
-        /// Gets a service object for the requested type, or nullptr when it is not registered.
+        /**
+         * @brief Gets a service object for the requested type.
+         *
+         * @param type Runtime type info of the requested service.
+         * @return Pointer to the service object, or nullptr if not registered.
+         */
         [[nodiscard]] virtual void* GetService(const std::type_info& type) const = 0;
     };
 }
