@@ -19,7 +19,10 @@ namespace {
 }
 #elif defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
-namespace { inline bool validFd(int fd) { return false; } }
+namespace {
+    inline bool validFd([[maybe_unused]] int fd) { return false; }
+    inline void closeSk([[maybe_unused]] int fd) {}
+}
 #else
 #  include <sys/socket.h>
 #  include <unistd.h>
@@ -42,6 +45,7 @@ NetworkStream::~NetworkStream() { Close(); }
 
 intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
 #if defined(__EMSCRIPTEN__)
+    (void)buffer; (void)offset; (void)count;
     throw System::PlatformNotSupportedException("NetworkStream is not supported on Emscripten.");
 #else
     if (!validFd(fd_)) return 0;
@@ -54,6 +58,7 @@ intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
 
 void NetworkStream::Write(const bytecs buffer[], intcs offset, intcs count) {
 #if defined(__EMSCRIPTEN__)
+    (void)buffer; (void)offset; (void)count;
     throw System::PlatformNotSupportedException("NetworkStream is not supported on Emscripten.");
 #else
     if (!validFd(fd_)) return;

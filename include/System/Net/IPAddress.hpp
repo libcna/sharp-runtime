@@ -21,7 +21,6 @@ namespace System::Net {
      */
     class IPAddress {
         uint32_t addr_ = 0; // host-byte-order
-        bool     isV6_ = false;
     public:
         IPAddress() = default;
         explicit IPAddress(uint32_t address) : addr_(address) {}

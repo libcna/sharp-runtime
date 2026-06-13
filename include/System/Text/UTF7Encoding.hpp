@@ -20,7 +20,7 @@ namespace System::Text {
         /// Returns the encoding name "utf-7".
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "utf-7"; }
         /// Returns the code page 65000 (UTF-7).
-        [[nodiscard]] int getCodePageProperty()             const { return 65000; }
+        [[nodiscard]] int getCodePageProperty()             const override { return 65000; }
         /// Returns whether optional characters are allowed.
         [[nodiscard]] bool getAllowOptionals()               const { return allowOptionals_; }
 

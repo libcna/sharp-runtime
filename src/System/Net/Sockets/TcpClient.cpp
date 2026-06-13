@@ -28,7 +28,7 @@ namespace {
 }
 #elif defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
-namespace { inline void wsaInit() {} }
+namespace { /* no platform helpers needed on Emscripten */ }
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -67,6 +67,7 @@ TcpClient::~TcpClient() { Close(); }
 
 void TcpClient::Connect(const std::string& hostname, int port) {
 #if defined(__EMSCRIPTEN__)
+    (void)hostname; (void)port;
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
 #else
     wsaInit();
@@ -95,6 +96,7 @@ void TcpClient::Connect(const std::string& hostname, int port) {
 
 void TcpClient::Connect(const IPEndPoint& remoteEP) {
 #if defined(__EMSCRIPTEN__)
+    (void)remoteEP;
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
 #else
     wsaInit();
@@ -147,21 +149,23 @@ int TcpClient::Available() const {
 }
 
 std::shared_ptr<NetworkStream> TcpClient::GetStream() const {
-    if (!connected_ || !validFd(fd_))
-        throw std::runtime_error("TcpClient::GetStream: client is not connected.");
 #if defined(__EMSCRIPTEN__)
     throw System::PlatformNotSupportedException("TcpClient is not supported on Emscripten.");
-#elif defined(_WIN32)
+#else
+    if (!connected_ || !validFd(fd_))
+        throw std::runtime_error("TcpClient::GetStream: client is not connected.");
+#  if defined(_WIN32)
     // Winsock has no dup() — transfer ownership to the NetworkStream.
     int transferred = fd_;
     const_cast<TcpClient*>(this)->fd_ = -1;
     const_cast<TcpClient*>(this)->connected_ = false;
     return std::make_shared<NetworkStream>(transferred);
-#else
+#  else
     int dupfd = ::dup(fd_);
     if (dupfd < 0)
         throw std::runtime_error(std::string("TcpClient::GetStream: dup() failed: ") + netErr());
     return std::make_shared<NetworkStream>(dupfd);
+#  endif
 #endif
 }
 

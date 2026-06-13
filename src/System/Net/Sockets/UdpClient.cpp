@@ -29,8 +29,8 @@ namespace {
 #elif defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
 namespace {
-    void wsaInit() {}
     inline bool validFd(int fd) { return fd >= 0; }
+    inline void closeSk([[maybe_unused]] int fd) {}
 }
 #else
 #  include <sys/socket.h>
@@ -75,6 +75,7 @@ UdpClient::UdpClient() {
 
 UdpClient::UdpClient(int port) {
 #if defined(__EMSCRIPTEN__)
+    (void)port;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     fd_ = makeUdpSocket();
@@ -92,6 +93,7 @@ UdpClient::UdpClient(int port) {
 
 UdpClient::UdpClient(const Net::IPEndPoint& localEP) {
 #if defined(__EMSCRIPTEN__)
+    (void)localEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     fd_ = makeUdpSocket();
@@ -111,6 +113,7 @@ UdpClient::~UdpClient() { Close(); }
 
 void UdpClient::Connect(const std::string& hostname, int port) {
 #if defined(__EMSCRIPTEN__)
+    (void)hostname; (void)port;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     struct addrinfo hints{}, *res = nullptr;
@@ -138,6 +141,7 @@ void UdpClient::Connect(const std::string& hostname, int port) {
 
 void UdpClient::Connect(const Net::IPEndPoint& remoteEP) {
 #if defined(__EMSCRIPTEN__)
+    (void)remoteEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     remote_ = remoteEP;
@@ -153,6 +157,7 @@ void UdpClient::Connect(const Net::IPEndPoint& remoteEP) {
 
 int UdpClient::Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes) {
 #if defined(__EMSCRIPTEN__)
+    (void)dgram; (void)bytes;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     if (!hasRemote_)
@@ -167,6 +172,7 @@ int UdpClient::Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes) {
 
 std::vector<SharpRuntime::bytecs> UdpClient::Receive(Net::IPEndPoint& remoteEP) {
 #if defined(__EMSCRIPTEN__)
+    (void)remoteEP;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
     std::vector<SharpRuntime::bytecs> buf(65536);

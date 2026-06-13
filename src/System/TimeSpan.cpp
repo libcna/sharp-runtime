@@ -59,9 +59,9 @@ namespace System {
 
     longcs TimeSpan::TimeToTicks(intcs days, intcs hours, intcs minutes, intcs seconds, intcs milliseconds,
                                  intcs microseconds) {
-        long totalMicroseconds = (((longcs) days * 3600 * 24 + (longcs) hours * 3600 + (longcs) minutes * 60 + seconds)
-                                  *
-                                  1000 + milliseconds) * 1000 + microseconds;
+        longcs totalMicroseconds = (((longcs) days * 3600 * 24 + (longcs) hours * 3600 + (longcs) minutes * 60 + seconds)
+                                   *
+                                   1000 + milliseconds) * 1000 + microseconds;
         if (totalMicroseconds > MaxMicroSeconds || totalMicroseconds < MinMicroSeconds)
             throw ArgumentOutOfRangeException("Time span is too long.");
         return totalMicroseconds;
@@ -208,9 +208,9 @@ namespace System {
     }
 
     TimeSpan TimeSpan::IntervalFromDoubleTicks(double ticks) {
-        if (std::isnan(ticks) || (ticks > SharpRuntime::LONGCS_MAX) || (ticks < SharpRuntime::LONGCS_MIN))
+        if (std::isnan(ticks) || (ticks > static_cast<double>(SharpRuntime::LONGCS_MAX)) || (ticks < static_cast<double>(SharpRuntime::LONGCS_MIN)))
             throw OverflowException("TimeSpanTooLong");
-        if (ticks == Int64::MaxValue)
+        if (ticks == static_cast<double>(Int64::MaxValue))
             return MaxValue;
         return {(longcs) ticks};
     }

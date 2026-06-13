@@ -1,5 +1,4 @@
 #include <iostream>
-#include <bits/ostream.tcc>
 
 #include "gtest/gtest.h"
 #include "System/Random.hpp"

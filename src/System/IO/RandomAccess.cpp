@@ -21,6 +21,7 @@ namespace System::IO {
 
 int64_t RandomAccess::GetLength(int fd) {
 #if defined(__EMSCRIPTEN__)
+    (void)fd;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     LARGE_INTEGER sz{};
@@ -37,6 +38,7 @@ int64_t RandomAccess::GetLength(int fd) {
 
 void RandomAccess::SetLength(int fd, int64_t length) {
 #if defined(__EMSCRIPTEN__)
+    (void)fd; (void)length;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     LARGE_INTEGER li{};
@@ -55,6 +57,7 @@ intcs RandomAccess::Read(int fd, std::vector<bytecs>& buffer, int64_t fileOffset
 
 intcs RandomAccess::Read(int fd, bytecs* buffer, intcs count, int64_t fileOffset) {
 #if defined(__EMSCRIPTEN__)
+    (void)fd; (void)buffer; (void)count; (void)fileOffset;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     OVERLAPPED ov{};
@@ -77,6 +80,7 @@ void RandomAccess::Write(int fd, const std::vector<bytecs>& buffer, int64_t file
 
 void RandomAccess::Write(int fd, const bytecs* buffer, intcs count, int64_t fileOffset) {
 #if defined(__EMSCRIPTEN__)
+    (void)fd; (void)buffer; (void)count; (void)fileOffset;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     OVERLAPPED ov{};
@@ -93,6 +97,7 @@ void RandomAccess::Write(int fd, const bytecs* buffer, intcs count, int64_t file
 
 void RandomAccess::FlushToDisk(int fd) {
 #if defined(__EMSCRIPTEN__)
+    (void)fd;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     if (!FlushFileBuffers(hOf(fd)))

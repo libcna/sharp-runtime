@@ -85,9 +85,14 @@ namespace System::Threading::Tasks {
         }
 
         static Task Delay(int milliseconds) {
+#if defined(__EMSCRIPTEN__)
+            (void)milliseconds;
+            throw System::PlatformNotSupportedException("Task::Delay requires pthreads (not available on Emscripten).");
+#else
             return Task([milliseconds]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
             });
+#endif
         }
     };
 

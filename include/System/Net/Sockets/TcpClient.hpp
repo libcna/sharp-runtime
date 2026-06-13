@@ -20,8 +20,8 @@ namespace System::Net::Sockets {
      * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class TcpClient {
-        int  fd_        = -1;
-        bool connected_ = false;
+        [[maybe_unused]] int  fd_        = -1;
+        [[maybe_unused]] bool connected_ = false;
 
         /// @brief Constructs a TcpClient that already owns a connected socket fd (used by TcpListener).
         explicit TcpClient(int connectedFd);
@@ -61,8 +61,8 @@ namespace System::Net::Sockets {
      * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class TcpListener {
-        int        fd_    = -1;
-        IPEndPoint local_;
+        [[maybe_unused]] int fd_    = -1;
+        IPEndPoint           local_;
 
     public:
         explicit TcpListener(const IPEndPoint& localEP);
