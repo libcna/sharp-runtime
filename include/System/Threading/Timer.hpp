@@ -8,6 +8,9 @@
 #include <memory>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#if defined(__EMSCRIPTEN__)
+#  include "System/PlatformNotSupportedException.hpp"
+#endif
 
 namespace System::Threading {
 
@@ -37,26 +40,29 @@ namespace System::Threading {
         std::thread            thread_;
 
     public:
-        /**
-         * @param callback   Called on each tick. Receives the state object.
-         * @param state      Object passed to callback on each invocation.
-         * @param dueTime    Delay before first invocation, in milliseconds.
-         * @param period     Interval between invocations, in milliseconds. 0 = fire once.
-         */
+        /// Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds).
         Timer(std::function<void(void*)> callback, void* state, intcs dueTime, intcs period)
             : state_(std::make_shared<State>())
         {
+#if defined(__EMSCRIPTEN__)
+            (void)callback; (void)state; (void)dueTime; (void)period;
+            throw System::PlatformNotSupportedException("Timer requires pthreads (not available in Emscripten single-threaded build)");
+#else
             state_->callback = std::move(callback);
             state_->arg      = state;
             state_->dueTime  = dueTime;
             state_->period   = period;
             state_->running  = true;
             thread_ = std::thread([s = state_]() { run(s); });
+#endif
         }
 
+        /// Destroys the Timer and stops the background thread.
         ~Timer() { Dispose(); }
 
+        /// Copying is not allowed.
         Timer(const Timer&) = delete;
+        /// Copy assignment is not allowed.
         Timer& operator=(const Timer&) = delete;
 
         /** @brief Changes the timer's due time and period. Pass -1 to disable. */
@@ -65,6 +71,7 @@ namespace System::Threading {
             state_->period  = period;
         }
 
+        /// Stops the timer and releases the background thread.
         void Dispose() {
             if (state_) state_->running = false;
             if (thread_.joinable()) thread_.detach();
