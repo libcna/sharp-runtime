@@ -464,4 +464,53 @@ namespace System
         return Format(format, std::to_string(arg0));
     }
 
+    bool String::StartsWith(const std::string& value, char ch)
+    {
+        return !value.empty() && value.front() == ch;
+    }
+
+    bool String::EndsWith(const std::string& value, char ch)
+    {
+        return !value.empty() && value.back() == ch;
+    }
+
+    std::string String::Remove(const std::string& value, SharpRuntime::intcs startIndex)
+    {
+        return value.substr(0, static_cast<size_t>(startIndex));
+    }
+
+    std::string String::Remove(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
+    {
+        std::string result = value;
+        result.erase(static_cast<size_t>(startIndex), static_cast<size_t>(count));
+        return result;
+    }
+
+    std::string String::Insert(const std::string& value, SharpRuntime::intcs startIndex, const std::string& insertValue)
+    {
+        std::string result = value;
+        result.insert(static_cast<size_t>(startIndex), insertValue);
+        return result;
+    }
+
+    std::string String::Join(const std::string& separator, const std::vector<SharpRuntime::intcs>& values)
+    {
+        std::string result;
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (i > 0) result += separator;
+            result += std::to_string(values[i]);
+        }
+        return result;
+    }
+
+    std::string String::Join(const std::string& separator, const std::vector<double>& values)
+    {
+        std::string result;
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (i > 0) result += separator;
+            result += std::to_string(values[i]);
+        }
+        return result;
+    }
+
 }

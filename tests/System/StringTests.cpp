@@ -433,3 +433,49 @@ TEST(StringTests, Format_LongArg) {
     SharpRuntime::longcs big = 9876543210LL;
     EXPECT_EQ(String::Format("val={0}", big), "val=9876543210");
 }
+
+// --- String::StartsWith(char) / EndsWith(char) ---
+TEST(StringTests, StartsWithChar_True)  { EXPECT_TRUE(String::StartsWith("hello", 'h')); }
+TEST(StringTests, StartsWithChar_False) { EXPECT_FALSE(String::StartsWith("hello", 'e')); }
+TEST(StringTests, StartsWithChar_Empty) { EXPECT_FALSE(String::StartsWith("", 'h')); }
+TEST(StringTests, EndsWithChar_True)    { EXPECT_TRUE(String::EndsWith("hello", 'o')); }
+TEST(StringTests, EndsWithChar_False)   { EXPECT_FALSE(String::EndsWith("hello", 'l')); }
+TEST(StringTests, EndsWithChar_Empty)   { EXPECT_FALSE(String::EndsWith("", 'o')); }
+
+// --- String::Remove ---
+TEST(StringTests, Remove_FromIndex) {
+    EXPECT_EQ(String::Remove("hello world", 5), "hello");
+}
+TEST(StringTests, Remove_StartIndex_Count) {
+    EXPECT_EQ(String::Remove("hello world", 5, 6), "hello");
+}
+TEST(StringTests, Remove_Count_Zero) {
+    EXPECT_EQ(String::Remove("hello", 2, 0), "hello");
+}
+
+// --- String::Insert ---
+TEST(StringTests, Insert_AtStart) {
+    EXPECT_EQ(String::Insert("world", 0, "hello "), "hello world");
+}
+TEST(StringTests, Insert_AtEnd) {
+    EXPECT_EQ(String::Insert("hello", 5, "!"), "hello!");
+}
+TEST(StringTests, Insert_InMiddle) {
+    EXPECT_EQ(String::Insert("helo", 3, "l"), "hello");
+}
+
+// --- String::Join(intcs vector) ---
+TEST(StringTests, Join_IntVector) {
+    std::vector<SharpRuntime::intcs> v = {1, 2, 3};
+    EXPECT_EQ(String::Join(", ", v), "1, 2, 3");
+}
+TEST(StringTests, Join_IntVector_Empty) {
+    std::vector<SharpRuntime::intcs> v;
+    EXPECT_EQ(String::Join(",", v), "");
+}
+
+// --- String::Join(double vector) ---
+TEST(StringTests, Join_DoubleVector_Single) {
+    std::vector<double> v = {3.14};
+    EXPECT_FALSE(String::Join(",", v).empty());
+}

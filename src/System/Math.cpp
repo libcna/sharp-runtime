@@ -86,6 +86,16 @@ namespace System
         return value;
     }
 
+    longcs Math::Abs(longcs value)   { return value < 0 ? -value : value; }
+    longcs Math::Min(longcs a, longcs b) { return a < b ? a : b; }
+    longcs Math::Max(longcs a, longcs b) { return a > b ? a : b; }
+    longcs Math::Clamp(longcs value, longcs min, longcs max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
     double Math::Round(double value)
     {
         return std::round(value);

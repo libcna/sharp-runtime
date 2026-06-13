@@ -191,6 +191,33 @@ namespace System
         /// @brief Returns a new string of @p count copies of character @p ch.
         static std::string Create(SharpRuntime::intcs count, char ch);
 
+        /// @brief Returns true if @p value starts with the character @p ch.
+        static bool StartsWith(const std::string& value, char ch);
+
+        /// @brief Returns true if @p value ends with the character @p ch.
+        static bool EndsWith(const std::string& value, char ch);
+
+        /// @brief Returns a new string with all characters from @p startIndex to the end removed.
+        static std::string Remove(const std::string& value, SharpRuntime::intcs startIndex);
+
+        /// @brief Returns a new string with @p count characters removed starting at @p startIndex.
+        static std::string Remove(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
+
+        /// @brief Inserts @p insertValue into @p value at @p startIndex.
+        static std::string Insert(const std::string& value, SharpRuntime::intcs startIndex, const std::string& insertValue);
+
+        /// @brief Joins all strings in @p values (initializer_list form) with @p separator between them.
+        static std::string Join(const std::string& separator, std::initializer_list<std::string> values)
+        {
+            return Join(separator, std::vector<std::string>(values));
+        }
+
+        /// @brief Joins all integers in @p values with @p separator between them.
+        static std::string Join(const std::string& separator, const std::vector<SharpRuntime::intcs>& values);
+
+        /// @brief Joins all doubles in @p values with @p separator between them.
+        static std::string Join(const std::string& separator, const std::vector<double>& values);
+
         /// @brief Compares @p a and @p b ordinally; returns negative/zero/positive.
         static SharpRuntime::intcs Compare(const std::string& a, const std::string& b);
 

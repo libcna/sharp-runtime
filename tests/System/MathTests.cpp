@@ -390,3 +390,18 @@ TEST(MathTests, FusedMultiplyAdd_Basic) {
 TEST(MathTests, FusedMultiplyAdd_Zero) {
     EXPECT_NEAR(Math::FusedMultiplyAdd(0.0, 99.0, 7.0), 7.0, 1e-10);
 }
+
+// ---------------------------------------------------------------------------
+// longcs overloads: Abs, Min, Max, Clamp
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Abs_Long_Positive)  { EXPECT_EQ(Math::Abs(static_cast<SharpRuntime::longcs>(5LL)), 5LL); }
+TEST(MathTests, Abs_Long_Negative)  { EXPECT_EQ(Math::Abs(static_cast<SharpRuntime::longcs>(-5LL)), 5LL); }
+TEST(MathTests, Abs_Long_Zero)      { EXPECT_EQ(Math::Abs(static_cast<SharpRuntime::longcs>(0LL)), 0LL); }
+
+TEST(MathTests, Min_Long_Basic)     { EXPECT_EQ(Math::Min(static_cast<SharpRuntime::longcs>(3LL), static_cast<SharpRuntime::longcs>(7LL)), 3LL); }
+TEST(MathTests, Max_Long_Basic)     { EXPECT_EQ(Math::Max(static_cast<SharpRuntime::longcs>(3LL), static_cast<SharpRuntime::longcs>(7LL)), 7LL); }
+
+TEST(MathTests, Clamp_Long_Below)   { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(0LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 1LL); }
+TEST(MathTests, Clamp_Long_Above)   { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(20LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 10LL); }
+TEST(MathTests, Clamp_Long_InRange) { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(5LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 5LL); }

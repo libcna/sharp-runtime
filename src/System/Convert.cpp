@@ -173,6 +173,18 @@ namespace System {
         return result;
     }
 
+    uint32_t Convert::ToUInt32(const std::string& value)
+    {
+        unsigned long r = std::stoul(value);
+        return static_cast<uint32_t>(r);
+    }
+
+    uint64_t Convert::ToUInt64(const std::string& value)
+    {
+        unsigned long long r = std::stoull(value);
+        return static_cast<uint64_t>(r);
+    }
+
     static constexpr char kB64Chars[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

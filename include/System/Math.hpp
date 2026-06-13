@@ -168,6 +168,15 @@ namespace System
          */
         [[nodiscard]] static double Clamp(double value, double min, double max);
 
+        /// Returns the absolute value of a 64-bit signed integer.
+        [[nodiscard]] static longcs Abs(longcs value);
+        /// Returns the smaller of two 64-bit signed integers.
+        [[nodiscard]] static longcs Min(longcs a, longcs b);
+        /// Returns the larger of two 64-bit signed integers.
+        [[nodiscard]] static longcs Max(longcs a, longcs b);
+        /// Clamps a 64-bit signed integer to [@p min, @p max].
+        [[nodiscard]] static longcs Clamp(longcs value, longcs min, longcs max);
+
         /**
          * @brief Rounds a double-precision floating-point value to the nearest integer.
          *

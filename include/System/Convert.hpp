@@ -81,6 +81,23 @@ namespace System {
         /// Converts the specified string to a Boolean.
         [[nodiscard]] static bool     ToBoolean(const std::string& value);
 
+        /// Converts a 32-bit integer to an unsigned 32-bit integer.
+        [[nodiscard]] static uint32_t ToUInt32(intcs value)  { return static_cast<uint32_t>(value); }
+        /// Converts a 64-bit integer to an unsigned 32-bit integer.
+        [[nodiscard]] static uint32_t ToUInt32(longcs value) { return static_cast<uint32_t>(value); }
+        /// Converts the specified string to an unsigned 32-bit integer.
+        [[nodiscard]] static uint32_t ToUInt32(const std::string& value);
+
+        /// Converts a 32-bit integer to an unsigned 64-bit integer.
+        [[nodiscard]] static uint64_t ToUInt64(intcs value)  { return static_cast<uint64_t>(value); }
+        /// Converts a 64-bit integer to an unsigned 64-bit integer.
+        [[nodiscard]] static uint64_t ToUInt64(longcs value) { return static_cast<uint64_t>(value); }
+        /// Converts the specified string to an unsigned 64-bit integer.
+        [[nodiscard]] static uint64_t ToUInt64(const std::string& value);
+
+        /// Converts a 32-bit integer to a character (Unicode code point → char).
+        [[nodiscard]] static char     ToChar(intcs value)    { return static_cast<char>(value); }
+
         // --- To string ---
         /// Converts a 32-bit integer to its string representation.
         [[nodiscard]] static std::string ToString(intcs value);

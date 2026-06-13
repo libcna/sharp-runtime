@@ -377,3 +377,34 @@ TEST(ConvertTests, FromBase64String_InvalidLength_Throws) {
 TEST(ConvertTests, FromBase64String_InvalidChar_Throws) {
     EXPECT_THROW(Convert::FromBase64String("TW!u"), std::exception);
 }
+
+// ---------------------------------------------------------------------------
+// ToUInt32 / ToUInt64 / ToChar
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToUInt32_FromInt_Positive) {
+    EXPECT_EQ(Convert::ToUInt32(static_cast<SharpRuntime::intcs>(42)), 42u);
+}
+TEST(ConvertTests, ToUInt32_FromLong) {
+    EXPECT_EQ(Convert::ToUInt32(static_cast<SharpRuntime::longcs>(1000LL)), 1000u);
+}
+TEST(ConvertTests, ToUInt32_FromString) {
+    EXPECT_EQ(Convert::ToUInt32(std::string("4294967295")), 4294967295u);
+}
+
+TEST(ConvertTests, ToUInt64_FromInt) {
+    EXPECT_EQ(Convert::ToUInt64(static_cast<SharpRuntime::intcs>(99)), 99ull);
+}
+TEST(ConvertTests, ToUInt64_FromLong) {
+    EXPECT_EQ(Convert::ToUInt64(static_cast<SharpRuntime::longcs>(9999999999LL)), 9999999999ull);
+}
+TEST(ConvertTests, ToUInt64_FromString) {
+    EXPECT_EQ(Convert::ToUInt64(std::string("18446744073709551615")), 18446744073709551615ull);
+}
+
+TEST(ConvertTests, ToChar_FromInt) {
+    EXPECT_EQ(Convert::ToChar(static_cast<SharpRuntime::intcs>(65)), 'A');
+}
+TEST(ConvertTests, ToChar_Zero) {
+    EXPECT_EQ(Convert::ToChar(static_cast<SharpRuntime::intcs>(0)), '\0');
+}
