@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 50*
+*Last updated: 2026-06-13 (branch: develop) — session 51*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. 3208 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. 3213 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -246,6 +246,7 @@ git log --oneline -10
 | D1 | 48–49 | Doxygen pass: `///` comments added to `GenericMathInterfaces.hpp` and `String.hpp`; audit confirmed all 449 headers have Doxygen coverage (`///` or `/** */`) | — |
 | D2 | 49 | `COVERAGE.md` — full .NET API coverage analysis: namespaces, classes, methods; implemented vs stub vs missing; platform portability table; key gaps summary | — |
 | 84 | 50 | `System::String` — implement missing methods: `IsNullOrWhiteSpace`, `EndsWith`, `Contains`, `Replace` (string+char), `Substring` (1- and 2-arg), `Trim`/`TrimStart`/`TrimEnd`, `Concat` (2/3/4/vector), `Join`; 48 new tests | +37 |
+| 85 | 51 | `NameValueCollection` — `Get()` now comma-joins all values (matches .NET spec); add `Get(int)`, `GetValues(int)` by-index overloads; add `Add(collection)` merge; +5 tests. Fix COVERAGE.md false-stub markings for Console.ReadLine, PeriodicTimer, ThreadPool | +5 |
 
 ---
 
@@ -280,8 +281,9 @@ All planned tasks complete. No known remaining feature gaps.
 > Session 47: HttpClient (HTTP/1.1), FormUrlEncodedContent.
 > Sessions 48–49: Doxygen `///` pass over all headers; all 449 .hpp files confirmed covered. Full .NET API coverage analysis written to `COVERAGE.md`.
 > Session 50: `System::String` completed — IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join (+37 tests).
+> Session 51: `NameValueCollection` completed — Get comma-joins, by-index overloads, Add(collection); COVERAGE.md false-stub corrections (+5 tests).
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3208 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3213 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
