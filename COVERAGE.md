@@ -56,6 +56,10 @@ sharp-runtime, and whether each is fully implemented, partial, or a stub.
 | Concat(2/3/4 strings) | ✅ |
 | Concat(vector\<string\>) | ✅ |
 | Join(separator, vector\<string\>) | ✅ |
+| ToUpper / ToLower | ✅ |
+| IndexOf(string/char) | ✅ |
+| LastIndexOf(string/char) | ✅ |
+| PadLeft / PadRight | ✅ |
 | Format(format, int) | ✅ |
 | Format(format, string) | ✅ |
 | ToString(int, width, fill) | ✅ |
@@ -84,15 +88,19 @@ All standard exception types are present with `Message` / `what()` / `ToString()
 | ToString(int / float / double) | ✅ locale-safe |
 | ToBoolean, ToByte, ToChar, ToDecimal | ✅ |
 | parseIntBase (strtoll, not strtol) | ✅ |
+| ToHexString (byte array → hex string) | ✅ |
+| FromHexString (hex string → byte array) | ✅ |
 
 ### Math (DONE)
 | Method | Status |
 |--------|--------|
 | Sin, Cos, Tan, Sqrt, Abs, Min, Max | ✅ |
-| Pow, Log, Log10, Exp | ✅ |
+| Pow, Log, Log2, Log10, Exp | ✅ |
 | Floor, Ceiling, Round, Truncate | ✅ |
 | Atan2, Asin, Acos, Atan | ✅ |
-| Sign, Clamp, BitDecrement, BitIncrement | ✅ |
+| Sinh, Cosh, Tanh | ✅ |
+| Sign, Clamp | ✅ |
+| IEEERemainder, DivRem, BigMul, ScaleB | ✅ |
 | E, PI, Tau (constants) | ✅ |
 
 ### DateTime (DONE)

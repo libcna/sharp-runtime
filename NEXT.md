@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 53*
+*Last updated: 2026-06-13 (branch: develop) — session 54*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. 3224 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. Session 54 added String methods (ToUpper, ToLower, IndexOf, LastIndexOf, PadLeft, PadRight), Math completeness (Log2, Sinh/Cosh/Tanh, IEEERemainder, DivRem, BigMul, ScaleB, Tau constant), and Convert hex helpers (ToHexString, FromHexString). 3280 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -31,7 +31,7 @@
 - Zero errors, zero warnings
 
 ### Tests
-- **All 3171 tests pass** — `./build/SharpRuntimeTests` → `3171 tests from 479 test suites` ✅
+- **All 3280 tests pass** — `./build/SharpRuntimeTests` → `3280 tests from 479 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 75 test files in `tests/`
 - CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 

@@ -145,3 +145,72 @@ TEST(StringTests, Join_Single) {
 TEST(StringTests, Join_EmptySeparator) {
     EXPECT_EQ(String::Join("", {"a", "b", "c"}), "abc");
 }
+
+// --- ToUpper / ToLower ---
+
+TEST(StringTests, ToUpper_Basic) {
+    EXPECT_EQ(String::ToUpper("hello"), "HELLO");
+}
+TEST(StringTests, ToUpper_AlreadyUpper) {
+    EXPECT_EQ(String::ToUpper("WORLD"), "WORLD");
+}
+TEST(StringTests, ToLower_Basic) {
+    EXPECT_EQ(String::ToLower("HELLO"), "hello");
+}
+TEST(StringTests, ToLower_Mixed) {
+    EXPECT_EQ(String::ToLower("HeLLo"), "hello");
+}
+
+// --- IndexOf ---
+
+TEST(StringTests, IndexOf_String_Found) {
+    EXPECT_EQ(String::IndexOf("hello world", "world"), 6);
+}
+TEST(StringTests, IndexOf_String_NotFound) {
+    EXPECT_EQ(String::IndexOf("hello", "xyz"), -1);
+}
+TEST(StringTests, IndexOf_Char_Found) {
+    EXPECT_EQ(String::IndexOf("hello", 'l'), 2);
+}
+TEST(StringTests, IndexOf_Char_NotFound) {
+    EXPECT_EQ(String::IndexOf("hello", 'z'), -1);
+}
+
+// --- LastIndexOf ---
+
+TEST(StringTests, LastIndexOf_String_Found) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", "bc"), 4);
+}
+TEST(StringTests, LastIndexOf_String_NotFound) {
+    EXPECT_EQ(String::LastIndexOf("hello", "xyz"), -1);
+}
+TEST(StringTests, LastIndexOf_Char_Found) {
+    EXPECT_EQ(String::LastIndexOf("hello", 'l'), 3);
+}
+TEST(StringTests, LastIndexOf_Char_NotFound) {
+    EXPECT_EQ(String::LastIndexOf("hello", 'z'), -1);
+}
+
+// --- PadLeft ---
+
+TEST(StringTests, PadLeft_WithSpaces) {
+    EXPECT_EQ(String::PadLeft("42", 5), "   42");
+}
+TEST(StringTests, PadLeft_WithChar) {
+    EXPECT_EQ(String::PadLeft("42", 5, '0'), "00042");
+}
+TEST(StringTests, PadLeft_AlreadyWide) {
+    EXPECT_EQ(String::PadLeft("hello", 3), "hello");
+}
+
+// --- PadRight ---
+
+TEST(StringTests, PadRight_WithSpaces) {
+    EXPECT_EQ(String::PadRight("42", 5), "42   ");
+}
+TEST(StringTests, PadRight_WithChar) {
+    EXPECT_EQ(String::PadRight("hi", 5, '-'), "hi---");
+}
+TEST(StringTests, PadRight_AlreadyWide) {
+    EXPECT_EQ(String::PadRight("hello", 3), "hello");
+}

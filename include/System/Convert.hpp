@@ -5,6 +5,7 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -101,6 +102,12 @@ namespace System {
         [[nodiscard]] static std::string ToString(intcs value, int toBase);
         /// Parses a string representation of a number in the given base to a 32-bit integer.
         [[nodiscard]] static intcs        ToInt32(const std::string& value, int fromBase);
+
+        // --- Hex conversions ---
+        /// Converts a byte array to a lowercase hexadecimal string (no separators).
+        [[nodiscard]] static std::string ToHexString(const std::vector<bytecs>& inArray);
+        /// Converts a hexadecimal string (even number of hex digits) to a byte array.
+        [[nodiscard]] static std::vector<SharpRuntime::bytecs> FromHexString(const std::string& s);
     };
 
 } // namespace System

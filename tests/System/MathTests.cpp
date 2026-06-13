@@ -213,3 +213,128 @@ TEST(MathTests, SinSquaredPlusCosSquaredIsOne) {
         EXPECT_NEAR(s * s + c * c, 1.0, kEps) << "angle=" << angle;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tau constant
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, TauConstant) {
+    EXPECT_NEAR(Math::Tau, 2.0 * Math::PI, 1e-14);
+}
+
+// ---------------------------------------------------------------------------
+// Logarithms
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, LogNatural) {
+    EXPECT_NEAR(Math::Log(Math::E), 1.0, kEps);
+}
+TEST(MathTests, LogNatural_One) {
+    EXPECT_NEAR(Math::Log(1.0), 0.0, kEps);
+}
+TEST(MathTests, Log_WithBase) {
+    EXPECT_NEAR(Math::Log(8.0, 2.0), 3.0, kEps);
+}
+TEST(MathTests, Log2) {
+    EXPECT_NEAR(Math::Log2(8.0), 3.0, kEps);
+}
+TEST(MathTests, Log10) {
+    EXPECT_NEAR(Math::Log10(1000.0), 3.0, kEps);
+}
+TEST(MathTests, Exp) {
+    EXPECT_NEAR(Math::Exp(1.0), Math::E, kEps);
+}
+TEST(MathTests, Exp_Zero) {
+    EXPECT_NEAR(Math::Exp(0.0), 1.0, kEps);
+}
+
+// ---------------------------------------------------------------------------
+// Inverse trig
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Asin_One) {
+    EXPECT_NEAR(Math::Asin(1.0), Math::PI / 2.0, kEps);
+}
+TEST(MathTests, Acos_One) {
+    EXPECT_NEAR(Math::Acos(1.0), 0.0, kEps);
+}
+TEST(MathTests, Atan_One) {
+    EXPECT_NEAR(Math::Atan(1.0), Math::PI / 4.0, kEps);
+}
+TEST(MathTests, Atan2_OneOne) {
+    EXPECT_NEAR(Math::Atan2(1.0, 1.0), Math::PI / 4.0, kEps);
+}
+
+// ---------------------------------------------------------------------------
+// Hyperbolic
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Sinh_Zero) {
+    EXPECT_NEAR(Math::Sinh(0.0), 0.0, kEps);
+}
+TEST(MathTests, Cosh_Zero) {
+    EXPECT_NEAR(Math::Cosh(0.0), 1.0, kEps);
+}
+TEST(MathTests, Tanh_Zero) {
+    EXPECT_NEAR(Math::Tanh(0.0), 0.0, kEps);
+}
+
+// ---------------------------------------------------------------------------
+// Sign
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Sign_Positive) { EXPECT_EQ(Math::Sign(5),    1); }
+TEST(MathTests, Sign_Negative) { EXPECT_EQ(Math::Sign(-3),  -1); }
+TEST(MathTests, Sign_Zero)     { EXPECT_EQ(Math::Sign(0),    0); }
+TEST(MathTests, Sign_DoublePos) { EXPECT_EQ(Math::Sign(2.5),  1); }
+TEST(MathTests, Sign_DoubleNeg) { EXPECT_EQ(Math::Sign(-1.5),-1); }
+
+// ---------------------------------------------------------------------------
+// Truncate
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Truncate_Positive) {
+    EXPECT_NEAR(Math::Truncate(3.9), 3.0, kEps);
+}
+TEST(MathTests, Truncate_Negative) {
+    EXPECT_NEAR(Math::Truncate(-3.9), -3.0, kEps);
+}
+
+// ---------------------------------------------------------------------------
+// IEEERemainder
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, IEEERemainder_Basic) {
+    // 7 - (4 * round(7/4)) = 7 - 8 = -1
+    EXPECT_NEAR(Math::IEEERemainder(7.0, 4.0), -1.0, kEps);
+}
+
+// ---------------------------------------------------------------------------
+// DivRem
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, DivRem_Basic) {
+    int rem = 0;
+    int q = Math::DivRem(17, 5, rem);
+    EXPECT_EQ(q, 3);
+    EXPECT_EQ(rem, 2);
+}
+
+// ---------------------------------------------------------------------------
+// BigMul
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, BigMul_Basic) {
+    EXPECT_EQ(Math::BigMul(100000, 100000), 10000000000LL);
+}
+
+// ---------------------------------------------------------------------------
+// ScaleB
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, ScaleB_Basic) {
+    EXPECT_NEAR(Math::ScaleB(1.0, 3), 8.0, kEps);
+}
+TEST(MathTests, ScaleB_Negative) {
+    EXPECT_NEAR(Math::ScaleB(8.0, -3), 1.0, kEps);
+}

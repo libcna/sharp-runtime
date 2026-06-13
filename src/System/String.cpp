@@ -176,4 +176,64 @@ namespace System
         return result;
     }
 
+    std::string String::ToUpper(const std::string& value)
+    {
+        std::string result = value;
+        for (char& c : result) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return result;
+    }
+
+    std::string String::ToLower(const std::string& value)
+    {
+        std::string result = value;
+        for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return result;
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr)
+    {
+        auto pos = value.find(substr);
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, char ch)
+    {
+        auto pos = value.find(ch);
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr)
+    {
+        auto pos = value.rfind(substr);
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch)
+    {
+        auto pos = value.rfind(ch);
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    std::string String::PadLeft(const std::string& value, SharpRuntime::intcs totalWidth)
+    {
+        return PadLeft(value, totalWidth, ' ');
+    }
+
+    std::string String::PadLeft(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar)
+    {
+        if (static_cast<SharpRuntime::intcs>(value.size()) >= totalWidth) return value;
+        return std::string(static_cast<size_t>(totalWidth) - value.size(), paddingChar) + value;
+    }
+
+    std::string String::PadRight(const std::string& value, SharpRuntime::intcs totalWidth)
+    {
+        return PadRight(value, totalWidth, ' ');
+    }
+
+    std::string String::PadRight(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar)
+    {
+        if (static_cast<SharpRuntime::intcs>(value.size()) >= totalWidth) return value;
+        return value + std::string(static_cast<size_t>(totalWidth) - value.size(), paddingChar);
+    }
+
 }

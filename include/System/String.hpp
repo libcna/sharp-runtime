@@ -129,5 +129,35 @@ namespace System
 
         /// @brief Joins all elements of @p values with @p separator between them.
         static std::string Join(const std::string& separator, const std::vector<std::string>& values);
+
+        /// @brief Returns a copy of @p value with all characters converted to uppercase.
+        static std::string ToUpper(const std::string& value);
+
+        /// @brief Returns a copy of @p value with all characters converted to lowercase.
+        static std::string ToLower(const std::string& value);
+
+        /// @brief Returns the zero-based index of the first occurrence of @p substr in @p value, or -1 if not found.
+        static SharpRuntime::intcs IndexOf(const std::string& value, const std::string& substr);
+
+        /// @brief Returns the zero-based index of the first occurrence of @p ch in @p value, or -1 if not found.
+        static SharpRuntime::intcs IndexOf(const std::string& value, char ch);
+
+        /// @brief Returns the zero-based index of the last occurrence of @p substr in @p value, or -1 if not found.
+        static SharpRuntime::intcs LastIndexOf(const std::string& value, const std::string& substr);
+
+        /// @brief Returns the zero-based index of the last occurrence of @p ch in @p value, or -1 if not found.
+        static SharpRuntime::intcs LastIndexOf(const std::string& value, char ch);
+
+        /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
+        static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);
+
+        /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with @p paddingChar on the left.
+        static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar);
+
+        /// @brief Returns @p value left-aligned in a field of @p totalWidth, padded with spaces on the right.
+        static std::string PadRight(const std::string& value, SharpRuntime::intcs totalWidth);
+
+        /// @brief Returns @p value left-aligned in a field of @p totalWidth, padded with @p paddingChar on the right.
+        static std::string PadRight(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar);
     };
 }

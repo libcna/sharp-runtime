@@ -142,4 +142,35 @@ namespace System {
         throw FormatException("Invalid base.");
     }
 
+    std::string Convert::ToHexString(const std::vector<bytecs>& inArray)
+    {
+        static constexpr char hex[] = "0123456789abcdef";
+        std::string result;
+        result.reserve(inArray.size() * 2);
+        for (bytecs b : inArray) {
+            result += hex[(b >> 4) & 0xF];
+            result += hex[b & 0xF];
+        }
+        return result;
+    }
+
+    std::vector<SharpRuntime::bytecs> Convert::FromHexString(const std::string& s)
+    {
+        if (s.size() % 2 != 0)
+            throw FormatException("Hex string length must be even.");
+        std::vector<bytecs> result;
+        result.reserve(s.size() / 2);
+        for (size_t i = 0; i < s.size(); i += 2) {
+            auto hexVal = [](char c) -> uint8_t {
+                if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+                if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+                if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+                throw FormatException("Invalid hex character.");
+                return 0;
+            };
+            result.push_back(static_cast<bytecs>((hexVal(s[i]) << 4) | hexVal(s[i + 1])));
+        }
+        return result;
+    }
+
 } // namespace System

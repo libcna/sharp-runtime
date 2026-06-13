@@ -257,3 +257,64 @@ TEST(ConvertTests, ToStringBase10) {
 TEST(ConvertTests, ToStringInvalidBaseThrows) {
     EXPECT_THROW(Convert::ToString(42, 3), std::exception);
 }
+
+// ---------------------------------------------------------------------------
+// ToHexString / FromHexString
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToHexString_Empty) {
+    EXPECT_EQ(Convert::ToHexString({}), "");
+}
+
+TEST(ConvertTests, ToHexString_SingleByte) {
+    EXPECT_EQ(Convert::ToHexString({0xFF}), "ff");
+}
+
+TEST(ConvertTests, ToHexString_MultipleBytes) {
+    EXPECT_EQ(Convert::ToHexString({0x00, 0xAB, 0xCD, 0xEF}), "00abcdef");
+}
+
+TEST(ConvertTests, ToHexString_AllZeros) {
+    EXPECT_EQ(Convert::ToHexString({0x00, 0x00}), "0000");
+}
+
+TEST(ConvertTests, FromHexString_Empty) {
+    EXPECT_EQ(Convert::FromHexString("").size(), 0u);
+}
+
+TEST(ConvertTests, FromHexString_LowerCase) {
+    auto v = Convert::FromHexString("ff");
+    ASSERT_EQ(v.size(), 1u);
+    EXPECT_EQ(v[0], 0xFF);
+}
+
+TEST(ConvertTests, FromHexString_UpperCase) {
+    auto v = Convert::FromHexString("ABCD");
+    ASSERT_EQ(v.size(), 2u);
+    EXPECT_EQ(v[0], 0xAB);
+    EXPECT_EQ(v[1], 0xCD);
+}
+
+TEST(ConvertTests, FromHexString_MultipleBytes) {
+    auto v = Convert::FromHexString("00abcdef");
+    ASSERT_EQ(v.size(), 4u);
+    EXPECT_EQ(v[0], 0x00);
+    EXPECT_EQ(v[1], 0xAB);
+    EXPECT_EQ(v[2], 0xCD);
+    EXPECT_EQ(v[3], 0xEF);
+}
+
+TEST(ConvertTests, FromHexString_OddLengthThrows) {
+    EXPECT_THROW(Convert::FromHexString("abc"), std::exception);
+}
+
+TEST(ConvertTests, FromHexString_InvalidCharThrows) {
+    EXPECT_THROW(Convert::FromHexString("zz"), std::exception);
+}
+
+TEST(ConvertTests, HexRoundTrip) {
+    std::vector<uint8_t> original{0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
+    auto hex = Convert::ToHexString(original);
+    auto restored = Convert::FromHexString(hex);
+    EXPECT_EQ(original, restored);
+}

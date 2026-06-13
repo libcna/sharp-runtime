@@ -3,19 +3,21 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cstdint>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System
 {
     using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /**
      * @brief Provides constants and static methods for trigonometric,
      * logarithmic, and other common mathematical functions.
      *
-     * This class is a lightweight C++ emulation of .NET System.Math.
+     * C++ counterpart of .NET System.Math.
      *
-     * @note Status: PARTIAL
+     * @note Status: DONE
      */
     class Math
     {
@@ -28,15 +30,9 @@ namespace System
          *
          * @note Status: Ported
          */
-        static constexpr double E = 2.71828'18284'59045'2354;
-
-        /**
-         * @brief Represents the ratio of the circumference of a circle
-         * to its diameter.
-         *
-         * @note Status: Ported
-         */
-        static constexpr double PI = 3.14159'26535'89793'23846;
+        static constexpr double E   = 2.71828'18284'59045'2354;  ///< Base of natural logarithms.
+        static constexpr double PI  = 3.14159'26535'89793'23846; ///< Ratio of a circle's circumference to its diameter.
+        static constexpr double Tau = 6.28318'53071'79586'47692; ///< Two times PI (full circle in radians).
 
         /**
          * @brief Returns the sine of the specified angle.
@@ -212,5 +208,52 @@ namespace System
          * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Pow(double x, double y);
+
+        /// @brief Returns the natural (base-e) logarithm of @p d.
+        [[nodiscard]] static double Log(double d);
+        /// @brief Returns the logarithm of @p a in the specified @p newBase.
+        [[nodiscard]] static double Log(double a, double newBase);
+        /// @brief Returns the base-2 logarithm of @p x.
+        [[nodiscard]] static double Log2(double x);
+        /// @brief Returns the base-10 logarithm of @p d.
+        [[nodiscard]] static double Log10(double d);
+        /// @brief Returns e raised to the power @p d.
+        [[nodiscard]] static double Exp(double d);
+
+        /// @brief Returns the angle whose sine is @p d (in radians).
+        [[nodiscard]] static double Asin(double d);
+        /// @brief Returns the angle whose cosine is @p d (in radians).
+        [[nodiscard]] static double Acos(double d);
+        /// @brief Returns the angle whose tangent is @p d (in radians).
+        [[nodiscard]] static double Atan(double d);
+        /// @brief Returns the angle (in radians) whose tangent is the quotient of @p y and @p x.
+        [[nodiscard]] static double Atan2(double y, double x);
+
+        /// @brief Returns the hyperbolic sine of @p value.
+        [[nodiscard]] static double Sinh(double value);
+        /// @brief Returns the hyperbolic cosine of @p value.
+        [[nodiscard]] static double Cosh(double value);
+        /// @brief Returns the hyperbolic tangent of @p value.
+        [[nodiscard]] static double Tanh(double value);
+
+        /// @brief Returns an integer indicating the sign of a 32-bit integer (-1, 0, or 1).
+        [[nodiscard]] static intcs Sign(intcs value);
+        /// @brief Returns an integer indicating the sign of a double (-1, 0, or 1).
+        [[nodiscard]] static intcs Sign(double value);
+
+        /// @brief Returns the integral part of @p d (discards the fractional part).
+        [[nodiscard]] static double Truncate(double d);
+
+        /// @brief Returns the IEEE 754 remainder of @p x divided by @p y.
+        [[nodiscard]] static double IEEERemainder(double x, double y);
+
+        /// @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient.
+        static intcs DivRem(intcs a, intcs b, intcs& result);
+
+        /// @brief Returns the 64-bit product of two 32-bit integers.
+        [[nodiscard]] static longcs BigMul(intcs a, intcs b);
+
+        /// @brief Returns @p x multiplied by 2 raised to the power @p n (scalbn).
+        [[nodiscard]] static double ScaleB(double x, intcs n);
     };
 }
