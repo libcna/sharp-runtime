@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/StringSplitOptions.hpp"
 
 namespace System
 {
@@ -217,6 +218,24 @@ namespace System
 
         /// @brief Joins all doubles in @p values with @p separator between them.
         static std::string Join(const std::string& separator, const std::vector<double>& values);
+
+        /// @brief Returns the characters of @p value as a vector of chars.
+        static std::vector<char> ToCharArray(const std::string& value);
+
+        /// @brief Returns a copy of @p value with all leading and trailing characters in @p trimChars removed.
+        static std::string Trim(const std::string& value, const std::vector<char>& trimChars);
+
+        /// @brief Returns a copy of @p value with all leading characters in @p trimChars removed.
+        static std::string TrimStart(const std::string& value, const std::vector<char>& trimChars);
+
+        /// @brief Returns a copy of @p value with all trailing characters in @p trimChars removed.
+        static std::string TrimEnd(const std::string& value, const std::vector<char>& trimChars);
+
+        /// @brief Splits @p value on @p delimiter with the specified @p options.
+        static std::vector<std::string> Split(const std::string& value, char delimiter, StringSplitOptions options);
+
+        /// @brief Splits @p value on @p delimiter string with the specified @p options.
+        static std::vector<std::string> Split(const std::string& value, const std::string& delimiter, StringSplitOptions options);
 
         /// @brief Compares @p a and @p b ordinally; returns negative/zero/positive.
         static SharpRuntime::intcs Compare(const std::string& a, const std::string& b);

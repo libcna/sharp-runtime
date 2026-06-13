@@ -513,4 +513,61 @@ namespace System
         return result;
     }
 
+    std::vector<char> String::ToCharArray(const std::string& value)
+    {
+        return std::vector<char>(value.begin(), value.end());
+    }
+
+    std::string String::Trim(const std::string& value, const std::vector<char>& trimChars)
+    {
+        return TrimEnd(TrimStart(value, trimChars), trimChars);
+    }
+
+    std::string String::TrimStart(const std::string& value, const std::vector<char>& trimChars)
+    {
+        size_t start = 0;
+        while (start < value.size()) {
+            bool found = false;
+            for (char c : trimChars) if (value[start] == c) { found = true; break; }
+            if (!found) break;
+            ++start;
+        }
+        return value.substr(start);
+    }
+
+    std::string String::TrimEnd(const std::string& value, const std::vector<char>& trimChars)
+    {
+        size_t end = value.size();
+        while (end > 0) {
+            bool found = false;
+            for (char c : trimChars) if (value[end - 1] == c) { found = true; break; }
+            if (!found) break;
+            --end;
+        }
+        return value.substr(0, end);
+    }
+
+    static std::vector<std::string> applySplitOptions(std::vector<std::string> parts, StringSplitOptions options)
+    {
+        bool removeEmpty = (static_cast<int>(options) & static_cast<int>(StringSplitOptions::RemoveEmptyEntries)) != 0;
+        bool trimEntries = (static_cast<int>(options) & static_cast<int>(StringSplitOptions::TrimEntries)) != 0;
+        std::vector<std::string> result;
+        for (auto& p : parts) {
+            if (trimEntries) p = String::Trim(p);
+            if (removeEmpty && p.empty()) continue;
+            result.push_back(std::move(p));
+        }
+        return result;
+    }
+
+    std::vector<std::string> String::Split(const std::string& value, char delimiter, StringSplitOptions options)
+    {
+        return applySplitOptions(Split(value, delimiter), options);
+    }
+
+    std::vector<std::string> String::Split(const std::string& value, const std::string& delimiter, StringSplitOptions options)
+    {
+        return applySplitOptions(Split(value, delimiter), options);
+    }
+
 }

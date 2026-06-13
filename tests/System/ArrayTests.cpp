@@ -260,3 +260,23 @@ TEST(ArrayTests, Fill_StringVector) {
     EXPECT_EQ(v[0], "x");
     EXPECT_EQ(v[2], "x");
 }
+
+// ---------------------------------------------------------------------------
+// Empty<T>
+// ---------------------------------------------------------------------------
+
+TEST(ArrayTests, Empty_Int_IsEmpty) {
+    auto v = Array::Empty<int>();
+    EXPECT_TRUE(v.empty());
+    EXPECT_EQ(v.size(), 0u);
+}
+TEST(ArrayTests, Empty_String_IsEmpty) {
+    auto v = Array::Empty<std::string>();
+    EXPECT_TRUE(v.empty());
+}
+TEST(ArrayTests, Empty_ReturnsSeparateInstances) {
+    auto a = Array::Empty<int>();
+    auto b = Array::Empty<int>();
+    a.push_back(1);
+    EXPECT_TRUE(b.empty());
+}

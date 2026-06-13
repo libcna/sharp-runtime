@@ -479,3 +479,55 @@ TEST(StringTests, Join_DoubleVector_Single) {
     std::vector<double> v = {3.14};
     EXPECT_FALSE(String::Join(",", v).empty());
 }
+
+// --- String::ToCharArray ---
+TEST(StringTests, ToCharArray_Basic) {
+    auto v = String::ToCharArray("abc");
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 'a');
+    EXPECT_EQ(v[1], 'b');
+    EXPECT_EQ(v[2], 'c');
+}
+TEST(StringTests, ToCharArray_Empty) {
+    EXPECT_TRUE(String::ToCharArray("").empty());
+}
+
+// --- String::Trim(chars) / TrimStart(chars) / TrimEnd(chars) ---
+TEST(StringTests, TrimChars_BothEnds) {
+    EXPECT_EQ(String::Trim("..hello..", {'.'}), "hello");
+}
+TEST(StringTests, TrimChars_MultipleChars) {
+    EXPECT_EQ(String::Trim("*-hi-*", {'*', '-'}), "hi");
+}
+TEST(StringTests, TrimStartChars) {
+    EXPECT_EQ(String::TrimStart("000123", {'0'}), "123");
+}
+TEST(StringTests, TrimEndChars) {
+    EXPECT_EQ(String::TrimEnd("hello!!!", {'!'}), "hello");
+}
+
+// --- String::Split with StringSplitOptions ---
+TEST(StringTests, Split_RemoveEmptyEntries_Char) {
+    auto v = String::Split("a,,b,,c", ',', System::StringSplitOptions::RemoveEmptyEntries);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], "a");
+    EXPECT_EQ(v[1], "b");
+    EXPECT_EQ(v[2], "c");
+}
+TEST(StringTests, Split_TrimEntries_Char) {
+    auto v = String::Split("a , b , c", ',', System::StringSplitOptions::TrimEntries);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], "a");
+    EXPECT_EQ(v[1], "b");
+    EXPECT_EQ(v[2], "c");
+}
+TEST(StringTests, Split_RemoveEmptyEntries_String) {
+    auto v = String::Split("a::b::c", "::", System::StringSplitOptions::RemoveEmptyEntries);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], "a");
+}
+TEST(StringTests, Split_None_KeepsEmpty) {
+    auto v = String::Split("a,,b", ',', System::StringSplitOptions::None);
+    EXPECT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[1], "");
+}

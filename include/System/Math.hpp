@@ -177,6 +177,17 @@ namespace System
         /// Clamps a 64-bit signed integer to [@p min, @p max].
         [[nodiscard]] static longcs Clamp(longcs value, longcs min, longcs max);
 
+        /// Returns the absolute value of a single-precision float.
+        [[nodiscard]] static float Abs(float value)              { return std::abs(value); }
+        /// Returns the smaller of two single-precision floats.
+        [[nodiscard]] static float Min(float a, float b)         { return a < b ? a : b; }
+        /// Returns the larger of two single-precision floats.
+        [[nodiscard]] static float Max(float a, float b)         { return a > b ? a : b; }
+        /// Clamps a single-precision float to [@p min, @p max].
+        [[nodiscard]] static float Clamp(float value, float min, float max) {
+            return value < min ? min : (value > max ? max : value);
+        }
+
         /**
          * @brief Rounds a double-precision floating-point value to the nearest integer.
          *

@@ -403,3 +403,21 @@ TEST(StringBuilderTests, AppendFormat_LongArg) {
     sb.AppendFormat("n={0}", big);
     EXPECT_EQ(sb.ToString(), "n=1234567890123");
 }
+
+// --- setLengthProperty ---
+TEST(StringBuilderTests, SetLength_Truncate) {
+    StringBuilder sb("hello world");
+    sb.setLengthProperty(5);
+    EXPECT_EQ(sb.ToString(), "hello");
+    EXPECT_EQ(sb.getLengthProperty(), 5);
+}
+TEST(StringBuilderTests, SetLength_Zero_ClearsBuffer) {
+    StringBuilder sb("abc");
+    sb.setLengthProperty(0);
+    EXPECT_EQ(sb.ToString(), "");
+}
+TEST(StringBuilderTests, SetLength_Extend_PadsNulls) {
+    StringBuilder sb("hi");
+    sb.setLengthProperty(4);
+    EXPECT_EQ(sb.getLengthProperty(), 4);
+}

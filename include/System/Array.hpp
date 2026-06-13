@@ -127,6 +127,10 @@ namespace System {
         static void Fill(std::vector<T>& array, const T& value, intcs startIndex, intcs count) {
             std::fill(array.begin() + startIndex, array.begin() + startIndex + count, value);
         }
+
+        /// Returns an empty vector of type T (equivalent of .NET Array.Empty<T>()).
+        template<typename T>
+        [[nodiscard]] static std::vector<T> Empty() { return {}; }
     };
 
 } // namespace System

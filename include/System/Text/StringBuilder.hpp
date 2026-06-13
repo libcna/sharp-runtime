@@ -85,6 +85,9 @@ namespace System::Text
         /// @return Number of characters in the internal buffer.
         [[nodiscard]] intcs getLengthProperty() const;
 
+        /// Sets the length of the current instance; truncates or pads with null characters.
+        void setLengthProperty(intcs value);
+
         /// Returns true if the internal buffer is empty.
         [[nodiscard]] bool Empty() const;
 

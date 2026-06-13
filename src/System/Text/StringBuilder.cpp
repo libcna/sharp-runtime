@@ -89,6 +89,11 @@ namespace System::Text
         return static_cast<intcs>(buffer.size());
     }
 
+    void StringBuilder::setLengthProperty(intcs value)
+    {
+        buffer.resize(static_cast<size_t>(value), '\0');
+    }
+
     bool StringBuilder::Empty() const
     {
         return buffer.empty();

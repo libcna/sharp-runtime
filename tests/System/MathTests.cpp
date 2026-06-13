@@ -405,3 +405,15 @@ TEST(MathTests, Max_Long_Basic)     { EXPECT_EQ(Math::Max(static_cast<SharpRunti
 TEST(MathTests, Clamp_Long_Below)   { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(0LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 1LL); }
 TEST(MathTests, Clamp_Long_Above)   { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(20LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 10LL); }
 TEST(MathTests, Clamp_Long_InRange) { EXPECT_EQ(Math::Clamp(static_cast<SharpRuntime::longcs>(5LL), static_cast<SharpRuntime::longcs>(1LL), static_cast<SharpRuntime::longcs>(10LL)), 5LL); }
+
+// ---------------------------------------------------------------------------
+// float overloads: Abs, Min, Max, Clamp
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Abs_Float_Negative)  { EXPECT_EQ(Math::Abs(-3.5f), 3.5f); }
+TEST(MathTests, Abs_Float_Positive)  { EXPECT_EQ(Math::Abs(2.0f),  2.0f); }
+TEST(MathTests, Min_Float_Basic)     { EXPECT_EQ(Math::Min(1.5f, 2.5f), 1.5f); }
+TEST(MathTests, Max_Float_Basic)     { EXPECT_EQ(Math::Max(1.5f, 2.5f), 2.5f); }
+TEST(MathTests, Clamp_Float_Below)   { EXPECT_EQ(Math::Clamp(0.0f, 1.0f, 10.0f), 1.0f); }
+TEST(MathTests, Clamp_Float_Above)   { EXPECT_EQ(Math::Clamp(20.0f, 1.0f, 10.0f), 10.0f); }
+TEST(MathTests, Clamp_Float_InRange) { EXPECT_EQ(Math::Clamp(5.0f, 1.0f, 10.0f), 5.0f); }
