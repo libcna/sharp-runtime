@@ -352,7 +352,7 @@ TEST(CollectionExtensionsTests, AsReadOnly_ReturnsSameData) {
 // ===========================================================================
 
 TEST(StoragePathsTests, GetIsolatedStorageRoot_NoThrow) {
-    EXPECT_NO_THROW(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
+    EXPECT_NO_THROW((void)SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
 }
 
 TEST(StoragePathsTests, GetIsolatedStorageRoot_NonEmpty) {

@@ -27,9 +27,20 @@ namespace System::IO::IsolatedStorage
             case System::IO::FileMode::Open:
                 openMode |= std::ios::in;
                 break;
-
             case System::IO::FileMode::Create:
                 openMode |= std::ios::in | std::ios::out | std::ios::trunc;
+                break;
+            case System::IO::FileMode::CreateNew:
+                openMode |= std::ios::out | std::ios::trunc;
+                break;
+            case System::IO::FileMode::OpenOrCreate:
+                openMode |= std::ios::in | std::ios::out;
+                break;
+            case System::IO::FileMode::Truncate:
+                openMode |= std::ios::out | std::ios::trunc;
+                break;
+            case System::IO::FileMode::Append:
+                openMode |= std::ios::out | std::ios::app;
                 break;
         }
 

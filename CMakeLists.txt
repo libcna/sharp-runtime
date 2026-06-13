@@ -31,16 +31,19 @@ add_library(SHARP_RUNTIME STATIC
         ${SHARP_RUNTIME_SOURCES}
 )
 
-target_include_directories(SHARP_RUNTIME
-        PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
-)
+target_include_directories(SHARP_RUNTIME PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(SHARP_RUNTIME SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 
 # On Android, StoragePaths.cpp uses SDL_GetPrefPath / SDL_GetAndroidInternalStoragePath
 # which require SDL3 headers and library.  SDL3 is provided by the parent project
 # (CNA) via cna_configure_vendored_sdl() before this subdirectory is added.
 target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2 miniz)
+
+if(MSVC)
+    target_compile_options(SHARP_RUNTIME PRIVATE /W4 /WX)
+else()
+    target_compile_options(SHARP_RUNTIME PRIVATE -Wall -Wextra -Werror -Wno-format-truncation)
+endif()
 
 if(ANDROID AND TARGET SDL3::SDL3)
     target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
@@ -72,6 +75,10 @@ if(SHARP_RUNTIME_BUILD_TESTS)
             PRIVATE
             gtest_main
     )
+
+    if(NOT MSVC)
+        target_compile_options(SharpRuntimeTests PRIVATE -Wno-unused-result)
+    endif()
 
     include(GoogleTest)
     gtest_discover_tests(SharpRuntimeTests)
