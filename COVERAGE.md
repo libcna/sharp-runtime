@@ -1,6 +1,6 @@
 # COVERAGE.md — sharp-runtime .NET API Coverage Analysis
 
-*Generated: 2026-06-13 | Branch: develop | Tests: 3208 passing*
+*Generated: 2026-06-13 | Branch: develop | Tests: 3213 passing*
 
 This document maps which .NET `System.*` namespaces, classes, and methods are present in
 sharp-runtime, and whether each is fully implemented, partial, or a stub.
@@ -169,12 +169,12 @@ All standard exception types are present with `Message` / `what()` / `ToString()
 | ProcessorCount (POSIX/Win32/Emscripten) | ✅ |
 | OSVersion, NewLine, Exit | ✅ |
 
-### Console (PARTIAL)
+### Console (DONE)
 | Method | Status |
 |--------|--------|
 | WriteLine(string/int/double) | ✅ locale-safe |
 | Write(string/int/float/double) | ✅ locale-safe |
-| ReadLine | ⚠️ stub |
+| ReadLine | ✅ `std::getline(std::cin, ...)` |
 
 ### AppDomain / AppContext (DONE)
 | Method | Status |
@@ -234,14 +234,14 @@ All backed by `shared_ptr<const std::container<T>>`:
 `ConcurrentDictionary<K,V>`, `ConcurrentQueue<T>`, `ConcurrentStack<T>`,
 `ConcurrentBag<T>`, `BlockingCollection<T>` ✅
 
-### Specialized (PARTIAL)
+### Specialized (DONE)
 | Class | Status |
 |-------|--------|
 | StringCollection, StringDictionary | ✅ |
 | OrderedDictionary | ✅ |
 | BitVector32 | ✅ C++20 `std::popcount` |
 | HybridDictionary, ListDictionary | ✅ |
-| NameValueCollection | ⚠️ partial |
+| NameValueCollection | ✅ Get comma-joins all values; Get/GetValues by index; Add(collection) |
 
 ### Collection Interfaces (DONE)
 `IEnumerable<T>`, `IEnumerator<T>`, `ICollection<T>`, `IList<T>`,
@@ -337,7 +337,7 @@ All backed by `shared_ptr<const std::container<T>>`:
 | Class | Status |
 |-------|--------|
 | Thread | ✅ Start (deferred, once; 2nd throws), Join, IsAlive, ManagedThreadId |
-| ThreadPool | ⚠️ stubs — QueueUserWorkItem no-op |
+| ThreadPool | ✅ QueueUserWorkItem detaches `std::thread`; GetMin/MaxThreads; Emscripten guard |
 
 ### Synchronization primitives (DONE)
 `Monitor`, `Mutex`, `Semaphore`, `SemaphoreSlim`,
@@ -352,11 +352,11 @@ All backed by `shared_ptr<const std::container<T>>`:
 | TaskCompletionSource\<T\> | ✅ |
 | Parallel.For | ⚠️ stubs; Emscripten guard |
 
-### Timers (PARTIAL)
+### Timers (DONE)
 | Class | Status |
 |-------|--------|
 | Timer | ✅ `shared_ptr<State>` (no dangling-this) |
-| PeriodicTimer | ⚠️ stub |
+| PeriodicTimer | ✅ `WaitForNextTick` + `Dispose` implemented |
 
 ### Cancellation & async locals (DONE)
 `CancellationToken`, `CancellationTokenSource`, `CancellationTokenRegistration`,
@@ -533,11 +533,12 @@ Version attributes ✅
 
 | Gap | Impact | Notes |
 |-----|--------|-------|
-| `String` — Concat, Join, Replace, Trim, Substring, EndsWith, IsNullOrWhiteSpace | ~~Medium~~ | **Fixed in session 50** — all methods implemented ✅ |
+| `String` — Concat, Join, Replace, Trim, Substring, EndsWith, IsNullOrWhiteSpace | ~~Medium~~ | **Fixed session 50** ✅ |
+| `NameValueCollection` — Get comma-join, Get/GetValues by index, Add(collection) | ~~Medium~~ | **Fixed session 51** ✅ |
+| `Console.ReadLine` — was marked stub | ~~Low~~ | Already implemented ✅ (COVERAGE.md was wrong) |
+| `PeriodicTimer` — was marked stub | ~~Low~~ | Already implemented ✅ (COVERAGE.md was wrong) |
+| `ThreadPool` — was marked stub | ~~Low~~ | Already implemented ✅ (COVERAGE.md was wrong) |
 | `Task` / `Parallel` — no real threadpool | Low | `std::async` sufficient for current use cases |
-| `ThreadPool` — stub only | Low | |
-| `Console.ReadLine` — stub | Low | |
-| `PeriodicTimer` — stub | Low | |
 | `GC` — no-op | Low | not meaningful in C++ |
 | `Regex` — no named groups | Low | `std::regex` limitation |
 | `HttpClient` — no HTTPS/TLS | Medium | raw sockets only |

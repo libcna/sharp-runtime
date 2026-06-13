@@ -103,6 +103,49 @@ TEST(NameValueCollectionTests, OperatorBracket_ByName) {
     EXPECT_EQ(nvc["city"], "Prague");
 }
 
+TEST(NameValueCollectionTests, Get_MultipleValues_CommaJoined) {
+    NameValueCollection nvc;
+    nvc.Add("tag", "a");
+    nvc.Add("tag", "b");
+    nvc.Add("tag", "c");
+    EXPECT_EQ(nvc.Get("tag"), "a,b,c");
+}
+
+TEST(NameValueCollectionTests, Get_ByIndex_ReturnsCommaJoined) {
+    NameValueCollection nvc;
+    nvc.Add("colors", "red");
+    nvc.Add("colors", "blue");
+    EXPECT_EQ(nvc.Get(0), "red,blue");
+}
+
+TEST(NameValueCollectionTests, GetValues_ByIndex) {
+    NameValueCollection nvc;
+    nvc.Add("x", "1");
+    nvc.Add("x", "2");
+    auto vals = nvc.GetValues(0);
+    ASSERT_EQ(vals.size(), 2u);
+    EXPECT_EQ(vals[0], "1");
+    EXPECT_EQ(vals[1], "2");
+}
+
+TEST(NameValueCollectionTests, OperatorBracket_ByIndex_CommaJoined) {
+    NameValueCollection nvc;
+    nvc.Add("k", "p");
+    nvc.Add("k", "q");
+    EXPECT_EQ(nvc[0], "p,q");
+}
+
+TEST(NameValueCollectionTests, Add_OtherCollection) {
+    NameValueCollection a, b;
+    a.Add("foo", "1");
+    b.Add("bar", "2");
+    b.Add("foo", "extra");
+    a.Add(b);
+    EXPECT_EQ(a.getCountProperty(), 2);
+    EXPECT_EQ(a.Get("foo"), "1,extra");
+    EXPECT_EQ(a.Get("bar"), "2");
+}
+
 // ===========================================================================
 // StringCollection
 // ===========================================================================

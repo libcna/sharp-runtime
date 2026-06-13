@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <algorithm>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Specialized {
@@ -14,13 +15,24 @@ namespace System::Collections::Specialized {
     /**
      * @brief A collection that associates string keys with string values (one key can have multiple values).
      *
-     * Partial C++ counterpart of .NET System.Collections.Specialized.NameValueCollection.
+     * C++ counterpart of .NET System.Collections.Specialized.NameValueCollection.
+     * Multiple values for the same key are stored; Get() returns them comma-joined.
      *
-     * @note Status: Partial
+     * @note Status: DONE
      */
     class NameValueCollection {
-        std::vector<std::string>                                keys_;
-        std::unordered_map<std::string, std::vector<std::string>> map_;
+        std::vector<std::string>                                   keys_;
+        std::unordered_map<std::string, std::vector<std::string>>  map_;
+
+        static std::string joinComma(const std::vector<std::string>& v) {
+            std::string out;
+            for (size_t i = 0; i < v.size(); ++i) {
+                if (i) out += ',';
+                out += v[i];
+            }
+            return out;
+        }
+
     public:
         /// Default-constructs an empty NameValueCollection.
         NameValueCollection() = default;
@@ -32,6 +44,13 @@ namespace System::Collections::Specialized {
         void Add(const std::string& name, const std::string& value) {
             if (!map_.count(name)) keys_.push_back(name);
             map_[name].push_back(value);
+        }
+
+        /// Copies all entries from @p c into this collection.
+        void Add(const NameValueCollection& c) {
+            for (const auto& key : c.keys_)
+                for (const auto& val : c.map_.at(key))
+                    Add(key, val);
         }
 
         /// Sets name to a single value, replacing any existing values.
@@ -49,18 +68,30 @@ namespace System::Collections::Specialized {
         /// Removes all entries from the collection.
         void Clear() { keys_.clear(); map_.clear(); }
 
-        /** @brief Returns the first value associated with name, or "" if not found. */
+        /// Returns all values for @p name comma-joined, or "" if not found. Mirrors .NET Get(string).
         [[nodiscard]] std::string Get(const std::string& name) const {
             auto it = map_.find(name);
             if (it == map_.end() || it->second.empty()) return "";
-            return it->second[0];
+            return joinComma(it->second);
         }
 
-        /** @brief Returns all values associated with name. */
+        /// Returns all values for the key at @p index comma-joined, or "" if index is out of range.
+        [[nodiscard]] std::string Get(intcs index) const {
+            if (index < 0 || static_cast<size_t>(index) >= keys_.size()) return "";
+            return Get(keys_[static_cast<size_t>(index)]);
+        }
+
+        /// Returns all values associated with @p name.
         [[nodiscard]] std::vector<std::string> GetValues(const std::string& name) const {
             auto it = map_.find(name);
             if (it == map_.end()) return {};
             return it->second;
+        }
+
+        /// Returns all values associated with the key at @p index.
+        [[nodiscard]] std::vector<std::string> GetValues(intcs index) const {
+            if (index < 0 || static_cast<size_t>(index) >= keys_.size()) return {};
+            return GetValues(keys_[static_cast<size_t>(index)]);
         }
 
         /// Returns the key at the given zero-based index.
@@ -72,10 +103,10 @@ namespace System::Collections::Specialized {
         /// Returns a const reference to the ordered list of all keys.
         [[nodiscard]] const std::vector<std::string>& AllKeys() const { return keys_; }
 
-        /// Returns the first value for the given name, or "" if not found.
+        /// Returns all values for the given name comma-joined, or "" if not found.
         std::string operator[](const std::string& name) const { return Get(name); }
-        /// Returns the first value for the key at the given index, or "" if not found.
-        std::string operator[](intcs index) const { return Get(GetKey(index)); }
+        /// Returns all values for the key at the given index comma-joined, or "" if not found.
+        std::string operator[](intcs index) const { return Get(index); }
     };
 
 } // namespace System::Collections::Specialized
