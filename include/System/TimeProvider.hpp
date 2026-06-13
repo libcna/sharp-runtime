@@ -9,6 +9,8 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/Diagnostics/Stopwatch.hpp"
 #include "System/Threading/ITimer.hpp"
+#include "System/Threading/Timer.hpp"
+#include <memory>
 
 namespace System {
 
@@ -76,6 +78,11 @@ namespace System {
         TimeSpan GetElapsedTime(longcs startingTimestamp) const {
             return GetElapsedTime(startingTimestamp, GetTimestamp());
         }
+
+        /// Creates a new timer that invokes callback after dueTime and then every period.
+        virtual std::unique_ptr<Threading::ITimer> CreateTimer(
+            Threading::TimerCallback callback, void* state,
+            TimeSpan dueTime, TimeSpan period);
     };
 
 } // namespace System

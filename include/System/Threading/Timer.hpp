@@ -16,6 +16,9 @@ namespace System::Threading {
 
     using SharpRuntime::intcs;
 
+    /// Delegate type for timer callbacks — counterpart of .NET System.Threading.TimerCallback.
+    using TimerCallback = std::function<void(void*)>;
+
     /**
      * @brief Provides a mechanism for executing a method at specified intervals on a thread-pool thread.
      *

@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <atomic>
+#include <thread>
+#include <chrono>
 #include "System/TimeProvider.hpp"
 #include "System/Diagnostics/Stopwatch.hpp"
 
@@ -61,6 +64,18 @@ TEST(TimeProviderTests, GetElapsedTime_ReflectsDelay) {
     // Simulate 1 second: freq ticks = 1 second
     TimeSpan one_sec = tp.GetElapsedTime(0, freq);
     EXPECT_NEAR(one_sec.getTotalSecondsProperty(), 1.0, 1e-6);
+}
+
+TEST(TimeProviderTests, CreateTimer_FiresCallback) {
+    std::atomic<int> count{0};
+    System::Threading::TimerCallback cb = [&](void*) { count++; };
+    auto timer = TimeProvider::getSystemProperty().CreateTimer(
+        cb, nullptr,
+        System::TimeSpan::FromMilliseconds(20),
+        System::TimeSpan::FromMilliseconds(-1)); // fire once
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    timer->Dispose();
+    EXPECT_GE(count.load(), 1);
 }
 
 TEST(TimeProviderTests, CustomProvider_OverridesGetUtcNow) {
