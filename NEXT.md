@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 55*
+*Last updated: 2026-06-13 (branch: develop) — session 56*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. Session 54 added String methods (ToUpper, ToLower, IndexOf, LastIndexOf, PadLeft, PadRight), Math completeness (Log2, Sinh/Cosh/Tanh, IEEERemainder, DivRem, BigMul, ScaleB, Tau constant), and Convert hex helpers (ToHexString, FromHexString). Session 55 fixed `TaskT::FromResult` — it previously called the async constructor (which throws on Emscripten); now uses a private pre-completed constructor, safe on all platforms. Task/TaskT now fully DONE. 3280 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). Session 50 implemented missing `System::String` methods (IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join) — `String` now DONE. Session 51 completed `NameValueCollection` (Get comma-joins all values per .NET spec; Get/GetValues by index; Add(collection)); corrected false-stub entries in COVERAGE.md for Console.ReadLine, PeriodicTimer, ThreadPool. Session 52 completed `IsolatedStorageFile` (DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames, CreateFile, CopyFile, MoveFile, GetFileNames, Remove, Close, Dispose, AvailableFreeSpace, UsedSize) and fixed `Parallel::ForEach` ref-capture UB + implemented `MaxDegreeOfParallelism`. Session 54 added String methods (ToUpper, ToLower, IndexOf, LastIndexOf, PadLeft, PadRight), Math completeness (Log2, Sinh/Cosh/Tanh, IEEERemainder, DivRem, BigMul, ScaleB, Tau constant), and Convert hex helpers (ToHexString, FromHexString). Session 55 fixed `TaskT::FromResult` — it previously called the async constructor (which throws on Emscripten); now uses a private pre-completed constructor, safe on all platforms. Task/TaskT now fully DONE. Session 56 added `System::Linq` (header-only, 19 operators: Where/Select/First/FirstOrDefault/LastOrDefault/Any/All/Count/ToList/Sum/Min/Max/OrderBy/OrderByDescending/Distinct/Reverse/Skip/Take/Concat/Contains), enhanced `String::Format` with format specifiers (`{0:X}`, `{0:D3}`, `{0:F2}`, `{0:G}`, `{0:E}`) and multi-arg overloads, completed `Random` (seeded constructor, `NextDouble`, `NextBytes`), and added `Stopwatch::Frequency` and `IsHighResolution`. 3345 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -250,6 +250,7 @@ git log --oneline -10
 | D3 | 53 | COVERAGE.md gap audit — all remaining gaps (GC, Regex named groups, Task threadpool, HTTPS) confirmed intentionally out of scope; no fixable gaps remain | — |
 | 87 | 54 | `String`: ToUpper/ToLower/IndexOf/LastIndexOf/PadLeft/PadRight; `Math`: Log2/Sinh/Cosh/Tanh/IEEERemainder/DivRem/BigMul/ScaleB/Tau; `Convert`: ToHexString/FromHexString; 56 new tests | +56 |
 | 88 | 55 | `TaskT::FromResult` — fixed to use pre-completed path (no async), safe on Emscripten; Task/TaskT now fully DONE | — |
+| 89 | 56 | `System::Linq` (new, header-only): Where/Select/First/FirstOrDefault/LastOrDefault/Any/All/Count/ToList/Sum/Min/Max/OrderBy/OrderByDescending/Distinct/Reverse/Skip/Take/Concat/Contains; `String::Format` specifiers ({0:X}/{0:D3}/{0:F2}/{0:G}/{0:E}) + multi-arg; `Random`: seeded ctor/NextDouble/NextBytes; `Stopwatch`: Frequency/IsHighResolution | +65 |
 
 ---
 
@@ -270,7 +271,7 @@ All fixable gaps resolved. Remaining known limitations (intentionally out of sco
 
 - **No merge to master or tags** without explicit per-action user approval; push only to `develop`
 - **No broad header refactor** — naming conventions touch 449 files, would break CNA
-- **No LINQ** — use `std::ranges` in ported code instead
+- **`System::Linq` is now implemented** — use `System::Linq::Where(...)` etc. in ported code
 - **No changes to `SharpRuntime::` primitive typedefs** — API foundation
 - **No POSIX includes in public `.hpp` headers** — all platform code belongs in `.cpp` files
 
@@ -296,8 +297,9 @@ All fixable gaps resolved. Remaining known limitations (intentionally out of sco
 > Session 53: COVERAGE.md gap audit — all remaining gaps confirmed intentionally out of scope (GC, Regex named groups, Task threadpool, HTTPS/TLS). No fixable gaps remain.
 > Session 54: String (ToUpper/ToLower/IndexOf/LastIndexOf/PadLeft/PadRight), Math (Log2/Sinh/Cosh/Tanh/IEEERemainder/DivRem/BigMul/ScaleB/Tau), Convert (ToHexString/FromHexString) (+56 tests).
 > Session 55: `TaskT::FromResult` Emscripten fix — pre-completed constructor bypasses async; Task/TaskT now fully DONE.
+> Session 56: `System::Linq` (19 operators, header-only); `String::Format` specifiers + multi-arg; `Random` seeded ctor/NextDouble/NextBytes; `Stopwatch` Frequency/IsHighResolution (+65 tests).
 >
 > Build: `cmake --build build --parallel 4`
-> Run full suite: `./build/SharpRuntimeTests` — must show 3280 passing, 0 failing.
+> Run full suite: `./build/SharpRuntimeTests` — must show 3345 passing, 0 failing.
 > Commit each logical change separately, then update NEXT.md.
 > Push only to `develop` — never merge to master or create tags without explicit user approval.
