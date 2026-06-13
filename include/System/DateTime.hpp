@@ -29,9 +29,7 @@ namespace System {
      *   three-argument constructors were added in session 33. DateTimeKind is not stored.
      */
     class DateTime : public Object {
-    private:
-        longcs ticks_;
-
+    public:
         static constexpr longcs TicksPerMillisecond = 10000LL;
         static constexpr longcs TicksPerSecond      = 10000000LL;
         static constexpr longcs TicksPerMinute      = 600000000LL;
@@ -39,6 +37,9 @@ namespace System {
         static constexpr longcs TicksPerDay         = 864000000000LL;
         /// Ticks from the .NET epoch (0001-01-01) to the Unix epoch (1970-01-01).
         static constexpr longcs UnixEpochTicks      = 621355968000000000LL;
+
+    private:
+        longcs ticks_;
 
         /**
          * @brief Decomposes ticks_ into a UTC std::tm using the C standard library.
