@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 47*
+*Last updated: 2026-06-13 (branch: develop) — session 48*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–46 completed portability, locale-safety, Windows build test, and all calendar+IdnMapping implementations. 3132 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. 3171 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -31,8 +31,8 @@
 - Zero errors, zero warnings
 
 ### Tests
-- **All 3164 tests pass** — `./build/SharpRuntimeTests` → `3164 tests from 478 test suites` ✅
-- GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
+- **All 3171 tests pass** — `./build/SharpRuntimeTests` → `3171 tests from 479 test suites` ✅
+- GoogleTest at `vendor/googletest/`; 75 test files in `tests/`
 - CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 
 ### Vendored libraries
@@ -146,7 +146,7 @@ src/                                    ← .cpp for all non-template complex ty
   SharpRuntime/Storage/StoragePaths.cpp
 vendor/
   googletest/, nlohmann/, tinyxml2/, miniz/
-tests/                                  ← 74 GoogleTest files, 3080 tests
+tests/                                  ← 75 GoogleTest files, 3171 tests
 ```
 
 ### Platform portability rules (enforced)
