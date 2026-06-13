@@ -28,6 +28,7 @@ struct Plane {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss<<"{Normal:"<<Normal.ToString()<<" D:"<<D<<"}";
         return ss.str();
     }

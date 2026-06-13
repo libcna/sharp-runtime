@@ -217,6 +217,7 @@ struct Matrix4x4 {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss << "{ {M11:"<<M11<<" M12:"<<M12<<" M13:"<<M13<<" M14:"<<M14<<"} "
            << "{M21:"<<M21<<" M22:"<<M22<<" M23:"<<M23<<" M24:"<<M24<<"} "
            << "{M31:"<<M31<<" M32:"<<M32<<" M33:"<<M33<<" M34:"<<M34<<"} "

@@ -34,7 +34,8 @@ struct Quaternion {
     }
 
     std::string ToString() const {
-        std::ostringstream ss; ss<<"{X:"<<X<<" Y:"<<Y<<" Z:"<<Z<<" W:"<<W<<"}"; return ss.str();
+        std::ostringstream ss; ss.imbue(std::locale::classic());
+        ss<<"{X:"<<X<<" Y:"<<Y<<" Z:"<<Z<<" W:"<<W<<"}"; return ss.str();
     }
 
     Quaternion operator+(const Quaternion& r) const { return {X+r.X,Y+r.Y,Z+r.Z,W+r.W}; }

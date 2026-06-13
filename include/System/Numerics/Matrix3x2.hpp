@@ -87,6 +87,7 @@ struct Matrix3x2 {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss<<"{ {M11:"<<M11<<" M12:"<<M12<<"} {M21:"<<M21<<" M22:"<<M22<<"} {M31:"<<M31<<" M32:"<<M32<<"} }";
         return ss.str();
     }

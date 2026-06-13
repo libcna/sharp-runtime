@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -39,6 +40,7 @@ struct Argb {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss << "<" << +A << ", " << +R << ", " << +G << ", " << +B << ">";
         return ss.str();
     }
@@ -74,6 +76,7 @@ struct Rgba {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss << "<" << +R << ", " << +G << ", " << +B << ", " << +A << ">";
         return ss.str();
     }

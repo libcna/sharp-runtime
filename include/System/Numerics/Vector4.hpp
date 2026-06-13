@@ -40,7 +40,8 @@ struct Vector4 {
     [[nodiscard]] bool Equals(const Vector4& o) const { return X==o.X&&Y==o.Y&&Z==o.Z&&W==o.W; }
 
     std::string ToString() const {
-        std::ostringstream ss; ss<<"<"<<X<<", "<<Y<<", "<<Z<<", "<<W<<">"; return ss.str();
+        std::ostringstream ss; ss.imbue(std::locale::classic());
+        ss<<"<"<<X<<", "<<Y<<", "<<Z<<", "<<W<<">"; return ss.str();
     }
 
     float operator[](int i) const {

@@ -36,7 +36,8 @@ struct Vector3 {
     [[nodiscard]] bool Equals(const Vector3& o) const { return X==o.X && Y==o.Y && Z==o.Z; }
 
     std::string ToString() const {
-        std::ostringstream ss; ss << "<" << X << ", " << Y << ", " << Z << ">"; return ss.str();
+        std::ostringstream ss; ss.imbue(std::locale::classic());
+        ss << "<" << X << ", " << Y << ", " << Z << ">"; return ss.str();
     }
 
     float operator[](int i) const {

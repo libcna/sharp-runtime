@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cmath>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -39,6 +40,7 @@ struct Vector2 {
 
     std::string ToString() const {
         std::ostringstream ss;
+        ss.imbue(std::locale::classic());
         ss << "<" << X << ", " << Y << ">";
         return ss.str();
     }
