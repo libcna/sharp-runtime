@@ -289,6 +289,109 @@ TEST(DateTimeOffsetTests, ToString_NonEmpty) {
     DateTimeOffset dto;
     EXPECT_FALSE(dto.ToString().empty());
 }
+TEST(DateTimeOffsetTests, UtcNow_UtcTicks_Positive) {
+    auto dto = DateTimeOffset::getUtcNowProperty();
+    EXPECT_GT(dto.getUtcTicksProperty(), 0LL);
+    EXPECT_EQ(dto.getOffsetProperty(), TimeSpan::Zero);
+}
+TEST(DateTimeOffsetTests, Now_HasOffset) {
+    auto dto = DateTimeOffset::getNowProperty();
+    EXPECT_GT(dto.getUtcTicksProperty(), 0LL);
+}
+TEST(DateTimeOffsetTests, ComponentAccessors) {
+    DateTime dt(2024, 6, 15, 10, 30, 45, 0);
+    TimeSpan off = TimeSpan::FromHours(2);
+    DateTimeOffset dto(dt, off);
+    EXPECT_EQ(dto.getYearProperty(),  2024);
+    EXPECT_EQ(dto.getMonthProperty(), 6);
+    EXPECT_EQ(dto.getDayProperty(),   15);
+    EXPECT_EQ(dto.getHourProperty(),  10);
+    EXPECT_EQ(dto.getMinuteProperty(),30);
+    EXPECT_EQ(dto.getSecondProperty(),45);
+}
+TEST(DateTimeOffsetTests, AddHours_ShiftsTime) {
+    DateTime dt(2024, 1, 1, 0, 0, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::Zero);
+    auto dto2 = dto.AddHours(3);
+    EXPECT_EQ(dto2.getHourProperty(), 3);
+}
+TEST(DateTimeOffsetTests, AddDays_ShiftsDate) {
+    DateTime dt(2024, 1, 10, 0, 0, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::Zero);
+    auto dto2 = dto.AddDays(5);
+    EXPECT_EQ(dto2.getDayProperty(), 15);
+}
+TEST(DateTimeOffsetTests, Subtract_TwoDates_GivesTimeSpan) {
+    DateTime dt1(2024, 1, 1, 0, 0, 0, 0);
+    DateTime dt2(2024, 1, 2, 0, 0, 0, 0);
+    DateTimeOffset a(dt1, TimeSpan::Zero), b(dt2, TimeSpan::Zero);
+    TimeSpan diff = b - a;
+    EXPECT_NEAR(diff.getTotalHoursProperty(), 24.0, 0.001);
+}
+TEST(DateTimeOffsetTests, Operators_Plus_Minus) {
+    DateTime dt(2024, 6, 1, 12, 0, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::Zero);
+    auto dto2 = dto + TimeSpan::FromHours(1);
+    EXPECT_EQ(dto2.getHourProperty(), 13);
+    auto dto3 = dto2 - TimeSpan::FromHours(1);
+    EXPECT_EQ(dto3.getHourProperty(), 12);
+}
+TEST(DateTimeOffsetTests, ComparisonOperators) {
+    DateTime dt1(2024, 1, 1, 0, 0, 0, 0), dt2(2024, 1, 2, 0, 0, 0, 0);
+    DateTimeOffset a(dt1, TimeSpan::Zero), b(dt2, TimeSpan::Zero);
+    EXPECT_TRUE(a < b);
+    EXPECT_TRUE(b > a);
+    EXPECT_TRUE(a <= a);
+    EXPECT_TRUE(b >= b);
+}
+TEST(DateTimeOffsetTests, CompareTo) {
+    DateTime dt1(2024, 1, 1, 0, 0, 0, 0), dt2(2024, 1, 2, 0, 0, 0, 0);
+    DateTimeOffset a(dt1, TimeSpan::Zero), b(dt2, TimeSpan::Zero);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_GT(b.CompareTo(a), 0);
+    EXPECT_EQ(a.CompareTo(a), 0);
+}
+TEST(DateTimeOffsetTests, Parse_ISO8601_WithOffset) {
+    DateTimeOffset dto = DateTimeOffset::Parse("2024-06-15T10:30:00+02:00");
+    EXPECT_EQ(dto.getYearProperty(),  2024);
+    EXPECT_EQ(dto.getHourProperty(),  10);
+    EXPECT_NEAR(dto.getOffsetProperty().getTotalHoursProperty(), 2.0, 0.001);
+}
+TEST(DateTimeOffsetTests, Parse_ISO8601_Z) {
+    DateTimeOffset dto = DateTimeOffset::Parse("2024-06-15T10:30:00Z");
+    EXPECT_EQ(dto.getOffsetProperty(), TimeSpan::Zero);
+}
+TEST(DateTimeOffsetTests, TryParse_Invalid_ReturnsFalse) {
+    DateTimeOffset dto;
+    EXPECT_FALSE(DateTimeOffset::TryParse("not-a-date", dto));
+}
+TEST(DateTimeOffsetTests, AddMonths) {
+    DateTime dt(2024, 1, 31, 0, 0, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::Zero);
+    auto dto2 = dto.AddMonths(1);
+    EXPECT_EQ(dto2.getMonthProperty(), 2);
+}
+TEST(DateTimeOffsetTests, AddYears) {
+    DateTime dt(2024, 6, 1, 0, 0, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::Zero);
+    auto dto2 = dto.AddYears(2);
+    EXPECT_EQ(dto2.getYearProperty(), 2026);
+}
+TEST(DateTimeOffsetTests, ToUniversalTime_ZeroOffset) {
+    DateTime dt(2024, 6, 1, 12, 0, 0, 0);
+    TimeSpan off = TimeSpan::FromHours(2);
+    DateTimeOffset dto(dt, off);
+    auto utc = dto.ToUniversalTime();
+    EXPECT_EQ(utc.getOffsetProperty(), TimeSpan::Zero);
+    EXPECT_EQ(utc.getHourProperty(), 10); // 12 - 2 = 10
+}
+TEST(DateTimeOffsetTests, ToString_WithFormat_O) {
+    DateTime dt(2024, 6, 15, 10, 30, 0, 0);
+    DateTimeOffset dto(dt, TimeSpan::FromHours(2));
+    std::string s = dto.ToString(std::string("O"));
+    EXPECT_NE(s.find("2024"), std::string::npos);
+    EXPECT_NE(s.find("+02:00"), std::string::npos);
+}
 
 // ===========================================================================
 // TimeOnly

@@ -16,6 +16,9 @@
 
 namespace System {
 
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
+
     /**
      * @brief Represents a point in time relative to UTC.
      *
@@ -30,51 +33,63 @@ namespace System {
         TimeSpan offset_;
 
     public:
-        /**
-         * @brief Initializes a new instance with zero DateTime and zero offset.
-         */
         DateTimeOffset();
-
-        /**
-         * @brief Initializes a new instance with the specified DateTime and UTC offset.
-         *
-         * @param dateTime Date and time component.
-         * @param offset UTC offset.
-         */
         DateTimeOffset(const DateTime& dateTime, const TimeSpan& offset);
 
-        /**
-         * @brief Gets the DateTime component.
-         *
-         * @return DateTime value.
-         */
+        // Static factory
+        [[nodiscard]] static DateTimeOffset getNowProperty();
+        [[nodiscard]] static DateTimeOffset getUtcNowProperty();
+
+        // Component accessors
         [[nodiscard]] const DateTime& getDateTimeProperty() const;
-
-        /**
-         * @brief Gets the UTC offset component.
-         *
-         * @return Offset from UTC.
-         */
         [[nodiscard]] const TimeSpan& getOffsetProperty() const;
+        [[nodiscard]] longcs getUtcTicksProperty() const;
+        [[nodiscard]] intcs getYearProperty()        const;
+        [[nodiscard]] intcs getMonthProperty()       const;
+        [[nodiscard]] intcs getDayProperty()         const;
+        [[nodiscard]] intcs getHourProperty()        const;
+        [[nodiscard]] intcs getMinuteProperty()      const;
+        [[nodiscard]] intcs getSecondProperty()      const;
+        [[nodiscard]] intcs getMillisecondProperty() const;
+        [[nodiscard]] DateTime getDateProperty()          const;
+        [[nodiscard]] DateTime getUtcDateTimeProperty()   const;
 
-        /**
-         * @brief Gets the UTC tick value represented by this instance.
-         *
-         * @return UTC tick count.
-         */
-        [[nodiscard]] SharpRuntime::longcs getUtcTicksProperty() const;
+        // Arithmetic
+        [[nodiscard]] DateTimeOffset Add(const TimeSpan& ts) const;
+        [[nodiscard]] DateTimeOffset AddDays(double days) const;
+        [[nodiscard]] DateTimeOffset AddHours(double hours) const;
+        [[nodiscard]] DateTimeOffset AddMinutes(double minutes) const;
+        [[nodiscard]] DateTimeOffset AddSeconds(double seconds) const;
+        [[nodiscard]] DateTimeOffset AddMilliseconds(double ms) const;
+        [[nodiscard]] DateTimeOffset AddMonths(intcs months) const;
+        [[nodiscard]] DateTimeOffset AddYears(intcs years) const;
+        [[nodiscard]] TimeSpan Subtract(const DateTimeOffset& other) const;
+        [[nodiscard]] DateTimeOffset Subtract(const TimeSpan& ts) const;
+        [[nodiscard]] DateTimeOffset ToUniversalTime() const;
 
-        /**
-         * @brief Returns a string representation of the current instance.
-         *
-         * @return String representation.
-         */
+        // Parsing / formatting
+        [[nodiscard]] static DateTimeOffset Parse(const std::string& s);
+        static bool TryParse(const std::string& s, DateTimeOffset& result);
         [[nodiscard]] std::string ToString() const override;
+        [[nodiscard]] std::string ToString(const std::string& format) const;
 
-        /// Returns true if this instance is equal to the specified DateTimeOffset.
-        [[nodiscard]] bool operator==(const DateTimeOffset& other) const;
-        /// Returns true if this instance is not equal to the specified DateTimeOffset.
-        [[nodiscard]] bool operator!=(const DateTimeOffset& other) const;
+        using Object::Equals;
+
+        // Comparison
+        [[nodiscard]] intcs CompareTo(const DateTimeOffset& other) const;
+        [[nodiscard]] bool Equals(const DateTimeOffset& other) const;
+        bool operator==(const DateTimeOffset& other) const;
+        bool operator!=(const DateTimeOffset& other) const;
+        bool operator< (const DateTimeOffset& other) const;
+        bool operator<=(const DateTimeOffset& other) const;
+        bool operator> (const DateTimeOffset& other) const;
+        bool operator>=(const DateTimeOffset& other) const;
+
+        // Operators
+        [[nodiscard]] DateTimeOffset operator+(const TimeSpan& ts) const;
+        [[nodiscard]] DateTimeOffset operator-(const TimeSpan& ts) const;
+        [[nodiscard]] TimeSpan       operator-(const DateTimeOffset& other) const;
+
         GetTypeNameHPP()
     };
 
