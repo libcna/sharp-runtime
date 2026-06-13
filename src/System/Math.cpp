@@ -145,6 +145,20 @@ namespace System
         return 0;
     }
 
+    intcs Math::Sign(longcs value)
+    {
+        if (value < 0) return -1;
+        if (value > 0) return  1;
+        return 0;
+    }
+
+    intcs Math::Sign(float value)
+    {
+        if (value < 0.0f) return -1;
+        if (value > 0.0f) return  1;
+        return 0;
+    }
+
     double Math::Truncate(double d) { return std::trunc(d); }
 
     double Math::IEEERemainder(double x, double y)

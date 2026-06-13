@@ -308,3 +308,51 @@ TEST(SortedSetTests, StringSortedSet) {
     EXPECT_EQ(v[1], "banana");
     EXPECT_EQ(v[2], "cherry");
 }
+
+// ---------------------------------------------------------------------------
+// SortedSet — set-algebra parity with HashSet
+// ---------------------------------------------------------------------------
+
+TEST(SortedSetTests, SetEquals_SameSets_True) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{1, 2, 3};
+    EXPECT_TRUE(a.SetEquals(b));
+}
+TEST(SortedSetTests, SetEquals_DifferentSets_False) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{1, 2, 4};
+    EXPECT_FALSE(a.SetEquals(b));
+}
+TEST(SortedSetTests, SymmetricExceptWith_BasicXor) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{2, 3, 4};
+    a.SymmetricExceptWith(b);
+    std::vector<int> v = a.ToVector();
+    EXPECT_EQ(v, (std::vector<int>{1, 4}));
+}
+TEST(SortedSetTests, SymmetricExceptWith_EmptyOther_Unchanged) {
+    SortedSet<int> a{1, 2};
+    SortedSet<int> b;
+    a.SymmetricExceptWith(b);
+    EXPECT_EQ(a.getCountProperty(), 2);
+}
+TEST(SortedSetTests, IsProperSubsetOf_True) {
+    SortedSet<int> a{1, 2};
+    SortedSet<int> b{1, 2, 3};
+    EXPECT_TRUE(a.IsProperSubsetOf(b));
+}
+TEST(SortedSetTests, IsProperSubsetOf_EqualSets_False) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{1, 2, 3};
+    EXPECT_FALSE(a.IsProperSubsetOf(b));
+}
+TEST(SortedSetTests, IsProperSupersetOf_True) {
+    SortedSet<int> a{1, 2, 3};
+    SortedSet<int> b{1, 2};
+    EXPECT_TRUE(a.IsProperSupersetOf(b));
+}
+TEST(SortedSetTests, IsProperSupersetOf_EqualSets_False) {
+    SortedSet<int> a{1, 2};
+    SortedSet<int> b{1, 2};
+    EXPECT_FALSE(a.IsProperSupersetOf(b));
+}

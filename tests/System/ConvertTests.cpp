@@ -84,13 +84,13 @@ TEST(ConvertTests, ToInt32Base10) {
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToInt64FromString) {
-    EXPECT_EQ(Convert::ToInt64("1000000000000"), 1000000000000LL);
-    EXPECT_EQ(Convert::ToInt64("-1"),            -1LL);
+    EXPECT_EQ(Convert::ToInt64(std::string("1000000000000")), 1000000000000LL);
+    EXPECT_EQ(Convert::ToInt64(std::string("-1")),            -1LL);
 }
 
 TEST(ConvertTests, ToInt64FromStringInvalidThrows) {
-    EXPECT_THROW(Convert::ToInt64("abc"), std::exception);
-    EXPECT_THROW(Convert::ToInt64(""),    std::exception);
+    EXPECT_THROW(Convert::ToInt64(std::string("abc")), std::exception);
+    EXPECT_THROW(Convert::ToInt64(std::string("")),    std::exception);
 }
 
 TEST(ConvertTests, ToInt64FromInt) {
@@ -124,14 +124,14 @@ TEST(ConvertTests, ToInt16OverflowThrows) {
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToDoubleFromString) {
-    EXPECT_NEAR(Convert::ToDouble("3.14"), 3.14, 1e-10);
-    EXPECT_NEAR(Convert::ToDouble("-1.5"), -1.5, 1e-10);
-    EXPECT_NEAR(Convert::ToDouble("0"),    0.0,  1e-15);
+    EXPECT_NEAR(Convert::ToDouble(std::string("3.14")), 3.14, 1e-10);
+    EXPECT_NEAR(Convert::ToDouble(std::string("-1.5")), -1.5, 1e-10);
+    EXPECT_NEAR(Convert::ToDouble(std::string("0")),    0.0,  1e-15);
 }
 
 TEST(ConvertTests, ToDoubleFromStringInvalidThrows) {
-    EXPECT_THROW(Convert::ToDouble("abc"), std::exception);
-    EXPECT_THROW(Convert::ToDouble(""),    std::exception);
+    EXPECT_THROW(Convert::ToDouble(std::string("abc")), std::exception);
+    EXPECT_THROW(Convert::ToDouble(std::string("")),    std::exception);
 }
 
 TEST(ConvertTests, ToDoubleFromInt) {
@@ -147,7 +147,7 @@ TEST(ConvertTests, ToDoubleFromLong) {
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToSingleFromString) {
-    EXPECT_NEAR(static_cast<double>(Convert::ToSingle("3.14")), 3.14, 1e-5);
+    EXPECT_NEAR(static_cast<double>(Convert::ToSingle(std::string("3.14"))), 3.14, 1e-5);
 }
 
 TEST(ConvertTests, ToSingleFromDouble) {
@@ -174,7 +174,7 @@ TEST(ConvertTests, ToByteFromIntOverflowThrows) {
 }
 
 TEST(ConvertTests, ToByteFromString) {
-    EXPECT_EQ(Convert::ToByte("200"), 200u);
+    EXPECT_EQ(Convert::ToByte(std::string("200")), 200u);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,3 +408,52 @@ TEST(ConvertTests, ToChar_FromInt) {
 TEST(ConvertTests, ToChar_Zero) {
     EXPECT_EQ(Convert::ToChar(static_cast<SharpRuntime::intcs>(0)), '\0');
 }
+
+// ---------------------------------------------------------------------------
+// Convert — additional overloads (Task 99)
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToInt64_FromFloat) {
+    EXPECT_EQ(Convert::ToInt64(2.9f), static_cast<SharpRuntime::longcs>(2));
+}
+TEST(ConvertTests, ToInt64_FromBool_True) {
+    EXPECT_EQ(Convert::ToInt64(true), 1LL);
+}
+TEST(ConvertTests, ToInt64_FromBool_False) {
+    EXPECT_EQ(Convert::ToInt64(false), 0LL);
+}
+
+TEST(ConvertTests, ToDouble_FromFloat) {
+    EXPECT_NEAR(Convert::ToDouble(1.5f), 1.5, 1e-6);
+}
+TEST(ConvertTests, ToDouble_FromBool_True) {
+    EXPECT_EQ(Convert::ToDouble(true), 1.0);
+}
+TEST(ConvertTests, ToDouble_FromBool_False) {
+    EXPECT_EQ(Convert::ToDouble(false), 0.0);
+}
+
+TEST(ConvertTests, ToSingle_FromLong) {
+    EXPECT_EQ(Convert::ToSingle(static_cast<SharpRuntime::longcs>(4LL)), 4.0f);
+}
+TEST(ConvertTests, ToSingle_FromBool_True)  { EXPECT_EQ(Convert::ToSingle(true),  1.0f); }
+TEST(ConvertTests, ToSingle_FromBool_False) { EXPECT_EQ(Convert::ToSingle(false), 0.0f); }
+
+TEST(ConvertTests, ToByte_FromLong) {
+    EXPECT_EQ(Convert::ToByte(static_cast<SharpRuntime::longcs>(200LL)), SharpRuntime::bytecs(200));
+}
+TEST(ConvertTests, ToByte_FromBool_True)  { EXPECT_EQ(Convert::ToByte(true),  SharpRuntime::bytecs(1)); }
+TEST(ConvertTests, ToByte_FromBool_False) { EXPECT_EQ(Convert::ToByte(false), SharpRuntime::bytecs(0)); }
+TEST(ConvertTests, ToByte_FromDouble) {
+    EXPECT_EQ(Convert::ToByte(65.9), SharpRuntime::bytecs(65));
+}
+TEST(ConvertTests, ToByte_FromFloat) {
+    EXPECT_EQ(Convert::ToByte(10.5f), SharpRuntime::bytecs(10));
+}
+
+TEST(ConvertTests, ToBoolean_FromLong_NonZero) { EXPECT_TRUE(Convert::ToBoolean(static_cast<SharpRuntime::longcs>(1LL))); }
+TEST(ConvertTests, ToBoolean_FromLong_Zero)    { EXPECT_FALSE(Convert::ToBoolean(static_cast<SharpRuntime::longcs>(0LL))); }
+TEST(ConvertTests, ToBoolean_FromDouble_NonZero) { EXPECT_TRUE(Convert::ToBoolean(3.14)); }
+TEST(ConvertTests, ToBoolean_FromDouble_Zero)    { EXPECT_FALSE(Convert::ToBoolean(0.0)); }
+TEST(ConvertTests, ToBoolean_FromFloat_NonZero)  { EXPECT_TRUE(Convert::ToBoolean(0.1f)); }
+TEST(ConvertTests, ToBoolean_FromFloat_Zero)     { EXPECT_FALSE(Convert::ToBoolean(0.0f)); }

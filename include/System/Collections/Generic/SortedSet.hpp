@@ -71,6 +71,30 @@ namespace System::Collections::Generic {
             return other.IsSubsetOf(*this);
         }
 
+        /// Returns true if this set and the other set contain the same elements.
+        [[nodiscard]] bool SetEquals(const SortedSet<T>& other) const {
+            return data_ == other.data_;
+        }
+
+        /// Modifies this set to contain only elements present in either set, but not both.
+        void SymmetricExceptWith(const SortedSet<T>& other) {
+            for (auto& x : other.data_) {
+                auto it = data_.find(x);
+                if (it != data_.end()) data_.erase(it);
+                else data_.insert(x);
+            }
+        }
+
+        /// Returns true if this set is a proper subset of the other (subset and not equal).
+        [[nodiscard]] bool IsProperSubsetOf(const SortedSet<T>& other) const {
+            return IsSubsetOf(other) && !SetEquals(other);
+        }
+
+        /// Returns true if this set is a proper superset of the other (superset and not equal).
+        [[nodiscard]] bool IsProperSupersetOf(const SortedSet<T>& other) const {
+            return IsSupersetOf(other) && !SetEquals(other);
+        }
+
         /// Returns a view of elements that fall within the specified inclusive range [lower, upper].
         [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {
             SortedSet<T> view;

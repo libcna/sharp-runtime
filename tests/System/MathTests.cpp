@@ -417,3 +417,15 @@ TEST(MathTests, Max_Float_Basic)     { EXPECT_EQ(Math::Max(1.5f, 2.5f), 2.5f); }
 TEST(MathTests, Clamp_Float_Below)   { EXPECT_EQ(Math::Clamp(0.0f, 1.0f, 10.0f), 1.0f); }
 TEST(MathTests, Clamp_Float_Above)   { EXPECT_EQ(Math::Clamp(20.0f, 1.0f, 10.0f), 10.0f); }
 TEST(MathTests, Clamp_Float_InRange) { EXPECT_EQ(Math::Clamp(5.0f, 1.0f, 10.0f), 5.0f); }
+
+// ---------------------------------------------------------------------------
+// Sign — longcs and float overloads
+// ---------------------------------------------------------------------------
+
+TEST(MathTests, Sign_Long_Negative) { EXPECT_EQ(Math::Sign(static_cast<SharpRuntime::longcs>(-999999999999LL)), -1); }
+TEST(MathTests, Sign_Long_Zero)     { EXPECT_EQ(Math::Sign(static_cast<SharpRuntime::longcs>(0LL)), 0); }
+TEST(MathTests, Sign_Long_Positive) { EXPECT_EQ(Math::Sign(static_cast<SharpRuntime::longcs>(123456789012LL)), 1); }
+
+TEST(MathTests, Sign_Float_Negative) { EXPECT_EQ(Math::Sign(-3.5f), -1); }
+TEST(MathTests, Sign_Float_Zero)     { EXPECT_EQ(Math::Sign(0.0f),   0); }
+TEST(MathTests, Sign_Float_Positive) { EXPECT_EQ(Math::Sign(2.7f),   1); }

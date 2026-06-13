@@ -77,6 +77,21 @@ namespace System::Collections::Generic {
             }
             return result;
         }
+
+        /// Tries to remove and return the object at the beginning; returns false if empty.
+        bool TryDequeue(T& result) {
+            if (queue_.empty()) return false;
+            result = std::move(queue_.front());
+            queue_.pop();
+            return true;
+        }
+
+        /// Tries to return the object at the beginning without removing it; returns false if empty.
+        bool TryPeek(T& result) const {
+            if (queue_.empty()) return false;
+            result = queue_.front();
+            return true;
+        }
     };
 
 } // namespace System::Collections::Generic

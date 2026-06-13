@@ -270,3 +270,65 @@ TEST(StackTests, StressLifo) {
     for (int i = 999; i >= 0; --i) EXPECT_EQ(s.Pop(), i);
     EXPECT_EQ(s.getCountProperty(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Queue::TryDequeue / TryPeek
+// ---------------------------------------------------------------------------
+
+TEST(QueueTests, TryDequeue_EmptyReturnsFalse) {
+    Queue<int> q;
+    int v = 0;
+    EXPECT_FALSE(q.TryDequeue(v));
+}
+TEST(QueueTests, TryDequeue_PopsFront) {
+    Queue<int> q;
+    q.Enqueue(10); q.Enqueue(20);
+    int v = 0;
+    EXPECT_TRUE(q.TryDequeue(v));
+    EXPECT_EQ(v, 10);
+    EXPECT_EQ(q.getCountProperty(), 1);
+}
+TEST(QueueTests, TryPeek_EmptyReturnsFalse) {
+    Queue<int> q;
+    int v = 0;
+    EXPECT_FALSE(q.TryPeek(v));
+}
+TEST(QueueTests, TryPeek_ReturnsFrontWithoutRemoving) {
+    Queue<int> q;
+    q.Enqueue(42);
+    int v = 0;
+    EXPECT_TRUE(q.TryPeek(v));
+    EXPECT_EQ(v, 42);
+    EXPECT_EQ(q.getCountProperty(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Stack::TryPop / TryPeek
+// ---------------------------------------------------------------------------
+
+TEST(StackTests, TryPop_EmptyReturnsFalse) {
+    Stack<int> s;
+    int v = 0;
+    EXPECT_FALSE(s.TryPop(v));
+}
+TEST(StackTests, TryPop_PopsTop) {
+    Stack<int> s;
+    s.Push(5); s.Push(9);
+    int v = 0;
+    EXPECT_TRUE(s.TryPop(v));
+    EXPECT_EQ(v, 9);
+    EXPECT_EQ(s.getCountProperty(), 1);
+}
+TEST(StackTests, TryPeek_EmptyReturnsFalse) {
+    Stack<int> s;
+    int v = 0;
+    EXPECT_FALSE(s.TryPeek(v));
+}
+TEST(StackTests, TryPeek_ReturnsTopWithoutRemoving) {
+    Stack<int> s;
+    s.Push(7);
+    int v = 0;
+    EXPECT_TRUE(s.TryPeek(v));
+    EXPECT_EQ(v, 7);
+    EXPECT_EQ(s.getCountProperty(), 1);
+}

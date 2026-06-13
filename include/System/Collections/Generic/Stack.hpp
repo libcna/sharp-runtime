@@ -77,6 +77,21 @@ namespace System::Collections::Generic {
             }
             return result;
         }
+
+        /// Tries to remove and return the top object; returns false if empty.
+        bool TryPop(T& result) {
+            if (stack_.empty()) return false;
+            result = std::move(stack_.top());
+            stack_.pop();
+            return true;
+        }
+
+        /// Tries to return the top object without removing it; returns false if empty.
+        bool TryPeek(T& result) const {
+            if (stack_.empty()) return false;
+            result = stack_.top();
+            return true;
+        }
     };
 
 } // namespace System::Collections::Generic

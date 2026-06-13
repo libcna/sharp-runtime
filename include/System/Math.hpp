@@ -260,6 +260,10 @@ namespace System
         [[nodiscard]] static intcs Sign(intcs value);
         /// @brief Returns an integer indicating the sign of a double (-1, 0, or 1).
         [[nodiscard]] static intcs Sign(double value);
+        /// @brief Returns an integer indicating the sign of a 64-bit integer (-1, 0, or 1).
+        [[nodiscard]] static intcs Sign(longcs value);
+        /// @brief Returns an integer indicating the sign of a single-precision float (-1, 0, or 1).
+        [[nodiscard]] static intcs Sign(float value);
 
         /// @brief Returns the integral part of @p d (discards the fractional part).
         [[nodiscard]] static double Truncate(double d);
