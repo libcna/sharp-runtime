@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 52*
+*Last updated: 2026-06-13 (branch: develop) — session 53*
 
 ---
 
@@ -248,12 +248,20 @@ git log --oneline -10
 | 84 | 50 | `System::String` — implement missing methods: `IsNullOrWhiteSpace`, `EndsWith`, `Contains`, `Replace` (string+char), `Substring` (1- and 2-arg), `Trim`/`TrimStart`/`TrimEnd`, `Concat` (2/3/4/vector), `Join`; 48 new tests | +37 |
 | 85 | 51 | `NameValueCollection` — `Get()` now comma-joins all values (matches .NET spec); add `Get(int)`, `GetValues(int)` by-index overloads; add `Add(collection)` merge; +5 tests. Fix COVERAGE.md false-stub markings for Console.ReadLine, PeriodicTimer, ThreadPool | +5 |
 | 86 | 52 | `IsolatedStorageFile` — add DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames (glob), CreateFile, CopyFile (2 overloads), MoveFile, GetFileNames (glob), Remove, Close, Dispose, AvailableFreeSpace, UsedSize; +11 tests. Fix `Parallel::ForEach` ref-capture UB; implement `MaxDegreeOfParallelism` in `Parallel::For(opts)` | +11 |
+| D3 | 53 | COVERAGE.md gap audit — all remaining gaps (GC, Regex named groups, Task threadpool, HTTPS) confirmed intentionally out of scope; no fixable gaps remain | — |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-All planned tasks complete. No known remaining feature gaps.
+All fixable gaps resolved. Remaining known limitations (intentionally out of scope):
+
+| Limitation | Reason |
+|------------|--------|
+| `GC` — no-op stubs | Not meaningful in C++; correct behaviour |
+| `Regex` — no named groups | `std::regex` limitation; needs PCRE2 dependency |
+| `Task`/`TaskT` — no real threadpool | Large redesign; `std::async` sufficient for current use |
+| `HttpClient` — no HTTPS/TLS | Needs OpenSSL/mbedTLS external dependency |
 
 ---
 
@@ -284,6 +292,7 @@ All planned tasks complete. No known remaining feature gaps.
 > Session 50: `System::String` completed — IsNullOrWhiteSpace, EndsWith, Contains, Replace, Substring, Trim/TrimStart/TrimEnd, Concat, Join (+37 tests).
 > Session 51: `NameValueCollection` completed — Get comma-joins, by-index overloads, Add(collection); COVERAGE.md false-stub corrections (+5 tests).
 > Session 52: `IsolatedStorageFile` completed — directory/file ops, glob search, Remove/Close/Dispose, AvailableFreeSpace/UsedSize (+11 tests). `Parallel::ForEach` ref-capture UB fixed; `MaxDegreeOfParallelism` implemented.
+> Session 53: COVERAGE.md gap audit — all remaining gaps confirmed intentionally out of scope (GC, Regex named groups, Task threadpool, HTTPS/TLS). No fixable gaps remain.
 >
 > Build: `cmake --build build --parallel 4`
 > Run full suite: `./build/SharpRuntimeTests` — must show 3224 passing, 0 failing.
