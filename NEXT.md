@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 46*
+*Last updated: 2026-06-13 (branch: develop) — session 47*
 
 ---
 
@@ -31,7 +31,7 @@
 - Zero errors, zero warnings
 
 ### Tests
-- **All 3132 tests pass** — `./build/SharpRuntimeTests` → `3132 tests from 471 test suites` ✅
+- **All 3164 tests pass** — `./build/SharpRuntimeTests` → `3164 tests from 478 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 - CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 
@@ -95,6 +95,7 @@
 | `System::Collections::ArrayList` | ✅ DONE | std::vector<std::any> wrapper, full IList |
 | `System::Collections::Hashtable` | ✅ DONE | std::unordered_map<string,any> wrapper, IDictionary |
 | `System::Text::Ascii` | ✅ DONE | IsValid, ToUpper/Lower, Trim, EqualsIgnoreCase |
+| `System::Net::Http::HttpClient` | ✅ DONE | HTTP/1.1 only; no TLS/HTTPS; POSIX+Winsock2; chunked+Content-Length; Emscripten throws |
 | `System::GC` | ⚠️ STUB | no-op stub only |
 
 ---
@@ -241,6 +242,7 @@ git log --oneline -10
 | 80 | 45 | Windows build test (mingw-w64 14): all 7 Windows-specific `.cpp` files compile clean; fixed `#undef GetCurrentDirectory` in Environment.cpp and `#undef GetTempPath`/`GetTempFileName` in Path.cpp (Win32 macros colliding with our method definitions) | ✅ |
 | 70 | 46 | KoreanCalendar (year+2333), JapaneseCalendar (5 eras: Meiji/Taisho/Showa/Heisei/Reiwa), HijriCalendar (30-year algorithmic), HebrewCalendar (.NET lookup table 1583-2239, 6 year types), UmAlQuraCalendar (pre-computed table 1318-1500 AH); DateTime Ticks constants made public | ✅ |
 | 71 | 46 | IdnMapping — Punycode/IDNA (RFC 3492): GetAscii() Unicode→ACE, GetUnicode() ACE→Unicode; pure algorithmic, no ICU; UTF-8 I/O; multi-label domain support | ✅ |
+| 82 | 47 | HttpClient (System.Net.Http) — HTTP/1.1 over raw sockets; HttpMethod, HttpContent, StringContent, ByteArrayContent, HttpRequestMessage, HttpResponseMessage, HttpClient; POSIX+Winsock2; chunked+Content-Length; Emscripten throws; async via TaskT | +32 |
 
 ---
 
