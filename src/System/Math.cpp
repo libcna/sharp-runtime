@@ -173,6 +173,29 @@ namespace System
         return q;
     }
 
+    longcs Math::DivRem(longcs a, longcs b, longcs& result)
+    {
+        longcs q = a / b;
+        result   = a % b;
+        return q;
+    }
+
+    double Math::MaxMagnitude(double x, double y)
+    {
+        double ax = std::fabs(x), ay = std::fabs(y);
+        if (ax > ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? y : x;
+        return y;
+    }
+
+    double Math::MinMagnitude(double x, double y)
+    {
+        double ax = std::fabs(x), ay = std::fabs(y);
+        if (ax < ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? x : y;
+        return y;
+    }
+
     longcs Math::BigMul(intcs a, intcs b)
     {
         return static_cast<longcs>(a) * static_cast<longcs>(b);

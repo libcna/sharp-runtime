@@ -15,6 +15,7 @@ namespace System {
 
     using SharpRuntime::intcs;
     using SharpRuntime::bytecs;
+    using SharpRuntime::longcs;
 
     /**
      * @brief Represents a pseudo-random number generator.
@@ -90,6 +91,15 @@ namespace System {
          * @return A float greater than or equal to 0.0f and less than 1.0f.
          */
         float NextSingle();
+
+        /// @brief Returns a non-negative random 64-bit integer in [0, Int64.MaxValue).
+        longcs NextInt64();
+
+        /// @brief Returns a non-negative random 64-bit integer in [0, maxValue).
+        longcs NextInt64(longcs maxValue);
+
+        /// @brief Returns a random 64-bit integer in [minValue, maxValue).
+        longcs NextInt64(longcs minValue, longcs maxValue);
 
         /**
          * @brief Fills the elements of a byte vector with random values.

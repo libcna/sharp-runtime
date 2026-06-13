@@ -64,6 +64,30 @@ namespace System {
         return dist(generator);
     }
 
+    longcs Random::NextInt64()
+    {
+        return NextInt64(0LL, SharpRuntime::LONGCS_MAX);
+    }
+
+    longcs Random::NextInt64(longcs maxValue)
+    {
+        if (maxValue < 0)
+            throw ArgumentOutOfRangeException("maxValue must be >= 0");
+        if (maxValue == 0)
+            return 0;
+        return NextInt64(0LL, maxValue);
+    }
+
+    longcs Random::NextInt64(longcs minValue, longcs maxValue)
+    {
+        if (minValue > maxValue)
+            throw ArgumentOutOfRangeException("minValue must be <= maxValue");
+        if (minValue == maxValue)
+            return minValue;
+        std::uniform_int_distribution<longcs> dist(minValue, maxValue - 1);
+        return dist(generator);
+    }
+
     void Random::NextBytes(std::vector<bytecs>& buffer)
     {
         std::uniform_int_distribution<int> dist(0, 255);

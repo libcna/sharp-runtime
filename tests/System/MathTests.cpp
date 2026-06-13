@@ -429,3 +429,40 @@ TEST(MathTests, Sign_Long_Positive) { EXPECT_EQ(Math::Sign(static_cast<SharpRunt
 TEST(MathTests, Sign_Float_Negative) { EXPECT_EQ(Math::Sign(-3.5f), -1); }
 TEST(MathTests, Sign_Float_Zero)     { EXPECT_EQ(Math::Sign(0.0f),   0); }
 TEST(MathTests, Sign_Float_Positive) { EXPECT_EQ(Math::Sign(2.7f),   1); }
+
+// ---------------------------------------------------------------------------
+// DivRem — longcs overload
+// ---------------------------------------------------------------------------
+TEST(MathTests, DivRem_Long_Positive) {
+    SharpRuntime::longcs rem = 0;
+    SharpRuntime::longcs q = Math::DivRem(static_cast<SharpRuntime::longcs>(10LL),
+                                           static_cast<SharpRuntime::longcs>(3LL), rem);
+    EXPECT_EQ(q, 3LL);
+    EXPECT_EQ(rem, 1LL);
+}
+TEST(MathTests, DivRem_Long_Negative) {
+    SharpRuntime::longcs rem = 0;
+    SharpRuntime::longcs q = Math::DivRem(static_cast<SharpRuntime::longcs>(-10LL),
+                                           static_cast<SharpRuntime::longcs>(3LL), rem);
+    EXPECT_EQ(q, -3LL);
+    EXPECT_EQ(rem, -1LL);
+}
+TEST(MathTests, DivRem_Long_Exact) {
+    SharpRuntime::longcs rem = -1;
+    Math::DivRem(static_cast<SharpRuntime::longcs>(9LL),
+                 static_cast<SharpRuntime::longcs>(3LL), rem);
+    EXPECT_EQ(rem, 0LL);
+}
+
+// ---------------------------------------------------------------------------
+// MaxMagnitude / MinMagnitude
+// ---------------------------------------------------------------------------
+TEST(MathTests, MaxMagnitude_LargerFirst)  { EXPECT_EQ(Math::MaxMagnitude(5.0, 3.0),  5.0); }
+TEST(MathTests, MaxMagnitude_LargerSecond) { EXPECT_EQ(Math::MaxMagnitude(2.0, -7.0), -7.0); }
+TEST(MathTests, MaxMagnitude_Equal_ReturnsPositive) { EXPECT_EQ(Math::MaxMagnitude(3.0, -3.0), 3.0); }
+TEST(MathTests, MaxMagnitude_NaN_Propagates) { EXPECT_TRUE(std::isnan(Math::MaxMagnitude(std::numeric_limits<double>::quiet_NaN(), 1.0))); }
+
+TEST(MathTests, MinMagnitude_SmallerFirst)  { EXPECT_EQ(Math::MinMagnitude(2.0, 5.0),   2.0); }
+TEST(MathTests, MinMagnitude_SmallerSecond) { EXPECT_EQ(Math::MinMagnitude(-7.0, 2.0),  2.0); }
+TEST(MathTests, MinMagnitude_Equal_ReturnsNegative) { EXPECT_EQ(Math::MinMagnitude(-3.0, 3.0), -3.0); }
+TEST(MathTests, MinMagnitude_NaN_Propagates) { EXPECT_TRUE(std::isnan(Math::MinMagnitude(std::numeric_limits<double>::quiet_NaN(), 1.0))); }

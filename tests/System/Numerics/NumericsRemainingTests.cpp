@@ -178,3 +178,34 @@ TEST(MathFTests, FusedMultiplyAdd_Basic) {
 }
 TEST(MathFTests, Round_TwoDigits)  { EXPECT_NEAR(MathF::Round(3.14159f, 2), 3.14f, 1e-5f); }
 TEST(MathFTests, Round_ZeroDigits) { EXPECT_NEAR(MathF::Round(2.7f, 0),     3.0f,  1e-5f); }
+
+// ---------------------------------------------------------------------------
+// IsFinite, IsNormal, IsSubnormal, IsNegative
+// ---------------------------------------------------------------------------
+TEST(MathFTests, IsFinite_Normal)    { EXPECT_TRUE(MathF::IsFinite(1.0f)); }
+TEST(MathFTests, IsFinite_Inf)       { EXPECT_FALSE(MathF::IsFinite(std::numeric_limits<float>::infinity())); }
+TEST(MathFTests, IsFinite_NaN)       { EXPECT_FALSE(MathF::IsFinite(std::numeric_limits<float>::quiet_NaN())); }
+TEST(MathFTests, IsNormal_Normal)    { EXPECT_TRUE(MathF::IsNormal(1.0f)); }
+TEST(MathFTests, IsNormal_Zero)      { EXPECT_FALSE(MathF::IsNormal(0.0f)); }
+TEST(MathFTests, IsNormal_Subnormal) { EXPECT_FALSE(MathF::IsNormal(std::numeric_limits<float>::denorm_min())); }
+TEST(MathFTests, IsSubnormal_Yes)    { EXPECT_TRUE(MathF::IsSubnormal(std::numeric_limits<float>::denorm_min())); }
+TEST(MathFTests, IsSubnormal_Normal) { EXPECT_FALSE(MathF::IsSubnormal(1.0f)); }
+TEST(MathFTests, IsNegative_Neg)     { EXPECT_TRUE(MathF::IsNegative(-1.0f)); }
+TEST(MathFTests, IsNegative_Pos)     { EXPECT_FALSE(MathF::IsNegative(1.0f)); }
+TEST(MathFTests, IsNegative_NegZero) { EXPECT_TRUE(MathF::IsNegative(-0.0f)); }
+
+// ---------------------------------------------------------------------------
+// ScaleB
+// ---------------------------------------------------------------------------
+TEST(MathFTests, ScaleB_Basic)    { EXPECT_NEAR(MathF::ScaleB(1.0f, 3),  8.0f, 1e-5f); }
+TEST(MathFTests, ScaleB_Negative) { EXPECT_NEAR(MathF::ScaleB(8.0f, -1), 4.0f, 1e-5f); }
+
+// ---------------------------------------------------------------------------
+// MaxMagnitude / MinMagnitude
+// ---------------------------------------------------------------------------
+TEST(MathFTests, MaxMagnitude_LargerFirst)   { EXPECT_EQ(MathF::MaxMagnitude(5.0f, 3.0f),  5.0f); }
+TEST(MathFTests, MaxMagnitude_LargerSecond)  { EXPECT_EQ(MathF::MaxMagnitude(2.0f, -7.0f), -7.0f); }
+TEST(MathFTests, MaxMagnitude_Equal_RetPos)  { EXPECT_EQ(MathF::MaxMagnitude(3.0f, -3.0f), 3.0f); }
+TEST(MathFTests, MinMagnitude_SmallerFirst)  { EXPECT_EQ(MathF::MinMagnitude(2.0f, 5.0f),   2.0f); }
+TEST(MathFTests, MinMagnitude_SmallerSecond) { EXPECT_EQ(MathF::MinMagnitude(-7.0f, 2.0f),  2.0f); }
+TEST(MathFTests, MinMagnitude_Equal_RetNeg)  { EXPECT_EQ(MathF::MinMagnitude(-3.0f, 3.0f), -3.0f); }

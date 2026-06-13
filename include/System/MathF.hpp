@@ -115,6 +115,30 @@ namespace System {
             float factor = std::pow(10.0f, static_cast<float>(digits));
             return std::round(x * factor) / factor;
         }
+        /// Returns true if @p x is finite (not NaN or infinity).
+        static bool IsFinite(float x)              { return std::isfinite(x); }
+        /// Returns true if @p x is a normal floating-point value (not zero, subnormal, NaN, or infinite).
+        static bool IsNormal(float x)              { return std::isnormal(x); }
+        /// Returns true if @p x is subnormal (denormalized).
+        static bool IsSubnormal(float x)           { return std::fpclassify(x) == FP_SUBNORMAL; }
+        /// Returns true if @p x is negative (including -0 and -infinity).
+        static bool IsNegative(float x)            { return std::signbit(x); }
+        /// Returns @p x multiplied by 2 raised to the power @p n.
+        static float ScaleB(float x, int n)        { return std::scalbn(x, n); }
+        /// Returns the value with the greater magnitude; if equal, returns the positive one.
+        static float MaxMagnitude(float x, float y) {
+            float ax = std::fabs(x), ay = std::fabs(y);
+            if (ax > ay || std::isnan(ax)) return x;
+            if (ax == ay) return std::signbit(x) ? y : x;
+            return y;
+        }
+        /// Returns the value with the lesser magnitude; if equal, returns the negative one.
+        static float MinMagnitude(float x, float y) {
+            float ax = std::fabs(x), ay = std::fabs(y);
+            if (ax < ay || std::isnan(ax)) return x;
+            if (ax == ay) return std::signbit(x) ? x : y;
+            return y;
+        }
     };
 
 } // namespace System

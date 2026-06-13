@@ -273,6 +273,13 @@ namespace System
 
         /// @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient.
         static intcs DivRem(intcs a, intcs b, intcs& result);
+        /// @brief Divides @p a by @p b (64-bit) and stores the remainder in @p result; returns the quotient.
+        static longcs DivRem(longcs a, longcs b, longcs& result);
+
+        /// @brief Returns the value with the greater magnitude; if equal magnitudes, returns the positive one.
+        [[nodiscard]] static double MaxMagnitude(double x, double y);
+        /// @brief Returns the value with the lesser magnitude; if equal magnitudes, returns the negative one.
+        [[nodiscard]] static double MinMagnitude(double x, double y);
 
         /// @brief Returns the 64-bit product of two 32-bit integers.
         [[nodiscard]] static longcs BigMul(intcs a, intcs b);

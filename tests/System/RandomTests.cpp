@@ -2,8 +2,10 @@
 
 #include "gtest/gtest.h"
 #include "System/Random.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using SharpRuntime::intcs;
+using SharpRuntime::longcs;
 TEST(RandomTests, NextWithMaxValue) {
     System::Random rng;
     const intcs max = 100;
@@ -119,4 +121,52 @@ TEST(RandomTests, NextSingleInRange) {
 TEST(RandomTests, NextSingleSeededIsDeterministic) {
     System::Random a(7), b(7);
     EXPECT_EQ(a.NextSingle(), b.NextSingle());
+}
+
+// --- NextInt64 ---
+TEST(RandomTests, NextInt64_NoArgs_InRange) {
+    System::Random rng(1);
+    for (int i = 0; i < 100; ++i) {
+        longcs v = rng.NextInt64();
+        EXPECT_GE(v, 0LL);
+        EXPECT_LT(v, SharpRuntime::LONGCS_MAX);
+    }
+}
+TEST(RandomTests, NextInt64_MaxValue_InRange) {
+    System::Random rng(2);
+    const longcs max = 1000000000LL;
+    for (int i = 0; i < 100; ++i) {
+        longcs v = rng.NextInt64(max);
+        EXPECT_GE(v, 0LL);
+        EXPECT_LT(v, max);
+    }
+}
+TEST(RandomTests, NextInt64_MaxZero_ReturnsZero) {
+    System::Random rng(3);
+    EXPECT_EQ(rng.NextInt64(0LL), 0LL);
+}
+TEST(RandomTests, NextInt64_Range_InRange) {
+    System::Random rng(4);
+    const longcs lo = 500000000000LL, hi = 600000000000LL;
+    for (int i = 0; i < 100; ++i) {
+        longcs v = rng.NextInt64(lo, hi);
+        EXPECT_GE(v, lo);
+        EXPECT_LT(v, hi);
+    }
+}
+TEST(RandomTests, NextInt64_EqualMinMax_ReturnsMin) {
+    System::Random rng(5);
+    EXPECT_EQ(rng.NextInt64(42LL, 42LL), 42LL);
+}
+TEST(RandomTests, NextInt64_Seeded_Deterministic) {
+    System::Random a(99), b(99);
+    EXPECT_EQ(a.NextInt64(1000000LL), b.NextInt64(1000000LL));
+}
+TEST(RandomTests, NextInt64_MaxValueThrows) {
+    System::Random rng(6);
+    EXPECT_THROW(rng.NextInt64(-1LL), System::ArgumentOutOfRangeException);
+}
+TEST(RandomTests, NextInt64_InvalidRangeThrows) {
+    System::Random rng(7);
+    EXPECT_THROW(rng.NextInt64(10LL, 5LL), System::ArgumentOutOfRangeException);
 }
