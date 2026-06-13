@@ -14,9 +14,10 @@ namespace System::Net::Sockets {
      * @brief Provides client connections for TCP network services.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.TcpClient.
-     * Implemented using POSIX sockets (Linux/macOS).
+     * Uses Winsock2 on Windows, POSIX sockets on Linux/macOS,
+     * and throws PlatformNotSupportedException on Emscripten.
      *
-     * @note Status: Implemented — POSIX (Linux/macOS) only.
+     * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class TcpClient {
         int  fd_        = -1;
@@ -54,9 +55,10 @@ namespace System::Net::Sockets {
      * @brief Listens for connections from TCP network clients.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.TcpListener.
-     * Implemented using POSIX sockets (Linux/macOS).
+     * Uses Winsock2 on Windows, POSIX sockets on Linux/macOS,
+     * and throws PlatformNotSupportedException on Emscripten.
      *
-     * @note Status: Implemented — POSIX (Linux/macOS) only.
+     * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class TcpListener {
         int        fd_    = -1;

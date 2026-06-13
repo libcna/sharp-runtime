@@ -12,10 +12,11 @@ namespace System::Net::Sockets {
     /**
      * @brief Provides the underlying stream of data for network access.
      *
-     * Wraps a POSIX socket file descriptor and exposes it as a System::IO::Stream.
-     * Obtained via TcpClient::GetStream().
+     * Wraps a socket file descriptor and exposes it as a System::IO::Stream.
+     * Obtained via TcpClient::GetStream(). Uses Winsock2 on Windows,
+     * POSIX sockets on Linux/macOS; throws on Emscripten.
      *
-     * @note Status: Implemented — POSIX (Linux/macOS) only.
+     * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class NetworkStream : public System::IO::Stream {
         int fd_ = -1;

@@ -14,9 +14,10 @@ namespace System::Net::Sockets {
      * @brief Provides UDP network services.
      *
      * Partial C++ counterpart of .NET System.Net.Sockets.UdpClient.
-     * Implemented using POSIX sockets (Linux/macOS).
+     * Uses Winsock2 on Windows, POSIX sockets on Linux/macOS,
+     * and throws PlatformNotSupportedException on Emscripten.
      *
-     * @note Status: Implemented — POSIX (Linux/macOS) only.
+     * @note Status: Implemented — Windows (Winsock2) and POSIX (Linux/macOS).
      */
     class UdpClient {
         int              fd_        = -1;
