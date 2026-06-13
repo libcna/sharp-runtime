@@ -7,8 +7,10 @@
 
 #include "System/TimeSpan.hpp"
 
+#include <cstdio>
 #include <iomanip>
 
+#include "System/FormatException.hpp"
 #include "System/Int64.hpp"
 #include "System/OverflowException.hpp"
 
@@ -310,6 +312,134 @@ namespace System {
         return oss.str();
     }
 
+
+    std::string TimeSpan::ToString(const std::string& format) const {
+        longcs ticks = ticks_internal;
+        bool negative = ticks < 0;
+        std::uint64_t magnitude;
+        if (negative) magnitude = static_cast<std::uint64_t>(-(ticks + 1)) + 1;
+        else           magnitude = static_cast<std::uint64_t>(ticks);
+
+        const auto days    = static_cast<long long>(magnitude / static_cast<std::uint64_t>(TicksPerDay));
+        magnitude %= static_cast<std::uint64_t>(TicksPerDay);
+        const int hours   = static_cast<int>(magnitude / static_cast<std::uint64_t>(TicksPerHour));
+        magnitude %= static_cast<std::uint64_t>(TicksPerHour);
+        const int minutes = static_cast<int>(magnitude / static_cast<std::uint64_t>(TicksPerMinute));
+        magnitude %= static_cast<std::uint64_t>(TicksPerMinute);
+        const int seconds = static_cast<int>(magnitude / static_cast<std::uint64_t>(TicksPerSecond));
+        magnitude %= static_cast<std::uint64_t>(TicksPerSecond);
+        // magnitude is now sub-second ticks (0–9 999 999)
+
+        auto pad = [](long long n, int w) -> std::string {
+            std::string s = std::to_string(n < 0 ? -n : n);
+            while (static_cast<int>(s.size()) < w) s = "0" + s;
+            return s;
+        };
+
+        std::string result;
+        if (negative) result += '-';
+        size_t i = 0;
+        while (i < format.size()) {
+            char c = format[i];
+            auto run = [&](char ch) {
+                size_t k = i + 1;
+                while (k < format.size() && format[k] == ch) ++k;
+                return static_cast<int>(k - i);
+            };
+            if (c == 'd') {
+                int n = run('d');
+                result += (n >= 2) ? pad(days, n) : std::to_string(days < 0 ? -days : days);
+                i += n;
+            } else if (c == 'h') {
+                int n = run('h');
+                result += (n >= 2) ? pad(hours, 2) : std::to_string(hours);
+                i += n;
+            } else if (c == 'm') {
+                int n = run('m');
+                result += (n >= 2) ? pad(minutes, 2) : std::to_string(minutes);
+                i += n;
+            } else if (c == 's') {
+                int n = run('s');
+                result += (n >= 2) ? pad(seconds, 2) : std::to_string(seconds);
+                i += n;
+            } else if (c == 'f') {
+                int n = run('f');
+                std::string frac = pad(static_cast<long long>(magnitude), 7);
+                result += frac.substr(0, static_cast<size_t>(std::min(n, 7)));
+                i += n;
+            } else if (c == '\'') {
+                ++i;
+                while (i < format.size() && format[i] != '\'') result += format[i++];
+                if (i < format.size()) ++i;
+            } else {
+                result += c;
+                ++i;
+            }
+        }
+        return result;
+    }
+
+    bool TimeSpan::TryParse(const std::string& s, TimeSpan& result) {
+        if (s.empty()) return false;
+        const char* p = s.c_str();
+        bool negative = (*p == '-');
+        if (negative) ++p;
+
+        // Determine if there's a days component: look for '.' before the first ':'
+        const char* pScan = p;
+        bool hasDot = false;
+        while (*pScan && *pScan != ':') {
+            if (*pScan == '.') { hasDot = true; break; }
+            ++pScan;
+        }
+
+        int days = 0, hours = 0, minutes = 0, seconds = 0;
+        int matched = 0;
+        if (hasDot) {
+            matched = std::sscanf(p, "%d.%d:%d:%d", &days, &hours, &minutes, &seconds);
+            if (matched != 4) return false;
+        } else {
+            matched = std::sscanf(p, "%d:%d:%d", &hours, &minutes, &seconds);
+            if (matched != 3) return false;
+        }
+        if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59)
+            return false;
+
+        // Find position after the seconds digits to look for fractional part
+        const char* afterSec = p;
+        int colons = 0;
+        while (*afterSec && colons < 2) { if (*afterSec == ':') ++colons; ++afterSec; }
+        while (*afterSec >= '0' && *afterSec <= '9') ++afterSec;
+
+        long long subsecTicks = 0;
+        if (*afterSec == '.') {
+            ++afterSec;
+            int fracDigits = 0;
+            long long fracVal = 0;
+            while (*afterSec >= '0' && *afterSec <= '9' && fracDigits < 7) {
+                fracVal = fracVal * 10 + (*afterSec - '0');
+                ++fracDigits; ++afterSec;
+            }
+            while (fracDigits < 7) { fracVal *= 10; ++fracDigits; }
+            subsecTicks = fracVal;
+        }
+
+        longcs ticks = static_cast<longcs>(days)    * TicksPerDay
+                     + static_cast<longcs>(hours)   * TicksPerHour
+                     + static_cast<longcs>(minutes) * TicksPerMinute
+                     + static_cast<longcs>(seconds) * TicksPerSecond
+                     + subsecTicks;
+        if (negative) ticks = -ticks;
+        result = TimeSpan(ticks);
+        return true;
+    }
+
+    TimeSpan TimeSpan::Parse(const std::string& s) {
+        TimeSpan result;
+        if (!TryParse(s, result))
+            throw FormatException("String was not recognized as a valid TimeSpan: " + s);
+        return result;
+    }
 
     TimeSpan TimeSpan::operator-() const {
         if (ticks_internal == MinValue.ticks_internal)

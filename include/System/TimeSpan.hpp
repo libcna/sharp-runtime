@@ -431,6 +431,18 @@ namespace System {
         /// Returns the string representation of this TimeSpan (format: [-]d.hh:mm:ss.fffffff).
         [[nodiscard]] std::string ToString() const;
 
+        /// Returns the TimeSpan formatted according to @p format.
+        /// Tokens: d (days), hh/h (hours), mm/m (minutes), ss/s (seconds), f–fffffff (fractional seconds).
+        /// Literal text may be enclosed in single quotes.
+        [[nodiscard]] std::string ToString(const std::string& format) const;
+
+        /// Parses a TimeSpan from a string in the form [-][d.]hh:mm:ss[.fffffff].
+        /// @throws System::FormatException if the string cannot be parsed.
+        [[nodiscard]] static TimeSpan Parse(const std::string& s);
+
+        /// Tries to parse a TimeSpan string; returns false without throwing on failure.
+        static bool TryParse(const std::string& s, TimeSpan& result);
+
     public:
         /// Unary minus: returns the negated TimeSpan.
         TimeSpan operator-() const;

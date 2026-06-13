@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -352,4 +353,72 @@ TEST(TimeSpanTests, Comparisons) {
 TEST(TimeSpanTests, ToStringIsNonEmpty) {
     TimeSpan ts = TimeSpan::FromMinutes(90);
     EXPECT_FALSE(ts.ToString().empty());
+}
+
+// --- ToString(format) ---
+
+TEST(TimeSpanTests, ToStringFormat_HoursMinutes) {
+    TimeSpan ts = TimeSpan::FromSeconds(3675); // 1h 1m 15s
+    EXPECT_EQ(ts.ToString("hh':'mm':'ss"), "01:01:15");
+}
+
+TEST(TimeSpanTests, ToStringFormat_DaysHours) {
+    TimeSpan ts(2, 3, 0, 0); // 2d 3h
+    EXPECT_EQ(ts.ToString("d'.'hh':'mm':'ss"), "2.03:00:00");
+}
+
+TEST(TimeSpanTests, ToStringFormat_SingleTokens) {
+    TimeSpan ts = TimeSpan::FromSeconds(3661); // 1h 1m 1s
+    EXPECT_EQ(ts.ToString("h'm's"), "1m1");
+}
+
+TEST(TimeSpanTests, ToStringFormat_Fractional) {
+    TimeSpan ts = TimeSpan::FromMilliseconds(1500); // 1.5s
+    std::string s = ts.ToString("ss'.'fff");
+    EXPECT_EQ(s, "01.500");
+}
+
+// --- TryParse ---
+
+TEST(TimeSpanTests, TryParse_HoursMinutesSeconds) {
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("01:30:00", ts));
+    EXPECT_EQ(ts.getTotalSecondsProperty(), 5400.0);
+}
+
+TEST(TimeSpanTests, TryParse_WithDays) {
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("2.03:00:00", ts));
+    EXPECT_EQ(ts.getDaysProperty(), 2);
+    EXPECT_EQ(ts.getHoursProperty(), 3);
+}
+
+TEST(TimeSpanTests, TryParse_WithFractionalSeconds) {
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("00:00:01.5000000", ts));
+    EXPECT_EQ(ts.getTotalMillisecondsProperty(), 1500.0);
+}
+
+TEST(TimeSpanTests, TryParse_Negative) {
+    TimeSpan ts;
+    EXPECT_TRUE(TimeSpan::TryParse("-01:00:00", ts));
+    EXPECT_EQ(ts.getTotalHoursProperty(), -1.0);
+}
+
+TEST(TimeSpanTests, TryParse_Invalid_ReturnsFalse) {
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("not-a-timespan", ts));
+    EXPECT_FALSE(TimeSpan::TryParse("", ts));
+}
+
+// --- Parse ---
+
+TEST(TimeSpanTests, Parse_ValidString) {
+    TimeSpan ts = TimeSpan::Parse("00:45:30");
+    EXPECT_EQ(ts.getMinutesProperty(), 45);
+    EXPECT_EQ(ts.getSecondsProperty(), 30);
+}
+
+TEST(TimeSpanTests, Parse_InvalidThrows) {
+    EXPECT_THROW(TimeSpan::Parse("bad"), System::FormatException);
 }

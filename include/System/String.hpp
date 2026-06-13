@@ -93,6 +93,10 @@ namespace System
         static std::string Format(const std::string& format, const std::string& arg0, const std::string& arg1);
         /// @brief Formats a string with two double arguments (supports `{0:F2}` specifiers).
         static std::string Format(const std::string& format, double arg0, double arg1);
+        /// @brief Formats a string replacing `{0}` with @p arg0 as "True" or "False".
+        static std::string Format(const std::string& format, bool arg0);
+        /// @brief Formats a string replacing `{0}` with @p arg0 as a single character.
+        static std::string Format(const std::string& format, char arg0);
 
         /// @brief Converts an integer to a zero-padded string of at least @p width characters.
         /// @param value Integer value to convert.

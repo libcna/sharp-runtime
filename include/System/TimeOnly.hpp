@@ -6,17 +6,20 @@
 #include <sstream>
 #include <iomanip>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/TimeSpan.hpp"
 
 namespace System {
+
+    class DateTime; // forward declaration for FromDateTime
 
     using SharpRuntime::intcs;
 
     /**
      * @brief Represents a time of day, independent of date (hours, minutes, seconds, milliseconds).
      *
-     * Partial C++ counterpart of .NET System.TimeOnly.
+     * C++ counterpart of .NET System.TimeOnly.
      *
-     * @note Status: Partial
+     * @note Status: Done
      */
     class TimeOnly {
         intcs hour_   = 0; ///< Hour component (0–23).
@@ -27,19 +30,10 @@ namespace System {
         /// Constructs a TimeOnly at midnight (00:00:00.000).
         TimeOnly() = default;
         /// @brief Constructs a TimeOnly from hours and minutes.
-        /// @param hour Hour (0–23).
-        /// @param minute Minute (0–59).
         TimeOnly(intcs hour, intcs minute) : hour_(hour), minute_(minute) {}
         /// @brief Constructs a TimeOnly from hours, minutes, and seconds.
-        /// @param hour Hour (0–23).
-        /// @param minute Minute (0–59).
-        /// @param second Second (0–59).
         TimeOnly(intcs hour, intcs minute, intcs second) : hour_(hour), minute_(minute), second_(second) {}
         /// @brief Constructs a TimeOnly from hours, minutes, seconds, and milliseconds.
-        /// @param hour Hour (0–23).
-        /// @param minute Minute (0–59).
-        /// @param second Second (0–59).
-        /// @param millisecond Millisecond (0–999).
         TimeOnly(intcs hour, intcs minute, intcs second, intcs millisecond)
             : hour_(hour), minute_(minute), second_(second), ms_(millisecond) {}
 
@@ -60,6 +54,34 @@ namespace System {
                 << std::setw(2) << std::setfill('0') << second_;
             return oss.str();
         }
+
+        /// Returns the time formatted according to @p format.
+        /// Tokens: HH/H (24h hour), hh/h (12h hour), mm/m (minute), ss/s (second), fff/ff/f (ms).
+        [[nodiscard]] std::string ToString(const std::string& format) const;
+
+        /// Returns a new TimeOnly with @p n hours added (wraps around midnight).
+        [[nodiscard]] TimeOnly AddHours(int n) const;
+
+        /// Returns a new TimeOnly with @p n minutes added (wraps around midnight).
+        [[nodiscard]] TimeOnly AddMinutes(int n) const;
+
+        /// Returns a TimeOnly representing the time-of-day component of @p ts.
+        [[nodiscard]] static TimeOnly FromTimeSpan(const TimeSpan& ts);
+
+        /// Returns a TimeSpan representing the elapsed time since midnight.
+        [[nodiscard]] TimeSpan ToTimeSpan() const {
+            return TimeSpan(0, hour_, minute_, second_, ms_);
+        }
+
+        /// Extracts the time-of-day part from the specified DateTime.
+        [[nodiscard]] static TimeOnly FromDateTime(const DateTime& dt);
+
+        /// Parses a time string in the form "HH:MM:SS" or "HH:MM:SS.fff".
+        /// @throws System::FormatException on failure.
+        [[nodiscard]] static TimeOnly Parse(const std::string& s);
+
+        /// Tries to parse a time string in the form "HH:MM:SS[.fff]"; returns false on failure.
+        static bool TryParse(const std::string& s, TimeOnly& result);
 
         /// Returns true if this TimeOnly is equal to @p o.
         bool operator==(const TimeOnly& o) const { return hour_==o.hour_ && minute_==o.minute_ && second_==o.second_ && ms_==o.ms_; }

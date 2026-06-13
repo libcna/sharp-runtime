@@ -70,6 +70,46 @@ namespace System::Collections::Generic {
             return std::vector<T>(set_.begin(), set_.end());
         }
 
+        /// Returns true if this set and @p other contain exactly the same elements.
+        [[nodiscard]] bool SetEquals(const HashSet<T>& other) const {
+            if (set_.size() != other.set_.size()) return false;
+            for (const auto& item : other.set_)
+                if (!Contains(item)) return false;
+            return true;
+        }
+
+        /// Modifies the set so it contains only elements present in exactly one of the two sets.
+        void SymmetricExceptWith(const HashSet<T>& other) {
+            std::vector<T> toAdd;
+            for (const auto& item : other.set_) {
+                if (!Contains(item)) toAdd.push_back(item);
+                else set_.erase(item);
+            }
+            for (const auto& item : toAdd) set_.insert(item);
+        }
+
+        /// Returns true if every element of this set is contained in @p other.
+        [[nodiscard]] bool IsSubsetOf(const HashSet<T>& other) const {
+            for (const auto& item : set_)
+                if (!other.Contains(item)) return false;
+            return true;
+        }
+
+        /// Returns true if this set contains every element of @p other.
+        [[nodiscard]] bool IsSupersetOf(const HashSet<T>& other) const {
+            return other.IsSubsetOf(*this);
+        }
+
+        /// Returns true if this set is a strict subset of @p other (subset and not equal).
+        [[nodiscard]] bool IsProperSubsetOf(const HashSet<T>& other) const {
+            return IsSubsetOf(other) && !SetEquals(other);
+        }
+
+        /// Returns true if this set is a strict superset of @p other (superset and not equal).
+        [[nodiscard]] bool IsProperSupersetOf(const HashSet<T>& other) const {
+            return IsSupersetOf(other) && !SetEquals(other);
+        }
+
         /// Returns an iterator to the beginning of the HashSet.
         auto begin()       { return set_.begin(); }
         /// Returns an iterator past the end of the HashSet.

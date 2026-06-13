@@ -192,6 +192,14 @@ namespace System
         std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
         return         replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1)));
     }
+    std::string String::Format(const std::string& format, bool arg0)
+    {
+        return Format(format, arg0 ? std::string("True") : std::string("False"));
+    }
+    std::string String::Format(const std::string& format, char arg0)
+    {
+        return Format(format, std::string(1, arg0));
+    }
     std::string String::ToString(SharpRuntime::intcs value, int width, char fill)
     {
         std::ostringstream oss;

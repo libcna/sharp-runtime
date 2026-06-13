@@ -660,3 +660,69 @@ TEST(DictionaryTests, Values_ContainsAllValues) {
     EXPECT_TRUE(has10);
     EXPECT_TRUE(has20);
 }
+
+// ===========================================================================
+// HashSet<T> — additional set operations
+// ===========================================================================
+
+TEST(HashSetTests, SetEquals_SameElements) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2); a.Add(3);
+    b.Add(3); b.Add(1); b.Add(2);
+    EXPECT_TRUE(a.SetEquals(b));
+    EXPECT_TRUE(b.SetEquals(a));
+}
+
+TEST(HashSetTests, SetEquals_DifferentElements) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(1); b.Add(3);
+    EXPECT_FALSE(a.SetEquals(b));
+}
+
+TEST(HashSetTests, SymmetricExceptWith) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2); a.Add(3);
+    b.Add(2); b.Add(3); b.Add(4);
+    a.SymmetricExceptWith(b);
+    EXPECT_TRUE(a.Contains(1));
+    EXPECT_TRUE(a.Contains(4));
+    EXPECT_FALSE(a.Contains(2));
+    EXPECT_FALSE(a.Contains(3));
+}
+
+TEST(HashSetTests, IsSubsetOf_True) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(1); b.Add(2); b.Add(3);
+    EXPECT_TRUE(a.IsSubsetOf(b));
+    EXPECT_FALSE(b.IsSubsetOf(a));
+}
+
+TEST(HashSetTests, IsSupersetOf_True) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2); a.Add(3);
+    b.Add(1); b.Add(2);
+    EXPECT_TRUE(a.IsSupersetOf(b));
+    EXPECT_FALSE(b.IsSupersetOf(a));
+}
+
+TEST(HashSetTests, IsProperSubsetOf) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(1); b.Add(2); b.Add(3);
+    EXPECT_TRUE(a.IsProperSubsetOf(b));
+    EXPECT_FALSE(b.IsProperSubsetOf(a));
+    // Equal sets are NOT proper subsets
+    HashSet<int> c;
+    c.Add(1); c.Add(2);
+    EXPECT_FALSE(a.IsProperSubsetOf(c));
+}
+
+TEST(HashSetTests, IsProperSupersetOf) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2); a.Add(3);
+    b.Add(1); b.Add(2);
+    EXPECT_TRUE(a.IsProperSupersetOf(b));
+    EXPECT_FALSE(b.IsProperSupersetOf(a));
+}

@@ -301,3 +301,18 @@ TEST(StringTests, Format_TwoStrings) {
 TEST(StringTests, Format_TwoDoubles) {
     EXPECT_EQ(String::Format("({0:F1},{1:F1})", 1.25, 3.75), "(1.2,3.8)");
 }
+TEST(StringTests, Format_BoolTrue) {
+    EXPECT_EQ(String::Format("{0}", true), "True");
+}
+TEST(StringTests, Format_BoolFalse) {
+    EXPECT_EQ(String::Format("{0}", false), "False");
+}
+TEST(StringTests, Format_BoolInSentence) {
+    EXPECT_EQ(String::Format("value={0}", true), "value=True");
+}
+TEST(StringTests, Format_Char) {
+    EXPECT_EQ(String::Format("{0}", 'A'), "A");
+}
+TEST(StringTests, Format_CharInSentence) {
+    EXPECT_EQ(String::Format("key={0}", 'Z'), "key=Z");
+}
