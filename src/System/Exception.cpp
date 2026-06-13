@@ -21,8 +21,29 @@ namespace System {
         : message_(msg) {
     }
 
+    Exception::Exception(const std::string& msg, std::exception_ptr inner)
+        : message_(msg), innerException_(std::move(inner)) {
+    }
+
     const std::string& Exception::getMessageProperty() const {
         return message_;
+    }
+
+    std::exception_ptr Exception::getInnerExceptionProperty() const {
+        return innerException_;
+    }
+
+    const std::string& Exception::getStackTraceProperty() const {
+        static const std::string empty;
+        return empty;
+    }
+
+    std::map<std::string, std::string>& Exception::getDataProperty() {
+        return data_;
+    }
+
+    const std::map<std::string, std::string>& Exception::getDataProperty() const {
+        return data_;
     }
 
     const char* Exception::what() const noexcept {

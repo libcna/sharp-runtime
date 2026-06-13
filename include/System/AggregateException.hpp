@@ -73,6 +73,27 @@ namespace System {
             }
             if (!unhandled.empty()) throw AggregateException(std::move(unhandled));
         }
+
+        /// Flattens nested AggregateExceptions into a single flat AggregateException.
+        [[nodiscard]] AggregateException Flatten() const {
+            std::vector<std::exception_ptr> flat;
+            collectLeaves(innerExceptions_, flat);
+            return AggregateException(std::move(flat));
+        }
+
+    private:
+        static void collectLeaves(const std::vector<std::exception_ptr>& exs,
+                                  std::vector<std::exception_ptr>& result) {
+            for (auto& ep : exs) {
+                try {
+                    std::rethrow_exception(ep);
+                } catch (const AggregateException& ae) {
+                    collectLeaves(ae.innerExceptions_, result);
+                } catch (...) {
+                    result.push_back(ep);
+                }
+            }
+        }
     };
 
 } // namespace System

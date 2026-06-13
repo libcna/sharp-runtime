@@ -154,6 +154,48 @@ TEST(AggregateExceptionTests, Handle_SomeUnhandled_Rethrows) {
     EXPECT_THROW(ex.Handle([](std::exception_ptr) { return false; }),
                  System::AggregateException);
 }
+TEST(AggregateExceptionTests, Flatten_NestedAggregate_FlattensToLeaves) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("leaf1"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("leaf2"));
+    auto inner = std::make_exception_ptr(System::AggregateException({ep1, ep2}));
+    System::AggregateException outer({inner});
+    auto flat = outer.Flatten();
+    EXPECT_EQ(flat.getInnerExceptionCountProperty(), 2u);
+}
+TEST(AggregateExceptionTests, Flatten_AlreadyFlat_PreservesCount) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex({ep1, ep2});
+    auto flat = ex.Flatten();
+    EXPECT_EQ(flat.getInnerExceptionCountProperty(), 2u);
+}
+
+// ===========================================================================
+// Exception — InnerException / Data / StackTrace
+// ===========================================================================
+
+TEST(ExceptionTests, InnerException_DefaultNullptr) {
+    Exception ex("msg");
+    EXPECT_EQ(ex.getInnerExceptionProperty(), nullptr);
+}
+TEST(ExceptionTests, InnerException_StoredAndRetrievable) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    Exception ex("outer", inner);
+    EXPECT_NE(ex.getInnerExceptionProperty(), nullptr);
+}
+TEST(ExceptionTests, StackTrace_ReturnsEmptyString) {
+    Exception ex("msg");
+    EXPECT_TRUE(ex.getStackTraceProperty().empty());
+}
+TEST(ExceptionTests, Data_EmptyByDefault) {
+    Exception ex("msg");
+    EXPECT_TRUE(ex.getDataProperty().empty());
+}
+TEST(ExceptionTests, Data_CanStoreAndRetrieveValues) {
+    Exception ex("msg");
+    ex.getDataProperty()["key"] = "value";
+    EXPECT_EQ(ex.getDataProperty().at("key"), "value");
+}
 
 // ===========================================================================
 // NotFiniteNumberException — has offendingNumber property

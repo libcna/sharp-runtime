@@ -8,6 +8,8 @@
 #pragma once
 
 #include <exception>
+#include <map>
+#include <memory>
 #include <string>
 
 namespace System {
@@ -22,6 +24,8 @@ namespace System {
     class Exception : public std::exception {
     private:
         std::string message_;
+        std::exception_ptr innerException_;
+        mutable std::map<std::string, std::string> data_;
 
     public:
         /// Initializes a new instance of the Exception class with an empty message.
@@ -37,9 +41,22 @@ namespace System {
         /// @param msg A string describing the error.
         explicit Exception(const std::string& msg);
 
+        /// Initializes a new instance with a message and a reference to an inner exception.
+        Exception(const std::string& msg, std::exception_ptr inner);
+
         /// Gets the explanatory message associated with this exception.
         /// @return Const reference to the stored error message string.
         [[nodiscard]] virtual const std::string& getMessageProperty() const;
+
+        /// Returns the exception that caused the current exception, or nullptr if none.
+        [[nodiscard]] std::exception_ptr getInnerExceptionProperty() const;
+
+        /// Returns an empty string (stack trace is not captured in C++ exceptions).
+        [[nodiscard]] const std::string& getStackTraceProperty() const;
+
+        /// Returns a mutable key/value collection of additional user-defined data.
+        [[nodiscard]] std::map<std::string, std::string>& getDataProperty();
+        [[nodiscard]] const std::map<std::string, std::string>& getDataProperty() const;
 
         /// Returns the explanatory message as a null-terminated C string.
         /// The pointer remains valid for the lifetime of the exception object.
