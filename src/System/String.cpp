@@ -3,7 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/String.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cctype>
+#include <charconv>
+#include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
 
@@ -44,25 +49,121 @@ namespace System
         return value.empty();
     }
 
+    // --- Format helpers (file-internal) ---
+    namespace {
+        // Extract the spec from the first occurrence of {N:spec} in fmt (returns "" if none).
+        std::string extractSpec(const std::string& fmt, int n) {
+            std::string tok = "{" + std::to_string(n);
+            size_t pos = fmt.find(tok);
+            if (pos == std::string::npos) return "";
+            size_t after = pos + tok.size();
+            if (after >= fmt.size() || fmt[after] != ':') return "";
+            size_t end = fmt.find('}', after);
+            return end == std::string::npos ? "" : fmt.substr(after + 1, end - after - 1);
+        }
+
+        // Replace every {N} or {N:spec} occurrence in result with value.
+        std::string replaceArg(const std::string& fmt, int n, const std::string& value) {
+            std::string result = fmt;
+            std::string tok = "{" + std::to_string(n);
+            size_t pos;
+            while ((pos = result.find(tok)) != std::string::npos) {
+                size_t end = result.find('}', pos);
+                if (end == std::string::npos) break;
+                result.replace(pos, end - pos + 1, value);
+            }
+            return result;
+        }
+
+        // Format integer with .NET-style specifier (X/x=hex, D=decimal padded, else plain).
+        std::string fmtInt(SharpRuntime::intcs value, const std::string& spec) {
+            if (spec.empty()) return std::to_string(value);
+            char sc = spec[0];
+            int width = spec.size() > 1 ? std::abs(std::stoi(spec.substr(1))) : 0;
+            if (sc == 'X' || sc == 'x') {
+                std::ostringstream oss;
+                if (sc == 'X') oss << std::uppercase;
+                oss << std::hex;
+                if (width > 0) oss << std::setw(width) << std::setfill('0');
+                oss << static_cast<unsigned int>(value);
+                return oss.str();
+            }
+            if (sc == 'D' || sc == 'd') {
+                bool neg = value < 0;
+                std::string s = std::to_string(neg ? -static_cast<long long>(value) : static_cast<long long>(value));
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return neg ? "-" + s : s;
+            }
+            return std::to_string(value);
+        }
+
+        // Format double with .NET-style specifier (F=fixed, G=general, E=scientific).
+        std::string fmtDouble(double value, const std::string& spec) {
+            if (spec.empty()) {
+                std::array<char, 64> buf;
+                auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+                return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(value);
+            }
+            char sc = spec[0];
+            int prec = spec.size() > 1 ? std::stoi(spec.substr(1)) : 2;
+            std::ostringstream oss;
+            if (sc == 'F' || sc == 'f') {
+                oss << std::fixed << std::setprecision(prec) << value;
+            } else if (sc == 'G' || sc == 'g') {
+                oss << std::defaultfloat << std::setprecision(prec > 0 ? prec : 6) << value;
+            } else if (sc == 'E' || sc == 'e') {
+                if (sc == 'E') oss << std::uppercase;
+                oss << std::scientific << std::setprecision(prec) << value;
+            } else {
+                oss << value;
+            }
+            return oss.str();
+        }
+    }
+
     std::string String::Format(const std::string& format, SharpRuntime::intcs arg0)
     {
-        return Format(format, std::to_string(arg0));
+        return replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
+    }
+
+    std::string String::Format(const std::string& format, double arg0)
+    {
+        return replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
     }
 
     std::string String::Format(const std::string& format, const std::string& arg0)
     {
-        std::string result = format;
+        return replaceArg(format, 0, arg0);
+    }
 
-        const std::string placeholder = "{0}";
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1)
+    {
+        std::string r = replaceArg(format,  0, fmtInt(arg0, extractSpec(format, 0)));
+        return         replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
+    }
 
-        size_t pos = 0;
-        while ((pos = result.find(placeholder, pos)) != std::string::npos)
-        {
-            result.replace(pos, placeholder.length(), arg0);
-            pos += arg0.length();
-        }
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, const std::string& arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
+        return         replaceArg(r, 1, arg1);
+    }
 
-        return result;
+    std::string String::Format(const std::string& format, const std::string& arg0, SharpRuntime::intcs arg1)
+    {
+        std::string r = replaceArg(format, 0, arg0);
+        return         replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
+    }
+
+    std::string String::Format(const std::string& format, const std::string& arg0, const std::string& arg1)
+    {
+        std::string r = replaceArg(format, 0, arg0);
+        return         replaceArg(r, 1, arg1);
+    }
+
+    std::string String::Format(const std::string& format, double arg0, double arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
+        return         replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1)));
     }
     std::string String::ToString(SharpRuntime::intcs value, int width, char fill)
     {

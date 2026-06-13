@@ -142,3 +142,11 @@ TEST(StopwatchTests, AccumulatesAcrossMultipleStartStop) {
 
     EXPECT_GT(total, first);
 }
+
+TEST(StopwatchTests, Frequency_Is10MHz) {
+    EXPECT_EQ(Stopwatch::Frequency, 10'000'000LL);
+}
+
+TEST(StopwatchTests, IsHighResolution_True) {
+    EXPECT_TRUE(Stopwatch::IsHighResolution);
+}

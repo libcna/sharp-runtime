@@ -8,28 +8,31 @@
 #pragma once
 
 #include <random>
+#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
     using SharpRuntime::intcs;
+    using SharpRuntime::bytecs;
 
     /**
      * @brief Represents a pseudo-random number generator.
      *
      * This is a simplified C++ counterpart of the .NET System::Random class.
      * It provides methods for generating pseudo-random 32-bit signed integers.
-     * @note Status: Partial
+     * @note Status: DONE
      */
     class Random {
     private:
         std::mt19937 generator;
 
     public:
-        /**
-         * @brief Initializes a new instance of the Random class using a random seed.
-         */
+        /// @brief Initializes a new instance using a random seed from the hardware device.
         Random();
+
+        /// @brief Initializes a new instance with the specified @p seed value.
+        explicit Random(intcs seed);
 
         /// Deleted copy constructor — Random instances are not copyable.
         Random(const Random&) = delete;
@@ -73,6 +76,20 @@ namespace System {
          *         If minValue equals maxValue, returns minValue.
          */
         intcs Next(intcs minValue, intcs maxValue);
+
+        /**
+         * @brief Returns a random floating-point number in [0.0, 1.0).
+         *
+         * @return A double greater than or equal to 0.0 and less than 1.0.
+         */
+        double NextDouble();
+
+        /**
+         * @brief Fills the elements of a byte vector with random values.
+         *
+         * @param buffer Vector whose elements are to be filled with random bytes.
+         */
+        void NextBytes(std::vector<bytecs>& buffer);
     };
 
 } // namespace System

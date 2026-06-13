@@ -87,6 +87,13 @@ namespace System::Diagnostics {
             return sw;
         }
 
+        /// @brief Gets the frequency of the timer as the number of ticks per second.
+        /// Returns 10,000,000 to match the .NET tick resolution (100 ns per tick).
+        static constexpr longcs Frequency = 10'000'000LL;
+
+        /// @brief Indicates whether the Stopwatch timer is based on a high-resolution performance counter.
+        static constexpr bool IsHighResolution = true;
+
     private:
         [[nodiscard]] longcs currentNs() const {
             longcs ns = elapsed_ns_;

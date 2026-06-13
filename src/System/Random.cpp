@@ -11,8 +11,10 @@
 namespace System {
 
     Random::Random()
-        : generator(std::random_device{}()) {
-    }
+        : generator(std::random_device{}()) {}
+
+    Random::Random(intcs seed)
+        : generator(static_cast<uint32_t>(seed)) {}
 
     intcs Random::Next()
     {
@@ -48,6 +50,19 @@ namespace System {
 
         std::uniform_int_distribution<intcs> distribution(minValue, maxValue - 1);
         return distribution(generator);
+    }
+
+    double Random::NextDouble()
+    {
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+        return dist(generator);
+    }
+
+    void Random::NextBytes(std::vector<bytecs>& buffer)
+    {
+        std::uniform_int_distribution<int> dist(0, 255);
+        for (auto& b : buffer)
+            b = static_cast<bytecs>(dist(generator));
     }
 
 } // namespace System

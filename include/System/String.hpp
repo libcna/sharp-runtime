@@ -16,7 +16,7 @@ namespace System
      * This class is not a wrapper around std::string. Instead, it offers
      * static helper methods useful for source-porting C# code to C++.
      *
-     * @note Status: PARTIAL
+     * @note Status: DONE
      */
     class String
     {
@@ -70,14 +70,22 @@ namespace System
          */
         static bool IsNullOrEmpty(const std::string& value);
 
-        /// @brief Formats a string with a single integer argument, replacing the first "{0}" placeholder.
-        /// @param format Format string containing "{0}".
-        /// @param arg0 Integer value to substitute.
+        /// @brief Formats a string replacing `{0}` with @p arg0 (supports `{0:X}`, `{0:D3}` specifiers).
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0);
-        /// @brief Formats a string with a single string argument, replacing the first "{0}" placeholder.
-        /// @param format Format string containing "{0}".
-        /// @param arg0 String value to substitute.
+        /// @brief Formats a string replacing `{0}` with @p arg0 (supports `{0:F2}`, `{0:G}` specifiers).
+        static std::string Format(const std::string& format, double arg0);
+        /// @brief Formats a string replacing `{0}` with @p arg0 (plain string substitution).
         static std::string Format(const std::string& format, const std::string& arg0);
+        /// @brief Formats a string with two integer arguments (`{0}` and `{1}`).
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::intcs arg1);
+        /// @brief Formats a string with an integer arg0 and string arg1.
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0, const std::string& arg1);
+        /// @brief Formats a string with a string arg0 and integer arg1.
+        static std::string Format(const std::string& format, const std::string& arg0, SharpRuntime::intcs arg1);
+        /// @brief Formats a string with two string arguments.
+        static std::string Format(const std::string& format, const std::string& arg0, const std::string& arg1);
+        /// @brief Formats a string with two double arguments (supports `{0:F2}` specifiers).
+        static std::string Format(const std::string& format, double arg0, double arg1);
 
         /// @brief Converts an integer to a zero-padded string of at least @p width characters.
         /// @param value Integer value to convert.

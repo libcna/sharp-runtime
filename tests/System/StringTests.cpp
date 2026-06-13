@@ -214,3 +214,54 @@ TEST(StringTests, PadRight_WithChar) {
 TEST(StringTests, PadRight_AlreadyWide) {
     EXPECT_EQ(String::PadRight("hello", 3), "hello");
 }
+
+// --- Format specifiers ---
+
+TEST(StringTests, Format_Int_Plain) {
+    EXPECT_EQ(String::Format("{0}", 42), "42");
+}
+TEST(StringTests, Format_Int_HexUpper) {
+    EXPECT_EQ(String::Format("{0:X}", 255), "FF");
+}
+TEST(StringTests, Format_Int_HexLower) {
+    EXPECT_EQ(String::Format("{0:x}", 255), "ff");
+}
+TEST(StringTests, Format_Int_HexPadded) {
+    EXPECT_EQ(String::Format("{0:X4}", 255), "00FF");
+}
+TEST(StringTests, Format_Int_DecimalPadded) {
+    EXPECT_EQ(String::Format("{0:D3}", 7), "007");
+}
+TEST(StringTests, Format_Int_DecimalPadded_Negative) {
+    EXPECT_EQ(String::Format("{0:D3}", -7), "-007");
+}
+TEST(StringTests, Format_Double_Fixed) {
+    EXPECT_EQ(String::Format("{0:F2}", 3.14159), "3.14");
+}
+TEST(StringTests, Format_Double_Fixed_Zero) {
+    EXPECT_EQ(String::Format("{0:F0}", 3.7), "4");
+}
+TEST(StringTests, Format_Double_Plain) {
+    EXPECT_EQ(String::Format("{0}", 1.5), "1.5");
+}
+
+// --- Format multi-arg ---
+
+TEST(StringTests, Format_TwoInts) {
+    EXPECT_EQ(String::Format("{0} / {1}", 10, 20), "10 / 20");
+}
+TEST(StringTests, Format_TwoInts_WithSpecs) {
+    EXPECT_EQ(String::Format("{0:D2}:{1:D2}", 3, 5), "03:05");
+}
+TEST(StringTests, Format_IntAndString) {
+    EXPECT_EQ(String::Format("HP: {0}/{1}", 80, std::string("100")), "HP: 80/100");
+}
+TEST(StringTests, Format_StringAndInt) {
+    EXPECT_EQ(String::Format("{0}={1}", std::string("x"), 7), "x=7");
+}
+TEST(StringTests, Format_TwoStrings) {
+    EXPECT_EQ(String::Format("{0} {1}", std::string("hello"), std::string("world")), "hello world");
+}
+TEST(StringTests, Format_TwoDoubles) {
+    EXPECT_EQ(String::Format("({0:F1},{1:F1})", 1.25, 3.75), "(1.2,3.8)");
+}

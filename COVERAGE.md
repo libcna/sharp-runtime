@@ -60,8 +60,10 @@ sharp-runtime, and whether each is fully implemented, partial, or a stub.
 | IndexOf(string/char) | ✅ |
 | LastIndexOf(string/char) | ✅ |
 | PadLeft / PadRight | ✅ |
-| Format(format, int) | ✅ |
+| Format(format, int) — with `{0:X}`, `{0:D3}` specifiers | ✅ |
+| Format(format, double) — with `{0:F2}`, `{0:G}`, `{0:E}` specifiers | ✅ |
 | Format(format, string) | ✅ |
+| Format(format, int, int) / (int, string) / (string, int) / (string, string) / (double, double) | ✅ |
 | ToString(int, width, fill) | ✅ |
 
 ### Exception hierarchy (DONE)
@@ -165,9 +167,11 @@ All standard exception types are present with `Message` / `what()` / `ToString()
 ### Random (DONE)
 | Method | Status |
 |--------|--------|
+| Random() — random-device seed | ✅ |
+| Random(seed) — deterministic seeded constructor | ✅ |
 | Next(), Next(max), Next(min, max) | ✅ |
-| NextDouble, NextSingle | ✅ |
-| NextBytes | ✅ |
+| NextDouble() | ✅ |
+| NextBytes(vector\<byte\>&) | ✅ |
 
 ### Environment (DONE)
 | Method | Status |
@@ -204,6 +208,26 @@ Constructors, `Item1`–`Item8` properties, `ToString` ✅
 `Action`, `ActionT<T>`, `ActionT2<T1,T2>`, `ActionT3<T1,T2,T3>`,
 `Func<R>`, `FuncT<T,R>`, `FuncT2<T1,T2,R>`, `FuncT3<T1,T2,T3,R>`,
 `Predicate<T>`, `EventHandler`, `EventArgs` — all `std::function<>` aliases ✅
+
+---
+
+## System::Linq
+
+### Enumerable operators (DONE — header-only, System/Linq.hpp)
+| Operator | Status |
+|----------|--------|
+| Where, Select | ✅ |
+| First, FirstOrDefault | ✅ |
+| LastOrDefault | ✅ |
+| Any, All | ✅ |
+| Count (with/without predicate) | ✅ |
+| ToList | ✅ |
+| Sum (direct + with selector) | ✅ |
+| Min, Max | ✅ |
+| OrderBy, OrderByDescending | ✅ |
+| Distinct | ✅ |
+| Reverse, Skip, Take | ✅ |
+| Concat, Contains | ✅ |
 
 ---
 
@@ -482,7 +506,7 @@ Emscripten returns UTC ✅
 
 ### Debugging & tracing (DONE)
 `Debugger` (Break, IsAttached), `Debug`, `Trace`,
-`StackTrace`, `StackFrame`, `Stopwatch` ✅
+`StackTrace`, `StackFrame`, `Stopwatch` (Start/Stop/Reset/Restart/StartNew/Elapsed/ElapsedMilliseconds/ElapsedTicks/IsRunning/Frequency/IsHighResolution) ✅
 
 ### Attributes (DONE)
 `ConditionalAttribute`, `DebuggerBrowsableAttribute`, `DebuggerHiddenAttribute`,
