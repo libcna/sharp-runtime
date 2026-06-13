@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage. 3171 tests pass. No known remaining feature gaps.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–47 completed portability, locale-safety, Windows build test, all calendar+IdnMapping implementations, HttpClient+FormUrlEncodedContent, and full Doxygen documentation pass over 109 .hpp files. Session 48–49 completed remaining Doxygen docs (`GenericMathInterfaces.hpp`, `String.hpp`); confirmed all 449 headers have `///` or `/** */` Doxygen coverage; produced full .NET API coverage analysis (`COVERAGE.md`). 3171 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -244,6 +244,7 @@ git log --oneline -10
 | 71 | 46 | IdnMapping — Punycode/IDNA (RFC 3492): GetAscii() Unicode→ACE, GetUnicode() ACE→Unicode; pure algorithmic, no ICU; UTF-8 I/O; multi-label domain support | ✅ |
 | 82 | 47 | HttpClient (System.Net.Http) — HTTP/1.1 over raw sockets; HttpMethod, HttpContent, StringContent, ByteArrayContent, HttpRequestMessage, HttpResponseMessage, HttpClient; POSIX+Winsock2; chunked+Content-Length; Emscripten throws; async via TaskT | +32 |
 | D1 | 48–49 | Doxygen pass: `///` comments added to `GenericMathInterfaces.hpp` and `String.hpp`; audit confirmed all 449 headers have Doxygen coverage (`///` or `/** */`) | — |
+| D2 | 49 | `COVERAGE.md` — full .NET API coverage analysis: namespaces, classes, methods; implemented vs stub vs missing; platform portability table; key gaps summary | — |
 
 ---
 
@@ -276,7 +277,7 @@ All planned tasks complete. No known remaining feature gaps.
 > Session 45: Windows build test (mingw-w64 14), Win32 macro collision fixes.
 > Session 46: KoreanCalendar, JapaneseCalendar, HijriCalendar, HebrewCalendar, UmAlQuraCalendar, IdnMapping (Punycode/IDNA).
 > Session 47: HttpClient (HTTP/1.1), FormUrlEncodedContent.
-> Sessions 48–49: Doxygen `///` pass over all headers; all 449 .hpp files confirmed covered.
+> Sessions 48–49: Doxygen `///` pass over all headers; all 449 .hpp files confirmed covered. Full .NET API coverage analysis written to `COVERAGE.md`.
 >
 > Build: `cmake --build build --parallel 4`
 > Run full suite: `./build/SharpRuntimeTests` — must show 3171 passing, 0 failing.
