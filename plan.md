@@ -94,7 +94,7 @@ Status column is filled interactively: for each empty row, Claude describes what
 | 68 | `Microsoft.Win32` | `ignore` | Windows Registry and SystemEvents — Windows-only, irrelevant for game dev |
 | 69 | `Microsoft.Win32.SafeHandles` | `ignore` | Windows Safe Handle wrappers (SafeFileHandle etc.) — Windows-only |
 | 70 | `Microsoft.XmlSerializer.Generator` | `ignore` | MSBuild/CLI tool for pre-generating XmlSerializer code — build tooling only |
-| 71 | `System` | `todo` | Object, String, Int32, DateTime, Math, Console, Exception, Array, Enum, Convert, Random, GC, Environment |
+| 71 | `System` | `in_progress` | Object, String, Int32, DateTime, Math, Console, Exception, Array, Enum, Convert, Random, GC, Environment |
 | 72 | `System.Buffers` | `todo` | ArrayPool<T>, MemoryPool<T>, ReadOnlySequence<T>, SearchValues<T> |
 | 73 | `System.Buffers.Binary` | `todo` | BinaryPrimitives — endian-aware reading/writing of primitives |
 | 74 | `System.Buffers.Text` | `todo` | Utf8Formatter, Utf8Parser — text formatting/parsing on byte spans |
@@ -335,3 +335,13 @@ Status column is filled interactively: for each empty row, Claude describes what
 | 309 | `System.Xml.Xsl.Xslt` | `ignore` | XSLT compiler internals |
 | 310 | `System.Xml.Xsl.XsltOld` | `ignore` | Legacy XSLT implementation internals |
 | 311 | `System.Xml.Xsl.XsltOld.Debugger` | `ignore` | Legacy XSLT debugger internals |
+
+---
+
+## .cs Files
+
+Detailed tracking of individual .NET reference `.cs` files per namespace.
+Status values: `ported`, `in_progress`, `todo`, `ignore`
+
+| File | Namespace | Status |
+|------|-----------|--------|
