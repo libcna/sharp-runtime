@@ -235,6 +235,26 @@ TEST(HashCodeTests, AddAndToHashCode) {
     hc2.Add(20);
     EXPECT_EQ(hc.ToHashCode(), hc2.ToHashCode());
 }
+TEST(HashCodeTests, Combine5_Works) {
+    int h = HashCode::Combine(1, 2, 3, 4, 5);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5));
+    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 6));
+}
+TEST(HashCodeTests, Combine6_Works) {
+    int h = HashCode::Combine(1, 2, 3, 4, 5, 6);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6));
+    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 7));
+}
+TEST(HashCodeTests, Combine7_Works) {
+    int h = HashCode::Combine(1, 2, 3, 4, 5, 6, 7);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7));
+    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 8));
+}
+TEST(HashCodeTests, Combine8_Works) {
+    int h = HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 8));
+    EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 9));
+}
 
 // ===========================================================================
 // ArraySegment<T>

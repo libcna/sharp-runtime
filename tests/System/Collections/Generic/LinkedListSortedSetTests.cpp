@@ -153,6 +153,103 @@ TEST(LinkedListTests, StringLinkedList) {
 }
 
 // ---------------------------------------------------------------------------
+// LinkedListNode-based API
+// ---------------------------------------------------------------------------
+
+TEST(LinkedListTests, AddLast_ReturnsNode_ValueCorrect) {
+    LinkedList<int> ll;
+    auto node = ll.AddLast(42);
+    EXPECT_TRUE(static_cast<bool>(node));
+    EXPECT_EQ(node.getValueProperty(), 42);
+}
+
+TEST(LinkedListTests, AddFirst_ReturnsNode_ValueCorrect) {
+    LinkedList<int> ll;
+    ll.AddLast(2);
+    auto node = ll.AddFirst(1);
+    EXPECT_EQ(node.getValueProperty(), 1);
+    EXPECT_EQ(ll.getCountProperty(), 2);
+}
+
+TEST(LinkedListTests, GetFirstProperty_ReturnsNode) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20);
+    auto n = ll.getFirstProperty();
+    EXPECT_TRUE(static_cast<bool>(n));
+    EXPECT_EQ(n.getValueProperty(), 10);
+}
+
+TEST(LinkedListTests, GetLastProperty_ReturnsNode) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20);
+    auto n = ll.getLastProperty();
+    EXPECT_EQ(n.getValueProperty(), 20);
+}
+
+TEST(LinkedListTests, GetFirstProperty_EmptyList_NullNode) {
+    LinkedList<int> ll;
+    auto n = ll.getFirstProperty();
+    EXPECT_FALSE(static_cast<bool>(n));
+    EXPECT_EQ(n, nullptr);
+}
+
+TEST(LinkedListTests, Find_ExistingValue_ReturnsNode) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto n = ll.Find(2);
+    EXPECT_TRUE(static_cast<bool>(n));
+    EXPECT_EQ(n.getValueProperty(), 2);
+}
+
+TEST(LinkedListTests, Find_MissingValue_NullNode) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    auto n = ll.Find(99);
+    EXPECT_FALSE(static_cast<bool>(n));
+}
+
+TEST(LinkedListTests, FindLast_ReturnsLastOccurrence) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(1);
+    auto n = ll.FindLast(1);
+    EXPECT_TRUE(static_cast<bool>(n));
+    EXPECT_EQ(n.getValueProperty(), 1);
+    // Verify it's the last by checking count after removal
+    ll.Remove(n);
+    EXPECT_EQ(ll.getCountProperty(), 2);
+    EXPECT_EQ(ll.getLastProperty().getValueProperty(), 2);
+}
+
+TEST(LinkedListTests, AddBefore_InsertsBeforeNode) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(3);
+    auto n3 = ll.Find(3);
+    ll.AddBefore(n3, 2);
+    std::vector<int> v;
+    for (int x : ll) v.push_back(x);
+    EXPECT_EQ(v, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(LinkedListTests, AddAfter_InsertsAfterNode) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(3);
+    auto n1 = ll.Find(1);
+    ll.AddAfter(n1, 2);
+    std::vector<int> v;
+    for (int x : ll) v.push_back(x);
+    EXPECT_EQ(v, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(LinkedListTests, Remove_ByNode_RemovesIt) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20); ll.AddLast(30);
+    auto n = ll.Find(20);
+    ll.Remove(n);
+    EXPECT_EQ(ll.getCountProperty(), 2);
+    EXPECT_FALSE(ll.Contains(20));
+}
+
+// ---------------------------------------------------------------------------
 // SortedSet<T>
 // ---------------------------------------------------------------------------
 

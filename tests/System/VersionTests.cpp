@@ -119,3 +119,57 @@ TEST(VersionTests, LessOrEqual_SameVersion) {
 TEST(VersionTests, GreaterOrEqual_SameVersion) {
     EXPECT_TRUE(Version(1, 2) >= Version(1, 2));
 }
+
+// ---------------------------------------------------------------------------
+// Parse / TryParse / CompareTo / Equals
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, Parse_ValidString) {
+    Version v = Version::Parse("3.5.1.9");
+    EXPECT_EQ(v.Major, 3);
+    EXPECT_EQ(v.Minor, 5);
+    EXPECT_EQ(v.Build, 1);
+    EXPECT_EQ(v.Revision, 9);
+}
+
+TEST(VersionTests, Parse_TwoParts) {
+    Version v = Version::Parse("1.0");
+    EXPECT_EQ(v.Major, 1);
+    EXPECT_EQ(v.Minor, 0);
+}
+
+TEST(VersionTests, TryParse_Valid_ReturnsTrue) {
+    Version v;
+    EXPECT_TRUE(Version::TryParse("2.4.6", v));
+    EXPECT_EQ(v.Major, 2);
+    EXPECT_EQ(v.Minor, 4);
+    EXPECT_EQ(v.Build, 6);
+}
+
+TEST(VersionTests, TryParse_Invalid_ReturnsFalse) {
+    Version v(9, 9);
+    EXPECT_FALSE(Version::TryParse("not.a.version!", v));
+}
+
+TEST(VersionTests, CompareTo_Equal_ReturnsZero) {
+    Version a(1, 2, 3), b(1, 2, 3);
+    EXPECT_EQ(a.CompareTo(b), 0);
+}
+
+TEST(VersionTests, CompareTo_Less_ReturnsNegative) {
+    Version a(1, 0), b(2, 0);
+    EXPECT_LT(a.CompareTo(b), 0);
+}
+
+TEST(VersionTests, CompareTo_Greater_ReturnsPositive) {
+    Version a(3, 0), b(1, 5);
+    EXPECT_GT(a.CompareTo(b), 0);
+}
+
+TEST(VersionTests, Equals_Same_True) {
+    EXPECT_TRUE(Version(1, 2, 3, 4).Equals(Version(1, 2, 3, 4)));
+}
+
+TEST(VersionTests, Equals_Different_False) {
+    EXPECT_FALSE(Version(1, 2).Equals(Version(1, 3)));
+}

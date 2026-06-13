@@ -52,6 +52,36 @@ namespace System {
         static int Combine(const T1& v1, const T2& v2, const T3& v3, const T4& v4) {
             HashCode hc; hc.Add(v1); hc.Add(v2); hc.Add(v3); hc.Add(v4); return hc.ToHashCode();
         }
+        /// Combines five values into a single hash code.
+        template<typename T1, typename T2, typename T3, typename T4, typename T5>
+        static int Combine(const T1& v1, const T2& v2, const T3& v3, const T4& v4, const T5& v5) {
+            HashCode hc; hc.Add(v1); hc.Add(v2); hc.Add(v3); hc.Add(v4); hc.Add(v5);
+            return hc.ToHashCode();
+        }
+        /// Combines six values into a single hash code.
+        template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+        static int Combine(const T1& v1, const T2& v2, const T3& v3, const T4& v4,
+                           const T5& v5, const T6& v6) {
+            HashCode hc; hc.Add(v1); hc.Add(v2); hc.Add(v3); hc.Add(v4); hc.Add(v5); hc.Add(v6);
+            return hc.ToHashCode();
+        }
+        /// Combines seven values into a single hash code.
+        template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7>
+        static int Combine(const T1& v1, const T2& v2, const T3& v3, const T4& v4,
+                           const T5& v5, const T6& v6, const T7& v7) {
+            HashCode hc; hc.Add(v1); hc.Add(v2); hc.Add(v3); hc.Add(v4);
+            hc.Add(v5); hc.Add(v6); hc.Add(v7);
+            return hc.ToHashCode();
+        }
+        /// Combines eight values into a single hash code.
+        template<typename T1, typename T2, typename T3, typename T4,
+                 typename T5, typename T6, typename T7, typename T8>
+        static int Combine(const T1& v1, const T2& v2, const T3& v3, const T4& v4,
+                           const T5& v5, const T6& v6, const T7& v7, const T8& v8) {
+            HashCode hc; hc.Add(v1); hc.Add(v2); hc.Add(v3); hc.Add(v4);
+            hc.Add(v5); hc.Add(v6); hc.Add(v7); hc.Add(v8);
+            return hc.ToHashCode();
+        }
     };
 
 } // namespace System

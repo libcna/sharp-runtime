@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <stdexcept>
 #include <string>
 #include <sstream>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -35,6 +36,24 @@ namespace System {
         /// Parses a version from a dot-separated string such as "1.2.3.4".
         /// @param versionString String to parse; must contain at least two components.
         explicit Version(const std::string& versionString) { parse(versionString); }
+
+        /// Parses a version from a dot-separated string. Throws std::invalid_argument on failure.
+        static Version Parse(const std::string& s) {
+            try { return Version(s); } catch (...) {
+                throw std::invalid_argument("Invalid version string: " + s);
+            }
+        }
+
+        /// Tries to parse a version string without throwing. Returns true on success.
+        static bool TryParse(const std::string& s, Version& result) {
+            try { result = Version(s); return true; } catch (...) { return false; }
+        }
+
+        /// Compares this version to another. Returns negative, zero, or positive.
+        [[nodiscard]] intcs CompareTo(const Version& other) const { return cmp(other); }
+
+        /// Returns true if this version has equal components to other.
+        [[nodiscard]] bool Equals(const Version& other) const { return cmp(other) == 0; }
 
         /// Returns the version as a dot-separated string, omitting unspecified (negative) components.
         /// @return String representation, e.g. "1.2" or "1.2.3.4".
