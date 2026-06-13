@@ -94,6 +94,12 @@ namespace System::Diagnostics {
         /// @brief Indicates whether the Stopwatch timer is based on a high-resolution performance counter.
         static constexpr bool IsHighResolution = true;
 
+        /// @brief Returns the current high-frequency timestamp in Frequency units (100-ns ticks since epoch).
+        [[nodiscard]] static longcs GetTimestamp() {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       Clock::now().time_since_epoch()).count() / 100LL;
+        }
+
     private:
         [[nodiscard]] longcs currentNs() const {
             longcs ns = elapsed_ns_;

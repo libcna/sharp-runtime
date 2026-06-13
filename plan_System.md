@@ -8,7 +8,7 @@ Reference source: dotnet/runtime, MIT License
 
 | # | File | Namespace | Status | Note |
 |---|------|-----------|--------|------|
-| 1 | Common/src/System/TimeProvider.cs | `System` |   | TimeProvider — port (abstract time source) |
+| 1 | Common/src/System/TimeProvider.cs | `System` | `ported` | TimeProvider — port (abstract time source) |
 | 2 | Microsoft.Bcl.Numerics/src/System/MathF.cs | `System` | `ported` | Single-precision math — port via cmath |
 | 3 | System.ComponentModel/ref/System.ComponentModel.cs | `System` |   | Public API surface definition — use as porting reference |
 | 4 | System.ComponentModel/src/System/IServiceProvider.cs | `System` |   | IServiceProvider interface — port |
