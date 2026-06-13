@@ -32,27 +32,27 @@ namespace System::Numerics {
         }
 
         static int LeadingZeroCount(uint32_t value) noexcept {
-            return value == 0 ? 32 : __builtin_clz(value);
+            return static_cast<int>(std::countl_zero(value));
         }
         static int LeadingZeroCount(uint64_t value) noexcept {
-            return value == 0 ? 64 : __builtin_clzll(value);
+            return static_cast<int>(std::countl_zero(value));
         }
 
         static int Log2(uint32_t value) noexcept {
-            return value <= 1 ? 0 : 31 - __builtin_clz(value);
+            return value <= 1 ? 0 : static_cast<int>(std::bit_width(value)) - 1;
         }
         static int Log2(uint64_t value) noexcept {
-            return value <= 1 ? 0 : 63 - __builtin_clzll(value);
+            return value <= 1 ? 0 : static_cast<int>(std::bit_width(value)) - 1;
         }
 
-        static int PopCount(uint32_t value) noexcept { return __builtin_popcount(value); }
-        static int PopCount(uint64_t value) noexcept { return __builtin_popcountll(value); }
+        static int PopCount(uint32_t value) noexcept { return static_cast<int>(std::popcount(value)); }
+        static int PopCount(uint64_t value) noexcept { return static_cast<int>(std::popcount(value)); }
 
         static int TrailingZeroCount(uint32_t value) noexcept {
-            return value == 0 ? 32 : __builtin_ctz(value);
+            return static_cast<int>(std::countr_zero(value));
         }
         static int TrailingZeroCount(uint64_t value) noexcept {
-            return value == 0 ? 64 : __builtin_ctzll(value);
+            return static_cast<int>(std::countr_zero(value));
         }
         static int TrailingZeroCount(int32_t value) noexcept {
             return TrailingZeroCount(static_cast<uint32_t>(value));
