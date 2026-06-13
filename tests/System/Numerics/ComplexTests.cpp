@@ -266,3 +266,58 @@ TEST(ComplexTests, ToStringFormat) {
     EXPECT_NE(s.find("1."), std::string::npos);
     EXPECT_NE(s.find("2."), std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// New methods: Asin/Acos/Atan/Sinh/Cosh/Tanh/Log(base)/Reciprocal/FromPolar
+// ---------------------------------------------------------------------------
+
+TEST(ComplexTests, Sinh_Zero_IsZero) {
+    Complex r = Complex::Sinh(Complex::Zero);
+    EXPECT_NEAR(r.getRealProperty(), 0.0, 1e-12);
+}
+
+TEST(ComplexTests, Cosh_Zero_IsOne) {
+    Complex r = Complex::Cosh(Complex::Zero);
+    EXPECT_NEAR(r.getRealProperty(), 1.0, 1e-12);
+}
+
+TEST(ComplexTests, Tanh_Zero_IsZero) {
+    Complex r = Complex::Tanh(Complex::Zero);
+    EXPECT_NEAR(r.getRealProperty(), 0.0, 1e-12);
+}
+
+TEST(ComplexTests, Asin_Zero_IsZero) {
+    Complex r = Complex::Asin(Complex::Zero);
+    EXPECT_NEAR(r.getRealProperty(), 0.0, 1e-12);
+}
+
+TEST(ComplexTests, Acos_One_IsZero) {
+    Complex r = Complex::Acos(Complex::One);
+    EXPECT_NEAR(r.getRealProperty(), 0.0, 1e-12);
+}
+
+TEST(ComplexTests, Atan_Zero_IsZero) {
+    Complex r = Complex::Atan(Complex::Zero);
+    EXPECT_NEAR(r.getRealProperty(), 0.0, 1e-12);
+}
+
+TEST(ComplexTests, Log_Base10) {
+    Complex r = Complex::Log(Complex(100.0, 0.0), 10.0);
+    EXPECT_NEAR(r.getRealProperty(), 2.0, 1e-10);
+}
+
+TEST(ComplexTests, Reciprocal_One_IsOne) {
+    Complex r = Complex::Reciprocal(Complex::One);
+    EXPECT_NEAR(r.getRealProperty(), 1.0, 1e-12);
+}
+
+TEST(ComplexTests, Reciprocal_Two_IsHalf) {
+    Complex r = Complex::Reciprocal(Complex(2.0, 0.0));
+    EXPECT_NEAR(r.getRealProperty(), 0.5, 1e-12);
+}
+
+TEST(ComplexTests, FromPolarCoordinates_UnitAngle) {
+    Complex r = Complex::FromPolarCoordinates(1.0, 0.0);
+    EXPECT_NEAR(r.getRealProperty(),      1.0, 1e-12);
+    EXPECT_NEAR(r.getImaginaryProperty(), 0.0, 1e-12);
+}

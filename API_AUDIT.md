@@ -94,7 +94,7 @@
 | `IEquatable.hpp` | `IGNORE` | Interface |
 | `IFormatProvider.hpp` | `IGNORE` | Interface |
 | `IFormattable.hpp` | `IGNORE` | Interface |
-| `Index.hpp` | `TO_CHECK` | Range index type |
+| `Index.hpp` | `PORTED` | FromStart/FromEnd/Start/End/GetOffset — complete |
 | `IndexOutOfRangeException.hpp` | `IGNORE` | Exception marker |
 | `InsufficientExecutionStackException.hpp` | `IGNORE` | Exception marker |
 | `InsufficientMemoryException.hpp` | `IGNORE` | Exception marker |
@@ -141,7 +141,7 @@
 | `Predicate.hpp` | `PORTED` | Typedef for std::function |
 | `Progress.hpp` | `TO_CHECK` | IProgress<T> implementation |
 | `Random.hpp` | `PARTIAL` | Missing: `NextInt64()`, `NextInt64(max)`, `NextInt64(min,max)` |
-| `Range.hpp` | `TO_CHECK` | Range type |
+| `Range.hpp` | `PORTED` | All/StartAt/EndAt/GetOffsetAndLength — complete |
 | `RankException.hpp` | `IGNORE` | Exception marker |
 | `ResolveEventArgs.hpp` | `IGNORE` | Event args |
 | `ResolveEventHandler.hpp` | `IGNORE` | Delegate typedef |
@@ -161,7 +161,7 @@
 | `TimeZone.hpp` | `STUB` | Obsolete in .NET; stub |
 | `TimeZoneInfo.hpp` | `PORTED` | Local, UTC, FindSystemTimeZoneById (IANA) |
 | `TimeZoneNotFoundException.hpp` | `IGNORE` | Exception marker |
-| `Tuple.hpp` | `TO_CHECK` | Tuple<T1,T2,...> |
+| `Tuple.hpp` | `PORTED` | Tuple2/3/4 with Item1..ItemN and equality — complete |
 | `TypeAccessException.hpp` | `IGNORE` | Exception marker |
 | `TypeCode.hpp` | `IGNORE` | Enum |
 | `Type.hpp` | `STUB` | Very minimal — reflection not applicable |
@@ -177,7 +177,7 @@
 | `UnhandledExceptionEventArgs.hpp` | `IGNORE` | Event args |
 | `UnhandledExceptionEventHandler.hpp` | `IGNORE` | Delegate typedef |
 | `Uri.hpp` | `PORTED` | Full URI parsing |
-| `ValueTuple.hpp` | `TO_CHECK` | Value tuple |
+| `ValueTuple.hpp` | `PORTED` | ValueTuple1/2/3/4 + MakeValueTuple factory — complete |
 | `Version.hpp` | `PORTED` | Parse/TryParse/CompareTo/Equals added session 69 |
 | `WeakReference.hpp` | `PORTED` | WeakReference + WeakReferenceT<T>, IsAlive/Target/TryGetTarget — complete |
 
@@ -476,7 +476,7 @@
 | `Colors/Argb.hpp` | `PORTED` | Constructor, CopyTo, Equals, ToRgba |
 | `Colors/Colors.hpp` | `PORTED` | |
 | `Colors/Rgba.hpp` | `PORTED` | Constructor, CopyTo, Equals, ToArgb |
-| `Complex.hpp` | `TO_CHECK` | Complex number |
+| `Complex.hpp` | `PORTED` | Asin/Acos/Atan/Sinh/Cosh/Tanh/Log(base)/Reciprocal/FromPolarCoordinates added session 69 |
 | `DivisionRounding.hpp` | `IGNORE` | Enum |
 | `GenericMathInterfaces.hpp` | `IGNORE` | Interfaces |
 | `Matrix3x2.hpp` | `PORTED` | Full transforms, Invert |

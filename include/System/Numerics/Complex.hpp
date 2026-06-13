@@ -73,6 +73,26 @@ namespace System::Numerics {
         static Complex Cos(const Complex& c)                          { return Complex(std::cos(c.value)); }
         /// @return Complex tangent of @p c.
         static Complex Tan(const Complex& c)                          { return Complex(std::tan(c.value)); }
+        /// @return Complex arcsine of @p c.
+        static Complex Asin(const Complex& c)                         { return Complex(std::asin(c.value)); }
+        /// @return Complex arccosine of @p c.
+        static Complex Acos(const Complex& c)                         { return Complex(std::acos(c.value)); }
+        /// @return Complex arctangent of @p c.
+        static Complex Atan(const Complex& c)                         { return Complex(std::atan(c.value)); }
+        /// @return Complex hyperbolic sine of @p c.
+        static Complex Sinh(const Complex& c)                         { return Complex(std::sinh(c.value)); }
+        /// @return Complex hyperbolic cosine of @p c.
+        static Complex Cosh(const Complex& c)                         { return Complex(std::cosh(c.value)); }
+        /// @return Complex hyperbolic tangent of @p c.
+        static Complex Tanh(const Complex& c)                         { return Complex(std::tanh(c.value)); }
+        /// @return Natural logarithm of @p c to the specified @p baseValue.
+        static Complex Log(const Complex& c, double baseValue)        { return Complex(std::log(c.value) / std::log(baseValue)); }
+        /// @return The reciprocal 1/c. Returns (infinity, 0) if c is zero.
+        static Complex Reciprocal(const Complex& c)                   { return Complex(1.0 / c.value); }
+        /// @return Complex number from polar coordinates (magnitude, phase in radians).
+        static Complex FromPolarCoordinates(double magnitude, double phase) {
+            return Complex(std::polar(magnitude, phase));
+        }
 
         static const Complex Zero;         ///< The complex number 0 + 0i.
         static const Complex One;          ///< The complex number 1 + 0i.
