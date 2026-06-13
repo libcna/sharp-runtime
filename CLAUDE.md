@@ -62,6 +62,22 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 
 ---
 
+## plan.md namespace review workflow
+
+`plan.md` contains a numbered table of all .NET namespaces from dotnet/runtime. The **Status column starts empty** for each namespace. The workflow for filling it in:
+
+1. For each namespace where Status is empty, describe what classes/enums/interfaces it contains (look in `/rv/tmp/runtime/src/libraries/`).
+2. Ask the user: **todo / ignore / ported / in_progress**
+   - `todo` — needs to be ported/implemented in sharp-runtime
+   - `ignore` — out of scope (too complex, platform-specific, or irrelevant to game dev)
+   - `ported` — already implemented in sharp-runtime
+   - `in_progress` — partially implemented, work ongoing
+3. Write the chosen status into the table and move to the next namespace.
+
+Do this one namespace at a time. Never batch-decide without asking.
+
+---
+
 ## Useful commands
 
 ```bash
