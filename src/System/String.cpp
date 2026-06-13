@@ -464,6 +464,30 @@ namespace System
         return Format(format, std::to_string(arg0));
     }
 
+    std::string String::Format(const std::string& format, double arg0, const std::string& arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
+        return replaceArg(r, 1, arg1);
+    }
+
+    std::string String::Format(const std::string& format, const std::string& arg0, double arg1)
+    {
+        std::string r = replaceArg(format, 0, arg0);
+        return replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1)));
+    }
+
+    std::string String::Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::intcs arg1)
+    {
+        std::string r = replaceArg(format, 0, std::to_string(arg0));
+        return replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
+    }
+
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::longcs arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
+        return replaceArg(r, 1, std::to_string(arg1));
+    }
+
     bool String::StartsWith(const std::string& value, char ch)
     {
         return !value.empty() && value.front() == ch;

@@ -834,3 +834,33 @@ TEST(SortedListTests, getValuesProperty_SortedByKey) {
     EXPECT_EQ(vals[1], "b");
     EXPECT_EQ(vals[2], "c");
 }
+
+// ===========================================================================
+// List<T> — IndexOf(startIndex) and LastIndexOf
+// ===========================================================================
+
+TEST(ListTests, IndexOf_StartIndex_Found) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(2);
+    EXPECT_EQ(lst.IndexOf(2, 2), 3);
+}
+TEST(ListTests, IndexOf_StartIndex_NotFound) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_EQ(lst.IndexOf(1, 1), -1);
+}
+TEST(ListTests, LastIndexOf_Found) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(1);
+    EXPECT_EQ(lst.LastIndexOf(1), 2);
+}
+TEST(ListTests, LastIndexOf_NotFound) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.LastIndexOf(9), -1);
+}
+TEST(ListTests, LastIndexOf_WithStartIndex) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.LastIndexOf(2, 2), 1);
+}

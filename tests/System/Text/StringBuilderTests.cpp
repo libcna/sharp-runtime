@@ -421,3 +421,15 @@ TEST(StringBuilderTests, SetLength_Extend_PadsNulls) {
     sb.setLengthProperty(4);
     EXPECT_EQ(sb.getLengthProperty(), 4);
 }
+
+// --- Append(float) ---
+TEST(StringBuilderTests, Append_Float_Basic) {
+    StringBuilder sb;
+    sb.Append(1.5f);
+    EXPECT_FALSE(sb.ToString().empty());
+}
+TEST(StringBuilderTests, Append_Float_Chained) {
+    StringBuilder sb;
+    sb.Append("x=").Append(2.5f);
+    EXPECT_TRUE(sb.ToString().rfind("x=", 0) == 0);
+}

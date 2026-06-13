@@ -62,6 +62,11 @@ namespace System::Text
         /// @return Reference to this instance.
         StringBuilder& Append(double value);
 
+        /// Appends the string representation of the specified float value.
+        /// @param value Float value to append.
+        /// @return Reference to this instance.
+        StringBuilder& Append(float value);
+
         /// Appends the string representation of the specified boolean value.
         /// The appended text is "True" or "False" to match .NET behavior.
         /// @param value Boolean value to append.

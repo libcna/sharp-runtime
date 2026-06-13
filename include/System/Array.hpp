@@ -83,6 +83,14 @@ namespace System {
             return -1;
         }
 
+        /// Returns the zero-based index of the first element equal to @p value starting at @p startIndex, or -1.
+        template<typename T>
+        static intcs IndexOf(const std::vector<T>& array, const T& value, intcs startIndex) {
+            for (intcs i = startIndex; i < static_cast<intcs>(array.size()); ++i)
+                if (array[static_cast<size_t>(i)] == value) return i;
+            return -1;
+        }
+
         /// Reverses the order of all elements in @p array in place.
         /// @param array Vector to reverse.
         template<typename T>

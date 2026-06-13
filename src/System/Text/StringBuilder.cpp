@@ -60,6 +60,14 @@ namespace System::Text
         return *this;
     }
 
+    StringBuilder& StringBuilder::Append(float value)
+    {
+        std::array<char, 32> buf;
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), value);
+        buffer += (ec == std::errc{}) ? std::string(buf.data(), ptr) : std::to_string(value);
+        return *this;
+    }
+
     StringBuilder& StringBuilder::Append(bool value)
     {
         buffer += (value ? "True" : "False");

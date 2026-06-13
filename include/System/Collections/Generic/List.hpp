@@ -209,5 +209,26 @@ namespace System::Collections::Generic
                 return static_cast<int>(it - items_.begin());
             return ~static_cast<int>(it - items_.begin());
         }
+
+        /// Returns the zero-based index of the first occurrence of @p item starting at @p startIndex, or -1.
+        [[nodiscard]] int IndexOf(const T& item, int startIndex) const {
+            for (int i = startIndex; i < static_cast<int>(items_.size()); ++i)
+                if (items_[static_cast<size_t>(i)] == item) return i;
+            return -1;
+        }
+
+        /// Returns the zero-based index of the last occurrence of @p item, or -1.
+        [[nodiscard]] int LastIndexOf(const T& item) const {
+            for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
+                if (items_[static_cast<size_t>(i)] == item) return i;
+            return -1;
+        }
+
+        /// Returns the zero-based index of the last occurrence of @p item at or before @p startIndex, or -1.
+        [[nodiscard]] int LastIndexOf(const T& item, int startIndex) const {
+            for (int i = startIndex; i >= 0; --i)
+                if (items_[static_cast<size_t>(i)] == item) return i;
+            return -1;
+        }
     };
 }

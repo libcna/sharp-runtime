@@ -280,3 +280,20 @@ TEST(ArrayTests, Empty_ReturnsSeparateInstances) {
     a.push_back(1);
     EXPECT_TRUE(b.empty());
 }
+
+// ---------------------------------------------------------------------------
+// IndexOf with startIndex
+// ---------------------------------------------------------------------------
+
+TEST(ArrayTests, IndexOf_StartIndex_Found) {
+    std::vector<int> v = {1, 2, 3, 2, 4};
+    EXPECT_EQ(Array::IndexOf(v, 2, 2), 3);
+}
+TEST(ArrayTests, IndexOf_StartIndex_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(Array::IndexOf(v, 1, 1), -1);
+}
+TEST(ArrayTests, IndexOf_StartIndex_Zero_SameAsNoStart) {
+    std::vector<int> v = {5, 6, 7};
+    EXPECT_EQ(Array::IndexOf(v, 6, 0), 1);
+}

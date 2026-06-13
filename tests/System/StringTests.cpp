@@ -531,3 +531,19 @@ TEST(StringTests, Split_None_KeepsEmpty) {
     EXPECT_EQ(v.size(), 3u);
     EXPECT_EQ(v[1], "");
 }
+
+// --- String::Format mixed-type overloads ---
+TEST(StringTests, Format_DoubleAndString) {
+    EXPECT_EQ(String::Format("{0} {1}", 3.14, std::string("hi")), "3.14 hi");
+}
+TEST(StringTests, Format_StringAndDouble) {
+    EXPECT_EQ(String::Format("{0}={1}", std::string("pi"), 3.14), "pi=3.14");
+}
+TEST(StringTests, Format_LongAndInt) {
+    SharpRuntime::longcs big = 9999999999LL;
+    EXPECT_EQ(String::Format("{0}/{1}", big, static_cast<SharpRuntime::intcs>(42)), "9999999999/42");
+}
+TEST(StringTests, Format_IntAndLong) {
+    SharpRuntime::longcs big = 1234567890123LL;
+    EXPECT_EQ(String::Format("{0}+{1}", static_cast<SharpRuntime::intcs>(1), big), "1+1234567890123");
+}
