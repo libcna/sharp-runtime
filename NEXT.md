@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 54*
+*Last updated: 2026-06-13 (branch: develop) — session 55*
 
 ---
 
@@ -78,7 +78,7 @@
 | `System::Numerics::Plane` | ✅ DONE | CreateFromVertices, Dot, Normalize, Transform |
 | `System::Threading::Timer` | ✅ DONE | dangling-`this` UB fixed via `shared_ptr<State>` |
 | `System::Threading::Thread` | ✅ DONE | deferred start — Start() once; 2nd call throws; Join, IsAlive, ManagedThreadId |
-| `System::Threading::Task/TaskT` | ⚠️ PARTIAL | `std::async(launch::async)` — no real threadpool; safe shared_ptr<State>; no Emscripten guard yet |
+| `System::Threading::Task/TaskT` | ✅ DONE | `std::async(launch::async)`; Emscripten guard throws PlatformNotSupportedException; `FromResult` uses pre-completed path (no async) on all platforms |
 | `System::Net::Sockets::TcpClient/TcpListener` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
 | `System::Net::Sockets::UdpClient` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
 | `System::Net::Sockets::NetworkStream` | ✅ DONE | POSIX + Winsock2; Emscripten throws PlatformNotSupportedException |
@@ -104,8 +104,7 @@
 
 | Status | Issue |
 |--------|-------|
-| **incomplete** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool |
-| **incomplete** | `Task`/`TaskT` — no Emscripten guard; `std::async` without pthreads will fail on Wasm |
+| **by design** | `Task`/`TaskT` — one OS thread per task via `std::async`, no real threadpool (sufficient for game use) |
 | **incomplete** | `GC` — no-op stub only |
 | **Windows limitation** | `TcpClient::GetStream()` — no socket dup on Windows (transfers ownership instead of dup-ing fd) |
 | **Windows limitation** | `TimeZoneInfo::FindSystemTimeZoneById()` — throws for IANA IDs on Windows (no IANA→Windows mapping) |
@@ -249,6 +248,8 @@ git log --oneline -10
 | 85 | 51 | `NameValueCollection` — `Get()` now comma-joins all values (matches .NET spec); add `Get(int)`, `GetValues(int)` by-index overloads; add `Add(collection)` merge; +5 tests. Fix COVERAGE.md false-stub markings for Console.ReadLine, PeriodicTimer, ThreadPool | +5 |
 | 86 | 52 | `IsolatedStorageFile` — add DirectoryExists, CreateDirectory, DeleteDirectory, MoveDirectory, GetDirectoryNames (glob), CreateFile, CopyFile (2 overloads), MoveFile, GetFileNames (glob), Remove, Close, Dispose, AvailableFreeSpace, UsedSize; +11 tests. Fix `Parallel::ForEach` ref-capture UB; implement `MaxDegreeOfParallelism` in `Parallel::For(opts)` | +11 |
 | D3 | 53 | COVERAGE.md gap audit — all remaining gaps (GC, Regex named groups, Task threadpool, HTTPS) confirmed intentionally out of scope; no fixable gaps remain | — |
+| 87 | 54 | `String`: ToUpper/ToLower/IndexOf/LastIndexOf/PadLeft/PadRight; `Math`: Log2/Sinh/Cosh/Tanh/IEEERemainder/DivRem/BigMul/ScaleB/Tau; `Convert`: ToHexString/FromHexString; 56 new tests | +56 |
+| 88 | 55 | `TaskT::FromResult` — fixed to use pre-completed path (no async), safe on Emscripten; Task/TaskT now fully DONE | — |
 
 ---
 
@@ -260,7 +261,7 @@ All fixable gaps resolved. Remaining known limitations (intentionally out of sco
 |------------|--------|
 | `GC` — no-op stubs | Not meaningful in C++; correct behaviour |
 | `Regex` — no named groups | `std::regex` limitation; needs PCRE2 dependency |
-| `Task`/`TaskT` — no real threadpool | Large redesign; `std::async` sufficient for current use |
+| `Task`/`TaskT` — one OS thread per task | Large redesign; `std::async` sufficient for current game use |
 | `HttpClient` — no HTTPS/TLS | Needs OpenSSL/mbedTLS external dependency |
 
 ---

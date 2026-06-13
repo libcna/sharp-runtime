@@ -129,6 +129,12 @@ namespace System::Threading::Tasks {
         std::shared_ptr<std::future<TResult>> future_;
         std::shared_ptr<State>                state_;
 
+        // Pre-completed constructor — used by FromResult; never launches async.
+        TaskT(const TResult& value, bool /*completed*/) : state_(std::make_shared<State>()) {
+            state_->result = value;
+            state_->isCompleted = true;
+        }
+
     public:
         /// Constructs and immediately starts a TaskT that executes @p func on a thread pool thread.
         /// On Emscripten, throws PlatformNotSupportedException.
@@ -173,13 +179,14 @@ namespace System::Threading::Tasks {
         /// Waits for the task and returns its result; equivalent to getResultProperty().
         TResult Wait() { return getResultProperty(); }
 
-        /// Creates a TaskT that is already completed with the specified @p value.
+        /// Creates a TaskT that is already completed with @p value — works on all platforms.
         /// @param value The result value.
         static TaskT<TResult> FromResult(const TResult& value) {
-            return TaskT<TResult>([value]() { return value; });
+            return TaskT<TResult>(value, true);
         }
 
         /// Creates and starts a new TaskT that executes @p func asynchronously.
+        /// On Emscripten, throws PlatformNotSupportedException.
         /// @param func The work to execute.
         static TaskT<TResult> Run(std::function<TResult()> func) {
             return TaskT<TResult>(std::move(func));

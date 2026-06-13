@@ -360,10 +360,10 @@ All backed by `shared_ptr<const std::container<T>>`:
 `EventWaitHandle`, `ReaderWriterLockSlim`,
 `Barrier`, `CountdownEvent`, `SpinLock`, `SpinWait`, `Lock`, `WaitHandle` ✅
 
-### Task-based asynchrony (PARTIAL)
+### Task-based asynchrony (DONE)
 | Class | Status |
 |-------|--------|
-| Task, Task\<T\> | ⚠️ `std::async(launch::async)`, no real threadpool; Emscripten throws |
+| Task, Task\<T\> | ✅ `std::async(launch::async)`; Emscripten guard on all async paths; `FromResult` pre-completed on all platforms |
 | TaskCompletionSource\<T\> | ✅ |
 | Parallel.For | ✅ `std::async`; MaxDegreeOfParallelism honoured; Emscripten guard |
 | Parallel.ForEach | ✅ by-value capture (ref-capture bug fixed) |
