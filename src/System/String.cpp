@@ -388,4 +388,33 @@ namespace System
         return -1;
     }
 
+    bool String::Contains(const std::string& value, char ch)
+    {
+        return value.find(ch) != std::string::npos;
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex)
+    {
+        auto pos = value.find(substr, static_cast<size_t>(startIndex));
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex)
+    {
+        auto pos = value.find(ch, static_cast<size_t>(startIndex));
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex)
+    {
+        auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex)
+    {
+        auto pos = value.rfind(ch, static_cast<size_t>(startIndex));
+        return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+    }
+
 }

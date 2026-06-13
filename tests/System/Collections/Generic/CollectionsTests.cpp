@@ -9,10 +9,14 @@
 #include "System/Collections/Generic/List.hpp"
 #include "System/Collections/Generic/Dictionary.hpp"
 #include "System/Collections/Generic/HashSet.hpp"
+#include "System/Collections/Generic/SortedDictionary.hpp"
+#include "System/Collections/Generic/SortedList.hpp"
 
 using System::Collections::Generic::List;
 using System::Collections::Generic::Dictionary;
 using System::Collections::Generic::HashSet;
+using System::Collections::Generic::SortedDictionary;
+using System::Collections::Generic::SortedList;
 
 // ---------------------------------------------------------------------------
 // List<T>
@@ -725,4 +729,108 @@ TEST(HashSetTests, IsProperSupersetOf) {
     b.Add(1); b.Add(2);
     EXPECT_TRUE(a.IsProperSupersetOf(b));
     EXPECT_FALSE(b.IsProperSupersetOf(a));
+}
+
+// ===========================================================================
+// SortedDictionary
+// ===========================================================================
+
+TEST(SortedDictionaryTests, Add_And_ContainsKey) {
+    SortedDictionary<int, std::string> sd;
+    sd.Add(1, "one");
+    EXPECT_TRUE(sd.ContainsKey(1));
+    EXPECT_FALSE(sd.ContainsKey(2));
+}
+
+TEST(SortedDictionaryTests, ContainsValue) {
+    SortedDictionary<int, std::string> sd;
+    sd.Add(1, "one");
+    sd.Add(2, "two");
+    EXPECT_TRUE(sd.ContainsValue("one"));
+    EXPECT_FALSE(sd.ContainsValue("three"));
+}
+
+TEST(SortedDictionaryTests, TryAdd_ReturnsTrueOnNew) {
+    SortedDictionary<int, std::string> sd;
+    EXPECT_TRUE(sd.TryAdd(1, "one"));
+    EXPECT_FALSE(sd.TryAdd(1, "again"));
+    EXPECT_EQ(sd.getCountProperty(), 1);
+}
+
+TEST(SortedDictionaryTests, GetValueOrDefault_Found) {
+    SortedDictionary<int, std::string> sd;
+    sd.Add(5, "five");
+    EXPECT_EQ(sd.GetValueOrDefault(5, "?"), "five");
+}
+
+TEST(SortedDictionaryTests, GetValueOrDefault_Missing) {
+    SortedDictionary<int, std::string> sd;
+    EXPECT_EQ(sd.GetValueOrDefault(99, "missing"), "missing");
+}
+
+TEST(SortedDictionaryTests, getKeysProperty_SortedOrder) {
+    SortedDictionary<int, std::string> sd;
+    sd.Add(3, "c"); sd.Add(1, "a"); sd.Add(2, "b");
+    auto keys = sd.getKeysProperty();
+    EXPECT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0], 1);
+    EXPECT_EQ(keys[1], 2);
+    EXPECT_EQ(keys[2], 3);
+}
+
+TEST(SortedDictionaryTests, getValuesProperty_SortedByKey) {
+    SortedDictionary<int, std::string> sd;
+    sd.Add(3, "c"); sd.Add(1, "a"); sd.Add(2, "b");
+    auto vals = sd.getValuesProperty();
+    EXPECT_EQ(vals[0], "a");
+    EXPECT_EQ(vals[1], "b");
+    EXPECT_EQ(vals[2], "c");
+}
+
+// ===========================================================================
+// SortedList
+// ===========================================================================
+
+TEST(SortedListTests, Add_And_ContainsKey) {
+    SortedList<int, std::string> sl;
+    sl.Add(10, "ten");
+    EXPECT_TRUE(sl.ContainsKey(10));
+    EXPECT_FALSE(sl.ContainsKey(20));
+}
+
+TEST(SortedListTests, TryAdd_ReturnsTrueOnNew) {
+    SortedList<int, std::string> sl;
+    EXPECT_TRUE(sl.TryAdd(1, "one"));
+    EXPECT_FALSE(sl.TryAdd(1, "again"));
+    EXPECT_EQ(sl.getCountProperty(), 1);
+}
+
+TEST(SortedListTests, GetValueOrDefault_Found) {
+    SortedList<int, std::string> sl;
+    sl.Add(7, "seven");
+    EXPECT_EQ(sl.GetValueOrDefault(7, "?"), "seven");
+}
+
+TEST(SortedListTests, GetValueOrDefault_Missing) {
+    SortedList<int, std::string> sl;
+    EXPECT_EQ(sl.GetValueOrDefault(0, "nope"), "nope");
+}
+
+TEST(SortedListTests, getKeysProperty_SortedOrder) {
+    SortedList<int, std::string> sl;
+    sl.Add(30, "c"); sl.Add(10, "a"); sl.Add(20, "b");
+    auto keys = sl.getKeysProperty();
+    EXPECT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0], 10);
+    EXPECT_EQ(keys[1], 20);
+    EXPECT_EQ(keys[2], 30);
+}
+
+TEST(SortedListTests, getValuesProperty_SortedByKey) {
+    SortedList<int, std::string> sl;
+    sl.Add(30, "c"); sl.Add(10, "a"); sl.Add(20, "b");
+    auto vals = sl.getValuesProperty();
+    EXPECT_EQ(vals[0], "a");
+    EXPECT_EQ(vals[1], "b");
+    EXPECT_EQ(vals[2], "c");
 }

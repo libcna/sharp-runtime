@@ -89,3 +89,31 @@ TEST(ConsoleTests, Error_Write_DoesNotThrow) {
 TEST(ConsoleTests, Error_WriteLine_DoesNotThrow) {
     EXPECT_NO_THROW(Console::Error_WriteLine("err line"));
 }
+
+// ---------------------------------------------------------------------------
+// Format-string Write / WriteLine
+// ---------------------------------------------------------------------------
+
+TEST(ConsoleTests, Write_Format_IntArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write("val={0}", static_cast<SharpRuntime::intcs>(42)));
+}
+
+TEST(ConsoleTests, Write_Format_DoubleArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write("val={0}", 3.14));
+}
+
+TEST(ConsoleTests, Write_Format_StringArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write("hello {0}", std::string("world")));
+}
+
+TEST(ConsoleTests, Write_Format_TwoIntArgs_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::Write("{0}+{1}", static_cast<SharpRuntime::intcs>(1), static_cast<SharpRuntime::intcs>(2)));
+}
+
+TEST(ConsoleTests, WriteLine_Format_IntArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine("n={0}", static_cast<SharpRuntime::intcs>(7)));
+}
+
+TEST(ConsoleTests, WriteLine_Format_StringArg_DoesNotThrow) {
+    EXPECT_NO_THROW(Console::WriteLine("{0}!", std::string("hi")));
+}

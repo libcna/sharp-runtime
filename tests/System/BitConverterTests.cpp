@@ -158,3 +158,47 @@ TEST(BitConverterTests, ToString_Vector_AllBytes) {
     std::vector<bytecs> v = {0x0F, 0xFF};
     EXPECT_EQ(BitConverter::ToString(v), "0F-FF");
 }
+
+// ---------------------------------------------------------------------------
+// Bit reinterpretation — DoubleToInt64Bits / Int64BitsToDouble
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, DoubleToInt64Bits_RoundTrip) {
+    double val = 3.14159265358979;
+    SharpRuntime::longcs bits = BitConverter::DoubleToInt64Bits(val);
+    double back = BitConverter::Int64BitsToDouble(bits);
+    EXPECT_DOUBLE_EQ(back, val);
+}
+
+TEST(BitConverterTests, DoubleToInt64Bits_Zero) {
+    EXPECT_EQ(BitConverter::DoubleToInt64Bits(0.0), 0LL);
+}
+
+TEST(BitConverterTests, DoubleToInt64Bits_One) {
+    // IEEE 754: 1.0 = 0x3FF0000000000000
+    EXPECT_EQ(BitConverter::DoubleToInt64Bits(1.0), static_cast<SharpRuntime::longcs>(0x3FF0000000000000LL));
+}
+
+TEST(BitConverterTests, Int64BitsToDouble_One) {
+    EXPECT_DOUBLE_EQ(BitConverter::Int64BitsToDouble(0x3FF0000000000000LL), 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// Bit reinterpretation — SingleToInt32Bits / Int32BitsToSingle
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, SingleToInt32Bits_RoundTrip) {
+    float val = 2.5f;
+    SharpRuntime::intcs bits = BitConverter::SingleToInt32Bits(val);
+    float back = BitConverter::Int32BitsToSingle(bits);
+    EXPECT_FLOAT_EQ(back, val);
+}
+
+TEST(BitConverterTests, SingleToInt32Bits_One) {
+    // IEEE 754: 1.0f = 0x3F800000
+    EXPECT_EQ(BitConverter::SingleToInt32Bits(1.0f), static_cast<SharpRuntime::intcs>(0x3F800000));
+}
+
+TEST(BitConverterTests, Int32BitsToSingle_One) {
+    EXPECT_FLOAT_EQ(BitConverter::Int32BitsToSingle(0x3F800000), 1.0f);
+}

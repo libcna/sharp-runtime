@@ -341,3 +341,42 @@ TEST(StringTests, LastIndexOfAny_MultipleChars) {
 TEST(StringTests, LastIndexOfAny_NotFound) {
     EXPECT_EQ(String::LastIndexOfAny("hello", {'x', 'z'}), -1);
 }
+
+// --- Contains(char) ---
+TEST(StringTests, Contains_Char_Found) {
+    EXPECT_TRUE(String::Contains("hello", 'e'));
+}
+TEST(StringTests, Contains_Char_NotFound) {
+    EXPECT_FALSE(String::Contains("hello", 'z'));
+}
+TEST(StringTests, Contains_Char_Empty) {
+    EXPECT_FALSE(String::Contains("", 'a'));
+}
+
+// --- IndexOf with startIndex ---
+TEST(StringTests, IndexOf_StringStartIndex_Found) {
+    EXPECT_EQ(String::IndexOf("abcabc", "bc", 2), 4);
+}
+TEST(StringTests, IndexOf_StringStartIndex_NotFound) {
+    EXPECT_EQ(String::IndexOf("abcabc", "bc", 5), -1);
+}
+TEST(StringTests, IndexOf_CharStartIndex_Found) {
+    EXPECT_EQ(String::IndexOf("hello world", 'o', 5), 7);
+}
+TEST(StringTests, IndexOf_CharStartIndex_NotFound) {
+    EXPECT_EQ(String::IndexOf("hello", 'z', 0), -1);
+}
+
+// --- LastIndexOf with startIndex ---
+TEST(StringTests, LastIndexOf_StringStartIndex_Found) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", "ab", 4), 3);
+}
+TEST(StringTests, LastIndexOf_StringStartIndex_BeforeFirst) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", "ab", 1), 0);
+}
+TEST(StringTests, LastIndexOf_CharStartIndex_Found) {
+    EXPECT_EQ(String::LastIndexOf("hello world", 'l', 5), 3);
+}
+TEST(StringTests, LastIndexOf_CharStartIndex_NotFound) {
+    EXPECT_EQ(String::LastIndexOf("hello", 'z', 4), -1);
+}

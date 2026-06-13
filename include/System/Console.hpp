@@ -9,6 +9,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/String.hpp"
 
 namespace System {
 
@@ -83,6 +84,40 @@ namespace System {
         static void WriteLine(float v)  { Write(v); std::cout << NewLine; }
         /// Writes the specified Boolean followed by a line terminator.
         static void WriteLine(bool v)                { std::cout << (v ? "True" : "False") << NewLine; }
+
+        // --- Write (format) ---
+        /// Writes a formatted string with one integer argument.
+        static void Write(const std::string& format, intcs arg0)
+            { Write(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with one double argument.
+        static void Write(const std::string& format, double arg0)
+            { Write(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with one string argument.
+        static void Write(const std::string& format, const std::string& arg0)
+            { Write(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with two integer arguments.
+        static void Write(const std::string& format, intcs arg0, intcs arg1)
+            { Write(System::String::Format(format, arg0, arg1)); }
+        /// Writes a formatted string with two string arguments.
+        static void Write(const std::string& format, const std::string& arg0, const std::string& arg1)
+            { Write(System::String::Format(format, arg0, arg1)); }
+
+        // --- WriteLine (format) ---
+        /// Writes a formatted string with one integer argument followed by a line terminator.
+        static void WriteLine(const std::string& format, intcs arg0)
+            { WriteLine(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with one double argument followed by a line terminator.
+        static void WriteLine(const std::string& format, double arg0)
+            { WriteLine(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with one string argument followed by a line terminator.
+        static void WriteLine(const std::string& format, const std::string& arg0)
+            { WriteLine(System::String::Format(format, arg0)); }
+        /// Writes a formatted string with two integer arguments followed by a line terminator.
+        static void WriteLine(const std::string& format, intcs arg0, intcs arg1)
+            { WriteLine(System::String::Format(format, arg0, arg1)); }
+        /// Writes a formatted string with two string arguments followed by a line terminator.
+        static void WriteLine(const std::string& format, const std::string& arg0, const std::string& arg1)
+            { WriteLine(System::String::Format(format, arg0, arg1)); }
 
         // --- Error ---
         /// Writes the specified string to the standard error stream.

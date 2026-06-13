@@ -95,6 +95,24 @@ namespace System {
         /// Converts eight bytes from a vector to a double-precision float.
         [[nodiscard]] static double  ToDouble(const std::vector<bytecs>& v, intcs i) { return ToDouble(v.data(), i); }
 
+        // --- Bit reinterpretation ---
+        /// Reinterprets a double as its IEEE 754 bit pattern (a 64-bit integer).
+        [[nodiscard]] static longcs DoubleToInt64Bits(double value) {
+            longcs r; std::memcpy(&r, &value, 8); return r;
+        }
+        /// Reinterprets a 64-bit integer as a double using its IEEE 754 bit pattern.
+        [[nodiscard]] static double Int64BitsToDouble(longcs value) {
+            double r; std::memcpy(&r, &value, 8); return r;
+        }
+        /// Reinterprets a single-precision float as its IEEE 754 bit pattern (a 32-bit integer).
+        [[nodiscard]] static intcs SingleToInt32Bits(Single value) {
+            intcs r; std::memcpy(&r, &value, 4); return r;
+        }
+        /// Reinterprets a 32-bit integer as a single-precision float using its IEEE 754 bit pattern.
+        [[nodiscard]] static Single Int32BitsToSingle(intcs value) {
+            Single r; std::memcpy(&r, &value, 4); return r;
+        }
+
         /// Converts a byte range to a hex-string representation.
         [[nodiscard]] static std::string ToString(const bytecs* value, intcs startIndex, intcs length);
         /// Converts a byte vector to a hex-string representation.

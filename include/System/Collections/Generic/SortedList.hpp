@@ -55,6 +55,35 @@ namespace System::Collections::Generic {
             return false;
         }
 
+        /// Adds the key/value pair if the key does not already exist. Returns true if added.
+        bool TryAdd(const TKey& key, const TValue& value) {
+            if (map_.count(key)) return false;
+            map_[key] = value;
+            return true;
+        }
+
+        /// Returns the value for @p key, or @p defaultValue if the key is absent.
+        [[nodiscard]] TValue GetValueOrDefault(const TKey& key, const TValue& defaultValue = TValue{}) const {
+            auto it = map_.find(key);
+            return it != map_.end() ? it->second : defaultValue;
+        }
+
+        /// Returns a vector of all keys in sorted order.
+        [[nodiscard]] std::vector<TKey> getKeysProperty() const {
+            std::vector<TKey> keys;
+            keys.reserve(map_.size());
+            for (const auto& kv : map_) keys.push_back(kv.first);
+            return keys;
+        }
+
+        /// Returns a vector of all values in key-sorted order.
+        [[nodiscard]] std::vector<TValue> getValuesProperty() const {
+            std::vector<TValue> vals;
+            vals.reserve(map_.size());
+            for (const auto& kv : map_) vals.push_back(kv.second);
+            return vals;
+        }
+
         /// Gets the value associated with the specified key; returns true if found.
         bool TryGetValue(const TKey& key, TValue& value) const {
             auto it = map_.find(key);
