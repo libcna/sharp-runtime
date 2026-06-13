@@ -45,6 +45,10 @@ else()
     target_compile_options(SHARP_RUNTIME PRIVATE -Wall -Wextra -Werror -Wno-format-truncation)
 endif()
 
+if(WIN32)
+    target_link_libraries(SHARP_RUNTIME PRIVATE ws2_32)
+endif()
+
 if(ANDROID AND TARGET SDL3::SDL3)
     target_link_libraries(SHARP_RUNTIME PRIVATE SDL3::SDL3)
 elseif(ANDROID AND TARGET SDL3::SDL3-static)
