@@ -58,6 +58,12 @@ namespace System {
         return dist(generator);
     }
 
+    float Random::NextSingle()
+    {
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        return dist(generator);
+    }
+
     void Random::NextBytes(std::vector<bytecs>& buffer)
     {
         std::uniform_int_distribution<int> dist(0, 255);

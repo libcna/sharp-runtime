@@ -106,8 +106,8 @@ TEST(ConvertTests, ToInt64FromDouble) {
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToInt16FromString) {
-    EXPECT_EQ(Convert::ToInt16("100"),   100);
-    EXPECT_EQ(Convert::ToInt16("-32768"), -32768);
+    EXPECT_EQ(Convert::ToInt16(std::string("100")),    100);
+    EXPECT_EQ(Convert::ToInt16(std::string("-32768")), -32768);
 }
 
 TEST(ConvertTests, ToInt16FromInt) {
@@ -116,7 +116,24 @@ TEST(ConvertTests, ToInt16FromInt) {
 
 TEST(ConvertTests, ToInt16OverflowThrows) {
     EXPECT_THROW(Convert::ToInt16(32768), std::exception);
-    EXPECT_THROW(Convert::ToInt16("40000"), std::exception);
+    EXPECT_THROW(Convert::ToInt16(std::string("40000")), std::exception);
+}
+TEST(ConvertTests, ToInt16FromLong) {
+    EXPECT_EQ(Convert::ToInt16(static_cast<SharpRuntime::longcs>(1000LL)), 1000);
+}
+TEST(ConvertTests, ToInt16FromLongOverflowThrows) {
+    EXPECT_THROW(Convert::ToInt16(static_cast<SharpRuntime::longcs>(40000LL)), std::exception);
+}
+TEST(ConvertTests, ToInt16FromDouble) {
+    EXPECT_EQ(Convert::ToInt16(3.7), static_cast<SharpRuntime::shortcs>(3));
+}
+TEST(ConvertTests, ToInt16FromFloat) {
+    EXPECT_EQ(Convert::ToInt16(5.9f), static_cast<SharpRuntime::shortcs>(5));
+}
+TEST(ConvertTests, ToInt16FromBool_True)  { EXPECT_EQ(Convert::ToInt16(true),  static_cast<SharpRuntime::shortcs>(1)); }
+TEST(ConvertTests, ToInt16FromBool_False) { EXPECT_EQ(Convert::ToInt16(false), static_cast<SharpRuntime::shortcs>(0)); }
+TEST(ConvertTests, ToInt16FromByte) {
+    EXPECT_EQ(Convert::ToInt16(static_cast<SharpRuntime::bytecs>(200)), static_cast<SharpRuntime::shortcs>(200));
 }
 
 // ---------------------------------------------------------------------------

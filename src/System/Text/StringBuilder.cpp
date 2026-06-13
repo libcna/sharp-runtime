@@ -46,6 +46,12 @@ namespace System::Text
         return *this;
     }
 
+    StringBuilder& StringBuilder::Append(char value, intcs repeatCount)
+    {
+        buffer.append(static_cast<size_t>(repeatCount), value);
+        return *this;
+    }
+
     StringBuilder& StringBuilder::Append(intcs value)
     {
         buffer += std::to_string(value);

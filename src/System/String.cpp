@@ -594,4 +594,16 @@ namespace System
         return applySplitOptions(Split(value, delimiter), options);
     }
 
+    std::string String::Format(const std::string& format, SharpRuntime::intcs arg0, double arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtInt(arg0, extractSpec(format, 0)));
+        return replaceArg(r, 1, fmtDouble(arg1, extractSpec(format, 1)));
+    }
+
+    std::string String::Format(const std::string& format, double arg0, SharpRuntime::intcs arg1)
+    {
+        std::string r = replaceArg(format, 0, fmtDouble(arg0, extractSpec(format, 0)));
+        return replaceArg(r, 1, fmtInt(arg1, extractSpec(format, 1)));
+    }
+
 }

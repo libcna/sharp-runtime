@@ -52,6 +52,9 @@ namespace System::Text
         /// @return Reference to this instance.
         StringBuilder& Append(char value);
 
+        /// Appends the specified character @p repeatCount times to this instance.
+        StringBuilder& Append(char value, intcs repeatCount);
+
         /// Appends the string representation of the specified integer value.
         /// @param value Integer value to append.
         /// @return Reference to this instance.

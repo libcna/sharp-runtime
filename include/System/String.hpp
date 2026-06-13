@@ -265,6 +265,10 @@ namespace System
         static std::string Format(const std::string& format, SharpRuntime::longcs arg0, SharpRuntime::intcs arg1);
         /// @brief Formats a string with an intcs arg0 and longcs arg1.
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0, SharpRuntime::longcs arg1);
+        /// @brief Formats a string with an intcs arg0 and double arg1.
+        static std::string Format(const std::string& format, SharpRuntime::intcs arg0, double arg1);
+        /// @brief Formats a string with a double arg0 and intcs arg1.
+        static std::string Format(const std::string& format, double arg0, SharpRuntime::intcs arg1);
 
         /// @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);

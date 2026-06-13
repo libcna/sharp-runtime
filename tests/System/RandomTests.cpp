@@ -107,3 +107,16 @@ TEST(RandomTests, NextBytesAllValuesInRange) {
     for (auto b : buf)
         ASSERT_LE(b, 255);
 }
+
+TEST(RandomTests, NextSingleInRange) {
+    System::Random rng(42);
+    for (int i = 0; i < 100; ++i) {
+        float v = rng.NextSingle();
+        EXPECT_GE(v, 0.0f);
+        EXPECT_LT(v, 1.0f);
+    }
+}
+TEST(RandomTests, NextSingleSeededIsDeterministic) {
+    System::Random a(7), b(7);
+    EXPECT_EQ(a.NextSingle(), b.NextSingle());
+}

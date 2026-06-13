@@ -433,3 +433,21 @@ TEST(StringBuilderTests, Append_Float_Chained) {
     sb.Append("x=").Append(2.5f);
     EXPECT_TRUE(sb.ToString().rfind("x=", 0) == 0);
 }
+
+// --- Append(char, repeatCount) ---
+TEST(StringBuilderTests, Append_CharRepeat_Basic) {
+    StringBuilder sb;
+    sb.Append('x', 5);
+    EXPECT_EQ(sb.ToString(), "xxxxx");
+    EXPECT_EQ(sb.getLengthProperty(), 5);
+}
+TEST(StringBuilderTests, Append_CharRepeat_Zero) {
+    StringBuilder sb("hi");
+    sb.Append('-', 0);
+    EXPECT_EQ(sb.ToString(), "hi");
+}
+TEST(StringBuilderTests, Append_CharRepeat_Chained) {
+    StringBuilder sb;
+    sb.Append('a', 3).Append('b', 2);
+    EXPECT_EQ(sb.ToString(), "aaabb");
+}

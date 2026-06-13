@@ -85,6 +85,13 @@ namespace System {
         double NextDouble();
 
         /**
+         * @brief Returns a random single-precision float in [0.0f, 1.0f).
+         *
+         * @return A float greater than or equal to 0.0f and less than 1.0f.
+         */
+        float NextSingle();
+
+        /**
          * @brief Fills the elements of a byte vector with random values.
          *
          * @param buffer Vector whose elements are to be filled with random bytes.

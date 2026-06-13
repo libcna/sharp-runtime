@@ -70,6 +70,10 @@ namespace System {
         if (value > 32767 || value < -32768) throw OverflowException();
         return static_cast<shortcs>(value);
     }
+    shortcs Convert::ToInt16(longcs value) {
+        if (value > 32767 || value < -32768) throw OverflowException();
+        return static_cast<shortcs>(value);
+    }
 
     double Convert::ToDouble(const std::string& value) {
         if (value.empty()) throw FormatException();

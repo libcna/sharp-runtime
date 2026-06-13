@@ -60,6 +60,16 @@ namespace System {
         [[nodiscard]] static shortcs  ToInt16(const std::string& value);
         /// Converts a 32-bit integer to a 16-bit integer.
         [[nodiscard]] static shortcs  ToInt16(intcs value);
+        /// Converts a 64-bit integer to a 16-bit integer.
+        [[nodiscard]] static shortcs  ToInt16(longcs value);
+        /// Converts a double to a 16-bit integer.
+        [[nodiscard]] static shortcs  ToInt16(double value)  { return static_cast<shortcs>(value); }
+        /// Converts a float to a 16-bit integer.
+        [[nodiscard]] static shortcs  ToInt16(float value)   { return static_cast<shortcs>(value); }
+        /// Converts a Boolean to a 16-bit integer (true=1, false=0).
+        [[nodiscard]] static shortcs  ToInt16(bool value)    { return value ? shortcs(1) : shortcs(0); }
+        /// Converts a byte to a 16-bit integer.
+        [[nodiscard]] static shortcs  ToInt16(bytecs value)  { return static_cast<shortcs>(value); }
 
         /// Converts the specified string to a double.
         [[nodiscard]] static double ToDouble(const std::string& value);

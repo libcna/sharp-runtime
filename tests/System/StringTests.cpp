@@ -547,3 +547,9 @@ TEST(StringTests, Format_IntAndLong) {
     SharpRuntime::longcs big = 1234567890123LL;
     EXPECT_EQ(String::Format("{0}+{1}", static_cast<SharpRuntime::intcs>(1), big), "1+1234567890123");
 }
+TEST(StringTests, Format_IntAndDouble) {
+    EXPECT_EQ(String::Format("{0}: {1:F2}", static_cast<SharpRuntime::intcs>(3), 3.14159), "3: 3.14");
+}
+TEST(StringTests, Format_DoubleAndInt) {
+    EXPECT_EQ(String::Format("{0:F1}/{1}", 2.5, static_cast<SharpRuntime::intcs>(10)), "2.5/10");
+}
