@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <array>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -62,7 +64,12 @@ namespace System::Numerics {
         static bool IsPositiveInfinity(BFloat16 v) { return v.bits_ == 0x7F80u; }
         static bool IsNegativeInfinity(BFloat16 v) { return v.bits_ == 0xFF80u; }
 
-        [[nodiscard]] std::string ToString() const { return std::to_string(toFloat(bits_)); }
+        [[nodiscard]] std::string ToString() const {
+            float v = toFloat(bits_);
+            std::array<char, 32> buf;
+            auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), v);
+            return ec == std::errc{} ? std::string(buf.data(), ptr) : std::to_string(v);
+        }
     };
 
 } // namespace System::Numerics
