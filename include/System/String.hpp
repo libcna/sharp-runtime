@@ -21,7 +21,9 @@ namespace System
     class String
     {
     public:
+        /// Deleted constructor — all members are static.
         String() = delete;
+        /// Deleted destructor — class is not instantiable.
         ~String() = delete;
 
         /**
@@ -68,9 +70,19 @@ namespace System
          */
         static bool IsNullOrEmpty(const std::string& value);
 
+        /// @brief Formats a string with a single integer argument, replacing the first "{0}" placeholder.
+        /// @param format Format string containing "{0}".
+        /// @param arg0 Integer value to substitute.
         static std::string Format(const std::string& format, SharpRuntime::intcs arg0);
+        /// @brief Formats a string with a single string argument, replacing the first "{0}" placeholder.
+        /// @param format Format string containing "{0}".
+        /// @param arg0 String value to substitute.
         static std::string Format(const std::string& format, const std::string& arg0);
 
+        /// @brief Converts an integer to a zero-padded string of at least @p width characters.
+        /// @param value Integer value to convert.
+        /// @param width Minimum field width.
+        /// @param fill  Padding character (default '0').
         static std::string ToString(SharpRuntime::intcs value, int width, char fill = '0');
     };
 }
