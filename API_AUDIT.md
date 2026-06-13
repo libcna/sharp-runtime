@@ -52,7 +52,7 @@
 | `BadImageFormatException.hpp` | `IGNORE` | Exception marker |
 | `BitConverter.hpp` | `PORTED` | All bit/byte methods including DoubleToInt64Bits etc. |
 | `Boolean.hpp` | `PARTIAL` | Missing: `TryParse(span)`, `ToString(IFormatProvider)` — minor |
-| `Buffer.hpp` | `TO_CHECK` | BlockCopy, ByteLength, GetByte, SetByte |
+| `Buffer.hpp` | `PORTED` | BlockCopy, ByteLength, GetByte, SetByte — already complete |
 | `Byte.hpp` | `PARTIAL` | Has Parse/TryParse/MinValue/MaxValue — missing `ToString(format)` |
 | `Char.hpp` | `PARTIAL` | ASCII helpers added session 68; still missing: `GetUnicodeCategory` |
 | `CLSCompliantAttribute.hpp` | `IGNORE` | Attribute marker |
@@ -62,7 +62,7 @@
 | `DateOnly.hpp` | `PORTED` | AddDays/Months/Years, Parse/TryParse, ToString(format), FromDateTime |
 | `DateTime.hpp` | `PORTED` | Full arithmetic, ISO-8601 Parse/ToString |
 | `DateTimeKind.hpp` | `IGNORE` | Enum |
-| `DateTimeOffset.hpp` | `STUB` | Minimal — no arithmetic or Parse |
+| `DateTimeOffset.hpp` | `PARTIAL` | Now/UtcNow, Add*/Subtract, Parse/TryParse, ToString(format), comparison — done session 69 |
 | `DayOfWeek.hpp` | `IGNORE` | Enum |
 | `DBNull.hpp` | `IGNORE` | Singleton marker |
 | `Decimal.hpp` | `PORTED` | Full arithmetic, TryParse |
@@ -73,7 +73,7 @@
 | `EnvironmentVariableTarget.hpp` | `IGNORE` | Enum |
 | `EventArgs.hpp` | `IGNORE` | Base class |
 | `EventHandler.hpp` | `IGNORE` | Delegate typedef |
-| `Exception.hpp` | `PARTIAL` | Basic — missing `InnerException`, `StackTrace` property, `Data` |
+| `Exception.hpp` | `PARTIAL` | InnerException/Data/StackTrace added session 69; still missing: HResult, HelpLink |
 | `ExecutionEngineException.hpp` | `IGNORE` | Exception marker |
 | `FieldAccessException.hpp` | `IGNORE` | Exception marker |
 | `FlagsAttribute.hpp` | `IGNORE` | Attribute marker |
@@ -83,7 +83,7 @@
 | `GC.hpp` | `STUB` | No-op stubs — intentional |
 | `Guid.hpp` | `PORTED` | Parse, TryParse, ToString(format), op==, constructor from string added session 68 |
 | `Half.hpp` | `TO_CHECK` | 16-bit float — needs audit |
-| `HashCode.hpp` | `TO_CHECK` | Combine, Add — needs audit |
+| `HashCode.hpp` | `PORTED` | Add, ToHashCode, Combine 1–8 args — done session 69 |
 | `IAsyncDisposable.hpp` | `IGNORE` | Interface |
 | `IAsyncResult.hpp` | `IGNORE` | Interface |
 | `ICloneable.hpp` | `IGNORE` | Interface |
@@ -178,7 +178,7 @@
 | `UnhandledExceptionEventHandler.hpp` | `IGNORE` | Delegate typedef |
 | `Uri.hpp` | `PORTED` | Full URI parsing |
 | `ValueTuple.hpp` | `TO_CHECK` | Value tuple |
-| `Version.hpp` | `TO_CHECK` | Version parsing |
+| `Version.hpp` | `PORTED` | Parse/TryParse/CompareTo/Equals added session 69 |
 | `WeakReference.hpp` | `TO_CHECK` | Weak reference |
 
 ---
@@ -253,7 +253,7 @@
 | `ISet.hpp` | `IGNORE` | Interface |
 | `KeyNotFoundException.hpp` | `IGNORE` | Exception marker |
 | `KeyValuePair.hpp` | `PORTED` | Simple struct |
-| `LinkedList.hpp` | `PARTIAL` | Missing: `AddBefore`, `AddAfter`, node-based methods |
+| `LinkedList.hpp` | `PARTIAL` | LinkedListNode<T> added session 69; AddBefore/AddAfter/Find/FindLast/Remove(node) done |
 | `List.hpp` | `PARTIAL` | Missing: `EnsureCapacity`, `TrimExcess`, `getCapacityProperty`, `ConvertAll`, `AsReadOnly`, `CopyTo` |
 | `PriorityQueue.hpp` | `PORTED` | Enqueue, TryDequeue, TryPeek, Count |
 | `Queue.hpp` | `PARTIAL` | Has TryDequeue/TryPeek; missing `EnsureCapacity` |
@@ -622,13 +622,17 @@
 9. `Array` functional methods — ✅ done session 68
 10. `Guid::Parse/TryParse/ToString(format)` — ✅ done session 68
 
-### MEDIUM priority — partially done (session 68)
+### MEDIUM priority — ✅ ALL DONE (session 69)
 - `StringBuilder::AppendFormat(3-arg)/EnsureCapacity` — ✅ done session 68
 - `Int32/Int64/Double/Single::ToString(format)` — ✅ done session 68
 - `String::Empty/ToUpperInvariant/CompareOrdinal/Format(float)` — ✅ done session 68
-- `LinkedList` — node-based `AddBefore`/`AddAfter` — TODO
-- `Version` — Parse, Compare, ToString — TODO
-- `HashCode` — Combine(T1,T2,...) overloads — TODO
+- `LinkedList` node-based API (`LinkedListNode<T>`, AddBefore/AddAfter/Find/FindLast/Remove(node)) — ✅ done session 69 (Task 107)
+- `Version::Parse/TryParse/CompareTo/Equals` — ✅ done session 69 (Task 107)
+- `HashCode::Combine` 5–8 args — ✅ done session 69 (Task 107)
+- `Exception::InnerException/Data/StackTrace`, `AggregateException::Flatten()` — ✅ done session 69 (Task 108)
+- `Byte/SByte/Int16/UInt16::ToString(format)` — ✅ done session 69 (Task 109)
+- `DateTimeOffset` full arithmetic/Parse/ToString/comparison — ✅ done session 69 (Task 110)
+- `Buffer::BlockCopy/ByteLength/GetByte/SetByte` — ✅ already implemented (marked TO_CHECK, now PORTED)
 
 ### LOW priority (not relevant for game dev)
 - `ConcurrentDictionary` detailed audit
