@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-13 (branch: develop) — session 45*
+*Last updated: 2026-06-13 (branch: develop) — session 46*
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Main goal:** provide `System::*` API compatibility so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
-**Current phase:** All major subsystems implemented and tested (~91% header coverage). hpp→cpp migration complete. Sessions 41–45 focused on portability and locale safety: POSIX includes removed from headers; Windows/Emscripten paths added; Emscripten build verified clean; comprehensive locale-safety sweep — all `stod`/`stof`/`to_string(float/double)` replaced with `from_chars`/`to_chars`/`locale::classic()` across Double, Single, Convert, Console, TextWriter, StringBuilder, JsonElement, Numerics, BFloat16. Session 45: Task 80 complete — Windows cross-compilation (mingw-w64 14) verified, macro collision bugs in Environment.cpp and Path.cpp fixed. Remaining: Tasks 70/71 (Calendar types, IdnMapping) await user decision.
+**Current phase:** All planned subsystems implemented and tested (~96%+ header coverage). Sessions 41–46 completed portability, locale-safety, Windows build test, and all calendar+IdnMapping implementations. 3132 tests pass. No known remaining feature gaps.
 
 **Key architectural decisions:**
 - Complex types: `.hpp` declarations + `.cpp` bodies; simple types remain header-only
@@ -31,7 +31,7 @@
 - Zero errors, zero warnings
 
 ### Tests
-- **All 3080 tests pass** — `./build/SharpRuntimeTests` → `3080 tests from 465 test suites` ✅
+- **All 3132 tests pass** — `./build/SharpRuntimeTests` → `3132 tests from 471 test suites` ✅
 - GoogleTest at `vendor/googletest/`; 74 test files in `tests/`
 - CMake now checks for `vendor/googletest/CMakeLists.txt` and prints a fatal error if missing
 
@@ -239,17 +239,14 @@ git log --oneline -10
 | P11 | 44 | Numerics `ToString()` locale-safety: `Vector2/3/4`, `Quaternion`, `Plane`, `Matrix3x2/4x4`, `Colors::Argb/Rgba` — `ostringstream.imbue(locale::classic())` | ✅ |
 | P12 | 44 | `Convert::parseIntBase`: `strtol` → `strtoll` (long=32-bit on Windows); Emscripten fixes: unused params, `closeSk`/`validFd` namespace, `TimeSpan long→longcs`, `IEnumerable/UTF7Encoding override`, `Task::Delay` Emscripten guard | ✅ |
 | 80 | 45 | Windows build test (mingw-w64 14): all 7 Windows-specific `.cpp` files compile clean; fixed `#undef GetCurrentDirectory` in Environment.cpp and `#undef GetTempPath`/`GetTempFileName` in Path.cpp (Win32 macros colliding with our method definitions) | ✅ |
+| 70 | 46 | KoreanCalendar (year+2333), JapaneseCalendar (5 eras: Meiji/Taisho/Showa/Heisei/Reiwa), HijriCalendar (30-year algorithmic), HebrewCalendar (.NET lookup table 1583-2239, 6 year types), UmAlQuraCalendar (pre-computed table 1318-1500 AH); DateTime Ticks constants made public | ✅ |
+| 71 | 46 | IdnMapping — Punycode/IDNA (RFC 3492): GetAscii() Unicode→ACE, GetUnicode() ACE→Unicode; pure algorithmic, no ICU; UTF-8 I/O; multi-label domain support | ✅ |
 
 ---
 
 ## 8. Next tasks (priority order)
 
-### Calendar types — awaiting user decision
-
-| Task | Description | Complexity |
-|------|-------------|------------|
-| 70 | `HebrewCalendar`, `HijriCalendar`, `JapaneseCalendar`, `KoreanCalendar`, `UmAlQuraCalendar`, lunisolar variants | very complex |
-| 71 | `IdnMapping` — Punycode/IDNA internationalized domain names | very complex |
+All planned tasks complete. No known remaining feature gaps.
 
 ---
 
@@ -283,7 +280,7 @@ git log --oneline -10
 >
 > Sessions 43–44 completed: Task 79 (Emscripten build — all errors fixed), Task 81 (Convert::ToDouble locale-safe), comprehensive locale-safety sweep (Double/Single/JsonElement/Convert/Console/TextWriter/StringBuilder/BFloat16/all Numerics ToString).
 >
-> Next: Tasks 70/71 (HebrewCalendar/HijriCalendar, JapaneseCalendar, KoreanCalendar, UmAlQuraCalendar, IdnMapping) await user decision.
+> All planned tasks complete. 3132 tests pass. No remaining feature gaps identified.
 > See §8 for full remaining task list.
 >
 > Build: `cmake --build build --parallel 4`
