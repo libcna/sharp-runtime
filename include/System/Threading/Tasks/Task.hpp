@@ -9,6 +9,9 @@
 #include <memory>
 #include <stdexcept>
 #include "System/Threading/CancellationToken.hpp"
+#if defined(__EMSCRIPTEN__)
+#  include "System/PlatformNotSupportedException.hpp"
+#endif
 
 namespace System::Threading::Tasks {
 
@@ -29,6 +32,10 @@ namespace System::Threading::Tasks {
         Task() : state_(std::make_shared<State>()) { state_->isCompleted = true; }
 
         explicit Task(std::function<void()> action) {
+#if defined(__EMSCRIPTEN__)
+            (void)action;
+            throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
+#else
             state_ = std::make_shared<State>();
             auto s = state_;
             future_ = std::make_shared<std::future<void>>(
@@ -43,6 +50,7 @@ namespace System::Threading::Tasks {
                     }
                 })
             );
+#endif
         }
 
         [[nodiscard]] bool getIsCompletedProperty()            const { return state_->isCompleted; }
@@ -97,6 +105,10 @@ namespace System::Threading::Tasks {
 
     public:
         explicit TaskT(std::function<TResult()> func) {
+#if defined(__EMSCRIPTEN__)
+            (void)func;
+            throw System::PlatformNotSupportedException("TaskT: std::async requires pthreads (not available in Emscripten single-threaded build)");
+#else
             state_ = std::make_shared<State>();
             auto s = state_;
             future_ = std::make_shared<std::future<TResult>>(
@@ -114,6 +126,7 @@ namespace System::Threading::Tasks {
                     }
                 })
             );
+#endif
         }
 
         [[nodiscard]] bool getIsCompletedProperty() const { return state_->isCompleted; }
