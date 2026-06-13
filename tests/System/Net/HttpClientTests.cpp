@@ -216,3 +216,49 @@ TEST(HttpClientTests, BaseAddress) {
     client.setBaseAddressProperty("http://api.example.com");
     EXPECT_EQ(client.getBaseAddressProperty(), "http://api.example.com");
 }
+
+// ---------------------------------------------------------------------------
+// FormUrlEncodedContent
+// ---------------------------------------------------------------------------
+
+#include "System/Net/Http/FormUrlEncodedContent.hpp"
+
+TEST(FormUrlEncodedContentTests, ContentType) {
+    FormUrlEncodedContent c({});
+    EXPECT_EQ(c.getContentType(), "application/x-www-form-urlencoded");
+}
+
+TEST(FormUrlEncodedContentTests, EmptyPairs) {
+    FormUrlEncodedContent c({});
+    EXPECT_EQ(c.ReadAsString(), "");
+}
+
+TEST(FormUrlEncodedContentTests, SinglePair) {
+    FormUrlEncodedContent c({{"name", "Alice"}});
+    EXPECT_EQ(c.ReadAsString(), "name=Alice");
+}
+
+TEST(FormUrlEncodedContentTests, MultiplePairs) {
+    FormUrlEncodedContent c({{"a", "1"}, {"b", "2"}});
+    EXPECT_EQ(c.ReadAsString(), "a=1&b=2");
+}
+
+TEST(FormUrlEncodedContentTests, SpaceEncodedAsPlus) {
+    FormUrlEncodedContent c({{"q", "hello world"}});
+    EXPECT_EQ(c.ReadAsString(), "q=hello+world");
+}
+
+TEST(FormUrlEncodedContentTests, SpecialCharsPercentEncoded) {
+    FormUrlEncodedContent c({{"url", "a&b=c"}});
+    std::string result = c.ReadAsString();
+    // '&' and '=' must be percent-encoded in values
+    EXPECT_EQ(result, "url=a%26b%3Dc");
+}
+
+TEST(FormUrlEncodedContentTests, ReadAsByteArrayMatchesString) {
+    FormUrlEncodedContent c({{"k", "v"}});
+    std::string s = c.ReadAsString();
+    auto bytes = c.ReadAsByteArray();
+    std::string fromBytes(bytes.begin(), bytes.end());
+    EXPECT_EQ(s, fromBytes);
+}
