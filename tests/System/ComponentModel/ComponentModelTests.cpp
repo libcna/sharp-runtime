@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <any>
 #include "System/IServiceProvider.hpp"
+#include "System/ComponentModel/CancelEventArgs.hpp"
 #include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
@@ -377,4 +378,46 @@ TEST(IServiceProviderTests, GetService_UnknownType_ReturnsNull) {
 
 TEST(IServiceProviderTests, IsAbstractInterface) {
     EXPECT_TRUE(std::is_abstract_v<System::IServiceProvider>);
+}
+
+// ===========================================================================
+// CancelEventArgs
+// ===========================================================================
+
+using System::ComponentModel::CancelEventArgs;
+
+TEST(CancelEventArgsTests, DefaultCtor_CancelIsFalse) {
+    CancelEventArgs e;
+    EXPECT_FALSE(e.Cancel);
+}
+
+TEST(CancelEventArgsTests, Ctor_True) {
+    CancelEventArgs e(true);
+    EXPECT_TRUE(e.Cancel);
+}
+
+TEST(CancelEventArgsTests, Ctor_False) {
+    CancelEventArgs e(false);
+    EXPECT_FALSE(e.Cancel);
+}
+
+TEST(CancelEventArgsTests, Cancel_CanBeSetToTrue) {
+    CancelEventArgs e;
+    e.Cancel = true;
+    EXPECT_TRUE(e.Cancel);
+}
+
+TEST(CancelEventArgsTests, Cancel_CanBeToggled) {
+    CancelEventArgs e(true);
+    e.Cancel = false;
+    EXPECT_FALSE(e.Cancel);
+    e.Cancel = true;
+    EXPECT_TRUE(e.Cancel);
+}
+
+TEST(CancelEventArgsTests, InheritsFromEventArgs) {
+    CancelEventArgs e;
+    System::EventArgs& base = e;
+    (void)base;
+    SUCCEED();
 }
