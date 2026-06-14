@@ -91,3 +91,85 @@ TEST(EnvironmentTests, TickCount64_Advances) {
     (void)sink;
     EXPECT_GE(t2, t1);
 }
+
+// ---------------------------------------------------------------------------
+// HasShutdownStarted
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, HasShutdownStarted_IsFalse) {
+    EXPECT_FALSE(Environment::HasShutdownStarted);
+}
+
+// ---------------------------------------------------------------------------
+// SetEnvironmentVariable / GetEnvironmentVariable roundtrip
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SetGet_RoundTrip) {
+    Environment::SetEnvironmentVariable("SHARP_TEST_VAR", "hello");
+    EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_TEST_VAR"), "hello");
+}
+
+TEST(EnvironmentTests, Set_Empty_RemovesVar) {
+    Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "value");
+    Environment::SetEnvironmentVariable("SHARP_TEST_VAR2", "");
+    EXPECT_TRUE(Environment::GetEnvironmentVariable("SHARP_TEST_VAR2").empty());
+}
+
+// ---------------------------------------------------------------------------
+// ExpandEnvironmentVariables
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, ExpandEnvVars_KnownVar) {
+    Environment::SetEnvironmentVariable("SHARP_EXPAND_TEST", "world");
+    std::string r = Environment::ExpandEnvironmentVariables("hello %SHARP_EXPAND_TEST%");
+    EXPECT_EQ(r, "hello world");
+}
+
+TEST(EnvironmentTests, ExpandEnvVars_UnknownVar_Preserved) {
+    std::string r = Environment::ExpandEnvironmentVariables("%SHARP_NONEXISTENT_XYZ%");
+    EXPECT_EQ(r, "%SHARP_NONEXISTENT_XYZ%");
+}
+
+TEST(EnvironmentTests, ExpandEnvVars_NoVars_Unchanged) {
+    EXPECT_EQ(Environment::ExpandEnvironmentVariables("no vars here"), "no vars here");
+}
+
+// ---------------------------------------------------------------------------
+// ProcessId
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, ProcessId_Positive) {
+    EXPECT_GT(Environment::getProcessIdProperty(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// TickCount (int)
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, TickCount_Positive) {
+    EXPECT_GT(Environment::getTickCountProperty(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// GetFolderPath
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetFolderPath_UserProfile_NonEmpty) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile);
+    EXPECT_FALSE(p.empty());
+}
+
+TEST(EnvironmentTests, GetFolderPath_Desktop_NonEmpty) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::Desktop);
+    EXPECT_FALSE(p.empty());
+}
+
+// ---------------------------------------------------------------------------
+// GetEnvironmentVariable with target
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetEnvironmentVariable_WithTarget_SameAsWithout) {
+    std::string a = Environment::GetEnvironmentVariable("PATH");
+    std::string b = Environment::GetEnvironmentVariable("PATH", System::EnvironmentVariableTarget::Process);
+    EXPECT_EQ(a, b);
+}

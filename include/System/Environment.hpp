@@ -6,6 +6,7 @@
 #include <string>
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/EnvironmentVariableTarget.hpp"
 
 namespace System {
 
@@ -86,13 +87,44 @@ namespace System {
         /// @brief Returns the current working directory (platform-specific implementation in .cpp).
         [[nodiscard]] static std::string GetCurrentDirectory();
 
+        /// @brief Gets a value indicating whether the current process is shutting down. Always false in this implementation.
+        static constexpr bool HasShutdownStarted = false;
+
+        /// @brief Returns the value of an environment variable of the current process.
         [[nodiscard]] static std::string GetEnvironmentVariable(const std::string& name) {
             const char* val = std::getenv(name.c_str());
             return val ? std::string(val) : std::string();
         }
 
+        /// @brief Returns the value of an environment variable from the specified target (Process only).
+        [[nodiscard]] static std::string GetEnvironmentVariable(const std::string& name, EnvironmentVariableTarget) {
+            return GetEnvironmentVariable(name);
+        }
+
+        /// @brief Sets an environment variable for the current process. Pass empty value to remove.
+        static void SetEnvironmentVariable(const std::string& name, const std::string& value);
+
+        /// @brief Replaces the name of each environment variable in @p name with its value.
+        [[nodiscard]] static std::string ExpandEnvironmentVariables(const std::string& name);
+
+        /// @brief Returns the path of the specified system special folder.
+        [[nodiscard]] static std::string GetFolderPath(SpecialFolder folder);
+
+        /// @brief Returns the path of the specified system special folder, with the given option.
+        [[nodiscard]] static std::string GetFolderPath(SpecialFolder folder, SpecialFolderOption) {
+            return GetFolderPath(folder);
+        }
+
         /// @brief Returns the number of logical processors (platform-specific implementation in .cpp).
         [[nodiscard]] static SharpRuntime::intcs getProcessorCountProperty();
+
+        /// @brief Returns the unique identifier of the current process.
+        [[nodiscard]] static SharpRuntime::intcs getProcessIdProperty();
+
+        /// @brief Returns the number of milliseconds elapsed since system startup (32-bit, may overflow).
+        [[nodiscard]] static SharpRuntime::intcs getTickCountProperty() {
+            return static_cast<SharpRuntime::intcs>(getTickCount64Property());
+        }
 
         static void Exit(SharpRuntime::intcs exitCode) { std::exit(exitCode); }
         static void FailFast(const std::string&)       { std::abort(); }

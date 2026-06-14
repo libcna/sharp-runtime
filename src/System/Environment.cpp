@@ -21,6 +21,7 @@
 #  include <pwd.h>
 #  include <time.h>
 #endif
+#include <sstream>
 
 namespace System {
 
@@ -77,6 +78,78 @@ std::string Environment::getUserNameProperty() {
     if (user) return std::string(user);
     struct passwd* pw = getpwuid(getuid());
     return pw ? std::string(pw->pw_name) : std::string();
+#endif
+}
+
+void Environment::SetEnvironmentVariable(const std::string& name, const std::string& value) {
+#if defined(_WIN32)
+    if (value.empty())
+        _putenv_s(name.c_str(), "");
+    else
+        _putenv_s(name.c_str(), value.c_str());
+#else
+    if (value.empty())
+        ::unsetenv(name.c_str());
+    else
+        ::setenv(name.c_str(), value.c_str(), 1);
+#endif
+}
+
+std::string Environment::ExpandEnvironmentVariables(const std::string& name) {
+    std::string result;
+    result.reserve(name.size());
+    size_t i = 0;
+    while (i < name.size()) {
+        if (name[i] == '%') {
+            size_t end = name.find('%', i + 1);
+            if (end != std::string::npos && end > i + 1) {
+                std::string var = name.substr(i + 1, end - i - 1);
+                const char* val = std::getenv(var.c_str());
+                if (val) result += val;
+                else { result += '%'; result += var; result += '%'; }
+                i = end + 1;
+                continue;
+            }
+        }
+        result += name[i++];
+    }
+    return result;
+}
+
+std::string Environment::GetFolderPath(SpecialFolder folder) {
+#if defined(_WIN32)
+    char buf[MAX_PATH];
+    if (SHGetFolderPathA(nullptr, static_cast<int>(folder), nullptr, SHGFP_TYPE_CURRENT, buf) == S_OK)
+        return std::string(buf);
+    return "";
+#else
+    const char* home = std::getenv("HOME");
+    std::string h = home ? std::string(home) : std::string();
+    switch (folder) {
+        case SpecialFolder::Personal:          // == MyDocuments (0x0005), returns home
+        case SpecialFolder::UserProfile:      return h;
+        case SpecialFolder::Desktop:
+        case SpecialFolder::DesktopDirectory: return h + "/Desktop";
+        case SpecialFolder::MyMusic:          return h + "/Music";
+        case SpecialFolder::MyPictures:       return h + "/Pictures";
+        case SpecialFolder::MyVideos:         return h + "/Videos";
+        case SpecialFolder::ApplicationData:  return h + "/.config";
+        case SpecialFolder::LocalApplicationData: return h + "/.local/share";
+        case SpecialFolder::CommonApplicationData: return "/etc";
+        case SpecialFolder::ProgramFiles:     return "/usr";
+        case SpecialFolder::System:           return "/usr/lib";
+        case SpecialFolder::Fonts:            return "/usr/share/fonts";
+        case SpecialFolder::Templates:        return h + "/Templates";
+        default:                              return "";
+    }
+#endif
+}
+
+SharpRuntime::intcs Environment::getProcessIdProperty() {
+#if defined(_WIN32)
+    return static_cast<SharpRuntime::intcs>(GetCurrentProcessId());
+#else
+    return static_cast<SharpRuntime::intcs>(::getpid());
 #endif
 }
 
