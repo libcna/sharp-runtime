@@ -326,6 +326,39 @@ TEST(UInt64Tests, ToString) {
     EXPECT_EQ(System::UInt64::ToString(0ULL), "0");
     EXPECT_EQ(System::UInt64::ToString(18446744073709551615ULL), "18446744073709551615");
 }
+TEST(UInt64Tests, ToString_Hex)           { EXPECT_EQ(System::UInt64::ToString(255ULL, std::string("X")), "FF"); }
+TEST(UInt64Tests, ToString_Hex_Padded)    { EXPECT_EQ(System::UInt64::ToString(255ULL, std::string("X4")), "00FF"); }
+TEST(UInt64Tests, ToString_D_Padded)      { EXPECT_EQ(System::UInt64::ToString(7ULL,   std::string("D5")), "00007"); }
+TEST(UInt64Tests, ToString_G)             { EXPECT_EQ(System::UInt64::ToString(42ULL,  std::string("G")), "42"); }
+TEST(UInt64Tests, CompareTo_Less)         { EXPECT_LT(System::UInt64::CompareTo(1ULL, 2ULL), 0); }
+TEST(UInt64Tests, CompareTo_Equal)        { EXPECT_EQ(System::UInt64::CompareTo(5ULL, 5ULL), 0); }
+TEST(UInt64Tests, CompareTo_Greater)      { EXPECT_GT(System::UInt64::CompareTo(9ULL, 3ULL), 0); }
+TEST(UInt64Tests, Equals_True)            { EXPECT_TRUE(System::UInt64::Equals(42ULL, 42ULL)); }
+TEST(UInt64Tests, Equals_False)           { EXPECT_FALSE(System::UInt64::Equals(1ULL, 2ULL)); }
+TEST(UInt64Tests, GetHashCode_NonZero)    { EXPECT_NE(System::UInt64::GetHashCode(0x0001000200030004ULL), 0); }
+TEST(UInt64Tests, Max)                    { EXPECT_EQ(System::UInt64::Max(10ULL, 20ULL), 20ULL); }
+TEST(UInt64Tests, Min)                    { EXPECT_EQ(System::UInt64::Min(10ULL, 20ULL), 10ULL); }
+TEST(UInt64Tests, Clamp_InRange)          { EXPECT_EQ(System::UInt64::Clamp(50ULL, 10ULL, 100ULL), 50ULL); }
+TEST(UInt64Tests, Clamp_BelowMin)         { EXPECT_EQ(System::UInt64::Clamp(5ULL,  10ULL, 100ULL), 10ULL); }
+TEST(UInt64Tests, Clamp_AboveMax)         { EXPECT_EQ(System::UInt64::Clamp(200ULL,10ULL, 100ULL), 100ULL); }
+TEST(UInt64Tests, Sign_Zero)              { EXPECT_EQ(System::UInt64::Sign(0ULL), 0); }
+TEST(UInt64Tests, Sign_Positive)          { EXPECT_EQ(System::UInt64::Sign(7ULL), 1); }
+TEST(UInt64Tests, DivRem) {
+    auto [q, r] = System::UInt64::DivRem(17ULL, 5ULL);
+    EXPECT_EQ(q, 3ULL); EXPECT_EQ(r, 2ULL);
+}
+TEST(UInt64Tests, IsEvenInteger)          { EXPECT_TRUE(System::UInt64::IsEvenInteger(4ULL)); EXPECT_FALSE(System::UInt64::IsEvenInteger(3ULL)); }
+TEST(UInt64Tests, IsOddInteger)           { EXPECT_TRUE(System::UInt64::IsOddInteger(7ULL));  EXPECT_FALSE(System::UInt64::IsOddInteger(8ULL)); }
+TEST(UInt64Tests, IsPow2_True)            { EXPECT_TRUE(System::UInt64::IsPow2(1024ULL)); }
+TEST(UInt64Tests, IsPow2_False)           { EXPECT_FALSE(System::UInt64::IsPow2(1000ULL)); }
+TEST(UInt64Tests, IsPow2_Zero)            { EXPECT_FALSE(System::UInt64::IsPow2(0ULL)); }
+TEST(UInt64Tests, Log2)                   { EXPECT_EQ(System::UInt64::Log2(1024ULL), 10ULL); }
+TEST(UInt64Tests, LeadingZeroCount)       { EXPECT_EQ(System::UInt64::LeadingZeroCount(1ULL), 63ULL); }
+TEST(UInt64Tests, TrailingZeroCount)      { EXPECT_EQ(System::UInt64::TrailingZeroCount(8ULL), 3ULL); }
+TEST(UInt64Tests, TrailingZeroCount_Zero) { EXPECT_EQ(System::UInt64::TrailingZeroCount(0ULL), 64ULL); }
+TEST(UInt64Tests, PopCount)               { EXPECT_EQ(System::UInt64::PopCount(0xFFULL), 8ULL); }
+TEST(UInt64Tests, RotateLeft)             { EXPECT_EQ(System::UInt64::RotateLeft(1ULL, 1), 2ULL); }
+TEST(UInt64Tests, RotateRight)            { EXPECT_EQ(System::UInt64::RotateRight(2ULL, 1), 1ULL); }
 
 // ===========================================================================
 // AppContext
