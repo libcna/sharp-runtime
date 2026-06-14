@@ -7,6 +7,7 @@
 #include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/CancelEventArgs.hpp"
 #include "System/ComponentModel/IChangeTracking.hpp"
+#include "System/ComponentModel/IEditableObject.hpp"
 #include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
@@ -461,4 +462,57 @@ TEST(IChangeTrackingTests, AcceptChanges_Idempotent_WhenNotChanged) {
 
 TEST(IChangeTrackingTests, IsAbstractInterface) {
     EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IChangeTracking>);
+}
+
+// ===========================================================================
+// IEditableObject
+// ===========================================================================
+
+class EditableRecord : public System::ComponentModel::IEditableObject {
+    std::string value_;
+    std::string snapshot_;
+    bool editing_ = false;
+public:
+    explicit EditableRecord(std::string v) : value_(std::move(v)) {}
+    const std::string& getValue() const { return value_; }
+    void setValue(const std::string& v) { value_ = v; }
+
+    void BeginEdit() override { snapshot_ = value_; editing_ = true; }
+    void EndEdit() override   { editing_ = false; }
+    void CancelEdit() override { if (editing_) { value_ = snapshot_; editing_ = false; } }
+};
+
+TEST(IEditableObjectTests, EndEdit_CommitsChanges) {
+    EditableRecord r("original");
+    r.BeginEdit();
+    r.setValue("modified");
+    r.EndEdit();
+    EXPECT_EQ(r.getValue(), "modified");
+}
+
+TEST(IEditableObjectTests, CancelEdit_RollsBack) {
+    EditableRecord r("original");
+    r.BeginEdit();
+    r.setValue("modified");
+    r.CancelEdit();
+    EXPECT_EQ(r.getValue(), "original");
+}
+
+TEST(IEditableObjectTests, CancelEdit_WithoutBeginEdit_DoesNotThrow) {
+    EditableRecord r("original");
+    EXPECT_NO_THROW(r.CancelEdit());
+    EXPECT_EQ(r.getValue(), "original");
+}
+
+TEST(IEditableObjectTests, BeginEdit_EndEdit_NoRollback) {
+    EditableRecord r("a");
+    r.BeginEdit();
+    r.setValue("b");
+    r.EndEdit();
+    r.CancelEdit();   // no-op: editing_ is false
+    EXPECT_EQ(r.getValue(), "b");
+}
+
+TEST(IEditableObjectTests, IsAbstractInterface) {
+    EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IEditableObject>);
 }
