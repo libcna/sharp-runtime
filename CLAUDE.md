@@ -18,6 +18,7 @@
 8. **No LINQ.** Use `std::ranges` in ported code instead.
 9. **No merge to master or tags** without explicit per-action user approval.
 10. **No broad header refactor** — naming conventions touch 449+ files and would break CNA.
+11. **Copy doc-comments from .NET source** — when porting a type, if the `.NET` source (`/rv/tmp/runtime/src/libraries/`) has XML doc comments and the sharp-runtime header has none, copy them as Doxygen `/** */` comments where the meaning translates cleanly to C++.
 
 ---
 
