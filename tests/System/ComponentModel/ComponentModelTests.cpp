@@ -8,6 +8,7 @@
 #include "System/ComponentModel/CancelEventArgs.hpp"
 #include "System/ComponentModel/IChangeTracking.hpp"
 #include "System/ComponentModel/IEditableObject.hpp"
+#include "System/ComponentModel/IRevertibleChangeTracking.hpp"
 #include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
@@ -515,4 +516,60 @@ TEST(IEditableObjectTests, BeginEdit_EndEdit_NoRollback) {
 
 TEST(IEditableObjectTests, IsAbstractInterface) {
     EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IEditableObject>);
+}
+
+// ===========================================================================
+// IRevertibleChangeTracking
+// ===========================================================================
+
+class RevertibleRecord : public System::ComponentModel::IRevertibleChangeTracking {
+    std::string value_;
+    std::string saved_;
+    bool changed_ = false;
+public:
+    explicit RevertibleRecord(std::string v) : value_(std::move(v)), saved_(value_) {}
+    void Modify(const std::string& v) { value_ = v; changed_ = true; }
+    const std::string& getValue() const { return value_; }
+
+    bool getIsChangedProperty() const override { return changed_; }
+    void AcceptChanges() override { saved_ = value_; changed_ = false; }
+    void RejectChanges() override { value_ = saved_; changed_ = false; }
+};
+
+TEST(IRevertibleChangeTrackingTests, InitialState_IsNotChanged) {
+    RevertibleRecord r("x");
+    EXPECT_FALSE(r.getIsChangedProperty());
+}
+
+TEST(IRevertibleChangeTrackingTests, AfterModify_IsChanged) {
+    RevertibleRecord r("x");
+    r.Modify("y");
+    EXPECT_TRUE(r.getIsChangedProperty());
+}
+
+TEST(IRevertibleChangeTrackingTests, AcceptChanges_CommitsAndClearsFlag) {
+    RevertibleRecord r("x");
+    r.Modify("y");
+    r.AcceptChanges();
+    EXPECT_FALSE(r.getIsChangedProperty());
+    EXPECT_EQ(r.getValue(), "y");
+}
+
+TEST(IRevertibleChangeTrackingTests, RejectChanges_RollsBackAndClearsFlag) {
+    RevertibleRecord r("x");
+    r.Modify("y");
+    r.RejectChanges();
+    EXPECT_FALSE(r.getIsChangedProperty());
+    EXPECT_EQ(r.getValue(), "x");
+}
+
+TEST(IRevertibleChangeTrackingTests, InheritsIChangeTracking) {
+    RevertibleRecord r("x");
+    System::ComponentModel::IChangeTracking& base = r;
+    (void)base;
+    SUCCEED();
+}
+
+TEST(IRevertibleChangeTrackingTests, IsAbstractInterface) {
+    EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IRevertibleChangeTracking>);
 }
