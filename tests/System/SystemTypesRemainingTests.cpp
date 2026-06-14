@@ -202,6 +202,64 @@ TEST(LazyTests, Value_AliasForGetValue) {
     Lazy<std::string> lz([]() { return std::string("hello"); });
     EXPECT_EQ(lz.Value(), "hello");
 }
+TEST(LazyTests, PrecomputedValue_IsCreatedImmediately) {
+    Lazy<int> lz(42);
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
+    EXPECT_EQ(lz.getValueProperty(), 42);
+}
+TEST(LazyTests, PrecomputedValue_NoFactoryInvoked) {
+    Lazy<std::string> lz(std::string("pre"));
+    EXPECT_EQ(lz.Value(), "pre");
+    EXPECT_TRUE(lz.getIsValueCreatedProperty());
+}
+TEST(LazyTests, BoolCtor_True_ThreadSafe_DefaultValue) {
+    Lazy<int> lz(true);
+    EXPECT_FALSE(lz.getIsValueCreatedProperty());
+    EXPECT_EQ(lz.getValueProperty(), 0);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::ExecutionAndPublication);
+}
+TEST(LazyTests, BoolCtor_False_NonThreadSafe_DefaultValue) {
+    Lazy<int> lz(false);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::None);
+    EXPECT_EQ(lz.getValueProperty(), 0);
+}
+TEST(LazyTests, ModeCtor_PublicationOnly) {
+    Lazy<int> lz(System::LazyThreadSafetyMode::PublicationOnly);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::PublicationOnly);
+    EXPECT_EQ(lz.getValueProperty(), 0);
+}
+TEST(LazyTests, FactoryBool_True_ExecutionAndPublication) {
+    Lazy<int> lz([]() { return 99; }, true);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::ExecutionAndPublication);
+    EXPECT_EQ(lz.getValueProperty(), 99);
+}
+TEST(LazyTests, FactoryBool_False_None) {
+    Lazy<int> lz([]() { return 55; }, false);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::None);
+    EXPECT_EQ(lz.getValueProperty(), 55);
+}
+TEST(LazyTests, FactoryMode_None) {
+    Lazy<int> lz([]() { return 7; }, System::LazyThreadSafetyMode::None);
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::None);
+    EXPECT_EQ(lz.getValueProperty(), 7);
+}
+TEST(LazyTests, DefaultCtor_ModeIsExecutionAndPublication) {
+    Lazy<int> lz;
+    EXPECT_EQ(lz.getModeProperty(), System::LazyThreadSafetyMode::ExecutionAndPublication);
+}
+TEST(LazyTests, ToString_NotCreated) {
+    Lazy<int> lz;
+    EXPECT_EQ(lz.ToString(), "Value is not created.");
+}
+TEST(LazyTests, ToString_Created) {
+    Lazy<int> lz([]() { return 1; });
+    lz.getValueProperty();
+    EXPECT_EQ(lz.ToString(), "Value is created.");
+}
+TEST(LazyTests, ToString_PrecomputedIsCreated) {
+    Lazy<int> lz(5);
+    EXPECT_EQ(lz.ToString(), "Value is created.");
+}
 
 // ===========================================================================
 // HashCode
