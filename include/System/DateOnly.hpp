@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DayOfWeek.hpp"
 
 namespace System {
 
@@ -25,6 +26,11 @@ namespace System {
         intcs month_ = 1;
         intcs day_   = 1;
     public:
+        /// The smallest possible value of DateOnly (January 1, 0001).
+        static const DateOnly MinValue;
+        /// The largest possible value of DateOnly (December 31, 9999).
+        static const DateOnly MaxValue;
+
         /// Initializes a new DateOnly with year=1, month=1, day=1.
         DateOnly() = default;
         /// Initializes a new DateOnly with the specified year, month, and day.
@@ -36,6 +42,15 @@ namespace System {
         [[nodiscard]] intcs getMonthProperty() const { return month_; }
         /// Returns the day component of this date.
         [[nodiscard]] intcs getDayProperty()   const { return day_; }
+        /// Returns the day of the week represented by this instance.
+        [[nodiscard]] DayOfWeek getDayOfWeekProperty() const;
+        /// Returns the day of the year represented by this instance (1–366).
+        [[nodiscard]] intcs getDayOfYearProperty() const;
+        /// Returns the number of days since January 1, 0001 (DateOnly.MinValue).
+        [[nodiscard]] intcs getDayNumberProperty() const;
+
+        /// Creates a DateOnly from the number of days since January 1, 0001.
+        [[nodiscard]] static DateOnly FromDayNumber(intcs dayNumber);
 
         /// Returns a string representation in the form "yyyy-MM-dd".
         [[nodiscard]] std::string ToString() const {
@@ -49,6 +64,13 @@ namespace System {
         /// Returns the date formatted according to @p format.
         /// Tokens: yyyy/yy (year), MM/M (month), dd/d (day). Literals in single quotes.
         [[nodiscard]] std::string ToString(const std::string& format) const;
+
+        /// Compares this instance to another DateOnly. Returns negative, zero, or positive.
+        [[nodiscard]] intcs CompareTo(const DateOnly& other) const;
+        /// Returns true if this instance equals another DateOnly.
+        [[nodiscard]] bool Equals(const DateOnly& other) const { return *this == other; }
+        /// Deconstructs this instance into year, month, and day components.
+        void Deconstruct(intcs& year, intcs& month, intcs& day) const { year = year_; month = month_; day = day_; }
 
         /// Returns a new DateOnly with @p n days added (may be negative).
         [[nodiscard]] DateOnly AddDays(int n) const;

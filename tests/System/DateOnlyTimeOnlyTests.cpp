@@ -128,6 +128,78 @@ TEST(DateOnlyTests, ToStringFormat_Literal) {
     EXPECT_EQ(d.ToString("yyyy'.'MM'.'dd"), "2025.12.25");
 }
 
+TEST(DateOnlyTests, MinValue_Is_0001_01_01) {
+    EXPECT_EQ(System::DateOnly::MinValue.getYearProperty(),  1);
+    EXPECT_EQ(System::DateOnly::MinValue.getMonthProperty(), 1);
+    EXPECT_EQ(System::DateOnly::MinValue.getDayProperty(),   1);
+}
+
+TEST(DateOnlyTests, MaxValue_Is_9999_12_31) {
+    EXPECT_EQ(System::DateOnly::MaxValue.getYearProperty(),  9999);
+    EXPECT_EQ(System::DateOnly::MaxValue.getMonthProperty(), 12);
+    EXPECT_EQ(System::DateOnly::MaxValue.getDayProperty(),   31);
+}
+
+TEST(DateOnlyTests, DayNumber_MinValue_IsZero) {
+    EXPECT_EQ(System::DateOnly::MinValue.getDayNumberProperty(), 0);
+}
+
+TEST(DateOnlyTests, FromDayNumber_RoundTrip) {
+    System::DateOnly d(2025, 6, 14);
+    int dn = d.getDayNumberProperty();
+    EXPECT_EQ(System::DateOnly::FromDayNumber(dn), d);
+}
+
+TEST(DateOnlyTests, DayOfWeek_Known) {
+    // 2025-06-14 is a Saturday
+    System::DateOnly d(2025, 6, 14);
+    EXPECT_EQ(d.getDayOfWeekProperty(), System::DayOfWeek::Saturday);
+}
+
+TEST(DateOnlyTests, DayOfYear_Jan1_IsOne) {
+    EXPECT_EQ(System::DateOnly(2025, 1, 1).getDayOfYearProperty(), 1);
+}
+
+TEST(DateOnlyTests, DayOfYear_Dec31_NonLeap) {
+    EXPECT_EQ(System::DateOnly(2025, 12, 31).getDayOfYearProperty(), 365);
+}
+
+TEST(DateOnlyTests, DayOfYear_Dec31_Leap) {
+    EXPECT_EQ(System::DateOnly(2024, 12, 31).getDayOfYearProperty(), 366);
+}
+
+TEST(DateOnlyTests, CompareTo_Less) {
+    System::DateOnly a(2020, 1, 1), b(2021, 1, 1);
+    EXPECT_LT(a.CompareTo(b), 0);
+}
+
+TEST(DateOnlyTests, CompareTo_Equal) {
+    System::DateOnly a(2020, 6, 15), b(2020, 6, 15);
+    EXPECT_EQ(a.CompareTo(b), 0);
+}
+
+TEST(DateOnlyTests, CompareTo_Greater) {
+    System::DateOnly a(2022, 1, 1), b(2021, 1, 1);
+    EXPECT_GT(a.CompareTo(b), 0);
+}
+
+TEST(DateOnlyTests, Equals_SameDate) {
+    System::DateOnly a(2025, 3, 1), b(2025, 3, 1);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(DateOnlyTests, Equals_DifferentDate) {
+    System::DateOnly a(2025, 3, 1), b(2025, 3, 2);
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(DateOnlyTests, Deconstruct) {
+    System::DateOnly d(2025, 11, 7);
+    System::intcs y, m, day;
+    d.Deconstruct(y, m, day);
+    EXPECT_EQ(y, 2025); EXPECT_EQ(m, 11); EXPECT_EQ(day, 7);
+}
+
 // ===========================================================================
 // TimeOnly — AddHours / AddMinutes
 // ===========================================================================

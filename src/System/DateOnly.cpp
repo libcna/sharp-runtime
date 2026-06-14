@@ -10,6 +10,9 @@
 
 namespace System {
 
+const DateOnly DateOnly::MinValue{1, 1, 1};
+const DateOnly DateOnly::MaxValue{9999, 12, 31};
+
 // Julian Day Number helpers for day-accurate date arithmetic
 static int dateToJDN(int y, int m, int d) {
     return d - 32075
@@ -29,6 +32,34 @@ static void jdnToDate(int jdn, int& y, int& m, int& d) {
     l = j / 11;
     m = j + 2 - 12 * l;
     y = 100 * (n - 49) + i + l;
+}
+
+// JDN of 0001-01-01 (DateOnly epoch)
+static constexpr int JDN_EPOCH = 1721426;
+
+DayOfWeek DateOnly::getDayOfWeekProperty() const {
+    // JDN % 7: 0=Monday … 6=Sunday → map to .NET Sunday=0
+    int jdn = dateToJDN(year_, month_, day_);
+    return static_cast<DayOfWeek>((jdn + 1) % 7);
+}
+
+intcs DateOnly::getDayOfYearProperty() const {
+    return dateToJDN(year_, month_, day_) - dateToJDN(year_, 1, 1) + 1;
+}
+
+intcs DateOnly::getDayNumberProperty() const {
+    return dateToJDN(year_, month_, day_) - JDN_EPOCH;
+}
+
+DateOnly DateOnly::FromDayNumber(intcs dayNumber) {
+    int y, m, d;
+    jdnToDate(dayNumber + JDN_EPOCH, y, m, d);
+    return DateOnly(y, m, d);
+}
+
+intcs DateOnly::CompareTo(const DateOnly& other) const {
+    intcs a = getDayNumberProperty(), b = other.getDayNumberProperty();
+    return (a < b) ? -1 : (a > b) ? 1 : 0;
 }
 
 DateOnly DateOnly::AddDays(int n) const {
