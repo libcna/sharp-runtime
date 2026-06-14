@@ -10,53 +10,81 @@
 namespace System {
 
     using SharpRuntime::intcs;
+    using SharpRuntime::shortcs;
 
-    /// <summary>
-    /// Represents a version number with Major, Minor, Build, and Revision components.
-    ///
-    /// Partial C++ counterpart of .NET System.Version.
-    /// </summary>
+    /**
+     * @brief Represents a version number with Major, Minor, Build, and Revision components.
+     *
+     * C++ counterpart of .NET System.Version.
+     */
     class Version {
     public:
-        intcs Major    = 0; ///< Major version component.
-        intcs Minor    = 0; ///< Minor version component.
+        intcs Major    = 0;  ///< Major version component.
+        intcs Minor    = 0;  ///< Minor version component.
         intcs Build    = -1; ///< Build number; -1 means not specified.
         intcs Revision = -1; ///< Revision number; -1 means not specified.
 
-        /// Constructs a Version with all components set to their defaults (0.0).
+        /** @brief Constructs a Version with all components set to their defaults (0.0). */
         Version() = default;
-        /// Constructs a Version with the given major and minor components.
+        /** @brief Constructs a Version with the given major and minor components. */
         Version(intcs major, intcs minor) : Major(major), Minor(minor) {}
-        /// Constructs a Version with major, minor, and build components.
+        /** @brief Constructs a Version with major, minor, and build components. */
         Version(intcs major, intcs minor, intcs build) : Major(major), Minor(minor), Build(build) {}
-        /// Constructs a Version with all four components.
+        /** @brief Constructs a Version with all four components. */
         Version(intcs major, intcs minor, intcs build, intcs revision)
             : Major(major), Minor(minor), Build(build), Revision(revision) {}
 
-        /// Parses a version from a dot-separated string such as "1.2.3.4".
-        /// @param versionString String to parse; must contain at least two components.
+        /** @brief Parses a version from a dot-separated string such as "1.2.3.4". */
         explicit Version(const std::string& versionString) { parse(versionString); }
 
-        /// Parses a version from a dot-separated string. Throws std::invalid_argument on failure.
+        /** @brief Parses a version from a dot-separated string. Throws std::invalid_argument on failure. */
         static Version Parse(const std::string& s) {
-            try { return Version(s); } catch (...) {
-                throw std::invalid_argument("Invalid version string: " + s);
-            }
+            try { return Version(s); }
+            catch (...) { throw std::invalid_argument("Invalid version string: " + s); }
         }
 
-        /// Tries to parse a version string without throwing. Returns true on success.
+        /** @brief Tries to parse a version string without throwing. Returns true on success. */
         static bool TryParse(const std::string& s, Version& result) {
             try { result = Version(s); return true; } catch (...) { return false; }
         }
 
-        /// Compares this version to another. Returns negative, zero, or positive.
+        /**
+         * @brief Gets the high 16 bits of the Revision component.
+         * Matches .NET Version.MajorRevision.
+         */
+        [[nodiscard]] shortcs getMajorRevisionProperty() const {
+            return static_cast<shortcs>(Revision >> 16);
+        }
+
+        /**
+         * @brief Gets the low 16 bits of the Revision component.
+         * Matches .NET Version.MinorRevision.
+         */
+        [[nodiscard]] shortcs getMinorRevisionProperty() const {
+            return static_cast<shortcs>(Revision & 0xFFFF);
+        }
+
+        /** @brief Compares this version to another. Returns negative, zero, or positive. */
         [[nodiscard]] intcs CompareTo(const Version& other) const { return cmp(other); }
 
-        /// Returns true if this version has equal components to other.
+        /** @brief Returns true if this version has equal components to other. */
         [[nodiscard]] bool Equals(const Version& other) const { return cmp(other) == 0; }
 
-        /// Returns the version as a dot-separated string, omitting unspecified (negative) components.
-        /// @return String representation, e.g. "1.2" or "1.2.3.4".
+        /** @brief Returns a hash code for this version. */
+        [[nodiscard]] int GetHashCode() const {
+            // Mirror .NET: accumulate 4 components with bit shifts
+            int hash = 0;
+            hash |= (Major & 0x0000000F) << 28;
+            hash |= (Minor & 0x000000FF) << 20;
+            hash |= (Build & 0x000000FF) << 12;
+            hash |= (Revision & 0x00000FFF);
+            return hash;
+        }
+
+        /**
+         * @brief Returns the version as a dot-separated string,
+         * omitting unspecified (negative) components.
+         */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
             oss << Major << '.' << Minor;
@@ -65,17 +93,34 @@ namespace System {
             return oss.str();
         }
 
-        /// Returns true if this version is equal to @p o.
+        /**
+         * @brief Returns the version string with exactly fieldCount components.
+         * @param fieldCount Number of components to include (1–4).
+         * @throws std::invalid_argument if fieldCount is out of range.
+         */
+        [[nodiscard]] std::string ToString(intcs fieldCount) const {
+            if (fieldCount < 0 || fieldCount > 4)
+                throw std::invalid_argument("fieldCount must be 0-4");
+            if (fieldCount == 0) return "";
+            std::ostringstream oss;
+            oss << Major;
+            if (fieldCount >= 2) oss << '.' << Minor;
+            if (fieldCount >= 3) oss << '.' << Build;
+            if (fieldCount >= 4) oss << '.' << Revision;
+            return oss.str();
+        }
+
+        /** @brief Returns true if this version is equal to o. */
         bool operator==(const Version& o) const { return cmp(o) == 0; }
-        /// Returns true if this version is not equal to @p o.
+        /** @brief Returns true if this version is not equal to o. */
         bool operator!=(const Version& o) const { return cmp(o) != 0; }
-        /// Returns true if this version is less than @p o.
+        /** @brief Returns true if this version is less than o. */
         bool operator< (const Version& o) const { return cmp(o) <  0; }
-        /// Returns true if this version is less than or equal to @p o.
+        /** @brief Returns true if this version is less than or equal to o. */
         bool operator<=(const Version& o) const { return cmp(o) <= 0; }
-        /// Returns true if this version is greater than @p o.
+        /** @brief Returns true if this version is greater than o. */
         bool operator> (const Version& o) const { return cmp(o) >  0; }
-        /// Returns true if this version is greater than or equal to @p o.
+        /** @brief Returns true if this version is greater than or equal to o. */
         bool operator>=(const Version& o) const { return cmp(o) >= 0; }
 
     private:

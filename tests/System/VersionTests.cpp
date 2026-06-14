@@ -173,3 +173,74 @@ TEST(VersionTests, Equals_Same_True) {
 TEST(VersionTests, Equals_Different_False) {
     EXPECT_FALSE(Version(1, 2).Equals(Version(1, 3)));
 }
+
+// ---------------------------------------------------------------------------
+// MajorRevision / MinorRevision
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, MajorRevision_HighBits) {
+    // Revision = 0x00020003 => MajorRevision = 0x0002 = 2
+    Version v(1, 0, 0, (2 << 16) | 3);
+    EXPECT_EQ(v.getMajorRevisionProperty(), static_cast<short>(2));
+}
+
+TEST(VersionTests, MinorRevision_LowBits) {
+    // Revision = 0x00020003 => MinorRevision = 0x0003 = 3
+    Version v(1, 0, 0, (2 << 16) | 3);
+    EXPECT_EQ(v.getMinorRevisionProperty(), static_cast<short>(3));
+}
+
+TEST(VersionTests, MajorRevision_NoRevision) {
+    Version v(1, 2, 3, 0);
+    EXPECT_EQ(v.getMajorRevisionProperty(), static_cast<short>(0));
+    EXPECT_EQ(v.getMinorRevisionProperty(), static_cast<short>(0));
+}
+
+// ---------------------------------------------------------------------------
+// GetHashCode
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, GetHashCode_SameVersion_SameHash) {
+    Version a(1, 2, 3, 4), b(1, 2, 3, 4);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(VersionTests, GetHashCode_DifferentVersions_DifferentHash) {
+    EXPECT_NE(Version(1, 2, 3, 4).GetHashCode(), Version(1, 2, 3, 5).GetHashCode());
+}
+
+TEST(VersionTests, GetHashCode_ZeroVersion_Zero) {
+    EXPECT_EQ(Version(0, 0, 0, 0).GetHashCode(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// ToString(fieldCount)
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, ToString_FieldCount0_Empty) {
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(0), "");
+}
+
+TEST(VersionTests, ToString_FieldCount1_MajorOnly) {
+    EXPECT_EQ(Version(5, 6, 7, 8).ToString(1), "5");
+}
+
+TEST(VersionTests, ToString_FieldCount2_MajorMinor) {
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(2), "1.2");
+}
+
+TEST(VersionTests, ToString_FieldCount3_MajorMinorBuild) {
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(3), "1.2.3");
+}
+
+TEST(VersionTests, ToString_FieldCount4_All) {
+    EXPECT_EQ(Version(1, 2, 3, 4).ToString(4), "1.2.3.4");
+}
+
+TEST(VersionTests, ToString_FieldCountNegative_Throws) {
+    EXPECT_THROW(Version(1, 2, 3, 4).ToString(-1), std::invalid_argument);
+}
+
+TEST(VersionTests, ToString_FieldCount5_Throws) {
+    EXPECT_THROW(Version(1, 2, 3, 4).ToString(5), std::invalid_argument);
+}
