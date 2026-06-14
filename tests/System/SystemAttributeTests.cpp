@@ -107,6 +107,25 @@ TEST(AttributeUsageAttributeTests, SetInherited_False) {
     EXPECT_FALSE(attr.getInheritedProperty());
 }
 
+TEST(AttributeUsageAttributeTests, ThreeArgCtor_StoresAll) {
+    AttributeUsageAttribute attr(AttributeTargets::Method, true, false);
+    EXPECT_EQ(attr.getValidOnProperty(), AttributeTargets::Method);
+    EXPECT_TRUE(attr.getAllowMultipleProperty());
+    EXPECT_FALSE(attr.getInheritedProperty());
+}
+
+TEST(AttributeUsageAttributeTests, Default_TargetsAll) {
+    EXPECT_EQ(AttributeUsageAttribute::Default.getValidOnProperty(), AttributeTargets::All);
+}
+
+TEST(AttributeUsageAttributeTests, Default_AllowMultipleFalse) {
+    EXPECT_FALSE(AttributeUsageAttribute::Default.getAllowMultipleProperty());
+}
+
+TEST(AttributeUsageAttributeTests, Default_InheritedTrue) {
+    EXPECT_TRUE(AttributeUsageAttribute::Default.getInheritedProperty());
+}
+
 // ===========================================================================
 // CLSCompliantAttribute
 // ===========================================================================
