@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
+#include "System/TimeSpan.hpp"
 
 namespace System {
 
@@ -21,6 +22,22 @@ namespace System {
     class Environment {
     public:
         Environment() = delete;
+
+        /**
+         * @brief Represents the amount of time the process has spent running in user mode and kernel mode.
+         * C++ counterpart of .NET System.Environment.ProcessCpuUsage.
+         */
+        struct ProcessCpuUsage {
+            /** @brief Gets the amount of time the process has spent running code in user mode. */
+            TimeSpan UserTime;
+            /** @brief Gets the amount of time the process has spent running code in kernel mode. */
+            TimeSpan PrivilegedTime;
+            /** @brief Gets the total CPU time (UserTime + PrivilegedTime). */
+            [[nodiscard]] TimeSpan getTotalTimeProperty() const { return UserTime + PrivilegedTime; }
+        };
+
+        /// @brief Returns the CPU usage of the current process.
+        [[nodiscard]] static ProcessCpuUsage getCpuUsageProperty();
 
         enum class SpecialFolder {
             Desktop                  = 0x0000,

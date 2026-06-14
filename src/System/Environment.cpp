@@ -20,6 +20,7 @@
 #  include <climits>
 #  include <pwd.h>
 #  include <time.h>
+#  include <sys/resource.h>
 #endif
 #include <sstream>
 
@@ -142,6 +143,33 @@ std::string Environment::GetFolderPath(SpecialFolder folder) {
         case SpecialFolder::Templates:        return h + "/Templates";
         default:                              return "";
     }
+#endif
+}
+
+Environment::ProcessCpuUsage Environment::getCpuUsageProperty() {
+#if defined(_WIN32)
+    FILETIME creation, exit, kernel, user;
+    if (GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
+        auto toTS = [](FILETIME ft) -> TimeSpan {
+            longcs ticks = (static_cast<longcs>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+            return TimeSpan(ticks); // FILETIME is in 100-ns units, same as TimeSpan ticks
+        };
+        return { toTS(user), toTS(kernel) };
+    }
+    return { TimeSpan::Zero, TimeSpan::Zero };
+#elif defined(__EMSCRIPTEN__)
+    return { TimeSpan::Zero, TimeSpan::Zero };
+#else
+    struct rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        auto tvToTS = [](const struct timeval& tv) -> TimeSpan {
+            longcs ticks = static_cast<longcs>(tv.tv_sec) * 10000000LL
+                         + static_cast<longcs>(tv.tv_usec) * 10LL;
+            return TimeSpan(ticks);
+        };
+        return { tvToTS(usage.ru_utime), tvToTS(usage.ru_stime) };
+    }
+    return { TimeSpan::Zero, TimeSpan::Zero };
 #endif
 }
 

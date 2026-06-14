@@ -173,3 +173,23 @@ TEST(EnvironmentTests, GetEnvironmentVariable_WithTarget_SameAsWithout) {
     std::string b = Environment::GetEnvironmentVariable("PATH", System::EnvironmentVariableTarget::Process);
     EXPECT_EQ(a, b);
 }
+
+// ---------------------------------------------------------------------------
+// ProcessCpuUsage
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, CpuUsage_UserTime_NonNegative) {
+    auto usage = Environment::getCpuUsageProperty();
+    EXPECT_GE(usage.UserTime.getTotalSecondsProperty(), 0.0);
+}
+
+TEST(EnvironmentTests, CpuUsage_PrivilegedTime_NonNegative) {
+    auto usage = Environment::getCpuUsageProperty();
+    EXPECT_GE(usage.PrivilegedTime.getTotalSecondsProperty(), 0.0);
+}
+
+TEST(EnvironmentTests, CpuUsage_TotalTime_EqualsSumOfParts) {
+    auto usage = Environment::getCpuUsageProperty();
+    System::TimeSpan expected = usage.UserTime + usage.PrivilegedTime;
+    EXPECT_EQ(usage.getTotalTimeProperty().getTicksProperty(), expected.getTicksProperty());
+}
