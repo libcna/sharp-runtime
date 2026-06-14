@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include "gtest/gtest.h"
 #include "System/Random.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -169,4 +167,175 @@ TEST(RandomTests, NextInt64_MaxValueThrows) {
 TEST(RandomTests, NextInt64_InvalidRangeThrows) {
     System::Random rng(7);
     EXPECT_THROW(rng.NextInt64(10LL, 5LL), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Shared_ReturnsSameReference) {
+    System::Random& a = System::Random::getSharedProperty();
+    System::Random& b = System::Random::getSharedProperty();
+    EXPECT_EQ(&a, &b);
+}
+
+TEST(RandomTests, Shared_ProducesValues) {
+    int v = System::Random::getSharedProperty().Next(1000);
+    EXPECT_GE(v, 0);
+    EXPECT_LT(v, 1000);
+}
+
+// ---------------------------------------------------------------------------
+// NextBytes(Span)
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, NextBytes_Span_FillsBuffer) {
+    System::Random rng(11);
+    std::vector<uint8_t> vec(16, 0);
+    System::Span<uint8_t> s(vec);
+    rng.NextBytes(s);
+    bool anyNonZero = false;
+    for (auto b : vec) if (b) { anyNonZero = true; break; }
+    EXPECT_TRUE(anyNonZero);
+}
+
+TEST(RandomTests, NextBytes_Span_LengthUnchanged) {
+    System::Random rng(22);
+    std::vector<uint8_t> vec(32);
+    System::Span<uint8_t> s(vec);
+    rng.NextBytes(s);
+    EXPECT_EQ(s.getLengthProperty(), 32);
+}
+
+// ---------------------------------------------------------------------------
+// NextInteger<T>
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, NextInteger_Int_InRange) {
+    System::Random rng(33);
+    for (int i = 0; i < 100; ++i) {
+        int v = rng.NextInteger<int>();
+        EXPECT_GE(v, 0);
+        EXPECT_LE(v, std::numeric_limits<int>::max());
+    }
+}
+
+TEST(RandomTests, NextInteger_MaxValue_InRange) {
+    System::Random rng(44);
+    for (int i = 0; i < 100; ++i) {
+        int v = rng.NextInteger<int>(50);
+        EXPECT_GE(v, 0);
+        EXPECT_LT(v, 50);
+    }
+}
+
+TEST(RandomTests, NextInteger_Range_InRange) {
+    System::Random rng(55);
+    for (int i = 0; i < 100; ++i) {
+        int v = rng.NextInteger<int>(10, 20);
+        EXPECT_GE(v, 10);
+        EXPECT_LT(v, 20);
+    }
+}
+
+TEST(RandomTests, NextInteger_EqualMinMax_ReturnsMin) {
+    System::Random rng(66);
+    EXPECT_EQ(rng.NextInteger<int>(7, 7), 7);
+}
+
+TEST(RandomTests, NextInteger_MaxValueNegative_Throws) {
+    System::Random rng(77);
+    EXPECT_THROW((rng.NextInteger<int>(-1)), System::ArgumentOutOfRangeException);
+}
+
+TEST(RandomTests, NextInteger_InvalidRange_Throws) {
+    System::Random rng(88);
+    EXPECT_THROW((rng.NextInteger<int>(10, 5)), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// Shuffle<T>
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Shuffle_ChangesOrder) {
+    System::Random rng(99);
+    std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> original = v;
+    rng.Shuffle(v);
+    // All elements must still be present
+    std::vector<int> sorted = v;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, original);
+}
+
+TEST(RandomTests, Shuffle_EmptyVector_NoThrow) {
+    System::Random rng(100);
+    std::vector<int> v;
+    EXPECT_NO_THROW(rng.Shuffle(v));
+}
+
+// ---------------------------------------------------------------------------
+// GetItems<T>
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetItems_CorrectLength) {
+    System::Random rng(111);
+    std::vector<int> choices = {10, 20, 30, 40};
+    auto result = rng.GetItems(choices, 6);
+    EXPECT_EQ(result.size(), 6u);
+}
+
+TEST(RandomTests, GetItems_OnlyFromChoices) {
+    System::Random rng(222);
+    std::vector<int> choices = {10, 20, 30};
+    auto result = rng.GetItems(choices, 50);
+    for (int v : result)
+        EXPECT_TRUE(v == 10 || v == 20 || v == 30);
+}
+
+// ---------------------------------------------------------------------------
+// GetString
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetString_CorrectLength) {
+    System::Random rng(333);
+    std::string result = rng.GetString("abc", 8);
+    EXPECT_EQ(result.size(), 8u);
+}
+
+TEST(RandomTests, GetString_OnlyFromChoices) {
+    System::Random rng(444);
+    std::string result = rng.GetString("xyz", 20);
+    for (char c : result)
+        EXPECT_TRUE(c == 'x' || c == 'y' || c == 'z');
+}
+
+// ---------------------------------------------------------------------------
+// GetHexString
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetHexString_CorrectLength) {
+    System::Random rng(555);
+    EXPECT_EQ(rng.GetHexString(8).size(), 8u);
+}
+
+TEST(RandomTests, GetHexString_UppercaseByDefault) {
+    System::Random rng(666);
+    std::string s = rng.GetHexString(100);
+    for (char c : s) {
+        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+    }
+}
+
+TEST(RandomTests, GetHexString_Lowercase) {
+    System::Random rng(777);
+    std::string s = rng.GetHexString(100, true);
+    for (char c : s) {
+        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+    }
+}
+
+TEST(RandomTests, GetHexString_ZeroLength_Empty) {
+    System::Random rng(888);
+    EXPECT_TRUE(rng.GetHexString(0).empty());
 }

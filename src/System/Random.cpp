@@ -95,4 +95,39 @@ namespace System {
             b = static_cast<bytecs>(dist(generator));
     }
 
+    void Random::NextBytes(Span<bytecs> buffer)
+    {
+        std::uniform_int_distribution<int> dist(0, 255);
+        for (intcs i = 0; i < buffer.getLengthProperty(); ++i)
+            buffer[i] = static_cast<bytecs>(dist(generator));
+    }
+
+    Random& Random::getSharedProperty()
+    {
+        static Random instance;
+        return instance;
+    }
+
+    std::string Random::GetString(const std::string& choices, intcs length)
+    {
+        std::string result;
+        result.reserve(static_cast<std::size_t>(length));
+        for (intcs i = 0; i < length; ++i)
+            result += choices[static_cast<std::size_t>(
+                Next(static_cast<intcs>(choices.size())))];
+        return result;
+    }
+
+    std::string Random::GetHexString(intcs stringLength, bool lowercase)
+    {
+        static constexpr const char* upper = "0123456789ABCDEF";
+        static constexpr const char* lower = "0123456789abcdef";
+        const char* chars = lowercase ? lower : upper;
+        std::string result;
+        result.reserve(static_cast<std::size_t>(stringLength));
+        for (intcs i = 0; i < stringLength; ++i)
+            result += chars[Next(16)];
+        return result;
+    }
+
 } // namespace System
