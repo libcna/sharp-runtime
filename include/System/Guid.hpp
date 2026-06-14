@@ -60,11 +60,20 @@ namespace System {
         [[nodiscard]] const std::array<uint8_t, 16>& ToByteArray() const { return bytes_; }
 
         /// Returns true if this Guid is equal to the specified Guid.
+        [[nodiscard]] bool Equals(const Guid& other) const { return bytes_ == other.bytes_; }
+
+        /**
+         * @brief Compares this Guid to another.
+         * @return negative if less, 0 if equal, positive if greater.
+         */
+        [[nodiscard]] int CompareTo(const Guid& other) const;
+
         bool operator==(const Guid& other) const { return bytes_ == other.bytes_; }
-        /// Returns true if this Guid is not equal to the specified Guid.
         bool operator!=(const Guid& other) const { return bytes_ != other.bytes_; }
-        /// Provides an ordering for use in sorted containers.
         bool operator< (const Guid& other) const { return bytes_ <  other.bytes_; }
+        bool operator<=(const Guid& other) const { return bytes_ <= other.bytes_; }
+        bool operator> (const Guid& other) const { return bytes_ >  other.bytes_; }
+        bool operator>=(const Guid& other) const { return bytes_ >= other.bytes_; }
     };
 
 } // namespace System

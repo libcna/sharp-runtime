@@ -71,6 +71,12 @@ namespace System {
         return oss.str();
     }
 
+    int Guid::CompareTo(const Guid& other) const {
+        if (bytes_ < other.bytes_) return -1;
+        if (bytes_ > other.bytes_) return  1;
+        return 0;
+    }
+
     std::string Guid::ToString(const std::string& format) const {
         std::string d = ToString(); // "D" format (default with hyphens)
         if (format == "D" || format.empty()) return d;

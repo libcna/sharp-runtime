@@ -237,3 +237,77 @@ TEST(GuidTests, ToString_P_HasParens) {
 TEST(GuidTests, ToString_InvalidFormat_Throws) {
     EXPECT_THROW(Guid::NewGuid().ToString("X"), System::FormatException);
 }
+
+// ---------------------------------------------------------------------------
+// Equals / CompareTo / additional operators
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, Equals_SameGuid_ReturnsTrue) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(GuidTests, Equals_DifferentGuid_ReturnsFalse) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("00000000-0000-0000-0000-000000000001");
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(GuidTests, Equals_Self_ReturnsTrue) {
+    Guid a = Guid::NewGuid();
+    EXPECT_TRUE(a.Equals(a));
+}
+
+TEST(GuidTests, CompareTo_Equal_ReturnsZero) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_EQ(a.CompareTo(b), 0);
+}
+
+TEST(GuidTests, CompareTo_Less_ReturnsNegative) {
+    Guid lo("00000000-0000-0000-0000-000000000001");
+    Guid hi("00000000-0000-0000-0000-000000000002");
+    EXPECT_LT(lo.CompareTo(hi), 0);
+}
+
+TEST(GuidTests, CompareTo_Greater_ReturnsPositive) {
+    Guid lo("00000000-0000-0000-0000-000000000001");
+    Guid hi("00000000-0000-0000-0000-000000000002");
+    EXPECT_GT(hi.CompareTo(lo), 0);
+}
+
+TEST(GuidTests, OperatorLessOrEqual_Equal) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_TRUE(a <= b);
+    EXPECT_TRUE(b <= a);
+}
+
+TEST(GuidTests, OperatorLessOrEqual_Less) {
+    Guid lo("00000000-0000-0000-0000-000000000001");
+    Guid hi("00000000-0000-0000-0000-000000000002");
+    EXPECT_TRUE(lo <= hi);
+    EXPECT_FALSE(hi <= lo);
+}
+
+TEST(GuidTests, OperatorGreater) {
+    Guid lo("00000000-0000-0000-0000-000000000001");
+    Guid hi("00000000-0000-0000-0000-000000000002");
+    EXPECT_TRUE(hi > lo);
+    EXPECT_FALSE(lo > hi);
+}
+
+TEST(GuidTests, OperatorGreaterOrEqual_Equal) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_TRUE(a >= b);
+    EXPECT_TRUE(b >= a);
+}
+
+TEST(GuidTests, OperatorGreaterOrEqual_Greater) {
+    Guid lo("00000000-0000-0000-0000-000000000001");
+    Guid hi("00000000-0000-0000-0000-000000000002");
+    EXPECT_TRUE(hi >= lo);
+    EXPECT_FALSE(lo >= hi);
+}
