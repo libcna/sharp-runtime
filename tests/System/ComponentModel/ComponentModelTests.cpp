@@ -6,6 +6,7 @@
 #include <any>
 #include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/CancelEventArgs.hpp"
+#include "System/ComponentModel/IChangeTracking.hpp"
 #include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
@@ -420,4 +421,44 @@ TEST(CancelEventArgsTests, InheritsFromEventArgs) {
     System::EventArgs& base = e;
     (void)base;
     SUCCEED();
+}
+
+// ===========================================================================
+// IChangeTracking
+// ===========================================================================
+
+class TrackedObject : public System::ComponentModel::IChangeTracking {
+    bool changed_ = false;
+public:
+    void Modify() { changed_ = true; }
+    bool getIsChangedProperty() const override { return changed_; }
+    void AcceptChanges() override { changed_ = false; }
+};
+
+TEST(IChangeTrackingTests, InitialState_IsNotChanged) {
+    TrackedObject obj;
+    EXPECT_FALSE(obj.getIsChangedProperty());
+}
+
+TEST(IChangeTrackingTests, AfterModify_IsChanged) {
+    TrackedObject obj;
+    obj.Modify();
+    EXPECT_TRUE(obj.getIsChangedProperty());
+}
+
+TEST(IChangeTrackingTests, AcceptChanges_ResetsIsChanged) {
+    TrackedObject obj;
+    obj.Modify();
+    obj.AcceptChanges();
+    EXPECT_FALSE(obj.getIsChangedProperty());
+}
+
+TEST(IChangeTrackingTests, AcceptChanges_Idempotent_WhenNotChanged) {
+    TrackedObject obj;
+    EXPECT_NO_THROW(obj.AcceptChanges());
+    EXPECT_FALSE(obj.getIsChangedProperty());
+}
+
+TEST(IChangeTrackingTests, IsAbstractInterface) {
+    EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IChangeTracking>);
 }
