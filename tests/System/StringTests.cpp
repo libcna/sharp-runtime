@@ -589,3 +589,26 @@ TEST(StringTests, ToLowerInvariant_Basic) { EXPECT_EQ(String::ToLowerInvariant("
 TEST(StringTests, CompareOrdinal_Equal)  { EXPECT_EQ(String::CompareOrdinal("abc", "abc"), 0); }
 TEST(StringTests, CompareOrdinal_Less)   { EXPECT_LT(String::CompareOrdinal("abc", "abd"), 0); }
 TEST(StringTests, CompareOrdinal_Greater){ EXPECT_GT(String::CompareOrdinal("abd", "abc"), 0); }
+
+// ---------------------------------------------------------------------------
+// StringNormalizationExtensions
+// ---------------------------------------------------------------------------
+#include "System/StringNormalizationExtensions.hpp"
+
+TEST(StringNormalizationExtensionsTests, IsNormalized_Default_True) {
+    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized("hello"));
+}
+TEST(StringNormalizationExtensionsTests, IsNormalized_FormD_True) {
+    EXPECT_TRUE(System::StringNormalizationExtensions::IsNormalized(
+        "hello", System::Text::NormalizationForm::FormD));
+}
+TEST(StringNormalizationExtensionsTests, Normalize_Default_ReturnsInput) {
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize("hello"), "hello");
+}
+TEST(StringNormalizationExtensionsTests, Normalize_FormKC_ReturnsInput) {
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize(
+        "abc", System::Text::NormalizationForm::FormKC), "abc");
+}
+TEST(StringNormalizationExtensionsTests, Normalize_EmptyString) {
+    EXPECT_EQ(System::StringNormalizationExtensions::Normalize(""), "");
+}
