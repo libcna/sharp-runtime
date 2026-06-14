@@ -255,6 +255,38 @@ TEST(HashCodeTests, Combine8_Works) {
     EXPECT_EQ(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 8));
     EXPECT_NE(h, HashCode::Combine(1, 2, 3, 4, 5, 6, 7, 9));
 }
+TEST(HashCodeTests, AddWithComparer_UsesComparerHash) {
+    struct ConstComparer : System::Collections::Generic::IEqualityComparer<int> {
+        bool Equals(const int&, const int&) const override { return true; }
+        std::size_t GetHashCode(const int&) const override { return 99u; }
+    };
+    ConstComparer cmp;
+    HashCode hc1, hc2;
+    hc1.Add(42, cmp);
+    hc2.Add(99, cmp); // different value, same comparer hash → same result
+    EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
+TEST(HashCodeTests, AddBytes_SameInput_SameHash) {
+    std::vector<uint8_t> bytes = {1, 2, 3, 4};
+    HashCode hc1, hc2;
+    hc1.AddBytes(bytes);
+    hc2.AddBytes(bytes);
+    EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
+TEST(HashCodeTests, AddBytes_DifferentInput_DifferentHash) {
+    HashCode hc1, hc2;
+    hc1.AddBytes({1, 2, 3});
+    hc2.AddBytes({4, 5, 6});
+    EXPECT_NE(hc1.ToHashCode(), hc2.ToHashCode());
+}
+TEST(HashCodeTests, AddBytes_RawPointer_MatchesVector) {
+    uint8_t buf[] = {10, 20, 30};
+    std::vector<uint8_t> vec(buf, buf + 3);
+    HashCode hc1, hc2;
+    hc1.AddBytes(buf, 3);
+    hc2.AddBytes(vec);
+    EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
 
 // ===========================================================================
 // ArraySegment<T>
