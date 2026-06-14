@@ -48,6 +48,13 @@ namespace System {
          */
         explicit NotImplementedException(const std::string& message);
 
+        /**
+         * @brief Initializes a new instance with the specified error message and inner exception.
+         *
+         * @param message A string that describes the error.
+         * @param inner   The exception that is the cause of the current exception.
+         */
+        NotImplementedException(const std::string& message, const std::exception& inner);
     };
 
 } // namespace System
