@@ -92,12 +92,53 @@ namespace System {
                 new TimeZoneInfo(id, utcOffset, displayName, standardName, standardName, false));
         }
 
-        /// @brief Converts @p dt to the zone identified by @p destinationTimeZoneId.
+        /// @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
         static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
                                                       const std::string& destinationTimeZoneId) {
             auto tz = FindSystemTimeZoneById(destinationTimeZoneId);
             return dt.Add(tz->baseUtcOffset_);
         }
+
+        /// @brief Converts @p dt (assumed UTC) to the specified destination time zone.
+        static DateTime ConvertTime(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
+            return dt.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /// @brief Converts @p dt from @p sourceTimeZone to @p destinationTimeZone.
+        static DateTime ConvertTime(const DateTime& dt,
+                                    const TimeZoneInfo& sourceTimeZone,
+                                    const TimeZoneInfo& destinationTimeZone) {
+            DateTime utc = dt.Add(-sourceTimeZone.baseUtcOffset_);
+            return utc.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /// @brief Converts a UTC @p dt to the specified destination time zone.
+        static DateTime ConvertTimeFromUtc(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
+            return dt.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /// @brief Tries to find a time zone by id; returns false instead of throwing.
+        static bool TryFindSystemTimeZoneById(const std::string& id,
+                                              std::shared_ptr<TimeZoneInfo>& result) {
+            try {
+                result = FindSystemTimeZoneById(id);
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+
+        /// @brief Returns @c true if this zone has the same base UTC offset as @p other.
+        [[nodiscard]] bool HasSameRules(const TimeZoneInfo& other) const {
+            return baseUtcOffset_ == other.baseUtcOffset_ &&
+                   supportsDst_ == other.supportsDst_;
+        }
+
+        /// @brief Returns @c true if this zone has the same ID as @p other.
+        [[nodiscard]] bool Equals(const TimeZoneInfo& other) const { return id_ == other.id_; }
+
+        bool operator==(const TimeZoneInfo& other) const { return Equals(other); }
+        bool operator!=(const TimeZoneInfo& other) const { return !Equals(other); }
     };
 
 } // namespace System

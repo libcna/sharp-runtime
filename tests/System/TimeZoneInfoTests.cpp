@@ -189,3 +189,82 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_Unknown_Throws) {
     EXPECT_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dt, "Mars/Olympus"),
                  std::invalid_argument);
 }
+
+// ---------------------------------------------------------------------------
+// ConvertTime / ConvertTimeFromUtc
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, ConvertTime_DestZone_AddsOffset) {
+    auto utcPlus2 = TimeZoneInfo::CreateCustomTimeZone("+02", TimeSpan::FromHours(2), "+2", "+2");
+    DateTime utc(2025, 1, 1, 12, 0, 0);
+    DateTime local = TimeZoneInfo::ConvertTime(utc, *utcPlus2);
+    EXPECT_EQ(local.getHourProperty(), 14);
+}
+
+TEST(TimeZoneInfoTests, ConvertTime_SrcDst_Correct) {
+    auto src = TimeZoneInfo::CreateCustomTimeZone("src", TimeSpan::FromHours(2), "s", "s");
+    auto dst = TimeZoneInfo::CreateCustomTimeZone("dst", TimeSpan::FromHours(5), "d", "d");
+    DateTime srcTime(2025, 1, 1, 10, 0, 0);
+    DateTime dstTime = TimeZoneInfo::ConvertTime(srcTime, *src, *dst);
+    EXPECT_EQ(dstTime.getHourProperty(), 13); // +3h difference
+}
+
+TEST(TimeZoneInfoTests, ConvertTimeFromUtc_AddsOffset) {
+    auto utcPlus3 = TimeZoneInfo::CreateCustomTimeZone("+03", TimeSpan::FromHours(3), "+3", "+3");
+    DateTime utc(2025, 6, 1, 9, 0, 0);
+    DateTime local = TimeZoneInfo::ConvertTimeFromUtc(utc, *utcPlus3);
+    EXPECT_EQ(local.getHourProperty(), 12);
+}
+
+// ---------------------------------------------------------------------------
+// TryFindSystemTimeZoneById
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, TryFind_Utc_ReturnsTrue) {
+    std::shared_ptr<TimeZoneInfo> tz;
+    bool ok = TimeZoneInfo::TryFindSystemTimeZoneById("UTC", tz);
+    EXPECT_TRUE(ok);
+    ASSERT_NE(tz, nullptr);
+    EXPECT_EQ(tz->getIdProperty(), "UTC");
+}
+
+TEST(TimeZoneInfoTests, TryFind_Unknown_ReturnsFalse) {
+    std::shared_ptr<TimeZoneInfo> tz;
+    bool ok = TimeZoneInfo::TryFindSystemTimeZoneById("Mars/Olympus", tz);
+    EXPECT_FALSE(ok);
+}
+
+// ---------------------------------------------------------------------------
+// Equals / HasSameRules / operators
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, Equals_SameId_True) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromHours(1), "X", "X");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::FromHours(1), "X", "X");
+    EXPECT_TRUE(a->Equals(*b));
+}
+
+TEST(TimeZoneInfoTests, Equals_DiffId_False) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("A", TimeSpan::FromHours(1), "A", "A");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("B", TimeSpan::FromHours(1), "B", "B");
+    EXPECT_FALSE(a->Equals(*b));
+}
+
+TEST(TimeZoneInfoTests, HasSameRules_SameOffset_True) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("A", TimeSpan::FromHours(2), "A", "A");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("B", TimeSpan::FromHours(2), "B", "B");
+    EXPECT_TRUE(a->HasSameRules(*b));
+}
+
+TEST(TimeZoneInfoTests, HasSameRules_DiffOffset_False) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("A", TimeSpan::FromHours(1), "A", "A");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("B", TimeSpan::FromHours(2), "B", "B");
+    EXPECT_FALSE(a->HasSameRules(*b));
+}
+
+TEST(TimeZoneInfoTests, OperatorEqual_SameId) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("Z", TimeSpan::Zero, "Z", "Z");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("Z", TimeSpan::Zero, "Z", "Z");
+    EXPECT_TRUE(*a == *b);
+    EXPECT_FALSE(*a != *b);
+}
