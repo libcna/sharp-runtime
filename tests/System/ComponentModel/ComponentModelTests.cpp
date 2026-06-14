@@ -4,6 +4,7 @@
 //
 #include <gtest/gtest.h>
 #include <any>
+#include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/Attribute.hpp"
 #include "System/ComponentModel/DefaultValueAttribute.hpp"
 #include "System/ComponentModel/DescriptionAttribute.hpp"
@@ -333,4 +334,47 @@ TEST(INotifyPropertyChangingTests, HandlerFiredBeforeValueChanges) {
 TEST(INotifyPropertyChangingTests, NoHandlers_DoesNotThrow) {
     TestChangingObservable obj;
     EXPECT_NO_THROW(obj.setValue(3));
+}
+
+// ===========================================================================
+// IServiceProvider
+// ===========================================================================
+
+class SimpleServiceProvider : public System::IServiceProvider {
+    int service_ = 42;
+    std::string strService_ = "hello";
+public:
+    void* GetService(const std::type_info& type) const override {
+        if (type == typeid(int))         return const_cast<int*>(&service_);
+        if (type == typeid(std::string)) return const_cast<std::string*>(&strService_);
+        return nullptr;
+    }
+};
+
+TEST(IServiceProviderTests, GetService_KnownType_ReturnsNonNull) {
+    SimpleServiceProvider sp;
+    EXPECT_NE(sp.GetService(typeid(int)), nullptr);
+}
+
+TEST(IServiceProviderTests, GetService_ReturnsCorrectValue) {
+    SimpleServiceProvider sp;
+    int* val = static_cast<int*>(sp.GetService(typeid(int)));
+    ASSERT_NE(val, nullptr);
+    EXPECT_EQ(*val, 42);
+}
+
+TEST(IServiceProviderTests, GetService_StringService_ReturnsCorrectValue) {
+    SimpleServiceProvider sp;
+    std::string* s = static_cast<std::string*>(sp.GetService(typeid(std::string)));
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(*s, "hello");
+}
+
+TEST(IServiceProviderTests, GetService_UnknownType_ReturnsNull) {
+    SimpleServiceProvider sp;
+    EXPECT_EQ(sp.GetService(typeid(double)), nullptr);
+}
+
+TEST(IServiceProviderTests, IsAbstractInterface) {
+    EXPECT_TRUE(std::is_abstract_v<System::IServiceProvider>);
 }
