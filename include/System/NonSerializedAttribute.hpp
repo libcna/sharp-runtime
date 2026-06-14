@@ -5,5 +5,6 @@
 #include "System/Attribute.hpp"
 
 namespace System {
+    /** @brief Indicates that a field of a serializable class should not be serialized. */
     class NonSerializedAttribute : public Attribute {};
 } // namespace System
