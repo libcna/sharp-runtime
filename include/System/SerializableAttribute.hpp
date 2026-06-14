@@ -5,5 +5,6 @@
 #include "System/Attribute.hpp"
 
 namespace System {
+    /** @brief Indicates that a class can be serialized. */
     class SerializableAttribute : public Attribute {};
 } // namespace System
