@@ -339,3 +339,104 @@ TEST(RandomTests, GetHexString_ZeroLength_Empty) {
     System::Random rng(888);
     EXPECT_TRUE(rng.GetHexString(0).empty());
 }
+
+// ---------------------------------------------------------------------------
+// NextBinaryFloat<T>
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, NextBinaryFloat_Float_InRange) {
+    System::Random rng(10);
+    for (int i = 0; i < 100; ++i) {
+        float v = rng.NextBinaryFloat<float>();
+        EXPECT_GE(v, 0.0f);
+        EXPECT_LT(v, 1.0f);
+    }
+}
+
+TEST(RandomTests, NextBinaryFloat_Double_InRange) {
+    System::Random rng(20);
+    for (int i = 0; i < 100; ++i) {
+        double v = rng.NextBinaryFloat<double>();
+        EXPECT_GE(v, 0.0);
+        EXPECT_LT(v, 1.0);
+    }
+}
+
+TEST(RandomTests, NextBinaryFloat_Float_Seeded_Deterministic) {
+    System::Random a(30), b(30);
+    EXPECT_EQ(a.NextBinaryFloat<float>(), b.NextBinaryFloat<float>());
+}
+
+// ---------------------------------------------------------------------------
+// GetItems<T>(ReadOnlySpan, Span) — destination overload
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetItems_SpanDestination_FillsCorrectly) {
+    System::Random rng(40);
+    std::vector<int> choices = {1, 2, 3, 4};
+    std::vector<int> dest(6, 0);
+    System::ReadOnlySpan<int> src(choices);
+    System::Span<int> dst(dest);
+    rng.GetItems(src, dst);
+    for (int v : dest)
+        EXPECT_TRUE(v >= 1 && v <= 4);
+}
+
+TEST(RandomTests, GetItems_SpanDestination_LengthUnchanged) {
+    System::Random rng(50);
+    std::vector<int> choices = {10, 20};
+    std::vector<int> dest(8);
+    rng.GetItems(System::ReadOnlySpan<int>(choices), System::Span<int>(dest));
+    EXPECT_EQ(dest.size(), 8u);
+}
+
+// ---------------------------------------------------------------------------
+// Shuffle<T>(Span<T>)
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Shuffle_Span_PreservesElements) {
+    System::Random rng(60);
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    std::vector<int> original = v;
+    System::Span<int> s(v);
+    rng.Shuffle(s);
+    std::vector<int> sorted = v;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, original);
+}
+
+TEST(RandomTests, Shuffle_Span_EmptyNoThrow) {
+    System::Random rng(70);
+    std::vector<int> v;
+    EXPECT_NO_THROW(rng.Shuffle(System::Span<int>(v)));
+}
+
+// ---------------------------------------------------------------------------
+// GetHexString(Span<char>)
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetHexString_SpanDestination_FillsUppercase) {
+    System::Random rng(80);
+    std::vector<char> buf(12, 0);
+    System::Span<char> s(buf);
+    rng.GetHexString(s);
+    for (char c : buf)
+        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+}
+
+TEST(RandomTests, GetHexString_SpanDestination_FillsLowercase) {
+    System::Random rng(90);
+    std::vector<char> buf(12, 0);
+    System::Span<char> s(buf);
+    rng.GetHexString(s, true);
+    for (char c : buf)
+        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+}
+
+TEST(RandomTests, GetHexString_SpanDestination_LengthUnchanged) {
+    System::Random rng(91);
+    std::vector<char> buf(8);
+    System::Span<char> s(buf);
+    rng.GetHexString(s);
+    EXPECT_EQ(s.getLengthProperty(), 8);
+}

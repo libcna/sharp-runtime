@@ -169,6 +169,20 @@ namespace System {
         // -------------------------------------------------------------------------
 
         /**
+         * @brief Returns a random floating-point value of type T in [0.0, 1.0).
+         *
+         * C++ counterpart of .NET Random.NextBinaryFloat<T>().
+         * Supported types: float → NextSingle(); all other floating-point types → NextDouble().
+         * @tparam T A floating-point type (float, double, long double).
+         */
+        template<typename T>
+        T NextBinaryFloat() {
+            static_assert(std::is_floating_point_v<T>, "T must be a floating-point type");
+            if constexpr (std::is_same_v<T, float>) return NextSingle();
+            else                                     return static_cast<T>(NextDouble());
+        }
+
+        /**
          * @brief Returns a random single-precision float in [0.0f, 1.0f).
          * @return A float ≥ 0.0f and < 1.0f.
          */
@@ -218,6 +232,21 @@ namespace System {
         }
 
         /**
+         * @brief Performs an in-place Fisher-Yates shuffle of a Span.
+         *
+         * C++ counterpart of .NET Random.Shuffle<T>(Span<T>).
+         * @tparam T Element type.
+         * @param values Span over the elements to shuffle in place.
+         */
+        template<typename T>
+        void Shuffle(Span<T> values) {
+            for (intcs i = 0; i < values.getLengthProperty() - 1; ++i) {
+                intcs j = Next(i, values.getLengthProperty());
+                std::swap(values[i], values[j]);
+            }
+        }
+
+        /**
          * @brief Returns a vector of length @p length filled with elements chosen
          * randomly (with replacement) from @p choices.
          *
@@ -235,6 +264,21 @@ namespace System {
                 result.push_back(choices[static_cast<std::size_t>(
                     Next(static_cast<intcs>(choices.size())))]);
             return result;
+        }
+
+        /**
+         * @brief Fills @p destination with elements chosen randomly (with replacement)
+         * from @p choices.
+         *
+         * C++ counterpart of .NET Random.GetItems<T>(ReadOnlySpan<T>, Span<T>).
+         * @tparam T Element type.
+         * @param choices     Non-empty source span to sample from.
+         * @param destination Span to fill; its length determines how many items are picked.
+         */
+        template<typename T>
+        void GetItems(ReadOnlySpan<T> choices, Span<T> destination) {
+            for (intcs i = 0; i < destination.getLengthProperty(); ++i)
+                destination[i] = choices[Next(choices.getLengthProperty())];
         }
 
         // -------------------------------------------------------------------------
@@ -260,6 +304,15 @@ namespace System {
          * @return A std::string of @p stringLength hex characters.
          */
         std::string GetHexString(intcs stringLength, bool lowercase = false);
+
+        /**
+         * @brief Fills @p destination with random hexadecimal characters.
+         *
+         * C++ counterpart of .NET Random.GetHexString(Span<char>, bool).
+         * @param destination Span of char to fill with hex characters.
+         * @param lowercase   If true, uses lowercase (a–f); otherwise uppercase (A–F).
+         */
+        void GetHexString(Span<char> destination, bool lowercase = false);
     };
 
 } // namespace System

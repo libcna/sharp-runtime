@@ -130,4 +130,13 @@ namespace System {
         return result;
     }
 
+    void Random::GetHexString(Span<char> destination, bool lowercase)
+    {
+        static constexpr const char* upper = "0123456789ABCDEF";
+        static constexpr const char* lower = "0123456789abcdef";
+        const char* chars = lowercase ? lower : upper;
+        for (intcs i = 0; i < destination.getLengthProperty(); ++i)
+            destination[i] = chars[Next(16)];
+    }
+
 } // namespace System
