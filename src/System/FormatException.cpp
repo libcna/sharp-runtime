@@ -18,4 +18,7 @@ namespace System {
     FormatException::FormatException(const std::string& message)
         : SystemException(message) {}
 
+    FormatException::FormatException(const std::string& message, const std::exception& inner)
+        : SystemException(message + " | inner: " + inner.what()) {}
+
 } // namespace System
