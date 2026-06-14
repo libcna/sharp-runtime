@@ -45,6 +45,42 @@ TEST(AttributeTests, Match_DifferentInstance_False) {
     EXPECT_FALSE(a.Match(b));
 }
 
+TEST(AttributeTests, Equals_SameInstance_True) {
+    Attribute a;
+    EXPECT_TRUE(a.Equals(a));
+}
+
+TEST(AttributeTests, Equals_DifferentInstance_False) {
+    Attribute a, b;
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(AttributeTests, GetHashCode_SameInstance_Consistent) {
+    Attribute a;
+    EXPECT_EQ(a.GetHashCode(), a.GetHashCode());
+}
+
+TEST(AttributeTests, GetHashCode_DifferentInstances_TypicallyDifferent) {
+    Attribute a, b;
+    // Identity-based hash: different addresses → different hashes (not guaranteed
+    // by the contract, but true in practice for stack objects).
+    // We just verify both calls succeed without throwing.
+    (void)a.GetHashCode();
+    (void)b.GetHashCode();
+}
+
+TEST(AttributeTests, TypeId_ReturnsAttributeType) {
+    Attribute a;
+    EXPECT_EQ(a.getTypeIdProperty(), typeid(Attribute));
+}
+
+TEST(AttributeTests, Match_DelegatesTo_Equals) {
+    // Match should return the same result as Equals for the base class.
+    Attribute a, b;
+    EXPECT_EQ(a.Match(a), a.Equals(a));
+    EXPECT_EQ(a.Match(b), a.Equals(b));
+}
+
 // ===========================================================================
 // AttributeTargets
 // ===========================================================================
