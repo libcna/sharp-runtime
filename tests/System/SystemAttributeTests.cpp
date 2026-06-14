@@ -17,6 +17,8 @@
 #include "System/NonSerializedAttribute.hpp"
 #include "System/SerializableAttribute.hpp"
 #include "System/ThreadStaticAttribute.hpp"
+#include "System/LoaderOptimization.hpp"
+#include "System/LoaderOptimizationAttribute.hpp"
 
 using System::Attribute;
 using System::AttributeTargets;
@@ -187,4 +189,33 @@ TEST(MarkerAttributeTests, SerializableAttribute_DefaultCtor) {
 
 TEST(MarkerAttributeTests, ThreadStaticAttribute_DefaultCtor) {
     EXPECT_NO_THROW(System::ThreadStaticAttribute{});
+}
+
+// ===========================================================================
+// LoaderOptimization / LoaderOptimizationAttribute
+// ===========================================================================
+
+TEST(LoaderOptimizationTests, NotSpecified_IsZero) {
+    EXPECT_EQ(static_cast<int>(System::LoaderOptimization::NotSpecified), 0);
+}
+TEST(LoaderOptimizationTests, SingleDomain_IsOne) {
+    EXPECT_EQ(static_cast<int>(System::LoaderOptimization::SingleDomain), 1);
+}
+TEST(LoaderOptimizationTests, MultiDomain_IsTwo) {
+    EXPECT_EQ(static_cast<int>(System::LoaderOptimization::MultiDomain), 2);
+}
+TEST(LoaderOptimizationTests, MultiDomainHost_IsThree) {
+    EXPECT_EQ(static_cast<int>(System::LoaderOptimization::MultiDomainHost), 3);
+}
+TEST(LoaderOptimizationAttributeTests, Ctor_StoresValue) {
+    System::LoaderOptimizationAttribute attr(System::LoaderOptimization::SingleDomain);
+    EXPECT_EQ(attr.getValueProperty(), System::LoaderOptimization::SingleDomain);
+}
+TEST(LoaderOptimizationAttributeTests, Ctor_MultiDomain) {
+    System::LoaderOptimizationAttribute attr(System::LoaderOptimization::MultiDomain);
+    EXPECT_EQ(attr.getValueProperty(), System::LoaderOptimization::MultiDomain);
+}
+TEST(LoaderOptimizationAttributeTests, IsA_Attribute) {
+    System::LoaderOptimizationAttribute attr(System::LoaderOptimization::NotSpecified);
+    EXPECT_NE(dynamic_cast<System::Attribute*>(&attr), nullptr);
 }
