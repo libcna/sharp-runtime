@@ -11,6 +11,7 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#  include <psapi.h>
 #  undef GetCurrentDirectory   // windows.h macro collides with our method name
 #elif defined(__EMSCRIPTEN__)
 #  include <unistd.h>
@@ -21,8 +22,13 @@
 #  include <pwd.h>
 #  include <time.h>
 #  include <sys/resource.h>
+#  include <cstdio>
 #endif
 #include <sstream>
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+extern char** environ; // POSIX — global process environment array
+#endif
 
 namespace System {
 
@@ -190,6 +196,133 @@ SharpRuntime::longcs Environment::getTickCount64Property() {
     return static_cast<SharpRuntime::longcs>(ts.tv_sec) * 1000LL
          + static_cast<SharpRuntime::longcs>(ts.tv_nsec) / 1000000LL;
 #endif
+}
+
+bool Environment::getIsPrivilegedProcessProperty() {
+#if defined(_WIN32)
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    TOKEN_ELEVATION elev{};
+    DWORD size = 0;
+    bool result = GetTokenInformation(token, TokenElevation, &elev, sizeof(elev), &size)
+                  && elev.TokenIsElevated;
+    CloseHandle(token);
+    return result;
+#elif defined(__EMSCRIPTEN__)
+    return false;
+#else
+    return ::geteuid() == 0;
+#endif
+}
+
+void Environment::SetCurrentDirectory(const std::string& path) {
+#if defined(_WIN32)
+    SetCurrentDirectoryA(path.c_str());
+#else
+    chdir(path.c_str());
+#endif
+}
+
+std::string Environment::getProcessPathProperty() {
+#if defined(_WIN32)
+    char buf[4096]{};
+    GetModuleFileNameA(nullptr, buf, sizeof(buf) - 1);
+    return std::string(buf);
+#elif defined(__EMSCRIPTEN__)
+    return "";
+#else
+    char buf[4096]{};
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len > 0) { buf[len] = '\0'; return std::string(buf); }
+    return "";
+#endif
+}
+
+std::map<std::string, std::string> Environment::GetEnvironmentVariables() {
+    std::map<std::string, std::string> result;
+#if defined(_WIN32)
+    LPCH envBlock = GetEnvironmentStringsA();
+    if (envBlock) {
+        for (LPCH p = envBlock; *p; p += std::strlen(p) + 1) {
+            std::string entry(p);
+            auto eq = entry.find('=');
+            if (eq != std::string::npos && eq > 0)
+                result[entry.substr(0, eq)] = entry.substr(eq + 1);
+        }
+        FreeEnvironmentStringsA(envBlock);
+    }
+#else
+    for (char** ep = environ; ep && *ep; ++ep) {
+        std::string entry(*ep);
+        auto eq = entry.find('=');
+        if (eq != std::string::npos)
+            result[entry.substr(0, eq)] = entry.substr(eq + 1);
+    }
+#endif
+    return result;
+}
+
+SharpRuntime::intcs Environment::getSystemPageSizeProperty() {
+#if defined(_WIN32)
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    return static_cast<SharpRuntime::intcs>(si.dwPageSize);
+#else
+    return static_cast<SharpRuntime::intcs>(getpagesize());
+#endif
+}
+
+std::string Environment::getUserDomainNameProperty() {
+#if defined(_WIN32)
+    char buf[256]{};
+    DWORD size = sizeof(buf);
+    if (GetComputerNameExA(ComputerNameDnsDomain, buf, &size) && buf[0])
+        return std::string(buf);
+    return getMachineNameProperty();
+#else
+    return getMachineNameProperty();
+#endif
+}
+
+SharpRuntime::longcs Environment::getWorkingSetProperty() {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        return static_cast<SharpRuntime::longcs>(pmc.WorkingSetSize);
+    return 0;
+#elif defined(__linux__)
+    FILE* f = std::fopen("/proc/self/status", "r");
+    if (!f) return 0;
+    char line[256];
+    long kb = 0;
+    while (std::fgets(line, sizeof(line), f)) {
+        if (std::sscanf(line, "VmRSS: %ld kB", &kb) == 1) break;
+    }
+    std::fclose(f);
+    return static_cast<SharpRuntime::longcs>(kb) * 1024LL;
+#else
+    return 0;
+#endif
+}
+
+static std::vector<std::string> s_commandLineArgs;
+
+void Environment::InitializeCommandLine(int argc, char** argv) {
+    s_commandLineArgs.clear();
+    for (int i = 0; i < argc; ++i) s_commandLineArgs.emplace_back(argv[i]);
+}
+
+std::vector<std::string> Environment::GetCommandLineArgs() {
+    return s_commandLineArgs;
+}
+
+std::string Environment::getCommandLineProperty() {
+    std::string result;
+    for (std::size_t i = 0; i < s_commandLineArgs.size(); ++i) {
+        if (i > 0) result += ' ';
+        result += s_commandLineArgs[i];
+    }
+    return result;
 }
 
 } // namespace System

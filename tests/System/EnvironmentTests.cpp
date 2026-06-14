@@ -175,6 +175,129 @@ TEST(EnvironmentTests, GetEnvironmentVariable_WithTarget_SameAsWithout) {
 }
 
 // ---------------------------------------------------------------------------
+// IsPrivilegedProcess
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, IsPrivilegedProcess_ReturnsBool) {
+    bool v = Environment::getIsPrivilegedProcessProperty();
+    (void)v; // just verify it doesn't throw
+}
+
+// ---------------------------------------------------------------------------
+// SetCurrentDirectory
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SetCurrentDirectory_ThenGetReflectsChange) {
+    std::string original = Environment::GetCurrentDirectory();
+    // Change to /tmp and verify
+    Environment::SetCurrentDirectory("/tmp");
+    EXPECT_EQ(Environment::GetCurrentDirectory(), "/tmp");
+    // Restore
+    Environment::SetCurrentDirectory(original);
+}
+
+// ---------------------------------------------------------------------------
+// GetEnvironmentVariables
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetEnvironmentVariables_ContainsPATH) {
+    auto vars = Environment::GetEnvironmentVariables();
+    EXPECT_TRUE(vars.count("PATH") > 0);
+}
+
+TEST(EnvironmentTests, GetEnvironmentVariables_WithTarget_SameAsWithout) {
+    auto a = Environment::GetEnvironmentVariables();
+    auto b = Environment::GetEnvironmentVariables(System::EnvironmentVariableTarget::Process);
+    EXPECT_EQ(a.size(), b.size());
+}
+
+TEST(EnvironmentTests, GetEnvironmentVariables_SetVar_Appears) {
+    Environment::SetEnvironmentVariable("SHARP_MAP_TEST", "42");
+    auto vars = Environment::GetEnvironmentVariables();
+    ASSERT_TRUE(vars.count("SHARP_MAP_TEST") > 0);
+    EXPECT_EQ(vars.at("SHARP_MAP_TEST"), "42");
+}
+
+// ---------------------------------------------------------------------------
+// SetEnvironmentVariable with target
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SetEnvironmentVariable_WithTarget_SetsForProcess) {
+    Environment::SetEnvironmentVariable("SHARP_TARGET_VAR", "ok",
+                                        System::EnvironmentVariableTarget::Process);
+    EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_TARGET_VAR"), "ok");
+}
+
+// ---------------------------------------------------------------------------
+// ProcessPath
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, ProcessPath_NonEmpty) {
+    std::string path = Environment::getProcessPathProperty();
+    EXPECT_FALSE(path.empty());
+}
+
+// ---------------------------------------------------------------------------
+// SystemPageSize
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SystemPageSize_PowerOfTwo) {
+    int ps = Environment::getSystemPageSizeProperty();
+    EXPECT_GT(ps, 0);
+    EXPECT_EQ(ps & (ps - 1), 0); // must be a power of two
+}
+
+// ---------------------------------------------------------------------------
+// UserDomainName
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, UserDomainName_NonEmpty) {
+    EXPECT_FALSE(Environment::getUserDomainNameProperty().empty());
+}
+
+// ---------------------------------------------------------------------------
+// WorkingSet
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, WorkingSet_NonNegative) {
+    EXPECT_GE(Environment::getWorkingSetProperty(), 0LL);
+}
+
+// ---------------------------------------------------------------------------
+// Command-line args
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, InitializeCommandLine_GetCommandLineArgs_Roundtrip) {
+    const char* args[] = { "prog", "--flag", "value" };
+    Environment::InitializeCommandLine(3, const_cast<char**>(args));
+    auto v = Environment::GetCommandLineArgs();
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], "prog");
+    EXPECT_EQ(v[1], "--flag");
+    EXPECT_EQ(v[2], "value");
+}
+
+TEST(EnvironmentTests, CommandLine_JoinsArgs) {
+    const char* args[] = { "prog", "arg1" };
+    Environment::InitializeCommandLine(2, const_cast<char**>(args));
+    EXPECT_EQ(Environment::getCommandLineProperty(), "prog arg1");
+}
+
+TEST(EnvironmentTests, CommandLine_EmptyWhenNotInitialized) {
+    Environment::InitializeCommandLine(0, nullptr);
+    EXPECT_EQ(Environment::getCommandLineProperty(), "");
+}
+
+// ---------------------------------------------------------------------------
+// StackTrace (stub)
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, StackTrace_DoesNotThrow) {
+    std::string s = Environment::getStackTraceProperty();
+    (void)s;
+}
+
+// ---------------------------------------------------------------------------
 // ProcessCpuUsage
 // ---------------------------------------------------------------------------
 
