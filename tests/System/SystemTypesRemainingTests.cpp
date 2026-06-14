@@ -25,6 +25,8 @@
 #include "System/ValueTuple.hpp"
 #include "System/DateOnly.hpp"
 #include "System/WeakReference.hpp"
+#include "System/IFormattable.hpp"
+#include "System/ISpanFormattable.hpp"
 
 using System::StringComparison;
 using System::StringSplitOptions;
@@ -483,4 +485,55 @@ TEST(WeakReferenceTTests, IsAlive_False_AfterExpiry) {
         wr.SetTarget(sp);
     }
     EXPECT_FALSE(wr.getIsAliveProperty());
+}
+
+// ===========================================================================
+// IFormattable / ISpanFormattable
+// ===========================================================================
+
+namespace {
+    struct FormattableInt : System::ISpanFormattable {
+        int value;
+        explicit FormattableInt(int v) : value(v) {}
+
+        [[nodiscard]] std::string ToString(const std::string& /*format*/) const override {
+            return std::to_string(value);
+        }
+
+        bool TryFormat(char* dest, std::size_t destLen, std::size_t& charsWritten,
+                       const std::string& /*format*/) const override {
+            std::string s = std::to_string(value);
+            if (s.size() > destLen) { charsWritten = 0; return false; }
+            std::copy(s.begin(), s.end(), dest);
+            charsWritten = s.size();
+            return true;
+        }
+    };
+}
+
+TEST(IFormattableTests, ToString_ReturnsString) {
+    FormattableInt f(42);
+    EXPECT_EQ(f.ToString(""), "42");
+}
+
+TEST(ISpanFormattableTests, TryFormat_Succeeds) {
+    FormattableInt f(123);
+    char buf[16];
+    std::size_t written = 0;
+    EXPECT_TRUE(f.TryFormat(buf, sizeof(buf), written, ""));
+    EXPECT_EQ(written, 3u);
+    EXPECT_EQ(std::string(buf, written), "123");
+}
+
+TEST(ISpanFormattableTests, TryFormat_BufferTooSmall_ReturnsFalse) {
+    FormattableInt f(99999);
+    char buf[3];
+    std::size_t written = 0;
+    EXPECT_FALSE(f.TryFormat(buf, sizeof(buf), written, ""));
+    EXPECT_EQ(written, 0u);
+}
+
+TEST(ISpanFormattableTests, IsA_IFormattable) {
+    FormattableInt f(1);
+    EXPECT_NE(dynamic_cast<System::IFormattable*>(&f), nullptr);
 }
