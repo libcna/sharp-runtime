@@ -655,6 +655,43 @@ TEST(ProgressTests, AddHandler_BothCalled) {
     p.Report(0);
     EXPECT_EQ(count, 2);
 }
+TEST(ProgressTests, MultipleEventHandlers_AllCalled) {
+    int sum = 0;
+    System::Progress<int> p;
+    p.addProgressChangedHandler([&sum](int v) { sum += v; });
+    p.addProgressChangedHandler([&sum](int v) { sum += v * 2; });
+    p.Report(3);
+    EXPECT_EQ(sum, 9); // 3 + 6
+}
+TEST(ProgressTests, IProgress_Polymorphic) {
+    int received = -1;
+    System::Progress<int> p([&received](int v) { received = v; });
+    System::IProgress<int>* ip = &p;
+    ip->Report(77);
+    EXPECT_EQ(received, 77);
+}
+TEST(ProgressTests, OnReport_Override_Called) {
+    struct TrackingProgress : System::Progress<int> {
+        int onReportCalls = 0;
+    protected:
+        void OnReport(const int& value) override {
+            ++onReportCalls;
+            System::Progress<int>::OnReport(value);
+        }
+    };
+    int received = -1;
+    TrackingProgress p;
+    p.addProgressChangedHandler([&received](int v) { received = v; });
+    p.Report(5);
+    EXPECT_EQ(p.onReportCalls, 1);
+    EXPECT_EQ(received, 5);
+}
+TEST(ProgressTests, Report_StringType) {
+    std::string last;
+    System::Progress<std::string> p([&last](std::string s) { last = std::move(s); });
+    p.Report("hello");
+    EXPECT_EQ(last, "hello");
+}
 
 // ===========================================================================
 // UnicodeRange / UnicodeRanges
