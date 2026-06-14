@@ -100,13 +100,24 @@ public:
     };
 
     /**
-     * @brief Specifies options to use when getting the path to a special folder.
+     * @brief Specifies options to use when getting the path to a system special folder.
      *
      * C++ counterpart of .NET System.Environment.SpecialFolderOption.
+     * Values correspond to Windows CSIDL flags and are meaningful only on Windows;
+     * on POSIX they are accepted for API compatibility and ignored.
      */
     enum class SpecialFolderOption {
+        /** @brief No option is specified. */
         None        = 0,
+        /**
+         * @brief Return the path even if it does not exist on disk.
+         * Equivalent of Windows KF_FLAG_DONT_VERIFY (CSIDL_FLAG_DONT_VERIFY = 0x4000).
+         */
         DoNotVerify = 0x4000,
+        /**
+         * @brief Force the folder to be created if it does not exist.
+         * Equivalent of Windows KF_FLAG_CREATE (CSIDL_FLAG_CREATE = 0x8000).
+         */
         Create      = 0x8000,
     };
 

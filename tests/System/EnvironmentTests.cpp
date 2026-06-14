@@ -298,6 +298,47 @@ TEST(EnvironmentTests, StackTrace_DoesNotThrow) {
 }
 
 // ---------------------------------------------------------------------------
+// SpecialFolderOption — enum values
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SpecialFolderOption_None_IsZero) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolderOption::None), 0);
+}
+
+TEST(EnvironmentTests, SpecialFolderOption_DoNotVerify_Is0x4000) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolderOption::DoNotVerify), 0x4000);
+}
+
+TEST(EnvironmentTests, SpecialFolderOption_Create_Is0x8000) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolderOption::Create), 0x8000);
+}
+
+// ---------------------------------------------------------------------------
+// GetFolderPath with SpecialFolderOption
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetFolderPath_WithNone_SameAsWithout) {
+    auto without = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile);
+    auto with    = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile,
+                                               Environment::SpecialFolderOption::None);
+    EXPECT_EQ(without, with);
+}
+
+TEST(EnvironmentTests, GetFolderPath_WithDoNotVerify_SameAsWithout) {
+    auto without = Environment::GetFolderPath(Environment::SpecialFolder::Desktop);
+    auto with    = Environment::GetFolderPath(Environment::SpecialFolder::Desktop,
+                                               Environment::SpecialFolderOption::DoNotVerify);
+    EXPECT_EQ(without, with);
+}
+
+TEST(EnvironmentTests, GetFolderPath_WithCreate_SameAsWithout) {
+    auto without = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile);
+    auto with    = Environment::GetFolderPath(Environment::SpecialFolder::UserProfile,
+                                               Environment::SpecialFolderOption::Create);
+    EXPECT_EQ(without, with);
+}
+
+// ---------------------------------------------------------------------------
 // ProcessCpuUsage
 // ---------------------------------------------------------------------------
 
