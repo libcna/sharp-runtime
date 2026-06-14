@@ -135,6 +135,84 @@ public:
 
     bool operator==(const Delegate& o) const { return Equals(o); }
     bool operator!=(const Delegate& o) const { return !Equals(o); }
+
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Provides a zero-allocation enumerator over a delegate's invocation list.
+     *
+     * C++ counterpart of .NET System.Delegate.InvocationListEnumerator<TDelegate>.
+     * Supports both explicit MoveNext() / getCurrent() and C++ range-based for loops.
+     *
+     * @tparam TDelegate Delegate or a subclass of Delegate.
+     */
+    template<typename TDelegate>
+    struct InvocationListEnumerator {
+    private:
+        std::vector<std::shared_ptr<Delegate>> list_;
+        int                                    index_   = -1;
+        std::shared_ptr<TDelegate>             current_;
+
+    public:
+        InvocationListEnumerator() = default;
+
+        /** @brief Constructs an enumerator over the invocation list of d. */
+        explicit InvocationListEnumerator(std::shared_ptr<Delegate> d) {
+            if (d) list_ = d->GetInvocationList();
+        }
+
+        /** @brief Gets the element at the current enumerator position. */
+        [[nodiscard]] std::shared_ptr<TDelegate> getCurrent() const { return current_; }
+
+        /**
+         * @brief Advances the enumerator to the next element.
+         * @return true if an element is available; false at end of list.
+         */
+        bool MoveNext() {
+            int next = index_ + 1;
+            if (next < static_cast<int>(list_.size())) {
+                current_ = std::dynamic_pointer_cast<TDelegate>(list_[next]);
+                index_   = next;
+                return true;
+            }
+            current_ = nullptr;
+            return false;
+        }
+
+        /** @brief Returns this enumerator (foreach-compatibility, mirrors .NET GetEnumerator). */
+        InvocationListEnumerator<TDelegate> GetEnumerator() const { return *this; }
+
+        // ---- range-based for support ----
+
+        struct Iterator {
+            InvocationListEnumerator* e;
+            bool                      valid;
+            bool operator!=(const Iterator& o) const { return valid != o.valid; }
+            Iterator& operator++() { valid = e->MoveNext(); return *this; }
+            std::shared_ptr<TDelegate> operator*() const { return e->getCurrent(); }
+        };
+
+        /** @brief Returns a begin iterator for range-based for. */
+        Iterator begin() { bool ok = MoveNext(); return {this, ok}; }
+        /** @brief Returns the sentinel end iterator. */
+        Iterator end()   { return {this, false}; }
+    };
+
+    /**
+     * @brief Returns an enumerator over the invocation list of d.
+     *
+     * C++ counterpart of .NET Delegate.EnumerateInvocationList<TDelegate>(TDelegate? d).
+     * A null delegate yields an empty enumerator. The returned enumerator can be used
+     * in a C++ range-based for loop or via explicit MoveNext() / getCurrent() calls.
+     *
+     * @tparam TDelegate Must be Delegate or a subclass of Delegate.
+     * @param d The delegate to enumerate.
+     * @return InvocationListEnumerator<TDelegate> ready to iterate.
+     */
+    template<typename TDelegate>
+    static InvocationListEnumerator<TDelegate> EnumerateInvocationList(std::shared_ptr<TDelegate> d) {
+        return InvocationListEnumerator<TDelegate>(std::static_pointer_cast<Delegate>(d));
+    }
 };
 
 } // namespace System

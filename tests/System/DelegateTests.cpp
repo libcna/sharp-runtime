@@ -197,6 +197,66 @@ TEST(DelegateTests, DynamicInvoke_Throws) {
 }
 
 // ---------------------------------------------------------------------------
+// InvocationListEnumerator — explicit MoveNext / getCurrent
+// ---------------------------------------------------------------------------
+
+TEST(DelegateTests, InvocationListEnumerator_SingleTarget_OneIteration) {
+    auto d = std::make_shared<Delegate>([]{});
+    auto e = Delegate::EnumerateInvocationList<Delegate>(d);
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_EQ(e.getCurrent().get(), d.get());
+    EXPECT_FALSE(e.MoveNext());
+}
+
+TEST(DelegateTests, InvocationListEnumerator_MulticastThreeTargets_ThreeIterations) {
+    auto d1 = std::make_shared<Delegate>([]{});
+    auto d2 = std::make_shared<Delegate>([]{});
+    auto d3 = std::make_shared<Delegate>([]{});
+    auto combined = Delegate::Combine({d1, d2, d3});
+    auto e = Delegate::EnumerateInvocationList<Delegate>(combined);
+    int count = 0;
+    while (e.MoveNext()) ++count;
+    EXPECT_EQ(count, 3);
+}
+
+TEST(DelegateTests, InvocationListEnumerator_Null_ZeroIterations) {
+    auto e = Delegate::EnumerateInvocationList<Delegate>(nullptr);
+    EXPECT_FALSE(e.MoveNext());
+}
+
+// ---------------------------------------------------------------------------
+// InvocationListEnumerator — range-based for loop
+// ---------------------------------------------------------------------------
+
+TEST(DelegateTests, InvocationListEnumerator_RangeFor_CollectsAll) {
+    int sum = 0;
+    auto d1 = std::make_shared<Delegate>([&]{ sum += 1; });
+    auto d2 = std::make_shared<Delegate>([&]{ sum += 2; });
+    auto combined = Delegate::Combine(d1, d2);
+    for (auto target : Delegate::EnumerateInvocationList<Delegate>(combined)) {
+        target->Invoke();
+    }
+    EXPECT_EQ(sum, 3);
+}
+
+TEST(DelegateTests, InvocationListEnumerator_RangeFor_SingleTarget_Invokes) {
+    int count = 0;
+    auto d = std::make_shared<Delegate>([&]{ ++count; });
+    for (auto target : Delegate::EnumerateInvocationList<Delegate>(d)) {
+        target->Invoke();
+    }
+    EXPECT_EQ(count, 1);
+}
+
+TEST(DelegateTests, InvocationListEnumerator_RangeFor_Null_Empty) {
+    int count = 0;
+    for (auto target : Delegate::EnumerateInvocationList<Delegate>(nullptr)) {
+        (void)target; ++count;
+    }
+    EXPECT_EQ(count, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Equality operators
 // ---------------------------------------------------------------------------
 
