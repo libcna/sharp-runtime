@@ -10,10 +10,10 @@ Reference source: dotnet/runtime, MIT License
 |---|------|-----------|--------|------|
 | 1 | Common/src/System/TimeProvider.cs | `System` | `ported` | TimeProvider — port (abstract time source) |
 | 2 | Microsoft.Bcl.Numerics/src/System/MathF.cs | `System` | `ported` | Single-precision math — port via cmath |
-| 3 | System.ComponentModel/ref/System.ComponentModel.cs | `System` |   | Public API surface definition — use as porting reference |
-| 4 | System.ComponentModel/src/System/IServiceProvider.cs | `System` |   | IServiceProvider interface — port |
-| 5 | System.ComponentModel.TypeConverter/ref/System.ComponentModel.TypeConverter.cs | `System` |   | Public API surface definition — use as porting reference |
-| 6 | System.ComponentModel.TypeConverter/src/System/ComponentModel/UriTypeConverter.cs | `System` |   | UriTypeConverter — port with ComponentModel |
+| 3 | System.ComponentModel/ref/System.ComponentModel.cs | `System` | `ignore` | Public API surface definition — use as porting reference |
+| 4 | System.ComponentModel/src/System/IServiceProvider.cs | `System` | `ignore` | IServiceProvider interface — port |
+| 5 | System.ComponentModel.TypeConverter/ref/System.ComponentModel.TypeConverter.cs | `System` | `ignore` | Public API surface definition — use as porting reference |
+| 6 | System.ComponentModel.TypeConverter/src/System/ComponentModel/UriTypeConverter.cs | `System` | `ignore` | UriTypeConverter — port with ComponentModel |
 | 7 | System.Configuration.ConfigurationManager/ref/System.Configuration.ConfigurationManager.cs | `System` |   | Public API surface definition — use as porting reference |
 | 8 | System.Configuration.ConfigurationManager/src/System/UriIdnScope.cs | `System` |   | IDN scope enum — part of Uri port |
 | 9 | System.Console/ref/System.Console.cs | `System` |   | Public API surface definition — use as porting reference |

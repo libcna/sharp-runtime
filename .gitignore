@@ -2,3 +2,4 @@ build*
 .idea/*
 cmake-build-debug/*
 dotnet_types.db
+dotnet_types.db-journal
