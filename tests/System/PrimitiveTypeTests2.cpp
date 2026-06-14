@@ -662,6 +662,35 @@ TEST(UInt16Tests, ToString_Hex_Uppercase) { EXPECT_EQ(UInt16::ToString(65535, st
 TEST(UInt16Tests, ToString_Hex_Padded)    { EXPECT_EQ(UInt16::ToString(255,   std::string("X4")), "00FF"); }
 TEST(UInt16Tests, ToString_D_Padded)      { EXPECT_EQ(UInt16::ToString(7,     std::string("D5")), "00007"); }
 TEST(UInt16Tests, ToString_G)             { EXPECT_EQ(UInt16::ToString(100,   std::string("G")), "100"); }
+TEST(UInt16Tests, CompareTo_Less)         { EXPECT_LT(UInt16::CompareTo(1, 2), 0); }
+TEST(UInt16Tests, CompareTo_Equal)        { EXPECT_EQ(UInt16::CompareTo(5, 5), 0); }
+TEST(UInt16Tests, CompareTo_Greater)      { EXPECT_GT(UInt16::CompareTo(9, 3), 0); }
+TEST(UInt16Tests, Equals_True)            { EXPECT_TRUE(UInt16::Equals(42, 42)); }
+TEST(UInt16Tests, Equals_False)           { EXPECT_FALSE(UInt16::Equals(1, 2)); }
+TEST(UInt16Tests, GetHashCode)            { EXPECT_EQ(UInt16::GetHashCode(100), 100); }
+TEST(UInt16Tests, Max)                    { EXPECT_EQ(UInt16::Max(10, 20), 20u); }
+TEST(UInt16Tests, Min)                    { EXPECT_EQ(UInt16::Min(10, 20), 10u); }
+TEST(UInt16Tests, Clamp_InRange)          { EXPECT_EQ(UInt16::Clamp(50, 10, 100), 50u); }
+TEST(UInt16Tests, Clamp_BelowMin)         { EXPECT_EQ(UInt16::Clamp(5, 10, 100), 10u); }
+TEST(UInt16Tests, Clamp_AboveMax)         { EXPECT_EQ(UInt16::Clamp(200, 10, 100), 100u); }
+TEST(UInt16Tests, Sign_Zero)              { EXPECT_EQ(UInt16::Sign(0), 0); }
+TEST(UInt16Tests, Sign_Positive)          { EXPECT_EQ(UInt16::Sign(7), 1); }
+TEST(UInt16Tests, DivRem)                 { auto [q, r] = UInt16::DivRem(17, 5); EXPECT_EQ(q, 3u); EXPECT_EQ(r, 2u); }
+TEST(UInt16Tests, IsEvenInteger_Even)     { EXPECT_TRUE(UInt16::IsEvenInteger(4)); }
+TEST(UInt16Tests, IsEvenInteger_Odd)      { EXPECT_FALSE(UInt16::IsEvenInteger(3)); }
+TEST(UInt16Tests, IsOddInteger_Odd)       { EXPECT_TRUE(UInt16::IsOddInteger(7)); }
+TEST(UInt16Tests, IsOddInteger_Even)      { EXPECT_FALSE(UInt16::IsOddInteger(8)); }
+TEST(UInt16Tests, IsPow2_True)            { EXPECT_TRUE(UInt16::IsPow2(256)); }
+TEST(UInt16Tests, IsPow2_False)           { EXPECT_FALSE(UInt16::IsPow2(100)); }
+TEST(UInt16Tests, IsPow2_Zero)            { EXPECT_FALSE(UInt16::IsPow2(0)); }
+TEST(UInt16Tests, Log2)                   { EXPECT_EQ(UInt16::Log2(256), 8u); }
+TEST(UInt16Tests, LeadingZeroCount)       { EXPECT_EQ(UInt16::LeadingZeroCount(1), 15u); }
+TEST(UInt16Tests, LeadingZeroCount_Max)   { EXPECT_EQ(UInt16::LeadingZeroCount(65535), 0u); }
+TEST(UInt16Tests, TrailingZeroCount)      { EXPECT_EQ(UInt16::TrailingZeroCount(8), 3u); }
+TEST(UInt16Tests, TrailingZeroCount_Zero) { EXPECT_EQ(UInt16::TrailingZeroCount(0), 16u); }
+TEST(UInt16Tests, PopCount)               { EXPECT_EQ(UInt16::PopCount(0xFF), 8u); }
+TEST(UInt16Tests, RotateLeft)             { EXPECT_EQ(UInt16::RotateLeft(0x0001, 1), 0x0002u); }
+TEST(UInt16Tests, RotateRight)            { EXPECT_EQ(UInt16::RotateRight(0x8000, 1), 0x4000u); }
 
 // ---------------------------------------------------------------------------
 // SByte::ToString(format)
