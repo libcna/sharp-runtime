@@ -6,6 +6,7 @@
 
 namespace System {
 
+    /** @brief The exception that is thrown when a time zone cannot be found. */
     class TimeZoneNotFoundException : public Exception {
     public:
         TimeZoneNotFoundException() : Exception("The time zone could not be found.") {}
