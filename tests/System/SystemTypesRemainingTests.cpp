@@ -537,3 +537,76 @@ TEST(ISpanFormattableTests, IsA_IFormattable) {
     FormattableInt f(1);
     EXPECT_NE(dynamic_cast<System::IFormattable*>(&f), nullptr);
 }
+
+// ===========================================================================
+// IObservable / IObserver
+// ===========================================================================
+#include "System/IObservable.hpp"
+#include "System/IObserver.hpp"
+
+namespace {
+    struct NullDisposable : System::IDisposable {
+        void Dispose() override {}
+    };
+
+    struct RecordingObserver : System::IObserver<int> {
+        int lastValue = -1;
+        bool completed = false;
+        std::string errorMsg;
+
+        void OnNext(const int& value) override { lastValue = value; }
+        void OnError(const std::exception& e) override { errorMsg = e.what(); }
+        void OnCompleted() override { completed = true; }
+    };
+
+    struct SimpleObservable : System::IObservable<int> {
+        std::shared_ptr<System::IObserver<int>> subscriber;
+
+        std::shared_ptr<System::IDisposable> Subscribe(
+                std::shared_ptr<System::IObserver<int>> observer) override {
+            subscriber = observer;
+            return std::make_shared<NullDisposable>();
+        }
+
+        void Push(int v) { if (subscriber) subscriber->OnNext(v); }
+        void Complete()  { if (subscriber) subscriber->OnCompleted(); }
+    };
+}
+
+TEST(IObservableTests, Subscribe_ReturnsDisposable) {
+    SimpleObservable src;
+    auto obs = std::make_shared<RecordingObserver>();
+    auto sub = src.Subscribe(obs);
+    EXPECT_NE(sub, nullptr);
+}
+
+TEST(IObservableTests, OnNext_DeliveredToObserver) {
+    SimpleObservable src;
+    auto obs = std::make_shared<RecordingObserver>();
+    src.Subscribe(obs);
+    src.Push(42);
+    EXPECT_EQ(obs->lastValue, 42);
+}
+
+TEST(IObservableTests, OnCompleted_DeliveredToObserver) {
+    SimpleObservable src;
+    auto obs = std::make_shared<RecordingObserver>();
+    src.Subscribe(obs);
+    src.Complete();
+    EXPECT_TRUE(obs->completed);
+}
+
+TEST(IObserverTests, OnError_DeliveredToObserver) {
+    auto obs = std::make_shared<RecordingObserver>();
+    std::runtime_error err("boom");
+    obs->OnError(err);
+    EXPECT_EQ(obs->errorMsg, "boom");
+}
+
+TEST(IObserverTests, MultipleOnNext_LastValueKept) {
+    auto obs = std::make_shared<RecordingObserver>();
+    obs->OnNext(1);
+    obs->OnNext(2);
+    obs->OnNext(3);
+    EXPECT_EQ(obs->lastValue, 3);
+}
