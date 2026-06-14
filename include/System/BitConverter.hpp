@@ -16,6 +16,10 @@ namespace System {
     using SharpRuntime::longcs;
     using SharpRuntime::shortcs;
     using SharpRuntime::Single;
+    using SharpRuntime::ushortcs;
+    using SharpRuntime::uintcs;
+    using SharpRuntime::ulongcs;
+    using SharpRuntime::charcs;
 
     /**
      * @brief Converts base data types to an array of bytes, and an array of
@@ -68,6 +72,30 @@ namespace System {
         [[nodiscard]] static std::array<bytecs,1> GetBytes(bool value) {
             return { static_cast<bytecs>(value ? 1 : 0) };
         }
+        /// Returns the specified UTF-16 character as a two-element byte array.
+        [[nodiscard]] static std::array<bytecs,2> GetBytes(charcs value) {
+            std::array<bytecs,2> b;
+            std::memcpy(b.data(), &value, 2);
+            return b;
+        }
+        /// Returns the specified 16-bit unsigned integer as an array of bytes.
+        [[nodiscard]] static std::array<bytecs,2> GetBytes(ushortcs value) {
+            std::array<bytecs,2> b;
+            std::memcpy(b.data(), &value, 2);
+            return b;
+        }
+        /// Returns the specified 32-bit unsigned integer as an array of bytes.
+        [[nodiscard]] static std::array<bytecs,4> GetBytes(uintcs value) {
+            std::array<bytecs,4> b;
+            std::memcpy(b.data(), &value, 4);
+            return b;
+        }
+        /// Returns the specified 64-bit unsigned integer as an array of bytes.
+        [[nodiscard]] static std::array<bytecs,8> GetBytes(ulongcs value) {
+            std::array<bytecs,8> b;
+            std::memcpy(b.data(), &value, 8);
+            return b;
+        }
 
         // --- From bytes ---
         /// Converts two bytes at the specified position to a 16-bit signed integer.
@@ -81,7 +109,15 @@ namespace System {
         /// Converts eight bytes at the specified position to a double-precision float.
         [[nodiscard]] static double  ToDouble(const bytecs* value, intcs startIndex) { double  r; std::memcpy(&r, value+startIndex, 8); return r; }
         /// Returns a boolean converted from the byte at the specified position.
-        [[nodiscard]] static bool    ToBoolean(const bytecs* value, intcs startIndex) { return value[startIndex] != 0; }
+        [[nodiscard]] static bool      ToBoolean(const bytecs* value, intcs startIndex) { return value[startIndex] != 0; }
+        /// Converts two bytes at the specified position to a UTF-16 character.
+        [[nodiscard]] static charcs    ToChar   (const bytecs* value, intcs startIndex) { charcs  r; std::memcpy(&r, value+startIndex, 2); return r; }
+        /// Converts two bytes at the specified position to a 16-bit unsigned integer.
+        [[nodiscard]] static ushortcs  ToUInt16 (const bytecs* value, intcs startIndex) { ushortcs r; std::memcpy(&r, value+startIndex, 2); return r; }
+        /// Converts four bytes at the specified position to a 32-bit unsigned integer.
+        [[nodiscard]] static uintcs    ToUInt32 (const bytecs* value, intcs startIndex) { uintcs   r; std::memcpy(&r, value+startIndex, 4); return r; }
+        /// Converts eight bytes at the specified position to a 64-bit unsigned integer.
+        [[nodiscard]] static ulongcs   ToUInt64 (const bytecs* value, intcs startIndex) { ulongcs  r; std::memcpy(&r, value+startIndex, 8); return r; }
 
         // Vector overloads
         /// Converts two bytes from a vector to a 16-bit signed integer.
@@ -93,7 +129,15 @@ namespace System {
         /// Converts four bytes from a vector to a single-precision float.
         [[nodiscard]] static Single  ToSingle(const std::vector<bytecs>& v, intcs i) { return ToSingle(v.data(), i); }
         /// Converts eight bytes from a vector to a double-precision float.
-        [[nodiscard]] static double  ToDouble(const std::vector<bytecs>& v, intcs i) { return ToDouble(v.data(), i); }
+        [[nodiscard]] static double    ToDouble (const std::vector<bytecs>& v, intcs i) { return ToDouble (v.data(), i); }
+        /// Converts two bytes from a vector to a UTF-16 character.
+        [[nodiscard]] static charcs    ToChar   (const std::vector<bytecs>& v, intcs i) { return ToChar   (v.data(), i); }
+        /// Converts two bytes from a vector to a 16-bit unsigned integer.
+        [[nodiscard]] static ushortcs  ToUInt16 (const std::vector<bytecs>& v, intcs i) { return ToUInt16 (v.data(), i); }
+        /// Converts four bytes from a vector to a 32-bit unsigned integer.
+        [[nodiscard]] static uintcs    ToUInt32 (const std::vector<bytecs>& v, intcs i) { return ToUInt32 (v.data(), i); }
+        /// Converts eight bytes from a vector to a 64-bit unsigned integer.
+        [[nodiscard]] static ulongcs   ToUInt64 (const std::vector<bytecs>& v, intcs i) { return ToUInt64 (v.data(), i); }
 
         // --- Bit reinterpretation ---
         /// Reinterprets a double as its IEEE 754 bit pattern (a 64-bit integer).
@@ -112,9 +156,27 @@ namespace System {
         [[nodiscard]] static Single Int32BitsToSingle(intcs value) {
             Single r; std::memcpy(&r, &value, 4); return r;
         }
+        /// Reinterprets a double as its IEEE 754 bit pattern (a 64-bit unsigned integer).
+        [[nodiscard]] static ulongcs DoubleToUInt64Bits(double value) {
+            ulongcs r; std::memcpy(&r, &value, 8); return r;
+        }
+        /// Reinterprets a 64-bit unsigned integer as a double using its IEEE 754 bit pattern.
+        [[nodiscard]] static double UInt64BitsToDouble(ulongcs value) {
+            double r; std::memcpy(&r, &value, 8); return r;
+        }
+        /// Reinterprets a single-precision float as its IEEE 754 bit pattern (a 32-bit unsigned integer).
+        [[nodiscard]] static uintcs SingleToUInt32Bits(Single value) {
+            uintcs r; std::memcpy(&r, &value, 4); return r;
+        }
+        /// Reinterprets a 32-bit unsigned integer as a single-precision float using its IEEE 754 bit pattern.
+        [[nodiscard]] static Single UInt32BitsToSingle(uintcs value) {
+            Single r; std::memcpy(&r, &value, 4); return r;
+        }
 
         /// Converts a byte range to a hex-string representation.
         [[nodiscard]] static std::string ToString(const bytecs* value, intcs startIndex, intcs length);
+        /// Converts bytes from startIndex to the end of the array to a hex-string representation.
+        [[nodiscard]] static std::string ToString(const std::vector<bytecs>& value, intcs startIndex);
         /// Converts a byte vector to a hex-string representation.
         [[nodiscard]] static std::string ToString(const std::vector<bytecs>& value);
     };

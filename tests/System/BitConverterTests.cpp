@@ -7,6 +7,10 @@
 
 using System::BitConverter;
 using System::bytecs;
+using SharpRuntime::ushortcs;
+using SharpRuntime::uintcs;
+using SharpRuntime::ulongcs;
+using SharpRuntime::charcs;
 
 // ---------------------------------------------------------------------------
 // IsLittleEndian
@@ -201,4 +205,88 @@ TEST(BitConverterTests, SingleToInt32Bits_One) {
 
 TEST(BitConverterTests, Int32BitsToSingle_One) {
     EXPECT_FLOAT_EQ(BitConverter::Int32BitsToSingle(0x3F800000), 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// GetBytes — unsigned and char variants
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, GetBytes_Char_SizeIsTwo) {
+    EXPECT_EQ(BitConverter::GetBytes(charcs(u'A')).size(), 2u);
+}
+
+TEST(BitConverterTests, GetBytes_UInt16_RoundTrip) {
+    ushortcs val = 0xABCDu;
+    auto b = BitConverter::GetBytes(val);
+    EXPECT_EQ(BitConverter::ToUInt16(b.data(), 0), val);
+}
+
+TEST(BitConverterTests, GetBytes_UInt32_RoundTrip) {
+    uintcs val = 0xDEADBEEFu;
+    auto b = BitConverter::GetBytes(val);
+    EXPECT_EQ(BitConverter::ToUInt32(b.data(), 0), val);
+}
+
+TEST(BitConverterTests, GetBytes_UInt64_RoundTrip) {
+    ulongcs val = 0xCAFEBABEDEADBEEFull;
+    auto b = BitConverter::GetBytes(val);
+    EXPECT_EQ(BitConverter::ToUInt64(b.data(), 0), val);
+}
+
+TEST(BitConverterTests, ToChar_RoundTrip) {
+    charcs c = u'é'; // é
+    auto b = BitConverter::GetBytes(c);
+    EXPECT_EQ(BitConverter::ToChar(b.data(), 0), c);
+}
+
+TEST(BitConverterTests, ToUInt32_VectorOverload) {
+    uintcs val = 42u;
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt32(v, 0), val);
+}
+
+TEST(BitConverterTests, ToUInt64_VectorOverload) {
+    ulongcs val = 0xFFFFFFFFFFFFFFFFull;
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt64(v, 0), val);
+}
+
+// ---------------------------------------------------------------------------
+// Unsigned bit reinterpretation
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, DoubleToUInt64Bits_RoundTrip) {
+    double val = 3.14;
+    ulongcs bits = BitConverter::DoubleToUInt64Bits(val);
+    EXPECT_DOUBLE_EQ(BitConverter::UInt64BitsToDouble(bits), val);
+}
+
+TEST(BitConverterTests, DoubleToUInt64Bits_One) {
+    EXPECT_EQ(BitConverter::DoubleToUInt64Bits(1.0), 0x3FF0000000000000ull);
+}
+
+TEST(BitConverterTests, SingleToUInt32Bits_RoundTrip) {
+    float val = 2.5f;
+    uintcs bits = BitConverter::SingleToUInt32Bits(val);
+    EXPECT_FLOAT_EQ(BitConverter::UInt32BitsToSingle(bits), val);
+}
+
+TEST(BitConverterTests, SingleToUInt32Bits_One) {
+    EXPECT_EQ(BitConverter::SingleToUInt32Bits(1.0f), 0x3F800000u);
+}
+
+// ---------------------------------------------------------------------------
+// ToString(vector, startIndex)
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, ToString_VectorStartIndex_SkipsFirst) {
+    std::vector<bytecs> v = {0x01, 0x02, 0x03};
+    EXPECT_EQ(BitConverter::ToString(v, 1), "02-03");
+}
+
+TEST(BitConverterTests, ToString_VectorStartIndex_Zero_MatchesFull) {
+    std::vector<bytecs> v = {0xAA, 0xBB};
+    EXPECT_EQ(BitConverter::ToString(v, 0), BitConverter::ToString(v));
 }

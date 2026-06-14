@@ -17,6 +17,10 @@ namespace System {
         return oss.str();
     }
 
+    std::string BitConverter::ToString(const std::vector<bytecs>& value, intcs startIndex) {
+        return ToString(value.data(), startIndex, static_cast<intcs>(value.size()) - startIndex);
+    }
+
     std::string BitConverter::ToString(const std::vector<bytecs>& value) {
         return ToString(value.data(), 0, static_cast<intcs>(value.size()));
     }
