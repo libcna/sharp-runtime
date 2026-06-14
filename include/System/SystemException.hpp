@@ -12,32 +12,24 @@
 namespace System {
 
     /**
-     * \class SystemException
-     * \brief Represents the base class for exceptions defined by the system.
+     * @brief Represents the base class for exceptions defined by the system.
      *
-     * This class is a C++ reimplementation of the .NET System::SystemException type.
-     * It derives from ::System::Exception and serves as a base class for exceptions
-     * that are thrown by the runtime or framework itself.
-     * @note Status: Partial
+     * C++ counterpart of .NET System.SystemException. Derives from System::Exception
+     * and serves as a base class for exceptions thrown by the runtime or framework.
      */
     class SystemException : public System::Exception {
     public:
-        /**
-         * \brief Initializes a new instance of the SystemException class with an empty message.
-         */
+        /** @brief Initializes a new instance with a default message. */
         SystemException();
 
-        /**
-         * \brief Initializes a new instance of the SystemException class with the specified message.
-         * \param str A null-terminated character string that describes the error.
-         */
+        /** @brief Initializes a new instance with the specified message. */
         explicit SystemException(const char* str);
 
-        /**
-         * \brief Initializes a new instance of the SystemException class with the specified message.
-         * \param str A string that describes the error.
-         */
+        /** @brief Initializes a new instance with the specified message. */
         explicit SystemException(const std::string& str);
+
+        /** @brief Initializes a new instance with the specified message and inner exception. */
+        SystemException(const std::string& str, std::exception_ptr inner);
     };
 
 } // namespace System

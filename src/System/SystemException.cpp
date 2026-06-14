@@ -9,28 +9,16 @@
 
 namespace System {
 
-    /**
-     * \brief Initializes a new instance of the SystemException class with an empty message.
-     * @note Status: Partial
-     */
     SystemException::SystemException()
-        : Exception() {
-    }
+        : Exception() {}
 
-    /**
-     * \brief Initializes a new instance of the SystemException class with the specified message.
-     * \param str A null-terminated character string that describes the error.
-     */
     SystemException::SystemException(const char* str)
-        : Exception(str) {
-    }
+        : Exception(str) {}
 
-    /**
-     * \brief Initializes a new instance of the SystemException class with the specified message.
-     * \param str A string that describes the error.
-     */
     SystemException::SystemException(const std::string& str)
-        : Exception(str) {
-    }
+        : Exception(str) {}
+
+    SystemException::SystemException(const std::string& str, std::exception_ptr inner)
+        : Exception(str, inner) {}
 
 } // namespace System
