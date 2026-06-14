@@ -142,6 +142,12 @@ namespace System {
         static bool IsNegative(float x)            { return std::signbit(x); }
         /// Returns @p x multiplied by 2 raised to the power @p n.
         static float ScaleB(float x, int n)        { return std::scalbn(x, n); }
+        /// Returns the base-2 integer exponent of @p x (i.e. floor(log2(|x|))).
+        static int   ILogB(float x)                { return std::ilogb(x); }
+        /// Returns an estimate of the reciprocal of @p x (1/x).
+        static float ReciprocalEstimate(float x)   { return 1.0f / x; }
+        /// Returns an estimate of the reciprocal square root of @p x (1/sqrt(x)).
+        static float ReciprocalSqrtEstimate(float x) { return 1.0f / std::sqrt(x); }
         /// Returns the value with the greater magnitude; if equal, returns the positive one.
         static float MaxMagnitude(float x, float y) {
             float ax = std::fabs(x), ay = std::fabs(y);

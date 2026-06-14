@@ -226,3 +226,14 @@ TEST(MathFTests, MaxMagnitude_Equal_RetPos)  { EXPECT_EQ(MathF::MaxMagnitude(3.0
 TEST(MathFTests, MinMagnitude_SmallerFirst)  { EXPECT_EQ(MathF::MinMagnitude(2.0f, 5.0f),   2.0f); }
 TEST(MathFTests, MinMagnitude_SmallerSecond) { EXPECT_EQ(MathF::MinMagnitude(-7.0f, 2.0f),  2.0f); }
 TEST(MathFTests, MinMagnitude_Equal_RetNeg)  { EXPECT_EQ(MathF::MinMagnitude(-3.0f, 3.0f), -3.0f); }
+
+TEST(MathFTests, ILogB_One)    { EXPECT_EQ(MathF::ILogB(1.0f), 0); }
+TEST(MathFTests, ILogB_Two)    { EXPECT_EQ(MathF::ILogB(2.0f), 1); }
+TEST(MathFTests, ILogB_Eight)  { EXPECT_EQ(MathF::ILogB(8.0f), 3); }
+
+TEST(MathFTests, ReciprocalEstimate_One)  { EXPECT_FLOAT_EQ(MathF::ReciprocalEstimate(1.0f),  1.0f); }
+TEST(MathFTests, ReciprocalEstimate_Two)  { EXPECT_FLOAT_EQ(MathF::ReciprocalEstimate(2.0f),  0.5f); }
+TEST(MathFTests, ReciprocalEstimate_Four) { EXPECT_FLOAT_EQ(MathF::ReciprocalEstimate(4.0f), 0.25f); }
+
+TEST(MathFTests, ReciprocalSqrtEstimate_One)  { EXPECT_FLOAT_EQ(MathF::ReciprocalSqrtEstimate(1.0f), 1.0f); }
+TEST(MathFTests, ReciprocalSqrtEstimate_Four) { EXPECT_FLOAT_EQ(MathF::ReciprocalSqrtEstimate(4.0f), 0.5f); }

@@ -6,6 +6,7 @@
 
 namespace System {
 
+    /** @brief The exception that is thrown when an array with the wrong number of dimensions is passed to a method. */
     class RankException : public SystemException {
     public:
         RankException() : SystemException("Attempted to operate on an array with the incorrect number of dimensions.") {}
