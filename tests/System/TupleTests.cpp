@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include "System/Tuple.hpp"
+#include "System/TupleExtensions.hpp"
 
 using System::Tuple2;
 using System::Tuple3;
@@ -148,4 +149,75 @@ TEST(TupleTests, Tuple4_AllZero) {
     EXPECT_EQ(t.Item2, 0);
     EXPECT_EQ(t.Item3, 0);
     EXPECT_EQ(t.Item4, 0);
+}
+
+// ===========================================================================
+// TupleExtensions — Deconstruct
+// ===========================================================================
+
+TEST(TupleExtensionsTests, Deconstruct_Tuple2) {
+    System::Tuple2<int, std::string> t(42, "hello");
+    int a; std::string b;
+    t.Deconstruct(a, b);
+    EXPECT_EQ(a, 42);
+    EXPECT_EQ(b, "hello");
+}
+
+TEST(TupleExtensionsTests, Deconstruct_Tuple3) {
+    System::Tuple3<int, double, std::string> t(1, 2.5, "x");
+    int a; double b; std::string c;
+    t.Deconstruct(a, b, c);
+    EXPECT_EQ(a, 1);
+    EXPECT_DOUBLE_EQ(b, 2.5);
+    EXPECT_EQ(c, "x");
+}
+
+TEST(TupleExtensionsTests, Deconstruct_Tuple4) {
+    System::Tuple4<int, int, int, int> t(1, 2, 3, 4);
+    int a, b, c, d;
+    t.Deconstruct(a, b, c, d);
+    EXPECT_EQ(a, 1); EXPECT_EQ(b, 2); EXPECT_EQ(c, 3); EXPECT_EQ(d, 4);
+}
+
+// ===========================================================================
+// TupleExtensions — ToValueTuple / ToTuple
+// ===========================================================================
+
+TEST(TupleExtensionsTests, ToValueTuple_Tuple2) {
+    System::Tuple2<int, std::string> t(7, "hi");
+    auto vt = System::TupleExtensions::ToValueTuple(t);
+    EXPECT_EQ(std::get<0>(vt), 7);
+    EXPECT_EQ(std::get<1>(vt), "hi");
+}
+
+TEST(TupleExtensionsTests, ToValueTuple_Tuple3) {
+    System::Tuple3<int, int, int> t(1, 2, 3);
+    auto vt = System::TupleExtensions::ToValueTuple(t);
+    EXPECT_EQ(std::get<2>(vt), 3);
+}
+
+TEST(TupleExtensionsTests, ToTuple_StdTuple2) {
+    auto st = std::make_tuple(10, std::string("world"));
+    auto t = System::TupleExtensions::ToTuple(st);
+    EXPECT_EQ(t.Item1, 10);
+    EXPECT_EQ(t.Item2, "world");
+}
+
+TEST(TupleExtensionsTests, ToTuple_StdTuple3) {
+    auto st = std::make_tuple(1, 2, 3);
+    auto t = System::TupleExtensions::ToTuple(st);
+    EXPECT_EQ(t.Item3, 3);
+}
+
+TEST(TupleExtensionsTests, ToTuple_StdTuple4) {
+    auto st = std::make_tuple(1, 2, 3, 4);
+    auto t = System::TupleExtensions::ToTuple(st);
+    EXPECT_EQ(t.Item4, 4);
+}
+
+TEST(TupleExtensionsTests, RoundTrip_Tuple2_ToValueTuple_ToTuple) {
+    System::Tuple2<int, int> original(5, 6);
+    auto vt = System::TupleExtensions::ToValueTuple(original);
+    auto back = System::TupleExtensions::ToTuple(vt);
+    EXPECT_EQ(back, original);
 }
