@@ -46,6 +46,9 @@ using System::ValueTuple1;
 using System::ValueTuple2;
 using System::ValueTuple3;
 using System::ValueTuple4;
+using System::ValueTuple5;
+using System::ValueTuple6;
+using System::ValueTuple7;
 using System::MakeValueTuple;
 using System::DateOnly;
 using System::WeakReference;
@@ -474,6 +477,93 @@ TEST(ValueTupleTests, Tuple4_StoresAndCompares) {
     auto t = MakeValueTuple(1, 2, 3, 4);
     EXPECT_EQ(t.Item4, 4);
     EXPECT_FALSE(t == MakeValueTuple(1, 2, 3, 0));
+}
+
+TEST(ValueTupleTests, Tuple1_Equals) {
+    auto a = MakeValueTuple(10);
+    auto b = MakeValueTuple(10);
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_FALSE(a.Equals(MakeValueTuple(99)));
+}
+
+TEST(ValueTupleTests, Tuple2_Equals) {
+    auto a = MakeValueTuple(1, 2);
+    EXPECT_TRUE(a.Equals(MakeValueTuple(1, 2)));
+    EXPECT_FALSE(a.Equals(MakeValueTuple(1, 3)));
+}
+
+TEST(ValueTupleTests, Tuple1_GetHashCode_SameForEqualValues) {
+    auto a = MakeValueTuple(5);
+    auto b = MakeValueTuple(5);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(ValueTupleTests, Tuple2_GetHashCode_SameForEqualValues) {
+    auto a = MakeValueTuple(1, 2);
+    auto b = MakeValueTuple(1, 2);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(ValueTupleTests, Tuple1_CompareTo_Less) {
+    auto a = MakeValueTuple(1);
+    auto b = MakeValueTuple(2);
+    EXPECT_EQ(a.CompareTo(b), -1);
+    EXPECT_EQ(b.CompareTo(a),  1);
+    EXPECT_EQ(a.CompareTo(a),  0);
+}
+
+TEST(ValueTupleTests, Tuple2_CompareTo_Lexicographic) {
+    auto a = MakeValueTuple(1, 1);
+    auto b = MakeValueTuple(1, 2);
+    EXPECT_EQ(a.CompareTo(b), -1);
+}
+
+TEST(ValueTupleTests, Tuple1_OrderingOperators) {
+    auto a = MakeValueTuple(1);
+    auto b = MakeValueTuple(2);
+    EXPECT_TRUE(a < b);
+    EXPECT_TRUE(b > a);
+    EXPECT_TRUE(a <= a);
+    EXPECT_TRUE(a >= a);
+}
+
+TEST(ValueTupleTests, Tuple1_ToString) {
+    auto t = MakeValueTuple(42);
+    EXPECT_EQ(t.ToString(), "(42)");
+}
+
+TEST(ValueTupleTests, Tuple2_ToString) {
+    auto t = MakeValueTuple(1, 2);
+    EXPECT_EQ(t.ToString(), "(1, 2)");
+}
+
+TEST(ValueTupleTests, Tuple3_ToString) {
+    auto t = MakeValueTuple(1, 2, 3);
+    EXPECT_EQ(t.ToString(), "(1, 2, 3)");
+}
+
+TEST(ValueTupleTests, Tuple5_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5);
+    EXPECT_EQ(t.Item5, 5);
+    EXPECT_TRUE(t == MakeValueTuple(1, 2, 3, 4, 5));
+    EXPECT_FALSE(t == MakeValueTuple(1, 2, 3, 4, 0));
+}
+
+TEST(ValueTupleTests, Tuple6_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5, 6);
+    EXPECT_EQ(t.Item6, 6);
+    EXPECT_TRUE(t == MakeValueTuple(1, 2, 3, 4, 5, 6));
+}
+
+TEST(ValueTupleTests, Tuple7_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5, 6, 7);
+    EXPECT_EQ(t.Item7, 7);
+    EXPECT_TRUE(t == MakeValueTuple(1, 2, 3, 4, 5, 6, 7));
+}
+
+TEST(ValueTupleTests, Tuple7_ToString) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5, 6, 7);
+    EXPECT_EQ(t.ToString(), "(1, 2, 3, 4, 5, 6, 7)");
 }
 
 // ===========================================================================
