@@ -268,3 +268,103 @@ TEST(TimeZoneInfoTests, OperatorEqual_SameId) {
     EXPECT_TRUE(*a == *b);
     EXPECT_FALSE(*a != *b);
 }
+
+// ---------------------------------------------------------------------------
+// New API: HasIanaId, GetHashCode, ToString
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, HasIanaId_WithSlash_True) {
+    auto tz = TimeZoneInfo::FindSystemTimeZoneById("Europe/Prague");
+    EXPECT_TRUE(tz->getHasIanaIdProperty());
+}
+
+TEST(TimeZoneInfoTests, HasIanaId_UTC_False) {
+    EXPECT_FALSE(TimeZoneInfo::Utc().getHasIanaIdProperty());
+}
+
+TEST(TimeZoneInfoTests, GetHashCode_SameId_SameHash) {
+    auto a = TimeZoneInfo::CreateCustomTimeZone("TZ1", TimeSpan::Zero, "X", "X");
+    auto b = TimeZoneInfo::CreateCustomTimeZone("TZ1", TimeSpan::Zero, "Y", "Y");
+    EXPECT_EQ(a->GetHashCode(), b->GetHashCode());
+}
+
+TEST(TimeZoneInfoTests, ToString_ReturnsDisplayName) {
+    auto tz = TimeZoneInfo::CreateCustomTimeZone("X", TimeSpan::Zero, "My Display", "X");
+    EXPECT_EQ(tz->ToString(), "My Display");
+}
+
+// ---------------------------------------------------------------------------
+// GetAmbiguousTimeOffsets / GetAdjustmentRules
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, GetAmbiguousTimeOffsets_DateTime_ReturnsEmpty) {
+    DateTime dt;
+    auto offsets = TimeZoneInfo::Utc().GetAmbiguousTimeOffsets(dt);
+    EXPECT_TRUE(offsets.empty());
+}
+
+TEST(TimeZoneInfoTests, GetAdjustmentRules_ReturnsEmpty) {
+    auto rules = TimeZoneInfo::Utc().GetAdjustmentRules();
+    EXPECT_TRUE(rules.empty());
+}
+
+// ---------------------------------------------------------------------------
+// GetSystemTimeZones(bool) overload
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, GetSystemTimeZones_SkipSorting_SameCount) {
+    auto a = TimeZoneInfo::GetSystemTimeZones(false);
+    auto b = TimeZoneInfo::GetSystemTimeZones(true);
+    EXPECT_EQ(a.size(), b.size());
+}
+
+// ---------------------------------------------------------------------------
+// Static ConvertTimeToUtc(DateTime, TimeZoneInfo)
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, ConvertTimeToUtc_Static_SubtractsOffset) {
+    auto tz = TimeZoneInfo::CreateCustomTimeZone("+02", TimeSpan::FromHours(2), "+2", "+2");
+    DateTime local(2025, 6, 1, 14, 0, 0);
+    DateTime utc = TimeZoneInfo::ConvertTimeToUtc(local, *tz);
+    EXPECT_EQ(utc.getHourProperty(), 12);
+}
+
+// ---------------------------------------------------------------------------
+// ClearCachedData — no-op, must not throw
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, ClearCachedData_DoesNotThrow) {
+    EXPECT_NO_THROW(TimeZoneInfo::ClearCachedData());
+}
+
+// ---------------------------------------------------------------------------
+// TransitionTime
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, TransitionTime_FixedDateRule) {
+    DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    EXPECT_TRUE(t.getIsFixedDateRuleProperty());
+    EXPECT_EQ(t.getMonthProperty(), 3);
+    EXPECT_EQ(t.getDayProperty(), 14);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_FloatingDateRule) {
+    DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 10, 4, System::DayOfWeek::Sunday);
+    EXPECT_FALSE(t.getIsFixedDateRuleProperty());
+    EXPECT_EQ(t.getMonthProperty(), 10);
+    EXPECT_EQ(t.getWeekProperty(), 4);
+    EXPECT_EQ(t.getDayOfWeekProperty(), System::DayOfWeek::Sunday);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_EqualityOperators) {
+    DateTime tod;
+    auto a = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 25);
+    auto b = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 25);
+    auto c = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 4, 1);
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == c);
+    EXPECT_TRUE(a != c);
+}

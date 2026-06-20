@@ -7,18 +7,148 @@
 #include <string>
 #include <vector>
 #include "System/DateTime.hpp"
+#include "System/DateTimeOffset.hpp"
+#include "System/DayOfWeek.hpp"
 #include "System/TimeSpan.hpp"
 
 namespace System {
 
     /**
-     * @brief Represents a time zone — a named region with a fixed UTC offset.
+     * @brief Represents a time zone — a named region with a UTC offset.
      *
-     * Implements the subset of the .NET @c System.TimeZoneInfo API needed for game-engine
-     * porting. @c Local() reads the real system timezone via POSIX @c localtime_r().
+     * C++ counterpart of .NET System.TimeZoneInfo.
+     *
+     * Implements the subset of the .NET API needed for game-engine porting.
+     * @c Local() reads the real system timezone via POSIX @c localtime_r().
      * @c FindSystemTimeZoneById() resolves IANA names from @c /usr/share/zoneinfo/.
+     *
+     * **Limitations (documented, not bugs):**
+     * - DST transitions are not modelled; IsDaylightSavingTime always returns false.
+     * - GetAdjustmentRules() returns an empty array.
+     * - Serialisation (ToSerializedString / FromSerializedString) is not implemented.
+     * - POSIX-only: Local() and FindSystemTimeZoneById() use localtime_r and /usr/share/zoneinfo.
      */
     class TimeZoneInfo {
+    public:
+        // =====================================================================
+        // Nested types
+        // =====================================================================
+
+        /**
+         * @brief Represents the date and time when a time zone changes from standard
+         * time to daylight saving time, or vice versa.
+         *
+         * C++ counterpart of .NET System.TimeZoneInfo.TransitionTime.
+         * In this implementation all instances are stubs; DST transitions are not modelled.
+         */
+        struct TransitionTime {
+            DateTime   timeOfDay_;
+            int        month_          = 0;
+            int        week_           = 0;
+            int        day_            = 0;
+            DayOfWeek  dayOfWeek_      = DayOfWeek::Sunday;
+            bool       isFixedDateRule_ = false;
+
+            /** @brief Gets the time of day at which the transition occurs. */
+            [[nodiscard]] DateTime   getTimeOfDayProperty()     const { return timeOfDay_; }
+            /** @brief Gets the month in which the transition occurs (1-12). */
+            [[nodiscard]] int        getMonthProperty()         const { return month_; }
+            /** @brief Gets the week of the month (1-5) in which the transition occurs. */
+            [[nodiscard]] int        getWeekProperty()          const { return week_; }
+            /** @brief Gets the day on which the transition occurs for a fixed-date rule. */
+            [[nodiscard]] int        getDayProperty()           const { return day_; }
+            /** @brief Gets the day of the week on which the transition occurs for a floating rule. */
+            [[nodiscard]] DayOfWeek  getDayOfWeekProperty()     const { return dayOfWeek_; }
+            /** @brief Gets a value indicating whether the transition is fixed-date or floating. */
+            [[nodiscard]] bool       getIsFixedDateRuleProperty() const { return isFixedDateRule_; }
+
+            /**
+             * @brief Creates a fixed-date transition rule.
+             *
+             * C++ counterpart of .NET TransitionTime.CreateFixedDateRule(DateTime, int, int).
+             */
+            static TransitionTime CreateFixedDateRule(DateTime timeOfDay, int month, int day) {
+                TransitionTime t;
+                t.timeOfDay_      = timeOfDay;
+                t.month_          = month;
+                t.day_            = day;
+                t.isFixedDateRule_ = true;
+                return t;
+            }
+
+            /**
+             * @brief Creates a floating-date transition rule.
+             *
+             * C++ counterpart of .NET TransitionTime.CreateFloatingDateRule(DateTime, int, int, DayOfWeek).
+             */
+            static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, int month,
+                                                         int week, DayOfWeek dayOfWeek) {
+                TransitionTime t;
+                t.timeOfDay_      = timeOfDay;
+                t.month_          = month;
+                t.week_           = week;
+                t.dayOfWeek_      = dayOfWeek;
+                t.isFixedDateRule_ = false;
+                return t;
+            }
+
+            bool operator==(const TransitionTime& o) const {
+                return month_ == o.month_ && week_ == o.week_ && day_ == o.day_ &&
+                       dayOfWeek_ == o.dayOfWeek_ && isFixedDateRule_ == o.isFixedDateRule_;
+            }
+            bool operator!=(const TransitionTime& o) const { return !(*this == o); }
+        };
+
+        /**
+         * @brief Provides information about a time zone adjustment (DST rule).
+         *
+         * C++ counterpart of .NET System.TimeZoneInfo.AdjustmentRule.
+         * In this implementation GetAdjustmentRules() always returns an empty vector;
+         * these objects are exposed only for API completeness.
+         */
+        class AdjustmentRule {
+            DateTime       dateStart_;
+            DateTime       dateEnd_;
+            TimeSpan       daylightDelta_;
+            TransitionTime daylightTransitionStart_;
+            TransitionTime daylightTransitionEnd_;
+            TimeSpan       baseUtcOffsetDelta_;
+
+            AdjustmentRule() = default;
+        public:
+            /** @brief Gets the date when the adjustment rule begins. */
+            [[nodiscard]] DateTime       getDateStartProperty()              const { return dateStart_; }
+            /** @brief Gets the date when the adjustment rule ends. */
+            [[nodiscard]] DateTime       getDateEndProperty()                const { return dateEnd_; }
+            /** @brief Gets the time difference between standard time and DST. */
+            [[nodiscard]] TimeSpan       getDaylightDeltaProperty()          const { return daylightDelta_; }
+            /** @brief Gets the start transition for DST. */
+            [[nodiscard]] TransitionTime getDaylightTransitionStartProperty() const { return daylightTransitionStart_; }
+            /** @brief Gets the end transition for DST. */
+            [[nodiscard]] TransitionTime getDaylightTransitionEndProperty()   const { return daylightTransitionEnd_; }
+            /** @brief Gets the UTC offset delta relative to the zone's base UTC offset. */
+            [[nodiscard]] TimeSpan       getBaseUtcOffsetDeltaProperty()     const { return baseUtcOffsetDelta_; }
+
+            /**
+             * @brief Creates an adjustment rule.
+             *
+             * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(...).
+             */
+            static std::shared_ptr<AdjustmentRule> CreateAdjustmentRule(
+                DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
+                TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd)
+            {
+                auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
+                r->dateStart_                = dateStart;
+                r->dateEnd_                  = dateEnd;
+                r->daylightDelta_            = daylightDelta;
+                r->daylightTransitionStart_  = daylightTransitionStart;
+                r->daylightTransitionEnd_    = daylightTransitionEnd;
+                return r;
+            }
+        };
+
+    private:
         std::string id_;
         std::string displayName_;
         std::string standardName_;
@@ -34,35 +164,200 @@ namespace System {
               baseUtcOffset_(baseUtcOffset), supportsDst_(supportsDst) {}
 
     public:
-        /// @brief Returns the IANA or well-known identifier of this time zone.
+        // =====================================================================
+        // Properties
+        // =====================================================================
+
+        /**
+         * @brief Gets the IANA or well-known identifier of this time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.Id.
+         */
         [[nodiscard]] const std::string& getIdProperty()           const { return id_; }
-        /// @brief Returns a human-readable display name for this time zone.
+
+        /**
+         * @brief Gets a human-readable display name for this time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.DisplayName.
+         */
         [[nodiscard]] const std::string& getDisplayNameProperty()  const { return displayName_; }
-        /// @brief Returns the standard (non-DST) name.
+
+        /**
+         * @brief Gets the standard (non-DST) name.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.StandardName.
+         */
         [[nodiscard]] const std::string& getStandardNameProperty() const { return standardName_; }
-        /// @brief Returns the daylight-saving name (may equal standard name when DST is not supported).
+
+        /**
+         * @brief Gets the daylight-saving name.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.DaylightName.
+         * May equal the standard name when DST is not observed.
+         */
         [[nodiscard]] const std::string& getDaylightNameProperty() const { return daylightName_; }
-        /// @brief Returns the fixed UTC offset for this zone (DST transitions are not modelled).
+
+        /**
+         * @brief Gets the fixed UTC offset for this zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.BaseUtcOffset.
+         * DST transitions are not modelled; this is always the standard offset.
+         */
         [[nodiscard]] TimeSpan getBaseUtcOffsetProperty()          const { return baseUtcOffset_; }
-        /// @brief Returns @c true if this zone ever observes daylight saving time.
+
+        /**
+         * @brief Gets a value indicating whether this zone ever observes DST.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.SupportsDaylightSavingTime.
+         */
         [[nodiscard]] bool getSupportsDaylightSavingTimeProperty() const { return supportsDst_; }
 
-        /// @brief Always returns @c false — DST transitions are not modelled.
+        /**
+         * @brief Gets a value indicating whether the time zone ID has the IANA format.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.HasIanaId.
+         * Returns true when the ID contains a '/' (e.g. "Europe/Prague").
+         */
+        [[nodiscard]] bool getHasIanaIdProperty() const {
+            return id_.find('/') != std::string::npos;
+        }
+
+        // =====================================================================
+        // Instance methods
+        // =====================================================================
+
+        /**
+         * @brief Returns false — DST transitions are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.IsDaylightSavingTime(DateTime).
+         */
         [[nodiscard]] bool IsDaylightSavingTime(const DateTime& /*dt*/) const { return false; }
-        /// @brief Returns the fixed UTC offset for any @p dt.
-        [[nodiscard]] TimeSpan GetUtcOffset(const DateTime& /*dt*/) const { return baseUtcOffset_; }
 
-        /// @brief Always returns @c false.
-        [[nodiscard]] bool IsAmbiguousTime(const DateTime& /*dt*/) const { return false; }
-        /// @brief Always returns @c false.
-        [[nodiscard]] bool IsInvalidTime(const DateTime& /*dt*/)   const { return false; }
+        /**
+         * @brief Returns false — DST transitions are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.IsDaylightSavingTime(DateTimeOffset).
+         */
+        [[nodiscard]] bool IsDaylightSavingTime(const DateTimeOffset& /*dt*/) const { return false; }
 
-        /// @brief Converts @p dt to UTC by subtracting the zone's UTC offset.
+        /**
+         * @brief Returns the fixed UTC offset for any DateTime.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetUtcOffset(DateTime).
+         */
+        [[nodiscard]] TimeSpan GetUtcOffset(const DateTime& /*dt*/)       const { return baseUtcOffset_; }
+
+        /**
+         * @brief Returns the fixed UTC offset for any DateTimeOffset.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetUtcOffset(DateTimeOffset).
+         */
+        [[nodiscard]] TimeSpan GetUtcOffset(const DateTimeOffset& /*dt*/) const { return baseUtcOffset_; }
+
+        /**
+         * @brief Returns false — ambiguous times are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.IsAmbiguousTime(DateTime).
+         */
+        [[nodiscard]] bool IsAmbiguousTime(const DateTime& /*dt*/)        const { return false; }
+
+        /**
+         * @brief Returns false — ambiguous times are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.IsAmbiguousTime(DateTimeOffset).
+         */
+        [[nodiscard]] bool IsAmbiguousTime(const DateTimeOffset& /*dt*/)  const { return false; }
+
+        /**
+         * @brief Returns false — invalid times are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.IsInvalidTime(DateTime).
+         */
+        [[nodiscard]] bool IsInvalidTime(const DateTime& /*dt*/)          const { return false; }
+
+        /**
+         * @brief Returns an empty array — DST transitions are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetAmbiguousTimeOffsets(DateTime).
+         */
+        [[nodiscard]] std::vector<TimeSpan> GetAmbiguousTimeOffsets(const DateTime& /*dt*/) const {
+            return {};
+        }
+
+        /**
+         * @brief Returns an empty array — DST transitions are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetAmbiguousTimeOffsets(DateTimeOffset).
+         */
+        [[nodiscard]] std::vector<TimeSpan> GetAmbiguousTimeOffsets(const DateTimeOffset& /*dt*/) const {
+            return {};
+        }
+
+        /**
+         * @brief Returns an empty array — DST adjustment rules are not modelled.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetAdjustmentRules().
+         */
+        [[nodiscard]] std::vector<std::shared_ptr<AdjustmentRule>> GetAdjustmentRules() const {
+            return {};
+        }
+
+        /**
+         * @brief Converts a DateTime to UTC by subtracting the zone's base UTC offset.
+         *
+         * C++ counterpart of the instance form of .NET TimeZoneInfo.ConvertTimeToUtc(DateTime).
+         */
         [[nodiscard]] DateTime ConvertTimeToUtc(const DateTime& dt) const {
             return dt.Add(-baseUtcOffset_);
         }
 
-        /// @brief Returns the UTC singleton (offset zero, no DST).
+        /**
+         * @brief Returns true if this zone has the same base UTC offset and DST support as @p other.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.HasSameRules(TimeZoneInfo).
+         */
+        [[nodiscard]] bool HasSameRules(const TimeZoneInfo& other) const {
+            return baseUtcOffset_ == other.baseUtcOffset_ &&
+                   supportsDst_   == other.supportsDst_;
+        }
+
+        /**
+         * @brief Returns true if this zone has the same ID as @p other.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.Equals(TimeZoneInfo).
+         */
+        [[nodiscard]] bool Equals(const TimeZoneInfo& other) const { return id_ == other.id_; }
+
+        /**
+         * @brief Returns a hash code based on the zone ID (case-insensitive).
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetHashCode().
+         */
+        [[nodiscard]] int GetHashCode() const {
+            std::string lower = id_;
+            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return static_cast<int>(std::hash<std::string>{}(lower));
+        }
+
+        /**
+         * @brief Returns the display name of this time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ToString().
+         */
+        [[nodiscard]] std::string ToString() const { return displayName_; }
+
+        bool operator==(const TimeZoneInfo& other) const { return Equals(other); }
+        bool operator!=(const TimeZoneInfo& other) const { return !Equals(other); }
+
+        // =====================================================================
+        // Static properties
+        // =====================================================================
+
+        /**
+         * @brief Returns the UTC singleton (offset zero, no DST).
+         *
+         * C++ counterpart of .NET TimeZoneInfo.Utc.
+         */
         static const TimeZoneInfo& Utc() {
             static TimeZoneInfo tz("UTC", TimeSpan::Zero,
                                    "Coordinated Universal Time",
@@ -71,53 +366,42 @@ namespace System {
             return tz;
         }
 
-        /// @brief Returns the local system time zone by reading the OS timezone via
-        ///        POSIX @c localtime_r(). The offset reflects the current wall-clock offset
-        ///        (including any active DST).
+        /**
+         * @brief Returns the local system time zone by reading the OS timezone via POSIX localtime_r().
+         *
+         * C++ counterpart of .NET TimeZoneInfo.Local.
+         * The offset reflects the current wall-clock offset (including any active DST).
+         * On Emscripten, returns UTC.
+         */
         static const TimeZoneInfo& Local();
 
-        /// @brief Looks up a time zone by IANA ID (e.g. @c "Europe/Prague") using
-        ///        @c /usr/share/zoneinfo/. Throws @c std::invalid_argument if not found.
+        // =====================================================================
+        // Static methods
+        // =====================================================================
+
+        /**
+         * @brief Clears the cached local time zone data.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ClearCachedData().
+         * This implementation is a no-op because Local() uses a block-scope static.
+         */
+        static void ClearCachedData() { /* local static cannot be reset */ }
+
+        /**
+         * @brief Looks up a time zone by IANA ID (e.g. "Europe/Prague").
+         *
+         * C++ counterpart of .NET TimeZoneInfo.FindSystemTimeZoneById(string).
+         * On Linux: checks /usr/share/zoneinfo/ and probes the offset via setenv("TZ").
+         * On Windows: uses the IANA→Windows CLDR mapping table.
+         * @throws std::invalid_argument if the ID is not found.
+         */
         static std::shared_ptr<TimeZoneInfo> FindSystemTimeZoneById(const std::string& id);
 
-        /// @brief Returns UTC and Local as the minimal system zone list.
-        static std::vector<std::shared_ptr<TimeZoneInfo>> GetSystemTimeZones();
-
-        /// @brief Creates a fixed-offset zone with the given parameters.
-        static std::shared_ptr<TimeZoneInfo> CreateCustomTimeZone(
-            const std::string& id, const TimeSpan& utcOffset,
-            const std::string& displayName, const std::string& standardName)
-        {
-            return std::shared_ptr<TimeZoneInfo>(
-                new TimeZoneInfo(id, utcOffset, displayName, standardName, standardName, false));
-        }
-
-        /// @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
-        static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
-                                                      const std::string& destinationTimeZoneId) {
-            auto tz = FindSystemTimeZoneById(destinationTimeZoneId);
-            return dt.Add(tz->baseUtcOffset_);
-        }
-
-        /// @brief Converts @p dt (assumed UTC) to the specified destination time zone.
-        static DateTime ConvertTime(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
-            return dt.Add(destinationTimeZone.baseUtcOffset_);
-        }
-
-        /// @brief Converts @p dt from @p sourceTimeZone to @p destinationTimeZone.
-        static DateTime ConvertTime(const DateTime& dt,
-                                    const TimeZoneInfo& sourceTimeZone,
-                                    const TimeZoneInfo& destinationTimeZone) {
-            DateTime utc = dt.Add(-sourceTimeZone.baseUtcOffset_);
-            return utc.Add(destinationTimeZone.baseUtcOffset_);
-        }
-
-        /// @brief Converts a UTC @p dt to the specified destination time zone.
-        static DateTime ConvertTimeFromUtc(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
-            return dt.Add(destinationTimeZone.baseUtcOffset_);
-        }
-
-        /// @brief Tries to find a time zone by id; returns false instead of throwing.
+        /**
+         * @brief Tries to find a time zone by ID; returns false instead of throwing.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.TryFindSystemTimeZoneById(string, out TimeZoneInfo).
+         */
         static bool TryFindSystemTimeZoneById(const std::string& id,
                                               std::shared_ptr<TimeZoneInfo>& result) {
             try {
@@ -128,17 +412,111 @@ namespace System {
             }
         }
 
-        /// @brief Returns @c true if this zone has the same base UTC offset as @p other.
-        [[nodiscard]] bool HasSameRules(const TimeZoneInfo& other) const {
-            return baseUtcOffset_ == other.baseUtcOffset_ &&
-                   supportsDst_ == other.supportsDst_;
+        /**
+         * @brief Returns all known system time zones (UTC + Local in this implementation).
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetSystemTimeZones().
+         */
+        static std::vector<std::shared_ptr<TimeZoneInfo>> GetSystemTimeZones();
+
+        /**
+         * @brief Returns all known system time zones; skipSorting is ignored.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.GetSystemTimeZones(bool skipSorting).
+         */
+        static std::vector<std::shared_ptr<TimeZoneInfo>> GetSystemTimeZones(bool /*skipSorting*/) {
+            return GetSystemTimeZones();
         }
 
-        /// @brief Returns @c true if this zone has the same ID as @p other.
-        [[nodiscard]] bool Equals(const TimeZoneInfo& other) const { return id_ == other.id_; }
+        /**
+         * @brief Creates a fixed-offset custom time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.CreateCustomTimeZone(string, TimeSpan, string, string).
+         */
+        static std::shared_ptr<TimeZoneInfo> CreateCustomTimeZone(
+            const std::string& id, const TimeSpan& utcOffset,
+            const std::string& displayName, const std::string& standardName)
+        {
+            return std::shared_ptr<TimeZoneInfo>(
+                new TimeZoneInfo(id, utcOffset, displayName, standardName, standardName, false));
+        }
 
-        bool operator==(const TimeZoneInfo& other) const { return Equals(other); }
-        bool operator!=(const TimeZoneInfo& other) const { return !Equals(other); }
+        /**
+         * @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime, string).
+         */
+        static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
+                                                      const std::string& destinationTimeZoneId) {
+            auto tz = FindSystemTimeZoneById(destinationTimeZoneId);
+            return dt.Add(tz->baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts @p dt (assumed UTC) to the zone identified by @p destinationTimeZoneId.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime, string, string).
+         */
+        static DateTime ConvertTimeBySystemTimeZoneId(const DateTime& dt,
+                                                      const std::string& sourceTimeZoneId,
+                                                      const std::string& destinationTimeZoneId) {
+            auto src = FindSystemTimeZoneById(sourceTimeZoneId);
+            auto dst = FindSystemTimeZoneById(destinationTimeZoneId);
+            DateTime utc = dt.Add(-src->baseUtcOffset_);
+            return utc.Add(dst->baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts a DateTimeOffset to the specified destination time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTime(DateTimeOffset, TimeZoneInfo).
+         */
+        static DateTimeOffset ConvertTime(const DateTimeOffset& dto,
+                                          const TimeZoneInfo& destinationTimeZone) {
+            return DateTimeOffset(dto.getUtcDateTimeProperty().Add(destinationTimeZone.baseUtcOffset_),
+                                  destinationTimeZone.baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts @p dt (assumed UTC) to the specified destination time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTime(DateTime, TimeZoneInfo).
+         */
+        static DateTime ConvertTime(const DateTime& dt, const TimeZoneInfo& destinationTimeZone) {
+            return dt.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts @p dt from @p sourceTimeZone to @p destinationTimeZone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTime(DateTime, TimeZoneInfo, TimeZoneInfo).
+         */
+        static DateTime ConvertTime(const DateTime& dt,
+                                    const TimeZoneInfo& sourceTimeZone,
+                                    const TimeZoneInfo& destinationTimeZone) {
+            DateTime utc = dt.Add(-sourceTimeZone.baseUtcOffset_);
+            return utc.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts a UTC DateTime to the specified destination time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTimeFromUtc(DateTime, TimeZoneInfo).
+         */
+        static DateTime ConvertTimeFromUtc(const DateTime& dt,
+                                           const TimeZoneInfo& destinationTimeZone) {
+            return dt.Add(destinationTimeZone.baseUtcOffset_);
+        }
+
+        /**
+         * @brief Converts a DateTime to UTC using the specified source time zone.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTimeToUtc(DateTime, TimeZoneInfo).
+         */
+        static DateTime ConvertTimeToUtc(const DateTime& dt, const TimeZoneInfo& sourceTimeZone) {
+            return dt.Add(-sourceTimeZone.baseUtcOffset_);
+        }
+
     };
 
 } // namespace System
