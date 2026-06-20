@@ -5,13 +5,17 @@
 
 namespace System {
 
-    /// Specifies the location where an environment variable is stored.
+    /**
+     * @brief Specifies the location where an environment variable is stored or retrieved.
+     *
+     * C++ counterpart of .NET System.EnvironmentVariableTarget.
+     */
     enum class EnvironmentVariableTarget {
-        /// The environment variable is stored in the process block.
+        /** @brief The environment variable is stored or retrieved from the process environment block. */
         Process = 0,
-        /// The environment variable is stored in the user-level registry key.
+        /** @brief The environment variable is stored or retrieved from the HKEY_CURRENT_USER registry key (Windows only; falls back to Process on other platforms). */
         User    = 1,
-        /// The environment variable is stored in the machine-level registry key.
+        /** @brief The environment variable is stored or retrieved from the HKEY_LOCAL_MACHINE registry key (Windows only; falls back to Process on other platforms). */
         Machine = 2,
     };
 

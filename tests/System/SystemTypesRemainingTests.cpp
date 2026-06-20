@@ -134,6 +134,7 @@ TEST(PlatformIDTests, Unix_IsFour)   { EXPECT_EQ(static_cast<int>(PlatformID::Un
 // ===========================================================================
 
 TEST(EnvironmentVariableTargetTests, Process_IsZero)  { EXPECT_EQ(static_cast<int>(EnvironmentVariableTarget::Process), 0); }
+TEST(EnvironmentVariableTargetTests, User_IsOne)      { EXPECT_EQ(static_cast<int>(EnvironmentVariableTarget::User),    1); }
 TEST(EnvironmentVariableTargetTests, Machine_IsTwo)   { EXPECT_EQ(static_cast<int>(EnvironmentVariableTarget::Machine), 2); }
 
 // ===========================================================================
