@@ -1003,3 +1003,38 @@ TEST(TypedReferenceTests, GetTargetType_Throws) {
     EXPECT_THROW(System::TypedReference::GetTargetType(tr),
                  System::NotSupportedException);
 }
+
+// ===========================================================================
+// Void
+// ===========================================================================
+
+#include "System/Void.hpp"
+
+TEST(VoidTests, DefaultConstructible) {
+    System::Void v;
+    (void)v;
+    SUCCEED();
+}
+
+TEST(VoidTests, Equality_TwoInstances_AreEqual) {
+    System::Void a, b;
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
+}
+
+TEST(VoidTests, ToString_ReturnsEmpty) {
+    System::Void v;
+    EXPECT_EQ(v.ToString(), "");
+}
+
+TEST(VoidTests, UsableAsTemplateArgument) {
+    System::Nullable<System::Void> n;
+    EXPECT_FALSE(n.getHasValueProperty());
+    n = System::Void{};
+    EXPECT_TRUE(n.getHasValueProperty());
+}
+
+TEST(VoidTests, IsTrivial) {
+    // System.Void is a struct with no fields — verify it's empty in C++ too
+    EXPECT_EQ(sizeof(System::Void), sizeof(unsigned char)); // empty struct has size >= 1
+}
