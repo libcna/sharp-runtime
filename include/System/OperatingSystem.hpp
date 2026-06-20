@@ -2,45 +2,111 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cctype>
+#include <memory>
 #include <string>
 #include "System/PlatformID.hpp"
 #include "System/Version.hpp"
 
 namespace System {
 
-    /// <summary>Represents information about the operating system, such as the platform and version.</summary>
+    /**
+     * @brief Represents information about an operating system, such as the platform and version.
+     *
+     * C++ counterpart of .NET System.OperatingSystem.
+     *
+     * The static IsXxx() predicate methods are resolved at compile time from preprocessor macros.
+     * The IsXxxVersionAtLeast() methods return true when running on the matching platform
+     * (actual version detection is not implemented; the assumption is that the build host
+     * is recent enough).
+     */
     class OperatingSystem {
-        PlatformID platform_;
-        Version version_;
+        PlatformID  platform_;
+        Version     version_;
         std::string servicePack_;
 
+        static std::string toLower(std::string s) {
+            std::transform(s.begin(), s.end(), s.begin(),
+                [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            return s;
+        }
+
     public:
-        /// Constructs an OperatingSystem with the specified platform identifier and version.
-        /// @param platform Platform identifier (e.g. PlatformID::Unix).
-        /// @param version  OS version.
+        /**
+         * @brief Constructs an OperatingSystem with the specified platform identifier and version.
+         *
+         * C++ counterpart of .NET OperatingSystem(PlatformID, Version).
+         * @param platform Platform identifier (e.g. PlatformID::Unix).
+         * @param version  OS version.
+         */
         OperatingSystem(PlatformID platform, const Version& version)
             : platform_(platform), version_(version) {}
 
-        /// Returns the platform identifier for this operating system.
-        [[nodiscard]] PlatformID getPlatformProperty() const { return platform_; }
-        /// Returns the version of this operating system.
-        [[nodiscard]] const Version& getVersionProperty() const { return version_; }
-        /// Returns the service pack string (empty in this port).
+        // ---- Properties ----
+
+        /**
+         * @brief Gets the platform identifier for this operating system.
+         *
+         * C++ counterpart of .NET OperatingSystem.Platform.
+         */
+        [[nodiscard]] PlatformID         getPlatformProperty()    const { return platform_; }
+
+        /**
+         * @brief Gets the version of this operating system.
+         *
+         * C++ counterpart of .NET OperatingSystem.Version.
+         */
+        [[nodiscard]] const Version&     getVersionProperty()     const { return version_; }
+
+        /**
+         * @brief Gets the service pack string (always empty in this port).
+         *
+         * C++ counterpart of .NET OperatingSystem.ServicePack.
+         */
         [[nodiscard]] const std::string& getServicePackProperty() const { return servicePack_; }
 
-        /// Returns a human-readable version string such as "Unix 5.15.0".
+        /**
+         * @brief Gets a human-readable version string such as "Unix 5.15.0".
+         *
+         * C++ counterpart of .NET OperatingSystem.VersionString.
+         */
         [[nodiscard]] std::string getVersionStringProperty() const {
             std::string name;
             switch (platform_) {
-                case PlatformID::Win32NT:      name = "Microsoft Windows NT "; break;
-                case PlatformID::Unix:         name = "Unix "; break;
-                case PlatformID::MacOSX:       name = "Mac OS X "; break;
-                default:                       name = "Unknown "; break;
+                case PlatformID::Win32NT:  name = "Microsoft Windows NT "; break;
+                case PlatformID::Unix:     name = "Unix "; break;
+                case PlatformID::MacOSX:   name = "Mac OS X "; break;
+                default:                   name = "Unknown "; break;
             }
             return name + version_.ToString();
         }
 
-        /// Returns true when compiled for Windows (_WIN32 or _WIN64 defined).
+        // ---- Instance methods ----
+
+        /**
+         * @brief Returns a copy of this OperatingSystem instance.
+         *
+         * C++ counterpart of .NET OperatingSystem.Clone().
+         */
+        [[nodiscard]] std::shared_ptr<OperatingSystem> Clone() const {
+            return std::make_shared<OperatingSystem>(platform_, version_);
+        }
+
+        /**
+         * @brief Returns the same string as getVersionStringProperty().
+         *
+         * C++ counterpart of .NET OperatingSystem.ToString().
+         */
+        [[nodiscard]] std::string ToString() const { return getVersionStringProperty(); }
+
+        // ---- Static platform predicates ----
+
+        /**
+         * @brief Returns true when compiled for Windows (_WIN32 or _WIN64 defined).
+         *
+         * C++ counterpart of .NET OperatingSystem.IsWindows().
+         */
         static bool IsWindows() {
 #if defined(_WIN32) || defined(_WIN64)
             return true;
@@ -49,7 +115,11 @@ namespace System {
 #endif
         }
 
-        /// Returns true when compiled for Linux (__linux__ defined).
+        /**
+         * @brief Returns true when compiled for Linux (__linux__ defined).
+         *
+         * C++ counterpart of .NET OperatingSystem.IsLinux().
+         */
         static bool IsLinux() {
 #if defined(__linux__)
             return true;
@@ -58,16 +128,24 @@ namespace System {
 #endif
         }
 
-        /// Returns true when compiled for macOS (__APPLE__ defined).
+        /**
+         * @brief Returns true when compiled for macOS (__APPLE__ and !__IPHONE_OS_VERSION_MIN_REQUIRED defined).
+         *
+         * C++ counterpart of .NET OperatingSystem.IsMacOS().
+         */
         static bool IsMacOS() {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
             return true;
 #else
             return false;
 #endif
         }
 
-        /// Returns true when compiled for FreeBSD (__FreeBSD__ defined).
+        /**
+         * @brief Returns true when compiled for FreeBSD (__FreeBSD__ defined).
+         *
+         * C++ counterpart of .NET OperatingSystem.IsFreeBSD().
+         */
         static bool IsFreeBSD() {
 #if defined(__FreeBSD__)
             return true;
@@ -76,15 +154,183 @@ namespace System {
 #endif
         }
 
-        /// Always returns false; Android is not supported in this port.
-        static bool IsAndroid() { return false; }
-        /// Always returns false; iOS is not supported in this port.
-        static bool IsIOS()     { return false; }
-        /// Always returns false; browser (Emscripten runtime detection) is not supported in this port.
-        static bool IsBrowser() { return false; }
+        /**
+         * @brief Returns true when compiled for WebAssembly via Emscripten (__EMSCRIPTEN__ defined).
+         *
+         * C++ counterpart of .NET OperatingSystem.IsBrowser().
+         */
+        static bool IsBrowser() {
+#if defined(__EMSCRIPTEN__)
+            return true;
+#else
+            return false;
+#endif
+        }
 
-        /// Returns the same string as getVersionStringProperty().
-        [[nodiscard]] std::string ToString() const { return getVersionStringProperty(); }
+        /**
+         * @brief Returns false — WASI is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsWasi().
+         */
+        static bool IsWasi() { return false; }
+
+        /**
+         * @brief Returns false — Android is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsAndroid().
+         */
+        static bool IsAndroid() { return false; }
+
+        /**
+         * @brief Returns false — iOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsIOS().
+         */
+        static bool IsIOS() { return false; }
+
+        /**
+         * @brief Returns false — tvOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsTvOS().
+         */
+        static bool IsTvOS() { return false; }
+
+        /**
+         * @brief Returns false — watchOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsWatchOS().
+         */
+        static bool IsWatchOS() { return false; }
+
+        /**
+         * @brief Returns false — Mac Catalyst is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsMacCatalyst().
+         */
+        static bool IsMacCatalyst() { return false; }
+
+        /**
+         * @brief Indicates whether the current OS platform matches the specified name.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsOSPlatform(string).
+         * Comparison is case-insensitive. Recognised values: "windows", "linux", "macos",
+         * "freebsd", "browser", "android", "ios", "tvos", "watchos", "maccatalyst", "wasi".
+         * @param platform The platform name to check.
+         * @return true if the current OS matches the given name.
+         */
+        static bool IsOSPlatform(const std::string& platform) {
+            const std::string p = toLower(platform);
+            if (p == "windows")     return IsWindows();
+            if (p == "linux")       return IsLinux();
+            if (p == "macos")       return IsMacOS();
+            if (p == "freebsd")     return IsFreeBSD();
+            if (p == "browser")     return IsBrowser();
+            if (p == "android")     return IsAndroid();
+            if (p == "ios")         return IsIOS();
+            if (p == "tvos")        return IsTvOS();
+            if (p == "watchos")     return IsWatchOS();
+            if (p == "maccatalyst") return IsMacCatalyst();
+            if (p == "wasi")        return IsWasi();
+            return false;
+        }
+
+        // ---- Version-at-least predicates ----
+        // These return true when running on the matching platform.
+        // Actual OS version detection is not implemented; the platform presence
+        // is used as a proxy (suitable for game-dev porting where the host is always recent).
+
+        /**
+         * @brief Returns true if running on Windows.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsWindowsVersionAtLeast(int, int, int, int).
+         * Version comparison is not implemented; returns IsWindows().
+         */
+        static bool IsWindowsVersionAtLeast(int /*major*/, int /*minor*/ = 0,
+                                             int /*build*/ = 0, int /*revision*/ = 0) {
+            return IsWindows();
+        }
+
+        /**
+         * @brief Returns true if running on macOS.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsMacOSVersionAtLeast(int, int, int).
+         * Version comparison is not implemented; returns IsMacOS().
+         */
+        static bool IsMacOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+            return IsMacOS();
+        }
+
+        /**
+         * @brief Returns true if running on FreeBSD.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsFreeBSDVersionAtLeast(int, int, int, int).
+         * Version comparison is not implemented; returns IsFreeBSD().
+         */
+        static bool IsFreeBSDVersionAtLeast(int /*major*/, int /*minor*/ = 0,
+                                             int /*build*/ = 0, int /*revision*/ = 0) {
+            return IsFreeBSD();
+        }
+
+        /**
+         * @brief Always returns false — Android is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsAndroidVersionAtLeast(int, int, int, int).
+         */
+        static bool IsAndroidVersionAtLeast(int /*major*/, int /*minor*/ = 0,
+                                             int /*build*/ = 0, int /*revision*/ = 0) {
+            return false;
+        }
+
+        /**
+         * @brief Always returns false — iOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsIOSVersionAtLeast(int, int, int).
+         */
+        static bool IsIOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+            return false;
+        }
+
+        /**
+         * @brief Always returns false — tvOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsTvOSVersionAtLeast(int, int, int).
+         */
+        static bool IsTvOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+            return false;
+        }
+
+        /**
+         * @brief Always returns false — watchOS is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsWatchOSVersionAtLeast(int, int, int).
+         */
+        static bool IsWatchOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+            return false;
+        }
+
+        /**
+         * @brief Always returns false — Mac Catalyst is not supported in this port.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsMacCatalystVersionAtLeast(int, int, int).
+         */
+        static bool IsMacCatalystVersionAtLeast(int /*major*/, int /*minor*/ = 0,
+                                                 int /*build*/ = 0) {
+            return false;
+        }
+
+        /**
+         * @brief Returns true if the current OS platform matches the name and is assumed to meet
+         * the specified version requirement.
+         *
+         * C++ counterpart of .NET OperatingSystem.IsOSPlatformVersionAtLeast(string, int, int, int, int).
+         * Version comparison is not implemented; delegates to IsOSPlatform(platform).
+         * @param platform The platform name (case-insensitive).
+         */
+        static bool IsOSPlatformVersionAtLeast(const std::string& platform,
+                                               int /*major*/, int /*minor*/ = 0,
+                                               int /*build*/ = 0, int /*revision*/ = 0) {
+            return IsOSPlatform(platform);
+        }
     };
 
 } // namespace System

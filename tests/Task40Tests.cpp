@@ -520,6 +520,61 @@ TEST(OperatingSystemTests, VersionString_ContainsPlatformName) {
     OperatingSystem os(PlatformID::Unix, Version(1, 0));
     EXPECT_NE(os.getVersionStringProperty().find("Unix"), std::string::npos);
 }
+TEST(OperatingSystemTests, Clone_ReturnsCopy) {
+    OperatingSystem os(PlatformID::Unix, Version(3, 1));
+    auto copy = os.Clone();
+    ASSERT_NE(copy, nullptr);
+    EXPECT_EQ(copy->getPlatformProperty(), PlatformID::Unix);
+    EXPECT_EQ(copy->getVersionProperty().Major, 3);
+}
+TEST(OperatingSystemTests, ToString_ContainsPlatformName) {
+    OperatingSystem os(PlatformID::Win32NT, Version(10, 0));
+    EXPECT_NE(os.ToString().find("Windows"), std::string::npos);
+}
+TEST(OperatingSystemTests, IsWasi_False) {
+    EXPECT_FALSE(OperatingSystem::IsWasi());
+}
+TEST(OperatingSystemTests, IsTvOS_False) {
+    EXPECT_FALSE(OperatingSystem::IsTvOS());
+}
+TEST(OperatingSystemTests, IsWatchOS_False) {
+    EXPECT_FALSE(OperatingSystem::IsWatchOS());
+}
+TEST(OperatingSystemTests, IsMacCatalyst_False) {
+    EXPECT_FALSE(OperatingSystem::IsMacCatalyst());
+}
+TEST(OperatingSystemTests, IsOSPlatform_Linux_CaseInsensitive) {
+#ifdef __linux__
+    EXPECT_TRUE(OperatingSystem::IsOSPlatform("linux"));
+    EXPECT_TRUE(OperatingSystem::IsOSPlatform("Linux"));
+    EXPECT_TRUE(OperatingSystem::IsOSPlatform("LINUX"));
+#else
+    EXPECT_FALSE(OperatingSystem::IsOSPlatform("linux"));
+#endif
+}
+TEST(OperatingSystemTests, IsOSPlatform_UnknownPlatform_False) {
+    EXPECT_FALSE(OperatingSystem::IsOSPlatform("Haiku"));
+    EXPECT_FALSE(OperatingSystem::IsOSPlatform(""));
+}
+TEST(OperatingSystemTests, IsOSPlatform_Android_False) {
+    EXPECT_FALSE(OperatingSystem::IsOSPlatform("android"));
+}
+TEST(OperatingSystemTests, IsWindowsVersionAtLeast_MatchesIsWindows) {
+    EXPECT_EQ(OperatingSystem::IsWindowsVersionAtLeast(10), OperatingSystem::IsWindows());
+}
+TEST(OperatingSystemTests, IsAndroidVersionAtLeast_AlwaysFalse) {
+    EXPECT_FALSE(OperatingSystem::IsAndroidVersionAtLeast(9));
+}
+TEST(OperatingSystemTests, IsOSPlatformVersionAtLeast_Linux) {
+#ifdef __linux__
+    EXPECT_TRUE(OperatingSystem::IsOSPlatformVersionAtLeast("linux", 4));
+#else
+    EXPECT_FALSE(OperatingSystem::IsOSPlatformVersionAtLeast("linux", 4));
+#endif
+}
+TEST(OperatingSystemTests, IsOSPlatformVersionAtLeast_Android_False) {
+    EXPECT_FALSE(OperatingSystem::IsOSPlatformVersionAtLeast("android", 12));
+}
 
 // ===========================================================================
 // BFloat16
