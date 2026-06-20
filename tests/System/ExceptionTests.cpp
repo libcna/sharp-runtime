@@ -18,6 +18,7 @@
 #include "System/NotSupportedException.hpp"
 #include "System/NullReferenceException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/ArrayTypeMismatchException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -355,4 +356,26 @@ TEST(ExceptionTests, CatchByBaseInsteadOfDerived) {
     try { throw ArgumentNullException("p"); }
     catch (const Exception&) { caught = true; }
     EXPECT_TRUE(caught);
+}
+
+// ---------------------------------------------------------------------------
+// ArrayTypeMismatchException
+// ---------------------------------------------------------------------------
+
+TEST(ArrayTypeMismatchExceptionTests, DefaultCtor_MessageContainsWrongType) {
+    System::ArrayTypeMismatchException ex;
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("wrong type"), std::string::npos);
+}
+
+TEST(ArrayTypeMismatchExceptionTests, IsA_SystemException) {
+    EXPECT_THROW(throw System::ArrayTypeMismatchException(), SystemException);
+}
+
+TEST(ArrayTypeMismatchExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("inner cause");
+    System::ArrayTypeMismatchException ex("outer msg", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("outer msg"), std::string::npos);
+    EXPECT_NE(msg.find("inner cause"), std::string::npos);
 }

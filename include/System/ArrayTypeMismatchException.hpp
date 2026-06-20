@@ -2,18 +2,52 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <string>
 #include "System/SystemException.hpp"
 
 namespace System {
 
-    /// The exception thrown when an attempt is made to store an element of the wrong type in an array.
+    /**
+     * @brief The exception that is thrown when an attempt is made to store an
+     * element of the wrong type within an array.
+     *
+     * C++ counterpart of .NET System.ArrayTypeMismatchException.
+     */
     class ArrayTypeMismatchException : public SystemException {
     public:
-        /// Initializes a new instance with the default type mismatch message.
-        ArrayTypeMismatchException() : SystemException("Attempted to store an element of the wrong type within an array.") {}
-        /// Initializes a new instance with the specified error message.
-        explicit ArrayTypeMismatchException(const std::string& message) : SystemException(message) {}
-        /// Initializes a new instance with the specified message and inner exception.
+        /**
+         * @brief Initializes a new instance with the default message.
+         *
+         * C++ counterpart of .NET ArrayTypeMismatchException().
+         */
+        ArrayTypeMismatchException()
+            : SystemException("Attempted to store an element of the wrong type within an array.") {}
+
+        /**
+         * @brief Initializes a new instance with the specified error message.
+         *
+         * C++ counterpart of .NET ArrayTypeMismatchException(string).
+         * @param message A string that describes the error.
+         */
+        explicit ArrayTypeMismatchException(const std::string& message)
+            : SystemException(message) {}
+
+        /**
+         * @brief Initializes a new instance with the specified error message.
+         *
+         * @param message A string that describes the error.
+         */
+        explicit ArrayTypeMismatchException(const char* message)
+            : SystemException(message) {}
+
+        /**
+         * @brief Initializes a new instance with the specified message and
+         * inner exception.
+         *
+         * C++ counterpart of .NET ArrayTypeMismatchException(string, Exception).
+         * @param message A string that describes the error.
+         * @param inner   The exception that is the cause of this exception.
+         */
         ArrayTypeMismatchException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };
