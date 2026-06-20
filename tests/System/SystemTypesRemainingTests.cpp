@@ -668,3 +668,32 @@ TEST(IObserverTests, MultipleOnNext_LastValueKept) {
     obs->OnNext(3);
     EXPECT_EQ(obs->lastValue, 3);
 }
+
+// ===========================================================================
+// TypedReference
+// ===========================================================================
+
+#include "System/TypedReference.hpp"
+
+TEST(TypedReferenceTests, GetHashCode_ReturnsZero) {
+    System::TypedReference tr{};
+    EXPECT_EQ(tr.GetHashCode(), 0);
+}
+TEST(TypedReferenceTests, Equals_Throws) {
+    System::TypedReference a{}, b{};
+    EXPECT_THROW(a.Equals(b), System::NotSupportedException);
+}
+TEST(TypedReferenceTests, MakeTypedReference_Throws) {
+    EXPECT_THROW(System::TypedReference::MakeTypedReference(),
+                 System::NotSupportedException);
+}
+TEST(TypedReferenceTests, SetTypedReference_Throws) {
+    System::TypedReference tr{};
+    EXPECT_THROW(System::TypedReference::SetTypedReference(tr, nullptr),
+                 System::NotSupportedException);
+}
+TEST(TypedReferenceTests, GetTargetType_Throws) {
+    System::TypedReference tr{};
+    EXPECT_THROW(System::TypedReference::GetTargetType(tr),
+                 System::NotSupportedException);
+}
