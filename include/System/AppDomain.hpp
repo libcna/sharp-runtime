@@ -4,52 +4,220 @@
 #pragma once
 #include <functional>
 #include <string>
+#include "System/EventArgs.hpp"
 #include "System/MarshalByRefObject.hpp"
 #include "System/UnhandledExceptionEventHandler.hpp"
 
 namespace System {
 
     /**
-     * @brief Represents an application domain — the isolated execution environment for an application.
+     * @brief Represents an application domain — the isolated execution environment
+     * for an application. This class cannot be inherited.
      *
-     * Only the singleton @c CurrentDomain is supported. Implements the subset of the .NET
-     * @c System.AppDomain API needed for game-engine porting (friendly name, base directory,
-     * event stubs, and data storage stubs).
+     * C++ counterpart of .NET System.AppDomain (sealed).
+     * Only the singleton CurrentDomain() is supported. Implements the subset of
+     * the .NET AppDomain API needed for game-engine porting: friendly name,
+     * base directory, identity properties, and event/data stubs.
+     *
+     * Assembly loading, reflection, and code-access security are not implemented.
      */
-    class AppDomain : public MarshalByRefObject {
+    class AppDomain final : public MarshalByRefObject {
         std::string friendlyName_  = "DefaultDomain";
         std::string baseDirectory_;
 
         AppDomain();
 
     public:
-        /// @brief Returns the single application-domain instance for this process.
+        // -----------------------------------------------------------------------
+        // Singleton access
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the current application domain for the current thread.
+         *
+         * C++ counterpart of .NET AppDomain.CurrentDomain.
+         * Returns the single process-wide AppDomain (there is no multi-domain
+         * support in this port).
+         */
         static AppDomain& CurrentDomain() {
             static AppDomain domain;
             return domain;
         }
 
-        /// @brief Returns the friendly name of this domain (always @c "DefaultDomain").
-        [[nodiscard]] const std::string& getFriendlyNameProperty()  const { return friendlyName_; }
+        // -----------------------------------------------------------------------
+        // Properties
+        // -----------------------------------------------------------------------
 
-        /// @brief Returns the base directory of the application — the directory containing the
-        ///        executable, with a trailing @c '/'. Reads @c /proc/self/exe at first use.
-        [[nodiscard]] const std::string& getBaseDirectoryProperty() const { return baseDirectory_; }
+        /**
+         * @brief Gets the friendly name of this application domain.
+         *
+         * C++ counterpart of .NET AppDomain.FriendlyName.
+         * Always returns @c "DefaultDomain" in this port.
+         */
+        [[nodiscard]] const std::string& getFriendlyNameProperty() const {
+            return friendlyName_;
+        }
 
-        /// @brief Stub — event registration is not functional; provided for API compatibility.
+        /**
+         * @brief Gets the base directory that the assembly resolver uses to probe
+         * for assemblies.
+         *
+         * C++ counterpart of .NET AppDomain.BaseDirectory.
+         * On Linux, the directory containing the executable (from /proc/self/exe),
+         * with a trailing '/'. On Windows, from GetModuleFileNameW. Falls back to
+         * "./" if detection fails.
+         */
+        [[nodiscard]] const std::string& getBaseDirectoryProperty() const {
+            return baseDirectory_;
+        }
+
+        /**
+         * @brief Gets the path under the base directory where the assembly resolver
+         * probes for private assemblies.
+         *
+         * C++ counterpart of .NET AppDomain.RelativeSearchPath.
+         * Always returns an empty string in this port (no dynamic probing).
+         */
+        [[nodiscard]] std::string getRelativeSearchPathProperty() const { return {}; }
+
+        /**
+         * @brief Gets the directory that the assembly resolver uses to probe for
+         * dynamically created assemblies.
+         *
+         * C++ counterpart of .NET AppDomain.DynamicDirectory.
+         * Always returns an empty string in this port.
+         */
+        [[nodiscard]] std::string getDynamicDirectoryProperty() const { return {}; }
+
+        /**
+         * @brief Gets a unique integer identifier for this application domain.
+         *
+         * C++ counterpart of .NET AppDomain.Id.
+         * Always returns 1 (there is only one domain in this port).
+         */
+        [[nodiscard]] int getIdProperty() const noexcept { return 1; }
+
+        /**
+         * @brief Gets a value indicating whether the current application domain is
+         * fully trusted.
+         *
+         * C++ counterpart of .NET AppDomain.IsFullyTrusted.
+         * Always returns true in this port.
+         */
+        [[nodiscard]] bool getIsFullyTrustedProperty() const noexcept { return true; }
+
+        /**
+         * @brief Gets a value indicating whether the current application domain is
+         * homogeneous.
+         *
+         * C++ counterpart of .NET AppDomain.IsHomogenous.
+         * Always returns true in this port.
+         */
+        [[nodiscard]] bool getIsHomogenousProperty() const noexcept { return true; }
+
+        // -----------------------------------------------------------------------
+        // Methods
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Returns a value indicating whether this is the default application
+         * domain for the current process.
+         *
+         * C++ counterpart of .NET AppDomain.IsDefaultAppDomain().
+         * Always returns true in this port.
+         */
+        [[nodiscard]] bool IsDefaultAppDomain() const noexcept { return true; }
+
+        /**
+         * @brief Returns a value indicating whether this application domain is
+         * being unloaded.
+         *
+         * C++ counterpart of .NET AppDomain.IsFinalizingForUnload().
+         * Always returns false in this port (domains cannot be unloaded).
+         */
+        [[nodiscard]] bool IsFinalizingForUnload() const noexcept { return false; }
+
+        /**
+         * @brief Returns the policy-mapped assembly display name for a given
+         * assembly name.
+         *
+         * C++ counterpart of .NET AppDomain.ApplyPolicy(string).
+         * Returns @p assemblyName unchanged (no policy engine in this port).
+         * @param assemblyName The assembly display name to map.
+         * @return @p assemblyName unchanged.
+         */
+        [[nodiscard]] std::string ApplyPolicy(const std::string& assemblyName) const {
+            return assemblyName;
+        }
+
+        /**
+         * @brief Returns a string representation of this application domain.
+         *
+         * C++ counterpart of .NET AppDomain.ToString().
+         */
+        [[nodiscard]] std::string ToString() const {
+            return "Name:" + friendlyName_;
+        }
+
+        // -----------------------------------------------------------------------
+        // Data store (stubs)
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Assigns a value to the named data element of the current domain.
+         *
+         * C++ counterpart of .NET AppDomain.SetData(string, object).
+         * Stub — stores nothing; provided for API compatibility.
+         * @param name The name of the data element.
+         * @param data A pointer to the value (ignored).
+         */
+        void SetData(const std::string& /*name*/, void* /*data*/) {}
+
+        /**
+         * @brief Gets the value stored in the current domain under the given name.
+         *
+         * C++ counterpart of .NET AppDomain.GetData(string).
+         * Stub — always returns nullptr; provided for API compatibility.
+         * @param name The name of the data element.
+         * @return Always nullptr in this port.
+         */
+        void* GetData(const std::string& /*name*/) { return nullptr; }
+
+        // -----------------------------------------------------------------------
+        // Events (stubs)
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.UnhandledException event add accessor.
+         */
         void add_UnhandledException(const UnhandledExceptionEventHandler& /*handler*/) {}
-        /// @brief Stub — event registration is not functional; provided for API compatibility.
+
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.UnhandledException event remove accessor.
+         */
         void remove_UnhandledException(const UnhandledExceptionEventHandler& /*handler*/) {}
 
-        /// @brief Stub — event registration is not functional; provided for API compatibility.
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.ProcessExit event add accessor.
+         */
         void add_ProcessExit(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
-        /// @brief Stub — event registration is not functional; provided for API compatibility.
-        void remove_ProcessExit(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
 
-        /// @brief Stub — stores nothing; provided for API compatibility.
-        void SetData(const std::string& /*name*/, void* /*data*/) {}
-        /// @brief Stub — always returns @c nullptr; provided for API compatibility.
-        void* GetData(const std::string& /*name*/) { return nullptr; }
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.ProcessExit event remove accessor.
+         */
+        void remove_ProcessExit(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
     };
 
 } // namespace System

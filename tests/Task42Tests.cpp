@@ -448,6 +448,43 @@ TEST(AppDomainTests, SetGetData_Stubs_NoThrow) {
     EXPECT_EQ(System::AppDomain::CurrentDomain().GetData("k"), nullptr);
 }
 
+TEST(AppDomainTests, Id_IsOne) {
+    EXPECT_EQ(System::AppDomain::CurrentDomain().getIdProperty(), 1);
+}
+
+TEST(AppDomainTests, IsFullyTrusted_True) {
+    EXPECT_TRUE(System::AppDomain::CurrentDomain().getIsFullyTrustedProperty());
+}
+
+TEST(AppDomainTests, IsHomogenous_True) {
+    EXPECT_TRUE(System::AppDomain::CurrentDomain().getIsHomogenousProperty());
+}
+
+TEST(AppDomainTests, IsDefaultAppDomain_True) {
+    EXPECT_TRUE(System::AppDomain::CurrentDomain().IsDefaultAppDomain());
+}
+
+TEST(AppDomainTests, IsFinalizingForUnload_False) {
+    EXPECT_FALSE(System::AppDomain::CurrentDomain().IsFinalizingForUnload());
+}
+
+TEST(AppDomainTests, RelativeSearchPath_Empty) {
+    EXPECT_TRUE(System::AppDomain::CurrentDomain().getRelativeSearchPathProperty().empty());
+}
+
+TEST(AppDomainTests, DynamicDirectory_Empty) {
+    EXPECT_TRUE(System::AppDomain::CurrentDomain().getDynamicDirectoryProperty().empty());
+}
+
+TEST(AppDomainTests, ApplyPolicy_ReturnsInput) {
+    EXPECT_EQ(System::AppDomain::CurrentDomain().ApplyPolicy("MyAssembly"), "MyAssembly");
+}
+
+TEST(AppDomainTests, ToString_ContainsFriendlyName) {
+    std::string s = System::AppDomain::CurrentDomain().ToString();
+    EXPECT_NE(s.find("DefaultDomain"), std::string::npos);
+}
+
 // ===========================================================================
 // GC
 // ===========================================================================
