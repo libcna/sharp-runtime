@@ -208,6 +208,29 @@ TEST(ExceptionTests, OverflowExceptionIsArithmeticException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ArithmeticExceptionTests, DefaultCtor_MessageContainsOverflow) {
+    ArithmeticException ex;
+    std::string msg = ex.what();
+    EXPECT_NE(msg.find("arithmetic"), std::string::npos);
+}
+
+TEST(ArithmeticExceptionTests, MessageCtor_WhatContainsMessage) {
+    ArithmeticException ex("division by zero");
+    EXPECT_NE(std::string(ex.what()).find("division by zero"), std::string::npos);
+}
+
+TEST(ArithmeticExceptionTests, IsA_SystemException) {
+    EXPECT_THROW(throw ArithmeticException(), System::SystemException);
+}
+
+TEST(ArithmeticExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root cause");
+    ArithmeticException ex("outer msg", inner);
+    std::string w = ex.what();
+    EXPECT_NE(w.find("outer msg"), std::string::npos);
+    EXPECT_NE(w.find("root cause"), std::string::npos);
+}
+
 // ---------------------------------------------------------------------------
 // FormatException
 // ---------------------------------------------------------------------------
