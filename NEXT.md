@@ -104,22 +104,35 @@ The only constraint on velocity is **scope management**: `plan_System.md` has 23
 
 ### Directory layout
 ```
-include/System/              ← public headers (~182 files)
-  Collections/Generic/       ← List, Dictionary, Queue, etc.
-  Collections/Concurrent/    ← ConcurrentDictionary, BlockingCollection
-  Collections/Immutable/     ← ImmutableArray, ImmutableList, etc.
-  IO/                        ← Stream hierarchy, File, Path, Compression/, Hashing/
-  Text/                      ← StringBuilder, Encoding, Json/, Encodings/
-  Threading/                 ← Thread, Monitor, Tasks/, LazyThreadSafetyMode
-  Numerics/                  ← BigInteger, Vector*, Matrix*, Quaternion
-  Diagnostics/               ← Debug, Stopwatch, Activity
-  Globalization/             ← CultureInfo, Calendar, DateTimeFormatInfo
-  Net/                       ← IPAddress, Http/, Sockets/
-  Xml/                       ← XmlReader, XmlWriter, Linq/
-src/System/                  ← .cpp bodies (auto-discovered by CMake GLOB_RECURSE)
-tests/                       ← GoogleTest suites
-vendor/                      ← googletest, nlohmann/json, tinyxml2, miniz
+include/
+  SharpRuntime/SharpRuntimeHelper.hpp   ← intcs, bytecs, shortcs, longcs, charcs
+  SharpRuntime/Prop.hpp                 ← property macros
+  SharpRuntime/Storage/StoragePaths.hpp ← platform storage root
+  System/                               ← core types, exceptions, Math (~182 files)
+    Collections/Generic/                ← List, Dictionary, Queue, etc.
+    Collections/Concurrent/             ← ConcurrentDictionary, BlockingCollection
+    Collections/Immutable/              ← ImmutableArray, ImmutableList, etc.
+    IO/                                 ← Stream, File, Path, Compression/, Hashing/
+    Text/                               ← StringBuilder, Encoding, Json/, Encodings/
+    Threading/                          ← Thread, Monitor, Tasks/, LazyThreadSafetyMode
+    Numerics/                           ← BigInteger, Vector*, Matrix*, Quaternion
+    Diagnostics/                        ← Debug, Stopwatch, Activity
+    Globalization/                      ← CultureInfo, Calendar, DateTimeFormatInfo
+    Net/                                ← IPAddress, Http/, Sockets/
+    Xml/                                ← XmlReader, XmlWriter, Linq/
+src/System/                             ← .cpp bodies (auto-discovered by CMake GLOB_RECURSE)
+tests/                                  ← GoogleTest suites
+vendor/                                 ← googletest, nlohmann/json, tinyxml2, miniz
 ```
+
+**Vendored libraries:**
+
+| Library | Use |
+|---------|-----|
+| GoogleTest | test framework |
+| nlohmann/json | `System::Text::Json` |
+| tinyxml2 | `System::Xml::XmlReader/XmlWriter` |
+| miniz | `System::IO::Compression::ZipArchive` |
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) — run before every commit.
