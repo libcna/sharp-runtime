@@ -18,6 +18,9 @@
 #include "System/DateTimeOffset.hpp"
 #include "System/TimeOnly.hpp"
 #include "System/DBNull.hpp"
+#include "System/IConvertible.hpp"
+#include "System/InvalidCastException.hpp"
+#include "System/TypeCode.hpp"
 #include "System/FormattableString.hpp"
 #include "System/Runtime/CompilerServices/FormattableStringFactory.hpp"
 #include "System/OperatingSystem.hpp"
@@ -579,6 +582,43 @@ TEST(DBNullTests, Value_ReturnsSingleton) {
 
 TEST(DBNullTests, ToString_ReturnsEmptyString) {
     EXPECT_EQ(System::DBNull::Value().ToString(), "");
+}
+
+TEST(DBNullTests, ToString_WithProvider_ReturnsEmptyString) {
+    EXPECT_EQ(System::DBNull::Value().ToString(nullptr), "");
+}
+
+TEST(DBNullTests, GetTypeCode_IsDBNull) {
+    EXPECT_EQ(System::DBNull::Value().GetTypeCode(), System::TypeCode::DBNull);
+}
+
+TEST(DBNullTests, IsA_IConvertible) {
+    System::IConvertible* p = &System::DBNull::Value();
+    EXPECT_NE(p, nullptr);
+}
+
+TEST(DBNullTests, ToBoolean_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToBoolean(), System::InvalidCastException);
+}
+
+TEST(DBNullTests, ToInt32_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToInt32(), System::InvalidCastException);
+}
+
+TEST(DBNullTests, ToDouble_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToDouble(), System::InvalidCastException);
+}
+
+TEST(DBNullTests, ToChar_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToChar(), System::InvalidCastException);
+}
+
+TEST(DBNullTests, ToInt64_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToInt64(), System::InvalidCastException);
+}
+
+TEST(DBNullTests, ToSingle_Throws) {
+    EXPECT_THROW(System::DBNull::Value().ToSingle(), System::InvalidCastException);
 }
 
 // ===========================================================================
