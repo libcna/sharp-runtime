@@ -188,3 +188,242 @@ TEST(MemoryExtensionsTests, StartsWith_LongerValue_False) {
     std::vector<int> prefix = {1, 2, 3};
     EXPECT_FALSE(MemoryExtensions::StartsWith(ReadOnlySpan<int>(v), ReadOnlySpan<int>(prefix)));
 }
+
+// ---------------------------------------------------------------------------
+// AsSpan from string
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, AsSpan_String_Full) {
+    std::string s = "hello";
+    auto span = MemoryExtensions::AsSpan(s);
+    EXPECT_EQ(span.getLengthProperty(), 5);
+    EXPECT_EQ(span[0], 'h');
+    EXPECT_EQ(span[4], 'o');
+}
+
+TEST(MemoryExtensionsTests, AsSpan_String_WithStart) {
+    std::string s = "hello";
+    auto span = MemoryExtensions::AsSpan(s, 2);
+    EXPECT_EQ(span.getLengthProperty(), 3);
+    EXPECT_EQ(span[0], 'l');
+}
+
+TEST(MemoryExtensionsTests, AsSpan_String_StartAndLength) {
+    std::string s = "hello world";
+    auto span = MemoryExtensions::AsSpan(s, 6, 5);
+    EXPECT_EQ(span.getLengthProperty(), 5);
+    EXPECT_EQ(span[0], 'w');
+    EXPECT_EQ(span[4], 'd');
+}
+
+TEST(MemoryExtensionsTests, AsSpan_String_StartOutOfRange_Throws) {
+    std::string s = "hi";
+    EXPECT_THROW(MemoryExtensions::AsSpan(s, 99), std::out_of_range);
+}
+
+TEST(MemoryExtensionsTests, AsSpan_String_LengthOutOfRange_Throws) {
+    std::string s = "hi";
+    EXPECT_THROW(MemoryExtensions::AsSpan(s, 0, 99), std::out_of_range);
+}
+
+// ---------------------------------------------------------------------------
+// ContainsAny
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, ContainsAny_TwoValues_Found) {
+    std::vector<int> v = {1, 3, 5};
+    EXPECT_TRUE(MemoryExtensions::ContainsAny(ReadOnlySpan<int>(v), 3, 99));
+}
+
+TEST(MemoryExtensionsTests, ContainsAny_TwoValues_NotFound) {
+    std::vector<int> v = {1, 3, 5};
+    EXPECT_FALSE(MemoryExtensions::ContainsAny(ReadOnlySpan<int>(v), 2, 4));
+}
+
+TEST(MemoryExtensionsTests, ContainsAny_ThreeValues_Found) {
+    std::vector<int> v = {10, 20, 30};
+    EXPECT_TRUE(MemoryExtensions::ContainsAny(ReadOnlySpan<int>(v), 0, 0, 20));
+}
+
+TEST(MemoryExtensionsTests, ContainsAny_Span_Found) {
+    std::vector<int> v = {1, 2, 3};
+    std::vector<int> vals = {9, 2};
+    EXPECT_TRUE(MemoryExtensions::ContainsAny(
+        ReadOnlySpan<int>(v), ReadOnlySpan<int>(vals)));
+}
+
+// ---------------------------------------------------------------------------
+// IndexOf — subsequence
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, IndexOf_Subsequence_Found) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    std::vector<int> needle = {3, 4};
+    EXPECT_EQ(MemoryExtensions::IndexOf(ReadOnlySpan<int>(v), ReadOnlySpan<int>(needle)), 2);
+}
+
+TEST(MemoryExtensionsTests, IndexOf_Subsequence_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    std::vector<int> needle = {4, 5};
+    EXPECT_EQ(MemoryExtensions::IndexOf(ReadOnlySpan<int>(v), ReadOnlySpan<int>(needle)), -1);
+}
+
+TEST(MemoryExtensionsTests, IndexOf_EmptyNeedle_ReturnsZero) {
+    std::vector<int> v = {1, 2, 3};
+    std::vector<int> needle;
+    EXPECT_EQ(MemoryExtensions::IndexOf(ReadOnlySpan<int>(v), ReadOnlySpan<int>(needle)), 0);
+}
+
+// ---------------------------------------------------------------------------
+// LastIndexOf — subsequence
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, LastIndexOf_Subsequence_Found) {
+    std::vector<int> v = {1, 2, 3, 1, 2};
+    std::vector<int> needle = {1, 2};
+    EXPECT_EQ(MemoryExtensions::LastIndexOf(ReadOnlySpan<int>(v), ReadOnlySpan<int>(needle)), 3);
+}
+
+TEST(MemoryExtensionsTests, LastIndexOf_Subsequence_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    std::vector<int> needle = {9, 9};
+    EXPECT_EQ(MemoryExtensions::LastIndexOf(ReadOnlySpan<int>(v), ReadOnlySpan<int>(needle)), -1);
+}
+
+// ---------------------------------------------------------------------------
+// SequenceCompareTo
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, SequenceCompareTo_Equal) {
+    std::vector<int> a = {1, 2, 3};
+    std::vector<int> b = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::SequenceCompareTo(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 0);
+}
+
+TEST(MemoryExtensionsTests, SequenceCompareTo_LessThan) {
+    std::vector<int> a = {1, 2, 3};
+    std::vector<int> b = {1, 2, 4};
+    EXPECT_LT(MemoryExtensions::SequenceCompareTo(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 0);
+}
+
+TEST(MemoryExtensionsTests, SequenceCompareTo_GreaterThan) {
+    std::vector<int> a = {1, 2, 4};
+    std::vector<int> b = {1, 2, 3};
+    EXPECT_GT(MemoryExtensions::SequenceCompareTo(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 0);
+}
+
+TEST(MemoryExtensionsTests, SequenceCompareTo_ShorterIsLess) {
+    std::vector<int> a = {1, 2};
+    std::vector<int> b = {1, 2, 3};
+    EXPECT_LT(MemoryExtensions::SequenceCompareTo(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Count
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Count_MultipleOccurrences) {
+    std::vector<int> v = {1, 2, 1, 3, 1};
+    EXPECT_EQ(MemoryExtensions::Count(ReadOnlySpan<int>(v), 1), 3);
+}
+
+TEST(MemoryExtensionsTests, Count_NoOccurrences) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::Count(ReadOnlySpan<int>(v), 9), 0);
+}
+
+// ---------------------------------------------------------------------------
+// BinarySearch
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, BinarySearch_Found) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    EXPECT_EQ(MemoryExtensions::BinarySearch(ReadOnlySpan<int>(v), 5), 2);
+}
+
+TEST(MemoryExtensionsTests, BinarySearch_NotFound_ReturnsComplement) {
+    std::vector<int> v = {1, 3, 5, 7, 9};
+    int idx = MemoryExtensions::BinarySearch(ReadOnlySpan<int>(v), 4);
+    EXPECT_LT(idx, 0);
+    EXPECT_EQ(~idx, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Overlaps
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Overlaps_SameMemory_True) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    ReadOnlySpan<int> a(v.data(), 3);
+    ReadOnlySpan<int> b(v.data() + 2, 3);
+    EXPECT_TRUE(MemoryExtensions::Overlaps(a, b));
+}
+
+TEST(MemoryExtensionsTests, Overlaps_Disjoint_False) {
+    std::vector<int> a = {1, 2, 3};
+    std::vector<int> b = {4, 5, 6};
+    EXPECT_FALSE(MemoryExtensions::Overlaps(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)));
+}
+
+TEST(MemoryExtensionsTests, Overlaps_EmptySpan_False) {
+    std::vector<int> v = {1, 2, 3};
+    ReadOnlySpan<int> empty(v.data(), 0);
+    EXPECT_FALSE(MemoryExtensions::Overlaps(ReadOnlySpan<int>(v), empty));
+}
+
+// ---------------------------------------------------------------------------
+// Trim / TrimStart / TrimEnd — whitespace
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Trim_Whitespace) {
+    std::string s = "  hello  ";
+    auto span = MemoryExtensions::Trim(MemoryExtensions::AsSpan(s));
+    EXPECT_EQ(span.getLengthProperty(), 5);
+    EXPECT_EQ(span[0], 'h');
+}
+
+TEST(MemoryExtensionsTests, TrimStart_Whitespace) {
+    std::string s = "  hi";
+    auto span = MemoryExtensions::TrimStart(MemoryExtensions::AsSpan(s));
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[0], 'h');
+}
+
+TEST(MemoryExtensionsTests, TrimEnd_Whitespace) {
+    std::string s = "hi  ";
+    auto span = MemoryExtensions::TrimEnd(MemoryExtensions::AsSpan(s));
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[1], 'i');
+}
+
+TEST(MemoryExtensionsTests, Trim_NothingToTrim) {
+    std::string s = "hello";
+    auto span = MemoryExtensions::Trim(MemoryExtensions::AsSpan(s));
+    EXPECT_EQ(span.getLengthProperty(), 5);
+}
+
+// ---------------------------------------------------------------------------
+// Trim / TrimStart / TrimEnd — single element
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Trim_SingleElement) {
+    std::vector<int> v = {0, 0, 1, 2, 0, 0};
+    auto span = MemoryExtensions::Trim(ReadOnlySpan<int>(v), 0);
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[0], 1);
+    EXPECT_EQ(span[1], 2);
+}
+
+TEST(MemoryExtensionsTests, TrimStart_SingleElement) {
+    std::vector<int> v = {9, 9, 1, 2, 9};
+    auto span = MemoryExtensions::TrimStart(ReadOnlySpan<int>(v), 9);
+    EXPECT_EQ(span.getLengthProperty(), 3);
+    EXPECT_EQ(span[0], 1);
+}
+
+TEST(MemoryExtensionsTests, TrimEnd_SingleElement) {
+    std::vector<int> v = {1, 2, 9, 9};
+    auto span = MemoryExtensions::TrimEnd(ReadOnlySpan<int>(v), 9);
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[1], 2);
+}
