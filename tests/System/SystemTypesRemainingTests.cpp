@@ -696,6 +696,63 @@ TEST(WeakReferenceTTests, IsAlive_False_AfterExpiry) {
     EXPECT_FALSE(wr.getIsAliveProperty());
 }
 
+TEST(WeakReferenceTests, TrackResurrection_DefaultFalse) {
+    auto sp = std::make_shared<int>(1);
+    WeakReference wr(sp);
+    EXPECT_FALSE(wr.getTrackResurrectionProperty());
+}
+
+TEST(WeakReferenceTests, TrackResurrection_TrueWhenSet) {
+    auto sp = std::make_shared<int>(1);
+    WeakReference wr(sp, true);
+    EXPECT_TRUE(wr.getTrackResurrectionProperty());
+}
+
+TEST(WeakReferenceTests, GetTarget_ReturnsSharedPtr) {
+    auto sp = std::make_shared<int>(42);
+    WeakReference wr(sp);
+    EXPECT_NE(wr.getTargetProperty(), nullptr);
+}
+
+TEST(WeakReferenceTests, GetTarget_NullAfterExpiry) {
+    WeakReference wr;
+    {
+        auto sp = std::make_shared<int>(5);
+        wr.setTargetProperty(sp);
+    }
+    EXPECT_EQ(wr.getTargetProperty(), nullptr);
+}
+
+TEST(WeakReferenceTests, TryGetTarget_False_WhenExpired) {
+    WeakReference wr;
+    std::shared_ptr<void> out;
+    EXPECT_FALSE(wr.TryGetTarget(out));
+    EXPECT_EQ(out, nullptr);
+}
+
+TEST(WeakReferenceTTests, TrackResurrection_Stored) {
+    auto sp = std::make_shared<int>(1);
+    WeakReferenceT<int> wr(sp, true);
+    EXPECT_TRUE(wr.getTrackResurrectionProperty());
+}
+
+TEST(WeakReferenceTTests, TryGetTarget_False_WhenExpired) {
+    WeakReferenceT<int> wr;
+    std::shared_ptr<int> out;
+    EXPECT_FALSE(wr.TryGetTarget(out));
+    EXPECT_EQ(out, nullptr);
+}
+
+TEST(WeakReferenceTTests, SetTarget_UpdatesReference) {
+    WeakReferenceT<std::string> wr;
+    auto sp = std::make_shared<std::string>("world");
+    wr.SetTarget(sp);
+    EXPECT_TRUE(wr.getIsAliveProperty());
+    std::shared_ptr<std::string> out;
+    wr.TryGetTarget(out);
+    EXPECT_EQ(*out, "world");
+}
+
 // ===========================================================================
 // IFormattable / ISpanFormattable
 // ===========================================================================
