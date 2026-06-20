@@ -249,3 +249,36 @@ TEST(CultureNotFoundExceptionTests, MessageAndName_StoreName) {
 TEST(CultureNotFoundExceptionTests, IsA_Exception) {
     EXPECT_THROW(throw System::Globalization::CultureNotFoundException(), System::Exception);
 }
+
+// ---------------------------------------------------------------------------
+// MethodAccessException — additional tests
+// ---------------------------------------------------------------------------
+
+TEST(MethodAccessExceptionTests, DefaultCtor_IsMemberAccessException) {
+    EXPECT_THROW(throw System::MethodAccessException(), System::MemberAccessException);
+}
+TEST(MethodAccessExceptionTests, DefaultCtor_IsSystemException) {
+    EXPECT_THROW(throw System::MethodAccessException(), System::SystemException);
+}
+TEST(MethodAccessExceptionTests, DefaultMsg_ContainsMethod) {
+    System::MethodAccessException ex;
+    EXPECT_NE(std::string(ex.what()).find("method"), std::string::npos);
+}
+TEST(MethodAccessExceptionTests, InnerExceptionPtr_Stored) {
+    auto inner = std::make_exception_ptr(std::runtime_error("root cause"));
+    System::MethodAccessException ex("access denied", inner);
+    EXPECT_EQ(std::string(ex.what()), "access denied");
+}
+
+// ---------------------------------------------------------------------------
+// MemberAccessException — additional tests
+// ---------------------------------------------------------------------------
+
+TEST(MemberAccessExceptionTests, IsSystemException) {
+    EXPECT_THROW(throw System::MemberAccessException(), System::SystemException);
+}
+TEST(MemberAccessExceptionTests, InnerExceptionPtr_Stored) {
+    auto inner = std::make_exception_ptr(std::runtime_error("cause"));
+    System::MemberAccessException ex("no access", inner);
+    EXPECT_EQ(std::string(ex.what()), "no access");
+}
