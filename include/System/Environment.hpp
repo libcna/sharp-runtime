@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
+#include "System/OperatingSystem.hpp"
 #include "System/TimeSpan.hpp"
 
 namespace System {
@@ -147,6 +148,24 @@ public:
      * On POSIX returns true when euid == 0. On Windows checks token elevation.
      */
     [[nodiscard]] static bool getIsPrivilegedProcessProperty();
+
+    /**
+     * @brief Gets an OperatingSystem object that contains the current platform identifier
+     * and version number.
+     *
+     * C++ counterpart of .NET Environment.OSVersion.
+     * On POSIX, the version is parsed from uname(2) utsname.release.
+     */
+    [[nodiscard]] static System::OperatingSystem getOSVersionProperty();
+
+    /**
+     * @brief Gets a value indicating whether the current process is running in
+     * user-interactive mode.
+     *
+     * C++ counterpart of .NET Environment.UserInteractive.
+     * Always returns true in this port (games always run interactively).
+     */
+    [[nodiscard]] static bool getUserInteractiveProperty() { return true; }
 
     // -------------------------------------------------------------------------
     // Current directory

@@ -22,6 +22,7 @@
 #  include <pwd.h>
 #  include <time.h>
 #  include <sys/resource.h>
+#  include <sys/utsname.h>
 #  include <cstdio>
 #endif
 #include <sstream>
@@ -31,6 +32,51 @@ extern char** environ; // POSIX — global process environment array
 #endif
 
 namespace System {
+
+// ---------------------------------------------------------------------------
+// OSVersion
+// ---------------------------------------------------------------------------
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static int parseNextNumber(const std::string& s, std::size_t& pos) {
+    // skip to next digit
+    while (pos < s.size() && (s[pos] < '0' || s[pos] > '9')) ++pos;
+    int num = 0;
+    while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') {
+        int d = s[pos++] - '0';
+        if (num <= (2147483647 - d) / 10) num = num * 10 + d;
+        else return 2147483647; // overflow guard
+    }
+    return num;
+}
+#endif
+
+System::OperatingSystem Environment::getOSVersionProperty() {
+#if defined(_WIN32)
+    OSVERSIONINFOEXW osvi{};
+    osvi.dwOSVersionInfoSize = sizeof(osvi);
+#pragma warning(suppress: 4996)
+    GetVersionExW(reinterpret_cast<OSVERSIONINFOW*>(&osvi));
+    Version v(static_cast<int>(osvi.dwMajorVersion),
+               static_cast<int>(osvi.dwMinorVersion),
+               static_cast<int>(osvi.dwBuildNumber),
+               static_cast<int>(osvi.wServicePackMajor));
+    return System::OperatingSystem(PlatformID::Win32NT, v);
+#elif defined(__EMSCRIPTEN__)
+    return System::OperatingSystem(PlatformID::Other, Version(0, 0));
+#else
+    // Parse utsname.release (e.g. "6.1.0-28-amd64") for major.minor.build.revision
+    struct utsname uts {};
+    uname(&uts);
+    std::string release(uts.release);
+    std::size_t pos = 0;
+    int major    = parseNextNumber(release, pos);
+    int minor    = parseNextNumber(release, pos);
+    int build    = parseNextNumber(release, pos);
+    int revision = parseNextNumber(release, pos);
+    return System::OperatingSystem(PlatformID::Unix, Version(major, minor, build, revision));
+#endif
+}
 
 std::string Environment::GetCurrentDirectory() {
 #if defined(_WIN32)

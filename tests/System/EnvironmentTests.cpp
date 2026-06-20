@@ -357,3 +357,45 @@ TEST(EnvironmentTests, CpuUsage_TotalTime_EqualsSumOfParts) {
     System::TimeSpan expected = usage.UserTime + usage.PrivilegedTime;
     EXPECT_EQ(usage.getTotalTimeProperty().getTicksProperty(), expected.getTicksProperty());
 }
+
+// ---------------------------------------------------------------------------
+// OSVersion
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, OSVersion_PlatformIsValid) {
+    auto osv = Environment::getOSVersionProperty();
+    // Must be one of the known PlatformID values — not an arbitrary integer
+    auto pid = osv.getPlatformProperty();
+    bool valid = pid == System::PlatformID::Win32NT
+              || pid == System::PlatformID::Unix
+              || pid == System::PlatformID::MacOSX
+              || pid == System::PlatformID::Other;
+    EXPECT_TRUE(valid);
+}
+
+TEST(EnvironmentTests, OSVersion_VersionNonNegative) {
+    auto osv = Environment::getOSVersionProperty();
+    EXPECT_GE(osv.getVersionProperty().Major, 0);
+    EXPECT_GE(osv.getVersionProperty().Minor, 0);
+}
+
+#ifdef __linux__
+TEST(EnvironmentTests, OSVersion_LinuxPlatformIsUnix) {
+    auto osv = Environment::getOSVersionProperty();
+    EXPECT_EQ(osv.getPlatformProperty(), System::PlatformID::Unix);
+}
+
+TEST(EnvironmentTests, OSVersion_LinuxMajorVersionReasonable) {
+    auto osv = Environment::getOSVersionProperty();
+    // Linux kernel major version has been >= 2 since 1996
+    EXPECT_GE(osv.getVersionProperty().Major, 2);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// UserInteractive
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, UserInteractive_IsTrue) {
+    EXPECT_TRUE(Environment::getUserInteractiveProperty());
+}
