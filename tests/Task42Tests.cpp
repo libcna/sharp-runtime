@@ -364,15 +364,19 @@ TEST(UInt64Tests, RotateRight)            { EXPECT_EQ(System::UInt64::RotateRigh
 // AppContext
 // ===========================================================================
 
-TEST(AppContextTests, BaseDirProperty) {
-    const auto& dir = System::AppContext::getBaseDirProperty();
+TEST(AppContextTests, BaseDirectoryProperty_NonEmpty) {
+    const auto& dir = System::AppContext::getBaseDirectoryProperty();
     EXPECT_FALSE(dir.empty());
     EXPECT_EQ(dir.back(), '/');
 }
 
-TEST(AppContextTests, BaseDirProperty_MatchesAppDomain) {
-    EXPECT_EQ(System::AppContext::getBaseDirProperty(),
+TEST(AppContextTests, BaseDirectoryProperty_MatchesAppDomain) {
+    EXPECT_EQ(System::AppContext::getBaseDirectoryProperty(),
               System::AppDomain::CurrentDomain().getBaseDirectoryProperty());
+}
+
+TEST(AppContextTests, TargetFrameworkName_IsEmpty) {
+    EXPECT_TRUE(System::AppContext::getTargetFrameworkNameProperty().empty());
 }
 
 TEST(AppContextTests, SetGetData_RoundTrip) {
@@ -394,11 +398,28 @@ TEST(AppContextTests, SetSwitch_TryGetSwitch) {
     EXPECT_TRUE(enabled);
 }
 
+TEST(AppContextTests, SetSwitch_False_TryGetSwitch) {
+    System::AppContext::SetSwitch("task42.switch.off", false);
+    bool enabled = true;
+    bool found = System::AppContext::TryGetSwitch("task42.switch.off", enabled);
+    EXPECT_TRUE(found);
+    EXPECT_FALSE(enabled);
+}
+
 TEST(AppContextTests, TryGetSwitch_Missing) {
     bool enabled = true;
     bool found = System::AppContext::TryGetSwitch("__no_such_switch_task42__", enabled);
     EXPECT_FALSE(found);
     EXPECT_FALSE(enabled);
+}
+
+TEST(AppContextTests, SetSwitch_EmptyName_Throws) {
+    EXPECT_THROW(System::AppContext::SetSwitch("", true), std::invalid_argument);
+}
+
+TEST(AppContextTests, TryGetSwitch_EmptyName_Throws) {
+    bool e = false;
+    EXPECT_THROW(System::AppContext::TryGetSwitch("", e), std::invalid_argument);
 }
 
 // ===========================================================================

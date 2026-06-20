@@ -10,20 +10,53 @@
 namespace System {
 
     /**
-     * @brief Provides access to application-context information and data, mirroring
-     *        the .NET @c System.AppContext static class.
+     * @brief Provides members for setting and retrieving data about an application's context.
+     *
+     * C++ counterpart of .NET System.AppContext static class.
+     * Supports the named-data store, compatibility switches, and the base directory.
      */
     class AppContext {
     public:
         AppContext() = delete;
 
-        /// @brief Returns the base directory of the application — delegates to
-        ///        @c AppDomain::CurrentDomain().getBaseDirectoryProperty().
-        static const std::string& getBaseDirProperty() {
+        // -----------------------------------------------------------------------
+        // Properties
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the file path of the base directory that the assembly resolver
+         * uses to probe for assemblies.
+         *
+         * C++ counterpart of .NET AppContext.BaseDirectory.
+         * Delegates to AppDomain.CurrentDomain().BaseDirectory.
+         * @return The base directory path (ends with a directory separator).
+         */
+        static const std::string& getBaseDirectoryProperty() {
             return AppDomain::CurrentDomain().getBaseDirectoryProperty();
         }
 
-        /// @brief Returns the named data item previously stored via @c SetData, or @c nullptr.
+        /**
+         * @brief Gets the name of the framework version targeted by the current application.
+         *
+         * C++ counterpart of .NET AppContext.TargetFrameworkName.
+         * Always returns an empty string in sharp-runtime (CLR reflection not available).
+         * @return An empty string.
+         */
+        static std::string getTargetFrameworkNameProperty() {
+            return {};
+        }
+
+        // -----------------------------------------------------------------------
+        // Data store
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Returns the value of the named data element assigned to the current application.
+         *
+         * C++ counterpart of .NET AppContext.GetData(string).
+         * @param name The name of the data element.
+         * @return A pointer to the stored value, or nullptr if @p name is not found.
+         */
         static void* GetData(const std::string& name) {
             std::lock_guard<std::mutex> lock(mutex_());
             auto& store = dataStore_();
@@ -31,15 +64,35 @@ namespace System {
             return (it != store.end()) ? it->second : nullptr;
         }
 
-        /// @brief Associates a named data item with this application context.
+        /**
+         * @brief Assigns a value to the named data element of the current application context.
+         *
+         * C++ counterpart of .NET AppContext.SetData(string, object).
+         * @param name The name of the data element.
+         * @param data A pointer to the value to associate with @p name.
+         */
         static void SetData(const std::string& name, void* data) {
             std::lock_guard<std::mutex> lock(mutex_());
             dataStore_()[name] = data;
         }
 
-        /// @brief Returns whether the named switch is enabled. Returns @c false and sets
-        ///        @p isEnabled to @c false if the switch has not been set.
+        // -----------------------------------------------------------------------
+        // Compatibility switches
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Tries to get the value of the named compatibility switch.
+         *
+         * C++ counterpart of .NET AppContext.TryGetSwitch(string, out bool).
+         * @param switchName The name of the switch.
+         * @param isEnabled  Set to the switch value on success, or false on failure.
+         * @return true if the switch was found and its value was assigned to @p isEnabled;
+         *         false if the switch has not been set.
+         * @throws std::invalid_argument if @p switchName is empty.
+         */
         static bool TryGetSwitch(const std::string& switchName, bool& isEnabled) {
+            if (switchName.empty())
+                throw std::invalid_argument("switchName cannot be null or empty.");
             std::lock_guard<std::mutex> lock(mutex_());
             auto& sw = switches_();
             auto it = sw.find(switchName);
@@ -51,8 +104,17 @@ namespace System {
             return false;
         }
 
-        /// @brief Sets the value of the named switch.
+        /**
+         * @brief Sets the value of the named compatibility switch.
+         *
+         * C++ counterpart of .NET AppContext.SetSwitch(string, bool).
+         * @param switchName The name of the switch.
+         * @param isEnabled  The value to assign to the switch.
+         * @throws std::invalid_argument if @p switchName is empty.
+         */
         static void SetSwitch(const std::string& switchName, bool isEnabled) {
+            if (switchName.empty())
+                throw std::invalid_argument("switchName cannot be null or empty.");
             std::lock_guard<std::mutex> lock(mutex_());
             switches_()[switchName] = isEnabled;
         }
