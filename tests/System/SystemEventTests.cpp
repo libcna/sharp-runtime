@@ -92,6 +92,30 @@ TEST(UnhandledExceptionEventArgsTests, NullException_Stored) {
     UnhandledExceptionEventArgs args(nullptr, false);
     EXPECT_EQ(args.getExceptionObjectProperty(), nullptr);
 }
+TEST(UnhandledExceptionEventArgsTests, IsA_EventArgs) {
+    auto ex = std::make_exception_ptr(std::runtime_error("x"));
+    UnhandledExceptionEventArgs args(ex, false);
+    EXPECT_NE(dynamic_cast<System::EventArgs*>(&args), nullptr);
+}
+TEST(UnhandledExceptionEventHandlerTests, Invokable_ReceivesSenderAndArgs) {
+    void* capturedSender = nullptr;
+    bool  capturedTerminating = false;
+    System::UnhandledExceptionEventHandler h =
+        [&](void* sender, UnhandledExceptionEventArgs& e) {
+            capturedSender      = sender;
+            capturedTerminating = e.getIsTerminatingProperty();
+        };
+    int dummy = 0;
+    auto ex = std::make_exception_ptr(std::runtime_error("err"));
+    UnhandledExceptionEventArgs args(ex, true);
+    h(&dummy, args);
+    EXPECT_EQ(capturedSender, &dummy);
+    EXPECT_TRUE(capturedTerminating);
+}
+TEST(UnhandledExceptionEventHandlerTests, NullHandler_IsFalsy) {
+    System::UnhandledExceptionEventHandler h;
+    EXPECT_FALSE(static_cast<bool>(h));
+}
 
 // ===========================================================================
 // ThreadExceptionEventArgs
