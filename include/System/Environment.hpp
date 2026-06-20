@@ -3,14 +3,17 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
 #include "System/OperatingSystem.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/Version.hpp"
 
 namespace System {
 
@@ -196,6 +199,27 @@ public:
      * C++ counterpart of .NET Environment.ProcessId.
      */
     [[nodiscard]] static SharpRuntime::intcs getProcessIdProperty();
+
+    /**
+     * @brief Gets the unique identifier of the current managed thread.
+     *
+     * C++ counterpart of .NET Environment.CurrentManagedThreadId.
+     * Returns a stable per-thread integer derived from std::this_thread::get_id().
+     */
+    [[nodiscard]] static SharpRuntime::intcs getCurrentManagedThreadIdProperty() {
+        return static_cast<SharpRuntime::intcs>(
+            std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0x7FFFFFFFu);
+    }
+
+    /**
+     * @brief Gets the version of the common language runtime (CLR).
+     *
+     * C++ counterpart of .NET Environment.Version.
+     * Returns a stub version of 1.0.0 in this port.
+     */
+    [[nodiscard]] static System::Version getVersionProperty() {
+        return System::Version(1, 0, 0);
+    }
 
     /**
      * @brief Gets the path of the executable that started the current process.
@@ -455,6 +479,16 @@ public:
      * C++ counterpart of .NET Environment.FailFast(string).
      */
     static void FailFast(const std::string&) { std::abort(); }
+
+    /**
+     * @brief Terminates the process immediately without running finalizers.
+     *
+     * C++ counterpart of .NET Environment.FailFast(string, Exception).
+     * The inner exception is accepted for API compatibility and ignored before aborting.
+     * @param message  A message describing the failure.
+     * @param exception The exception that caused the failure.
+     */
+    static void FailFast(const std::string&, const std::exception&) { std::abort(); }
 };
 
 } // namespace System

@@ -3,9 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Environment.hpp"
+#include "System/Version.hpp"
 
 using System::Environment;
 using SharpRuntime::longcs;
+using SharpRuntime::intcs;
 
 // ---------------------------------------------------------------------------
 // NewLine
@@ -479,4 +481,33 @@ TEST(EnvironmentTests, GetFolderPath_MyDocuments_NonEmpty) {
 TEST(EnvironmentTests, GetFolderPath_Temp_IsString) {
     std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData);
     EXPECT_NE(p, "");
+}
+
+// ---------------------------------------------------------------------------
+// CurrentManagedThreadId
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, CurrentManagedThreadId_NonNegative) {
+    SharpRuntime::intcs id = Environment::getCurrentManagedThreadIdProperty();
+    EXPECT_GE(id, 0);
+}
+
+TEST(EnvironmentTests, CurrentManagedThreadId_Idempotent) {
+    SharpRuntime::intcs a = Environment::getCurrentManagedThreadIdProperty();
+    SharpRuntime::intcs b = Environment::getCurrentManagedThreadIdProperty();
+    EXPECT_EQ(a, b);
+}
+
+// ---------------------------------------------------------------------------
+// Version
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, Version_MajorAtLeastOne) {
+    System::Version v = Environment::getVersionProperty();
+    EXPECT_GE(v.Major, 1);
+}
+
+TEST(EnvironmentTests, Version_MinorNonNegative) {
+    System::Version v = Environment::getVersionProperty();
+    EXPECT_GE(v.Minor, 0);
 }
