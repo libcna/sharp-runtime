@@ -90,6 +90,24 @@ EXCEPT_SIMPLE(DllNotFoundException)
 EXCEPT_SIMPLE(DuplicateWaitObjectException)
 EXCEPT_SIMPLE(EntryPointNotFoundException)
 EXCEPT_SIMPLE(ExecutionEngineException)
+
+TEST(ExecutionEngineExceptionTests, DefaultMessage_ContainsRuntime) {
+    System::ExecutionEngineException ex;
+    EXPECT_NE(std::string(ex.what()).find("runtime"), std::string::npos);
+}
+
+TEST(ExecutionEngineExceptionTests, IsA_SystemException) {
+    EXPECT_THROW(throw System::ExecutionEngineException(), System::SystemException);
+}
+
+TEST(ExecutionEngineExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root");
+    System::ExecutionEngineException ex("engine fault", inner);
+    std::string w = ex.what();
+    EXPECT_NE(w.find("engine fault"), std::string::npos);
+    EXPECT_NE(w.find("root"), std::string::npos);
+}
+
 EXCEPT_SIMPLE(FieldAccessException)
 EXCEPT_SIMPLE(IndexOutOfRangeException)
 EXCEPT_SIMPLE(InsufficientExecutionStackException)
