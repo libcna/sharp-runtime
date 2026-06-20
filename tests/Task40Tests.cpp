@@ -162,7 +162,7 @@ TEST(HalfTests, ExplicitConversion_ToFloat) {
 TEST(Int128Tests, DefaultCtor_IsZero) {
     System::Int128 v;
     EXPECT_EQ(v.getLowerProperty(), uint64_t(0));
-    EXPECT_EQ(v.getUpperProperty(), int64_t(0));
+    EXPECT_EQ(v.getUpperProperty(), uint64_t(0));
 }
 
 TEST(Int128Tests, Addition) {
@@ -205,6 +205,137 @@ TEST(Int128Tests, Comparison) {
 TEST(Int128Tests, StaticZero_One) {
     EXPECT_EQ(static_cast<long long>(System::Int128::Zero()), 0LL);
     EXPECT_EQ(static_cast<long long>(System::Int128::One()), 1LL);
+}
+
+TEST(Int128Tests, Equals_SameValue) {
+    System::Int128 a(42), b(42);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(Int128Tests, Equals_DifferentValues) {
+    System::Int128 a(1), b(2);
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(Int128Tests, GetHashCode_SameValueSameHash) {
+    System::Int128 a(99), b(99);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(Int128Tests, CompareTo_Less) {
+    System::Int128 a(1), b(2);
+    EXPECT_EQ(a.CompareTo(b), -1);
+}
+
+TEST(Int128Tests, CompareTo_Equal) {
+    System::Int128 a(5), b(5);
+    EXPECT_EQ(a.CompareTo(b), 0);
+}
+
+TEST(Int128Tests, CompareTo_Greater) {
+    System::Int128 a(10), b(3);
+    EXPECT_EQ(a.CompareTo(b), 1);
+}
+
+TEST(Int128Tests, ToString_Negative) {
+    System::Int128 v(-42);
+    EXPECT_EQ(v.ToString(), "-42");
+}
+
+TEST(Int128Tests, Parse_Positive) {
+    System::Int128 v = System::Int128::Parse("170141183460469231731687303715884105727");
+    EXPECT_EQ(v, System::Int128::MaxValue());
+}
+
+TEST(Int128Tests, Parse_Negative) {
+    System::Int128 v = System::Int128::Parse("-42");
+    EXPECT_EQ(static_cast<long long>(v), -42LL);
+}
+
+TEST(Int128Tests, Parse_Invalid_Throws) {
+    EXPECT_THROW(System::Int128::Parse("abc"), std::invalid_argument);
+}
+
+TEST(Int128Tests, TryParse_Success) {
+    System::Int128 result;
+    EXPECT_TRUE(System::Int128::TryParse("12345", result));
+    EXPECT_EQ(static_cast<long long>(result), 12345LL);
+}
+
+TEST(Int128Tests, TryParse_Failure) {
+    System::Int128 result;
+    EXPECT_FALSE(System::Int128::TryParse("not_a_number", result));
+}
+
+TEST(Int128Tests, Abs_Positive) {
+    System::Int128 v(7);
+    EXPECT_EQ(System::Int128::Abs(v), System::Int128(7));
+}
+
+TEST(Int128Tests, Abs_Negative) {
+    System::Int128 v(-7);
+    EXPECT_EQ(System::Int128::Abs(v), System::Int128(7));
+}
+
+TEST(Int128Tests, DivRem) {
+    System::Int128 dividend(17), divisor(5), remainder;
+    System::Int128 quotient = System::Int128::DivRem(dividend, divisor, remainder);
+    EXPECT_EQ(static_cast<long long>(quotient),  3LL);
+    EXPECT_EQ(static_cast<long long>(remainder), 2LL);
+}
+
+TEST(Int128Tests, LeadingZeroCount_One) {
+    System::Int128 v(1);
+    EXPECT_EQ(System::Int128::LeadingZeroCount(v), 127);
+}
+
+TEST(Int128Tests, LeadingZeroCount_Zero) {
+    System::Int128 v(0);
+    EXPECT_EQ(System::Int128::LeadingZeroCount(v), 128);
+}
+
+TEST(Int128Tests, TrailingZeroCount_One) {
+    System::Int128 v(1);
+    EXPECT_EQ(System::Int128::TrailingZeroCount(v), 0);
+}
+
+TEST(Int128Tests, TrailingZeroCount_Four) {
+    System::Int128 v(4);
+    EXPECT_EQ(System::Int128::TrailingZeroCount(v), 2);
+}
+
+TEST(Int128Tests, PopCount) {
+    System::Int128 v(7); // binary 111
+    EXPECT_EQ(System::Int128::PopCount(v), 3);
+}
+
+TEST(Int128Tests, RotateLeft_ByZero) {
+    System::Int128 v(1);
+    EXPECT_EQ(System::Int128::RotateLeft(v, 0), System::Int128(1));
+}
+
+TEST(Int128Tests, RotateLeft_By1) {
+    System::Int128 v(1);
+    EXPECT_EQ(System::Int128::RotateLeft(v, 1), System::Int128(2));
+}
+
+TEST(Int128Tests, RotateRight_By1) {
+    System::Int128 v(2);
+    EXPECT_EQ(System::Int128::RotateRight(v, 1), System::Int128(1));
+}
+
+TEST(Int128Tests, UpperLower_TwoArgCtor) {
+    System::Int128 v(uint64_t(0), uint64_t(0xDEADBEEFu));
+    EXPECT_EQ(v.getLowerProperty(), uint64_t(0xDEADBEEFu));
+    EXPECT_EQ(v.getUpperProperty(), uint64_t(0));
+}
+
+TEST(Int128Tests, MinValue_IsNegative) {
+    EXPECT_TRUE(System::Int128::MinValue() < System::Int128::Zero());
+}
+
+TEST(Int128Tests, MaxValue_IsPositive) {
+    EXPECT_TRUE(System::Int128::MaxValue() > System::Int128::Zero());
 }
 
 // ===========================================================================

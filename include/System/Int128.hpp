@@ -4,6 +4,8 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <stdexcept>
+#include <functional>
 
 #if defined(_MSC_VER)
 #  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."
@@ -11,99 +13,323 @@
 
 namespace System {
 
-    /// 128-bit signed integer, mirroring .NET System.Int128 (GCC/Clang only).
+    /**
+     * @brief Represents a 128-bit signed integer.
+     *
+     * C++ counterpart of .NET System.Int128.
+     * Backed by the GCC/Clang @c __int128 extension; MSVC is not supported.
+     */
     class Int128 {
         __int128 value_;
 
     public:
-        /// Constructs an Int128 with value 0.
-        constexpr Int128() : value_(0) {}
-        /// Constructs an Int128 from a raw __int128 value.
-        constexpr explicit Int128(__int128 v) : value_(v) {}
-        /// @brief Constructs an Int128 from a 64-bit upper half and a 64-bit lower half.
-        /// @param upper Signed high 64 bits.
-        /// @param lower Unsigned low 64 bits.
-        constexpr Int128(int64_t upper, uint64_t lower)
-            : value_((static_cast<__int128>(upper) << 64) | lower) {}
+        /** @brief Initializes a new instance of Int128 with value 0. */
+        constexpr Int128() noexcept : value_(0) {}
 
-        /// Returns the minimum representable Int128 value.
-        static const Int128 MinValue() {
-            static Int128 v(static_cast<__int128>(static_cast<int64_t>(0x8000000000000000LL)) << 64);
-            return v;
+        /** @brief Initializes a new instance of Int128 from a raw __int128 value. */
+        constexpr explicit Int128(__int128 v) noexcept : value_(v) {}
+
+        /**
+         * @brief Initializes a new instance of Int128.
+         * @param upper The upper 64 bits of the 128-bit value.
+         * @param lower The lower 64 bits of the 128-bit value.
+         */
+        constexpr Int128(uint64_t upper, uint64_t lower) noexcept
+            : value_(static_cast<__int128>(
+                (static_cast<unsigned __int128>(upper) << 64) | lower)) {}
+
+        // ---------------------------------------------------------------
+        // Static constants
+        // ---------------------------------------------------------------
+
+        /** @brief Represents the minimum value of Int128 (-2^127). */
+        static Int128 MinValue() noexcept {
+            return Int128(static_cast<__int128>(static_cast<unsigned __int128>(1) << 127));
         }
-        /// Returns the maximum representable Int128 value.
-        static const Int128 MaxValue() {
-            static Int128 v((static_cast<__int128>(static_cast<int64_t>(0x7FFFFFFFFFFFFFFFLL)) << 64) | 0xFFFFFFFFFFFFFFFFULL);
-            return v;
+
+        /** @brief Represents the maximum value of Int128 (2^127 - 1). */
+        static Int128 MaxValue() noexcept {
+            return Int128(~(static_cast<__int128>(static_cast<unsigned __int128>(1) << 127)));
         }
-        /// Returns an Int128 with value 0.
-        static const Int128 Zero() { return Int128(0); }
-        /// Returns an Int128 with value 1.
-        static const Int128 One()  { return Int128(1); }
 
-        /// Returns the low 64 bits as an unsigned 64-bit integer.
-        [[nodiscard]] uint64_t getLowerProperty() const { return static_cast<uint64_t>(value_); }
-        /// Returns the high 64 bits as a signed 64-bit integer.
-        [[nodiscard]] int64_t  getUpperProperty() const { return static_cast<int64_t>(value_ >> 64); }
+        /** @brief Gets an Int128 whose value is 0. */
+        static constexpr Int128 Zero() noexcept { return Int128(static_cast<__int128>(0)); }
 
-        /// Explicit conversion to long long (truncates to 64 bits).
-        explicit operator long long()          const { return static_cast<long long>(value_); }
-        /// Explicit conversion to unsigned long long (truncates to 64 bits).
-        explicit operator unsigned long long() const { return static_cast<unsigned long long>(value_); }
-        /// Explicit conversion to double (may lose precision).
-        explicit operator double()             const { return static_cast<double>(value_); }
-        /// Explicit conversion to __int128.
-        explicit operator __int128()           const { return value_; }
+        /** @brief Gets an Int128 whose value is 1. */
+        static constexpr Int128 One()  noexcept { return Int128(static_cast<__int128>(1)); }
 
-        /// Addition operator.
-        Int128 operator+(const Int128& o) const { return Int128(value_ + o.value_); }
-        /// Subtraction operator.
-        Int128 operator-(const Int128& o) const { return Int128(value_ - o.value_); }
-        /// Multiplication operator.
-        Int128 operator*(const Int128& o) const { return Int128(value_ * o.value_); }
-        /// Division operator.
-        Int128 operator/(const Int128& o) const { return Int128(value_ / o.value_); }
-        /// Modulo operator.
-        Int128 operator%(const Int128& o) const { return Int128(value_ % o.value_); }
-        /// Bitwise AND operator.
-        Int128 operator&(const Int128& o) const { return Int128(value_ & o.value_); }
-        /// Bitwise OR operator.
-        Int128 operator|(const Int128& o) const { return Int128(value_ | o.value_); }
-        /// Bitwise XOR operator.
-        Int128 operator^(const Int128& o) const { return Int128(value_ ^ o.value_); }
-        /// Bitwise NOT operator.
-        Int128 operator~()               const { return Int128(~value_); }
-        /// Unary negation operator.
-        Int128 operator-()               const { return Int128(-value_); }
-        /// Left-shift operator.
-        Int128 operator<<(int n)         const { return Int128(value_ << n); }
-        /// Right-shift operator.
-        Int128 operator>>(int n)         const { return Int128(value_ >> n); }
+        // ---------------------------------------------------------------
+        // Properties
+        // ---------------------------------------------------------------
 
-        /// Equality comparison.
-        bool operator==(const Int128& o) const { return value_ == o.value_; }
-        /// Inequality comparison.
-        bool operator!=(const Int128& o) const { return value_ != o.value_; }
-        /// Less-than comparison.
-        bool operator< (const Int128& o) const { return value_ <  o.value_; }
-        /// Less-than-or-equal comparison.
-        bool operator<=(const Int128& o) const { return value_ <= o.value_; }
-        /// Greater-than comparison.
-        bool operator> (const Int128& o) const { return value_ >  o.value_; }
-        /// Greater-than-or-equal comparison.
-        bool operator>=(const Int128& o) const { return value_ >= o.value_; }
+        /**
+         * @brief Gets the lower 64 bits of the 128-bit value.
+         *
+         * C++ counterpart of .NET Int128 internal Lower property.
+         */
+        [[nodiscard]] uint64_t getLowerProperty() const noexcept {
+            return static_cast<uint64_t>(value_);
+        }
 
-        /// Returns the decimal string representation of this Int128.
+        /**
+         * @brief Gets the upper 64 bits of the 128-bit value.
+         *
+         * C++ counterpart of .NET Int128 internal Upper property.
+         */
+        [[nodiscard]] uint64_t getUpperProperty() const noexcept {
+            return static_cast<uint64_t>(static_cast<unsigned __int128>(value_) >> 64);
+        }
+
+        // ---------------------------------------------------------------
+        // Equality and ordering
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Determines whether the specified Int128 is equal to this instance.
+         * @param other The Int128 to compare with the current instance.
+         * @return true if @p other is equal to this instance; false otherwise.
+         */
+        [[nodiscard]] bool Equals(const Int128& other) const noexcept {
+            return value_ == other.value_;
+        }
+
+        /**
+         * @brief Returns the hash code for this instance.
+         *
+         * C++ counterpart of .NET Int128.GetHashCode().
+         */
+        [[nodiscard]] int GetHashCode() const noexcept {
+            std::size_t seed = std::hash<uint64_t>{}(getLowerProperty());
+            seed ^= std::hash<uint64_t>{}(getUpperProperty())
+                  + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+            return static_cast<int>(seed);
+        }
+
+        /**
+         * @brief Compares this instance to another Int128 value.
+         * @param value The Int128 to compare with the current instance.
+         * @return -1 if less than @p value; 0 if equal; 1 if greater than @p value.
+         */
+        [[nodiscard]] int CompareTo(const Int128& value) const noexcept {
+            if (*this < value) return -1;
+            if (*this > value) return  1;
+            return 0;
+        }
+
+        // ---------------------------------------------------------------
+        // String conversion
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Converts the value of this Int128 to its equivalent string representation.
+         *
+         * C++ counterpart of .NET Int128.ToString().
+         * @return A string containing the decimal representation of this value.
+         */
         [[nodiscard]] std::string ToString() const {
             if (value_ == 0) return "0";
             bool neg = value_ < 0;
-            __int128 v = neg ? -value_ : value_;
+            unsigned __int128 v = neg ? static_cast<unsigned __int128>(-value_)
+                                      : static_cast<unsigned __int128>(value_);
             std::string s;
-            while (v > 0) { s += char('0' + (int)(v % 10)); v /= 10; }
+            while (v > 0) { s += char('0' + int(v % 10)); v /= 10; }
             if (neg) s += '-';
             std::reverse(s.begin(), s.end());
             return s;
         }
+
+        /**
+         * @brief Converts the string representation of a number to its Int128 equivalent.
+         * @param s A string containing the number to convert.
+         * @return An Int128 equivalent to @p s.
+         * @throws std::invalid_argument if @p s is not a valid integer string.
+         */
+        static Int128 Parse(const std::string& s) {
+            Int128 result;
+            if (!TryParse(s, result))
+                throw std::invalid_argument("Input string was not in a correct format: " + s);
+            return result;
+        }
+
+        /**
+         * @brief Tries to convert a string to its Int128 equivalent.
+         * @param s      A string containing the number to convert.
+         * @param result Set to the parsed value on success, or 0 on failure.
+         * @return true if @p s was converted successfully; false otherwise.
+         */
+        static bool TryParse(const std::string& s, Int128& result) {
+            result = Int128{};
+            if (s.empty()) return false;
+            std::size_t i = 0;
+            bool neg = false;
+            if (s[i] == '-') { neg = true; ++i; }
+            else if (s[i] == '+') { ++i; }
+            if (i == s.size()) return false;
+
+            const unsigned __int128 absMax = neg
+                ? (static_cast<unsigned __int128>(1) << 127)
+                : ((static_cast<unsigned __int128>(1) << 127) - 1);
+
+            unsigned __int128 val = 0;
+            for (; i < s.size(); ++i) {
+                if (s[i] < '0' || s[i] > '9') return false;
+                unsigned int digit = static_cast<unsigned int>(s[i] - '0');
+                if (val > (absMax - digit) / 10) return false;
+                val = val * 10 + digit;
+            }
+            result = neg ? Int128(-static_cast<__int128>(val))
+                        : Int128(static_cast<__int128>(val));
+            return true;
+        }
+
+        // ---------------------------------------------------------------
+        // Static math methods
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Computes the absolute value of the specified Int128.
+         * @param value The value whose absolute value is to be computed.
+         * @return The absolute value of @p value.
+         */
+        [[nodiscard]] static Int128 Abs(const Int128& value) noexcept {
+            return value.value_ < 0 ? Int128(-value.value_) : value;
+        }
+
+        /**
+         * @brief Produces the full product of two Int128 values.
+         * @param left      The dividend.
+         * @param right     The divisor.
+         * @param remainder Set to the remainder of the division.
+         * @return The quotient of dividing @p left by @p right.
+         */
+        static Int128 DivRem(const Int128& left, const Int128& right, Int128& remainder) {
+            Int128 quotient = left / right;
+            remainder = left - quotient * right;
+            return quotient;
+        }
+
+        /**
+         * @brief Counts the number of leading zero bits in a value.
+         * @param value The value whose leading zeros are to be counted.
+         * @return The number of leading zero bits in @p value.
+         */
+        [[nodiscard]] static int LeadingZeroCount(const Int128& value) noexcept {
+            uint64_t hi = value.getUpperProperty();
+            if (hi != 0) return __builtin_clzll(hi);
+            uint64_t lo = value.getLowerProperty();
+            if (lo != 0) return 64 + __builtin_clzll(lo);
+            return 128;
+        }
+
+        /**
+         * @brief Counts the number of trailing zero bits in a value.
+         * @param value The value whose trailing zeros are to be counted.
+         * @return The number of trailing zero bits in @p value.
+         */
+        [[nodiscard]] static int TrailingZeroCount(const Int128& value) noexcept {
+            uint64_t lo = value.getLowerProperty();
+            if (lo != 0) return __builtin_ctzll(lo);
+            uint64_t hi = value.getUpperProperty();
+            if (hi != 0) return 64 + __builtin_ctzll(hi);
+            return 128;
+        }
+
+        /**
+         * @brief Computes the number of bits that are set in a value.
+         * @param value The value whose set bits are to be counted.
+         * @return The number of set bits in @p value.
+         */
+        [[nodiscard]] static int PopCount(const Int128& value) noexcept {
+            return __builtin_popcountll(value.getLowerProperty())
+                 + __builtin_popcountll(value.getUpperProperty());
+        }
+
+        /**
+         * @brief Rotates a value left by a given number of bits.
+         * @param value        The value to rotate.
+         * @param rotateAmount The number of bits to rotate by.
+         * @return @p value rotated left by @p rotateAmount bits.
+         */
+        [[nodiscard]] static Int128 RotateLeft(const Int128& value, int rotateAmount) noexcept {
+            rotateAmount &= 127;
+            if (rotateAmount == 0) return value;
+            auto uv = static_cast<unsigned __int128>(value.value_);
+            return Int128(static_cast<__int128>(
+                (uv << rotateAmount) | (uv >> (128 - rotateAmount))));
+        }
+
+        /**
+         * @brief Rotates a value right by a given number of bits.
+         * @param value        The value to rotate.
+         * @param rotateAmount The number of bits to rotate by.
+         * @return @p value rotated right by @p rotateAmount bits.
+         */
+        [[nodiscard]] static Int128 RotateRight(const Int128& value, int rotateAmount) noexcept {
+            rotateAmount &= 127;
+            if (rotateAmount == 0) return value;
+            auto uv = static_cast<unsigned __int128>(value.value_);
+            return Int128(static_cast<__int128>(
+                (uv >> rotateAmount) | (uv << (128 - rotateAmount))));
+        }
+
+        // ---------------------------------------------------------------
+        // Arithmetic operators
+        // ---------------------------------------------------------------
+
+        /** @brief Adds two Int128 values. */
+        Int128 operator+(const Int128& o) const noexcept { return Int128(value_ + o.value_); }
+        /** @brief Subtracts one Int128 from another. */
+        Int128 operator-(const Int128& o) const noexcept { return Int128(value_ - o.value_); }
+        /** @brief Multiplies two Int128 values. */
+        Int128 operator*(const Int128& o) const noexcept { return Int128(value_ * o.value_); }
+        /** @brief Divides an Int128 by another. */
+        Int128 operator/(const Int128& o) const { return Int128(value_ / o.value_); }
+        /** @brief Computes the remainder of dividing one Int128 by another. */
+        Int128 operator%(const Int128& o) const { return Int128(value_ % o.value_); }
+        /** @brief Computes the bitwise AND of two Int128 values. */
+        Int128 operator&(const Int128& o) const noexcept { return Int128(value_ & o.value_); }
+        /** @brief Computes the bitwise OR of two Int128 values. */
+        Int128 operator|(const Int128& o) const noexcept { return Int128(value_ | o.value_); }
+        /** @brief Computes the bitwise XOR of two Int128 values. */
+        Int128 operator^(const Int128& o) const noexcept { return Int128(value_ ^ o.value_); }
+        /** @brief Returns the bitwise complement of an Int128. */
+        Int128 operator~() const noexcept { return Int128(~value_); }
+        /** @brief Returns the arithmetic negation of an Int128. */
+        Int128 operator-() const noexcept { return Int128(-value_); }
+        /** @brief Shifts an Int128 left by n bits. */
+        Int128 operator<<(int n) const noexcept { return Int128(value_ << n); }
+        /** @brief Shifts an Int128 right by n bits (arithmetic/signed). */
+        Int128 operator>>(int n) const noexcept { return Int128(value_ >> n); }
+
+        // ---------------------------------------------------------------
+        // Comparison operators
+        // ---------------------------------------------------------------
+
+        /** @brief Returns true if two Int128 values are equal. */
+        bool operator==(const Int128& o) const noexcept { return value_ == o.value_; }
+        /** @brief Returns true if two Int128 values are not equal. */
+        bool operator!=(const Int128& o) const noexcept { return value_ != o.value_; }
+        /** @brief Returns true if this Int128 is less than another. */
+        bool operator< (const Int128& o) const noexcept { return value_ <  o.value_; }
+        /** @brief Returns true if this Int128 is less than or equal to another. */
+        bool operator<=(const Int128& o) const noexcept { return value_ <= o.value_; }
+        /** @brief Returns true if this Int128 is greater than another. */
+        bool operator> (const Int128& o) const noexcept { return value_ >  o.value_; }
+        /** @brief Returns true if this Int128 is greater than or equal to another. */
+        bool operator>=(const Int128& o) const noexcept { return value_ >= o.value_; }
+
+        // ---------------------------------------------------------------
+        // Explicit conversions to primitive types
+        // ---------------------------------------------------------------
+
+        /** @brief Explicitly converts to long long (truncates to 64 bits). */
+        explicit operator long long()          const noexcept { return static_cast<long long>(value_); }
+        /** @brief Explicitly converts to unsigned long long (truncates to 64 bits). */
+        explicit operator unsigned long long() const noexcept { return static_cast<unsigned long long>(value_); }
+        /** @brief Explicitly converts to double (may lose precision). */
+        explicit operator double()             const noexcept { return static_cast<double>(value_); }
+        /** @brief Returns the underlying __int128 value. */
+        explicit operator __int128()           const noexcept { return value_; }
     };
 
 } // namespace System
