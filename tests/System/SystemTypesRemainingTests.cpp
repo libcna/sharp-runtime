@@ -46,9 +46,11 @@ using System::ValueTuple1;
 using System::ValueTuple2;
 using System::ValueTuple3;
 using System::ValueTuple4;
+using System::ValueTuple;
 using System::ValueTuple5;
 using System::ValueTuple6;
 using System::ValueTuple7;
+using System::ValueTuple8;
 using System::MakeValueTuple;
 using System::DateOnly;
 using System::WeakReference;
@@ -564,6 +566,64 @@ TEST(ValueTupleTests, Tuple7_StoresAndCompares) {
 TEST(ValueTupleTests, Tuple7_ToString) {
     auto t = MakeValueTuple(1, 2, 3, 4, 5, 6, 7);
     EXPECT_EQ(t.ToString(), "(1, 2, 3, 4, 5, 6, 7)");
+}
+
+TEST(ValueTupleTests, Tuple8_StoresAndCompares) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.Rest.Item1, 8);
+    EXPECT_TRUE(t == MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 8));
+    EXPECT_FALSE(t == MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 0));
+}
+
+TEST(ValueTupleTests, Tuple8_ToString) {
+    auto t = MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(t.ToString(), "(1, 2, 3, 4, 5, 6, 7, 8)");
+}
+
+TEST(ValueTupleTests, Tuple8_CompareTo) {
+    auto a = MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 1);
+    auto b = MakeValueTuple(1, 2, 3, 4, 5, 6, 7, 2);
+    EXPECT_EQ(a.CompareTo(b), -1);
+    EXPECT_EQ(b.CompareTo(a),  1);
+    EXPECT_EQ(a.CompareTo(a),  0);
+}
+
+TEST(ValueTupleTests, ZeroElement_DefaultCtor) {
+    ValueTuple t;
+    EXPECT_EQ(t.ToString(), "()");
+    EXPECT_EQ(t.GetHashCode(), 0);
+    EXPECT_EQ(t.CompareTo(ValueTuple{}), 0);
+    EXPECT_TRUE(t.Equals(ValueTuple{}));
+    EXPECT_TRUE(t == ValueTuple{});
+    EXPECT_FALSE(t != ValueTuple{});
+}
+
+TEST(ValueTupleTests, Create_ZeroElement) {
+    auto t = ValueTuple::Create();
+    EXPECT_EQ(t.ToString(), "()");
+}
+
+TEST(ValueTupleTests, Create_1) {
+    auto t = ValueTuple::Create(42);
+    EXPECT_EQ(t.Item1, 42);
+}
+
+TEST(ValueTupleTests, Create_2) {
+    auto t = ValueTuple::Create(1, 2);
+    EXPECT_EQ(t.Item1, 1);
+    EXPECT_EQ(t.Item2, 2);
+}
+
+TEST(ValueTupleTests, Create_7) {
+    auto t = ValueTuple::Create(1, 2, 3, 4, 5, 6, 7);
+    EXPECT_EQ(t.Item7, 7);
+}
+
+TEST(ValueTupleTests, Create_8) {
+    auto t = ValueTuple::Create(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.Rest.Item1, 8);
 }
 
 // ===========================================================================
