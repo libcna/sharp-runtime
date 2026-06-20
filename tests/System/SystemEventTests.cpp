@@ -67,6 +67,16 @@ TEST(ResolveEventArgsTests, TwoArgCtor_StoresBoth) {
     EXPECT_EQ(args.getRequestingAssemblyNameProperty(), "MyApp");
 }
 
+TEST(ResolveEventArgsTests, IsA_EventArgs) {
+    ResolveEventArgs args("System.Foo");
+    EXPECT_NE(dynamic_cast<System::EventArgs*>(&args), nullptr);
+}
+
+TEST(ResolveEventArgsTests, RequestingAssembly_DefaultEmpty) {
+    ResolveEventArgs args("MyType");
+    EXPECT_TRUE(args.getRequestingAssemblyNameProperty().empty());
+}
+
 // ===========================================================================
 // UnhandledExceptionEventArgs
 // ===========================================================================
