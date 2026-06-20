@@ -17,6 +17,7 @@
 #include "System/PlatformID.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
 #include "System/Nullable.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Lazy.hpp"
 #include "System/HashCode.hpp"
 #include "System/ArraySegment.hpp"
@@ -152,7 +153,7 @@ TEST(NullableTests, ValueCtor_HasValueTrue) {
 }
 TEST(NullableTests, GetValue_NoValue_Throws) {
     Nullable<int> n;
-    EXPECT_THROW(n.getValueProperty(), std::runtime_error);
+    EXPECT_THROW(n.getValueProperty(), System::InvalidOperationException);
 }
 TEST(NullableTests, GetValueOrDefault_NoValue_ReturnsDefault) {
     Nullable<int> n;
@@ -181,6 +182,82 @@ TEST(NullableTests, Equality_NulloptComparison) {
     EXPECT_TRUE(n == std::nullopt);
     Nullable<int> m(1);
     EXPECT_FALSE(m == std::nullopt);
+}
+
+TEST(NullableTests, Equals_SameValue_True) {
+    Nullable<int> a(10), b(10);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(NullableTests, Equals_DifferentValues_False) {
+    Nullable<int> a(10), b(20);
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(NullableTests, Equals_BothNull_True) {
+    Nullable<int> a, b;
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(NullableTests, GetHashCode_HasValue_NonZero) {
+    Nullable<int> n(42);
+    EXPECT_NE(n.GetHashCode(), static_cast<std::size_t>(0));
+}
+
+TEST(NullableTests, GetHashCode_NoValue_IsZero) {
+    Nullable<int> n;
+    EXPECT_EQ(n.GetHashCode(), static_cast<std::size_t>(0));
+}
+
+TEST(NullableTests, ToString_HasValue_ReturnsString) {
+    Nullable<int> n(7);
+    EXPECT_EQ(n.ToString(), "7");
+}
+
+TEST(NullableTests, ToString_NoValue_ReturnsEmpty) {
+    Nullable<int> n;
+    EXPECT_EQ(n.ToString(), "");
+}
+
+// ---------------------------------------------------------------------------
+// NullableHelper (static class counterpart)
+// ---------------------------------------------------------------------------
+
+TEST(NullableHelperTests, Compare_BothNull_Zero) {
+    Nullable<int> a, b;
+    EXPECT_EQ(System::NullableHelper::Compare(a, b), 0);
+}
+
+TEST(NullableHelperTests, Compare_FirstNull_Negative) {
+    Nullable<int> a;
+    Nullable<int> b(1);
+    EXPECT_LT(System::NullableHelper::Compare(a, b), 0);
+}
+
+TEST(NullableHelperTests, Compare_SecondNull_Positive) {
+    Nullable<int> a(1);
+    Nullable<int> b;
+    EXPECT_GT(System::NullableHelper::Compare(a, b), 0);
+}
+
+TEST(NullableHelperTests, Compare_EqualValues_Zero) {
+    Nullable<int> a(5), b(5);
+    EXPECT_EQ(System::NullableHelper::Compare(a, b), 0);
+}
+
+TEST(NullableHelperTests, Equals_BothNull_True) {
+    Nullable<int> a, b;
+    EXPECT_TRUE(System::NullableHelper::Equals(a, b));
+}
+
+TEST(NullableHelperTests, Equals_SameValue_True) {
+    Nullable<int> a(3), b(3);
+    EXPECT_TRUE(System::NullableHelper::Equals(a, b));
+}
+
+TEST(NullableHelperTests, Equals_DifferentValues_False) {
+    Nullable<int> a(3), b(4);
+    EXPECT_FALSE(System::NullableHelper::Equals(a, b));
 }
 
 // ===========================================================================
