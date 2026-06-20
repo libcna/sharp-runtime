@@ -102,6 +102,54 @@ TEST(ExceptionTests, ArgumentExceptionCatchableAsSystemException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, ArgumentException_ParamName_Stored) {
+    ArgumentException e("bad value", "myParam");
+    EXPECT_EQ(e.getParamNameProperty(), "myParam");
+}
+
+TEST(ExceptionTests, ArgumentException_ParamName_InMessage) {
+    ArgumentException e("bad value", "myParam");
+    EXPECT_NE(e.getMessageProperty().find("myParam"), std::string::npos);
+}
+
+TEST(ExceptionTests, ArgumentException_NoParamName_Empty) {
+    ArgumentException e("bad arg");
+    EXPECT_EQ(e.getParamNameProperty(), "");
+}
+
+TEST(ExceptionTests, ArgumentException_InnerException_Stored) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    ArgumentException e("bad arg", inner);
+    EXPECT_NE(e.getInnerExceptionProperty(), nullptr);
+}
+
+TEST(ExceptionTests, ArgumentException_ParamAndInner) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    ArgumentException e("bad arg", "p", inner);
+    EXPECT_EQ(e.getParamNameProperty(), "p");
+    EXPECT_NE(e.getInnerExceptionProperty(), nullptr);
+}
+
+TEST(ExceptionTests, ArgumentException_ThrowIfNullOrEmpty_Throws) {
+    EXPECT_THROW(ArgumentException::ThrowIfNullOrEmpty("", "arg"), ArgumentException);
+}
+
+TEST(ExceptionTests, ArgumentException_ThrowIfNullOrEmpty_NoThrow) {
+    EXPECT_NO_THROW(ArgumentException::ThrowIfNullOrEmpty("hello", "arg"));
+}
+
+TEST(ExceptionTests, ArgumentException_ThrowIfNullOrWhiteSpace_Throws) {
+    EXPECT_THROW(ArgumentException::ThrowIfNullOrWhiteSpace("   ", "arg"), ArgumentException);
+}
+
+TEST(ExceptionTests, ArgumentException_ThrowIfNullOrWhiteSpace_NoThrow) {
+    EXPECT_NO_THROW(ArgumentException::ThrowIfNullOrWhiteSpace("hello", "arg"));
+}
+
+TEST(ExceptionTests, ArgumentException_ThrowIfNullOrWhiteSpace_EmptyThrows) {
+    EXPECT_THROW(ArgumentException::ThrowIfNullOrWhiteSpace("", "arg"), ArgumentException);
+}
+
 // ---------------------------------------------------------------------------
 // ArgumentNullException
 // ---------------------------------------------------------------------------

@@ -1,46 +1,62 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 6/5/25.
-//
-
 #include "System/ArgumentException.hpp"
+#include <algorithm>
+#include <cctype>
 
 namespace System {
 
-    /**
-     * \brief Initializes a new instance of the ArgumentException class
-     * with an empty message.
-     */
+    static std::string appendParamName(const std::string& msg, const std::string& paramName) {
+        if (paramName.empty()) return msg;
+        return msg + " (Parameter '" + paramName + "')";
+    }
+
     ArgumentException::ArgumentException()
-        : SystemException() {
-    }
+        : SystemException("Value does not fall within the expected range.") {}
 
-    /**
-     * \brief Initializes a new instance of the ArgumentException class
-     * with the specified error message.
-     * \param str A null-terminated character string that describes the error.
-     */
-    ArgumentException::ArgumentException(const char* str)
-        : SystemException(str) {
-    }
+    ArgumentException::ArgumentException(const char* message)
+        : SystemException(message ? message : "") {}
 
-    /**
-     * \brief Initializes a new instance of the ArgumentException class
-     * with the specified error message.
-     * \param str A string that describes the error.
-     */
-    ArgumentException::ArgumentException(const std::string& str)
-        : SystemException(str) {
-    }
+    ArgumentException::ArgumentException(const std::string& message)
+        : SystemException(message) {}
+
+    ArgumentException::ArgumentException(const std::string& message,
+                                         std::exception_ptr innerException)
+        : SystemException(message, std::move(innerException)) {}
 
     ArgumentException::ArgumentException(const char* message, const char* paramName)
-        : SystemException(std::string(message) + " (Parameter '" + paramName + "')") {
+        : SystemException(appendParamName(message ? message : "", paramName ? paramName : "")),
+          paramName_(paramName ? paramName : "") {}
+
+    ArgumentException::ArgumentException(const std::string& message,
+                                         const std::string& paramName)
+        : SystemException(appendParamName(message, paramName)),
+          paramName_(paramName) {}
+
+    ArgumentException::ArgumentException(const std::string& message,
+                                         const std::string& paramName,
+                                         std::exception_ptr innerException)
+        : SystemException(appendParamName(message, paramName), std::move(innerException)),
+          paramName_(paramName) {}
+
+    void ArgumentException::ThrowIfNullOrEmpty(const std::string& argument,
+                                               const std::string& paramName) {
+        if (argument.empty()) {
+            throw ArgumentException("The value cannot be null or empty.", paramName);
+        }
     }
 
-    ArgumentException::ArgumentException(const std::string& message, const std::string& paramName)
-        : SystemException(message + " (Parameter '" + paramName + "')") {
+    void ArgumentException::ThrowIfNullOrWhiteSpace(const std::string& argument,
+                                                    const std::string& paramName) {
+        bool allSpace = argument.empty() ||
+            std::all_of(argument.begin(), argument.end(),
+                        [](unsigned char c) { return std::isspace(c); });
+        if (allSpace) {
+            throw ArgumentException(
+                "The value cannot be null, empty, or consist only of white-space characters.",
+                paramName);
+        }
     }
 
 } // namespace System
