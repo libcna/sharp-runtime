@@ -399,3 +399,84 @@ TEST(EnvironmentTests, OSVersion_LinuxMajorVersionReasonable) {
 TEST(EnvironmentTests, UserInteractive_IsTrue) {
     EXPECT_TRUE(Environment::getUserInteractiveProperty());
 }
+
+// ---------------------------------------------------------------------------
+// SpecialFolder — enum numeric values (match CSIDL constants from .NET)
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SpecialFolder_Desktop_Is0x0000) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Desktop), 0x0000);
+}
+TEST(EnvironmentTests, SpecialFolder_Programs_Is0x0002) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Programs), 0x0002);
+}
+TEST(EnvironmentTests, SpecialFolder_Personal_Is0x0005) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Personal), 0x0005);
+}
+TEST(EnvironmentTests, SpecialFolder_MyDocuments_SameAsPersonal) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::MyDocuments),
+              static_cast<int>(Environment::SpecialFolder::Personal));
+}
+TEST(EnvironmentTests, SpecialFolder_ApplicationData_Is0x001A) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::ApplicationData), 0x001A);
+}
+TEST(EnvironmentTests, SpecialFolder_LocalApplicationData_Is0x001C) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::LocalApplicationData), 0x001C);
+}
+TEST(EnvironmentTests, SpecialFolder_CommonApplicationData_Is0x0023) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::CommonApplicationData), 0x0023);
+}
+TEST(EnvironmentTests, SpecialFolder_UserProfile_Is0x0028) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::UserProfile), 0x0028);
+}
+TEST(EnvironmentTests, SpecialFolder_ProgramFiles_Is0x0026) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::ProgramFiles), 0x0026);
+}
+TEST(EnvironmentTests, SpecialFolder_System_Is0x0025) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::System), 0x0025);
+}
+TEST(EnvironmentTests, SpecialFolder_Windows_Is0x0024) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Windows), 0x0024);
+}
+TEST(EnvironmentTests, SpecialFolder_MyPictures_Is0x0027) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::MyPictures), 0x0027);
+}
+TEST(EnvironmentTests, SpecialFolder_MyMusic_Is0x000D) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::MyMusic), 0x000D);
+}
+TEST(EnvironmentTests, SpecialFolder_MyVideos_Is0x000E) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::MyVideos), 0x000E);
+}
+TEST(EnvironmentTests, SpecialFolder_Fonts_Is0x0014) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Fonts), 0x0014);
+}
+TEST(EnvironmentTests, SpecialFolder_Favorites_Is0x0006) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::Favorites), 0x0006);
+}
+TEST(EnvironmentTests, SpecialFolder_StartMenu_Is0x000B) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::StartMenu), 0x000B);
+}
+TEST(EnvironmentTests, SpecialFolder_CDBurning_Is0x003B) {
+    EXPECT_EQ(static_cast<int>(Environment::SpecialFolder::CDBurning), 0x003B);
+}
+
+// ---------------------------------------------------------------------------
+// GetFolderPath — additional folders
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetFolderPath_ApplicationData_NonEmpty) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData);
+    EXPECT_FALSE(p.empty());
+}
+TEST(EnvironmentTests, GetFolderPath_LocalApplicationData_NonEmpty) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::LocalApplicationData);
+    EXPECT_FALSE(p.empty());
+}
+TEST(EnvironmentTests, GetFolderPath_MyDocuments_NonEmpty) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::MyDocuments);
+    EXPECT_FALSE(p.empty());
+}
+TEST(EnvironmentTests, GetFolderPath_Temp_IsString) {
+    std::string p = Environment::GetFolderPath(Environment::SpecialFolder::ApplicationData);
+    EXPECT_NE(p, "");
+}
