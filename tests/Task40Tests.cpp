@@ -19,6 +19,7 @@
 #include "System/TimeOnly.hpp"
 #include "System/DBNull.hpp"
 #include "System/FormattableString.hpp"
+#include "System/Runtime/CompilerServices/FormattableStringFactory.hpp"
 #include "System/OperatingSystem.hpp"
 #include "System/Numerics/BFloat16.hpp"
 #include "System/Numerics/DivisionRounding.hpp"
@@ -608,6 +609,56 @@ TEST(FormattableStringTests, ToString_SubstitutesPlaceholders) {
 TEST(FormattableStringTests, Invariant_ReturnsToString) {
     System::FormattableString fs("{0}+{1}={2}", {"1", "2", "3"});
     EXPECT_EQ(System::FormattableString::Invariant(fs), "1+2=3");
+}
+
+TEST(FormattableStringTests, GetArguments_ReturnsAllArgs) {
+    System::FormattableString fs("{0} {1}", {"alpha", "beta"});
+    auto args = fs.GetArguments();
+    ASSERT_EQ(static_cast<int>(args.size()), 2);
+    EXPECT_EQ(args[0], "alpha");
+    EXPECT_EQ(args[1], "beta");
+}
+
+TEST(FormattableStringTests, GetArguments_EmptyWhenNoArgs) {
+    System::FormattableString fs("no placeholders");
+    EXPECT_TRUE(fs.GetArguments().empty());
+}
+
+TEST(FormattableStringTests, ToString_WithNullProvider_SameAsToString) {
+    System::FormattableString fs("value={0}", {"42"});
+    EXPECT_EQ(fs.ToString(nullptr), "value=42");
+}
+
+TEST(FormattableStringTests, CurrentCulture_ReturnsToString) {
+    System::FormattableString fs("{0} world", {"hello"});
+    EXPECT_EQ(System::FormattableString::CurrentCulture(fs), "hello world");
+}
+
+TEST(FormattableStringTests, GetArgument_OutOfRange_Throws) {
+    System::FormattableString fs("{0}", {"x"});
+    EXPECT_THROW(fs.GetArgument(5), std::out_of_range);
+}
+
+// ===========================================================================
+// FormattableStringFactory
+// ===========================================================================
+
+TEST(FormattableStringFactoryTests, Create_NoArgs) {
+    auto fs = System::Runtime::CompilerServices::FormattableStringFactory::Create("hello");
+    EXPECT_EQ(fs.getFormatProperty(), "hello");
+    EXPECT_EQ(fs.getArgumentCountProperty(), 0);
+}
+
+TEST(FormattableStringFactoryTests, Create_WithArgs_ToString) {
+    auto fs = System::Runtime::CompilerServices::FormattableStringFactory::Create(
+        "{0} + {1} = {2}", {"1", "2", "3"});
+    EXPECT_EQ(fs.ToString(), "1 + 2 = 3");
+}
+
+TEST(FormattableStringFactoryTests, Create_PreservesArguments) {
+    auto fs = System::Runtime::CompilerServices::FormattableStringFactory::Create(
+        "{0}", {"hello"});
+    EXPECT_EQ(fs.GetArgument(0), "hello");
 }
 
 // ===========================================================================
