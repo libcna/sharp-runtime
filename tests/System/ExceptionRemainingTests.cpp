@@ -111,6 +111,19 @@ EXCEPT_SIMPLE(StackOverflowException)
 EXCEPT_SIMPLE(TimeoutException)
 EXCEPT_SIMPLE(TimeZoneNotFoundException)
 EXCEPT_SIMPLE(TypeAccessException)
+
+TEST(TypeAccessExceptionTests, IsA_TypeLoadException) {
+    EXPECT_THROW(throw System::TypeAccessException(), System::TypeLoadException);
+}
+
+TEST(TypeAccessExceptionTests, InnerExceptionCtor_MessageContainsBoth) {
+    std::runtime_error inner("inner cause");
+    System::TypeAccessException ex("access denied", inner);
+    std::string w = ex.what();
+    EXPECT_NE(w.find("access denied"), std::string::npos);
+    EXPECT_NE(w.find("inner cause"), std::string::npos);
+}
+
 EXCEPT_SIMPLE(TypeLoadException)
 EXCEPT_SIMPLE(TypeUnloadedException)
 EXCEPT_SIMPLE(UnauthorizedAccessException)
