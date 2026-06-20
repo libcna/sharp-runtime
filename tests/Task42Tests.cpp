@@ -1010,6 +1010,56 @@ TEST(ActionTests, ActionT3_ThreeArgs) {
     a(1, 2, 3);
     EXPECT_EQ(sum, 6);
 }
+TEST(ActionTests, ActionT4_FourArgs) {
+    int sum = 0;
+    System::ActionT4<int,int,int,int> a = [&](int a, int b, int c, int d){ sum = a+b+c+d; };
+    a(1, 2, 3, 4);
+    EXPECT_EQ(sum, 10);
+}
+TEST(ActionTests, ActionT8_EightArgs) {
+    int sum = 0;
+    System::ActionT8<int,int,int,int,int,int,int,int> a =
+        [&](int a,int b,int c,int d,int e,int f,int g,int h){ sum=a+b+c+d+e+f+g+h; };
+    a(1,1,1,1,1,1,1,1);
+    EXPECT_EQ(sum, 8);
+}
+TEST(ActionTests, ActionT16_SixteenArgs) {
+    int sum = 0;
+    System::ActionT16<int,int,int,int,int,int,int,int,int,int,int,int,int,int,int,int> a =
+        [&](int a,int b,int c,int d,int e,int f,int g,int h,
+            int i,int j,int k,int l,int m,int n,int o,int p){
+            sum=a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p; };
+    a(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
+    EXPECT_EQ(sum, 16);
+}
+TEST(ActionTests, Comparison_LessThan) {
+    System::Comparison<int> cmp = [](int x, int y){ return x - y; };
+    EXPECT_LT(cmp(1, 2), 0);
+    EXPECT_EQ(cmp(3, 3), 0);
+    EXPECT_GT(cmp(5, 4), 0);
+}
+TEST(ActionTests, Converter_IntToString) {
+    System::Converter<int, std::string> conv = [](int v){ return std::to_string(v); };
+    EXPECT_EQ(conv(42), "42");
+}
+TEST(ActionTests, SpanAction_Buffers) {
+    int sum = 0;
+    System::Buffers::SpanAction<int, int> a =
+        [&](System::Span<int> sp, int extra){ for (int i = 0; i < sp.getLengthProperty(); ++i) sum += sp[i]; sum += extra; };
+    std::vector<int> v = {1, 2, 3};
+    System::Span<int> sp(v.data(), static_cast<int>(v.size()));
+    a(sp, 10);
+    EXPECT_EQ(sum, 16);
+}
+TEST(ActionTests, ReadOnlySpanAction_Buffers) {
+    int count = 0;
+    System::Buffers::ReadOnlySpanAction<int, std::string> a =
+        [&](System::ReadOnlySpan<int> sp, std::string){ count = sp.getLengthProperty(); };
+    std::vector<int> v = {5, 6, 7, 8};
+    System::ReadOnlySpan<int> sp(v.data(), static_cast<int>(v.size()));
+    a(sp, "ignored");
+    EXPECT_EQ(count, 4);
+}
 
 TEST(FuncTests, Func_NoArgs) {
     System::Func<int> f = []{ return 42; };
