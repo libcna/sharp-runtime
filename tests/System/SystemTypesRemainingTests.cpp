@@ -954,6 +954,27 @@ TEST(IObserverTests, MultipleOnNext_LastValueKept) {
     EXPECT_EQ(obs->lastValue, 3);
 }
 
+TEST(IObserverTests, IsAbstract_CannotInstantiateDirect) {
+    static_assert(std::is_abstract_v<System::IObserver<int>>,
+                  "IObserver<T> must be abstract");
+    SUCCEED();
+}
+
+TEST(IObserverTests, StringObserver_OnNext_Delivered) {
+    struct StringObs : System::IObserver<std::string> {
+        std::string last;
+        bool done = false;
+        void OnNext(const std::string& v) override { last = v; }
+        void OnError(const std::exception&) override {}
+        void OnCompleted() override { done = true; }
+    };
+    StringObs obs;
+    obs.OnNext("hello");
+    EXPECT_EQ(obs.last, "hello");
+    obs.OnCompleted();
+    EXPECT_TRUE(obs.done);
+}
+
 // ===========================================================================
 // TypedReference
 // ===========================================================================
