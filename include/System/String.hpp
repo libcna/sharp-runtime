@@ -590,6 +590,30 @@ namespace System
                                   const std::string& arg2, const std::string& arg3);
 
         // -----------------------------------------------------------------------
+        // Interning (stub — C++ has no string intern pool)
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Retrieves the system's reference to the specified string.
+         *
+         * C++ counterpart of .NET String.Intern(string). C++ has no managed
+         * string intern pool, so this stub returns @p str unchanged.
+         * @param str The string to intern.
+         * @return The same string @p str.
+         */
+        static std::string Intern(const std::string& str) { return str; }
+
+        /**
+         * @brief Returns a reference to a known interned string, if it exists.
+         *
+         * C++ counterpart of .NET String.IsInterned(string). C++ has no managed
+         * string intern pool, so this stub always returns @p str (never null).
+         * @param str The string to look up.
+         * @return The same string @p str.
+         */
+        static std::string IsInterned(const std::string& str) { return str; }
+
+        // -----------------------------------------------------------------------
         // Constants
         // -----------------------------------------------------------------------
 

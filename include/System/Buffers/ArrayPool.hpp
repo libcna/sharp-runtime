@@ -23,6 +23,25 @@ namespace System::Buffers {
 
         /// Returns a shared, process-wide ArrayPool instance.
         static ArrayPool<T>& Shared();
+
+        /**
+         * @brief Creates a new ArrayPool with default capacity limits.
+         *
+         * C++ counterpart of .NET ArrayPool&lt;T&gt;.Create(). Returns a heap-backed
+         * pool that allocates a new vector on each Rent call.
+         */
+        static std::unique_ptr<ArrayPool<T>> Create();
+
+        /**
+         * @brief Creates a new ArrayPool with specified capacity limits.
+         *
+         * C++ counterpart of .NET ArrayPool&lt;T&gt;.Create(int, int).
+         * The capacity parameters are accepted for API compatibility but are
+         * not used in this stub implementation.
+         * @param maxArrayLength       Maximum allowed array length.
+         * @param maxArraysPerBucket   Maximum number of arrays per bucket.
+         */
+        static std::unique_ptr<ArrayPool<T>> Create(int maxArrayLength, int maxArraysPerBucket);
     };
 
     // Defined after ArrayPool<T> is complete to avoid incomplete-type warning.
@@ -39,6 +58,16 @@ namespace System::Buffers {
     ArrayPool<T>& ArrayPool<T>::Shared() {
         static SharedArrayPool<T> instance;
         return instance;
+    }
+
+    template<typename T>
+    std::unique_ptr<ArrayPool<T>> ArrayPool<T>::Create() {
+        return std::make_unique<SharedArrayPool<T>>();
+    }
+
+    template<typename T>
+    std::unique_ptr<ArrayPool<T>> ArrayPool<T>::Create(int /*maxArrayLength*/, int /*maxArraysPerBucket*/) {
+        return std::make_unique<SharedArrayPool<T>>();
     }
 
 } // namespace System::Buffers

@@ -432,6 +432,49 @@ public:
         if (d == Zero) return 0;
         return d.negative_ ? -1 : 1;
     }
+
+    // -----------------------------------------------------------------------
+    // OLE Automation Currency interop
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Converts an OLE Automation Currency value to a Decimal.
+     *
+     * C++ counterpart of .NET Decimal.FromOACurrency(long). OA Currency stores
+     * monetary values as a 64-bit integer where 1 unit = 10000 (i.e. four
+     * implicit decimal places).
+     * @param cy OA Currency value.
+     * @return The equivalent Decimal value (cy / 10000).
+     */
+    static Decimal FromOACurrency(long long cy)
+    {
+        return Decimal(cy) / Decimal(10000LL);
+    }
+
+    /**
+     * @brief Converts this Decimal to an OLE Automation Currency value.
+     *
+     * C++ counterpart of .NET Decimal.ToOACurrency(decimal). Multiplies by
+     * 10000 and truncates to a 64-bit integer.
+     * @return OA Currency representation of this value.
+     */
+    [[nodiscard]] long long ToOACurrency() const
+    {
+        Decimal scaled = *this * Decimal(10000LL);
+        return Truncate(scaled).ToInt64();
+    }
+
+    /**
+     * @brief Converts a Decimal to an OLE Automation Currency value (static form).
+     *
+     * C++ counterpart of .NET Decimal.ToOACurrency(decimal).
+     * @param d The Decimal value to convert.
+     * @return OA Currency representation.
+     */
+    static long long ToOACurrency(const Decimal& d)
+    {
+        return d.ToOACurrency();
+    }
 };
 
 } // namespace System
