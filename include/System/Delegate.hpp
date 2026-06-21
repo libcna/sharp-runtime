@@ -86,10 +86,27 @@ public:
 
     /**
      * @brief Determines whether this delegate equals other.
-     * Default uses object identity (pointer equality).
-     * @return true if this and other are the same object instance.
+     *
+     * C++ counterpart of .NET MulticastDelegate.Equals(object).
+     * Compares the invocation lists element-by-element by pointer identity.
+     * Single-target delegates compare as equal only when they wrap the same
+     * underlying shared_ptr-managed object.
+     *
+     * @return true if both invocation lists have the same length and
+     *         corresponding entries are pointer-identical.
      */
-    [[nodiscard]] virtual bool Equals(const Delegate& other) const { return this == &other; }
+    [[nodiscard]] virtual bool Equals(const Delegate& other) const;
+
+    /**
+     * @brief Returns a hash code for this delegate.
+     *
+     * C++ counterpart of .NET MulticastDelegate.GetHashCode().
+     * The hash is derived from the invocation list contents:
+     *   - An empty (no-target) delegate returns 0.
+     *   - A single-target delegate hashes its internal callable address.
+     *   - A multicast delegate XOR-folds the pointer hashes of its entries.
+     */
+    [[nodiscard]] std::size_t GetHashCode() const noexcept;
 
     /**
      * @brief Not implemented — always throws NotImplementedException.

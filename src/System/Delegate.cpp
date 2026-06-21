@@ -3,8 +3,41 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Delegate.hpp"
 #include "System/NotImplementedException.hpp"
+#include <functional>
 
 namespace System {
+
+bool Delegate::Equals(const Delegate& other) const {
+    // Fast path: same object
+    if (this == &other) return true;
+    // Compare invocation lists by pointer
+    const auto& la = invocationList_;
+    const auto& lb = other.invocationList_;
+    if (la.empty() && lb.empty()) return false; // different single-target objects
+    if (la.size() != lb.size()) return false;
+    for (std::size_t i = 0; i < la.size(); ++i)
+        if (la[i].get() != lb[i].get()) return false;
+    return true;
+}
+
+std::size_t Delegate::GetHashCode() const noexcept {
+    // Empty delegate (no target, no list)
+    if (!invoke_ && invocationList_.empty()) return 0;
+    // Multicast: fold pointer hashes
+    if (!invocationList_.empty()) {
+        std::size_t h = 0;
+        std::hash<Delegate*> hasher;
+        for (const auto& d : invocationList_) {
+            std::size_t p = hasher(d.get());
+            h ^= p + 0x9e3779b9u + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+    // Single-target: hash the function target pointer if available
+    const void* target = invoke_.target<void(*)()>();
+    if (target) return std::hash<const void*>{}(target);
+    return std::hash<const Delegate*>{}(this);
+}
 
 void Delegate::Invoke() const {
     if (!invocationList_.empty()) {
