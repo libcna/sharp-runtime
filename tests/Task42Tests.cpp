@@ -207,6 +207,62 @@ TEST(TypeTests, GetTypeInfo_NotNull) {
     EXPECT_NE(t.getTypeInfo(), nullptr);
 }
 
+TEST(TypeTests, GetNameProperty_NotNull) {
+    auto t = System::Type::From<int>();
+    EXPECT_NE(t.getNameProperty(), "(null)");
+}
+
+TEST(TypeTests, GetFullNameProperty_NotNull) {
+    auto t = System::Type::From<double>();
+    EXPECT_NE(t.getFullNameProperty(), "(null)");
+}
+
+TEST(TypeTests, ToString_NotNull) {
+    auto t = System::Type::From<float>();
+    EXPECT_NE(t.ToString(), "(null)");
+}
+
+TEST(TypeTests, GetHashCode_NonZero) {
+    auto t = System::Type::From<int>();
+    EXPECT_NE(t.GetHashCode(), 0u);
+}
+
+TEST(TypeTests, GetHashCode_SameTypeConsistent) {
+    auto a = System::Type::From<std::string>();
+    auto b = System::Type::From<std::string>();
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(TypeTests, DefaultCtor_GetHashCode_Zero) {
+    System::Type t;
+    EXPECT_EQ(t.GetHashCode(), 0u);
+}
+
+TEST(TypeTests, GetIsValueTypeProperty_False) {
+    auto t = System::Type::From<int>();
+    EXPECT_FALSE(t.getIsValueTypeProperty());
+}
+
+TEST(TypeTests, GetIsClassProperty_True) {
+    auto t = System::Type::From<std::string>();
+    EXPECT_TRUE(t.getIsClassProperty());
+}
+
+TEST(TypeTests, GetIsAbstractProperty_False) {
+    auto t = System::Type::From<int>();
+    EXPECT_FALSE(t.getIsAbstractProperty());
+}
+
+TEST(TypeTests, GetIsSealedProperty_False) {
+    auto t = System::Type::From<int>();
+    EXPECT_FALSE(t.getIsSealedProperty());
+}
+
+TEST(TypeTests, GetIsInterfaceProperty_False) {
+    auto t = System::Type::From<int>();
+    EXPECT_FALSE(t.getIsInterfaceProperty());
+}
+
 // ===========================================================================
 // String (static utility)
 // ===========================================================================
