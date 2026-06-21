@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include "System/Buffer.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Buffer;
 using SharpRuntime::bytecs;
@@ -138,4 +139,118 @@ TEST(BufferTests, SetByte_FirstByte) {
     std::vector<bytecs> v = {0x01, 0x02};
     Buffer::SetByte(v, 0, 0xDE);
     EXPECT_EQ(Buffer::GetByte(v, 0), 0xDE);
+}
+
+// ---------------------------------------------------------------------------
+// BlockCopy — edge cases
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, BlockCopy_ZeroCount_NoOp) {
+    std::vector<bytecs> src = {1, 2, 3};
+    std::vector<bytecs> dst = {9, 9, 9};
+    Buffer::BlockCopy(src, 0, dst, 0, 0);
+    EXPECT_EQ(dst[0], 9);
+    EXPECT_EQ(dst[1], 9);
+    EXPECT_EQ(dst[2], 9);
+}
+
+TEST(BufferTests, BlockCopy_RawPointer_ZeroCount_NoOp) {
+    uint8_t src[2] = {0xAA, 0xBB};
+    uint8_t dst[2] = {0x00, 0x00};
+    Buffer::BlockCopy(src, 0, dst, 0, 0);
+    EXPECT_EQ(dst[0], 0x00);
+}
+
+// ---------------------------------------------------------------------------
+// ByteLength — extra types
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, ByteLength_SingleByteElement) {
+    std::vector<bytecs> v = {42};
+    EXPECT_EQ(Buffer::ByteLength(v), 1);
+}
+
+TEST(BufferTests, ByteLength_FloatVector) {
+    std::vector<float> v(3);
+    EXPECT_EQ(Buffer::ByteLength(v), 12); // 3 * 4 bytes
+}
+
+TEST(BufferTests, ByteLength_DoubleVector) {
+    std::vector<double> v(2);
+    EXPECT_EQ(Buffer::ByteLength(v), 16); // 2 * 8 bytes
+}
+
+// ---------------------------------------------------------------------------
+// GetByte — byte vector
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, GetByte_ByteVector_DirectRead) {
+    std::vector<bytecs> v = {0x10, 0x20, 0x30};
+    EXPECT_EQ(Buffer::GetByte(v, 0), 0x10);
+    EXPECT_EQ(Buffer::GetByte(v, 1), 0x20);
+    EXPECT_EQ(Buffer::GetByte(v, 2), 0x30);
+}
+
+// ---------------------------------------------------------------------------
+// SetByte — extra cases
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, SetByte_LastByte) {
+    std::vector<bytecs> v = {0, 0, 0};
+    Buffer::SetByte(v, 2, 0x99);
+    EXPECT_EQ(v[2], 0x99);
+    EXPECT_EQ(v[0], 0);
+    EXPECT_EQ(v[1], 0);
+}
+
+TEST(BufferTests, SetByte_AllBytes) {
+    std::vector<bytecs> v(4, 0);
+    for (intcs i = 0; i < 4; ++i)
+        Buffer::SetByte(v, i, static_cast<bytecs>(i + 1));
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[3], 4);
+}
+
+// ---------------------------------------------------------------------------
+// MemoryCopy
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, MemoryCopy_Basic) {
+    uint8_t src[4] = {1, 2, 3, 4};
+    uint8_t dst[4] = {0, 0, 0, 0};
+    Buffer::MemoryCopy(src, dst, 4, 4);
+    EXPECT_EQ(dst[0], 1);
+    EXPECT_EQ(dst[3], 4);
+}
+
+TEST(BufferTests, MemoryCopy_PartialCopy) {
+    uint8_t src[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    uint8_t dst[4] = {0x00, 0x00, 0x00, 0x00};
+    Buffer::MemoryCopy(src, dst, 4, 2);
+    EXPECT_EQ(dst[0], 0xAA);
+    EXPECT_EQ(dst[1], 0xBB);
+    EXPECT_EQ(dst[2], 0x00); // untouched
+}
+
+TEST(BufferTests, MemoryCopy_ZeroBytes_NoOp) {
+    uint8_t dst[2] = {0x11, 0x22};
+    Buffer::MemoryCopy(dst, dst, 2, 0);
+    EXPECT_EQ(dst[0], 0x11);
+}
+
+TEST(BufferTests, MemoryCopy_OverlapSafe) {
+    uint8_t buf[6] = {1, 2, 3, 4, 5, 6};
+    // Shift [0..3] one byte right — overlapping move
+    Buffer::MemoryCopy(buf, buf + 1, 5, 4);
+    EXPECT_EQ(buf[1], 1);
+    EXPECT_EQ(buf[2], 2);
+    EXPECT_EQ(buf[3], 3);
+    EXPECT_EQ(buf[4], 4);
+}
+
+TEST(BufferTests, MemoryCopy_SizeExceeded_Throws) {
+    uint8_t src[4] = {1, 2, 3, 4};
+    uint8_t dst[2] = {0, 0};
+    EXPECT_THROW(Buffer::MemoryCopy(src, dst, 2, 4),
+                 System::ArgumentOutOfRangeException);
 }
