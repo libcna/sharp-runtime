@@ -7,6 +7,7 @@
 #include "System/EventArgs.hpp"
 #include "System/MarshalByRefObject.hpp"
 #include "System/UnhandledExceptionEventHandler.hpp"
+#include "System/Environment.hpp"
 
 namespace System {
 
@@ -218,6 +219,113 @@ namespace System {
          * C++ counterpart of .NET AppDomain.ProcessExit event remove accessor.
          */
         void remove_ProcessExit(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
+
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.DomainUnload event add accessor.
+         */
+        void add_DomainUnload(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
+
+        /**
+         * @brief Stub — event registration is not functional; provided for API
+         * compatibility.
+         *
+         * C++ counterpart of .NET AppDomain.DomainUnload event remove accessor.
+         */
+        void remove_DomainUnload(const std::function<void(void*, EventArgs&)>& /*handler*/) {}
+
+        // -----------------------------------------------------------------------
+        // Additional properties
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets a value indicating whether shadow copying of files is enabled.
+         *
+         * C++ counterpart of .NET AppDomain.ShadowCopyFiles.
+         * Always returns false in this port.
+         */
+        [[nodiscard]] bool getShadowCopyFilesProperty() const noexcept { return false; }
+
+        /**
+         * @brief Determines whether a compatibility switch is set.
+         *
+         * C++ counterpart of .NET AppDomain.IsCompatibilitySwitchSet(string).
+         * Always returns false in this port (no switch registry).
+         * @param value The name of the compatibility switch.
+         */
+        [[nodiscard]] bool IsCompatibilitySwitchSet(const std::string& /*value*/) const noexcept {
+            return false;
+        }
+
+        // -----------------------------------------------------------------------
+        // Additional static methods
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets an integer that uniquely identifies the current managed thread.
+         *
+         * C++ counterpart of .NET AppDomain.GetCurrentThreadId().
+         * @deprecated In .NET this method is deprecated; prefer Thread.ManagedThreadId.
+         *             Delegates to Environment::getCurrentManagedThreadIdProperty().
+         */
+        [[nodiscard]] static SharpRuntime::intcs GetCurrentThreadId() {
+            return Environment::getCurrentManagedThreadIdProperty();
+        }
+
+        // -----------------------------------------------------------------------
+        // Deprecated no-op stub methods
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.SetDynamicBase(string) [Obsolete].
+         */
+        void SetDynamicBase(const std::string& /*path*/) {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.AppendPrivatePath(string) [Obsolete].
+         */
+        void AppendPrivatePath(const std::string& /*path*/) {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.ClearPrivatePath() [Obsolete].
+         */
+        void ClearPrivatePath() {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.ClearShadowCopyPath() [Obsolete].
+         */
+        void ClearShadowCopyPath() {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.SetShadowCopyFiles() [Obsolete].
+         */
+        void SetShadowCopyFiles() {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.SetShadowCopyPath(string) [Obsolete].
+         */
+        void SetShadowCopyPath(const std::string& /*path*/) {}
+
+        /**
+         * @brief No-op stub.
+         *
+         * C++ counterpart of .NET AppDomain.SetCachePath(string) [Obsolete].
+         */
+        void SetCachePath(const std::string& /*path*/) {}
     };
 
 } // namespace System

@@ -320,6 +320,7 @@ TEST(StringTests, ToString_PadsToWidth) {
     EXPECT_EQ(r, "007");
 }
 
+
 // ===========================================================================
 // Byte
 // ===========================================================================
@@ -539,6 +540,52 @@ TEST(AppDomainTests, ApplyPolicy_ReturnsInput) {
 TEST(AppDomainTests, ToString_ContainsFriendlyName) {
     std::string s = System::AppDomain::CurrentDomain().ToString();
     EXPECT_NE(s.find("DefaultDomain"), std::string::npos);
+}
+
+TEST(AppDomainTests, ShadowCopyFiles_False) {
+    EXPECT_FALSE(System::AppDomain::CurrentDomain().getShadowCopyFilesProperty());
+}
+
+TEST(AppDomainTests, IsCompatibilitySwitchSet_ReturnsFalse) {
+    EXPECT_FALSE(System::AppDomain::CurrentDomain().IsCompatibilitySwitchSet("SomeSwitch"));
+}
+
+TEST(AppDomainTests, GetCurrentThreadId_Positive) {
+    EXPECT_GT(System::AppDomain::GetCurrentThreadId(), 0);
+}
+
+TEST(AppDomainTests, SetDynamicBase_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetDynamicBase("/tmp"));
+}
+
+TEST(AppDomainTests, AppendPrivatePath_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().AppendPrivatePath("/tmp"));
+}
+
+TEST(AppDomainTests, ClearPrivatePath_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().ClearPrivatePath());
+}
+
+TEST(AppDomainTests, ClearShadowCopyPath_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().ClearShadowCopyPath());
+}
+
+TEST(AppDomainTests, SetShadowCopyFiles_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetShadowCopyFiles());
+}
+
+TEST(AppDomainTests, SetShadowCopyPath_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetShadowCopyPath("/tmp"));
+}
+
+TEST(AppDomainTests, SetCachePath_NoThrow) {
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetCachePath("/tmp"));
+}
+
+TEST(AppDomainTests, AddRemoveDomainUnload_NoThrow) {
+    auto handler = [](void*, System::EventArgs&) {};
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_DomainUnload(handler));
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_DomainUnload(handler));
 }
 
 // ===========================================================================
