@@ -12,6 +12,7 @@ namespace System {
     using SharpRuntime::bytecs;
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
+    using SharpRuntime::ulongcs;
 
     /**
      * @brief Manipulates arrays of primitive types as raw binary memory.
@@ -66,6 +67,29 @@ namespace System {
                                std::vector<bytecs>& dst, intcs dstOffset, intcs count) {
             std::memcpy(dst.data() + dstOffset,
                         src.data() + srcOffset,
+                        static_cast<size_t>(count));
+        }
+
+        /**
+         * @brief Copies @p count raw bytes from @p src (at byte offset @p srcOffset)
+         * into @p dst (at byte offset @p dstOffset), treating both vectors as
+         * contiguous binary storage.
+         *
+         * C++ counterpart of .NET Buffer.BlockCopy(Array, int, Array, int, int)
+         * for arbitrary primitive element types.
+         *
+         * @tparam T Element type (must be trivially-copyable).
+         * @param src       Source vector.
+         * @param srcOffset Byte offset into @p src raw memory.
+         * @param dst       Destination vector.
+         * @param dstOffset Byte offset into @p dst raw memory.
+         * @param count     Number of bytes to copy.
+         */
+        template<typename T>
+        static void BlockCopy(const std::vector<T>& src, intcs srcOffset,
+                               std::vector<T>& dst, intcs dstOffset, intcs count) {
+            std::memcpy(reinterpret_cast<bytecs*>(dst.data()) + dstOffset,
+                        reinterpret_cast<const bytecs*>(src.data()) + srcOffset,
                         static_cast<size_t>(count));
         }
 
@@ -147,6 +171,28 @@ namespace System {
         static void MemoryCopy(const void* source, void* destination,
                                 longcs destinationSizeInBytes,
                                 longcs sourceBytesToCopy) {
+            if (sourceBytesToCopy > destinationSizeInBytes)
+                throw ArgumentOutOfRangeException(
+                    "sourceBytesToCopy exceeds destinationSizeInBytes");
+            std::memmove(destination, source, static_cast<size_t>(sourceBytesToCopy));
+        }
+
+        /**
+         * @brief Copies @p sourceBytesToCopy bytes from @p source to @p destination,
+         * allowing overlapping regions. Unsigned-size overload.
+         *
+         * C++ counterpart of .NET Buffer.MemoryCopy(void*, void*, ulong, ulong).
+         *
+         * @param source                 Pointer to the source memory block.
+         * @param destination            Pointer to the destination memory block.
+         * @param destinationSizeInBytes Capacity of the destination block in bytes.
+         * @param sourceBytesToCopy      Number of bytes to copy.
+         * @throws System::ArgumentOutOfRangeException if
+         *         @p sourceBytesToCopy > @p destinationSizeInBytes.
+         */
+        static void MemoryCopy(const void* source, void* destination,
+                                ulongcs destinationSizeInBytes,
+                                ulongcs sourceBytesToCopy) {
             if (sourceBytesToCopy > destinationSizeInBytes)
                 throw ArgumentOutOfRangeException(
                     "sourceBytesToCopy exceeds destinationSizeInBytes");

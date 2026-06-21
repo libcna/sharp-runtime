@@ -215,10 +215,12 @@ TEST(BufferTests, SetByte_AllBytes) {
 // MemoryCopy
 // ---------------------------------------------------------------------------
 
+using SharpRuntime::longcs;
+
 TEST(BufferTests, MemoryCopy_Basic) {
     uint8_t src[4] = {1, 2, 3, 4};
     uint8_t dst[4] = {0, 0, 0, 0};
-    Buffer::MemoryCopy(src, dst, 4, 4);
+    Buffer::MemoryCopy(src, dst, longcs{4}, longcs{4});
     EXPECT_EQ(dst[0], 1);
     EXPECT_EQ(dst[3], 4);
 }
@@ -226,7 +228,7 @@ TEST(BufferTests, MemoryCopy_Basic) {
 TEST(BufferTests, MemoryCopy_PartialCopy) {
     uint8_t src[4] = {0xAA, 0xBB, 0xCC, 0xDD};
     uint8_t dst[4] = {0x00, 0x00, 0x00, 0x00};
-    Buffer::MemoryCopy(src, dst, 4, 2);
+    Buffer::MemoryCopy(src, dst, longcs{4}, longcs{2});
     EXPECT_EQ(dst[0], 0xAA);
     EXPECT_EQ(dst[1], 0xBB);
     EXPECT_EQ(dst[2], 0x00); // untouched
@@ -234,14 +236,14 @@ TEST(BufferTests, MemoryCopy_PartialCopy) {
 
 TEST(BufferTests, MemoryCopy_ZeroBytes_NoOp) {
     uint8_t dst[2] = {0x11, 0x22};
-    Buffer::MemoryCopy(dst, dst, 2, 0);
+    Buffer::MemoryCopy(dst, dst, longcs{2}, longcs{0});
     EXPECT_EQ(dst[0], 0x11);
 }
 
 TEST(BufferTests, MemoryCopy_OverlapSafe) {
     uint8_t buf[6] = {1, 2, 3, 4, 5, 6};
     // Shift [0..3] one byte right — overlapping move
-    Buffer::MemoryCopy(buf, buf + 1, 5, 4);
+    Buffer::MemoryCopy(buf, buf + 1, longcs{5}, longcs{4});
     EXPECT_EQ(buf[1], 1);
     EXPECT_EQ(buf[2], 2);
     EXPECT_EQ(buf[3], 3);
@@ -251,6 +253,6 @@ TEST(BufferTests, MemoryCopy_OverlapSafe) {
 TEST(BufferTests, MemoryCopy_SizeExceeded_Throws) {
     uint8_t src[4] = {1, 2, 3, 4};
     uint8_t dst[2] = {0, 0};
-    EXPECT_THROW(Buffer::MemoryCopy(src, dst, 2, 4),
+    EXPECT_THROW(Buffer::MemoryCopy(src, dst, longcs{2}, longcs{4}),
                  System::ArgumentOutOfRangeException);
 }
