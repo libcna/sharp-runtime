@@ -22,6 +22,7 @@
 #include "System/FieldAccessException.hpp"
 #include "System/InsufficientMemoryException.hpp"
 #include "System/OutOfMemoryException.hpp"
+#include "System/InvalidTimeZoneException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -447,4 +448,46 @@ TEST(InsufficientMemoryExceptionTests, InnerExceptionCtor_ContainsBoth) {
     std::string msg(ex.what());
     EXPECT_NE(msg.find("allocation failed"), std::string::npos);
     EXPECT_NE(msg.find("no mem"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// InvalidTimeZoneException
+// ---------------------------------------------------------------------------
+
+TEST(InvalidTimeZoneExceptionTests, DefaultCtor_MessageContainsTimeZone) {
+    System::InvalidTimeZoneException ex;
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("time zone"), std::string::npos);
+}
+
+TEST(InvalidTimeZoneExceptionTests, CatchableAsException) {
+    bool caught = false;
+    try { throw System::InvalidTimeZoneException(); }
+    catch (const System::Exception&) { caught = true; }
+    EXPECT_TRUE(caught);
+}
+
+TEST(InvalidTimeZoneExceptionTests, CStringCtor_WhatContainsMessage) {
+    System::InvalidTimeZoneException ex("bad tz data");
+    EXPECT_NE(std::string(ex.what()).find("bad tz data"), std::string::npos);
+}
+
+TEST(InvalidTimeZoneExceptionTests, StringCtor_WhatContainsMessage) {
+    System::InvalidTimeZoneException ex(std::string("corrupted zone"));
+    EXPECT_NE(std::string(ex.what()).find("corrupted zone"), std::string::npos);
+}
+
+TEST(InvalidTimeZoneExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("registry error");
+    System::InvalidTimeZoneException ex("invalid time zone data", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("invalid time zone data"), std::string::npos);
+    EXPECT_NE(msg.find("registry error"), std::string::npos);
+}
+
+TEST(InvalidTimeZoneExceptionTests, CatchableAsStdException) {
+    bool caught = false;
+    try { throw System::InvalidTimeZoneException("tz error"); }
+    catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
+    EXPECT_TRUE(caught);
 }
