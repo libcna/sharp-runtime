@@ -591,6 +591,69 @@ TEST(StringTests, CompareOrdinal_Less)   { EXPECT_LT(String::CompareOrdinal("abc
 TEST(StringTests, CompareOrdinal_Greater){ EXPECT_GT(String::CompareOrdinal("abd", "abc"), 0); }
 
 // ---------------------------------------------------------------------------
+// IndexOf / LastIndexOf with count — new overloads
+// ---------------------------------------------------------------------------
+
+TEST(StringTests, IndexOf_CharCount_Found) {
+    EXPECT_EQ(String::IndexOf("abcabc", 'c', 0, 4), 2);
+}
+TEST(StringTests, IndexOf_CharCount_OutOfWindow) {
+    EXPECT_EQ(String::IndexOf("abcabc", 'c', 0, 2), -1);
+}
+TEST(StringTests, IndexOf_StringCount_Found) {
+    EXPECT_EQ(String::IndexOf("abcabc", std::string("bc"), 0, 4), 1);
+}
+TEST(StringTests, IndexOf_StringCount_OutOfWindow) {
+    // "hello world": "world" starts at 6, outside window [0..4]
+    EXPECT_EQ(String::IndexOf("hello world", std::string("world"), 0, 5), -1);
+}
+TEST(StringTests, LastIndexOf_CharCount_Found) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", 'c', 5, 3), 5);
+}
+TEST(StringTests, LastIndexOf_CharCount_OutOfWindow) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", 'c', 1, 1), -1);
+}
+TEST(StringTests, LastIndexOf_StringCount_Found) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", std::string("ab"), 5, 4), 3);
+}
+TEST(StringTests, LastIndexOf_StringCount_OutOfWindow) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", std::string("ab"), 1, 1), -1);
+}
+
+// ---------------------------------------------------------------------------
+// ToCharArray with range
+// ---------------------------------------------------------------------------
+
+TEST(StringTests, ToCharArray_Range_Basic) {
+    auto v = String::ToCharArray("hello", 1, 3);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 'e');
+    EXPECT_EQ(v[1], 'l');
+    EXPECT_EQ(v[2], 'l');
+}
+TEST(StringTests, ToCharArray_Range_OutOfBounds_Throws) {
+    EXPECT_THROW(String::ToCharArray("hi", 1, 5), std::out_of_range);
+}
+TEST(StringTests, ToCharArray_Range_ZeroLength) {
+    auto v = String::ToCharArray("hello", 2, 0);
+    EXPECT_TRUE(v.empty());
+}
+
+// ---------------------------------------------------------------------------
+// GetHashCode
+// ---------------------------------------------------------------------------
+
+TEST(StringTests, GetHashCode_Consistent) {
+    EXPECT_EQ(String::GetHashCode("hello"), String::GetHashCode("hello"));
+}
+TEST(StringTests, GetHashCode_DifferentStrings) {
+    EXPECT_NE(String::GetHashCode("abc"), String::GetHashCode("xyz"));
+}
+TEST(StringTests, GetHashCode_EmptyString) {
+    EXPECT_EQ(String::GetHashCode(""), String::GetHashCode(""));
+}
+
+// ---------------------------------------------------------------------------
 // StringNormalizationExtensions
 // ---------------------------------------------------------------------------
 #include "System/StringNormalizationExtensions.hpp"

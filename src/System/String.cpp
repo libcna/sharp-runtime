@@ -646,4 +646,50 @@ namespace System
         return 0;
     }
 
+    SharpRuntime::intcs String::IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
+    {
+        SharpRuntime::intcs end = startIndex + count;
+        for (SharpRuntime::intcs i = startIndex; i < end && i < static_cast<SharpRuntime::intcs>(value.size()); ++i)
+            if (value[static_cast<size_t>(i)] == ch) return i;
+        return -1;
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
+    {
+        if (substr.empty()) return startIndex;
+        SharpRuntime::intcs end = startIndex + count;
+        auto pos = value.find(substr, static_cast<size_t>(startIndex));
+        if (pos == std::string::npos) return -1;
+        return static_cast<SharpRuntime::intcs>(pos) < end ? static_cast<SharpRuntime::intcs>(pos) : -1;
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
+    {
+        SharpRuntime::intcs begin = startIndex - count + 1;
+        for (SharpRuntime::intcs i = startIndex; i >= begin && i >= 0; --i)
+            if (value[static_cast<size_t>(i)] == ch) return i;
+        return -1;
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
+    {
+        if (substr.empty()) return startIndex;
+        SharpRuntime::intcs begin = startIndex - count + 1;
+        auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
+        if (pos == std::string::npos) return -1;
+        return static_cast<SharpRuntime::intcs>(pos) >= begin ? static_cast<SharpRuntime::intcs>(pos) : -1;
+    }
+
+    std::vector<char> String::ToCharArray(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length)
+    {
+        if (startIndex < 0 || length < 0 || startIndex + length > static_cast<SharpRuntime::intcs>(value.size()))
+            throw std::out_of_range("String::ToCharArray: index out of range");
+        return std::vector<char>(value.begin() + startIndex, value.begin() + startIndex + length);
+    }
+
+    std::size_t String::GetHashCode(const std::string& value) noexcept
+    {
+        return std::hash<std::string>{}(value);
+    }
+
 }
