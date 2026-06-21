@@ -24,6 +24,7 @@
 #include "System/OutOfMemoryException.hpp"
 #include "System/InvalidTimeZoneException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/ContextMarshalException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -530,6 +531,47 @@ TEST(IndexOutOfRangeExceptionTests, CatchableAsSystemException) {
 TEST(IndexOutOfRangeExceptionTests, CatchableAsStdException) {
     bool caught = false;
     try { throw System::IndexOutOfRangeException("oob"); }
+    catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
+    EXPECT_TRUE(caught);
+}
+
+// ---------------------------------------------------------------------------
+// ContextMarshalException
+// ---------------------------------------------------------------------------
+
+TEST(ContextMarshalExceptionTests, DefaultCtor_MessageContainsMarshal) {
+    System::ContextMarshalException ex;
+    EXPECT_NE(std::string(ex.what()).find("marshal"), std::string::npos);
+}
+
+TEST(ContextMarshalExceptionTests, CStringCtor_WhatContainsMessage) {
+    System::ContextMarshalException ex("cannot cross context");
+    EXPECT_NE(std::string(ex.what()).find("cannot cross context"), std::string::npos);
+}
+
+TEST(ContextMarshalExceptionTests, StringCtor_WhatContainsMessage) {
+    System::ContextMarshalException ex(std::string("bad marshal"));
+    EXPECT_NE(std::string(ex.what()).find("bad marshal"), std::string::npos);
+}
+
+TEST(ContextMarshalExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root cause");
+    System::ContextMarshalException ex("context error", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("context error"), std::string::npos);
+    EXPECT_NE(msg.find("root cause"), std::string::npos);
+}
+
+TEST(ContextMarshalExceptionTests, CatchableAsSystemException) {
+    bool caught = false;
+    try { throw System::ContextMarshalException(); }
+    catch (const System::SystemException&) { caught = true; }
+    EXPECT_TRUE(caught);
+}
+
+TEST(ContextMarshalExceptionTests, CatchableAsStdException) {
+    bool caught = false;
+    try { throw System::ContextMarshalException("err"); }
     catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
     EXPECT_TRUE(caught);
 }

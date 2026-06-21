@@ -101,9 +101,15 @@ TEST(MidpointRoundingTests, ToPositiveInfinity_IsFour)   { EXPECT_EQ(static_cast
 // DayOfWeek
 // ===========================================================================
 
-TEST(DayOfWeekTests, Sunday_IsZero)    { EXPECT_EQ(static_cast<int>(DayOfWeek::Sunday), 0); }
-TEST(DayOfWeekTests, Monday_IsOne)     { EXPECT_EQ(static_cast<int>(DayOfWeek::Monday), 1); }
-TEST(DayOfWeekTests, Saturday_IsSix)   { EXPECT_EQ(static_cast<int>(DayOfWeek::Saturday), 6); }
+TEST(DayOfWeekTests, Sunday_IsZero)      { EXPECT_EQ(static_cast<int>(DayOfWeek::Sunday),    0); }
+TEST(DayOfWeekTests, Monday_IsOne)       { EXPECT_EQ(static_cast<int>(DayOfWeek::Monday),    1); }
+TEST(DayOfWeekTests, Tuesday_IsTwo)      { EXPECT_EQ(static_cast<int>(DayOfWeek::Tuesday),   2); }
+TEST(DayOfWeekTests, Wednesday_IsThree)  { EXPECT_EQ(static_cast<int>(DayOfWeek::Wednesday), 3); }
+TEST(DayOfWeekTests, Thursday_IsFour)    { EXPECT_EQ(static_cast<int>(DayOfWeek::Thursday),  4); }
+TEST(DayOfWeekTests, Friday_IsFive)      { EXPECT_EQ(static_cast<int>(DayOfWeek::Friday),    5); }
+TEST(DayOfWeekTests, Saturday_IsSix)     { EXPECT_EQ(static_cast<int>(DayOfWeek::Saturday),  6); }
+TEST(DayOfWeekTests, CastRoundTrip)      { EXPECT_EQ(static_cast<DayOfWeek>(3), DayOfWeek::Wednesday); }
+TEST(DayOfWeekTests, Distinct_Sun_Sat)   { EXPECT_NE(DayOfWeek::Sunday, DayOfWeek::Saturday); }
 
 // ===========================================================================
 // DateTimeKind

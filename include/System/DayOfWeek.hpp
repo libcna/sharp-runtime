@@ -5,21 +5,26 @@
 
 namespace System {
 
-    /// Specifies the day of the week.
+    /**
+     * @brief Specifies the day of the week.
+     *
+     * C++ counterpart of .NET System.DayOfWeek.
+     * The integer values match those of .NET: Sunday = 0, Saturday = 6.
+     */
     enum class DayOfWeek {
-        /// Indicates Sunday.
+        /** @brief Indicates Sunday (0). */
         Sunday    = 0,
-        /// Indicates Monday.
+        /** @brief Indicates Monday (1). */
         Monday    = 1,
-        /// Indicates Tuesday.
+        /** @brief Indicates Tuesday (2). */
         Tuesday   = 2,
-        /// Indicates Wednesday.
+        /** @brief Indicates Wednesday (3). */
         Wednesday = 3,
-        /// Indicates Thursday.
+        /** @brief Indicates Thursday (4). */
         Thursday  = 4,
-        /// Indicates Friday.
+        /** @brief Indicates Friday (5). */
         Friday    = 5,
-        /// Indicates Saturday.
+        /** @brief Indicates Saturday (6). */
         Saturday  = 6,
     };
 
