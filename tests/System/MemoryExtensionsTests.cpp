@@ -427,3 +427,156 @@ TEST(MemoryExtensionsTests, TrimEnd_SingleElement) {
     EXPECT_EQ(span.getLengthProperty(), 2);
     EXPECT_EQ(span[1], 2);
 }
+
+// ---------------------------------------------------------------------------
+// IndexOfAny
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, IndexOfAny_TwoValues_FirstMatch) {
+    std::vector<int> v = {1, 5, 3, 7};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<int>(v), 5, 7), 1);
+}
+
+TEST(MemoryExtensionsTests, IndexOfAny_TwoValues_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<int>(v), 8, 9), -1);
+}
+
+TEST(MemoryExtensionsTests, IndexOfAny_ThreeValues_Found) {
+    std::vector<int> v = {10, 20, 30, 40};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<int>(v), 0, 30, 99), 2);
+}
+
+TEST(MemoryExtensionsTests, IndexOfAny_Span_Found) {
+    std::vector<int> v = {1, 2, 3, 4};
+    std::vector<int> vals = {7, 3};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<int>(v), ReadOnlySpan<int>(vals)), 2);
+}
+
+TEST(MemoryExtensionsTests, IndexOfAny_Span_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    std::vector<int> vals = {8, 9};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<int>(v), ReadOnlySpan<int>(vals)), -1);
+}
+
+// ---------------------------------------------------------------------------
+// LastIndexOfAny
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, LastIndexOfAny_TwoValues_LastMatch) {
+    std::vector<int> v = {5, 2, 7, 5};
+    EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), 5, 7), 3);
+}
+
+TEST(MemoryExtensionsTests, LastIndexOfAny_TwoValues_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), 8, 9), -1);
+}
+
+TEST(MemoryExtensionsTests, LastIndexOfAny_Span_Found) {
+    std::vector<int> v = {1, 2, 3, 2, 1};
+    std::vector<int> vals = {2, 3};
+    EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), ReadOnlySpan<int>(vals)), 3);
+}
+
+// ---------------------------------------------------------------------------
+// Replace
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Replace_SingleOccurrence) {
+    std::vector<int> v = {1, 2, 3};
+    MemoryExtensions::Replace(Span<int>(v), 2, 99);
+    EXPECT_EQ(v[1], 99);
+}
+
+TEST(MemoryExtensionsTests, Replace_MultipleOccurrences) {
+    std::vector<int> v = {5, 1, 5, 2, 5};
+    MemoryExtensions::Replace(Span<int>(v), 5, 0);
+    EXPECT_EQ(v[0], 0);
+    EXPECT_EQ(v[2], 0);
+    EXPECT_EQ(v[4], 0);
+    EXPECT_EQ(v[1], 1);
+}
+
+TEST(MemoryExtensionsTests, Replace_NoMatch_Unchanged) {
+    std::vector<int> v = {1, 2, 3};
+    MemoryExtensions::Replace(Span<int>(v), 9, 0);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[1], 2);
+    EXPECT_EQ(v[2], 3);
+}
+
+// ---------------------------------------------------------------------------
+// CommonPrefixLength
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, CommonPrefixLength_Matching) {
+    std::vector<int> a = {1, 2, 3, 4};
+    std::vector<int> b = {1, 2, 9, 9};
+    EXPECT_EQ(MemoryExtensions::CommonPrefixLength(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 2);
+}
+
+TEST(MemoryExtensionsTests, CommonPrefixLength_NoCommon) {
+    std::vector<int> a = {1, 2, 3};
+    std::vector<int> b = {9, 8, 7};
+    EXPECT_EQ(MemoryExtensions::CommonPrefixLength(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 0);
+}
+
+TEST(MemoryExtensionsTests, CommonPrefixLength_FullMatch) {
+    std::vector<int> a = {1, 2, 3};
+    std::vector<int> b = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::CommonPrefixLength(ReadOnlySpan<int>(a), ReadOnlySpan<int>(b)), 3);
+}
+
+// ---------------------------------------------------------------------------
+// StartsWith / EndsWith — single element
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, StartsWith_SingleElement_True) {
+    std::vector<int> v = {5, 1, 2};
+    EXPECT_TRUE(MemoryExtensions::StartsWith(ReadOnlySpan<int>(v), 5));
+}
+
+TEST(MemoryExtensionsTests, StartsWith_SingleElement_False) {
+    std::vector<int> v = {5, 1, 2};
+    EXPECT_FALSE(MemoryExtensions::StartsWith(ReadOnlySpan<int>(v), 1));
+}
+
+TEST(MemoryExtensionsTests, EndsWith_SingleElement_True) {
+    std::vector<int> v = {1, 2, 7};
+    EXPECT_TRUE(MemoryExtensions::EndsWith(ReadOnlySpan<int>(v), 7));
+}
+
+TEST(MemoryExtensionsTests, EndsWith_SingleElement_False) {
+    std::vector<int> v = {1, 2, 7};
+    EXPECT_FALSE(MemoryExtensions::EndsWith(ReadOnlySpan<int>(v), 2));
+}
+
+// ---------------------------------------------------------------------------
+// Trim / TrimStart / TrimEnd — span of trim elements
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Trim_SpanElements_BothEnds) {
+    std::vector<int> v = {0, 9, 1, 2, 9, 0};
+    std::vector<int> trimVals = {0, 9};
+    auto span = MemoryExtensions::Trim(ReadOnlySpan<int>(v), ReadOnlySpan<int>(trimVals));
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[0], 1);
+    EXPECT_EQ(span[1], 2);
+}
+
+TEST(MemoryExtensionsTests, TrimStart_SpanElements_Leading) {
+    std::vector<int> v = {0, 9, 1, 2};
+    std::vector<int> trimVals = {0, 9};
+    auto span = MemoryExtensions::TrimStart(ReadOnlySpan<int>(v), ReadOnlySpan<int>(trimVals));
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[0], 1);
+}
+
+TEST(MemoryExtensionsTests, TrimEnd_SpanElements_Trailing) {
+    std::vector<int> v = {1, 2, 9, 0};
+    std::vector<int> trimVals = {0, 9};
+    auto span = MemoryExtensions::TrimEnd(ReadOnlySpan<int>(v), ReadOnlySpan<int>(trimVals));
+    EXPECT_EQ(span.getLengthProperty(), 2);
+    EXPECT_EQ(span[1], 2);
+}

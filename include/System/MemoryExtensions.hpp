@@ -530,6 +530,145 @@ namespace System {
         }
 
         // ---------------------------------------------------------------
+        // IndexOfAny — multiple values
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Returns the index of the first occurrence of either @p value0 or @p value1.
+         *
+         * C++ counterpart of .NET MemoryExtensions.IndexOfAny<T>(ReadOnlySpan<T>, T, T).
+         * @return Index of first match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs IndexOfAny(ReadOnlySpan<T> span,
+                                                             const T& value0, const T& value1) {
+            for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
+                if (span[i] == value0 || span[i] == value1) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Returns the index of the first occurrence of any of three values.
+         *
+         * C++ counterpart of .NET MemoryExtensions.IndexOfAny<T>(ReadOnlySpan<T>, T, T, T).
+         * @return Index of first match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs IndexOfAny(ReadOnlySpan<T> span,
+                                                             const T& value0, const T& value1,
+                                                             const T& value2) {
+            for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
+                if (span[i] == value0 || span[i] == value1 || span[i] == value2) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Returns the index of the first occurrence of any value in @p values.
+         *
+         * C++ counterpart of .NET MemoryExtensions.IndexOfAny<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         * @return Index of first match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs IndexOfAny(ReadOnlySpan<T> span,
+                                                             ReadOnlySpan<T> values) {
+            for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
+                for (SharpRuntime::intcs j = 0; j < values.getLengthProperty(); ++j)
+                    if (span[i] == values[j]) return i;
+            return -1;
+        }
+
+        // ---------------------------------------------------------------
+        // LastIndexOfAny — multiple values
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Returns the index of the last occurrence of either @p value0 or @p value1.
+         *
+         * C++ counterpart of .NET MemoryExtensions.LastIndexOfAny<T>(ReadOnlySpan<T>, T, T).
+         * @return Index of last match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs LastIndexOfAny(ReadOnlySpan<T> span,
+                                                                 const T& value0, const T& value1) {
+            for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
+                if (span[i] == value0 || span[i] == value1) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Returns the index of the last occurrence of any value in @p values.
+         *
+         * C++ counterpart of .NET MemoryExtensions.LastIndexOfAny<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         * @return Index of last match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs LastIndexOfAny(ReadOnlySpan<T> span,
+                                                                 ReadOnlySpan<T> values) {
+            for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
+                for (SharpRuntime::intcs j = 0; j < values.getLengthProperty(); ++j)
+                    if (span[i] == values[j]) return i;
+            return -1;
+        }
+
+        // ---------------------------------------------------------------
+        // Replace
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Replaces all occurrences of @p oldValue with @p newValue in the span.
+         *
+         * C++ counterpart of .NET MemoryExtensions.Replace<T>(Span<T>, T, T).
+         */
+        template<typename T>
+        static void Replace(Span<T> span, const T& oldValue, const T& newValue) {
+            for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
+                if (span[i] == oldValue) span[i] = newValue;
+        }
+
+        // ---------------------------------------------------------------
+        // CommonPrefixLength
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Determines the length of the common prefix between two spans.
+         *
+         * C++ counterpart of .NET MemoryExtensions.CommonPrefixLength<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs CommonPrefixLength(ReadOnlySpan<T> span,
+                                                                     ReadOnlySpan<T> other) {
+            SharpRuntime::intcs minLen = std::min(span.getLengthProperty(), other.getLengthProperty());
+            for (SharpRuntime::intcs i = 0; i < minLen; ++i)
+                if (span[i] != other[i]) return i;
+            return minLen;
+        }
+
+        // ---------------------------------------------------------------
+        // StartsWith / EndsWith — single element
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Returns true if @p span starts with @p value (single element).
+         *
+         * C++ counterpart of .NET MemoryExtensions.StartsWith<T>(ReadOnlySpan<T>, T).
+         */
+        template<typename T>
+        [[nodiscard]] static bool StartsWith(ReadOnlySpan<T> span, const T& value) {
+            return span.getLengthProperty() > 0 && span[0] == value;
+        }
+
+        /**
+         * @brief Returns true if @p span ends with @p value (single element).
+         *
+         * C++ counterpart of .NET MemoryExtensions.EndsWith<T>(ReadOnlySpan<T>, T).
+         */
+        template<typename T>
+        [[nodiscard]] static bool EndsWith(ReadOnlySpan<T> span, const T& value) {
+            SharpRuntime::intcs len = span.getLengthProperty();
+            return len > 0 && span[len - 1] == value;
+        }
+
+        // ---------------------------------------------------------------
         // Trim / TrimStart / TrimEnd — single trim element (generic)
         // ---------------------------------------------------------------
 
@@ -566,6 +705,59 @@ namespace System {
                                                        const T& trimElement) {
             SharpRuntime::intcs i = span.getLengthProperty() - 1;
             while (i >= 0 && span[i] == trimElement) --i;
+            return span.Slice(0, i + 1);
+        }
+
+        // ---------------------------------------------------------------
+        // Trim / TrimStart / TrimEnd — span of trim elements (generic)
+        // ---------------------------------------------------------------
+
+        /**
+         * @brief Removes all leading and trailing elements in @p trimElements from the span.
+         *
+         * C++ counterpart of .NET MemoryExtensions.Trim<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         */
+        template<typename T>
+        [[nodiscard]] static ReadOnlySpan<T> Trim(ReadOnlySpan<T> span,
+                                                    ReadOnlySpan<T> trimElements) {
+            return TrimEnd(TrimStart(span, trimElements), trimElements);
+        }
+
+        /**
+         * @brief Removes all leading elements in @p trimElements from the span.
+         *
+         * C++ counterpart of .NET MemoryExtensions.TrimStart<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         */
+        template<typename T>
+        [[nodiscard]] static ReadOnlySpan<T> TrimStart(ReadOnlySpan<T> span,
+                                                         ReadOnlySpan<T> trimElements) {
+            SharpRuntime::intcs i = 0;
+            while (i < span.getLengthProperty()) {
+                bool found = false;
+                for (SharpRuntime::intcs j = 0; j < trimElements.getLengthProperty(); ++j)
+                    if (span[i] == trimElements[j]) { found = true; break; }
+                if (!found) break;
+                ++i;
+            }
+            return span.Slice(i);
+        }
+
+        /**
+         * @brief Removes all trailing elements in @p trimElements from the span.
+         *
+         * C++ counterpart of .NET MemoryExtensions.TrimEnd<T>(ReadOnlySpan<T>, ReadOnlySpan<T>).
+         */
+        template<typename T>
+        [[nodiscard]] static ReadOnlySpan<T> TrimEnd(ReadOnlySpan<T> span,
+                                                       ReadOnlySpan<T> trimElements) {
+            SharpRuntime::intcs i = span.getLengthProperty() - 1;
+            while (i >= 0) {
+                bool found = false;
+                for (SharpRuntime::intcs j = 0; j < trimElements.getLengthProperty(); ++j)
+                    if (span[i] == trimElements[j]) { found = true; break; }
+                if (!found) break;
+                --i;
+            }
             return span.Slice(0, i + 1);
         }
     };
