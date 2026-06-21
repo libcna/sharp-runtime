@@ -2,60 +2,518 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
+#include <sstream>
+#include <string>
 #include <tuple>
 
 namespace System {
 
-    /// @brief Thin wrappers matching .NET Tuple<> naming convention.
-    ///
-    /// Delegate to std::tuple. The Item1/Item2/... fields follow .NET naming.
-    ///
-    /// @note Status: Implemented (2-, 3-, and 4-element variants)
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+namespace detail {
+    inline int tupleHashCombine(int h1, int h2) noexcept
+    {
+        return ((h1 << 5) + h1) ^ h2;
+    }
+    template<typename T>
+    int tupleHash(const T& val)
+    {
+        return static_cast<int>(std::hash<T>{}(val) & 0x7fffffff);
+    }
+    template<typename T>
+    std::string tupleItemStr(const T& val)
+    {
+        std::ostringstream oss;
+        oss << val;
+        return oss.str();
+    }
+} // namespace detail
+
+// ---------------------------------------------------------------------------
+// Tuple1
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 1-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1>.
+ * Wraps a single value with an Item1 field.
+ */
+template<typename T1>
+struct Tuple1 {
+    /** @brief The first element of the tuple. */
+    T1 Item1;
+
+    /** @brief Constructs a Tuple1 from one value. */
+    explicit Tuple1(T1 i1) : Item1(std::move(i1)) {}
+
+    /** @brief Deconstructs this tuple into its element. */
+    void Deconstruct(T1& item1) const { item1 = Item1; }
+
+    /** @brief Converts this tuple to an equivalent std::tuple. */
+    [[nodiscard]] std::tuple<T1> ToStdTuple() const { return {Item1}; }
+
+    /** @brief Returns true if both tuples have equal elements. */
+    bool operator==(const Tuple1& o) const { return Item1 == o.Item1; }
+
+    /** @brief Returns true if any element differs. */
+    bool operator!=(const Tuple1& o) const { return !(*this == o); }
+
+    /**
+     * @brief Returns a string representation in the form "(item1)".
+     *
+     * C++ counterpart of .NET Tuple<T1>.ToString().
+     */
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ")";
+    }
+
+    /**
+     * @brief Returns a hash code for this tuple.
+     *
+     * C++ counterpart of .NET Tuple<T1>.GetHashCode().
+     */
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHash(Item1);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple2
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 2-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2>.
+ */
+template<typename T1, typename T2>
+struct Tuple2 {
+    /** @brief The first element of the tuple. */
+    T1 Item1;
+    /** @brief The second element of the tuple. */
+    T2 Item2;
+
+    /** @brief Constructs a Tuple2 from two values. */
+    Tuple2(T1 i1, T2 i2) : Item1(std::move(i1)), Item2(std::move(i2)) {}
+
+    /** @brief Deconstructs this tuple into its elements. */
+    void Deconstruct(T1& item1, T2& item2) const { item1 = Item1; item2 = Item2; }
+
+    /** @brief Converts this tuple to an equivalent std::tuple. */
+    [[nodiscard]] std::tuple<T1, T2> ToStdTuple() const { return {Item1, Item2}; }
+
+    /** @brief Returns true if all elements compare equal. */
+    bool operator==(const Tuple2& o) const { return Item1 == o.Item1 && Item2 == o.Item2; }
+
+    /** @brief Returns true if any element differs. */
+    bool operator!=(const Tuple2& o) const { return !(*this == o); }
+
+    /**
+     * @brief Returns a string representation in the form "(item1, item2)".
+     *
+     * C++ counterpart of .NET Tuple<T1, T2>.ToString().
+     */
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", " + detail::tupleItemStr(Item2) + ")";
+    }
+
+    /**
+     * @brief Returns a hash code for this tuple.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2>.GetHashCode().
+     */
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple3
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 3-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3>.
+ */
+template<typename T1, typename T2, typename T3>
+struct Tuple3 {
+    /** @brief The first element of the tuple. */
+    T1 Item1;
+    /** @brief The second element of the tuple. */
+    T2 Item2;
+    /** @brief The third element of the tuple. */
+    T3 Item3;
+
+    /** @brief Constructs a Tuple3 from three values. */
+    Tuple3(T1 i1, T2 i2, T3 i3)
+        : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)) {}
+
+    /** @brief Deconstructs this tuple into its elements. */
+    void Deconstruct(T1& item1, T2& item2, T3& item3) const
+    {
+        item1 = Item1; item2 = Item2; item3 = Item3;
+    }
+
+    /** @brief Converts this tuple to an equivalent std::tuple. */
+    [[nodiscard]] std::tuple<T1, T2, T3> ToStdTuple() const { return {Item1, Item2, Item3}; }
+
+    /** @brief Returns true if all elements compare equal. */
+    bool operator==(const Tuple3& o) const
+    {
+        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3;
+    }
+
+    /** @brief Returns true if any element differs. */
+    bool operator!=(const Tuple3& o) const { return !(*this == o); }
+
+    /**
+     * @brief Returns a string representation in the form "(item1, item2, item3)".
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3>.ToString().
+     */
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ")";
+    }
+
+    /**
+     * @brief Returns a hash code for this tuple.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3>.GetHashCode().
+     */
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+            detail::tupleHash(Item3));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple4
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 4-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3, T4>.
+ */
+template<typename T1, typename T2, typename T3, typename T4>
+struct Tuple4 {
+    /** @brief The first element of the tuple. */
+    T1 Item1;
+    /** @brief The second element of the tuple. */
+    T2 Item2;
+    /** @brief The third element of the tuple. */
+    T3 Item3;
+    /** @brief The fourth element of the tuple. */
+    T4 Item4;
+
+    /** @brief Constructs a Tuple4 from four values. */
+    Tuple4(T1 i1, T2 i2, T3 i3, T4 i4)
+        : Item1(std::move(i1)), Item2(std::move(i2)),
+          Item3(std::move(i3)), Item4(std::move(i4)) {}
+
+    /** @brief Deconstructs this tuple into its elements. */
+    void Deconstruct(T1& item1, T2& item2, T3& item3, T4& item4) const
+    {
+        item1 = Item1; item2 = Item2; item3 = Item3; item4 = Item4;
+    }
+
+    /** @brief Converts this tuple to an equivalent std::tuple. */
+    [[nodiscard]] std::tuple<T1, T2, T3, T4> ToStdTuple() const
+    {
+        return {Item1, Item2, Item3, Item4};
+    }
+
+    /** @brief Returns true if all elements compare equal. */
+    bool operator==(const Tuple4& o) const
+    {
+        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3 && Item4 == o.Item4;
+    }
+
+    /** @brief Returns true if any element differs. */
+    bool operator!=(const Tuple4& o) const { return !(*this == o); }
+
+    /**
+     * @brief Returns a string representation in the form "(item1, item2, item3, item4)".
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3, T4>.ToString().
+     */
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ", "
+                   + detail::tupleItemStr(Item4) + ")";
+    }
+
+    /**
+     * @brief Returns a hash code for this tuple.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3, T4>.GetHashCode().
+     */
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+            detail::tupleHashCombine(detail::tupleHash(Item3), detail::tupleHash(Item4)));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple5
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 5-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3, T4, T5>.
+ */
+template<typename T1, typename T2, typename T3, typename T4, typename T5>
+struct Tuple5 {
+    T1 Item1; /**< @brief The first element. */
+    T2 Item2; /**< @brief The second element. */
+    T3 Item3; /**< @brief The third element. */
+    T4 Item4; /**< @brief The fourth element. */
+    T5 Item5; /**< @brief The fifth element. */
+
+    /** @brief Constructs a Tuple5 from five values. */
+    Tuple5(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5)
+        : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
+          Item4(std::move(i4)), Item5(std::move(i5)) {}
+
+    /** @brief Deconstructs this tuple into its elements. */
+    void Deconstruct(T1& i1, T2& i2, T3& i3, T4& i4, T5& i5) const
+    {
+        i1 = Item1; i2 = Item2; i3 = Item3; i4 = Item4; i5 = Item5;
+    }
+
+    /** @brief Converts this tuple to an equivalent std::tuple. */
+    [[nodiscard]] std::tuple<T1, T2, T3, T4, T5> ToStdTuple() const
+    {
+        return {Item1, Item2, Item3, Item4, Item5};
+    }
+
+    bool operator==(const Tuple5& o) const
+    {
+        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3
+            && Item4 == o.Item4 && Item5 == o.Item5;
+    }
+    bool operator!=(const Tuple5& o) const { return !(*this == o); }
+
+    /** @brief Returns a string in the form "(item1, …, item5)". */
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ", "
+                   + detail::tupleItemStr(Item4) + ", "
+                   + detail::tupleItemStr(Item5) + ")";
+    }
+
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+                detail::tupleHashCombine(detail::tupleHash(Item3), detail::tupleHash(Item4))),
+            detail::tupleHash(Item5));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple6
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 6-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3, T4, T5, T6>.
+ */
+template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+struct Tuple6 {
+    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6;
+
+    Tuple6(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6)
+        : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
+          Item4(std::move(i4)), Item5(std::move(i5)), Item6(std::move(i6)) {}
+
+    void Deconstruct(T1& i1, T2& i2, T3& i3, T4& i4, T5& i5, T6& i6) const
+    {
+        i1=Item1; i2=Item2; i3=Item3; i4=Item4; i5=Item5; i6=Item6;
+    }
+
+    [[nodiscard]] std::tuple<T1,T2,T3,T4,T5,T6> ToStdTuple() const
+    {
+        return {Item1, Item2, Item3, Item4, Item5, Item6};
+    }
+
+    bool operator==(const Tuple6& o) const
+    {
+        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3
+            && Item4==o.Item4 && Item5==o.Item5 && Item6==o.Item6;
+    }
+    bool operator!=(const Tuple6& o) const { return !(*this == o); }
+
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ", "
+                   + detail::tupleItemStr(Item4) + ", "
+                   + detail::tupleItemStr(Item5) + ", "
+                   + detail::tupleItemStr(Item6) + ")";
+    }
+
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+                detail::tupleHashCombine(detail::tupleHash(Item3), detail::tupleHash(Item4))),
+            detail::tupleHashCombine(detail::tupleHash(Item5), detail::tupleHash(Item6)));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple7
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents a 7-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3, T4, T5, T6, T7>.
+ */
+template<typename T1, typename T2, typename T3, typename T4,
+         typename T5, typename T6, typename T7>
+struct Tuple7 {
+    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6; T7 Item7;
+
+    Tuple7(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7)
+        : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
+          Item4(std::move(i4)), Item5(std::move(i5)), Item6(std::move(i6)),
+          Item7(std::move(i7)) {}
+
+    void Deconstruct(T1& i1, T2& i2, T3& i3, T4& i4, T5& i5, T6& i6, T7& i7) const
+    {
+        i1=Item1; i2=Item2; i3=Item3; i4=Item4; i5=Item5; i6=Item6; i7=Item7;
+    }
+
+    [[nodiscard]] std::tuple<T1,T2,T3,T4,T5,T6,T7> ToStdTuple() const
+    {
+        return {Item1, Item2, Item3, Item4, Item5, Item6, Item7};
+    }
+
+    bool operator==(const Tuple7& o) const
+    {
+        return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4
+            && Item5==o.Item5 && Item6==o.Item6 && Item7==o.Item7;
+    }
+    bool operator!=(const Tuple7& o) const { return !(*this == o); }
+
+    [[nodiscard]] std::string ToString() const
+    {
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ", "
+                   + detail::tupleItemStr(Item4) + ", "
+                   + detail::tupleItemStr(Item5) + ", "
+                   + detail::tupleItemStr(Item6) + ", "
+                   + detail::tupleItemStr(Item7) + ")";
+    }
+
+    [[nodiscard]] int GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+                detail::tupleHashCombine(detail::tupleHash(Item3), detail::tupleHash(Item4))),
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item5), detail::tupleHash(Item6)),
+                detail::tupleHash(Item7)));
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tuple factory (mirrors .NET static Tuple.Create<T...>() methods)
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Provides static factory methods that create Tuple instances.
+ *
+ * C++ counterpart of the static .NET System.Tuple class.
+ * Use Tuple::Create(...) to construct typed tuples with inferred element types.
+ */
+struct Tuple {
+    Tuple() = delete;
+
+    /** @brief Creates a 1-element tuple. */
+    template<typename T1>
+    [[nodiscard]] static Tuple1<T1> Create(T1 item1)
+    {
+        return Tuple1<T1>(std::move(item1));
+    }
+
+    /** @brief Creates a 2-element tuple. */
     template<typename T1, typename T2>
-    struct Tuple2 {
-        T1 Item1; ///< First element.
-        T2 Item2; ///< Second element.
-        /// Constructs a Tuple2 from two values.
-        Tuple2(T1 i1, T2 i2) : Item1(std::move(i1)), Item2(std::move(i2)) {}
-        /// Deconstructs this tuple into its elements.
-        void Deconstruct(T1& item1, T2& item2) const { item1 = Item1; item2 = Item2; }
-        /// Converts this tuple to an equivalent std::tuple.
-        [[nodiscard]] std::tuple<T1, T2> ToStdTuple() const { return {Item1, Item2}; }
-        /// Returns true if all elements compare equal.
-        bool operator==(const Tuple2& o) const { return Item1 == o.Item1 && Item2 == o.Item2; }
-        /// Returns true if any element differs.
-        bool operator!=(const Tuple2& o) const { return !(*this == o); }
-    };
+    [[nodiscard]] static Tuple2<T1, T2> Create(T1 item1, T2 item2)
+    {
+        return Tuple2<T1, T2>(std::move(item1), std::move(item2));
+    }
 
+    /** @brief Creates a 3-element tuple. */
     template<typename T1, typename T2, typename T3>
-    struct Tuple3 {
-        T1 Item1; ///< First element.
-        T2 Item2; ///< Second element.
-        T3 Item3; ///< Third element.
-        /// Constructs a Tuple3 from three values.
-        Tuple3(T1 i1, T2 i2, T3 i3) : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)) {}
-        /// Deconstructs this tuple into its elements.
-        void Deconstruct(T1& item1, T2& item2, T3& item3) const { item1 = Item1; item2 = Item2; item3 = Item3; }
-        /// Converts this tuple to an equivalent std::tuple.
-        [[nodiscard]] std::tuple<T1, T2, T3> ToStdTuple() const { return {Item1, Item2, Item3}; }
-        /// Returns true if all elements compare equal.
-        bool operator==(const Tuple3& o) const { return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3; }
-        /// Returns true if any element differs.
-        bool operator!=(const Tuple3& o) const { return !(*this == o); }
-    };
+    [[nodiscard]] static Tuple3<T1, T2, T3> Create(T1 item1, T2 item2, T3 item3)
+    {
+        return Tuple3<T1, T2, T3>(std::move(item1), std::move(item2), std::move(item3));
+    }
 
+    /** @brief Creates a 4-element tuple. */
     template<typename T1, typename T2, typename T3, typename T4>
-    struct Tuple4 {
-        T1 Item1; ///< First element.
-        T2 Item2; ///< Second element.
-        T3 Item3; ///< Third element.
-        T4 Item4; ///< Fourth element.
-        /// Constructs a Tuple4 from four values.
-        Tuple4(T1 i1, T2 i2, T3 i3, T4 i4) : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)), Item4(std::move(i4)) {}
-        /// Deconstructs this tuple into its elements.
-        void Deconstruct(T1& item1, T2& item2, T3& item3, T4& item4) const { item1 = Item1; item2 = Item2; item3 = Item3; item4 = Item4; }
-        /// Converts this tuple to an equivalent std::tuple.
-        [[nodiscard]] std::tuple<T1, T2, T3, T4> ToStdTuple() const { return {Item1, Item2, Item3, Item4}; }
-    };
+    [[nodiscard]] static Tuple4<T1, T2, T3, T4> Create(T1 item1, T2 item2, T3 item3, T4 item4)
+    {
+        return Tuple4<T1, T2, T3, T4>(std::move(item1), std::move(item2),
+                                      std::move(item3), std::move(item4));
+    }
+
+    /** @brief Creates a 5-element tuple. */
+    template<typename T1, typename T2, typename T3, typename T4, typename T5>
+    [[nodiscard]] static Tuple5<T1,T2,T3,T4,T5> Create(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5)
+    {
+        return Tuple5<T1,T2,T3,T4,T5>(std::move(i1),std::move(i2),std::move(i3),
+                                      std::move(i4),std::move(i5));
+    }
+
+    /** @brief Creates a 6-element tuple. */
+    template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+    [[nodiscard]] static Tuple6<T1,T2,T3,T4,T5,T6> Create(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6)
+    {
+        return Tuple6<T1,T2,T3,T4,T5,T6>(std::move(i1),std::move(i2),std::move(i3),
+                                         std::move(i4),std::move(i5),std::move(i6));
+    }
+
+    /** @brief Creates a 7-element tuple. */
+    template<typename T1, typename T2, typename T3, typename T4,
+             typename T5, typename T6, typename T7>
+    [[nodiscard]] static Tuple7<T1,T2,T3,T4,T5,T6,T7>
+    Create(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7)
+    {
+        return Tuple7<T1,T2,T3,T4,T5,T6,T7>(std::move(i1),std::move(i2),std::move(i3),
+                                             std::move(i4),std::move(i5),std::move(i6),
+                                             std::move(i7));
+    }
+};
 
 } // namespace System
