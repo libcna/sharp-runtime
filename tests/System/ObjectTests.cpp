@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <climits>
+#include <typeinfo>
 #include "System/Object.hpp"
+#include "System/Type.hpp"
 
 // ---------------------------------------------------------------------------
 // Minimal concrete subclasses for testing
@@ -199,4 +201,50 @@ TEST(ObjectTests, PolyDispatch_Equals_ViaBasePtr) {
     System::Object* pa = &a;
     System::Object* pb = &b;
     EXPECT_TRUE(pa->Equals(pb));
+}
+
+// ---------------------------------------------------------------------------
+// GetType
+// ---------------------------------------------------------------------------
+
+TEST(ObjectTests, GetType_NonNullTypeInfo) {
+    SimpleObj o;
+    EXPECT_NE(o.GetType().getTypeInfo(), nullptr);
+}
+
+TEST(ObjectTests, GetType_DynamicType_NotBaseObject) {
+    SimpleObj o;
+    System::Type t = o.GetType();
+    System::Type objectType = System::Type::From<System::Object>();
+    EXPECT_NE(t, objectType);
+}
+
+TEST(ObjectTests, GetType_MatchesTypeId) {
+    SimpleObj o;
+    System::Type t = o.GetType();
+    System::Type expected = System::Type::From<SimpleObj>();
+    EXPECT_EQ(t, expected);
+}
+
+TEST(ObjectTests, GetType_ViaPoly_ReturnsDerivedType) {
+    SimpleObj o;
+    System::Object* p = &o;
+    // Even through a base pointer, GetType returns the dynamic (derived) type
+    EXPECT_EQ(p->GetType(), System::Type::From<SimpleObj>());
+}
+
+TEST(ObjectTests, GetType_TwoInstancesSameClass_Equal) {
+    SimpleObj a, b;
+    EXPECT_EQ(a.GetType(), b.GetType());
+}
+
+TEST(ObjectTests, GetType_DifferentClasses_NotEqual) {
+    SimpleObj a;
+    NamedObj b("x");
+    EXPECT_NE(a.GetType(), b.GetType());
+}
+
+TEST(ObjectTests, GetType_ToString_NonEmpty) {
+    SimpleObj o;
+    EXPECT_FALSE(o.GetType().ToString().empty());
 }

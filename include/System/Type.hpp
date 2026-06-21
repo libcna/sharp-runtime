@@ -53,6 +53,19 @@ namespace System
             return Type(typeid(T));
         }
 
+        /**
+         * @brief Creates a Type instance from a std::type_info reference.
+         *
+         * Used internally by Object::GetType() to construct a Type from
+         * the result of typeid(*this) on a polymorphic object.
+         * @param info The RTTI descriptor to wrap.
+         * @return A Type wrapping @p info.
+         */
+        static Type FromTypeInfo(const std::type_info& info)
+        {
+            return Type(info);
+        }
+
         // -----------------------------------------------------------------------
         // Name properties
         // -----------------------------------------------------------------------
