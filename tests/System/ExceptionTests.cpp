@@ -23,6 +23,7 @@
 #include "System/InsufficientMemoryException.hpp"
 #include "System/OutOfMemoryException.hpp"
 #include "System/InvalidTimeZoneException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -488,6 +489,47 @@ TEST(InvalidTimeZoneExceptionTests, InnerExceptionCtor_ContainsBoth) {
 TEST(InvalidTimeZoneExceptionTests, CatchableAsStdException) {
     bool caught = false;
     try { throw System::InvalidTimeZoneException("tz error"); }
+    catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
+    EXPECT_TRUE(caught);
+}
+
+// ---------------------------------------------------------------------------
+// IndexOutOfRangeException
+// ---------------------------------------------------------------------------
+
+TEST(IndexOutOfRangeExceptionTests, DefaultCtor_MessageContainsBounds) {
+    System::IndexOutOfRangeException ex;
+    EXPECT_NE(std::string(ex.what()).find("bounds"), std::string::npos);
+}
+
+TEST(IndexOutOfRangeExceptionTests, CStringCtor_WhatContainsMessage) {
+    System::IndexOutOfRangeException ex("index 99 is out of range");
+    EXPECT_NE(std::string(ex.what()).find("index 99"), std::string::npos);
+}
+
+TEST(IndexOutOfRangeExceptionTests, StringCtor_WhatContainsMessage) {
+    System::IndexOutOfRangeException ex(std::string("bad index"));
+    EXPECT_NE(std::string(ex.what()).find("bad index"), std::string::npos);
+}
+
+TEST(IndexOutOfRangeExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root cause");
+    System::IndexOutOfRangeException ex("index exceeded array size", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("index exceeded array size"), std::string::npos);
+    EXPECT_NE(msg.find("root cause"), std::string::npos);
+}
+
+TEST(IndexOutOfRangeExceptionTests, CatchableAsSystemException) {
+    bool caught = false;
+    try { throw System::IndexOutOfRangeException(); }
+    catch (const System::SystemException&) { caught = true; }
+    EXPECT_TRUE(caught);
+}
+
+TEST(IndexOutOfRangeExceptionTests, CatchableAsStdException) {
+    bool caught = false;
+    try { throw System::IndexOutOfRangeException("oob"); }
     catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
     EXPECT_TRUE(caught);
 }

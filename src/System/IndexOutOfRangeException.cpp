@@ -18,4 +18,8 @@ namespace System {
     IndexOutOfRangeException::IndexOutOfRangeException(const std::string& message)
         : SystemException(message) {}
 
+    IndexOutOfRangeException::IndexOutOfRangeException(const std::string& message,
+                                                       const std::exception& innerException)
+        : SystemException(message + " | inner: " + innerException.what()) {}
+
 } // namespace System
