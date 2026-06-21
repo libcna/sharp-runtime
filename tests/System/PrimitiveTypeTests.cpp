@@ -141,6 +141,75 @@ TEST(Int32Tests, ToString_B_Basic)       { EXPECT_EQ(Int32::ToString(5, std::str
 TEST(Int32Tests, ToString_B_Padded)      { EXPECT_EQ(Int32::ToString(5, std::string("B8")), "00000101"); }
 
 // ---------------------------------------------------------------------------
+// Int32 — arithmetic helpers
+// ---------------------------------------------------------------------------
+
+TEST(Int32Tests, BigMul_PositiveValues) {
+    EXPECT_EQ(Int32::BigMul(100000, 100000), 10000000000LL);
+}
+TEST(Int32Tests, BigMul_NegativeTimesPositive) {
+    EXPECT_EQ(Int32::BigMul(-3, 7), -21LL);
+}
+TEST(Int32Tests, DivRem_Basic) {
+    auto [q, r] = Int32::DivRem(10, 3);
+    EXPECT_EQ(q, 3);
+    EXPECT_EQ(r, 1);
+}
+TEST(Int32Tests, DivRem_NegativeDividend) {
+    auto [q, r] = Int32::DivRem(-10, 3);
+    EXPECT_EQ(q, -3);
+    EXPECT_EQ(r, -1);
+}
+TEST(Int32Tests, Abs_Positive) { EXPECT_EQ(Int32::Abs(42), 42); }
+TEST(Int32Tests, Abs_Negative) { EXPECT_EQ(Int32::Abs(-42), 42); }
+TEST(Int32Tests, Abs_Zero)     { EXPECT_EQ(Int32::Abs(0), 0); }
+TEST(Int32Tests, Clamp_InRange)    { EXPECT_EQ(Int32::Clamp(5, 1, 10), 5); }
+TEST(Int32Tests, Clamp_BelowMin)   { EXPECT_EQ(Int32::Clamp(-5, 1, 10), 1); }
+TEST(Int32Tests, Clamp_AboveMax)   { EXPECT_EQ(Int32::Clamp(15, 1, 10), 10); }
+TEST(Int32Tests, Max_ReturnsLarger) { EXPECT_EQ(Int32::Max(3, 7), 7); }
+TEST(Int32Tests, Min_ReturnsSmaller) { EXPECT_EQ(Int32::Min(3, 7), 3); }
+TEST(Int32Tests, Sign_Positive) { EXPECT_EQ(Int32::Sign(42), 1); }
+TEST(Int32Tests, Sign_Negative) { EXPECT_EQ(Int32::Sign(-42), -1); }
+TEST(Int32Tests, Sign_Zero)     { EXPECT_EQ(Int32::Sign(0), 0); }
+TEST(Int32Tests, MaxMagnitude_ReturnsCorrect) {
+    EXPECT_EQ(Int32::MaxMagnitude(-10, 5), -10);
+}
+TEST(Int32Tests, MinMagnitude_ReturnsCorrect) {
+    EXPECT_EQ(Int32::MinMagnitude(-10, 5), 5);
+}
+
+// ---------------------------------------------------------------------------
+// Int32 — bit operations
+// ---------------------------------------------------------------------------
+
+TEST(Int32Tests, LeadingZeroCount_One)  { EXPECT_EQ(Int32::LeadingZeroCount(1), 31); }
+TEST(Int32Tests, LeadingZeroCount_Zero) { EXPECT_EQ(Int32::LeadingZeroCount(0), 32); }
+TEST(Int32Tests, TrailingZeroCount_Eight) { EXPECT_EQ(Int32::TrailingZeroCount(8), 3); }
+TEST(Int32Tests, TrailingZeroCount_One)   { EXPECT_EQ(Int32::TrailingZeroCount(1), 0); }
+TEST(Int32Tests, PopCount_Zero)    { EXPECT_EQ(Int32::PopCount(0), 0); }
+TEST(Int32Tests, PopCount_Seven)   { EXPECT_EQ(Int32::PopCount(7), 3); }
+TEST(Int32Tests, RotateLeft_Basic) { EXPECT_EQ(Int32::RotateLeft(1, 1), 2); }
+TEST(Int32Tests, RotateRight_Basic) { EXPECT_EQ(Int32::RotateRight(2, 1), 1); }
+TEST(Int32Tests, IsPow2_True)  { EXPECT_TRUE(Int32::IsPow2(64)); }
+TEST(Int32Tests, IsPow2_False) { EXPECT_FALSE(Int32::IsPow2(63)); }
+TEST(Int32Tests, IsPow2_NegativeFalse) { EXPECT_FALSE(Int32::IsPow2(-4)); }
+TEST(Int32Tests, Log2_Eight)  { EXPECT_EQ(Int32::Log2(8), 3); }
+TEST(Int32Tests, Log2_One)    { EXPECT_EQ(Int32::Log2(1), 0); }
+
+// ---------------------------------------------------------------------------
+// Int32 — classification predicates
+// ---------------------------------------------------------------------------
+
+TEST(Int32Tests, IsEvenInteger_Even) { EXPECT_TRUE(Int32::IsEvenInteger(4)); }
+TEST(Int32Tests, IsEvenInteger_Odd)  { EXPECT_FALSE(Int32::IsEvenInteger(3)); }
+TEST(Int32Tests, IsOddInteger_Odd)   { EXPECT_TRUE(Int32::IsOddInteger(3)); }
+TEST(Int32Tests, IsOddInteger_Even)  { EXPECT_FALSE(Int32::IsOddInteger(4)); }
+TEST(Int32Tests, IsNegative_True)    { EXPECT_TRUE(Int32::IsNegative(-1)); }
+TEST(Int32Tests, IsNegative_False)   { EXPECT_FALSE(Int32::IsNegative(0)); }
+TEST(Int32Tests, IsPositive_True)    { EXPECT_TRUE(Int32::IsPositive(0)); }
+TEST(Int32Tests, IsPositive_False)   { EXPECT_FALSE(Int32::IsPositive(-1)); }
+
+// ---------------------------------------------------------------------------
 // Int64::ToString(format)
 // ---------------------------------------------------------------------------
 TEST(Int64Tests, ToString_Hex) { EXPECT_EQ(Int64::ToString(255LL, std::string("X")), "FF"); }
