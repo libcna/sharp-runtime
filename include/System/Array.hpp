@@ -41,6 +41,33 @@ namespace System {
             });
         }
 
+        /** @brief Sorts @p length elements starting at @p index using the default comparator. */
+        template<typename T>
+        static void Sort(std::vector<T>& array, intcs index, intcs length) {
+            std::sort(array.begin() + index, array.begin() + index + length);
+        }
+
+        /**
+         * @brief Sorts @p length elements starting at @p index using @p comparison.
+         * @param comparison Function returning negative/zero/positive for a&lt;b / a==b / a&gt;b.
+         */
+        template<typename T>
+        static void Sort(std::vector<T>& array, intcs index, intcs length,
+                         std::function<int(const T&, const T&)> comparison) {
+            std::sort(array.begin() + index, array.begin() + index + length,
+                      [&](const T& a, const T& b) { return comparison(a, b) < 0; });
+        }
+
+        /**
+         * @brief Copies @p length elements from the start of @p src into the start of @p dst.
+         * @param dst Destination vector (must already be sized to fit @p length elements).
+         */
+        template<typename T>
+        static void Copy(const std::vector<T>& src, std::vector<T>& dst, intcs length) {
+            for (intcs i = 0; i < length; ++i)
+                dst[static_cast<size_t>(i)] = src[static_cast<size_t>(i)];
+        }
+
         /**
          * @brief Copies @p length elements from @p src[@p srcIndex] into @p dst[@p dstIndex].
          * @param dst Destination vector (must already be sized to fit the copied range).
@@ -58,6 +85,17 @@ namespace System {
         template<typename T>
         static void Copy(const T* src, intcs srcIndex, T* dst, intcs dstIndex, intcs length) {
             std::memcpy(dst + dstIndex, src + srcIndex, static_cast<size_t>(length) * sizeof(T));
+        }
+
+        /**
+         * @brief Copies elements like Copy but signals that the copy must succeed atomically
+         * (no partial copy on type mismatch). In C++ there is no runtime type check, so
+         * this delegates directly to Copy.
+         */
+        template<typename T>
+        static void ConstrainedCopy(const std::vector<T>& src, intcs srcIndex,
+                                    std::vector<T>& dst, intcs dstIndex, intcs length) {
+            Copy(src, srcIndex, dst, dstIndex, length);
         }
 
         /** @brief Resizes @p array to @p newSize, preserving existing elements and default-initializing new ones. */
@@ -82,10 +120,32 @@ namespace System {
             return -1;
         }
 
+        /** @brief Returns the first index of @p value in [@p startIndex, @p startIndex+@p count), or -1. */
+        template<typename T>
+        static intcs IndexOf(const std::vector<T>& array, const T& value,
+                             intcs startIndex, intcs count) {
+            intcs end = startIndex + count;
+            for (intcs i = startIndex; i < end; ++i)
+                if (array[static_cast<size_t>(i)] == value) return i;
+            return -1;
+        }
+
         /** @brief Reverses the order of all elements in @p array in place. */
         template<typename T>
         static void Reverse(std::vector<T>& array) {
             std::reverse(array.begin(), array.end());
+        }
+
+        /** @brief Reverses @p length elements of @p array starting at @p index. */
+        template<typename T>
+        static void Reverse(std::vector<T>& array, intcs index, intcs length) {
+            std::reverse(array.begin() + index, array.begin() + index + length);
+        }
+
+        /** @brief Resets all elements of @p array to the default value of T. */
+        template<typename T>
+        static void Clear(std::vector<T>& array) {
+            std::fill(array.begin(), array.end(), T{});
         }
 
         /** @brief Resets @p length elements starting at @p index to the default value of T. */
@@ -107,6 +167,66 @@ namespace System {
                 if (array[static_cast<size_t>(mid)] == value) return mid;
                 if (array[static_cast<size_t>(mid)] < value)  lo = mid + 1;
                 else                                           hi = mid - 1;
+            }
+            return ~lo;
+        }
+
+        /**
+         * @brief Searches a sorted sub-range of @p array for @p value using binary search.
+         * @param index  First index of the range to search.
+         * @param length Number of elements in the range.
+         * @return Zero-based index if found; bitwise complement of the insertion point otherwise.
+         */
+        template<typename T>
+        static intcs BinarySearch(const std::vector<T>& array, intcs index, intcs length,
+                                   const T& value) {
+            intcs lo = index, hi = index + length - 1;
+            while (lo <= hi) {
+                intcs mid = lo + (hi - lo) / 2;
+                if (array[static_cast<size_t>(mid)] == value) return mid;
+                if (array[static_cast<size_t>(mid)] < value)  lo = mid + 1;
+                else                                           hi = mid - 1;
+            }
+            return ~lo;
+        }
+
+        /**
+         * @brief Searches a sorted @p array for @p value using a custom comparer.
+         * @param comparison Returns negative/zero/positive for less/equal/greater.
+         * @return Zero-based index if found; bitwise complement of the insertion point otherwise.
+         */
+        template<typename T>
+        static intcs BinarySearch(const std::vector<T>& array, const T& value,
+                                   std::function<int(const T&, const T&)> comparison) {
+            intcs lo = 0, hi = static_cast<intcs>(array.size()) - 1;
+            while (lo <= hi) {
+                intcs mid = lo + (hi - lo) / 2;
+                int cmp = comparison(array[static_cast<size_t>(mid)], value);
+                if (cmp == 0) return mid;
+                if (cmp < 0)  lo = mid + 1;
+                else          hi = mid - 1;
+            }
+            return ~lo;
+        }
+
+        /**
+         * @brief Searches a sorted sub-range of @p array for @p value using a custom comparer.
+         * @param index      First index of the range to search.
+         * @param length     Number of elements in the range.
+         * @param comparison Returns negative/zero/positive for less/equal/greater.
+         * @return Zero-based index if found; bitwise complement of the insertion point otherwise.
+         */
+        template<typename T>
+        static intcs BinarySearch(const std::vector<T>& array, intcs index, intcs length,
+                                   const T& value,
+                                   std::function<int(const T&, const T&)> comparison) {
+            intcs lo = index, hi = index + length - 1;
+            while (lo <= hi) {
+                intcs mid = lo + (hi - lo) / 2;
+                int cmp = comparison(array[static_cast<size_t>(mid)], value);
+                if (cmp == 0) return mid;
+                if (cmp < 0)  lo = mid + 1;
+                else          hi = mid - 1;
             }
             return ~lo;
         }
@@ -183,12 +303,54 @@ namespace System {
             return -1;
         }
 
+        /** @brief Searches [@p startIndex, end) for the first element satisfying @p predicate. */
+        template<typename T>
+        [[nodiscard]] static intcs FindIndex(
+                const std::vector<T>& array, intcs startIndex,
+                std::function<bool(const T&)> predicate) {
+            for (intcs i = startIndex; i < static_cast<intcs>(array.size()); ++i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /** @brief Searches [@p startIndex, @p startIndex+@p count) for the first element satisfying @p predicate. */
+        template<typename T>
+        [[nodiscard]] static intcs FindIndex(
+                const std::vector<T>& array, intcs startIndex, intcs count,
+                std::function<bool(const T&)> predicate) {
+            intcs end = startIndex + count;
+            for (intcs i = startIndex; i < end; ++i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
         /** @brief Returns the index of the last element satisfying @p predicate, or -1 if none. */
         template<typename T>
         [[nodiscard]] static intcs FindLastIndex(
                 const std::vector<T>& array,
                 std::function<bool(const T&)> predicate) {
             for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /** @brief Searches backward from @p startIndex for the last element satisfying @p predicate. */
+        template<typename T>
+        [[nodiscard]] static intcs FindLastIndex(
+                const std::vector<T>& array, intcs startIndex,
+                std::function<bool(const T&)> predicate) {
+            for (intcs i = startIndex; i >= 0; --i)
+                if (predicate(array[static_cast<size_t>(i)])) return i;
+            return -1;
+        }
+
+        /** @brief Searches backward in [@p startIndex-@p count+1, @p startIndex] for an element satisfying @p predicate. */
+        template<typename T>
+        [[nodiscard]] static intcs FindLastIndex(
+                const std::vector<T>& array, intcs startIndex, intcs count,
+                std::function<bool(const T&)> predicate) {
+            intcs endIdx = startIndex - count + 1;
+            for (intcs i = startIndex; i >= endIdx && i >= 0; --i)
                 if (predicate(array[static_cast<size_t>(i)])) return i;
             return -1;
         }
@@ -213,6 +375,38 @@ namespace System {
             for (intcs i = static_cast<intcs>(array.size()) - 1; i >= 0; --i)
                 if (array[static_cast<size_t>(i)] == value) return i;
             return -1;
+        }
+
+        /**
+         * @brief Searches backward from @p startIndex for the last occurrence of @p value, or -1.
+         */
+        template<typename T>
+        [[nodiscard]] static intcs LastIndexOf(const std::vector<T>& array, const T& value,
+                                               intcs startIndex) {
+            for (intcs i = startIndex; i >= 0; --i)
+                if (array[static_cast<size_t>(i)] == value) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Searches backward in [@p startIndex-@p count+1, @p startIndex] for @p value, or -1.
+         */
+        template<typename T>
+        [[nodiscard]] static intcs LastIndexOf(const std::vector<T>& array, const T& value,
+                                               intcs startIndex, intcs count) {
+            intcs endIdx = startIndex - count + 1;
+            for (intcs i = startIndex; i >= endIdx && i >= 0; --i)
+                if (array[static_cast<size_t>(i)] == value) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Returns a const reference to @p array as a read-only view.
+         * C++ counterpart of .NET Array.AsReadOnly&lt;T&gt;().
+         */
+        template<typename T>
+        [[nodiscard]] static const std::vector<T>& AsReadOnly(const std::vector<T>& array) {
+            return array;
         }
     };
 
