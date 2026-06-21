@@ -5,6 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/IEnumerator.hpp"
 
 namespace System::Collections {
 
@@ -18,11 +19,16 @@ namespace System::Collections {
  */
 class BitArray {
     std::vector<bool> bits_;
+
 public:
+    // -----------------------------------------------------------------------
+    // Constructors
+    // -----------------------------------------------------------------------
+
     /**
      * @brief Constructs a BitArray of the given length with all bits set to @p defaultValue.
      *
-     * C++ counterpart of .NET BitArray(int, bool).
+     * C++ counterpart of .NET BitArray(int) and BitArray(int, bool).
      */
     explicit BitArray(intcs length, bool defaultValue = false)
         : bits_(static_cast<size_t>(length), defaultValue) {}
@@ -58,6 +64,10 @@ public:
                 bits_.push_back((static_cast<uint32_t>(v) >> i) & 1u);
     }
 
+    // -----------------------------------------------------------------------
+    // Properties
+    // -----------------------------------------------------------------------
+
     /**
      * @brief Gets the number of bits in the BitArray.
      *
@@ -71,6 +81,31 @@ public:
      * C++ counterpart of .NET BitArray.Count.
      */
     [[nodiscard]] intcs getCountProperty()  const { return getLengthProperty(); }
+
+    /**
+     * @brief Returns false; BitArray is never read-only.
+     *
+     * C++ counterpart of .NET BitArray.IsReadOnly.
+     */
+    [[nodiscard]] bool getIsReadOnlyProperty() const { return false; }
+
+    /**
+     * @brief Returns false; BitArray is not thread-safe.
+     *
+     * C++ counterpart of .NET BitArray.IsSynchronized.
+     */
+    [[nodiscard]] bool getIsSynchronizedProperty() const { return false; }
+
+    /**
+     * @brief Gets an object that can be used to synchronize access to the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.SyncRoot.
+     */
+    [[nodiscard]] const void* getSyncRootProperty() const { return this; }
+
+    // -----------------------------------------------------------------------
+    // Element access
+    // -----------------------------------------------------------------------
 
     /**
      * @brief Returns the value of the bit at the given index.
@@ -99,6 +134,10 @@ public:
      * C++ counterpart of .NET BitArray[int].
      */
     bool operator[](intcs i) const { return bits_.at(static_cast<size_t>(i)); }
+
+    // -----------------------------------------------------------------------
+    // Bitwise operations
+    // -----------------------------------------------------------------------
 
     /**
      * @brief Performs a bitwise AND of this BitArray with @p other in place.
@@ -168,6 +207,10 @@ public:
         return *this;
     }
 
+    // -----------------------------------------------------------------------
+    // Query
+    // -----------------------------------------------------------------------
+
     /**
      * @brief Returns the number of bits set to true in the BitArray.
      *
@@ -199,6 +242,10 @@ public:
         return false;
     }
 
+    // -----------------------------------------------------------------------
+    // Copy / clone
+    // -----------------------------------------------------------------------
+
     /**
      * @brief Copies all bits into a bool vector (resized to match).
      *
@@ -217,6 +264,53 @@ public:
         for (size_t i = 0; i < bits_.size(); ++i)
             if (bits_[i]) dest[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
     }
+
+    /**
+     * @brief Returns a copy of this BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Clone().
+     */
+    [[nodiscard]] BitArray Clone() const { return BitArray(bits_); }
+
+    // -----------------------------------------------------------------------
+    // Enumerator
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Enumerates over each bool value in the BitArray.
+     *
+     * getCurrent() returns a void* pointing to an internal bool; cast to bool* to read.
+     */
+    class Enumerator : public IEnumerator {
+        const BitArray* arr_;
+        int             index_;
+        mutable bool    current_;
+    public:
+        explicit Enumerator(const BitArray* arr) : arr_(arr), index_(-1), current_(false) {}
+        bool MoveNext() override {
+            int len = arr_->getLengthProperty();
+            if (index_ + 1 < len) {
+                ++index_;
+                current_ = arr_->Get(index_);
+                return true;
+            }
+            return false;
+        }
+        void Reset() override { index_ = -1; current_ = false; }
+        /** @brief Returns pointer to an internal bool holding the current bit value. */
+        void* getCurrent() const override { return &current_; }
+    };
+
+    /**
+     * @brief Returns a heap-allocated Enumerator; caller takes ownership.
+     *
+     * C++ counterpart of .NET BitArray.GetEnumerator().
+     */
+    [[nodiscard]] IEnumerator* GetEnumerator() { return new Enumerator(this); }
+
+    // -----------------------------------------------------------------------
+    // Range-based for support
+    // -----------------------------------------------------------------------
 
     /** @brief Returns an iterator to the beginning of the bit sequence. */
     auto begin() const { return bits_.begin(); }
