@@ -14,13 +14,26 @@ namespace System {
      * supported, or when there is an attempt to read, seek, or write to a
      * stream that does not support the invoked functionality.
      *
-     * @note Status: Implemented
+     * C++ counterpart of .NET System.NotSupportedException.
      */
     class NotSupportedException : public SystemException {
     public:
+        /** @brief Initializes a new instance with the default message. */
         NotSupportedException();
+
+        /** @brief Initializes a new instance with the specified message. */
         explicit NotSupportedException(const char* message);
+
+        /** @brief Initializes a new instance with the specified message. */
         explicit NotSupportedException(const std::string& message);
+
+        /**
+         * @brief Initializes a new instance with a specified message and a
+         * reference to the inner exception that is the cause of this exception.
+         *
+         * C++ counterpart of .NET NotSupportedException(string, Exception).
+         */
+        NotSupportedException(const std::string& message, const std::exception& innerException);
     };
 
 } // namespace System

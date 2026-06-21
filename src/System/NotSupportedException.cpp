@@ -18,4 +18,8 @@ namespace System {
     NotSupportedException::NotSupportedException(const std::string& message)
         : SystemException(message) {}
 
+    NotSupportedException::NotSupportedException(const std::string& message,
+                                                 const std::exception& innerException)
+        : SystemException(message + " | inner: " + innerException.what()) {}
+
 } // namespace System
