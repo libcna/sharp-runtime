@@ -267,6 +267,25 @@ namespace System {
         }
 
         /**
+         * @brief Returns a vector of @p length elements chosen randomly (with replacement)
+         * from a ReadOnlySpan.
+         *
+         * C++ counterpart of .NET Random.GetItems<T>(ReadOnlySpan<T>, int).
+         * @tparam T Element type.
+         * @param choices Non-empty source span to sample from.
+         * @param length  Number of elements to pick.
+         * @return A new vector of size @p length.
+         */
+        template<typename T>
+        std::vector<T> GetItems(ReadOnlySpan<T> choices, intcs length) {
+            std::vector<T> result;
+            result.reserve(static_cast<std::size_t>(length));
+            for (intcs i = 0; i < length; ++i)
+                result.push_back(choices[Next(choices.getLengthProperty())]);
+            return result;
+        }
+
+        /**
          * @brief Fills @p destination with elements chosen randomly (with replacement)
          * from @p choices.
          *

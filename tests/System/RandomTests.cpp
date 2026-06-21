@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "gtest/gtest.h"
 #include "System/Random.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -439,4 +442,88 @@ TEST(RandomTests, GetHexString_SpanDestination_LengthUnchanged) {
     System::Span<char> s(buf);
     rng.GetHexString(s);
     EXPECT_EQ(s.getLengthProperty(), 8);
+}
+
+// ---------------------------------------------------------------------------
+// Next — edge cases and throws
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Next_MaxValueZero_ReturnsZero) {
+    System::Random rng(1);
+    EXPECT_EQ(rng.Next(0), 0);
+}
+
+TEST(RandomTests, Next_MaxValueNegative_Throws) {
+    System::Random rng(2);
+    EXPECT_THROW(rng.Next(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(RandomTests, Next_EqualMinMax_ReturnsMin) {
+    System::Random rng(3);
+    EXPECT_EQ(rng.Next(7, 7), 7);
+}
+
+TEST(RandomTests, Next_InvalidRange_Throws) {
+    System::Random rng(4);
+    EXPECT_THROW(rng.Next(10, 5), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// NextBytes — edge cases
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, NextBytes_EmptyVector_NoThrow) {
+    System::Random rng(5);
+    std::vector<uint8_t> buf;
+    EXPECT_NO_THROW(rng.NextBytes(buf));
+}
+
+// ---------------------------------------------------------------------------
+// NextDouble — determinism
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, NextDouble_Seeded_Deterministic) {
+    System::Random a(12345), b(12345);
+    EXPECT_EQ(a.NextDouble(), b.NextDouble());
+}
+
+// ---------------------------------------------------------------------------
+// GetString — edge cases
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetString_ZeroLength_Empty) {
+    System::Random rng(6);
+    EXPECT_TRUE(rng.GetString("abc", 0).empty());
+}
+
+// ---------------------------------------------------------------------------
+// Shuffle — single element
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Shuffle_SingleElement_NoThrow) {
+    System::Random rng(7);
+    std::vector<int> v = {42};
+    EXPECT_NO_THROW(rng.Shuffle(v));
+    EXPECT_EQ(v[0], 42);
+}
+
+// ---------------------------------------------------------------------------
+// GetItems — ReadOnlySpan overload
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, GetItems_ReadOnlySpan_CorrectLength) {
+    System::Random rng(111);
+    std::vector<int> choices = {10, 20, 30, 40};
+    System::ReadOnlySpan<int> src(choices);
+    auto result = rng.GetItems(src, 6);
+    EXPECT_EQ(result.size(), 6u);
+}
+
+TEST(RandomTests, GetItems_ReadOnlySpan_OnlyFromChoices) {
+    System::Random rng(222);
+    std::vector<int> choices = {10, 20, 30};
+    System::ReadOnlySpan<int> src(choices);
+    auto result = rng.GetItems(src, 50);
+    for (int v : result)
+        EXPECT_TRUE(v == 10 || v == 20 || v == 30);
 }
