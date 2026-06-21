@@ -158,6 +158,18 @@ namespace System {
         return result;
     }
 
+    std::string Convert::ToHexStringUpper(const std::vector<bytecs>& inArray)
+    {
+        static constexpr char hex[] = "0123456789ABCDEF";
+        std::string result;
+        result.reserve(inArray.size() * 2);
+        for (bytecs b : inArray) {
+            result += hex[(b >> 4) & 0xF];
+            result += hex[b & 0xF];
+        }
+        return result;
+    }
+
     std::vector<SharpRuntime::bytecs> Convert::FromHexString(const std::string& s)
     {
         if (s.size() % 2 != 0)
