@@ -970,6 +970,35 @@ TEST(ProgressTests, Report_StringType) {
     EXPECT_EQ(last, "hello");
 }
 
+TEST(ProgressTests, Report_MultipleValues_AllReceived) {
+    std::vector<int> got;
+    System::Progress<int> p([&got](int v) { got.push_back(v); });
+    p.Report(1);
+    p.Report(2);
+    p.Report(3);
+    ASSERT_EQ(got.size(), 3u);
+    EXPECT_EQ(got[0], 1);
+    EXPECT_EQ(got[1], 2);
+    EXPECT_EQ(got[2], 3);
+}
+
+TEST(ProgressTests, Report_DoubleType_Works) {
+    double received = 0.0;
+    System::Progress<double> p([&received](double v) { received = v; });
+    p.Report(3.14);
+    EXPECT_DOUBLE_EQ(received, 3.14);
+}
+
+TEST(IProgressTests, IsAbstract) {
+    static_assert(std::is_abstract_v<System::IProgress<int>>,
+                  "IProgress<T> must be abstract");
+}
+
+TEST(IProgressTests, Progress_IsA_IProgress) {
+    static_assert(std::is_base_of_v<System::IProgress<int>, System::Progress<int>>,
+                  "Progress<T> must inherit IProgress<T>");
+}
+
 // ===========================================================================
 // UnicodeRange / UnicodeRanges
 // ===========================================================================
