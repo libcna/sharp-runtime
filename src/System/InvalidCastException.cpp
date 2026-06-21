@@ -6,4 +6,6 @@ namespace System {
     InvalidCastException::InvalidCastException() : SystemException("Specified cast is not valid.") {}
     InvalidCastException::InvalidCastException(const char* message) : SystemException(message) {}
     InvalidCastException::InvalidCastException(const std::string& message) : SystemException(message) {}
+    InvalidCastException::InvalidCastException(const std::string& message, const std::exception& innerException)
+        : SystemException(message + " | inner: " + innerException.what()) {}
 } // namespace System

@@ -5,11 +5,20 @@
 #include <string>
 #include "System/SystemException.hpp"
 namespace System {
-    /** @brief The exception thrown for invalid casting or explicit conversion. @note Status: Implemented */
+    /**
+     * @brief The exception thrown for invalid casting or explicit conversion.
+     *
+     * C++ counterpart of .NET System.InvalidCastException.
+     */
     class InvalidCastException : public SystemException {
     public:
+        /** @brief Initializes a new instance with the default invalid-cast message. */
         InvalidCastException();
+        /** @brief Initializes a new instance with the specified message (const char* overload). */
         explicit InvalidCastException(const char* message);
+        /** @brief Initializes a new instance with the specified error message. */
         explicit InvalidCastException(const std::string& message);
+        /** @brief Initializes a new instance with the specified message and inner exception. */
+        InvalidCastException(const std::string& message, const std::exception& innerException);
     };
 } // namespace System
