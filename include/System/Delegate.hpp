@@ -109,6 +109,16 @@ public:
     [[nodiscard]] std::size_t GetHashCode() const noexcept;
 
     /**
+     * @brief Gets the class instance on which the current delegate invokes the instance method.
+     *
+     * C++ counterpart of .NET Delegate.Target.
+     * Always returns nullptr — sharp-runtime does not track the bound target object separately
+     * from the callable, and CLR reflection is not available.
+     * @return nullptr.
+     */
+    [[nodiscard]] virtual void* getTargetProperty() const noexcept { return nullptr; }
+
+    /**
      * @brief Not implemented — always throws NotImplementedException.
      * C++ has no equivalent of .NET late-bound object[] invocation.
      */

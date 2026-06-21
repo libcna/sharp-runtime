@@ -4,34 +4,11 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include "System/GCCollectionMode.hpp"
+#include "System/GCNotificationStatus.hpp"
 #include "System/TimeSpan.hpp"
 
 namespace System {
-
-    /**
-     * @brief Specifies the behavior for a forced garbage collection.
-     *
-     * C++ counterpart of .NET System.GCCollectionMode.
-     */
-    enum class GCCollectionMode {
-        Default   = 0, /**< Default mode (equivalent to Forced). */
-        Forced    = 1, /**< Force an immediate GC. */
-        Optimized = 2, /**< Allow the GC to determine the optimal time. */
-        Aggressive = 3, /**< Force an aggressive GC. */
-    };
-
-    /**
-     * @brief Provides information about the current registration for full GC notifications.
-     *
-     * C++ counterpart of .NET System.GCNotificationStatus.
-     */
-    enum class GCNotificationStatus {
-        Succeeded    = 0, /**< The notification was successful. */
-        Failed       = 1, /**< The notification failed. */
-        Canceled     = 2, /**< The notification was canceled. */
-        Timeout      = 3, /**< The time specified by the @p millisecondsTimeout parameter elapsed. */
-        NotApplicable = 4, /**< This result can be caused by registering with a concurrent GC. */
-    };
 
     /**
      * @brief Specifies the kind of garbage collection.
