@@ -127,8 +127,21 @@ TEST(TypeCodeTests, DateTime_Is16)   { EXPECT_EQ(static_cast<int>(TypeCode::Date
 // PlatformID
 // ===========================================================================
 
-TEST(PlatformIDTests, Win32NT_IsTwo) { EXPECT_EQ(static_cast<int>(PlatformID::Win32NT), 2); }
-TEST(PlatformIDTests, Unix_IsFour)   { EXPECT_EQ(static_cast<int>(PlatformID::Unix), 4); }
+TEST(PlatformIDTests, Win32S_IsZero)        { EXPECT_EQ(static_cast<int>(PlatformID::Win32S),       0); }
+TEST(PlatformIDTests, Win32Windows_IsOne)   { EXPECT_EQ(static_cast<int>(PlatformID::Win32Windows), 1); }
+TEST(PlatformIDTests, Win32NT_IsTwo)        { EXPECT_EQ(static_cast<int>(PlatformID::Win32NT),      2); }
+TEST(PlatformIDTests, WinCE_IsThree)        { EXPECT_EQ(static_cast<int>(PlatformID::WinCE),        3); }
+TEST(PlatformIDTests, Unix_IsFour)          { EXPECT_EQ(static_cast<int>(PlatformID::Unix),         4); }
+TEST(PlatformIDTests, Xbox_IsFive)          { EXPECT_EQ(static_cast<int>(PlatformID::Xbox),         5); }
+TEST(PlatformIDTests, MacOSX_IsSix)         { EXPECT_EQ(static_cast<int>(PlatformID::MacOSX),       6); }
+TEST(PlatformIDTests, Other_IsSeven)        { EXPECT_EQ(static_cast<int>(PlatformID::Other),        7); }
+TEST(PlatformIDTests, Distinct_Win32NT_Unix) {
+    EXPECT_NE(static_cast<int>(PlatformID::Win32NT), static_cast<int>(PlatformID::Unix));
+}
+TEST(PlatformIDTests, CastRoundTrip) {
+    PlatformID pid = static_cast<PlatformID>(4);
+    EXPECT_EQ(pid, PlatformID::Unix);
+}
 
 // ===========================================================================
 // EnvironmentVariableTarget
