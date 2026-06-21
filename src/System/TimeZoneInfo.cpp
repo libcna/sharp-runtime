@@ -65,12 +65,12 @@ static std::mutex s_tzMutex;
 #endif
 
 // ---------------------------------------------------------------------------
-// IANA → Windows timezone name mapping (CLDR-derived, ~85 common zones)
+// IANA ↔ Windows timezone name mapping (CLDR-derived, ~85 common zones)
+// Always compiled; used by TryConvertIanaIdToWindowsId / TryConvertWindowsIdToIanaId
+// and, on Windows, by FindSystemTimeZoneById.
 // ---------------------------------------------------------------------------
-#if defined(_WIN32)
 namespace {
-static const char* ianaToWindows(const std::string& iana) {
-    static const struct { const char* iana; const char* win; } kMap[] = {
+static const struct { const char* iana; const char* win; } kIanaWindowsMap[] = {
         {"Africa/Abidjan",                  "Greenwich Standard Time"},
         {"Africa/Accra",                    "Greenwich Standard Time"},
         {"Africa/Cairo",                    "Egypt Standard Time"},
@@ -162,14 +162,21 @@ static const char* ianaToWindows(const std::string& iana) {
         {"Pacific/Midway",                  "Samoa Standard Time"},
         {"Pacific/Port_Moresby",            "West Pacific Standard Time"},
         {"Pacific/Tongatapu",               "Tonga Standard Time"},
-        {nullptr, nullptr}
-    };
-    for (const auto* p = kMap; p->iana; ++p)
+    {nullptr, nullptr}
+};
+
+static const char* ianaToWindows(const std::string& iana) {
+    for (const auto* p = kIanaWindowsMap; p->iana; ++p)
         if (iana == p->iana) return p->win;
     return nullptr;
 }
+
+static const char* windowsToIana(const std::string& win) {
+    for (const auto* p = kIanaWindowsMap; p->iana; ++p)
+        if (win == p->win) return p->iana;
+    return nullptr;
+}
 } // anonymous namespace
-#endif
 
 std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::string& id) {
     if (id == "UTC")   return std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Utc()));
@@ -242,6 +249,20 @@ std::vector<std::shared_ptr<TimeZoneInfo>> TimeZoneInfo::GetSystemTimeZones() {
         std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Utc())),
         std::shared_ptr<TimeZoneInfo>(new TimeZoneInfo(Local()))
     };
+}
+
+bool TimeZoneInfo::TryConvertIanaIdToWindowsId(const std::string& ianaId, std::string& windowsId) {
+    const char* win = ianaToWindows(ianaId);
+    if (!win) return false;
+    windowsId = win;
+    return true;
+}
+
+bool TimeZoneInfo::TryConvertWindowsIdToIanaId(const std::string& windowsId, std::string& ianaId) {
+    const char* iana = windowsToIana(windowsId);
+    if (!iana) return false;
+    ianaId = iana;
+    return true;
 }
 
 } // namespace System

@@ -92,6 +92,15 @@ namespace System {
                 return t;
             }
 
+            /**
+             * @brief Returns a hash code for this TransitionTime.
+             *
+             * C++ counterpart of .NET TransitionTime.GetHashCode().
+             */
+            [[nodiscard]] int GetHashCode() const noexcept {
+                return month_ ^ (week_ << 8);
+            }
+
             bool operator==(const TransitionTime& o) const {
                 return month_ == o.month_ && week_ == o.week_ && day_ == o.day_ &&
                        dayOfWeek_ == o.dayOfWeek_ && isFixedDateRule_ == o.isFixedDateRule_;
@@ -128,6 +137,32 @@ namespace System {
             [[nodiscard]] TransitionTime getDaylightTransitionEndProperty()   const { return daylightTransitionEnd_; }
             /** @brief Gets the UTC offset delta relative to the zone's base UTC offset. */
             [[nodiscard]] TimeSpan       getBaseUtcOffsetDeltaProperty()     const { return baseUtcOffsetDelta_; }
+
+            /**
+             * @brief Returns a hash code for this AdjustmentRule.
+             *
+             * C++ counterpart of .NET AdjustmentRule.GetHashCode().
+             */
+            [[nodiscard]] int GetHashCode() const noexcept {
+                auto ticks = getDateStartProperty().getTicksProperty();
+                return static_cast<int>(ticks ^ (ticks >> 32));
+            }
+
+            /**
+             * @brief Returns true if this rule is equal to @p other.
+             *
+             * C++ counterpart of .NET AdjustmentRule.Equals(AdjustmentRule).
+             */
+            [[nodiscard]] bool Equals(const AdjustmentRule& other) const {
+                return dateStart_ == other.dateStart_ &&
+                       dateEnd_   == other.dateEnd_   &&
+                       daylightDelta_           == other.daylightDelta_ &&
+                       daylightTransitionStart_ == other.daylightTransitionStart_ &&
+                       daylightTransitionEnd_   == other.daylightTransitionEnd_;
+            }
+
+            bool operator==(const AdjustmentRule& o) const { return Equals(o); }
+            bool operator!=(const AdjustmentRule& o) const { return !Equals(o); }
 
             /**
              * @brief Creates an adjustment rule.
@@ -516,6 +551,39 @@ namespace System {
         static DateTime ConvertTimeToUtc(const DateTime& dt, const TimeZoneInfo& sourceTimeZone) {
             return dt.Add(-sourceTimeZone.baseUtcOffset_);
         }
+
+        /**
+         * @brief Converts a DateTimeOffset to the zone identified by @p destinationTimeZoneId.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTimeOffset, string).
+         */
+        static DateTimeOffset ConvertTimeBySystemTimeZoneId(const DateTimeOffset& dto,
+                                                            const std::string& destinationTimeZoneId) {
+            auto tz = FindSystemTimeZoneById(destinationTimeZoneId);
+            return ConvertTime(dto, *tz);
+        }
+
+        /**
+         * @brief Tries to map an IANA timezone ID to a Windows timezone ID.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.TryConvertIanaIdToWindowsId(string, out string).
+         * Uses the CLDR-derived IANA→Windows mapping table.
+         * @param ianaId    The IANA timezone identifier (e.g. "Europe/Prague").
+         * @param windowsId Receives the Windows timezone name on success.
+         * @return true if a mapping was found; false otherwise.
+         */
+        static bool TryConvertIanaIdToWindowsId(const std::string& ianaId, std::string& windowsId);
+
+        /**
+         * @brief Tries to map a Windows timezone ID to an IANA timezone ID.
+         *
+         * C++ counterpart of .NET TimeZoneInfo.TryConvertWindowsIdToIanaId(string, out string).
+         * Returns the first IANA ID that maps to @p windowsId in the CLDR table.
+         * @param windowsId The Windows timezone identifier (e.g. "Central Europe Standard Time").
+         * @param ianaId    Receives the IANA timezone name on success.
+         * @return true if a mapping was found; false otherwise.
+         */
+        static bool TryConvertWindowsIdToIanaId(const std::string& windowsId, std::string& ianaId);
 
     };
 

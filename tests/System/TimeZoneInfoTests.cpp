@@ -338,6 +338,120 @@ TEST(TimeZoneInfoTests, ClearCachedData_DoesNotThrow) {
 }
 
 // ---------------------------------------------------------------------------
+// TryConvertIanaIdToWindowsId / TryConvertWindowsIdToIanaId
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, TryConvertIanaToWindows_KnownId_ReturnsTrue) {
+    std::string win;
+    bool ok = TimeZoneInfo::TryConvertIanaIdToWindowsId("Europe/Prague", win);
+    EXPECT_TRUE(ok);
+    EXPECT_FALSE(win.empty());
+}
+
+TEST(TimeZoneInfoTests, TryConvertIanaToWindows_KnownId_CorrectMapping) {
+    std::string win;
+    TimeZoneInfo::TryConvertIanaIdToWindowsId("America/New_York", win);
+    EXPECT_EQ(win, "Eastern Standard Time");
+}
+
+TEST(TimeZoneInfoTests, TryConvertIanaToWindows_Unknown_ReturnsFalse) {
+    std::string win;
+    bool ok = TimeZoneInfo::TryConvertIanaIdToWindowsId("Mars/Olympus", win);
+    EXPECT_FALSE(ok);
+}
+
+TEST(TimeZoneInfoTests, TryConvertWindowsToIana_KnownId_ReturnsTrue) {
+    std::string iana;
+    bool ok = TimeZoneInfo::TryConvertWindowsIdToIanaId("Eastern Standard Time", iana);
+    EXPECT_TRUE(ok);
+    EXPECT_FALSE(iana.empty());
+}
+
+TEST(TimeZoneInfoTests, TryConvertWindowsToIana_Unknown_ReturnsFalse) {
+    std::string iana;
+    bool ok = TimeZoneInfo::TryConvertWindowsIdToIanaId("Fake Standard Time", iana);
+    EXPECT_FALSE(ok);
+}
+
+TEST(TimeZoneInfoTests, TryConvertRoundtrip_IanaToWindowsToIana) {
+    std::string win, iana2;
+    ASSERT_TRUE(TimeZoneInfo::TryConvertIanaIdToWindowsId("Asia/Tokyo", win));
+    ASSERT_TRUE(TimeZoneInfo::TryConvertWindowsIdToIanaId(win, iana2));
+    EXPECT_FALSE(iana2.empty());
+}
+
+// ---------------------------------------------------------------------------
+// ConvertTimeBySystemTimeZoneId (DateTimeOffset variant)
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_DateTimeOffset_UTC_NoThrow) {
+    System::DateTimeOffset dto;
+    EXPECT_NO_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dto, "UTC"));
+}
+
+TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_DateTimeOffset_Unknown_Throws) {
+    System::DateTimeOffset dto;
+    EXPECT_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dto, "Mars/Olympus"),
+                 std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// TransitionTime::GetHashCode
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_FixedRule) {
+    System::DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    EXPECT_EQ(t.GetHashCode(), 3 ^ (0 << 8));
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_SameInputSameHash) {
+    System::DateTime tod;
+    auto a = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(tod, 10, 4, System::DayOfWeek::Sunday);
+    auto b = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(tod, 10, 4, System::DayOfWeek::Sunday);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+// ---------------------------------------------------------------------------
+// AdjustmentRule::GetHashCode / Equals / operators
+// ---------------------------------------------------------------------------
+
+TEST(TimeZoneInfoTests, AdjustmentRule_GetHashCode_Consistent) {
+    System::DateTime start(2020, 1, 1), end(2020, 12, 31);
+    System::DateTime tod;
+    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto r = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        start, end, System::TimeSpan::Zero, tt, tt);
+    EXPECT_EQ(r->GetHashCode(), r->GetHashCode());
+}
+
+TEST(TimeZoneInfoTests, AdjustmentRule_Equals_SameRules_True) {
+    System::DateTime start(2020, 1, 1), end(2020, 12, 31);
+    System::DateTime tod;
+    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto a = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        start, end, System::TimeSpan::Zero, tt, tt);
+    auto b = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        start, end, System::TimeSpan::Zero, tt, tt);
+    EXPECT_TRUE(a->Equals(*b));
+    EXPECT_TRUE(*a == *b);
+    EXPECT_FALSE(*a != *b);
+}
+
+TEST(TimeZoneInfoTests, AdjustmentRule_Equals_DiffEnd_False) {
+    System::DateTime start(2020, 1, 1);
+    System::DateTime end1(2020, 12, 31), end2(2021, 12, 31);
+    System::DateTime tod;
+    auto tt = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto a = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        start, end1, System::TimeSpan::Zero, tt, tt);
+    auto b = TimeZoneInfo::AdjustmentRule::CreateAdjustmentRule(
+        start, end2, System::TimeSpan::Zero, tt, tt);
+    EXPECT_FALSE(a->Equals(*b));
+    EXPECT_TRUE(*a != *b);
+}
+
+// ---------------------------------------------------------------------------
 // TransitionTime
 // ---------------------------------------------------------------------------
 
