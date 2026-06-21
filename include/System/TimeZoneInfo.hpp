@@ -168,21 +168,50 @@ namespace System {
             TransitionTime daylightTransitionStart_;
             TransitionTime daylightTransitionEnd_;
             TimeSpan       baseUtcOffsetDelta_;
+            bool           noDaylightTransitions_ = false;
 
             AdjustmentRule() = default;
         public:
             /** @brief Gets the date when the adjustment rule begins. */
-            [[nodiscard]] DateTime       getDateStartProperty()              const { return dateStart_; }
+            [[nodiscard]] DateTime       getDateStartProperty()               const { return dateStart_; }
             /** @brief Gets the date when the adjustment rule ends. */
-            [[nodiscard]] DateTime       getDateEndProperty()                const { return dateEnd_; }
+            [[nodiscard]] DateTime       getDateEndProperty()                 const { return dateEnd_; }
             /** @brief Gets the time difference between standard time and DST. */
-            [[nodiscard]] TimeSpan       getDaylightDeltaProperty()          const { return daylightDelta_; }
+            [[nodiscard]] TimeSpan       getDaylightDeltaProperty()           const { return daylightDelta_; }
             /** @brief Gets the start transition for DST. */
             [[nodiscard]] TransitionTime getDaylightTransitionStartProperty() const { return daylightTransitionStart_; }
             /** @brief Gets the end transition for DST. */
             [[nodiscard]] TransitionTime getDaylightTransitionEndProperty()   const { return daylightTransitionEnd_; }
-            /** @brief Gets the UTC offset delta relative to the zone's base UTC offset. */
+
+            /**
+             * @brief Gets the time difference with the base UTC offset for the time zone
+             * during the adjustment-rule period.
+             *
+             * C++ counterpart of .NET AdjustmentRule.BaseUtcOffsetDelta.
+             */
             [[nodiscard]] TimeSpan       getBaseUtcOffsetDeltaProperty()     const { return baseUtcOffsetDelta_; }
+
+            /**
+             * @brief Gets a value indicating that this rule fixes the time zone offset
+             * from DateStart to DateEnd without any daylight transitions in between.
+             *
+             * C++ counterpart of .NET AdjustmentRule.NoDaylightTransitions (internal).
+             */
+            [[nodiscard]] bool           getNoDaylightTransitionsProperty()  const { return noDaylightTransitions_; }
+
+            /**
+             * @brief Gets a value indicating whether this rule involves a DST change.
+             *
+             * C++ counterpart of .NET AdjustmentRule.HasDaylightSaving (internal).
+             * Returns true when DaylightDelta is non-zero or either transition time is
+             * non-default.
+             */
+            [[nodiscard]] bool getHasDaylightSavingProperty() const {
+                static const TransitionTime kDefault{};
+                return daylightDelta_ != TimeSpan::Zero ||
+                       !(daylightTransitionStart_ == kDefault) ||
+                       !(daylightTransitionEnd_   == kDefault);
+            }
 
             /**
              * @brief Returns a hash code for this AdjustmentRule.
@@ -190,7 +219,7 @@ namespace System {
              * C++ counterpart of .NET AdjustmentRule.GetHashCode().
              */
             [[nodiscard]] int GetHashCode() const noexcept {
-                auto ticks = getDateStartProperty().getTicksProperty();
+                auto ticks = dateStart_.getTicksProperty();
                 return static_cast<int>(ticks ^ (ticks >> 32));
             }
 
@@ -198,11 +227,13 @@ namespace System {
              * @brief Returns true if this rule is equal to @p other.
              *
              * C++ counterpart of .NET AdjustmentRule.Equals(AdjustmentRule).
+             * Two rules are equal when all fields (including BaseUtcOffsetDelta) match.
              */
             [[nodiscard]] bool Equals(const AdjustmentRule& other) const {
-                return dateStart_ == other.dateStart_ &&
-                       dateEnd_   == other.dateEnd_   &&
-                       daylightDelta_           == other.daylightDelta_ &&
+                return dateStart_            == other.dateStart_            &&
+                       dateEnd_              == other.dateEnd_              &&
+                       daylightDelta_        == other.daylightDelta_        &&
+                       baseUtcOffsetDelta_   == other.baseUtcOffsetDelta_   &&
                        daylightTransitionStart_ == other.daylightTransitionStart_ &&
                        daylightTransitionEnd_   == other.daylightTransitionEnd_;
             }
@@ -211,20 +242,47 @@ namespace System {
             bool operator!=(const AdjustmentRule& o) const { return !Equals(o); }
 
             /**
-             * @brief Creates an adjustment rule.
+             * @brief Creates an adjustment rule with zero BaseUtcOffsetDelta.
              *
-             * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(...).
+             * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(DateTime, DateTime,
+             * TimeSpan, TransitionTime, TransitionTime).
              */
             static std::shared_ptr<AdjustmentRule> CreateAdjustmentRule(
                 DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
                 TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd)
             {
                 auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
-                r->dateStart_                = dateStart;
-                r->dateEnd_                  = dateEnd;
-                r->daylightDelta_            = daylightDelta;
-                r->daylightTransitionStart_  = daylightTransitionStart;
-                r->daylightTransitionEnd_    = daylightTransitionEnd;
+                r->dateStart_               = dateStart;
+                r->dateEnd_                 = dateEnd;
+                r->daylightDelta_           = daylightDelta;
+                r->daylightTransitionStart_ = daylightTransitionStart;
+                r->daylightTransitionEnd_   = daylightTransitionEnd;
+                r->baseUtcOffsetDelta_      = TimeSpan::Zero;
+                r->noDaylightTransitions_   = false;
+                return r;
+            }
+
+            /**
+             * @brief Creates an adjustment rule with an explicit BaseUtcOffsetDelta.
+             *
+             * C++ counterpart of .NET AdjustmentRule.CreateAdjustmentRule(DateTime, DateTime,
+             * TimeSpan, TransitionTime, TransitionTime, TimeSpan).
+             * @param baseUtcOffsetDelta The delta from the zone's default UTC offset that
+             *                           applies during this rule's period.
+             */
+            static std::shared_ptr<AdjustmentRule> CreateAdjustmentRule(
+                DateTime dateStart, DateTime dateEnd, TimeSpan daylightDelta,
+                TransitionTime daylightTransitionStart, TransitionTime daylightTransitionEnd,
+                TimeSpan baseUtcOffsetDelta)
+            {
+                auto r = std::shared_ptr<AdjustmentRule>(new AdjustmentRule());
+                r->dateStart_               = dateStart;
+                r->dateEnd_                 = dateEnd;
+                r->daylightDelta_           = daylightDelta;
+                r->daylightTransitionStart_ = daylightTransitionStart;
+                r->daylightTransitionEnd_   = daylightTransitionEnd;
+                r->baseUtcOffsetDelta_      = baseUtcOffsetDelta;
+                r->noDaylightTransitions_   = false;
                 return r;
             }
         };
