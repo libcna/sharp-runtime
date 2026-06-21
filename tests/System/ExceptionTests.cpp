@@ -19,6 +19,7 @@
 #include "System/NullReferenceException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/ArrayTypeMismatchException.hpp"
+#include "System/FieldAccessException.hpp"
 #include "System/InsufficientMemoryException.hpp"
 #include "System/OutOfMemoryException.hpp"
 
@@ -380,6 +381,27 @@ TEST(ArrayTypeMismatchExceptionTests, InnerExceptionCtor_ContainsBoth) {
     std::string msg(ex.what());
     EXPECT_NE(msg.find("outer msg"), std::string::npos);
     EXPECT_NE(msg.find("inner cause"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// FieldAccessException
+// ---------------------------------------------------------------------------
+
+TEST(FieldAccessExceptionTests, DefaultCtor_MessageContainsField) {
+    System::FieldAccessException ex;
+    EXPECT_NE(std::string(ex.what()).find("field"), std::string::npos);
+}
+
+TEST(FieldAccessExceptionTests, IsA_MemberAccessException) {
+    EXPECT_THROW(throw System::FieldAccessException(), System::MemberAccessException);
+}
+
+TEST(FieldAccessExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root cause");
+    System::FieldAccessException ex("cannot access field", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("cannot access field"), std::string::npos);
+    EXPECT_NE(msg.find("root cause"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
