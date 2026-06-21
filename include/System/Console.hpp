@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ConsoleColor.hpp"
@@ -19,6 +21,8 @@ namespace System {
 
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
+    using SharpRuntime::uintcs;
+    using SharpRuntime::ulongcs;
     using SharpRuntime::Single;
 
     /**
@@ -74,6 +78,28 @@ namespace System {
         }
         /** @brief Writes the specified Boolean to the standard output stream. */
         static void Write(bool value) { std::cout << (value ? "True" : "False"); }
+        /** @brief Writes the specified unsigned 32-bit integer to the standard output stream. */
+        static void Write(uintcs value)  { std::cout << value; }
+        /** @brief Writes the specified unsigned 64-bit integer to the standard output stream. */
+        static void Write(ulongcs value) { std::cout << value; }
+
+        /**
+         * @brief Writes all characters in a vector to the standard output stream.
+         * @param buffer Vector of characters to write.
+         */
+        static void Write(const std::vector<char>& buffer) {
+            std::cout.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        }
+        /**
+         * @brief Writes @p count characters from @p buffer starting at @p index.
+         * @param buffer Source vector.
+         * @param index  Zero-based start index.
+         * @param count  Number of characters to write.
+         */
+        static void Write(const std::vector<char>& buffer, int index, int count) {
+            if (count > 0)
+                std::cout.write(buffer.data() + index, static_cast<std::streamsize>(count));
+        }
 
         // -----------------------------------------------------------------------
         // WriteLine
@@ -96,7 +122,19 @@ namespace System {
         /** @brief Writes the specified float followed by a line terminator. */
         static void WriteLine(float v)  { Write(v); std::cout << NewLine; }
         /** @brief Writes the specified Boolean followed by a line terminator. */
-        static void WriteLine(bool v)   { std::cout << (v ? "True" : "False") << NewLine; }
+        static void WriteLine(bool v)    { std::cout << (v ? "True" : "False") << NewLine; }
+        /** @brief Writes the specified unsigned 32-bit integer followed by a line terminator. */
+        static void WriteLine(uintcs v)  { std::cout << v << NewLine; }
+        /** @brief Writes the specified unsigned 64-bit integer followed by a line terminator. */
+        static void WriteLine(ulongcs v) { std::cout << v << NewLine; }
+        /**
+         * @brief Writes all characters in a vector followed by a line terminator.
+         * @param buffer Vector of characters to write.
+         */
+        static void WriteLine(const std::vector<char>& buffer) {
+            Write(buffer);
+            std::cout << NewLine;
+        }
 
         // -----------------------------------------------------------------------
         // Write (format)
@@ -321,20 +359,43 @@ namespace System {
          * @param top  Row index (0-based).
          */
         static void SetCursorPosition(intcs left, intcs top) {
+            cursorLeft_ = left;
+            cursorTop_  = top;
             std::printf("\033[%d;%dH", top + 1, left + 1);
         }
 
-        /** @brief Clears the console screen using an ANSI escape sequence. */
-        static void Clear() { std::cout << "\033[2J\033[1;1H"; }
+        /**
+         * @brief Returns the current cursor position as (Left, Top).
+         * @return std::pair where first=Left, second=Top.
+         */
+        [[nodiscard]] static std::pair<intcs, intcs> GetCursorPosition() {
+            return { cursorLeft_, cursorTop_ };
+        }
 
-        /** @brief Returns the cursor's current column (0 — not queryable portably). */
-        [[nodiscard]] static intcs getCursorLeftProperty()   { return 0; }
-        /** @brief Returns the cursor's current row (0 — not queryable portably). */
-        [[nodiscard]] static intcs getCursorTopProperty()    { return 0; }
-        /** @brief Returns the console window width in columns (default 80). */
-        [[nodiscard]] static intcs getWindowWidthProperty()  { return 80; }
-        /** @brief Returns the console window height in rows (default 24). */
-        [[nodiscard]] static intcs getWindowHeightProperty() { return 24; }
+        /** @brief Clears the console screen using an ANSI escape sequence. */
+        static void Clear() { std::cout << "\033[2J\033[1;1H"; cursorLeft_ = 0; cursorTop_ = 0; }
+
+        // -----------------------------------------------------------------------
+        // Cursor properties
+        // -----------------------------------------------------------------------
+
+        /** @brief Gets the cursor's current column. */
+        [[nodiscard]] static intcs getCursorLeftProperty() { return cursorLeft_; }
+        /** @brief Sets the cursor's column position. */
+        static void setCursorLeftProperty(intcs v) { SetCursorPosition(v, cursorTop_); }
+
+        /** @brief Gets the cursor's current row. */
+        [[nodiscard]] static intcs getCursorTopProperty() { return cursorTop_; }
+        /** @brief Sets the cursor's row position. */
+        static void setCursorTopProperty(intcs v) { SetCursorPosition(cursorLeft_, v); }
+
+        /**
+         * @brief Gets the height of the cursor within a character cell (1–100 percent).
+         * @return The stored cursor size (default 25).
+         */
+        [[nodiscard]] static intcs getCursorSizeProperty() { return cursorSize_; }
+        /** @brief Sets the cursor size (stored; not visually applied in this implementation). */
+        static void setCursorSizeProperty(intcs v) { cursorSize_ = v; }
 
         /**
          * @brief Gets a value indicating whether the cursor is visible.
@@ -350,8 +411,158 @@ namespace System {
             std::cout << (v ? "\033[?25h" : "\033[?25l") << std::flush;
         }
 
+        // -----------------------------------------------------------------------
+        // Window properties
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the width of the console window in columns.
+         * @return 80 (stub; ioctl query requires platform-specific headers).
+         */
+        [[nodiscard]] static intcs getWindowWidthProperty() { return 80; }
+
+        /**
+         * @brief Gets the height of the console window in rows.
+         * @return 24 (stub; ioctl query requires platform-specific headers).
+         */
+        [[nodiscard]] static intcs getWindowHeightProperty() { return 24; }
+
+        /** @brief Gets the leftmost column of the console window area (always 0). */
+        [[nodiscard]] static intcs getWindowLeftProperty() { return 0; }
+        /** @brief Gets the topmost row of the console window area (always 0). */
+        [[nodiscard]] static intcs getWindowTopProperty()  { return 0; }
+
+        /**
+         * @brief Gets the largest possible window width on the current display.
+         * @return Terminal query result, or 80 as fallback.
+         */
+        [[nodiscard]] static intcs getLargestWindowWidthProperty()  { return getWindowWidthProperty(); }
+        /**
+         * @brief Gets the largest possible window height on the current display.
+         * @return Terminal query result, or 24 as fallback.
+         */
+        [[nodiscard]] static intcs getLargestWindowHeightProperty() { return getWindowHeightProperty(); }
+
+        /**
+         * @brief Sets the size of the console window using an xterm OSC escape sequence.
+         * @param width  New window width in columns.
+         * @param height New window height in rows.
+         */
+        static void SetWindowSize(int width, int height) {
+            std::printf("\033[8;%d;%dt", height, width);
+            std::fflush(stdout);
+        }
+
+        /**
+         * @brief Sets the position of the console window using an xterm OSC escape sequence.
+         * @param left New left position in pixels.
+         * @param top  New top position in pixels.
+         */
+        static void SetWindowPosition(int left, int top) {
+            std::printf("\033[3;%d;%dt", top, left);
+            std::fflush(stdout);
+        }
+
+        // -----------------------------------------------------------------------
+        // Buffer properties (stubs)
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the width of the console screen buffer in columns.
+         * @return Same as window width.
+         */
+        [[nodiscard]] static intcs getBufferWidthProperty()  { return getWindowWidthProperty(); }
+        /**
+         * @brief Gets the height of the console screen buffer in rows.
+         * @return Same as window height.
+         */
+        [[nodiscard]] static intcs getBufferHeightProperty() { return getWindowHeightProperty(); }
+
+        /**
+         * @brief Sets the screen buffer width (no-op in this implementation).
+         * @param v New buffer width.
+         */
+        static void setBufferWidthProperty(intcs v)  { (void)v; }
+        /**
+         * @brief Sets the screen buffer height (no-op in this implementation).
+         * @param v New buffer height.
+         */
+        static void setBufferHeightProperty(intcs v) { (void)v; }
+
+        /**
+         * @brief Sets the screen buffer size (no-op in this implementation).
+         * @param width  New buffer width.
+         * @param height New buffer height.
+         */
+        static void SetBufferSize(int width, int height) { (void)width; (void)height; }
+
+        /**
+         * @brief Copies a rectangular region of the buffer to another location (no-op stub).
+         */
+        static void MoveBufferArea(int sourceLeft, int sourceTop,
+                                    int sourceWidth, int sourceHeight,
+                                    int targetLeft, int targetTop) {
+            (void)sourceLeft; (void)sourceTop; (void)sourceWidth;
+            (void)sourceHeight; (void)targetLeft; (void)targetTop;
+        }
+
+        /**
+         * @brief Copies a rectangular region of the buffer, filling vacated cells (no-op stub).
+         */
+        static void MoveBufferArea(int sourceLeft, int sourceTop,
+                                    int sourceWidth, int sourceHeight,
+                                    int targetLeft, int targetTop,
+                                    char sourceChar,
+                                    ConsoleColor sourceForeColor,
+                                    ConsoleColor sourceBackColor) {
+            (void)sourceLeft; (void)sourceTop; (void)sourceWidth;
+            (void)sourceHeight; (void)targetLeft; (void)targetTop;
+            (void)sourceChar; (void)sourceForeColor; (void)sourceBackColor;
+        }
+
+        // -----------------------------------------------------------------------
+        // Keyboard state (stubs)
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets a value indicating whether the CAPS LOCK key is toggled on.
+         * @return false (not queryable portably).
+         */
+        [[nodiscard]] static bool getCapsLockProperty()   { return false; }
+        /**
+         * @brief Gets a value indicating whether the NUM LOCK key is toggled on.
+         * @return false (not queryable portably).
+         */
+        [[nodiscard]] static bool getNumberLockProperty() { return false; }
+
+        // -----------------------------------------------------------------------
+        // CancelKeyPress event
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Removes the registered CancelKeyPress handler (sets it to null).
+         */
+        static void removeCancelKeyPressHandler() { cancelKeyPressHandler_ = nullptr; }
+
+        // -----------------------------------------------------------------------
+        // Beep
+        // -----------------------------------------------------------------------
+
         /** @brief Produces a simple console beep via the BEL character. */
         static void Beep() { std::cout << '\a' << std::flush; }
+
+        /**
+         * @brief Produces a beep of the specified frequency and duration.
+         *
+         * Frequency and duration are ignored in this implementation — falls back to
+         * a simple BEL character, which is the only portable option.
+         * @param frequency Tone frequency in hertz (ignored).
+         * @param duration  Duration in milliseconds (ignored).
+         */
+        static void Beep(int frequency, int duration) {
+            (void)frequency; (void)duration;
+            std::cout << '\a' << std::flush;
+        }
 
     private:
         static inline ConsoleColor fg_              = ConsoleColor::White;
@@ -360,6 +571,9 @@ namespace System {
         static inline bool         cursorVisible_   = true;
         static inline bool         treatCtrlCAsInput_ = false;
         static inline ConsoleCancelEventHandler cancelKeyPressHandler_;
+        static inline intcs cursorLeft_  = 0;
+        static inline intcs cursorTop_   = 0;
+        static inline intcs cursorSize_  = 25;
 
         static std::string ansiColor(int c, bool fg) {
             char buf[12];
