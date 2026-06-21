@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeZoneInfo.hpp"
 
 using System::TimeZoneInfo;
@@ -402,7 +403,8 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_DateTimeOffset_Unknown_Thr
 TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_FixedRule) {
     System::DateTime tod;
     auto t = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
-    EXPECT_EQ(t.GetHashCode(), 3 ^ (0 << 8));
+    // Fixed rules initialise week_ = 1, so hash = month ^ (week << 8) = 3 ^ (1 << 8)
+    EXPECT_EQ(t.GetHashCode(), 3 ^ (1 << 8));
 }
 
 TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_SameInputSameHash) {
@@ -481,4 +483,89 @@ TEST(TimeZoneInfoTests, TransitionTime_EqualityOperators) {
     EXPECT_TRUE(a == b);
     EXPECT_FALSE(a == c);
     EXPECT_TRUE(a != c);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_Equals_SameFixed_True) {
+    DateTime tod;
+    auto a = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 6, 15);
+    auto b = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 6, 15);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_Equals_DiffDay_False) {
+    DateTime tod;
+    auto a = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 6, 10);
+    auto b = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 6, 20);
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_Equals_FixedVsFloating_False) {
+    DateTime tod;
+    auto fixed    = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 3, 14);
+    auto floating = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 3, 2, System::DayOfWeek::Sunday);
+    EXPECT_FALSE(fixed.Equals(floating));
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_Equals_FloatingSameFields_True) {
+    DateTime tod;
+    auto a = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 10, 5, System::DayOfWeek::Saturday);
+    auto b = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 10, 5, System::DayOfWeek::Saturday);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFixed_InvalidMonth_Throws) {
+    DateTime tod;
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 0, 1),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 13, 1),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFixed_InvalidDay_Throws) {
+    DateTime tod;
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 1, 0),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 1, 32),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFloating_InvalidMonth_Throws) {
+    DateTime tod;
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 13, 1, System::DayOfWeek::Sunday), System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFloating_InvalidWeek_Throws) {
+    DateTime tod;
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 3, 6, System::DayOfWeek::Sunday), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 3, 0, System::DayOfWeek::Sunday), System::ArgumentOutOfRangeException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_DayProperty_StoredByFixedRule) {
+    DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 7, 4);
+    EXPECT_EQ(t.getDayProperty(), 4);
+    EXPECT_EQ(t.getMonthProperty(), 7);
+    EXPECT_TRUE(t.getIsFixedDateRuleProperty());
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_WeekProperty_StoredByFloatingRule) {
+    DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 11, 3, System::DayOfWeek::Thursday);
+    EXPECT_EQ(t.getWeekProperty(), 3);
+    EXPECT_EQ(t.getDayOfWeekProperty(), System::DayOfWeek::Thursday);
+    EXPECT_FALSE(t.getIsFixedDateRuleProperty());
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_GetHashCode_FloatingRule) {
+    DateTime tod;
+    auto t = TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        tod, 10, 4, System::DayOfWeek::Sunday);
+    EXPECT_EQ(t.GetHashCode(), 10 ^ (4 << 8));
 }

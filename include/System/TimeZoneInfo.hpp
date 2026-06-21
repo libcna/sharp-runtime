@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DateTimeOffset.hpp"
 #include "System/DayOfWeek.hpp"
@@ -66,12 +67,21 @@ namespace System {
              * @brief Creates a fixed-date transition rule.
              *
              * C++ counterpart of .NET TransitionTime.CreateFixedDateRule(DateTime, int, int).
+             * @param timeOfDay Time of day when the transition occurs (must have no date component).
+             * @param month     Month of the transition (1-12).
+             * @param day       Day of the month (1-31).
+             * @throws ArgumentOutOfRangeException if month or day is out of range.
              */
             static TransitionTime CreateFixedDateRule(DateTime timeOfDay, int month, int day) {
+                if (month < 1 || month > 12)
+                    throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
+                if (day < 1 || day > 31)
+                    throw ArgumentOutOfRangeException("day: Day must be between 1 and 31.");
                 TransitionTime t;
-                t.timeOfDay_      = timeOfDay;
-                t.month_          = month;
-                t.day_            = day;
+                t.timeOfDay_       = timeOfDay;
+                t.month_           = month;
+                t.day_             = day;
+                t.week_            = 1;
                 t.isFixedDateRule_ = true;
                 return t;
             }
@@ -80,16 +90,44 @@ namespace System {
              * @brief Creates a floating-date transition rule.
              *
              * C++ counterpart of .NET TransitionTime.CreateFloatingDateRule(DateTime, int, int, DayOfWeek).
+             * @param timeOfDay  Time of day when the transition occurs.
+             * @param month      Month of the transition (1-12).
+             * @param week       Week of the month (1-5).
+             * @param dayOfWeek  Day of the week (Sunday=0 … Saturday=6).
+             * @throws ArgumentOutOfRangeException if month, week, or dayOfWeek is out of range.
              */
             static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, int month,
                                                          int week, DayOfWeek dayOfWeek) {
+                if (month < 1 || month > 12)
+                    throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
+                if (week < 1 || week > 5)
+                    throw ArgumentOutOfRangeException("week: Week must be between 1 and 5.");
+                if (static_cast<int>(dayOfWeek) < 0 || static_cast<int>(dayOfWeek) > 6)
+                    throw ArgumentOutOfRangeException("dayOfWeek: DayOfWeek must be between 0 and 6.");
                 TransitionTime t;
-                t.timeOfDay_      = timeOfDay;
-                t.month_          = month;
-                t.week_           = week;
-                t.dayOfWeek_      = dayOfWeek;
+                t.timeOfDay_       = timeOfDay;
+                t.month_           = month;
+                t.week_            = week;
+                t.day_             = 1;
+                t.dayOfWeek_       = dayOfWeek;
                 t.isFixedDateRule_ = false;
                 return t;
+            }
+
+            /**
+             * @brief Returns true if this TransitionTime is equal to @p other.
+             *
+             * C++ counterpart of .NET TransitionTime.Equals(TransitionTime).
+             * For fixed-date rules only Day is compared; for floating rules Week and DayOfWeek
+             * are compared instead, matching .NET's exact semantics.
+             */
+            [[nodiscard]] bool Equals(const TransitionTime& other) const {
+                if (isFixedDateRule_ != other.isFixedDateRule_) return false;
+                if (!(timeOfDay_ == other.timeOfDay_))          return false;
+                if (month_ != other.month_)                     return false;
+                return isFixedDateRule_
+                    ? (day_ == other.day_)
+                    : (week_ == other.week_ && dayOfWeek_ == other.dayOfWeek_);
             }
 
             /**
@@ -101,11 +139,19 @@ namespace System {
                 return month_ ^ (week_ << 8);
             }
 
-            bool operator==(const TransitionTime& o) const {
-                return month_ == o.month_ && week_ == o.week_ && day_ == o.day_ &&
-                       dayOfWeek_ == o.dayOfWeek_ && isFixedDateRule_ == o.isFixedDateRule_;
-            }
-            bool operator!=(const TransitionTime& o) const { return !(*this == o); }
+            /**
+             * @brief Returns true if both TransitionTime instances are equal.
+             *
+             * C++ counterpart of .NET TransitionTime operator==.
+             */
+            bool operator==(const TransitionTime& o) const { return Equals(o); }
+
+            /**
+             * @brief Returns true if both TransitionTime instances differ.
+             *
+             * C++ counterpart of .NET TransitionTime operator!=.
+             */
+            bool operator!=(const TransitionTime& o) const { return !Equals(o); }
         };
 
         /**
