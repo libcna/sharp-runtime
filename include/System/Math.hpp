@@ -3,13 +3,21 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System
 {
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
+    using SharpRuntime::shortcs;
+    using SharpRuntime::sbytecs;
+    using SharpRuntime::bytecs;
+    using SharpRuntime::uintcs;
+    using SharpRuntime::ulongcs;
+    using SharpRuntime::ushortcs;
 
     /**
      * @brief Provides constants and static methods for trigonometric,
@@ -313,5 +321,84 @@ namespace System
 
         /// @brief Returns @p x × @p y + @p z computed as a single fused operation.
         [[nodiscard]] static double FusedMultiplyAdd(double x, double y, double z);
+
+        // ------------------------------------------------------------------
+        // short / sbyte / byte / uint / ulong / ushort overloads
+        // ------------------------------------------------------------------
+
+        /// @brief Returns the absolute value of a 16-bit signed integer.
+        [[nodiscard]] static shortcs Abs(shortcs value) { return value < 0 ? static_cast<shortcs>(-value) : value; }
+        /// @brief Returns the absolute value of a signed byte.
+        [[nodiscard]] static sbytecs Abs(sbytecs value) { return value < 0 ? static_cast<sbytecs>(-value) : value; }
+
+        /// @brief Returns the smaller of two 16-bit signed integers.
+        [[nodiscard]] static shortcs  Min(shortcs a,  shortcs b)  { return a < b ? a : b; }
+        /// @brief Returns the larger of two 16-bit signed integers.
+        [[nodiscard]] static shortcs  Max(shortcs a,  shortcs b)  { return a > b ? a : b; }
+        /// @brief Clamps a 16-bit signed integer to [@p min, @p max].
+        [[nodiscard]] static shortcs  Clamp(shortcs v, shortcs mn, shortcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+
+        /// @brief Returns the smaller of two signed bytes.
+        [[nodiscard]] static sbytecs Min(sbytecs a, sbytecs b)  { return a < b ? a : b; }
+        /// @brief Returns the larger of two signed bytes.
+        [[nodiscard]] static sbytecs Max(sbytecs a, sbytecs b)  { return a > b ? a : b; }
+        /// @brief Clamps a signed byte to [@p min, @p max].
+        [[nodiscard]] static sbytecs Clamp(sbytecs v, sbytecs mn, sbytecs mx) { return v < mn ? mn : v > mx ? mx : v; }
+
+        /// @brief Returns the smaller of two unsigned bytes.
+        [[nodiscard]] static bytecs  Min(bytecs a,  bytecs b)   { return a < b ? a : b; }
+        /// @brief Returns the larger of two unsigned bytes.
+        [[nodiscard]] static bytecs  Max(bytecs a,  bytecs b)   { return a > b ? a : b; }
+        /// @brief Clamps an unsigned byte to [@p min, @p max].
+        [[nodiscard]] static bytecs  Clamp(bytecs v, bytecs mn, bytecs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+
+        /// @brief Returns the smaller of two 32-bit unsigned integers.
+        [[nodiscard]] static uintcs  Min(uintcs a,  uintcs b)   { return a < b ? a : b; }
+        /// @brief Returns the larger of two 32-bit unsigned integers.
+        [[nodiscard]] static uintcs  Max(uintcs a,  uintcs b)   { return a > b ? a : b; }
+        /// @brief Clamps a 32-bit unsigned integer to [@p min, @p max].
+        [[nodiscard]] static uintcs  Clamp(uintcs v, uintcs mn, uintcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+
+        /// @brief Returns the smaller of two 64-bit unsigned integers.
+        [[nodiscard]] static ulongcs Min(ulongcs a, ulongcs b)  { return a < b ? a : b; }
+        /// @brief Returns the larger of two 64-bit unsigned integers.
+        [[nodiscard]] static ulongcs Max(ulongcs a, ulongcs b)  { return a > b ? a : b; }
+        /// @brief Clamps a 64-bit unsigned integer to [@p min, @p max].
+        [[nodiscard]] static ulongcs Clamp(ulongcs v, ulongcs mn, ulongcs mx) { return v < mn ? mn : v > mx ? mx : v; }
+
+        /// @brief Returns the smaller of two 16-bit unsigned integers.
+        [[nodiscard]] static ushortcs Min(ushortcs a, ushortcs b)  { return a < b ? a : b; }
+        /// @brief Returns the larger of two 16-bit unsigned integers.
+        [[nodiscard]] static ushortcs Max(ushortcs a, ushortcs b)  { return a > b ? a : b; }
+        /// @brief Clamps a 16-bit unsigned integer to [@p min, @p max].
+        [[nodiscard]] static ushortcs Clamp(ushortcs v, ushortcs mn, ushortcs mx) { return v < mn ? mn : v > mx ? mx : v; }
+
+        // ------------------------------------------------------------------
+        // ILogB / BigMul(long,long,long&) / DivRem pair overloads
+        // ------------------------------------------------------------------
+
+        /// @brief Returns the base-2 integer logarithm of @p x (std::ilogb).
+        [[nodiscard]] static intcs ILogB(double x) { return static_cast<intcs>(std::ilogb(x)); }
+
+        /**
+         * @brief Multiplies two 64-bit signed integers and returns the full 128-bit product.
+         *
+         * The high 64 bits of the product are stored in @p high.
+         * C++ counterpart of .NET Math.BigMul(long, long, out long).
+         */
+        static longcs BigMul(longcs a, longcs b, longcs& high) {
+            __int128 product = static_cast<__int128>(a) * static_cast<__int128>(b);
+            high = static_cast<longcs>(product >> 64);
+            return static_cast<longcs>(product);
+        }
+
+        /// @brief Divides @p a by @p b and returns {quotient, remainder} as a pair.
+        [[nodiscard]] static std::pair<intcs, intcs> DivRem(intcs a, intcs b) {
+            return { a / b, a % b };
+        }
+        /// @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair.
+        [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs a, longcs b) {
+            return { a / b, a % b };
+        }
     };
 }
