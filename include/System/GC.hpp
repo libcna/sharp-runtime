@@ -3,51 +3,411 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include <functional>
+#include "System/TimeSpan.hpp"
 
 namespace System {
 
-    /// Controls the garbage collector (no-op stubs in this C++ port).
+    /**
+     * @brief Specifies the behavior for a forced garbage collection.
+     *
+     * C++ counterpart of .NET System.GCCollectionMode.
+     */
+    enum class GCCollectionMode {
+        Default   = 0, /**< Default mode (equivalent to Forced). */
+        Forced    = 1, /**< Force an immediate GC. */
+        Optimized = 2, /**< Allow the GC to determine the optimal time. */
+        Aggressive = 3, /**< Force an aggressive GC. */
+    };
+
+    /**
+     * @brief Provides information about the current registration for full GC notifications.
+     *
+     * C++ counterpart of .NET System.GCNotificationStatus.
+     */
+    enum class GCNotificationStatus {
+        Succeeded    = 0, /**< The notification was successful. */
+        Failed       = 1, /**< The notification failed. */
+        Canceled     = 2, /**< The notification was canceled. */
+        Timeout      = 3, /**< The time specified by the @p millisecondsTimeout parameter elapsed. */
+        NotApplicable = 4, /**< This result can be caused by registering with a concurrent GC. */
+    };
+
+    /**
+     * @brief Specifies the kind of garbage collection.
+     *
+     * C++ counterpart of .NET System.GCKind.
+     */
+    enum class GCKind {
+        Any          = 0, /**< Any kind of collection. */
+        Ephemeral    = 1, /**< A gen0 or gen1 collection. */
+        FullBlocking = 2, /**< A blocking gen2 collection. */
+        Background   = 3, /**< A background collection. */
+    };
+
+    /**
+     * @brief Provides memory usage information about the garbage collector.
+     *
+     * C++ counterpart of .NET System.GCMemoryInfo.
+     * All properties return zero in this stub implementation.
+     */
+    struct GCMemoryInfo {
+        /** @brief Gets the total available memory for the GC to use. */
+        [[nodiscard]] long long getTotalAvailableMemoryBytesProperty() const noexcept { return 0LL; }
+        /** @brief Gets the memory load reported by the OS. */
+        [[nodiscard]] long long getMemoryLoadBytesProperty()           const noexcept { return 0LL; }
+        /** @brief Gets the heap size. */
+        [[nodiscard]] long long getHeapSizeBytesProperty()             const noexcept { return 0LL; }
+        /** @brief Gets the fragmented space in the heap. */
+        [[nodiscard]] long long getFragmentedBytesProperty()           const noexcept { return 0LL; }
+        /** @brief Gets the high memory load threshold. */
+        [[nodiscard]] long long getHighMemoryLoadThresholdBytesProperty() const noexcept { return 0LL; }
+        /** @brief Gets the total committed memory. */
+        [[nodiscard]] long long getTotalCommittedBytesProperty()       const noexcept { return 0LL; }
+        /** @brief Gets the index of the collection that produced this info. */
+        [[nodiscard]] long long getIndexProperty()                     const noexcept { return 0LL; }
+        /** @brief Gets the generation this info belongs to. */
+        [[nodiscard]] int       getGenerationProperty()                const noexcept { return 0; }
+        /** @brief Returns true when this info was produced by a concurrent GC. */
+        [[nodiscard]] bool      getConcurrentProperty()                const noexcept { return false; }
+        /** @brief Returns true when this info was produced by a compacting GC. */
+        [[nodiscard]] bool      getCompactedProperty()                 const noexcept { return false; }
+        /** @brief Returns true when this info was produced by a pinned-object-heap GC. */
+        [[nodiscard]] bool      getPinnedObjectsCountProperty()        const noexcept { return false; }
+        /** @brief Gets the pause duration for this GC. */
+        [[nodiscard]] TimeSpan  getPauseDurationProperty()             const noexcept { return TimeSpan::Zero; }
+    };
+
+    /**
+     * @brief Controls the system garbage collector — a service that automatically
+     * reclaims unused memory.
+     *
+     * C++ counterpart of .NET System.GC.
+     * All methods are no-op stubs or return zero/false because the C++ runtime
+     * uses deterministic RAII rather than a tracing GC. The class exists so that
+     * ported game code that calls GC.Collect() or GC.SuppressFinalize() compiles
+     * and links without modification.
+     */
     class GC {
     public:
-        /// Deleted constructor; all members are static.
+        /** @brief Deleted constructor — all members are static. */
         GC() = delete;
 
-        /// Forces a garbage collection (no-op in this port).
+        // -----------------------------------------------------------------------
+        // Collect overloads
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Forces an immediate garbage collection of all generations.
+         *
+         * C++ counterpart of .NET GC.Collect().
+         * No-op in this port.
+         */
         static void Collect() {}
-        /// Forces a garbage collection of the specified generation (no-op in this port).
+
+        /**
+         * @brief Forces a garbage collection from generation 0 through @p generation.
+         *
+         * C++ counterpart of .NET GC.Collect(int).
+         * No-op in this port.
+         */
         static void Collect(int generation) { (void)generation; }
 
-        /// Returns the total memory currently thought to be allocated (always 0 in this port).
-        static long long GetTotalMemory(bool forceFullCollection) {
+        /**
+         * @brief Forces a garbage collection with the specified mode.
+         *
+         * C++ counterpart of .NET GC.Collect(int, GCCollectionMode).
+         * No-op in this port.
+         */
+        static void Collect(int generation, GCCollectionMode mode) {
+            (void)generation; (void)mode;
+        }
+
+        /**
+         * @brief Forces a garbage collection with the specified mode and blocking behaviour.
+         *
+         * C++ counterpart of .NET GC.Collect(int, GCCollectionMode, bool).
+         * No-op in this port.
+         */
+        static void Collect(int generation, GCCollectionMode mode, bool blocking) {
+            (void)generation; (void)mode; (void)blocking;
+        }
+
+        /**
+         * @brief Forces a garbage collection with the specified mode, blocking, and compacting.
+         *
+         * C++ counterpart of .NET GC.Collect(int, GCCollectionMode, bool, bool).
+         * No-op in this port.
+         */
+        static void Collect(int generation, GCCollectionMode mode, bool blocking, bool compacting) {
+            (void)generation; (void)mode; (void)blocking; (void)compacting;
+        }
+
+        // -----------------------------------------------------------------------
+        // Memory info
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the total memory (in bytes) currently thought to be allocated.
+         *
+         * C++ counterpart of .NET GC.GetTotalMemory(bool).
+         * Always returns 0 in this port.
+         */
+        [[nodiscard]] static long long GetTotalMemory(bool forceFullCollection) {
             (void)forceFullCollection;
             return 0LL;
         }
 
-        /// Returns the total bytes allocated by managed code since the process started (always 0 in this port).
-        static long long GetTotalAllocatedBytes(bool precise = false) {
+        /**
+         * @brief Gets the total bytes allocated on the managed heap since the process started.
+         *
+         * C++ counterpart of .NET GC.GetTotalAllocatedBytes(bool).
+         * Always returns 0 in this port.
+         */
+        [[nodiscard]] static long long GetTotalAllocatedBytes(bool precise = false) {
             (void)precise;
             return 0LL;
         }
 
-        /// Keeps the specified object reachable for GC purposes (no-op in this port).
+        /**
+         * @brief Gets the total bytes allocated on the managed heap for the current thread.
+         *
+         * C++ counterpart of .NET GC.GetAllocatedBytesForCurrentThread().
+         * Always returns 0 in this port.
+         */
+        [[nodiscard]] static long long GetAllocatedBytesForCurrentThread() { return 0LL; }
+
+        /**
+         * @brief Returns the total time spent pausing for GC since the process started.
+         *
+         * C++ counterpart of .NET GC.GetTotalPauseDuration().
+         * Always returns TimeSpan::Zero in this port.
+         */
+        [[nodiscard]] static TimeSpan GetTotalPauseDuration() { return TimeSpan::Zero; }
+
+        /**
+         * @brief Returns GC memory info for the most recent collection of any kind.
+         *
+         * C++ counterpart of .NET GC.GetGCMemoryInfo().
+         * Returns an all-zero stub in this port.
+         */
+        [[nodiscard]] static GCMemoryInfo GetGCMemoryInfo() { return GCMemoryInfo{}; }
+
+        /**
+         * @brief Returns GC memory info for the most recent collection of the specified kind.
+         *
+         * C++ counterpart of .NET GC.GetGCMemoryInfo(GCKind).
+         * Returns an all-zero stub in this port.
+         */
+        [[nodiscard]] static GCMemoryInfo GetGCMemoryInfo(GCKind kind) {
+            (void)kind;
+            return GCMemoryInfo{};
+        }
+
+        // -----------------------------------------------------------------------
+        // Generation info
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Gets the maximum number of generations the GC supports.
+         *
+         * C++ counterpart of .NET GC.MaxGeneration.
+         * Returns 2 (matching .NET's 3-generation model: gen0, gen1, gen2).
+         */
+        [[nodiscard]] static int getMaxGenerationProperty() { return 2; }
+
+        /** @brief Alias kept for backward compatibility. */
+        [[nodiscard]] static int MaxGeneration() { return 2; }
+
+        /**
+         * @brief Returns the current GC generation of the object pointed to by @p obj.
+         *
+         * C++ counterpart of .NET GC.GetGeneration(object).
+         * Always returns 0 in this port.
+         */
+        [[nodiscard]] static int GetGeneration(void*) { return 0; }
+
+        /**
+         * @brief Returns the number of times GC has occurred for the specified generation.
+         *
+         * C++ counterpart of .NET GC.CollectionCount(int).
+         * Always returns 0 in this port.
+         */
+        [[nodiscard]] static int CollectionCount(int generation) {
+            (void)generation;
+            return 0;
+        }
+
+        // -----------------------------------------------------------------------
+        // Finalizer control
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Requests that the system not call the finalizer for @p obj.
+         *
+         * C++ counterpart of .NET GC.SuppressFinalize(object).
+         * No-op in this port.
+         */
+        static void SuppressFinalize(void*) {}
+
+        /**
+         * @brief Requests that the system call the finalizer for @p obj,
+         * even if SuppressFinalize was previously called.
+         *
+         * C++ counterpart of .NET GC.ReRegisterForFinalize(object).
+         * No-op in this port.
+         */
+        static void ReRegisterForFinalize(void*) {}
+
+        /**
+         * @brief Suspends the current thread until the finalizer thread has
+         * emptied its queue.
+         *
+         * C++ counterpart of .NET GC.WaitForPendingFinalizers().
+         * No-op in this port.
+         */
+        static void WaitForPendingFinalizers() {}
+
+        // -----------------------------------------------------------------------
+        // KeepAlive
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief References @p obj, making it ineligible for GC from the start of
+         * the current method until this call.
+         *
+         * C++ counterpart of .NET GC.KeepAlive(object).
+         * No-op in this port.
+         */
         template<typename T>
         static void KeepAlive(const T&) {}
 
-        /// Requests that the runtime not call the finalizer for the specified object (no-op in this port).
-        static void SuppressFinalize(void*) {}
-        /// Requests that the runtime call the finalizer for the specified object (no-op in this port).
-        static void ReRegisterForFinalize(void*) {}
+        // -----------------------------------------------------------------------
+        // Memory pressure
+        // -----------------------------------------------------------------------
 
-        /// Returns the maximum number of generations the GC supports (returns 2).
-        static int MaxGeneration() { return 2; }
-        /// Returns the current GC generation of the specified object (always 0 in this port).
-        static int GetGeneration(void*) { return 0; }
+        /**
+         * @brief Informs the runtime of a large allocation of unmanaged memory.
+         *
+         * C++ counterpart of .NET GC.AddMemoryPressure(long).
+         * No-op in this port.
+         */
+        static void AddMemoryPressure(long long bytesAllocated) { (void)bytesAllocated; }
 
-        /// Suspends the current thread until the thread processing the queue of finalizers has emptied it (no-op).
-        static void WaitForPendingFinalizers() {}
+        /**
+         * @brief Informs the runtime that unmanaged memory has been released.
+         *
+         * C++ counterpart of .NET GC.RemoveMemoryPressure(long).
+         * No-op in this port.
+         */
+        static void RemoveMemoryPressure(long long bytesAllocated) { (void)bytesAllocated; }
 
-        /// Returns the total available memory bytes as reported by GCMemoryInfo (always 0 in this port).
-        static long long GetGCMemoryInfo_TotalAvailableMemoryBytes() { return 0LL; }
+        /**
+         * @brief Updates the runtime on the current memory limit.
+         *
+         * C++ counterpart of .NET GC.RefreshMemoryLimit().
+         * No-op in this port.
+         */
+        static void RefreshMemoryLimit() {}
+
+        // -----------------------------------------------------------------------
+        // No-GC region
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Attempts to disallow garbage collection during the execution of
+         * a critical path.
+         *
+         * C++ counterpart of .NET GC.TryStartNoGCRegion(long).
+         * Always returns false in this port (no GC to suppress).
+         */
+        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize) {
+            (void)totalSize;
+            return false;
+        }
+
+        /**
+         * @brief Ends the no-GC region latency mode.
+         *
+         * C++ counterpart of .NET GC.EndNoGCRegion().
+         * No-op in this port.
+         */
+        static void EndNoGCRegion() {}
+
+        /**
+         * @brief Registers a callback to invoke when a no-GC region allocation
+         * reaches @p totalSize bytes.
+         *
+         * C++ counterpart of .NET GC.RegisterNoGCRegionCallback(long, Action).
+         * No-op in this port.
+         */
+        static void RegisterNoGCRegionCallback(long long totalSize,
+                                               std::function<void()> callback) {
+            (void)totalSize; (void)callback;
+        }
+
+        // -----------------------------------------------------------------------
+        // Full GC notifications
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Specifies that a garbage collection notification should be raised
+         * when conditions favor a full, blocking GC.
+         *
+         * C++ counterpart of .NET GC.RegisterForFullGCNotification(int, int).
+         * No-op in this port.
+         */
+        static void RegisterForFullGCNotification(int maxGenerationThreshold,
+                                                   int largeObjectHeapThreshold) {
+            (void)maxGenerationThreshold; (void)largeObjectHeapThreshold;
+        }
+
+        /**
+         * @brief Cancels the registration of a full GC notification.
+         *
+         * C++ counterpart of .NET GC.CancelFullGCNotification().
+         * No-op in this port.
+         */
+        static void CancelFullGCNotification() {}
+
+        /**
+         * @brief Returns the status of a registered notification for a full GC approach.
+         *
+         * C++ counterpart of .NET GC.WaitForFullGCApproach(int).
+         * Always returns GCNotificationStatus::Succeeded in this port.
+         */
+        [[nodiscard]] static GCNotificationStatus WaitForFullGCApproach(
+            int millisecondsTimeout = -1)
+        {
+            (void)millisecondsTimeout;
+            return GCNotificationStatus::Succeeded;
+        }
+
+        /**
+         * @brief Returns the status of a registered notification for a full GC completion.
+         *
+         * C++ counterpart of .NET GC.WaitForFullGCComplete(int).
+         * Always returns GCNotificationStatus::Succeeded in this port.
+         */
+        [[nodiscard]] static GCNotificationStatus WaitForFullGCComplete(
+            int millisecondsTimeout = -1)
+        {
+            (void)millisecondsTimeout;
+            return GCNotificationStatus::Succeeded;
+        }
+
+        // -----------------------------------------------------------------------
+        // Legacy helper kept for source compatibility
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Returns total available memory bytes from GCMemoryInfo.
+         *
+         * Convenience wrapper kept for existing callers; prefer GetGCMemoryInfo().
+         */
+        [[nodiscard]] static long long GetGCMemoryInfo_TotalAvailableMemoryBytes() {
+            return 0LL;
+        }
     };
 
 } // namespace System
