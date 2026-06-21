@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <optional>
+#include <vector>
+#include "System/Buffers/ReadOnlySequence.hpp"
+#include "System/Buffers/IBufferWriter.hpp"
+#include "System/Span.hpp"
+
+namespace System::Buffers {
+
+/**
+ * @brief Extension methods for ReadOnlySequence&lt;T&gt; and IBufferWriter&lt;T&gt;.
+ *
+ * C++ counterpart of .NET System.Buffers.BuffersExtensions.
+ * These are free functions (C++ has no extension methods).
+ */
+namespace BuffersExtensions {
+
+/**
+ * @brief Returns the position of the first occurrence of @p value in @p source.
+ *
+ * C++ counterpart of .NET BuffersExtensions.PositionOf&lt;T&gt;(ReadOnlySequence, T).
+ * @param source The sequence to search.
+ * @param value  The value to search for.
+ * @return The SequencePosition of the first match, or std::nullopt if not found.
+ */
+template<typename T>
+[[nodiscard]] std::optional<System::SequencePosition> PositionOf(
+    const ReadOnlySequence<T>& source, const T& value)
+{
+    long long len = source.getLengthProperty();
+    for (long long i = 0; i < len; ++i) {
+        auto slice = source.Slice(source.getStartProperty(),
+                                  source.GetPosition(i + 1));
+        auto arr = slice.ToArray();
+        if (!arr.empty() && arr.back() == value) {
+            return source.GetPosition(i);
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * @brief Copies the entire @p source sequence into @p destination.
+ *
+ * C++ counterpart of .NET BuffersExtensions.CopyTo(ReadOnlySequence, Span).
+ * @param source      The sequence to copy from.
+ * @param destination The span to copy into.
+ */
+template<typename T>
+void CopyTo(const ReadOnlySequence<T>& source, System::Span<T> destination) {
+    source.CopyTo(destination);
+}
+
+/**
+ * @brief Copies all data from @p source into @p writer.
+ *
+ * C++ counterpart of .NET BuffersExtensions.Write(IBufferWriter, ReadOnlySequence).
+ * @param writer The IBufferWriter to write into.
+ * @param source The sequence to copy.
+ */
+template<typename T>
+void Write(IBufferWriter<T>& writer, const ReadOnlySequence<T>& source) {
+    auto data = source.ToArray();
+    int count = static_cast<int>(data.size());
+    if (count == 0) return;
+    auto span = writer.GetSpan(count);
+    std::copy(data.begin(), data.end(), span.getPointer());
+    writer.Advance(count);
+}
+
+/**
+ * @brief Returns all elements of @p source as a std::vector.
+ *
+ * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.ToArray() as an extension.
+ */
+template<typename T>
+[[nodiscard]] std::vector<T> ToArray(const ReadOnlySequence<T>& source) {
+    return source.ToArray();
+}
+
+} // namespace BuffersExtensions
+} // namespace System::Buffers

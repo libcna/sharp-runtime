@@ -7,6 +7,7 @@
 #include <vector>
 #include "System/SequencePosition.hpp"
 #include "System/ReadOnlyMemory.hpp"
+#include "System/Span.hpp"
 
 namespace System::Buffers {
 
@@ -123,6 +124,38 @@ namespace System::Buffers {
             if (pos < start_ || pos > end_)
                 throw std::out_of_range("ReadOnlySequence::GetPosition out of range");
             return System::SequencePosition(nullptr, pos);
+        }
+
+        /**
+         * @brief Returns true if the sequence is backed by a single contiguous segment.
+         *
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.IsSingleSegment.
+         * This stub implementation always returns true because ReadOnlySequence here
+         * wraps a single contiguous vector.
+         */
+        [[nodiscard]] bool getIsSingleSegmentProperty() const noexcept { return true; }
+
+        /**
+         * @brief Copies all elements of the sequence into a std::vector.
+         *
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.ToArray().
+         */
+        [[nodiscard]] std::vector<T> ToArray() const {
+            return std::vector<T>(data_.begin() + start_, data_.begin() + end_);
+        }
+
+        /**
+         * @brief Copies the sequence into @p destination.
+         *
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.CopyTo(Span&lt;T&gt;).
+         * @throws std::out_of_range if destination is too small.
+         */
+        void CopyTo(System::Span<T> destination) const {
+            int len = end_ - start_;
+            if (destination.getLengthProperty() < len)
+                throw std::out_of_range("ReadOnlySequence::CopyTo destination too small");
+            std::copy(data_.begin() + start_, data_.begin() + end_,
+                      destination.getPointer());
         }
     };
 

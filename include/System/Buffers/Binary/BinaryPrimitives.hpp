@@ -160,6 +160,36 @@ namespace System::Buffers::Binary {
             uint64_t v = toBE64u(value); std::memcpy(destination.getPointer(), &v, 8);
         }
 
+        // -----------------------------------------------------------------------
+        // ReverseEndianness
+        // -----------------------------------------------------------------------
+
+        /** @brief Returns @p value with its bytes in reversed order (no-op for sbyte). */
+        static int8_t   ReverseEndianness(int8_t value)   { return value; }
+        /** @brief Returns @p value with its bytes in reversed order (no-op for byte). */
+        static uint8_t  ReverseEndianness(uint8_t value)  { return value; }
+        /** @brief Returns @p value with its bytes reversed. */
+        static int16_t  ReverseEndianness(int16_t value)  {
+            uint16_t u; std::memcpy(&u, &value, 2); u = bswap16(u);
+            int16_t r; std::memcpy(&r, &u, 2); return r;
+        }
+        /** @brief Returns @p value with its bytes reversed. */
+        static uint16_t ReverseEndianness(uint16_t value) { return bswap16(value); }
+        /** @brief Returns @p value with its bytes reversed. */
+        static int32_t  ReverseEndianness(int32_t value)  {
+            uint32_t u; std::memcpy(&u, &value, 4); u = bswap32(u);
+            int32_t r; std::memcpy(&r, &u, 4); return r;
+        }
+        /** @brief Returns @p value with its bytes reversed. */
+        static uint32_t ReverseEndianness(uint32_t value) { return bswap32(value); }
+        /** @brief Returns @p value with its bytes reversed. */
+        static int64_t  ReverseEndianness(int64_t value)  {
+            uint64_t u; std::memcpy(&u, &value, 8); u = bswap64(u);
+            int64_t r; std::memcpy(&r, &u, 8); return r;
+        }
+        /** @brief Returns @p value with its bytes reversed. */
+        static uint64_t ReverseEndianness(uint64_t value) { return bswap64(value); }
+
     private:
         static void checkSize(int len, int needed) {
             if (len < needed) throw std::out_of_range("BinaryPrimitives: span too small");
