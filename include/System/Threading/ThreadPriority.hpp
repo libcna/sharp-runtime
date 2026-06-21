@@ -5,17 +5,21 @@
 
 namespace System::Threading {
 
-    /// Specifies the scheduling priority of a thread.
+    /**
+     * @brief Specifies the scheduling priority of a System::Threading::Thread.
+     *
+     * C++ counterpart of .NET System.Threading.ThreadPriority.
+     */
     enum class ThreadPriority {
-        /// The thread can be scheduled after threads with any other priority.
+        /** @brief The thread can be scheduled after threads with any other priority. */
         Lowest      = 0,
-        /// The thread can be scheduled after Normal priority threads.
+        /** @brief The thread can be scheduled after Normal priority threads. */
         BelowNormal = 1,
-        /// The thread is scheduled with normal priority.
+        /** @brief The thread is scheduled with normal priority. */
         Normal      = 2,
-        /// The thread can be scheduled before Normal priority threads.
+        /** @brief The thread can be scheduled before Normal priority threads. */
         AboveNormal = 3,
-        /// The thread is scheduled before threads with any other priority.
+        /** @brief The thread is scheduled before threads with any other priority. */
         Highest     = 4,
     };
 

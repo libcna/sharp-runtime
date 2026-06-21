@@ -5,13 +5,17 @@
 
 namespace System::Threading {
 
-    /// Specifies the apartment state of a managed thread.
+    /**
+     * @brief Specifies the apartment state of a managed thread.
+     *
+     * C++ counterpart of .NET System.Threading.ApartmentState.
+     */
     enum class ApartmentState {
-        /// The thread will create and enter a single-threaded apartment.
+        /** @brief The thread will create and enter a single-threaded apartment. */
         STA     = 0,
-        /// The thread will create and enter a multi-threaded apartment.
+        /** @brief The thread will create and enter a multi-threaded apartment. */
         MTA     = 1,
-        /// The apartment state has not been set.
+        /** @brief The apartment state has not been set. */
         Unknown = 2,
     };
 

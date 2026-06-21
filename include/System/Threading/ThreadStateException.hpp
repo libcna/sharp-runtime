@@ -6,14 +6,25 @@
 
 namespace System::Threading {
 
-    /// The exception thrown when a method is invoked on a Thread that is in an invalid ThreadState.
+    /**
+     * @brief The exception thrown when a method is invoked on a Thread that is in an invalid ThreadState.
+     *
+     * C++ counterpart of .NET System.Threading.ThreadStateException.
+     */
     class ThreadStateException : public System::SystemException {
     public:
-        /// Initializes a ThreadStateException with a default message.
+        /** @brief Initializes a ThreadStateException with a default message. */
         ThreadStateException() : SystemException("Thread is in an invalid state for the operation being executed.") {}
-        /// Initializes a ThreadStateException with the specified message.
+        /**
+         * @brief Initializes a ThreadStateException with the specified message.
+         * @param message The error message.
+         */
         explicit ThreadStateException(const std::string& message) : SystemException(message) {}
-        /// Initializes a ThreadStateException with a message and an inner exception.
+        /**
+         * @brief Initializes a ThreadStateException with a message and an inner exception.
+         * @param message The error message.
+         * @param inner   The exception that caused this exception.
+         */
         ThreadStateException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };

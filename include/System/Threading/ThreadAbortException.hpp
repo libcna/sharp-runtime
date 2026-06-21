@@ -6,12 +6,21 @@
 
 namespace System::Threading {
 
-    /// The exception thrown when Thread.Abort() is invoked on a thread.
+    /**
+     * @brief The exception thrown when Thread.Abort() is invoked on a thread.
+     *
+     * C++ counterpart of .NET System.Threading.ThreadAbortException.
+     * In .NET 5+, Thread.Abort() always throws PlatformNotSupportedException.
+     * This type exists for source-compatibility with pre-.NET 5 code.
+     */
     class ThreadAbortException : public System::SystemException {
     public:
-        /// Initializes a ThreadAbortException with a default message.
+        /** @brief Initializes a ThreadAbortException with a default message. */
         ThreadAbortException() : SystemException("Thread was being aborted.") {}
-        /// Initializes a ThreadAbortException with the specified message.
+        /**
+         * @brief Initializes a ThreadAbortException with the specified message.
+         * @param message The error message.
+         */
         explicit ThreadAbortException(const std::string& message) : SystemException(message) {}
     };
 
