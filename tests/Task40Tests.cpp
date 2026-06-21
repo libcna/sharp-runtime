@@ -93,6 +93,101 @@ TEST(SpanTests, RangeFor_IteratesAll) {
     EXPECT_EQ(sum, 6);
 }
 
+TEST(SpanTests, Empty_IsEmpty) {
+    auto s = Span<int>::Empty();
+    EXPECT_TRUE(s.getIsEmptyProperty());
+    EXPECT_EQ(s.getLengthProperty(), 0);
+}
+
+TEST(SpanTests, Slice_OneArg_ToEnd) {
+    int arr[] = {1, 2, 3, 4};
+    Span<int> s(arr, 4);
+    auto sl = s.Slice(2);
+    EXPECT_EQ(sl.getLengthProperty(), 2);
+    EXPECT_EQ(sl[0], 3);
+    EXPECT_EQ(sl[1], 4);
+}
+
+TEST(SpanTests, CopyTo_Succeeds) {
+    int src[] = {10, 20, 30};
+    int dst[] = {0, 0, 0};
+    Span<int> s(src, 3);
+    Span<int> d(dst, 3);
+    s.CopyTo(d);
+    EXPECT_EQ(dst[0], 10);
+    EXPECT_EQ(dst[2], 30);
+}
+
+TEST(SpanTests, TryCopyTo_SucceedsWhenFits) {
+    int src[] = {1, 2};
+    int dst[] = {0, 0, 0};
+    Span<int> s(src, 2);
+    Span<int> d(dst, 3);
+    EXPECT_TRUE(s.TryCopyTo(d));
+    EXPECT_EQ(dst[0], 1);
+}
+
+TEST(SpanTests, TryCopyTo_FailsWhenTooShort) {
+    int src[] = {1, 2, 3};
+    int dst[] = {0, 0};
+    Span<int> s(src, 3);
+    Span<int> d(dst, 2);
+    EXPECT_FALSE(s.TryCopyTo(d));
+}
+
+TEST(SpanTests, ToArray_ReturnsCopy) {
+    int arr[] = {7, 8, 9};
+    Span<int> s(arr, 3);
+    auto v = s.ToArray();
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[1], 8);
+}
+
+TEST(SpanTests, Fill_SetsAllElements) {
+    int arr[] = {0, 0, 0, 0};
+    Span<int> s(arr, 4);
+    s.Fill(42);
+    for (int x : arr) EXPECT_EQ(x, 42);
+}
+
+TEST(SpanTests, Clear_ZeroesAllElements) {
+    int arr[] = {1, 2, 3};
+    Span<int> s(arr, 3);
+    s.Clear();
+    for (int x : arr) EXPECT_EQ(x, 0);
+}
+
+TEST(SpanTests, ToString_CharSpan) {
+    char buf[] = {'h', 'i'};
+    Span<char> s(buf, 2);
+    EXPECT_EQ(s.ToString(), "hi");
+}
+
+TEST(SpanTests, EqualityOperator_SameSpan) {
+    int arr[] = {1, 2, 3};
+    Span<int> a(arr, 3);
+    Span<int> b(arr, 3);
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a != b);
+}
+
+TEST(SpanTests, EqualityOperator_DifferentPointer) {
+    int a1[] = {1, 2, 3};
+    int a2[] = {1, 2, 3};
+    Span<int> a(a1, 3);
+    Span<int> b(a2, 3);
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a != b);
+}
+
+TEST(SpanTests, ImplicitConversion_ToReadOnlySpan) {
+    int arr[] = {4, 5, 6};
+    Span<int> s(arr, 3);
+    ReadOnlySpan<int> ros = s;
+    EXPECT_EQ(ros.getLengthProperty(), 3);
+    EXPECT_EQ(ros[0], 4);
+}
+
 TEST(ReadOnlySpanTests, Ctor_LengthAndAccess) {
     const int arr[] = {7, 8, 9};
     ReadOnlySpan<int> rs(arr, 3);
