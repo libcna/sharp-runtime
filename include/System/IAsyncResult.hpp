@@ -5,14 +5,19 @@
 
 namespace System {
 
-    /// Represents the status of an asynchronous operation.
+    /**
+     * @brief Represents the status of an asynchronous operation.
+     *
+     * C++ counterpart of .NET System.IAsyncResult.
+     * Implement this interface on types returned from Begin* asynchronous methods.
+     */
     class IAsyncResult {
     public:
-        /// Virtual destructor for safe polymorphic destruction.
+        /** @brief Virtual destructor for safe polymorphic destruction. */
         virtual ~IAsyncResult() = default;
-        /// Returns true if the asynchronous operation has completed.
+        /** @brief Returns true if the asynchronous operation has completed. */
         [[nodiscard]] virtual bool getIsCompletedProperty() const = 0;
-        /// Returns true if the asynchronous operation completed synchronously.
+        /** @brief Returns true if the asynchronous operation completed synchronously. */
         [[nodiscard]] virtual bool getCompletedSynchronouslyProperty() const = 0;
     };
 

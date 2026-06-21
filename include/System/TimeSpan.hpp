@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 5/26/25.
-//
-
 #pragma once
 #include <chrono>
 #include <cmath>
@@ -22,22 +18,14 @@ namespace System {
     using SharpRuntime::longcs;
 
     /**
-     * @class TimeSpan
      * @brief Represents a duration of time, which can be either positive or negative.
      *
      * TimeSpan is stored internally as a number of ticks, where a tick represents
      * 100 nanoseconds. This allows precise representation of hours, minutes, and
-     * days. However, longer time periods such as months or years are not neatly
-     * expressible due to variations in calendar calculations.
+     * days. Months and years are not directly representable because calendar
+     * arithmetic depends on which specific dates are involved.
      *
-     * For example:
-     * - A month can range from 28 to 31 days.
-     * - A year may consist of 365 or 366 days.
-     * - A decade might include between 1 and 3 leap years.
-     *
-     * Due to these inconsistencies, TimeSpan does not offer direct methods
-     * for retrieving months or years.
-     * @note Status: Partial
+     * C++ counterpart of .NET System.TimeSpan.
      */
     struct TimeSpan : IEquatable<TimeSpan>, IComparable<TimeSpan> {
     private:

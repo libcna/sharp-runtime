@@ -7,5 +7,11 @@
 #include "System/ResolveEventArgs.hpp"
 
 namespace System {
+    /**
+     * @brief Represents a method that handles the event for resolving assemblies.
+     *
+     * C++ counterpart of the .NET System.ResolveEventHandler delegate type.
+     * The function signature is: `std::string(void* sender, ResolveEventArgs& args)`.
+     */
     using ResolveEventHandler = std::function<std::string(void*, ResolveEventArgs&)>;
 } // namespace System
