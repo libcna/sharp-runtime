@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 5/25/25.
-//
-
 #include "System/Object.hpp"
 
 #include <typeinfo>
@@ -16,13 +12,6 @@ namespace System
     Object::Object() = default;
 
     Object::~Object() = default;
-
-    // std::string Object::ToString() const
-    // {
-    //     // Closest practical equivalent to .NET default Object.ToString()
-    //     // without a custom System::Type implementation.
-    //     return typeid(*this).name();
-    // }
 
     std::string Object::ToString() const
     {
@@ -37,15 +26,9 @@ namespace System
     bool Object::Equals(const Object* objA, const Object* objB)
     {
         if (objA == objB)
-        {
             return true;
-        }
-
         if (objA == nullptr || objB == nullptr)
-        {
             return false;
-        }
-
         return objA->Equals(objB);
     }
 
@@ -57,8 +40,6 @@ namespace System
     int Object::GetHashCode() const
     {
         const std::size_t hash = std::hash<const void*>{}(this);
-
-        // Narrow to int to resemble .NET Int32 return type.
         return static_cast<int>(hash & 0x7fffffff);
     }
 }
