@@ -1,33 +1,28 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 5/26/25.
-//
-
 #pragma once
-
 #include "System/ArithmeticException.hpp"
 
 namespace System {
 
     /**
-     * @brief Represents an exception that is thrown when an arithmetic,
-     * casting, or conversion operation results in an overflow.
+     * @brief The exception thrown when an arithmetic, casting, or conversion operation
+     * results in an overflow.
      *
-     * This class is a C++ counterpart of the .NET System::OverflowException type.
-     * It derives from System::ArithmeticException.
+     * C++ counterpart of .NET System.OverflowException.
+     * Derives from ArithmeticException.
      */
     class OverflowException : public ArithmeticException {
     public:
-        /**
-         * @brief Initializes a new instance of the OverflowException class
-         * with the specified error message.
-         *
-         * @param str A null-terminated character string that describes the error.
-         */
+        /** @brief Initializes a new instance with the default overflow message. */
         OverflowException();
+        /** @brief Initializes a new instance with the specified message (const char* overload). */
         explicit OverflowException(const char* str);
+        /** @brief Initializes a new instance with the specified error message. */
+        explicit OverflowException(const std::string& message);
+        /** @brief Initializes a new instance with the specified message and inner exception. */
+        OverflowException(const std::string& message, const std::exception& innerException);
     };
 
 } // namespace System

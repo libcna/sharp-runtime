@@ -10,6 +10,12 @@
 
 namespace System {
 
+/**
+ * @brief Provides constants and static methods for working with Unicode characters.
+ *
+ * C++ counterpart of .NET System.Char.
+ * Characters are represented as char16_t (SharpRuntime::charcs) code units.
+ */
 class Char {
 public:
     static constexpr SharpRuntime::charcs MaxValue = 0xFFFFu;

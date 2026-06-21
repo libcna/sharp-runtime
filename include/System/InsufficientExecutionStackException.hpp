@@ -6,12 +6,17 @@
 
 namespace System {
 
-    /// The exception thrown when there is insufficient execution stack available to allow most methods to execute.
+    /**
+     * @brief The exception thrown when there is insufficient execution stack available
+     * to allow most methods to execute.
+     *
+     * C++ counterpart of .NET System.InsufficientExecutionStackException.
+     */
     class InsufficientExecutionStackException : public SystemException {
     public:
-        /// Initializes a new instance with the default insufficient-stack message.
+        /** @brief Initializes a new instance with the default insufficient-stack message. */
         InsufficientExecutionStackException() : SystemException("Insufficient stack to continue executing the program safely. This can happen from having too many functions on the call stack or function on the stack using too much stack space.") {}
-        /// Initializes a new instance with the specified error message.
+        /** @brief Initializes a new instance with the specified error message. */
         explicit InsufficientExecutionStackException(const std::string& message) : SystemException(message) {}
     };
 

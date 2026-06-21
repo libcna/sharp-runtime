@@ -13,7 +13,12 @@
 
 namespace System {
 
-/// Static helper methods that mirror System.Single (float) in .NET.
+/**
+ * @brief Provides constants and static methods for working with single-precision
+ * floating-point values.
+ *
+ * C++ counterpart of .NET System.Single.
+ */
 class Single {
 public:
     static constexpr float MaxValue          =  std::numeric_limits<float>::max();          ///< Largest finite positive float (~3.4e38).

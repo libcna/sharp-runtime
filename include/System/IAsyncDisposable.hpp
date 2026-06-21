@@ -5,12 +5,17 @@
 
 namespace System {
 
-    /// Provides a mechanism for releasing unmanaged resources asynchronously.
+    /**
+     * @brief Provides a mechanism for releasing unmanaged resources asynchronously.
+     *
+     * C++ counterpart of .NET System.IAsyncDisposable.
+     * In this port DisposeAsync() runs synchronously — the async aspect is not modelled.
+     */
     class IAsyncDisposable {
     public:
-        /// Virtual destructor for safe polymorphic destruction.
+        /** @brief Virtual destructor for safe polymorphic destruction. */
         virtual ~IAsyncDisposable() = default;
-        /// Releases resources asynchronously (approximated synchronously in this C++ port).
+        /** @brief Releases resources asynchronously (approximated synchronously in this C++ port). */
         virtual void DisposeAsync() = 0;
     };
 

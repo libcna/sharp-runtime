@@ -12,7 +12,11 @@
 
 namespace System {
 
-/// Static helper methods that mirror System.Int16 in .NET.
+/**
+ * @brief Provides constants and static methods for working with 16-bit signed integers.
+ *
+ * C++ counterpart of .NET System.Int16.
+ */
 class Int16 {
 public:
     static constexpr SharpRuntime::shortcs MaxValue = std::numeric_limits<int16_t>::max(); ///< Maximum value of a 16-bit signed integer (32767).

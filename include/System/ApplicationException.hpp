@@ -6,14 +6,18 @@
 
 namespace System {
 
-    /// The exception that represents a non-fatal application error.
+    /**
+     * @brief The exception that is thrown when a non-fatal application error occurs.
+     *
+     * C++ counterpart of .NET System.ApplicationException.
+     */
     class ApplicationException : public Exception {
     public:
-        /// Initializes a new instance with the default application error message.
+        /** @brief Initializes a new instance with the default application error message. */
         ApplicationException() : Exception("Error in the application.") {}
-        /// Initializes a new instance with the specified error message.
+        /** @brief Initializes a new instance with the specified error message. */
         explicit ApplicationException(const std::string& message) : Exception(message) {}
-        /// Initializes a new instance with the specified message and inner exception.
+        /** @brief Initializes a new instance with the specified message and inner exception. */
         ApplicationException(const std::string& message, const std::exception& inner)
             : Exception(message + " | inner: " + inner.what()) {}
     };
