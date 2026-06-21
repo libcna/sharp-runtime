@@ -19,6 +19,7 @@
 #include "System/NullReferenceException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/ArrayTypeMismatchException.hpp"
+#include "System/InsufficientMemoryException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -378,4 +379,28 @@ TEST(ArrayTypeMismatchExceptionTests, InnerExceptionCtor_ContainsBoth) {
     std::string msg(ex.what());
     EXPECT_NE(msg.find("outer msg"), std::string::npos);
     EXPECT_NE(msg.find("inner cause"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// InsufficientMemoryException
+// ---------------------------------------------------------------------------
+
+TEST(InsufficientMemoryExceptionTests, DefaultCtor_MessageContainsInsufficient) {
+    System::InsufficientMemoryException ex;
+    EXPECT_NE(std::string(ex.what()).find("Insufficient"), std::string::npos);
+}
+
+TEST(InsufficientMemoryExceptionTests, IsA_OutOfMemoryException) {
+    bool caught = false;
+    try { throw System::InsufficientMemoryException(); }
+    catch (const System::OutOfMemoryException&) { caught = true; }
+    EXPECT_TRUE(caught);
+}
+
+TEST(InsufficientMemoryExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("no mem");
+    System::InsufficientMemoryException ex("allocation failed", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("allocation failed"), std::string::npos);
+    EXPECT_NE(msg.find("no mem"), std::string::npos);
 }
