@@ -44,8 +44,11 @@ public:
     /// @param index Zero-based index.
     const std::any& operator[](int index) const { return _items.at(static_cast<size_t>(index)); }
 
-    /// Adds a raw pointer value to the end of the list.
-    void Add(void* value) override { _items.emplace_back(value); }
+    /// Adds a raw pointer value to the end of the list; returns its new index.
+    SharpRuntime::intcs Add(void* value) override {
+        _items.emplace_back(value);
+        return static_cast<SharpRuntime::intcs>(_items.size()) - 1;
+    }
     /// Adds a typed value to the end of the list and returns its new index.
     /// @param value Value to add.
     /// @return Zero-based index at which the value was inserted.
@@ -74,7 +77,7 @@ public:
     }
 
     /// Returns the zero-based index of the first occurrence of the raw pointer, or -1.
-    int IndexOf(void* value) const override {
+    SharpRuntime::intcs IndexOf(void* value) const override {
         for (int i = 0; i < static_cast<int>(_items.size()); ++i)
             if (std::any_cast<void*>(&_items[i]) && std::any_cast<void*>(_items[i]) == value) return i;
         return -1;
@@ -89,7 +92,7 @@ public:
 
     /// Inserts a raw pointer at the specified index.
     /// @param index Zero-based insertion position.
-    void Insert(int index, void* value) override {
+    void Insert(SharpRuntime::intcs index, void* value) override {
         _items.insert(_items.begin() + index, value);
     }
     /// Inserts a typed value at the specified index.
@@ -114,7 +117,7 @@ public:
 
     /// Removes the element at the specified index.
     /// @param index Zero-based index of the element to remove.
-    void RemoveAt(int index) override {
+    void RemoveAt(SharpRuntime::intcs index) override {
         if (index < 0 || index >= static_cast<int>(_items.size())) throw std::out_of_range("index");
         _items.erase(_items.begin() + index);
     }
