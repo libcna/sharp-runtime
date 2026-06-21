@@ -20,6 +20,7 @@
 #include "System/ObjectDisposedException.hpp"
 #include "System/ArrayTypeMismatchException.hpp"
 #include "System/InsufficientMemoryException.hpp"
+#include "System/OutOfMemoryException.hpp"
 
 using System::Exception;
 using System::SystemException;
@@ -379,6 +380,27 @@ TEST(ArrayTypeMismatchExceptionTests, InnerExceptionCtor_ContainsBoth) {
     std::string msg(ex.what());
     EXPECT_NE(msg.find("outer msg"), std::string::npos);
     EXPECT_NE(msg.find("inner cause"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// OutOfMemoryException
+// ---------------------------------------------------------------------------
+
+TEST(OutOfMemoryExceptionTests, DefaultCtor_ContainsMemory) {
+    System::OutOfMemoryException ex;
+    EXPECT_NE(std::string(ex.what()).find("memory"), std::string::npos);
+}
+
+TEST(OutOfMemoryExceptionTests, IsA_SystemException) {
+    EXPECT_THROW(throw System::OutOfMemoryException(), SystemException);
+}
+
+TEST(OutOfMemoryExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root cause");
+    System::OutOfMemoryException ex("not enough memory", inner);
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("not enough memory"), std::string::npos);
+    EXPECT_NE(msg.find("root cause"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

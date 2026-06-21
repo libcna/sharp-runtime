@@ -6,4 +6,6 @@ namespace System {
     OutOfMemoryException::OutOfMemoryException() : SystemException("Insufficient memory to continue the execution of the program.") {}
     OutOfMemoryException::OutOfMemoryException(const char* message) : SystemException(message) {}
     OutOfMemoryException::OutOfMemoryException(const std::string& message) : SystemException(message) {}
+    OutOfMemoryException::OutOfMemoryException(const std::string& message, const std::exception& inner)
+        : SystemException(message + " | inner: " + inner.what()) {}
 } // namespace System
