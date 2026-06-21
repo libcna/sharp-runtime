@@ -13,14 +13,32 @@ namespace System::Collections {
      *
      * @note Status: Stub
      */
-    class ICollection : public IEnumerable {
-    public:
-        /// Destroys the collection.
-        virtual ~ICollection() = default;
-        /// Gets the number of elements contained in the collection.
-        [[nodiscard]] virtual int getCountProperty() const = 0;
-        /// Returns true if access to the collection is synchronized (thread-safe).
-        [[nodiscard]] virtual bool getIsSynchronizedProperty() const { return false; }
-    };
+class ICollection : public IEnumerable {
+public:
+    /** @brief Virtual destructor for safe polymorphic destruction. */
+    virtual ~ICollection() = default;
+
+    /**
+     * @brief Gets the number of elements contained in the collection.
+     *
+     * C++ counterpart of .NET ICollection.Count.
+     */
+    [[nodiscard]] virtual int getCountProperty() const = 0;
+
+    /**
+     * @brief Gets an object that can be used to synchronize access to the collection.
+     *
+     * C++ counterpart of .NET ICollection.SyncRoot.
+     * @return A pointer that can be used as a synchronization lock.
+     */
+    [[nodiscard]] virtual const void* getSyncRootProperty() const { return this; }
+
+    /**
+     * @brief Gets a value indicating whether access to the collection is synchronized (thread-safe).
+     *
+     * C++ counterpart of .NET ICollection.IsSynchronized.
+     */
+    [[nodiscard]] virtual bool getIsSynchronizedProperty() const { return false; }
+};
 
 } // namespace System::Collections

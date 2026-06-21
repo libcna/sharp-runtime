@@ -7,15 +7,34 @@
 
 namespace System::Collections {
 
-    /// Defines methods to support structural equality comparison of objects within a collection.
-    class IStructuralEquatable {
-    public:
-        /// Destroys the equatable object.
-        virtual ~IStructuralEquatable() = default;
-        /// Determines structural equality with another object using the given comparer.
-        [[nodiscard]] virtual bool Equals(const void* other, const IEqualityComparer& comparer) const = 0;
-        /// Returns a structural hash code using the given comparer.
-        [[nodiscard]] virtual std::size_t GetHashCode(const IEqualityComparer& comparer) const = 0;
-    };
+/**
+ * @brief Defines methods to support structural equality comparison of objects within a collection.
+ *
+ * C++ counterpart of .NET System.Collections.IStructuralEquatable.
+ */
+class IStructuralEquatable {
+public:
+    /** @brief Virtual destructor for safe polymorphic destruction. */
+    virtual ~IStructuralEquatable() = default;
+
+    /**
+     * @brief Determines whether an object is structurally equal to the current instance.
+     *
+     * C++ counterpart of .NET IStructuralEquatable.Equals(object, IEqualityComparer).
+     * @param other    The object to compare with the current instance.
+     * @param comparer The comparer to use.
+     * @return true if the objects are considered equal; otherwise false.
+     */
+    [[nodiscard]] virtual bool Equals(const void* other, const IEqualityComparer& comparer) const = 0;
+
+    /**
+     * @brief Returns a hash code for the current instance using the specified comparer.
+     *
+     * C++ counterpart of .NET IStructuralEquatable.GetHashCode(IEqualityComparer).
+     * @param comparer The comparer to use.
+     * @return A hash code for the current instance.
+     */
+    [[nodiscard]] virtual std::size_t GetHashCode(const IEqualityComparer& comparer) const = 0;
+};
 
 } // namespace System::Collections

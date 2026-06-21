@@ -15,13 +15,27 @@ namespace System::Collections
     public:
         virtual ~IEnumerator() = default;
 
-        /// Advances the enumerator to the next element. Returns false when past the end.
-        virtual bool MoveNext() = 0;
+    /**
+     * @brief Advances the enumerator to the next element of the collection.
+     *
+     * C++ counterpart of .NET IEnumerator.MoveNext().
+     * @return true if the enumerator was advanced; false if past the end.
+     */
+    virtual bool MoveNext() = 0;
 
-        /// Resets the enumerator to before the first element.
-        virtual void Reset() = 0;
+    /**
+     * @brief Sets the enumerator to its initial position, before the first element.
+     *
+     * C++ counterpart of .NET IEnumerator.Reset().
+     */
+    virtual void Reset() = 0;
 
-        /// Returns the current element as a void pointer (caller must cast).
-        [[nodiscard]] virtual void* getCurrent() const = 0;
+    /**
+     * @brief Gets the current element in the collection.
+     *
+     * C++ counterpart of .NET IEnumerator.Current.
+     * @return Pointer to the current element; cast to the appropriate type.
+     */
+    [[nodiscard]] virtual void* getCurrent() const = 0;
     };
 }

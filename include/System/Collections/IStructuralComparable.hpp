@@ -6,13 +6,25 @@
 
 namespace System::Collections {
 
-    /// Supports structural comparison of objects within a collection.
-    class IStructuralComparable {
-    public:
-        /// Destroys the comparable object.
-        virtual ~IStructuralComparable() = default;
-        /// Compares this object to another using the given comparer and returns an ordering integer.
-        [[nodiscard]] virtual int CompareTo(const void* other, const IComparer& comparer) const = 0;
-    };
+/**
+ * @brief Supports structural comparison of objects within a collection.
+ *
+ * C++ counterpart of .NET System.Collections.IStructuralComparable.
+ */
+class IStructuralComparable {
+public:
+    /** @brief Virtual destructor for safe polymorphic destruction. */
+    virtual ~IStructuralComparable() = default;
+
+    /**
+     * @brief Compares this object with another using the specified comparer.
+     *
+     * C++ counterpart of .NET IStructuralComparable.CompareTo(object, IComparer).
+     * @param other   The object to compare with the current instance.
+     * @param comparer The comparer to use.
+     * @return Negative, zero, or positive depending on relative order.
+     */
+    [[nodiscard]] virtual int CompareTo(const void* other, const IComparer& comparer) const = 0;
+};
 
 } // namespace System::Collections

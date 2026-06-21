@@ -7,23 +7,51 @@
 
 namespace System::Collections {
 
-    /// Non-generic Comparer using strcmp for strings, numeric comparison for pointers treated as intptr.
-    class Comparer : public IComparer {
-    public:
-        /// Compares two objects by pointer value and returns a negative, zero, or positive integer.
-        [[nodiscard]] int Compare(const void* x, const void* y) const override {
-            if (x == y) return 0;
-            if (!x) return -1;
-            if (!y) return  1;
-            // Compare as pointer values (approximate — callers should use typed comparers).
-            return x < y ? -1 : 1;
-        }
+/**
+ * @brief Compares two objects for equivalence using pointer ordering.
+ *
+ * C++ counterpart of .NET System.Collections.Comparer.
+ * Because C++ has no runtime type system, objects are compared by pointer value.
+ * Callers that need value-based comparison should use a typed comparer.
+ */
+class Comparer : public IComparer {
+public:
+    /**
+     * @brief Compares two objects and returns a value indicating their relative order.
+     *
+     * C++ counterpart of .NET Comparer.Compare(object, object).
+     * Null is less than any non-null value; equal pointers return 0.
+     * @param x The first object to compare.
+     * @param y The second object to compare.
+     * @return -1, 0, or 1.
+     */
+    [[nodiscard]] int Compare(const void* x, const void* y) const override {
+        if (x == y) return 0;
+        if (!x) return -1;
+        if (!y) return  1;
+        return x < y ? -1 : 1;
+    }
 
-        /// Returns the default Comparer instance.
-        static const Comparer& Default() {
-            static Comparer instance;
-            return instance;
-        }
-    };
+    /**
+     * @brief Returns the default Comparer instance (current-culture equivalent).
+     *
+     * C++ counterpart of .NET Comparer.Default.
+     */
+    static const Comparer& Default() {
+        static Comparer instance;
+        return instance;
+    }
+
+    /**
+     * @brief Returns a Comparer that performs invariant-culture-equivalent comparisons.
+     *
+     * C++ counterpart of .NET Comparer.DefaultInvariant.
+     * In this C++ implementation, both Default and DefaultInvariant use pointer ordering.
+     */
+    static const Comparer& DefaultInvariant() {
+        static Comparer instance;
+        return instance;
+    }
+};
 
 } // namespace System::Collections

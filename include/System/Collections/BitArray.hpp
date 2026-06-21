@@ -10,94 +10,218 @@ namespace System::Collections {
 
     using SharpRuntime::intcs;
 
+/**
+ * @brief Manages a compact array of bit values, represented as Booleans.
+ *
+ * C++ counterpart of .NET System.Collections.BitArray.
+ * Backed by std::vector<bool>.
+ */
+class BitArray {
+    std::vector<bool> bits_;
+public:
     /**
-     * @brief Manages a compact array of bit values, represented as Booleans.
+     * @brief Constructs a BitArray of the given length with all bits set to @p defaultValue.
      *
-     * Wraps std::vector<bool>. Partial C++ counterpart of .NET System.Collections.BitArray.
-     *
-     * @note Status: Partial
+     * C++ counterpart of .NET BitArray(int, bool).
      */
-    class BitArray {
-        std::vector<bool> bits_;
-    public:
-        /// Constructs a BitArray with the given length, optionally initializing all bits to a default value.
-        explicit BitArray(intcs length, bool defaultValue = false)
-            : bits_(static_cast<size_t>(length), defaultValue) {}
+    explicit BitArray(intcs length, bool defaultValue = false)
+        : bits_(static_cast<size_t>(length), defaultValue) {}
 
-        /// Constructs a BitArray from an existing vector of bool values.
-        explicit BitArray(const std::vector<bool>& values) : bits_(values) {}
+    /**
+     * @brief Constructs a BitArray from a vector of bool values.
+     *
+     * C++ counterpart of .NET BitArray(bool[]).
+     */
+    explicit BitArray(const std::vector<bool>& values) : bits_(values) {}
 
-        /// Constructs a BitArray from a vector of bytes, unpacking each byte into 8 bits.
-        explicit BitArray(const std::vector<SharpRuntime::bytecs>& bytes) {
-            bits_.reserve(bytes.size() * 8);
-            for (auto b : bytes)
-                for (int i = 0; i < 8; ++i)
-                    bits_.push_back((b >> i) & 1);
-        }
+    /**
+     * @brief Constructs a BitArray from a vector of bytes, unpacking each byte into 8 bits (LSB-first).
+     *
+     * C++ counterpart of .NET BitArray(byte[]).
+     */
+    explicit BitArray(const std::vector<SharpRuntime::bytecs>& bytes) {
+        bits_.reserve(bytes.size() * 8);
+        for (auto b : bytes)
+            for (int i = 0; i < 8; ++i)
+                bits_.push_back((b >> i) & 1);
+    }
 
-        /// Gets the number of bits in the BitArray.
-        [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(bits_.size()); }
-        /// Gets the number of elements (bits) in the BitArray.
-        [[nodiscard]] intcs getCountProperty()  const { return getLengthProperty(); }
+    /**
+     * @brief Constructs a BitArray from a vector of int values, unpacking each int into 32 bits (LSB-first).
+     *
+     * C++ counterpart of .NET BitArray(int[]).
+     */
+    explicit BitArray(const std::vector<SharpRuntime::intcs>& values) {
+        bits_.reserve(values.size() * 32);
+        for (auto v : values)
+            for (int i = 0; i < 32; ++i)
+                bits_.push_back((static_cast<uint32_t>(v) >> i) & 1u);
+    }
 
-        /// Returns the value of the bit at the given index.
-        [[nodiscard]] bool Get(intcs index) const { return bits_.at(static_cast<size_t>(index)); }
-        /// Sets the bit at the given index to the specified value.
-        void Set(intcs index, bool value)         { bits_.at(static_cast<size_t>(index)) = value; }
-        /// Sets all bits in the BitArray to the specified value.
-        void SetAll(bool value)                   { std::fill(bits_.begin(), bits_.end(), value); }
+    /**
+     * @brief Gets the number of bits in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Length.
+     */
+    [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(bits_.size()); }
 
-        /// Returns the value of the bit at index i.
-        bool operator[](intcs i) const { return bits_.at(static_cast<size_t>(i)); }
+    /**
+     * @brief Gets the number of elements (bits) in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.Count.
+     */
+    [[nodiscard]] intcs getCountProperty()  const { return getLengthProperty(); }
 
-        /// Performs a bitwise AND of this BitArray with another and returns *this.
-        BitArray& And(const BitArray& other) {
-            for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] && other.bits_[i];
-            return *this;
-        }
-        /// Performs a bitwise OR of this BitArray with another and returns *this.
-        BitArray& Or(const BitArray& other) {
-            for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] || other.bits_[i];
-            return *this;
-        }
-        /// Performs a bitwise XOR of this BitArray with another and returns *this.
-        BitArray& Xor(const BitArray& other) {
-            for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] != other.bits_[i];
-            return *this;
-        }
-        /// Inverts all bit values in this BitArray and returns *this.
-        BitArray& Not() {
-            for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = !bits_[i];
-            return *this;
-        }
+    /**
+     * @brief Returns the value of the bit at the given index.
+     *
+     * C++ counterpart of .NET BitArray.Get(int).
+     */
+    [[nodiscard]] bool Get(intcs index) const { return bits_.at(static_cast<size_t>(index)); }
 
-        /// Returns true if every bit in the array is set to 1.
-        [[nodiscard]] bool HasAllSet() const {
-            for (bool b : bits_) if (!b) return false;
-            return true;
-        }
+    /**
+     * @brief Sets the bit at the given index to the specified value.
+     *
+     * C++ counterpart of .NET BitArray.Set(int, bool).
+     */
+    void Set(intcs index, bool value)         { bits_.at(static_cast<size_t>(index)) = value; }
 
-        /// Returns true if at least one bit in the array is set to 1.
-        [[nodiscard]] bool HasAnySet() const {
-            for (bool b : bits_) if (b) return true;
-            return false;
-        }
+    /**
+     * @brief Sets all bits in the BitArray to the specified value.
+     *
+     * C++ counterpart of .NET BitArray.SetAll(bool).
+     */
+    void SetAll(bool value)                   { std::fill(bits_.begin(), bits_.end(), value); }
 
-        /// Copies all bits into a bool vector (resized to match).
-        void CopyTo(std::vector<bool>& dest) const { dest = bits_; }
+    /**
+     * @brief Returns the value of the bit at index @p i.
+     *
+     * C++ counterpart of .NET BitArray[int].
+     */
+    bool operator[](intcs i) const { return bits_.at(static_cast<size_t>(i)); }
 
-        /// Copies bits packed into bytes (LSB-first per byte) into a byte vector.
-        void CopyTo(std::vector<SharpRuntime::bytecs>& dest) const {
-            size_t byteCount = (bits_.size() + 7) / 8;
-            dest.assign(byteCount, 0);
-            for (size_t i = 0; i < bits_.size(); ++i)
-                if (bits_[i]) dest[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
-        }
+    /**
+     * @brief Performs a bitwise AND of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.And(BitArray).
+     */
+    BitArray& And(const BitArray& other) {
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] && other.bits_[i];
+        return *this;
+    }
 
-        /// Returns an iterator to the beginning of the bit sequence.
-        auto begin() const { return bits_.begin(); }
-        /// Returns an iterator past the end of the bit sequence.
-        auto end()   const { return bits_.end(); }
-    };
+    /**
+     * @brief Performs a bitwise OR of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.Or(BitArray).
+     */
+    BitArray& Or(const BitArray& other) {
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] || other.bits_[i];
+        return *this;
+    }
+
+    /**
+     * @brief Performs a bitwise XOR of this BitArray with @p other in place.
+     *
+     * C++ counterpart of .NET BitArray.Xor(BitArray).
+     */
+    BitArray& Xor(const BitArray& other) {
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] != other.bits_[i];
+        return *this;
+    }
+
+    /**
+     * @brief Inverts all bit values in this BitArray in place.
+     *
+     * C++ counterpart of .NET BitArray.Not().
+     */
+    BitArray& Not() {
+        for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = !bits_[i];
+        return *this;
+    }
+
+    /**
+     * @brief Shifts all bits left (toward higher index) by @p count positions in place.
+     *
+     * C++ counterpart of .NET BitArray.LeftShift(int).
+     * Vacated low positions are set to false.
+     */
+    BitArray& LeftShift(int count) {
+        if (count < 0) throw std::out_of_range("count");
+        int len = static_cast<int>(bits_.size());
+        for (int i = len - 1; i >= 0; --i)
+            bits_[static_cast<size_t>(i)] = (i >= count) ? static_cast<bool>(bits_[static_cast<size_t>(i - count)]) : false;
+        return *this;
+    }
+
+    /**
+     * @brief Shifts all bits right (toward lower index) by @p count positions in place.
+     *
+     * C++ counterpart of .NET BitArray.RightShift(int).
+     * Vacated high positions are set to false.
+     */
+    BitArray& RightShift(int count) {
+        if (count < 0) throw std::out_of_range("count");
+        int len = static_cast<int>(bits_.size());
+        for (int i = 0; i < len; ++i)
+            bits_[static_cast<size_t>(i)] = (i + count < len) ? static_cast<bool>(bits_[static_cast<size_t>(i + count)]) : false;
+        return *this;
+    }
+
+    /**
+     * @brief Returns the number of bits set to true in the BitArray.
+     *
+     * C++ counterpart of .NET BitArray.PopCount().
+     */
+    [[nodiscard]] int PopCount() const {
+        int count = 0;
+        for (bool b : bits_) if (b) ++count;
+        return count;
+    }
+
+    /**
+     * @brief Returns true if every bit in the array is set to 1.
+     *
+     * C++ counterpart of .NET BitArray.HasAllSet().
+     */
+    [[nodiscard]] bool HasAllSet() const {
+        for (bool b : bits_) if (!b) return false;
+        return true;
+    }
+
+    /**
+     * @brief Returns true if at least one bit in the array is set to 1.
+     *
+     * C++ counterpart of .NET BitArray.HasAnySet().
+     */
+    [[nodiscard]] bool HasAnySet() const {
+        for (bool b : bits_) if (b) return true;
+        return false;
+    }
+
+    /**
+     * @brief Copies all bits into a bool vector (resized to match).
+     *
+     * C++ counterpart of .NET BitArray.CopyTo(Array, int) for bool arrays.
+     */
+    void CopyTo(std::vector<bool>& dest) const { dest = bits_; }
+
+    /**
+     * @brief Copies bits packed into bytes (LSB-first per byte) into a byte vector.
+     *
+     * C++ counterpart of .NET BitArray.CopyTo(Array, int) for byte arrays.
+     */
+    void CopyTo(std::vector<SharpRuntime::bytecs>& dest) const {
+        size_t byteCount = (bits_.size() + 7) / 8;
+        dest.assign(byteCount, 0);
+        for (size_t i = 0; i < bits_.size(); ++i)
+            if (bits_[i]) dest[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+    }
+
+    /** @brief Returns an iterator to the beginning of the bit sequence. */
+    auto begin() const { return bits_.begin(); }
+    /** @brief Returns an iterator past the end of the bit sequence. */
+    auto end()   const { return bits_.end(); }
+};
 
 } // namespace System::Collections

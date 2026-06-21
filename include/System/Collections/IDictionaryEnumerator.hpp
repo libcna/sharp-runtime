@@ -7,17 +7,37 @@
 
 namespace System::Collections {
 
-    /// Enumerates the elements of a non-generic dictionary.
-    class IDictionaryEnumerator : public IEnumerator {
-    public:
-        /// Destroys the enumerator.
-        virtual ~IDictionaryEnumerator() = default;
-        /// Gets both the key and the value of the current dictionary entry.
-        [[nodiscard]] virtual DictionaryEntry getEntryProperty() const = 0;
-        /// Gets the key of the current dictionary entry.
-        [[nodiscard]] virtual const void* getKeyProperty() const = 0;
-        /// Gets the value of the current dictionary entry.
-        [[nodiscard]] virtual const void* getValueProperty() const = 0;
-    };
+/**
+ * @brief Enumerates the elements of a non-generic dictionary.
+ *
+ * C++ counterpart of .NET System.Collections.IDictionaryEnumerator.
+ * Extends IEnumerator; getCurrent() returns a DictionaryEntry as void*.
+ */
+class IDictionaryEnumerator : public IEnumerator {
+public:
+    /** @brief Virtual destructor for safe polymorphic destruction. */
+    virtual ~IDictionaryEnumerator() = default;
+
+    /**
+     * @brief Gets both the key and the value of the current dictionary entry.
+     *
+     * C++ counterpart of .NET IDictionaryEnumerator.Entry.
+     */
+    [[nodiscard]] virtual DictionaryEntry getEntryProperty() const = 0;
+
+    /**
+     * @brief Gets the key of the current dictionary entry.
+     *
+     * C++ counterpart of .NET IDictionaryEnumerator.Key.
+     */
+    [[nodiscard]] virtual const void* getKeyProperty() const = 0;
+
+    /**
+     * @brief Gets the value of the current dictionary entry.
+     *
+     * C++ counterpart of .NET IDictionaryEnumerator.Value.
+     */
+    [[nodiscard]] virtual const void* getValueProperty() const = 0;
+};
 
 } // namespace System::Collections
