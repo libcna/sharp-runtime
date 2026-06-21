@@ -6,14 +6,25 @@
 
 namespace System {
 
-    /// The exception thrown when an attempt to load a class fails because the entry point cannot be found.
+    /**
+     * @brief The exception that is thrown when an attempt to load a class fails
+     * because the entry point was not found.
+     *
+     * C++ counterpart of .NET System.EntryPointNotFoundException.
+     */
     class EntryPointNotFoundException : public TypeLoadException {
     public:
-        /// Initializes a new instance with the default entry-point-not-found message.
+        /** @brief Initializes a new instance with the default entry-point-not-found message. */
         EntryPointNotFoundException() : TypeLoadException("Entry point was not found.") {}
-        /// Initializes a new instance with the specified error message.
+
+        /** @brief Initializes a new instance with the specified message. */
         explicit EntryPointNotFoundException(const std::string& message) : TypeLoadException(message) {}
-        /// Initializes a new instance with the specified message and inner exception.
+
+        /**
+         * @brief Initializes a new instance with a message and an inner exception.
+         *
+         * C++ counterpart of .NET EntryPointNotFoundException(string, Exception).
+         */
         EntryPointNotFoundException(const std::string& message, const std::exception& inner)
             : TypeLoadException(message + " | inner: " + inner.what()) {}
     };

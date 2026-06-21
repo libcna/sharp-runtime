@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include "System/InvalidOperationException.hpp"
+#include "System/NullReferenceException.hpp"
+
+using System::InvalidOperationException;
+using System::NullReferenceException;
+
+// InvalidOperationException — additional tests (basic message tests in ExceptionTests.cpp)
+TEST(InvalidOperationExceptionNewTests, DefaultMsg_NotEmpty) {
+    InvalidOperationException e;
+    EXPECT_FALSE(std::string(e.what()).empty());
+}
+TEST(InvalidOperationExceptionNewTests, DefaultMsg_ContainsState) {
+    InvalidOperationException e;
+    std::string msg(e.what());
+    EXPECT_NE(msg.find("state"), std::string::npos);
+}
+TEST(InvalidOperationExceptionNewTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("root");
+    InvalidOperationException e("outer msg", inner);
+    std::string msg(e.what());
+    EXPECT_NE(msg.find("outer msg"), std::string::npos);
+    EXPECT_NE(msg.find("root"), std::string::npos);
+}
+TEST(InvalidOperationExceptionNewTests, CStringCtor_MessageStored) {
+    InvalidOperationException e("my custom error");
+    EXPECT_EQ(std::string(e.what()), "my custom error");
+}
+
+// NullReferenceException — additional tests
+TEST(NullReferenceExceptionNewTests, DefaultMsg_ContainsNull) {
+    NullReferenceException e;
+    std::string msg(e.what());
+    EXPECT_FALSE(msg.empty());
+}
+TEST(NullReferenceExceptionNewTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("null ptr");
+    NullReferenceException e("deref failed", inner);
+    std::string msg(e.what());
+    EXPECT_NE(msg.find("deref failed"), std::string::npos);
+    EXPECT_NE(msg.find("null ptr"), std::string::npos);
+}
+TEST(NullReferenceExceptionNewTests, Catchable_AsSystemException) {
+    EXPECT_THROW({ throw NullReferenceException(); }, System::SystemException);
+}

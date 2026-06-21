@@ -6,14 +6,26 @@
 
 namespace System {
 
-    /// The exception thrown when the file image of a dynamic-link library or an executable program is invalid.
+    /**
+     * @brief The exception that is thrown when the file image of a dynamic-link
+     * library (DLL) or an executable program is invalid.
+     *
+     * C++ counterpart of .NET System.BadImageFormatException.
+     */
     class BadImageFormatException : public SystemException {
     public:
-        /// Initializes a new instance with the default invalid-format message.
-        BadImageFormatException() : SystemException("Format of the executable (.exe) or library (.dll) is invalid.") {}
-        /// Initializes a new instance with the specified error message.
+        /** @brief Initializes a new instance with the default invalid-image-format message. */
+        BadImageFormatException()
+            : SystemException("Format of the executable (.exe) or library (.dll) is invalid.") {}
+
+        /** @brief Initializes a new instance with the specified message. */
         explicit BadImageFormatException(const std::string& message) : SystemException(message) {}
-        /// Initializes a new instance with the specified message and inner exception.
+
+        /**
+         * @brief Initializes a new instance with a message and an inner exception.
+         *
+         * C++ counterpart of .NET BadImageFormatException(string, Exception).
+         */
         BadImageFormatException(const std::string& message, const std::exception& inner)
             : SystemException(message + " | inner: " + inner.what()) {}
     };

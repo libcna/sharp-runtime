@@ -8,12 +8,29 @@
 
 namespace System {
 
-    /// Defines a method that supports custom formatting of the value of an object.
+    /**
+     * @brief Defines a method that supports custom formatting of the value of an object.
+     *
+     * C++ counterpart of .NET System.ICustomFormatter.
+     * Implement this interface to provide formatting logic beyond what the
+     * standard format strings offer.
+     */
     class ICustomFormatter {
     public:
-        /// Virtual destructor for safe polymorphic destruction.
+        /** @brief Virtual destructor for safe polymorphic destruction. */
         virtual ~ICustomFormatter() = default;
-        /// Converts the value of the specified object to an equivalent string representation using the specified format and culture-specific formatting information.
+
+        /**
+         * @brief Converts the value of a specified object to an equivalent string
+         * representation using specified format and culture-specific formatting
+         * information.
+         *
+         * C++ counterpart of .NET ICustomFormatter.Format(string, object, IFormatProvider).
+         * @param format         A format string containing formatting specifications.
+         * @param arg            An object to format (as void* because C++ has no object root).
+         * @param formatProvider Culture-specific format information, or nullptr for invariant.
+         * @return The string representation of @p arg.
+         */
         [[nodiscard]] virtual std::string Format(
             const std::string& format,
             const void* arg,

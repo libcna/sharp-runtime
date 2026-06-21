@@ -6,15 +6,30 @@
 
 namespace System {
 
-    /// The exception thrown when a duplicate object exists in a wait array.
+    /**
+     * @brief The exception that is thrown when a duplicate object exists in an
+     * array where multiple distinct objects are required.
+     *
+     * C++ counterpart of .NET System.DuplicateWaitObjectException.
+     */
     class DuplicateWaitObjectException : public ArgumentException {
     public:
-        /// Initializes a new instance with the default duplicate-object message.
+        /** @brief Initializes a new instance with the default duplicate-object message. */
         DuplicateWaitObjectException() : ArgumentException("Duplicate objects in argument.") {}
-        /// Initializes a new instance with the name of the offending parameter.
+
+        /**
+         * @brief Initializes a new instance with the name of the offending parameter.
+         *
+         * C++ counterpart of .NET DuplicateWaitObjectException(string parameterName).
+         */
         explicit DuplicateWaitObjectException(const std::string& parameterName)
             : ArgumentException("Duplicate objects in argument.", parameterName) {}
-        /// Initializes a new instance with the parameter name and a custom message.
+
+        /**
+         * @brief Initializes a new instance with the parameter name and a custom message.
+         *
+         * C++ counterpart of .NET DuplicateWaitObjectException(string, string).
+         */
         DuplicateWaitObjectException(const std::string& parameterName, const std::string& message)
             : ArgumentException(message, parameterName) {}
     };

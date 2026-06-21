@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
@@ -17,12 +18,12 @@ namespace System {
      * @note Status: Partial — arithmetic not overloaded; use ToSingle/FromSingle for computation.
      */
     struct Half {
-        /// The raw IEEE 754 half-precision bit pattern.
+        /** @brief The raw IEEE 754 half-precision bit pattern. */
         uint16_t bits = 0;
 
-        /// Initializes a new Half with zero value.
+        /** @brief Initializes a new Half with zero value. */
         Half() = default;
-        /// Initializes a new Half from a raw 16-bit bit pattern.
+        /** @brief Initializes a new Half from a raw 16-bit bit pattern. */
         explicit Half(uint16_t rawBits) : bits(rawBits) {}
 
         /** @brief Converts a 32-bit float to Half. */
@@ -55,35 +56,97 @@ namespace System {
             return result;
         }
 
-        /// Explicit conversion to a 32-bit float.
+        /** @brief Explicit conversion to a 32-bit float. */
         explicit operator float() const { return ToSingle(); }
 
-        /// Represents the value zero.
+        /** @brief Represents the value zero. C++ counterpart of .NET Half.Zero. */
         static const Half Zero;
-        /// Represents Not a Number (NaN).
+        /** @brief Represents Not a Number (NaN). C++ counterpart of .NET Half.NaN. */
         static const Half NaN;
-        /// Represents positive infinity.
+        /** @brief Represents positive infinity. C++ counterpart of .NET Half.PositiveInfinity. */
         static const Half PositiveInfinity;
-        /// Represents negative infinity.
+        /** @brief Represents negative infinity. C++ counterpart of .NET Half.NegativeInfinity. */
         static const Half NegativeInfinity;
-        /// Represents the largest finite half-precision value (65504).
+        /** @brief Represents the largest finite half-precision value (65504). C++ counterpart of .NET Half.MaxValue. */
         static const Half MaxValue;
-        /// Represents the most negative finite half-precision value (-65504).
+        /** @brief Represents the most negative finite half-precision value (-65504). C++ counterpart of .NET Half.MinValue. */
         static const Half MinValue;
-        /// Represents the smallest positive half-precision value (~5.96e-8).
+        /** @brief Represents the smallest positive half-precision value (~5.96e-8). C++ counterpart of .NET Half.Epsilon. */
         static const Half Epsilon;
 
-        /// Returns true if this Half is equal to the specified Half.
+        /**
+         * @brief Returns true if the value is Not a Number (NaN).
+         * C++ counterpart of .NET Half.IsNaN(Half).
+         */
+        [[nodiscard]] static bool IsNaN(Half h) noexcept {
+            return (h.bits & 0x7FFF) > 0x7C00;
+        }
+
+        /**
+         * @brief Returns true if the value is positive or negative infinity.
+         * C++ counterpart of .NET Half.IsInfinity(Half).
+         */
+        [[nodiscard]] static bool IsInfinity(Half h) noexcept {
+            return (h.bits & 0x7FFF) == 0x7C00;
+        }
+
+        /**
+         * @brief Returns true if the value is positive infinity.
+         * C++ counterpart of .NET Half.IsPositiveInfinity(Half).
+         */
+        [[nodiscard]] static bool IsPositiveInfinity(Half h) noexcept {
+            return h.bits == 0x7C00;
+        }
+
+        /**
+         * @brief Returns true if the value is negative infinity.
+         * C++ counterpart of .NET Half.IsNegativeInfinity(Half).
+         */
+        [[nodiscard]] static bool IsNegativeInfinity(Half h) noexcept {
+            return h.bits == 0xFC00;
+        }
+
+        /**
+         * @brief Returns true if the value is finite (not NaN and not infinity).
+         * C++ counterpart of .NET Half.IsFinite(Half).
+         */
+        [[nodiscard]] static bool IsFinite(Half h) noexcept {
+            return (h.bits & 0x7C00) != 0x7C00;
+        }
+
+        /**
+         * @brief Returns true if the value is negative.
+         * C++ counterpart of .NET Half.IsNegative(Half).
+         */
+        [[nodiscard]] static bool IsNegative(Half h) noexcept {
+            return (h.bits & 0x8000) != 0;
+        }
+
+        /**
+         * @brief Returns a string representation of this Half value.
+         * C++ counterpart of .NET Half.ToString().
+         */
+        [[nodiscard]] std::string ToString() const {
+            return std::to_string(ToSingle());
+        }
+
+        /**
+         * @brief Returns a hash code for this Half value.
+         * C++ counterpart of .NET Half.GetHashCode().
+         */
+        [[nodiscard]] int GetHashCode() const noexcept { return static_cast<int>(bits); }
+
+        /** @brief Returns true if this Half is equal to @p o. */
         bool operator==(const Half& o) const { return bits == o.bits; }
-        /// Returns true if this Half is not equal to the specified Half.
+        /** @brief Returns true if this Half is not equal to @p o. */
         bool operator!=(const Half& o) const { return bits != o.bits; }
-        /// Returns true if this Half is less than the specified Half.
+        /** @brief Returns true if this Half is less than @p o. */
         bool operator< (const Half& o) const { return ToSingle() <  o.ToSingle(); }
-        /// Returns true if this Half is less than or equal to the specified Half.
+        /** @brief Returns true if this Half is less than or equal to @p o. */
         bool operator<=(const Half& o) const { return ToSingle() <= o.ToSingle(); }
-        /// Returns true if this Half is greater than the specified Half.
+        /** @brief Returns true if this Half is greater than @p o. */
         bool operator> (const Half& o) const { return ToSingle() >  o.ToSingle(); }
-        /// Returns true if this Half is greater than or equal to the specified Half.
+        /** @brief Returns true if this Half is greater than or equal to @p o. */
         bool operator>=(const Half& o) const { return ToSingle() >= o.ToSingle(); }
     };
 

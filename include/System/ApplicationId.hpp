@@ -7,16 +7,31 @@
 
 namespace System {
 
-    /// Provides a unique identifier for a manifest-based application.
+    /**
+     * @brief Provides a unique identity for a manifest-based application.
+     *
+     * C++ counterpart of .NET System.ApplicationId.
+     * Stores the name, version, processor architecture, culture, and public key
+     * token that together uniquely identify a ClickOnce application.
+     */
     class ApplicationId {
         std::string name_;
-        Version version_;
+        Version     version_;
         std::string processorArchitecture_;
         std::string culture_;
         std::string publicKeyToken_;
 
     public:
-        /// Initializes a new instance with the specified identity components.
+        /**
+         * @brief Initializes a new instance with the specified identity components.
+         *
+         * C++ counterpart of .NET ApplicationId(byte[], string, Version, string, string).
+         * @param publicKeyToken The application's public key token (as a string).
+         * @param name           The application name.
+         * @param version        The application version.
+         * @param processorArchitecture The processor architecture ("x86", "amd64", etc.).
+         * @param culture        The culture string ("neutral", "en-US", etc.).
+         */
         ApplicationId(const std::string& publicKeyToken,
                       const std::string& name,
                       const Version& version,
@@ -26,18 +41,28 @@ namespace System {
               processorArchitecture_(processorArchitecture),
               culture_(culture), publicKeyToken_(publicKeyToken) {}
 
-        /// Returns the name component of the application identity.
-        [[nodiscard]] const std::string& getNameProperty()                    const { return name_; }
-        /// Returns the version component of the application identity.
-        [[nodiscard]] const Version&     getVersionProperty()                 const { return version_; }
-        /// Returns the processor architecture component of the application identity.
-        [[nodiscard]] const std::string& getProcessorArchitectureProperty()   const { return processorArchitecture_; }
-        /// Returns the culture component of the application identity.
-        [[nodiscard]] const std::string& getCultureProperty()                 const { return culture_; }
-        /// Returns the public key token component of the application identity.
-        [[nodiscard]] const std::string& getPublicKeyTokenProperty()          const { return publicKeyToken_; }
+        /** @brief Gets the application name. C++ counterpart of .NET ApplicationId.Name. */
+        [[nodiscard]] const std::string& getNameProperty() const { return name_; }
 
-        /// Returns a string representation of the application identity.
+        /** @brief Gets the application version. C++ counterpart of .NET ApplicationId.Version. */
+        [[nodiscard]] const Version& getVersionProperty() const { return version_; }
+
+        /** @brief Gets the processor architecture. C++ counterpart of .NET ApplicationId.ProcessorArchitecture. */
+        [[nodiscard]] const std::string& getProcessorArchitectureProperty() const {
+            return processorArchitecture_;
+        }
+
+        /** @brief Gets the application culture. C++ counterpart of .NET ApplicationId.Culture. */
+        [[nodiscard]] const std::string& getCultureProperty() const { return culture_; }
+
+        /** @brief Gets the public key token. C++ counterpart of .NET ApplicationId.PublicKeyToken. */
+        [[nodiscard]] const std::string& getPublicKeyTokenProperty() const { return publicKeyToken_; }
+
+        /**
+         * @brief Returns a string representation of the application identity.
+         *
+         * C++ counterpart of .NET ApplicationId.ToString().
+         */
         [[nodiscard]] std::string ToString() const {
             return name_ + ", Version=" + version_.ToString()
                 + ", Culture=" + culture_

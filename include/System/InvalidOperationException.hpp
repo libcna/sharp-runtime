@@ -1,53 +1,35 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 6/7/25.
-//
-
 #pragma once
-
 #include <string>
-
 #include "System/SystemException.hpp"
 
 namespace System {
 
     /**
-     * @brief The exception that is thrown when a method call is invalid
-     * for the object's current state.
+     * @brief The exception that is thrown when a method call is invalid for
+     * the object's current state.
      *
-     * This is a partial C++ counterpart of the .NET
-     * System::InvalidOperationException type.
-     *
-     * @note Status: Partial.
-     * @note HResult, serialization, and inner exception support
-     * are not implemented here.
+     * C++ counterpart of .NET System.InvalidOperationException.
      */
     class InvalidOperationException : public SystemException {
     public:
-        /**
-         * @brief Initializes a new instance of the InvalidOperationException class
-         * with a default message.
-         */
+        /** @brief Initializes a new instance with the default invalid-operation message. */
         InvalidOperationException();
 
-        /**
-         * @brief Initializes a new instance of the InvalidOperationException class
-         * with the specified error message.
-         *
-         * @param message A null-terminated character string that describes the error.
-         */
+        /** @brief Initializes a new instance with the specified C-string message. */
         explicit InvalidOperationException(const char* message);
 
-        /**
-         * @brief Initializes a new instance of the InvalidOperationException class
-         * with the specified error message.
-         *
-         * @param message A string that describes the error.
-         */
+        /** @brief Initializes a new instance with the specified message. */
         explicit InvalidOperationException(const std::string& message);
 
+        /**
+         * @brief Initializes a new instance with a message and an inner exception.
+         *
+         * C++ counterpart of .NET InvalidOperationException(string, Exception).
+         */
+        InvalidOperationException(const std::string& message, const std::exception& innerException);
     };
 
 } // namespace System

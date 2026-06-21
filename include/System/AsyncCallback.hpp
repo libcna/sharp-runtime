@@ -6,6 +6,15 @@
 #include "System/IAsyncResult.hpp"
 
 namespace System {
-    /// Delegate type invoked when an asynchronous operation completes.
+
+    /**
+     * @brief References a method to be called when a corresponding asynchronous
+     * operation completes.
+     *
+     * C++ counterpart of .NET System.AsyncCallback delegate.
+     * Implemented as a std::function alias — any callable with signature
+     * @c void(IAsyncResult&) is compatible.
+     */
     using AsyncCallback = std::function<void(IAsyncResult&)>;
+
 } // namespace System

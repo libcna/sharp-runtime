@@ -10,7 +10,13 @@
 
 namespace System {
 
-    /// The exception that represents one or more errors that occur during application execution.
+    /**
+     * @brief The exception that represents one or more errors that occur during
+     * application execution.
+     *
+     * C++ counterpart of .NET System.AggregateException.
+     * Stores a list of inner exceptions and provides Flatten() and Handle() helpers.
+     */
     class AggregateException : public Exception {
         std::vector<std::exception_ptr> innerExceptions_;
 

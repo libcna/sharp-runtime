@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 6/7/25.
-//
-
 #include "System/InvalidOperationException.hpp"
 
 namespace System {
 
-    namespace {
-        constexpr const char* DefaultInvalidOperationMessage =
-            "Operation is not valid due to the current state of the object.";
-    }
+    static constexpr const char* kDefaultMsg =
+        "Operation is not valid due to the current state of the object.";
 
     InvalidOperationException::InvalidOperationException()
-        : SystemException(DefaultInvalidOperationMessage) {
-    }
+        : SystemException(kDefaultMsg) {}
 
     InvalidOperationException::InvalidOperationException(const char* message)
-        : SystemException(message) {
-    }
+        : SystemException(message) {}
 
     InvalidOperationException::InvalidOperationException(const std::string& message)
-        : SystemException(message) {
-    }
+        : SystemException(message) {}
 
+    InvalidOperationException::InvalidOperationException(
+        const std::string& message, const std::exception& innerException)
+        : SystemException(message + " | inner: " + innerException.what()) {}
 
 } // namespace System

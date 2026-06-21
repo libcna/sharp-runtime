@@ -18,4 +18,8 @@ namespace System {
     DivideByZeroException::DivideByZeroException(const std::string& message)
         : ArithmeticException(message) {}
 
+    DivideByZeroException::DivideByZeroException(
+        const std::string& message, const std::exception& innerException)
+        : ArithmeticException(message + " | inner: " + innerException.what()) {}
+
 } // namespace System
