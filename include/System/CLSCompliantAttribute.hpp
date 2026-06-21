@@ -6,13 +6,28 @@
 
 namespace System {
 
-    /// Indicates whether a program element is compliant with the Common Language Specification.
+    /**
+     * @brief Indicates whether a program element is compliant with the Common
+     * Language Specification (CLS).
+     *
+     * C++ counterpart of .NET System.CLSCompliantAttribute.
+     */
     class CLSCompliantAttribute : public Attribute {
         bool isCompliant_;
     public:
-        /// Initializes a new instance indicating the CLS compliance of the target element.
+        /**
+         * @brief Initializes a new instance indicating the CLS compliance of the target element.
+         *
+         * C++ counterpart of .NET CLSCompliantAttribute(bool isCompliant).
+         * @param isCompliant true if the element is CLS-compliant; otherwise, false.
+         */
         explicit CLSCompliantAttribute(bool isCompliant) : isCompliant_(isCompliant) {}
-        /// Returns true if the attributed element is CLS-compliant.
+
+        /**
+         * @brief Gets a value indicating whether the program element is CLS-compliant.
+         *
+         * C++ counterpart of .NET CLSCompliantAttribute.IsCompliant.
+         */
         [[nodiscard]] bool getIsCompliantProperty() const { return isCompliant_; }
     };
 

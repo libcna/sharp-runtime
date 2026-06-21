@@ -8,24 +8,53 @@
 
 namespace System {
 
-    /// Abstract base class representing a time zone, mirroring .NET System.TimeZone.
+    /**
+     * @brief Represents a time zone.
+     *
+     * C++ counterpart of .NET System.TimeZone (abstract base class).
+     * Concrete subclasses implement GetUtcOffset and IsDaylightSavingTime.
+     * Prefer TimeZoneInfo for new code; TimeZone is provided for compatibility.
+     */
     class TimeZone {
     public:
-        /// Virtual destructor.
+        /** @brief Virtual destructor. */
         virtual ~TimeZone() = default;
 
-        /// Returns the standard (non-daylight-saving) name of the time zone.
+        /**
+         * @brief Returns the standard (non-daylight-saving) name of the time zone.
+         *
+         * C++ counterpart of .NET TimeZone.StandardName.
+         */
         virtual const std::string& getStandardNameProperty()  const = 0;
-        /// Returns the daylight-saving name of the time zone.
+
+        /**
+         * @brief Returns the daylight-saving name of the time zone.
+         *
+         * C++ counterpart of .NET TimeZone.DaylightName.
+         */
         virtual const std::string& getDaylightNameProperty()  const = 0;
-        /// @brief Returns the UTC offset for the given local @p time.
-        /// @param time Local date/time whose offset is requested.
+
+        /**
+         * @brief Returns the UTC offset for the given local time.
+         *
+         * C++ counterpart of .NET TimeZone.GetUtcOffset(DateTime).
+         * @param time Local date/time whose offset is requested.
+         */
         virtual TimeSpan GetUtcOffset(const DateTime& time)   const = 0;
-        /// @brief Returns true if @p time falls within daylight saving time.
-        /// @param time Local date/time to test.
+
+        /**
+         * @brief Returns true if the specified time falls within a daylight saving time period.
+         *
+         * C++ counterpart of .NET TimeZone.IsDaylightSavingTime(DateTime).
+         * @param time Local date/time to test.
+         */
         virtual bool IsDaylightSavingTime(const DateTime& time) const = 0;
 
-        /// Returns the current local time zone.
+        /**
+         * @brief Returns the current local time zone.
+         *
+         * C++ counterpart of .NET TimeZone.CurrentTimeZone.
+         */
         static const TimeZone& CurrentTimeZone();
     };
 

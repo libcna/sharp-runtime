@@ -7,17 +7,25 @@
 namespace System {
 
     /**
-     * @brief Provides a mechanism for formatting the value of an object using a format string.
+     * @brief Provides a mechanism for formatting the value of an object into a
+     * string representation using a format string.
      *
-     * Partial C++ counterpart of .NET System.IFormattable.
-     *
-     * @note Status: Stub
+     * C++ counterpart of .NET System.IFormattable.
      */
     class IFormattable {
     public:
-        /// Virtual destructor for safe polymorphic destruction.
+        /** @brief Virtual destructor for safe polymorphic destruction. */
         virtual ~IFormattable() = default;
-        /// Formats the value of the current instance using the specified format.
+
+        /**
+         * @brief Formats the value of the current instance using the specified format.
+         *
+         * C++ counterpart of .NET IFormattable.ToString(string, IFormatProvider).
+         * The format-provider parameter is omitted because sharp-runtime has no
+         * IFormatProvider equivalent.
+         * @param format A format string, or empty for the default format.
+         * @return The value of the current instance in the specified format.
+         */
         [[nodiscard]] virtual std::string ToString(const std::string& format) const = 0;
     };
 

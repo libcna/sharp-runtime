@@ -13,19 +13,39 @@ namespace System {
      * @brief The exception that is thrown when a null reference is passed to a
      * method that does not accept it as a valid argument.
      *
-     * @note Status: Implemented
+     * C++ counterpart of .NET System.ArgumentNullException.
      */
     class ArgumentNullException : public ArgumentException {
     public:
-        /// Initializes a new instance with the default null-argument message.
+        /** @brief Initializes a new instance with the default null-argument message. */
         ArgumentNullException();
-        /// Initializes a new instance with the name of the null parameter.
+
+        /**
+         * @brief Initializes a new instance with the name of the null parameter.
+         *
+         * C++ counterpart of .NET ArgumentNullException(string paramName).
+         */
         explicit ArgumentNullException(const char* paramName);
-        /// Initializes a new instance with the parameter name and a custom message.
+
+        /**
+         * @brief Initializes a new instance with the parameter name and a custom message.
+         *
+         * C++ counterpart of .NET ArgumentNullException(string paramName, string message).
+         */
         ArgumentNullException(const char* paramName, const char* message);
-        /// Initializes a new instance with the name of the null parameter.
+
+        /**
+         * @brief Initializes a new instance with the name of the null parameter.
+         *
+         * C++ counterpart of .NET ArgumentNullException(string paramName).
+         */
         explicit ArgumentNullException(const std::string& paramName);
-        /// Initializes a new instance with the parameter name and a custom message.
+
+        /**
+         * @brief Initializes a new instance with the parameter name and a custom message.
+         *
+         * C++ counterpart of .NET ArgumentNullException(string paramName, string message).
+         */
         ArgumentNullException(const std::string& paramName, const std::string& message);
     };
 

@@ -5,13 +5,19 @@
 
 namespace System {
 
-    /// Specifies whether a DateTime value is local, UTC, or unspecified.
+    /**
+     * @brief Specifies whether a DateTime object represents a local time, a
+     * Coordinated Universal Time (UTC), or is not specified as either local time
+     * or UTC.
+     *
+     * C++ counterpart of .NET System.DateTimeKind.
+     */
     enum class DateTimeKind {
-        /// The time is not specified as either local or UTC.
+        /** @brief The time represented is not specified as either local time or UTC. */
         Unspecified = 0,
-        /// The time is expressed as UTC.
+        /** @brief The time represented is UTC. */
         Utc         = 1,
-        /// The time is expressed as local time.
+        /** @brief The time represented is local time. */
         Local       = 2,
     };
 
