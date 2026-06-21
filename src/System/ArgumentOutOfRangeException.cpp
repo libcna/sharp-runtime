@@ -1,38 +1,26 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-//
-// Created by robertvokac on 6/5/25.
-//
-
 #include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
-    /**
-     * \brief Initializes a new instance of the ArgumentOutOfRangeException class
-     * with an empty message.
-     */
     ArgumentOutOfRangeException::ArgumentOutOfRangeException()
-        : ArgumentException() {
-    }
+        : ArgumentException("Specified argument was out of the range of valid values.") {}
 
-    /**
-     * \brief Initializes a new instance of the ArgumentOutOfRangeException class
-     * with the specified error message.
-     * \param str A null-terminated character string that describes the error.
-     */
-    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const char* str)
-        : ArgumentException(str) {
-    }
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const char* message)
+        : ArgumentException(message) {}
 
-    /**
-     * \brief Initializes a new instance of the ArgumentOutOfRangeException class
-     * with the specified error message.
-     * \param str A string that describes the error.
-     */
-    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& str)
-        : ArgumentException(str) {
-    }
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& message)
+        : ArgumentException(message) {}
+
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& message,
+                                                             const std::exception& inner)
+        : ArgumentException(message + " | inner: " + inner.what()) {}
+
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& paramName,
+                                                             const std::string& actualValue,
+                                                             const std::string& message)
+        : ArgumentException(message, paramName), actualValue_(actualValue) {}
 
 } // namespace System
