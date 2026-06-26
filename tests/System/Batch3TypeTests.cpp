@@ -204,6 +204,23 @@ TEST(ActivatorTests, CreateInstancePtr_String_Empty) {
     EXPECT_NE(p.get(), nullptr);
     EXPECT_TRUE(p->empty());
 }
+TEST(ActivatorTests, CreateInstance_WithArgs_SetsValue) {
+    struct Point { int x, y; Point(int a, int b) : x(a), y(b) {} };
+    auto p = System::Activator::CreateInstance<Point>(3, 7);
+    EXPECT_EQ(p.x, 3);
+    EXPECT_EQ(p.y, 7);
+}
+TEST(ActivatorTests, CreateInstancePtr_WithArgs_NotNull) {
+    struct Point { int x, y; Point(int a, int b) : x(a), y(b) {} };
+    auto p = System::Activator::CreateInstancePtr<Point>(5, 9);
+    ASSERT_NE(p.get(), nullptr);
+    EXPECT_EQ(p->x, 5);
+    EXPECT_EQ(p->y, 9);
+}
+TEST(ActivatorTests, CreateInstance_String_WithArg) {
+    auto s = System::Activator::CreateInstance<std::string>(std::string("hello"));
+    EXPECT_EQ(s, "hello");
+}
 
 // ---------------------------------------------------------------------------
 // ThreadStaticAttribute
