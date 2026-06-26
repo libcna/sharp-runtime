@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include <string>
 #include "System/SystemException.hpp"
 namespace System {
@@ -19,6 +20,6 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit InvalidCastException(const std::string& message);
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        InvalidCastException(const std::string& message, const std::exception& innerException);
+        InvalidCastException(const std::string& message, std::exception_ptr innerException);
     };
 } // namespace System

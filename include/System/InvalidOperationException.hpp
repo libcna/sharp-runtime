@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include <string>
 #include "System/SystemException.hpp"
 
@@ -29,7 +30,7 @@ namespace System {
          *
          * C++ counterpart of .NET InvalidOperationException(string, Exception).
          */
-        InvalidOperationException(const std::string& message, const std::exception& innerException);
+        InvalidOperationException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System
