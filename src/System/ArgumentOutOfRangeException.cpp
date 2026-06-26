@@ -8,15 +8,21 @@ namespace System {
     ArgumentOutOfRangeException::ArgumentOutOfRangeException()
         : ArgumentException("Specified argument was out of the range of valid values.") {}
 
-    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const char* message)
-        : ArgumentException(message) {}
+    static const char* kDefaultMsg = "Specified argument was out of the range of valid values.";
 
-    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& message)
-        : ArgumentException(message) {}
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const char* paramName)
+        : ArgumentException(kDefaultMsg, paramName ? paramName : "") {}
+
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& paramName)
+        : ArgumentException(kDefaultMsg, paramName) {}
 
     ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& message,
-                                                             const std::exception& inner)
-        : ArgumentException(message + " | inner: " + inner.what()) {}
+                                                             std::exception_ptr inner)
+        : ArgumentException(message, std::move(inner)) {}
+
+    ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& paramName,
+                                                             const std::string& message)
+        : ArgumentException(message, paramName) {}
 
     ArgumentOutOfRangeException::ArgumentOutOfRangeException(const std::string& paramName,
                                                              const std::string& actualValue,

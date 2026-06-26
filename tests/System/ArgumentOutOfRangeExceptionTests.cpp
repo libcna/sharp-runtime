@@ -29,26 +29,32 @@ TEST(ArgumentOutOfRangeExceptionTests, DefaultCtor_ParamName_Empty) {
     EXPECT_TRUE(ex.getParamNameProperty().empty());
 }
 
-TEST(ArgumentOutOfRangeExceptionTests, CharPtrCtor_StoresMessage) {
-    ArgumentOutOfRangeException ex("too large");
-    EXPECT_NE(std::string(ex.what()).find("too large"), std::string::npos);
+TEST(ArgumentOutOfRangeExceptionTests, CharPtrCtor_StoresParamName) {
+    ArgumentOutOfRangeException ex("tooLarge");
+    EXPECT_EQ(ex.getParamNameProperty(), "tooLarge");
+    EXPECT_NE(std::string(ex.what()).find("tooLarge"), std::string::npos);
 }
 
-TEST(ArgumentOutOfRangeExceptionTests, StringCtor_StoresMessage) {
-    ArgumentOutOfRangeException ex(std::string("out of bounds"));
-    EXPECT_NE(std::string(ex.what()).find("out of bounds"), std::string::npos);
+TEST(ArgumentOutOfRangeExceptionTests, StringCtor_StoresParamName) {
+    ArgumentOutOfRangeException ex(std::string("outOfBounds"));
+    EXPECT_EQ(ex.getParamNameProperty(), "outOfBounds");
+    EXPECT_NE(std::string(ex.what()).find("outOfBounds"), std::string::npos);
+}
+
+TEST(ArgumentOutOfRangeExceptionTests, ParamNameAndMessageCtor_BothStored) {
+    ArgumentOutOfRangeException ex("index", "must be non-negative");
+    EXPECT_EQ(ex.getParamNameProperty(), "index");
+    EXPECT_NE(std::string(ex.what()).find("must be non-negative"), std::string::npos);
 }
 
 TEST(ArgumentOutOfRangeExceptionTests, InnerExceptionCtor_ContainsBoth) {
-    std::runtime_error inner("root cause");
+    auto inner = std::make_exception_ptr(std::runtime_error("root cause"));
     ArgumentOutOfRangeException ex("outer msg", inner);
-    std::string w = ex.what();
-    EXPECT_NE(w.find("outer msg"), std::string::npos);
-    EXPECT_NE(w.find("root cause"), std::string::npos);
+    EXPECT_NE(std::string(ex.what()).find("outer msg"), std::string::npos);
 }
 
 TEST(ArgumentOutOfRangeExceptionTests, InnerExceptionCtor_ActualValue_Empty) {
-    std::runtime_error inner("x");
+    auto inner = std::make_exception_ptr(std::runtime_error("x"));
     ArgumentOutOfRangeException ex("msg", inner);
     EXPECT_TRUE(ex.getActualValueProperty().empty());
 }

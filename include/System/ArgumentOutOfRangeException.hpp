@@ -26,30 +26,40 @@ public:
     ArgumentOutOfRangeException();
 
     /**
-     * @brief Initializes a new instance with the specified error message.
+     * @brief Initializes a new instance with the name of the parameter that caused the exception.
      *
-     * C++ counterpart of .NET ArgumentOutOfRangeException(string).
-     * @param message A null-terminated string that describes the error.
+     * C++ counterpart of .NET ArgumentOutOfRangeException(string paramName).
+     * @param paramName The name of the parameter that caused the exception.
      */
-    explicit ArgumentOutOfRangeException(const char* message);
+    explicit ArgumentOutOfRangeException(const char* paramName);
 
     /**
-     * @brief Initializes a new instance with the specified error message.
+     * @brief Initializes a new instance with the name of the parameter that caused the exception.
      *
-     * C++ counterpart of .NET ArgumentOutOfRangeException(string).
-     * @param message A string that describes the error.
+     * C++ counterpart of .NET ArgumentOutOfRangeException(string paramName).
+     * @param paramName The name of the parameter that caused the exception.
      */
-    explicit ArgumentOutOfRangeException(const std::string& message);
+    explicit ArgumentOutOfRangeException(const std::string& paramName);
 
     /**
-     * @brief Initializes a new instance with an error message and inner exception.
+     * @brief Initializes a new instance with a message and an inner exception.
      *
-     * C++ counterpart of .NET ArgumentOutOfRangeException(string, Exception).
+     * C++ counterpart of .NET ArgumentOutOfRangeException(string message, Exception innerException).
      * @param message The error message.
      * @param inner   The exception that is the cause of the current exception.
      */
     ArgumentOutOfRangeException(const std::string& message,
-                                const std::exception& inner);
+                                std::exception_ptr inner);
+
+    /**
+     * @brief Initializes a new instance with the parameter name and a custom message.
+     *
+     * C++ counterpart of .NET ArgumentOutOfRangeException(string paramName, string message).
+     * @param paramName The name of the parameter that caused the exception.
+     * @param message   A message that describes the error.
+     */
+    ArgumentOutOfRangeException(const std::string& paramName,
+                                const std::string& message);
 
     /**
      * @brief Initializes a new instance with a parameter name, actual value, and message.

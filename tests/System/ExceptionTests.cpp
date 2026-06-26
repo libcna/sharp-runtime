@@ -182,9 +182,9 @@ TEST(ExceptionTests, ArgumentNullExceptionCatchableAsArgumentException) {
 // ArgumentOutOfRangeException
 // ---------------------------------------------------------------------------
 
-TEST(ExceptionTests, ArgumentOutOfRangeExceptionMessage) {
-    ArgumentOutOfRangeException e("out of range");
-    EXPECT_EQ(e.getMessageProperty(), "out of range");
+TEST(ExceptionTests, ArgumentOutOfRangeExceptionParamName) {
+    ArgumentOutOfRangeException e("myParam");
+    EXPECT_EQ(e.getParamNameProperty(), "myParam");
 }
 
 TEST(ExceptionTests, ArgumentOutOfRangeExceptionIsArgumentException) {
