@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -155,6 +156,18 @@ namespace System {
         }
 
         /**
+         * @brief Creates a BinaryData instance by wrapping the provided byte vector
+         * and sets the media type.
+         * @param data      The array to wrap.
+         * @param mediaType MIME type string.
+         * @return New BinaryData instance.
+         */
+        [[nodiscard]] static BinaryData FromBytes(const std::vector<uint8_t>& data,
+                                                   std::string mediaType) {
+            return BinaryData(data, std::move(mediaType));
+        }
+
+        /**
          * @brief Creates a BinaryData instance from a string using UTF-8 encoding.
          * @param data The string data.
          * @return New BinaryData instance.
@@ -247,6 +260,40 @@ namespace System {
          */
         [[nodiscard]] uint8_t operator[](int index) const {
             return bytes_[index];
+        }
+
+        /**
+         * @brief Determines whether this instance is equal to another BinaryData.
+         *
+         * C++ counterpart of .NET BinaryData.Equals(object). Two instances are equal
+         * when they have the same length, the same bytes, and the same media type.
+         * @param other The BinaryData to compare with.
+         * @return true if both instances contain the same bytes and media type.
+         */
+        [[nodiscard]] bool Equals(const BinaryData& other) const {
+            if (getLengthProperty() != other.getLengthProperty()) return false;
+            if (mediaType_ != other.mediaType_) return false;
+            return ToArray() == other.ToArray();
+        }
+
+        /** @brief Returns true if both instances have the same bytes and media type. */
+        bool operator==(const BinaryData& other) const { return Equals(other); }
+
+        /** @brief Returns true if the instances differ. */
+        bool operator!=(const BinaryData& other) const { return !Equals(other); }
+
+        /**
+         * @brief Returns a hash code for this instance.
+         *
+         * C++ counterpart of .NET BinaryData.GetHashCode().
+         */
+        [[nodiscard]] int GetHashCode() const noexcept {
+            std::size_t h = std::hash<int>{}(getLengthProperty());
+            h ^= std::hash<std::string>{}(mediaType_) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            if (getLengthProperty() > 0) {
+                h ^= std::hash<uint8_t>{}((*this)[0]) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            }
+            return static_cast<int>(h & 0x7fffffff);
         }
     };
 
