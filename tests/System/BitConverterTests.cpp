@@ -290,3 +290,17 @@ TEST(BitConverterTests, ToString_VectorStartIndex_Zero_MatchesFull) {
     std::vector<bytecs> v = {0xAA, 0xBB};
     EXPECT_EQ(BitConverter::ToString(v, 0), BitConverter::ToString(v));
 }
+
+// Half bit-reinterpretation
+TEST(BitConverterTests, HalfToUInt16Bits_RoundTrip) {
+    System::Half h{0x3C00u}; // 1.0 in half-precision
+    EXPECT_EQ(BitConverter::HalfToUInt16Bits(h), 0x3C00u);
+}
+TEST(BitConverterTests, UInt16BitsToHalf_RoundTrip) {
+    System::Half h = BitConverter::UInt16BitsToHalf(0x3C00u);
+    EXPECT_EQ(h.bits, 0x3C00u);
+}
+TEST(BitConverterTests, HalfInt16Bits_RoundTrip) {
+    System::Half h = BitConverter::Int16BitsToHalf(static_cast<SharpRuntime::shortcs>(0x3C00));
+    EXPECT_EQ(BitConverter::HalfToInt16Bits(h), static_cast<SharpRuntime::shortcs>(0x3C00));
+}
