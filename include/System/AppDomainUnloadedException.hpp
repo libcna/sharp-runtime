@@ -7,8 +7,9 @@
 namespace System {
 
     /**
-     * @brief The exception thrown when an attempt is made to access an unloaded
-     * application domain.
+     * @brief The exception thrown when an attempt is made to access an unloaded application domain.
+     *
+     * C++ counterpart of .NET System.AppDomainUnloadedException.
      */
     class AppDomainUnloadedException : public SystemException {
     public:

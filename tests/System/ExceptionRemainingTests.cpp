@@ -80,6 +80,12 @@ using System::Exception;
 
 EXCEPT_SIMPLE(AccessViolationException)
 EXCEPT_SIMPLE(AppDomainUnloadedException)
+TEST(AppDomainUnloadedExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("inner");
+    System::AppDomainUnloadedException ex("outer", inner);
+    EXPECT_NE(std::string(ex.what()).find("outer"), std::string::npos);
+    EXPECT_NE(std::string(ex.what()).find("inner"), std::string::npos);
+}
 EXCEPT_SIMPLE(ApplicationException)
 EXCEPT_SIMPLE(ArrayTypeMismatchException)
 EXCEPT_SIMPLE(BadImageFormatException)
