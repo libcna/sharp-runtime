@@ -200,6 +200,31 @@ TEST(AggregateExceptionTests, Flatten_AlreadyFlat_PreservesCount) {
     auto flat = ex.Flatten();
     EXPECT_EQ(flat.getInnerExceptionCountProperty(), 2u);
 }
+TEST(AggregateExceptionTests, InitializerList_Ctor_CountMatches) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("x"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("y"));
+    System::AggregateException ex({ep1, ep2});
+    EXPECT_EQ(ex.getInnerExceptionsProperty().size(), 2u);
+}
+TEST(AggregateExceptionTests, MessageAndSingle_Ctor_StoresInner) {
+    auto ep = std::make_exception_ptr(std::runtime_error("inner"));
+    System::AggregateException ex("outer", ep);
+    EXPECT_EQ(ex.getInnerExceptionsProperty().size(), 1u);
+    EXPECT_STREQ(ex.what(), "outer");
+}
+TEST(AggregateExceptionTests, GetBaseException_SingleInner_ReturnsInner) {
+    auto ep = std::make_exception_ptr(std::runtime_error("leaf"));
+    System::AggregateException ex({ep});
+    auto base = ex.GetBaseException();
+    EXPECT_EQ(base, ep);
+}
+TEST(AggregateExceptionTests, GetBaseException_MultipleInner_ReturnsSelf) {
+    auto ep1 = std::make_exception_ptr(std::runtime_error("a"));
+    auto ep2 = std::make_exception_ptr(std::runtime_error("b"));
+    System::AggregateException ex({ep1, ep2});
+    auto base = ex.GetBaseException();
+    EXPECT_NE(base, ep1);
+}
 
 // ===========================================================================
 // Exception — InnerException / Data / StackTrace
