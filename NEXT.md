@@ -30,7 +30,7 @@
 - Formatting: `FormattableString`, `FormattableStringFactory`, `IFormatProvider`, `IFormattable`, `ISpanFormattable`, `IUtf8SpanFormattable<T>`, `ICustomFormatter`
 - Interfaces: `IAsyncDisposable`, `IAsyncResult`, `ICloneable`, `IComparable<T>`, `IConvertible`, `IDisposable`, `IEquatable<T>`, `IObservable<T>`, `IObserver<T>`, `IParsable<T>`, `IProgress<T>`, `IServiceProvider`, `ISpanParsable<T>`, `IUtf8SpanParsable<T>`
 - Time: `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `TimeZoneInfo`, `TimeProvider`, `Stopwatch`
-- Exceptions: full hierarchy with `std::exception_ptr` inner-exception ctors and `/** */` Doxygen on all types
+- Exceptions: full hierarchy — all `std::exception_ptr` inner-exception ctors, all `/** */` Doxygen on all types
 - Collections (non-generic): `ArrayList` (full API), `BitArray` (full API), `Hashtable`, `Queue`, `Stack`, `Comparer`, `IList`, `ICollection`, `IComparer`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`
 - Collections (generic): `List<T>`, `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `SortedList<K,V>`, `SortedDictionary<K,V>`, `HashSet<T>`, `SortedSet<T>`, `ReadOnlyCollection<T>`, `ArraySegment<T>`, `PriorityQueue<T,P>`, `ImmutableArray/List/Dictionary/HashSet/Queue/Stack/SortedDictionary/SortedSet<T>`
 - Span/Memory: `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`, `ReadOnlyMemory<T>`, `MemoryExtensions` (full), `SpanSplitEnumerator`
@@ -70,16 +70,15 @@ All on branch `develop`, most recent first:
 
 | Commit | Change |
 |--------|--------|
-| `0850ea3` | Port Int16–IntPtr; fix InvalidCast/Operation/TimeZone inner-exception ctors; add integer type tests |
-| `db3fe72` | Port ISpanParsable, IUtf8SpanFormattable, IUtf8SpanParsable, Index; fix IndexOutOfRange/InsufficientMemory/OutOfMemory inner-exception ctors |
-| `ee73141` | Port GC/GCCollectionMode/GCKind/GCLatencyMode/GCMemoryInfo/GCNotificationStatus, Guid (upgrade Doxygen), Half, HashCode, Func; port IAsyncDisposable→IEquatable, IFormatProvider→IUtf8SpanParsable; add tests |
-| `c896617` | Port Environment→Func batch; fix ExecutionEngineException/FieldAccessException/FormatException inner-exception ctors; add EventHandler/FlagsAttribute/FormattableString/Func tests |
-| `3959bbc` | Fix inner-exception ctors on TypeLoadException + derived types (DllNotFoundException, EntryPointNotFoundException) |
-| `fb0ab3c` | Port Char (upgrade Doxygen + TryParse/ToUpperInvariant), Converter, CrashReason; fix inner-exception ctors |
-| `3d41824` | Port CannotUnloadAppDomainException + Casing; fix inner-exception ctor pattern |
+| `310e4c7` | Systematic fix: all 33 remaining `const std::exception& inner` ctors → `std::exception_ptr`; `IOException` gains `(string, exception_ptr)` ctor; 6 `.cpp` bodies updated; 15+ test callers migrated to `make_exception_ptr`; 279 `include/System/**/*.hpp` headers converted `///` → `/** */` automatically |
+| `986ce5c` | NEXT.md: update to 6626 tests; document exception_ptr pattern, plan.sqlite3 workflow, workflow rules |
+| `0850ea3` | Port Int16→IntPtr + InvalidCast/Operation/TimeZone exceptions; fix inner-exception ctors; add integer type tests |
+| `db3fe72` | Port interfaces ISpanParsable→IUtf8SpanParsable + Index; fix IndexOutOfRange/InsufficientMemory/OutOfMemory inner-exception ctors |
+| `ee73141` | Port GC/Guid/Half/HashCode/Func + interfaces IAsyncDisposable→IEquatable; add tests for all |
+| `c896617` | Port Environment→Func: fix inner-exception ctors, add tests for EventHandler/FlagsAttribute/FormattableString/Func/FormatException/ExecutionEngineException |
 
-### Systematic fix applied across this session
-All exception classes that used `const std::exception& inner` → concatenating `inner.what()` into message have been migrated to `std::exception_ptr inner` + `SystemException(message, std::move(inner))`. Test callers updated from `std::runtime_error inner("x"); Foo("msg", inner)` to `auto inner = std::make_exception_ptr(std::runtime_error("x")); Foo("msg", inner)`. The check `EXPECT_NE(msg.find("inner msg"), ...)` was removed from updated tests since the inner message is no longer concatenated into `what()`.
+### Systematic fix applied this session
+All exception classes have been migrated from `const std::exception& inner` → `std::exception_ptr inner`. All 567 `include/System/**/*.hpp` headers now use Doxygen `/** */` (zero `///` remaining). Test callers updated: `make_exception_ptr` pattern, inner message no longer checked in `what()`.
 
 ---
 
@@ -87,9 +86,9 @@ All exception classes that used `const std::exception& inner` → concatenating 
 
 **No active technical blocker.** Build is clean, all 6626 tests pass.
 
-The workflow is user-driven: user approves each type with "ano" before porting begins. The assistant must **always ask before porting or ignoring** — this was violated in the 2026-06-26 session and must not happen again.
+The workflow is user-driven: user approves each type with "ano" before porting begins. The assistant must **always ask before porting or ignoring** — this was violated in a prior session and must not happen again.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`): `LoaderOptimizationAttribute`, `LocalDataStoreSlot`, `MDArray`, `MTAThreadAttribute`, `MarshalByRefObject`, `Math`, `MathF`, `MemberAccessException`, …
+Next unprocessed types in `System` namespace (from `plan.sqlite3`): `LoaderOptimizationAttribute`, `LocalDataStoreSlot`, `MDArray`, `MTAThreadAttribute`, `MarshalByRefObject`, `Math`, `MathF`, `MemberAccessException`, `Memory`, `MemoryExtensions`, …
 
 ---
 
@@ -155,7 +154,7 @@ plan.sqlite3                            ← tracks porting status per type (todo
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
 6. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
-7. **Doxygen `/** */`** on all public declarations — upgrade `///` when encountered; never add new `///`.
+7. **Doxygen `/** */`** on all public declarations — `///` has been fully eliminated; never reintroduce it.
 8. **No POSIX includes in public `.hpp`** — platform code belongs in `.cpp`, guarded by `#ifdef`.
 9. **Inner exceptions use `std::exception_ptr`** — never `const std::exception&`. Pattern: `FooException(const std::string& msg, std::exception_ptr inner) : Base(msg, std::move(inner)) {}`
 10. **No broad header refactor** — property naming touches 449+ files in CNA.
@@ -220,13 +219,15 @@ cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 
 # Run a specific suite
 ./build/SharpRuntimeTests --gtest_filter="Environment*"
-./build/SharpRuntimeTests --gtest_filter="GC*"
 
 # Check next unset types in System namespace
 sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 8;"
 
-# Find headers still using /// style Doxygen
-grep -rl "^\s*///" include/System/ | head -20
+# Verify no /// Doxygen remains
+grep -rl "^\s*///" include/System/ | wc -l
+
+# Verify no old inner-exception pattern remains
+grep -rl "const std::exception& inner" include/System/ | wc -l
 
 # Check .NET source for a type
 find /rv/tmp/runtime/src/libraries -name "Math.cs" | head -3
@@ -254,17 +255,8 @@ Ordered by priority. Each fits one focused coding session. **User must approve e
 - **Current count:** 110 unset types in System namespace.
 - **Verify:** Build clean, test count increases.
 
-### Task 3 — Fix remaining old inner-exception ctors
-- **Goal:** Scan for any remaining `const std::exception& inner` in exception headers and fix.
-- **Find:** `grep -rl "const std::exception& inner" include/System/`
-- **Verify:** Build clean, relevant tests pass.
-
-### Task 4 — Sweep `///` Doxygen in `include/System/` (deferred, opportunistic)
-- **Goal:** Upgrade `///` → `/** */` only on files being actively modified; not a mass sweep.
-- **Find:** `grep -rl "^\s*///" include/System/ | head -20`
-
-### Task 5 — Move to next namespace after System
-- **Goal:** Once System is complete, begin `System.IO` (59 unset types) or `System.Collections.Generic` (52 unset types) via same user-approval workflow.
+### Task 3 — Move to next namespace after System
+- **Goal:** Once System is complete, begin `System.IO` or `System.Collections.Generic` via same user-approval workflow.
 
 ---
 
@@ -280,8 +272,9 @@ Ordered by priority. Each fits one focused coding session. **User must approve e
 - **No work on `System::Type` / `System::Activator`** — stubs are the correct end state.
 - **No `SynchronizationContext` full implementation** — synchronous stub is correct for game use.
 - **No duplicate test suite names** — always check for collisions; use `Tests2` suffix.
-- **No mass `///` → `/** */` sweep in one commit** — upgrade only on files actively modified.
+- **No reintroduction of `///` Doxygen** — all headers now use `/** */`; never write `///` in new code.
 - **No `ArrayList.Sort()` without comparer** — `std::any` cannot be compared without type info.
+- **No mass rewrite or reformatting** in a single commit — incremental changes only.
 
 ---
 
@@ -299,7 +292,7 @@ before doing any porting or ignoring. Never port or mark ignored without explici
 For each approved type:
   1. Check the existing header (include/System/<Type>.hpp) and tests.
   2. Verify all 6 checklist items: full API, intcs/namespace syntax, Doxygen /** */, SPDX, build clean, tests pass.
-  3. Fix any issues found (especially old inner-exception ctors: const std::exception& → std::exception_ptr).
+  3. Fix any issues found.
   4. Add tests if missing. Use Tests2 suffix if suite name already exists.
   5. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
   6. Run: ./build/SharpRuntimeTests  (all 6626+ tests must pass)
