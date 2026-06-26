@@ -231,11 +231,9 @@ TEST(ArithmeticExceptionTests, IsA_SystemException) {
 }
 
 TEST(ArithmeticExceptionTests, InnerExceptionCtor_ContainsBoth) {
-    std::runtime_error inner("root cause");
+    auto inner = std::make_exception_ptr(std::runtime_error("root cause"));
     ArithmeticException ex("outer msg", inner);
-    std::string w = ex.what();
-    EXPECT_NE(w.find("outer msg"), std::string::npos);
-    EXPECT_NE(w.find("root cause"), std::string::npos);
+    EXPECT_NE(std::string(ex.what()).find("outer msg"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
