@@ -48,8 +48,8 @@ namespace System {
          * @param message A string that describes the error.
          * @param inner   The exception that is the cause of this exception.
          */
-        ArrayTypeMismatchException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        ArrayTypeMismatchException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System
