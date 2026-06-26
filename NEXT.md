@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-21 (branch: develop) — 6412 tests passing*
+*Last updated: 2026-06-26 (branch: develop) — 6626 tests passing*
 
 ---
 
@@ -8,9 +8,9 @@
 **sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
 - **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting — driven by a `plan.md` namespace review workflow. The user provides types one at a time; Claude ports, tests, and commits. Currently working through `System.Collections.*`.
+- **Phase:** Active porting — driven by a `plan.sqlite3` namespace review workflow. The user approves each type one at a time ("ano" = yes); Claude ports, tests, and commits. Currently working through the `System` namespace alphabetically.
 - **Header count:** ~567 `.hpp` files across `System`, `System.Collections`, `System.IO`, `System.Text`, `System.Threading`, `System.Net`, `System.Numerics`, `System.Diagnostics`, `System.Globalization`, `System.Xml`, `System.Buffers`, etc.
-- **Key architectural decisions:** No runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (int32_t), `bytecs` (uint8_t), etc.
+- **Key architectural decisions:** No runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (int32_t), `bytecs` (uint8_t), etc. Inner exceptions use `std::exception_ptr`.
 
 ---
 
@@ -20,17 +20,22 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **6412 tests passing** across 658 test suites. Zero failures.
+- **6626 tests passing** across 695 test suites. Zero failures.
 
 ### What works
-- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int32`, `Int64`, `UInt16`, `UInt64`, `Int128`, `UInt128`, `Half`, `Single`, `Double`, `Decimal` (+ OACurrency), `Guid`, `BitConverter`, `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode`, `Void`
+- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half`, `Single`, `Double`, `Decimal` (+ OACurrency), `Guid`, `BitConverter`, `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode`, `Void`, `Index`, `Lazy<T>`
+- Delegates/Events: `Func<T>`, `Converter<T,R>`, `EventHandler<T>`, `EventArgs`, `Delegate`
+- Attributes: `Attribute`, `FlagsAttribute`, `ObsoleteAttribute`, `SerializableAttribute`, `CLSCompliantAttribute`
+- Enums: `Casing`, `CrashReason`, `GCCollectionMode`, `GCKind`, `GCLatencyMode`, `GCNotificationStatus`, `EnvironmentVariableTarget`, `MidpointRounding`
+- Formatting: `FormattableString`, `FormattableStringFactory`, `IFormatProvider`, `IFormattable`, `ISpanFormattable`, `IUtf8SpanFormattable<T>`, `ICustomFormatter`
+- Interfaces: `IAsyncDisposable`, `IAsyncResult`, `ICloneable`, `IComparable<T>`, `IConvertible`, `IDisposable`, `IEquatable<T>`, `IObservable<T>`, `IObserver<T>`, `IParsable<T>`, `IProgress<T>`, `IServiceProvider`, `ISpanParsable<T>`, `IUtf8SpanParsable<T>`
 - Time: `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `TimeZoneInfo`, `TimeProvider`, `Stopwatch`
-- Exceptions: full hierarchy including inner-exception ctors and `/** */` Doxygen
-- Collections (non-generic): `ArrayList` (full API: Sort/BinarySearch/GetRange/Clone/Repeat/IndexOf overloads), `BitArray` (full API: LeftShift/RightShift/PopCount/Clone/GetEnumerator), `Hashtable`, `Queue`, `Stack`, `Comparer`, `IList`, `ICollection` (+ SyncRoot), `IComparer`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`
+- Exceptions: full hierarchy with `std::exception_ptr` inner-exception ctors and `/** */` Doxygen on all types
+- Collections (non-generic): `ArrayList` (full API), `BitArray` (full API), `Hashtable`, `Queue`, `Stack`, `Comparer`, `IList`, `ICollection`, `IComparer`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`
 - Collections (generic): `List<T>`, `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `SortedList<K,V>`, `SortedDictionary<K,V>`, `HashSet<T>`, `SortedSet<T>`, `ReadOnlyCollection<T>`, `ArraySegment<T>`, `PriorityQueue<T,P>`, `ImmutableArray/List/Dictionary/HashSet/Queue/Stack/SortedDictionary/SortedSet<T>`
 - Span/Memory: `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`, `ReadOnlyMemory<T>`, `MemoryExtensions` (full), `SpanSplitEnumerator`
-- Buffers: `ArrayPool<T>` (+ Create overloads), `MemoryPool<T>`, `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `IBufferWriter<T>`, `ArrayBufferWriter<T>`, `SearchValues<T>`, `SequencePosition`, `ReadOnlySequence<T>` (+ CopyTo/ToArray/IsSingleSegment), `ReadOnlySequenceSegment<T>`, `SequenceReader<T>` (+ TryPeek/TryReadTo/AdvancePast/IsNext), `SequenceReaderExtensions`, `BinaryPrimitives` (full endian swap), `BuffersExtensions`
-- Buffers.Text: `Base64` (encode/decode/validate, RFC 4648), `Base64Url` (encode/decode/validate, RFC 4648 §5)
+- Buffers: `ArrayPool<T>`, `MemoryPool<T>`, `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `IBufferWriter<T>`, `ArrayBufferWriter<T>`, `SearchValues<T>`, `SequencePosition`, `ReadOnlySequence<T>`, `ReadOnlySequenceSegment<T>`, `SequenceReader<T>`, `SequenceReaderExtensions`, `BinaryPrimitives` (full), `BuffersExtensions`
+- Buffers.Text: `Base64`, `Base64Url`
 - IO: `Stream`, `FileStream`, `MemoryStream`, `BinaryReader`, `BinaryWriter`, `StreamReader`, `StreamWriter`, `TextReader`, `TextWriter`, `File`, `Directory`, `Path`, `FileInfo`, `DirectoryInfo`, `RandomAccess`
 - IO.Compression: `ZipArchive`, `ZipArchiveEntry`, `ZipFile`, `DeflateStream`, `GZipStream`
 - IO.Hashing: `Crc32`, `Crc64`, `XxHash32`, `XxHash64`, `XxHash3`, `XxHash128`
@@ -45,7 +50,7 @@
 - Net.Http: `HttpClient`, `HttpRequestMessage`, `HttpResponseMessage`, `HttpContent` (no TLS)
 - Xml: `XmlReader`, `XmlWriter`, `XmlDocument`, `XElement`, `XDocument` (via tinyxml2)
 - Runtime handles: `RuntimeTypeHandle`, `RuntimeMethodHandle`, `RuntimeFieldHandle`, `ModuleHandle`, `ValueType`
-- Other: `Environment` (full), `AppDomain`, `AppContext`, `GC` (stubs), `DBNull`, `Delegate`, `Nullable<T>`, `NullableHelper`, `IObservable<T>`, `IObserver<T>`, `WeakReference`, `BinaryData`, `String.Intern/IsInterned`
+- Other: `Environment` (full), `AppDomain`, `AppContext`, `GC` (stubs), `DBNull`, `Delegate`, `Nullable<T>`, `WeakReference`, `BinaryData`, `String.Intern/IsInterned`, `Convert`, `Enum` (stub)
 
 ### What does NOT work
 - `Regex` — `std::regex` back-end; no named groups, no lookbehind.
@@ -53,7 +58,7 @@
 - `Net::Sockets` — POSIX-only; will not compile on Windows without Winsock2 path.
 - `SynchronizationContext` — stub; `Progress<T>` calls handlers synchronously.
 - `ArrayList.Sort()` (no-arg) — cannot sort `std::any` without type info; not implemented.
-- `CopyTo(Array, int)` on `ICollection`/`BitArray`/`ArrayList` — `System.Array` type does not exist in this project.
+- `CopyTo(Array, int)` on `ICollection`/`BitArray`/`ArrayList` — `System.Array` type does not exist.
 - `ArrayList.GetEnumerator()` — returns `nullptr`; non-generic enumerator over `std::any` not yet implemented.
 - Windows / Emscripten cross-compilation — untested; POSIX guards exist but not CI-validated.
 
@@ -65,23 +70,26 @@ All on branch `develop`, most recent first:
 
 | Commit | Change |
 |--------|--------|
-| `992010c` | `BitArray`: add `Clone`, `GetEnumerator` (inner `Enumerator` class), `IsReadOnly/IsSynchronized/SyncRoot` props; `ArrayList`: add `Clone`, `GetRange`, `Sort(IComparer)`, `Sort(int,int,IComparer)`, `BinarySearch` (2 overloads), `IndexOf` (2 overloads), `LastIndexOf` (2 overloads), `GetEnumerator(int,int)`, `Repeat`, `ArrayList(ICollection&)`, `getSyncRootProperty`; 25 new tests |
-| `d89f8f8` | `System.Collections` Batch18: all 9 types upgraded to `/** */` Doxygen; `ICollection`+SyncRoot, `Comparer`+DefaultInvariant, `BitArray`+LeftShift/RightShift/PopCount/int-ctor; 19 new tests |
-| `081e194` | `IEqualityComparer`: upgrade `///` → `/** */` Doxygen |
-| `acdff17` | `IList`: fix `Add(void*)` return type `void` → `SharpRuntime::intcs`; upgrade to `/** */` Doxygen; `ArrayList`: match new signatures |
-| `3ea15d7` | Batch17: `BinaryPrimitives.ReverseEndianness`, `SequenceReader` search methods, `ReadOnlySequenceSegment`, `BuffersExtensions`, `Base64`, `Base64Url`; 54 new tests |
-| `5596206` | Batch16: `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `SearchValues<T>`, `SequenceReaderExtensions`; `Decimal` OACurrency; `String.Intern/IsInterned`; `ArrayPool::Create`; 37 new tests |
-| `da64198` | Batch15: `Math` overloads (Abs/Min/Max/Clamp for all numeric types, ILogB, BigMul, DivRem), `BadImageFormatException` fileName ctor, `ValueType`, `RuntimeTypeHandle/MethodHandle/FieldHandle`, `ModuleHandle`; 59 new tests |
+| `0850ea3` | Port Int16–IntPtr; fix InvalidCast/Operation/TimeZone inner-exception ctors; add integer type tests |
+| `db3fe72` | Port ISpanParsable, IUtf8SpanFormattable, IUtf8SpanParsable, Index; fix IndexOutOfRange/InsufficientMemory/OutOfMemory inner-exception ctors |
+| `ee73141` | Port GC/GCCollectionMode/GCKind/GCLatencyMode/GCMemoryInfo/GCNotificationStatus, Guid (upgrade Doxygen), Half, HashCode, Func; port IAsyncDisposable→IEquatable, IFormatProvider→IUtf8SpanParsable; add tests |
+| `c896617` | Port Environment→Func batch; fix ExecutionEngineException/FieldAccessException/FormatException inner-exception ctors; add EventHandler/FlagsAttribute/FormattableString/Func tests |
+| `3959bbc` | Fix inner-exception ctors on TypeLoadException + derived types (DllNotFoundException, EntryPointNotFoundException) |
+| `fb0ab3c` | Port Char (upgrade Doxygen + TryParse/ToUpperInvariant), Converter, CrashReason; fix inner-exception ctors |
+| `3d41824` | Port CannotUnloadAppDomainException + Casing; fix inner-exception ctor pattern |
+
+### Systematic fix applied across this session
+All exception classes that used `const std::exception& inner` → concatenating `inner.what()` into message have been migrated to `std::exception_ptr inner` + `SystemException(message, std::move(inner))`. Test callers updated from `std::runtime_error inner("x"); Foo("msg", inner)` to `auto inner = std::make_exception_ptr(std::runtime_error("x")); Foo("msg", inner)`. The check `EXPECT_NE(msg.find("inner msg"), ...)` was removed from updated tests since the inner message is no longer concatenated into `what()`.
 
 ---
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 6412 tests pass.
+**No active technical blocker.** Build is clean, all 6626 tests pass.
 
-The workflow is driven by the user providing types from the `plan.md` namespace review one at a time. There is no automated queue. The current area of focus is `System.Collections` (non-generic interfaces and classes).
+The workflow is user-driven: user approves each type with "ano" before porting begins. The assistant must **always ask before porting or ignoring** — this was violated in the 2026-06-26 session and must not happen again.
 
-Remaining `///`-style Doxygen comments exist in **288 headers** — these should be upgraded opportunistically as types are touched, not in a mass sweep.
+Next unprocessed types in `System` namespace (from `plan.sqlite3`): `LoaderOptimizationAttribute`, `LocalDataStoreSlot`, `MDArray`, `MTAThreadAttribute`, `MarshalByRefObject`, `Math`, `MathF`, `MemberAccessException`, …
 
 ---
 
@@ -102,10 +110,11 @@ Remaining `///`-style Doxygen comments exist in **288 headers** — these should
 | stub | `System::GC` — all methods are no-ops |
 | stub | `System::Type` — no runtime reflection |
 | stub | `System::Activator` — `CreateInstance` not implementable without reflection |
+| stub | `System::Enum` — `GetNames`/`GetValues`/`Parse`/reflection methods not implemented; `HasFlag`/`ToUnderlying`/`ToInt32`/`ToString` work via templates |
 | suspected bug | `extern char** environ` must remain at file scope in `Environment.cpp` — placing it inside `namespace System` causes a PIE relocation error |
 | needs verification | Emscripten build — never CI-tested; POSIX guards exist but not validated |
-| incomplete | `WeakReferenceT<T>` is the generic form (C++ cannot have a class template and a plain class with the same name in the same namespace) |
-| design note | `ArrayList` compares `std::any` elements by `type_info` only (not value); meaningful value comparison requires a typed `IComparer` |
+| design note | `ArrayList` compares `std::any` elements by `type_info` only; meaningful value comparison requires a typed `IComparer` |
+| workflow risk | Duplicate test suite names cause linker errors — always check `--gtest_filter` output and use `Tests2` suffix when collisions exist |
 
 ---
 
@@ -134,31 +143,25 @@ include/
     Net/                                ← IPAddress, Http/, Sockets/
     Xml/                                ← XmlReader, XmlWriter, Linq/
 src/System/                             ← .cpp bodies (auto-discovered by CMake GLOB_RECURSE)
-tests/                                  ← 148 GoogleTest .cpp files
+tests/                                  ← ~175 GoogleTest .cpp files
 vendor/                                 ← googletest, nlohmann/json, tinyxml2, miniz
+plan.sqlite3                            ← tracks porting status per type (todo/ported/ignored/in_progress)
 ```
-
-**Vendored libraries:**
-
-| Library | Use |
-|---------|-----|
-| GoogleTest | test framework |
-| nlohmann/json | `System::Text::Json` |
-| tinyxml2 | `System::Xml::XmlReader/XmlWriter` |
-| miniz | `System::IO::Compression::ZipArchive` |
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **6412+ tests passing** — never go below the watermark.
+2. **6626+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
 6. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
-7. **Doxygen `/** */`** on all public declarations — upgrade `///` / `/// @brief` when encountered.
+7. **Doxygen `/** */`** on all public declarations — upgrade `///` when encountered; never add new `///`.
 8. **No POSIX includes in public `.hpp`** — platform code belongs in `.cpp`, guarded by `#ifdef`.
-9. **No broad header refactor** — property naming touches 449+ files in CNA.
-10. **Push only to `develop`** — never push to `master` or create tags without explicit per-action user approval.
-11. **GPG signing times out** — always commit with `git -c commit.gpgsign=false commit`.
+9. **Inner exceptions use `std::exception_ptr`** — never `const std::exception&`. Pattern: `FooException(const std::string& msg, std::exception_ptr inner) : Base(msg, std::move(inner)) {}`
+10. **No broad header refactor** — property naming touches 449+ files in CNA.
+11. **Push only to `develop`** — never push to `master` or create tags without explicit per-action user approval.
+12. **GPG signing times out** — always commit with `git -c commit.gpgsign=false commit`.
+13. **Always ask before porting or ignoring** — user must say "ano" for each type.
 
 ### Type alias summary
 | Alias | Underlying | .NET equivalent |
@@ -173,17 +176,30 @@ vendor/                                 ← googletest, nlohmann/json, tinyxml2,
 | `SharpRuntime::ushortcs` | `uint16_t` | `ushort` |
 | `SharpRuntime::charcs` | `char16_t` | `char` |
 
-### Circular include resolution pattern
-When two types mutually reference each other (e.g. `MemoryHandle` ↔ `IPinnable`, `RuntimeTypeHandle` ↔ `ModuleHandle`):
-1. Forward-declare the second type in the first header.
-2. Include the first header at the top of the second header (gets the full definition).
-3. Define the second type completely.
-4. Define the deferred methods of the first type as `inline` in the namespace block, after both types are complete.
+### plan.sqlite3 workflow
+- Table `task`, columns: `id, namespace, name, type, internal, status`
+- Status values: `ported`, `ignored`, `todo`, `in_progress`, `''` (empty = unset)
+- Query next unset: `SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 8;`
+- **Never set status without user approval per type**
 
-### Test naming conventions
-- `EXCEPT_SIMPLE(ExType)` macro in `ExceptionRemainingTests.cpp` already defines `DefaultCtor_WhatNotEmpty`, `MessageCtor_WhatContainsMessage`, `IsA_Exception` for many exception types. Do not re-add these names in dedicated test files — it causes a linker error (duplicate symbol).
-- New type tests go in `tests/System/<TypeName>Tests.cpp` or in `tests/System/SystemTypesRemainingTests.cpp` for small types.
-- Duplicate test name fix: append `_New` suffix.
+### Inner exception ctor pattern (correct)
+```cpp
+// Header (.hpp):
+FooException(const std::string& message, std::exception_ptr inner);
+
+// Body (.cpp):
+FooException::FooException(const std::string& message, std::exception_ptr inner)
+    : BaseException(message, std::move(inner)) {}
+
+// Test caller:
+auto inner = std::make_exception_ptr(std::runtime_error("cause"));
+FooException e("msg", inner);
+EXPECT_NE(std::string(e.what()).find("msg"), std::string::npos);
+// Do NOT check for inner.what() content — it is not concatenated into what()
+```
+
+### Duplicate test suite names
+`EXCEPT_SIMPLE(ExType)` macro in `ExceptionRemainingTests.cpp` already defines `DefaultCtor_WhatNotEmpty`, `MessageCtor_WhatContainsMessage`, `IsA_Exception`. New test files for those same types must use a `Tests2` suffix (e.g. `ExecutionEngineExceptionTests2`) to avoid linker duplicate symbol errors.
 
 ---
 
@@ -203,16 +219,17 @@ cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 ./build/SharpRuntimeTests
 
 # Run a specific suite
-./build/SharpRuntimeTests --gtest_filter="BitArray*"
-./build/SharpRuntimeTests --gtest_filter="ArrayList*"
-./build/SharpRuntimeTests --gtest_filter="Base64*"
+./build/SharpRuntimeTests --gtest_filter="Environment*"
+./build/SharpRuntimeTests --gtest_filter="GC*"
+
+# Check next unset types in System namespace
+sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 8;"
 
 # Find headers still using /// style Doxygen
 grep -rl "^\s*///" include/System/ | head -20
 
 # Check .NET source for a type
-find /rv/tmp/runtime/src/libraries -name "Hashtable.cs" | head -3
-cat /rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/Collections/Hashtable.cs
+find /rv/tmp/runtime/src/libraries -name "Math.cs" | head -3
 
 # Commit (GPG disabled — required in this environment)
 git -c commit.gpgsign=false commit -m "message"
@@ -225,67 +242,46 @@ git push origin develop
 
 ## 8. Next smallest tasks
 
-Ordered by value and readiness. Each fits one focused coding session.
+Ordered by priority. Each fits one focused coding session. **User must approve each type with "ano" before work begins.**
 
-### Task 1 — Upgrade `Hashtable` Doxygen + fill API gaps
-- **Goal:** Check `Hashtable.hpp` against .NET source; upgrade `///` → `/** */`; add any missing methods.
-- **Files:** `include/System/Collections/Hashtable.hpp`
-- **Reference:** `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/Collections/Hashtable.cs`
+### Task 1 — Continue System namespace: LoaderOptimizationAttribute
+- **Goal:** Describe type → await "ano" → check/port → mark ported in DB.
+- **Query:** `SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 1;`
 - **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`
 
-### Task 2 — Port `System.Collections.Queue` + `Stack` gap-fill
-- **Goal:** Check `Queue.hpp` and `Stack.hpp` against .NET source; upgrade Doxygen; fill missing API.
-- **Files:** `include/System/Collections/Queue.hpp`, `include/System/Collections/Stack.hpp`
-- **Reference:** `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/Collections/Queue.cs`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="QueueTests*:StackTests*"`
+### Task 2 — Continue System namespace: remaining types (Math, MathF, MemberAccessException, Memory, …)
+- **Goal:** Work through unset types one at a time with user approval.
+- **Current count:** 110 unset types in System namespace.
+- **Verify:** Build clean, test count increases.
 
-### Task 3 — `ArrayList.GetEnumerator()` — implement non-generic enumerator
-- **Goal:** Return a working `IEnumerator*` from `ArrayList::GetEnumerator()` instead of `nullptr`; add tests.
-- **Files:** `include/System/Collections/ArrayList.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="ArrayList*"`
+### Task 3 — Fix remaining old inner-exception ctors
+- **Goal:** Scan for any remaining `const std::exception& inner` in exception headers and fix.
+- **Find:** `grep -rl "const std::exception& inner" include/System/`
+- **Verify:** Build clean, relevant tests pass.
 
-### Task 4 — Continue `plan.md` namespace review: next `System.Collections` types
-- **Goal:** The user provides the next type from `plan.md`; port/verify/commit it following the established batch workflow.
-- **Files:** varies by type
-- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`
+### Task 4 — Sweep `///` Doxygen in `include/System/` (deferred, opportunistic)
+- **Goal:** Upgrade `///` → `/** */` only on files being actively modified; not a mass sweep.
+- **Find:** `grep -rl "^\s*///" include/System/ | head -20`
 
-### Task 5 — Sweep `///` Doxygen in `include/System/Collections/`
-- **Goal:** Find all `.hpp` files in `include/System/Collections/` still using `///` and upgrade to `/** */`.
-- **Find command:** `grep -rl "^\s*///" include/System/Collections/`
-- **Verify:** Build clean, test count unchanged.
-
-### Task 6 — Port `InvalidCastException` fully
-- **Goal:** Verify `/** */` Doxygen, `const char*` ctor, inner-exception ctor; add dedicated tests.
-- **Files:** `include/System/InvalidCastException.hpp`, new test file or existing `ExceptionTests.cpp`
-- **Reference:** `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/src/System/InvalidCastException.cs`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InvalidCast*"`
-
-### Task 7 — Port `ConsoleKey` / `ConsoleKeyInfo` / `ConsoleModifiers`
-- **Goal:** Add the Console key-input enum and struct needed by game input code.
-- **Files:** `include/System/ConsoleKey.hpp` (new), `include/System/ConsoleKeyInfo.hpp` (new), `include/System/ConsoleModifiers.hpp` (new)
-- **Reference:** `/rv/tmp/runtime/src/libraries/System.Console/src/System/ConsoleKey.cs`
-- **Verify:** Build clean, new tests pass.
-
-### Task 8 — Broad `///` sweep in `include/System/` (deferred)
-- **Goal:** 288 headers still use `///` style. Sweep the highest-traffic ones (IO, Text, Threading).
-- **Find command:** `grep -rl "^\s*///" include/System/ | grep -v Collections | head -20`
-- **Verify:** Build clean, test count unchanged.
+### Task 5 — Move to next namespace after System
+- **Goal:** Once System is complete, begin `System.IO` (59 unset types) or `System.Collections.Generic` (52 unset types) via same user-approval workflow.
 
 ---
 
 ## 9. Do not do yet
 
-- **No broad header refactor** — property naming (`getXxxProperty`) and namespace style touch 449+ files in CNA. Any rename silently breaks the consumer project.
-- **No LINQ port** — use `std::ranges` in all new ported code; do not add a LINQ layer.
-- **No Windows / Emscripten CI** — POSIX-only subsystems are documented bugs; do not attempt fixes until a cross-compile environment is available.
-- **No merge to `master`** — always push to `develop` only; master merge requires explicit user approval per action.
-- **No new vendored libraries** — do not add dependencies (e.g., Boost, PCRE2, OpenSSL) without discussing scope impact.
-- **No speculative API additions** — only add methods that exist in .NET's published API surface and are needed by CNA/mobile-eggbert.
-- **No work on `System::Type` / `System::Activator`** — they require runtime reflection that C++ cannot provide; stubs are the correct end state.
-- **No `SynchronizationContext` full implementation** — the current synchronous stub is correct for single-threaded game use.
-- **No duplicate test names** — `EXCEPT_SIMPLE` macro already defines `DefaultCtor_WhatNotEmpty`, `MessageCtor_WhatContainsMessage`, `IsA_Exception` for many exception types; adding them again causes a linker error.
-- **No mass `///` → `/** */` sweep in one commit** — upgrade Doxygen only on files being actively modified; a mass sweep touches too many files at once and risks merge conflicts.
-- **No `ArrayList.Sort()` without comparer** — `std::any` cannot be compared without type info; this is a known limitation, not a bug to fix.
+- **Do not port or ignore any type without user's "ano"** — learned from 2026-06-26 session.
+- **No broad header refactor** — property naming (`getXxxProperty`) and namespace style touch 449+ files in CNA.
+- **No LINQ port** — use `std::ranges` in all new ported code.
+- **No Windows / Emscripten CI** — POSIX-only subsystems are documented bugs.
+- **No merge to `master`** — always push to `develop` only; master merge requires explicit per-action approval.
+- **No new vendored libraries** without discussing scope impact.
+- **No speculative API additions** — only add methods present in .NET's published API surface.
+- **No work on `System::Type` / `System::Activator`** — stubs are the correct end state.
+- **No `SynchronizationContext` full implementation** — synchronous stub is correct for game use.
+- **No duplicate test suite names** — always check for collisions; use `Tests2` suffix.
+- **No mass `///` → `/** */` sweep in one commit** — upgrade only on files actively modified.
+- **No `ArrayList.Sort()` without comparer** — `std::any` cannot be compared without type info.
 
 ---
 
@@ -294,17 +290,24 @@ Ordered by value and readiness. Each fits one focused coding session.
 ```
 Read NEXT.md first to understand the current state of the project.
 
-Then read only the files needed for the first task in section 8.
-Do not read or refactor any unrelated code.
+Then open plan.sqlite3 and find the next unprocessed type:
+  sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 1;"
 
-Make one small, fully verified improvement:
-  - implement or update a single type or small group of related types,
-  - run: cmake --build build --parallel 4   (must produce zero errors, zero warnings)
-  - run: ./build/SharpRuntimeTests          (all 6412+ tests must pass)
-  - commit with: git -c commit.gpgsign=false commit -m "..."
-  - push to origin/develop only.
+IMPORTANT workflow rule: describe the type to the user and WAIT for their approval ("ano")
+before doing any porting or ignoring. Never port or mark ignored without explicit approval.
 
-After finishing, update NEXT.md (sections 2, 3, 4, 8) to reflect the new state.
+For each approved type:
+  1. Check the existing header (include/System/<Type>.hpp) and tests.
+  2. Verify all 6 checklist items: full API, intcs/namespace syntax, Doxygen /** */, SPDX, build clean, tests pass.
+  3. Fix any issues found (especially old inner-exception ctors: const std::exception& → std::exception_ptr).
+  4. Add tests if missing. Use Tests2 suffix if suite name already exists.
+  5. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
+  6. Run: ./build/SharpRuntimeTests  (all 6626+ tests must pass)
+  7. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
+  8. Commit: git -c commit.gpgsign=false commit -m "..."
+  9. Push: git push origin develop
 
-First task: see section 8 "Next smallest tasks", Task 1 — Hashtable Doxygen + API gap-fill.
+After a batch of types, update NEXT.md sections 2, 3, 4, 8.
+
+First task: next unset type in System namespace — describe it and await user approval.
 ```
