@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include <string>
 #include "System/SystemException.hpp"
 
@@ -49,8 +50,8 @@ namespace System {
          * @param message        A description of the error.
          * @param innerException The exception that is the cause of this exception.
          */
-        ContextMarshalException(const std::string& message, const std::exception& innerException)
-            : SystemException(message + " | inner: " + innerException.what()) {}
+        ContextMarshalException(const std::string& message, std::exception_ptr innerException)
+            : SystemException(message, std::move(innerException)) {}
     };
 
 } // namespace System

@@ -18,41 +18,59 @@ namespace System {
      * @brief Represents a date (year, month, day) with no time or time-zone information.
      *
      * C++ counterpart of .NET System.DateOnly.
-     *
-     * @note Status: Done
      */
     class DateOnly {
         intcs year_  = 1;
         intcs month_ = 1;
         intcs day_   = 1;
     public:
-        /// The smallest possible value of DateOnly (January 1, 0001).
+        /** @brief The smallest possible value of DateOnly (January 1, 0001). */
         static const DateOnly MinValue;
-        /// The largest possible value of DateOnly (December 31, 9999).
+        /** @brief The largest possible value of DateOnly (December 31, 9999). */
         static const DateOnly MaxValue;
 
-        /// Initializes a new DateOnly with year=1, month=1, day=1.
+        /** @brief Initializes a new DateOnly with year=1, month=1, day=1. */
         DateOnly() = default;
-        /// Initializes a new DateOnly with the specified year, month, and day.
+
+        /**
+         * @brief Initializes a new DateOnly with the specified year, month, and day.
+         * @param year  The year (1–9999).
+         * @param month The month (1–12).
+         * @param day   The day (1–28/29/30/31 depending on month/year).
+         */
         DateOnly(intcs year, intcs month, intcs day) : year_(year), month_(month), day_(day) {}
 
-        /// Returns the year component of this date.
+        /** @brief Returns the year component of this date. */
         [[nodiscard]] intcs getYearProperty()  const { return year_; }
-        /// Returns the month component of this date.
+
+        /** @brief Returns the month component of this date (1–12). */
         [[nodiscard]] intcs getMonthProperty() const { return month_; }
-        /// Returns the day component of this date.
+
+        /** @brief Returns the day-of-month component of this date (1–31). */
         [[nodiscard]] intcs getDayProperty()   const { return day_; }
-        /// Returns the day of the week represented by this instance.
+
+        /** @brief Returns the day of the week represented by this instance. */
         [[nodiscard]] DayOfWeek getDayOfWeekProperty() const;
-        /// Returns the day of the year represented by this instance (1–366).
+
+        /** @brief Returns the day of the year represented by this instance (1–366). */
         [[nodiscard]] intcs getDayOfYearProperty() const;
-        /// Returns the number of days since January 1, 0001 (DateOnly.MinValue).
+
+        /** @brief Returns the number of days since January 1, 0001 (DateOnly.MinValue). */
         [[nodiscard]] intcs getDayNumberProperty() const;
 
-        /// Creates a DateOnly from the number of days since January 1, 0001.
+        /**
+         * @brief Creates a DateOnly from the number of days since January 1, 0001.
+         *
+         * C++ counterpart of .NET DateOnly.FromDayNumber(int).
+         * @param dayNumber Zero-based day count from MinValue.
+         */
         [[nodiscard]] static DateOnly FromDayNumber(intcs dayNumber);
 
-        /// Returns a string representation in the form "yyyy-MM-dd".
+        /**
+         * @brief Returns a string representation in the form "yyyy-MM-dd".
+         *
+         * C++ counterpart of .NET DateOnly.ToString().
+         */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
             oss << year_ << '-'
@@ -61,47 +79,96 @@ namespace System {
             return oss.str();
         }
 
-        /// Returns the date formatted according to @p format.
-        /// Tokens: yyyy/yy (year), MM/M (month), dd/d (day). Literals in single quotes.
+        /**
+         * @brief Returns the date formatted according to @p format.
+         *
+         * C++ counterpart of .NET DateOnly.ToString(string).
+         * Tokens: yyyy/yy (year), MM/M (month), dd/d (day). Literals in single quotes.
+         * @param format The format string.
+         */
         [[nodiscard]] std::string ToString(const std::string& format) const;
 
-        /// Compares this instance to another DateOnly. Returns negative, zero, or positive.
+        /**
+         * @brief Compares this instance to another DateOnly.
+         *
+         * C++ counterpart of .NET DateOnly.CompareTo(DateOnly).
+         * @return Negative, zero, or positive.
+         */
         [[nodiscard]] intcs CompareTo(const DateOnly& other) const;
-        /// Returns true if this instance equals another DateOnly.
-        [[nodiscard]] bool Equals(const DateOnly& other) const { return *this == other; }
-        /// Deconstructs this instance into year, month, and day components.
-        void Deconstruct(intcs& year, intcs& month, intcs& day) const { year = year_; month = month_; day = day_; }
 
-        /// Returns a new DateOnly with @p n days added (may be negative).
+        /**
+         * @brief Returns true if this instance equals another DateOnly.
+         *
+         * C++ counterpart of .NET DateOnly.Equals(DateOnly).
+         */
+        [[nodiscard]] bool Equals(const DateOnly& other) const { return *this == other; }
+
+        /**
+         * @brief Deconstructs this instance into year, month, and day components.
+         *
+         * C++ counterpart of .NET DateOnly.Deconstruct(out int, out int, out int).
+         */
+        void Deconstruct(intcs& year, intcs& month, intcs& day) const {
+            year = year_; month = month_; day = day_;
+        }
+
+        /**
+         * @brief Returns a new DateOnly with @p n days added (may be negative).
+         *
+         * C++ counterpart of .NET DateOnly.AddDays(int).
+         */
         [[nodiscard]] DateOnly AddDays(int n) const;
 
-        /// Returns a new DateOnly with @p n months added (may be negative; clamps day to end of month).
+        /**
+         * @brief Returns a new DateOnly with @p n months added (may be negative).
+         *
+         * C++ counterpart of .NET DateOnly.AddMonths(int).
+         * Clamps the day to the end of the resulting month when needed.
+         */
         [[nodiscard]] DateOnly AddMonths(int n) const;
 
-        /// Returns a new DateOnly with @p n years added (may be negative).
+        /**
+         * @brief Returns a new DateOnly with @p n years added (may be negative).
+         *
+         * C++ counterpart of .NET DateOnly.AddYears(int).
+         */
         [[nodiscard]] DateOnly AddYears(int n) const;
 
-        /// Extracts the date part from the specified DateTime.
+        /**
+         * @brief Extracts the date part from the specified DateTime.
+         *
+         * C++ counterpart of .NET DateOnly.FromDateTime(DateTime).
+         * @param dt The DateTime to extract the date from.
+         */
         [[nodiscard]] static DateOnly FromDateTime(const DateTime& dt);
 
-        /// Parses a date string in the form "yyyy-MM-dd".
-        /// @throws System::FormatException on failure.
+        /**
+         * @brief Parses a date string in the form "yyyy-MM-dd".
+         *
+         * C++ counterpart of .NET DateOnly.Parse(string).
+         * @throws System::FormatException on failure.
+         */
         [[nodiscard]] static DateOnly Parse(const std::string& s);
 
-        /// Tries to parse a date string in the form "yyyy-MM-dd"; returns false on failure.
+        /**
+         * @brief Tries to parse a date string in the form "yyyy-MM-dd".
+         *
+         * C++ counterpart of .NET DateOnly.TryParse(string, out DateOnly).
+         * @return false if parsing fails.
+         */
         static bool TryParse(const std::string& s, DateOnly& result);
 
-        /// Returns true if this date equals the specified date.
+        /** @brief Returns true if this date equals the specified date. */
         bool operator==(const DateOnly& o) const { return year_==o.year_ && month_==o.month_ && day_==o.day_; }
-        /// Returns true if this date does not equal the specified date.
+        /** @brief Returns true if this date does not equal the specified date. */
         bool operator!=(const DateOnly& o) const { return !(*this==o); }
-        /// Returns true if this date is earlier than the specified date.
+        /** @brief Returns true if this date is earlier than the specified date. */
         bool operator< (const DateOnly& o) const { return toDays() <  o.toDays(); }
-        /// Returns true if this date is earlier than or equal to the specified date.
+        /** @brief Returns true if this date is earlier than or equal to the specified date. */
         bool operator<=(const DateOnly& o) const { return toDays() <= o.toDays(); }
-        /// Returns true if this date is later than the specified date.
+        /** @brief Returns true if this date is later than the specified date. */
         bool operator> (const DateOnly& o) const { return toDays() >  o.toDays(); }
-        /// Returns true if this date is later than or equal to the specified date.
+        /** @brief Returns true if this date is later than or equal to the specified date. */
         bool operator>=(const DateOnly& o) const { return toDays() >= o.toDays(); }
 
     private:

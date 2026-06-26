@@ -31,7 +31,7 @@ namespace System {
         static constexpr longcs TicksPerMinute      = 600000000LL;
         static constexpr longcs TicksPerHour        = 36000000000LL;
         static constexpr longcs TicksPerDay         = 864000000000LL;
-        /// Ticks from the .NET epoch (0001-01-01) to the Unix epoch (1970-01-01).
+        /** @brief Ticks from the .NET epoch (0001-01-01) to the Unix epoch (1970-01-01). */
         static constexpr longcs UnixEpochTicks      = 621355968000000000LL;
 
     private:
@@ -261,17 +261,31 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const override;
 
-        /// @brief Returns the date/time formatted according to @p format.
-        /// Tokens: yyyy, yy, MM, M, dd, d, HH, H, hh, h, mm, m, ss, s, fff, ff, f.
-        /// Literal text can be enclosed in single quotes.
+        /**
+         * @brief Returns the date/time formatted according to @p format.
+         *
+         * C++ counterpart of .NET DateTime.ToString(string).
+         * Tokens: yyyy, yy, MM, M, dd, d, HH, H, hh, h, mm, m, ss, s, fff, ff, f.
+         * Literal text can be enclosed in single quotes.
+         * @param format The format string.
+         */
         [[nodiscard]] std::string ToString(const std::string& format) const;
 
-        /// @brief Parses a date/time string in ISO-8601 style ("yyyy-MM-dd" or
-        /// "yyyy-MM-dd HH:mm:ss" or "yyyy-MM-ddTHH:mm:ss" or with .fff suffix).
-        /// @throws System::FormatException if the string cannot be parsed.
+        /**
+         * @brief Parses a date/time string in ISO-8601 style.
+         *
+         * C++ counterpart of .NET DateTime.Parse(string).
+         * Accepts "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss",
+         * or with optional ".fff" millisecond suffix.
+         * @throws System::FormatException if the string cannot be parsed.
+         */
         [[nodiscard]] static DateTime Parse(const std::string& s);
 
-        /// @brief Tries to parse a date/time string; returns false without throwing on failure.
+        /**
+         * @brief Tries to parse a date/time string; returns false without throwing on failure.
+         *
+         * C++ counterpart of .NET DateTime.TryParse(string, out DateTime).
+         */
         static bool TryParse(const std::string& s, DateTime& result);
 
         [[nodiscard]] bool operator==(const DateTime& other) const;

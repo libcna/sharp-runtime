@@ -551,7 +551,7 @@ TEST(ContextMarshalExceptionTests, StringCtor_WhatContainsMessage) {
 }
 
 TEST(ContextMarshalExceptionTests, InnerExceptionCtor_ContainsBoth) {
-    std::runtime_error inner("root cause");
+    auto inner = std::make_exception_ptr(std::runtime_error("root cause"));
     System::ContextMarshalException ex("context error", inner);
     std::string msg(ex.what());
     EXPECT_NE(msg.find("context error"), std::string::npos);
