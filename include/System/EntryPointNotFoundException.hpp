@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include "System/TypeLoadException.hpp"
 
 namespace System {
@@ -25,8 +26,8 @@ namespace System {
          *
          * C++ counterpart of .NET EntryPointNotFoundException(string, Exception).
          */
-        EntryPointNotFoundException(const std::string& message, const std::exception& inner)
-            : TypeLoadException(message + " | inner: " + inner.what()) {}
+        EntryPointNotFoundException(const std::string& message, std::exception_ptr inner)
+            : TypeLoadException(message, std::move(inner)) {}
     };
 
 } // namespace System

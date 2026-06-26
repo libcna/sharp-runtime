@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include <string>
 #include "System/SystemException.hpp"
 
@@ -48,8 +49,8 @@ public:
      * @param message The error message.
      * @param inner   The exception that is the cause of the current exception.
      */
-    TypeLoadException(const std::string& message, const std::exception& inner)
-        : SystemException(message + " | inner: " + inner.what()) {}
+    TypeLoadException(const std::string& message, std::exception_ptr inner)
+        : SystemException(message, std::move(inner)) {}
 
     /**
      * @brief Initializes a new instance of TypeLoadException with a message and type name.

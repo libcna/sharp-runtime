@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <exception>
 #include <string>
 
 #include "System/ArithmeticException.hpp"
@@ -31,7 +32,7 @@ namespace System {
          *
          * C++ counterpart of .NET DivideByZeroException(string, Exception).
          */
-        DivideByZeroException(const std::string& message, const std::exception& innerException);
+        DivideByZeroException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System
