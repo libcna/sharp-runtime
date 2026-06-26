@@ -27,4 +27,7 @@ namespace System {
     ArgumentNullException::ArgumentNullException(const std::string& paramName, const std::string& message)
         : ArgumentException(message, paramName) {}
 
+    ArgumentNullException::ArgumentNullException(const std::string& message, std::exception_ptr innerException)
+        : ArgumentException(message, std::move(innerException)) {}
+
 } // namespace System
