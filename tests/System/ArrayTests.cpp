@@ -373,3 +373,10 @@ TEST(ArrayTests, TrueForAll_Empty)        { EXPECT_TRUE(Array::TrueForAll<int>({
 // ---------------------------------------------------------------------------
 TEST(ArrayTests, LastIndexOf_Found)    { EXPECT_EQ(Array::LastIndexOf<int>({1,2,1,3}, 1), 2); }
 TEST(ArrayTests, LastIndexOf_NotFound) { EXPECT_EQ(Array::LastIndexOf<int>({1,2,3}, 9), -1); }
+
+// ---------------------------------------------------------------------------
+// MaxLengthProperty
+// ---------------------------------------------------------------------------
+TEST(ArrayTests, MaxLength_IsPositive) {
+    EXPECT_GT(Array::MaxLengthProperty(), 0);
+}

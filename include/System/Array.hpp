@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -23,6 +24,15 @@ namespace System {
     class Array {
     public:
         Array() = delete;
+
+        /**
+         * @brief Gets the maximum number of elements supported by the array.
+         *
+         * C++ counterpart of .NET Array.MaxLength.
+         */
+        [[nodiscard]] static constexpr intcs MaxLengthProperty() noexcept {
+            return std::numeric_limits<intcs>::max();
+        }
 
         /** @brief Sorts all elements of @p array using the default less-than comparator. */
         template<typename T>
@@ -60,6 +70,8 @@ namespace System {
 
         /**
          * @brief Copies @p length elements from the start of @p src into the start of @p dst.
+         *
+         * C++ counterpart of .NET Array.Copy(Array, Array, int).
          * @param dst Destination vector (must already be sized to fit @p length elements).
          */
         template<typename T>
