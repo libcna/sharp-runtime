@@ -3,3 +3,4 @@ build*
 cmake-build-debug/*
 dotnet_types.db
 dotnet_types.db-journal
+plan.sqlite3*

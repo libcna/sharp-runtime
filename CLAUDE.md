@@ -53,6 +53,43 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 
 ---
 
+## Porting checklist — criteria for `ported` / ✅ DONE
+
+A type may be marked `ported` only when **all** of the following hold:
+
+### 1. Implementation complete
+- Header `include/System/.../*.hpp` exists with the full public API: all public methods, constructors, properties, and operators that appear in the .NET `ref/` surface file.
+- Properties follow `getXxxProperty()` / `setXxxProperty()` naming.
+- Complex types have a `.cpp` body file; simple types may be header-only.
+- No method body is a bare `throw NotImplementedException()` stub — those are **STUB**, not ported.
+
+### 2. Correct C++ mapping
+- `SharpRuntime::intcs` (not `int`) for public API parameters that mirror .NET `int`.
+- Namespace opened with C++17 nested syntax: `namespace System::Collections::Generic {`.
+- No LINQ — use `std::ranges` instead.
+- POSIX-only internals are in `.cpp` files behind `#ifdef`, not in public `.hpp` headers.
+
+### 3. Doc-comments
+- Doxygen `/** */` block comments on every public type and method.
+- Comments copied/adapted from .NET XML doc-comments in `/rv/tmp/runtime/src/libraries/` where available.
+
+### 4. SPDX header
+Every `.hpp` and `.cpp` file starts with:
+```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+```
+
+### 5. Clean build
+- `cmake --build build --parallel 4` — **zero errors, zero warnings**.
+
+### 6. Tests passing
+- `./build/SharpRuntimeTests` — all tests pass (no failures, no crashes).
+- At least basic GoogleTest coverage exists for the ported type's key methods.
+
+---
+
 ## Architecture invariants
 
 - **Complex types:** `.hpp` declaration + `.cpp` body. Move bodies to `.cpp` when a header grows unwieldy.
