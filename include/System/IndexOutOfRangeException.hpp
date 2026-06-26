@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <exception>
 #include <string>
 
 #include "System/SystemException.hpp"
@@ -49,7 +50,7 @@ namespace System {
          * @param message        A description of the error.
          * @param innerException The exception that is the cause of this exception.
          */
-        IndexOutOfRangeException(const std::string& message, const std::exception& innerException);
+        IndexOutOfRangeException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System

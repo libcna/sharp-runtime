@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include <string>
 #include "System/SystemException.hpp"
 
@@ -54,7 +55,7 @@ namespace System {
          * @param message A string that describes the error.
          * @param inner   The exception that is the cause of this exception.
          */
-        OutOfMemoryException(const std::string& message, const std::exception& inner);
+        OutOfMemoryException(const std::string& message, std::exception_ptr inner);
     };
 
 } // namespace System
