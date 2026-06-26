@@ -59,6 +59,41 @@ namespace System {
         [[nodiscard]] const std::string& getPublicKeyTokenProperty() const { return publicKeyToken_; }
 
         /**
+         * @brief Creates a copy of this ApplicationId.
+         *
+         * C++ counterpart of .NET ApplicationId.Copy().
+         */
+        [[nodiscard]] ApplicationId Copy() const { return *this; }
+
+        /**
+         * @brief Determines whether this instance and the specified object have the same value.
+         *
+         * C++ counterpart of .NET ApplicationId.Equals(object).
+         * Two ApplicationId instances are equal when all five fields match.
+         */
+        [[nodiscard]] bool Equals(const ApplicationId& other) const {
+            return name_                == other.name_
+                && version_             == other.version_
+                && processorArchitecture_ == other.processorArchitecture_
+                && culture_             == other.culture_
+                && publicKeyToken_      == other.publicKeyToken_;
+        }
+
+        bool operator==(const ApplicationId& o) const { return Equals(o); }
+        bool operator!=(const ApplicationId& o) const { return !Equals(o); }
+
+        /**
+         * @brief Returns a hash code for this ApplicationId based on the name and version.
+         *
+         * C++ counterpart of .NET ApplicationId.GetHashCode().
+         */
+        [[nodiscard]] int GetHashCode() const noexcept {
+            std::size_t h = std::hash<std::string>{}(name_);
+            h ^= std::hash<std::string>{}(version_.ToString()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return static_cast<int>(h);
+        }
+
+        /**
          * @brief Returns a string representation of the application identity.
          *
          * C++ counterpart of .NET ApplicationId.ToString().

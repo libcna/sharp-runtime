@@ -39,3 +39,31 @@ TEST(ApplicationIdTests, ToString_ContainsCulture) {
 TEST(ApplicationIdTests, ToString_ContainsArchitecture) {
     EXPECT_NE(makeId().ToString().find("amd64"), std::string::npos);
 }
+TEST(ApplicationIdTests, Copy_IsEqual) {
+    auto orig = makeId();
+    auto copy = orig.Copy();
+    EXPECT_TRUE(copy.Equals(orig));
+}
+TEST(ApplicationIdTests, Copy_IsIndependent) {
+    auto orig = makeId();
+    auto copy = orig.Copy();
+    EXPECT_EQ(copy.getNameProperty(), orig.getNameProperty());
+}
+TEST(ApplicationIdTests, Equals_SameFields_True) {
+    EXPECT_TRUE(makeId().Equals(makeId()));
+}
+TEST(ApplicationIdTests, Equals_DiffName_False) {
+    auto a = makeId();
+    ApplicationId b("token123", "Other", Version(1,2,3,4), "amd64", "neutral");
+    EXPECT_FALSE(a.Equals(b));
+}
+TEST(ApplicationIdTests, GetHashCode_Consistent) {
+    EXPECT_EQ(makeId().GetHashCode(), makeId().GetHashCode());
+}
+TEST(ApplicationIdTests, OperatorEq_SameFields_True) {
+    EXPECT_TRUE(makeId() == makeId());
+}
+TEST(ApplicationIdTests, OperatorNe_DiffName_True) {
+    ApplicationId b("token123", "Other", Version(1,2,3,4), "amd64", "neutral");
+    EXPECT_TRUE(makeId() != b);
+}

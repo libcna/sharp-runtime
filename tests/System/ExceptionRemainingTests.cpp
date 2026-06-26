@@ -87,6 +87,12 @@ TEST(AppDomainUnloadedExceptionTests, InnerExceptionCtor_ContainsBoth) {
     EXPECT_NE(std::string(ex.what()).find("inner"), std::string::npos);
 }
 EXCEPT_SIMPLE(ApplicationException)
+TEST(ApplicationExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    std::runtime_error inner("inner");
+    System::ApplicationException ex("outer", inner);
+    EXPECT_NE(std::string(ex.what()).find("outer"), std::string::npos);
+    EXPECT_NE(std::string(ex.what()).find("inner"), std::string::npos);
+}
 EXCEPT_SIMPLE(ArrayTypeMismatchException)
 EXCEPT_SIMPLE(BadImageFormatException)
 EXCEPT_SIMPLE(CannotUnloadAppDomainException)
