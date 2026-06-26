@@ -1,54 +1,105 @@
-// #include "gtest/gtest.h"
-// #include <string>
-// #include "System/EventHandler.hpp"
-//
-// using System::EventHandler;
-//
-// TEST(EventHandlerTest, SingleHandlerIsCalled) {
-//     EventHandler<int> handler;
-//
-//     int result = 0;
-//     handler += [&result](const int& value) {
-//         result = value;
-//     };
-//
-//     handler.RaiseCurrentValueChanged(42);
-//     EXPECT_EQ(result, 42);
-// }
-//
-// TEST(EventHandlerTest, MultipleHandlersAreCalled) {
-//     EventHandler<std::string> handler;
-//
-//     std::string result1;
-//     std::string result2;
-//
-//     handler += [&result1](const std::string& value) {
-//         result1 = value;
-//     };
-//     handler += [&result2](const std::string& value) {
-//         result2 = value + "!";
-//     };
-//
-//     handler.RaiseCurrentValueChanged("Test");
-//
-//     EXPECT_EQ(result1, "Test");
-//     EXPECT_EQ(result2, "Test!");
-// }
-//
-// TEST(EventHandlerTest, HandlersAreCalledInOrder) {
-//     EventHandler<int> handler;
-//     std::vector<int> callOrder;
-//
-//     handler += [&callOrder](const int& value) {
-//         callOrder.push_back(value + 1);
-//     };
-//     handler += [&callOrder](const int& value) {
-//         callOrder.push_back(value + 2);
-//     };
-//
-//     handler.RaiseCurrentValueChanged(10);
-//
-//     ASSERT_EQ(callOrder.size(), 2);
-//     EXPECT_EQ(callOrder[0], 11);
-//     EXPECT_EQ(callOrder[1], 12);
-// }
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include <string>
+#include <vector>
+#include "System/EventHandler.hpp"
+#include "System/EventArgs.hpp"
+
+using System::EventHandler;
+using System::EventArgs;
+
+TEST(EventHandlerTests, DefaultCtor_Empty) {
+    EventHandler<EventArgs> h;
+    EXPECT_TRUE(h.Empty());
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, AddOne_SizeIsOne) {
+    EventHandler<EventArgs> h;
+    h += [](System::Object*, const EventArgs&) {};
+    EXPECT_EQ(h.Size(), 1u);
+}
+
+TEST(EventHandlerTests, Raise_SingleHandler_IsCalled) {
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 1);
+}
+
+TEST(EventHandlerTests, Raise_MultipleHandlers_AllCalled) {
+    EventHandler<EventArgs> h;
+    int a = 0, b = 0;
+    h += [&a](System::Object*, const EventArgs&) { ++a; };
+    h += [&b](System::Object*, const EventArgs&) { ++b; };
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 1);
+}
+
+TEST(EventHandlerTests, Raise_HandlersCalledInOrder) {
+    EventHandler<EventArgs> h;
+    std::vector<int> order;
+    h += [&order](System::Object*, const EventArgs&) { order.push_back(1); };
+    h += [&order](System::Object*, const EventArgs&) { order.push_back(2); };
+    h += [&order](System::Object*, const EventArgs&) { order.push_back(3); };
+    h.Raise(nullptr, EventArgs::Empty);
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(order[0], 1);
+    EXPECT_EQ(order[1], 2);
+    EXPECT_EQ(order[2], 3);
+}
+
+TEST(EventHandlerTests, Invoke_AliasForRaise) {
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    h.Invoke(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 1);
+}
+
+TEST(EventHandlerTests, Remove_ByToken_HandlerNotCalled) {
+    EventHandler<EventArgs> h;
+    int called = 0;
+    auto token = h.Add([&called](System::Object*, const EventArgs&) { ++called; });
+    h.Remove(token);
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 0);
+    EXPECT_TRUE(h.Empty());
+}
+
+TEST(EventHandlerTests, Remove_UnknownToken_NoEffect) {
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    h.Remove(9999); // no-op
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 1);
+}
+
+TEST(EventHandlerTests, Clear_RemovesAllHandlers) {
+    EventHandler<EventArgs> h;
+    h += [](System::Object*, const EventArgs&) {};
+    h += [](System::Object*, const EventArgs&) {};
+    h.Clear();
+    EXPECT_TRUE(h.Empty());
+    EXPECT_EQ(h.Size(), 0u);
+}
+
+TEST(EventHandlerTests, Raise_WithCustomEventArgs) {
+    struct CountArgs : public EventArgs { int count = 7; };
+    EventHandler<CountArgs> h;
+    int received = 0;
+    h += [&received](System::Object*, const CountArgs& e) { received = e.count; };
+    CountArgs args;
+    h.Raise(nullptr, args);
+    EXPECT_EQ(received, 7);
+}
+
+TEST(EventHandlerTests, Raise_Empty_DoesNotThrow) {
+    EventHandler<EventArgs> h;
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+}
