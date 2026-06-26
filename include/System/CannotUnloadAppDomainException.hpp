@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <exception>
 #include "System/SystemException.hpp"
 
 namespace System {
@@ -16,8 +17,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit CannotUnloadAppDomainException(const std::string& message) : SystemException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        CannotUnloadAppDomainException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        CannotUnloadAppDomainException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System
