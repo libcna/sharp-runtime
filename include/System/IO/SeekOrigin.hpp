@@ -11,11 +11,11 @@ namespace System::IO {
      * @note Status: Implemented
      */
     enum class SeekOrigin : int {
-        /// Seek from the beginning of the stream.
+        /** Seek from the beginning of the stream. */
         Begin   = 0,
-        /// Seek from the current position in the stream.
+        /** Seek from the current position in the stream. */
         Current = 1,
-        /// Seek from the end of the stream.
+        /** Seek from the end of the stream. */
         End     = 2
     };
 

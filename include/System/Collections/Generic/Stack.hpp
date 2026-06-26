@@ -22,15 +22,15 @@ namespace System::Collections::Generic {
         std::stack<T> stack_;
 
     public:
-        /// Default-constructs an empty Stack.
+        /** Default-constructs an empty Stack. */
         Stack() = default;
 
         /**
          * @brief Inserts an object at the top of the Stack.
          */
-        /// Pushes a copy of item onto the top of the Stack.
+        /** Pushes a copy of item onto the top of the Stack. */
         void Push(const T& item) { stack_.push(item); }
-        /// Pushes item by move onto the top of the Stack.
+        /** Pushes item by move onto the top of the Stack. */
         void Push(T&& item)      { stack_.push(std::move(item)); }
 
         /**
@@ -51,10 +51,10 @@ namespace System::Collections::Generic {
             return stack_.top();
         }
 
-        /// Gets the number of elements contained in the Stack.
+        /** Gets the number of elements contained in the Stack. */
         [[nodiscard]] int getCountProperty() const { return static_cast<int>(stack_.size()); }
 
-        /// Returns true if the Stack contains the specified element.
+        /** Returns true if the Stack contains the specified element. */
         [[nodiscard]] bool Contains(const T& item) const {
             std::stack<T> copy = stack_;
             while (!copy.empty()) {
@@ -64,10 +64,10 @@ namespace System::Collections::Generic {
             return false;
         }
 
-        /// Removes all objects from the Stack.
+        /** Removes all objects from the Stack. */
         void Clear() { while (!stack_.empty()) stack_.pop(); }
 
-        /// Copies the Stack elements to a new vector (top-first order).
+        /** Copies the Stack elements to a new vector (top-first order). */
         [[nodiscard]] std::vector<T> ToArray() const {
             std::vector<T> result;
             std::stack<T> copy = stack_;
@@ -78,7 +78,7 @@ namespace System::Collections::Generic {
             return result;
         }
 
-        /// Tries to remove and return the top object; returns false if empty.
+        /** Tries to remove and return the top object; returns false if empty. */
         bool TryPop(T& result) {
             if (stack_.empty()) return false;
             result = std::move(stack_.top());
@@ -86,7 +86,7 @@ namespace System::Collections::Generic {
             return true;
         }
 
-        /// Tries to return the top object without removing it; returns false if empty.
+        /** Tries to return the top object without removing it; returns false if empty. */
         bool TryPeek(T& result) const {
             if (stack_.empty()) return false;
             result = stack_.top();

@@ -17,11 +17,11 @@ namespace System::IO {
      */
     class EndOfStreamException : public IOException {
     public:
-        /// Initializes an EndOfStreamException with a default message.
+        /** Initializes an EndOfStreamException with a default message. */
         EndOfStreamException();
-        /// Initializes an EndOfStreamException with the specified C-string message.
+        /** Initializes an EndOfStreamException with the specified C-string message. */
         explicit EndOfStreamException(const char* message);
-        /// Initializes an EndOfStreamException with the specified message.
+        /** Initializes an EndOfStreamException with the specified message. */
         explicit EndOfStreamException(const std::string& message);
     };
 

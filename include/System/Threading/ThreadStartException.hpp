@@ -30,8 +30,8 @@ namespace System::Threading {
          * @param message The error message.
          * @param inner   The exception that caused this exception.
          */
-        ThreadStartException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        ThreadStartException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System::Threading

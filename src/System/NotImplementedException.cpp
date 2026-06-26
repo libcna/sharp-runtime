@@ -26,8 +26,8 @@ namespace System {
         : SystemException(message) {
     }
 
-    NotImplementedException::NotImplementedException(const std::string& message, const std::exception& inner)
-        : SystemException(message + " | inner: " + inner.what()) {
+    NotImplementedException::NotImplementedException(const std::string& message, std::exception_ptr inner)
+        : SystemException(message, std::move(inner)) {
     }
 
 } // namespace System

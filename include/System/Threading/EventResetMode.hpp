@@ -5,11 +5,11 @@
 
 namespace System::Threading {
 
-    /// Indicates whether an EventWaitHandle resets automatically or manually after being signalled.
+    /** Indicates whether an EventWaitHandle resets automatically or manually after being signalled. */
     enum class EventResetMode {
-        /// The event resets automatically after releasing a single waiting thread.
+        /** The event resets automatically after releasing a single waiting thread. */
         AutoReset   = 0,
-        /// The event must be reset manually.
+        /** The event must be reset manually. */
         ManualReset = 1,
     };
 

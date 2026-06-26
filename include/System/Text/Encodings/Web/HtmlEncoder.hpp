@@ -6,10 +6,10 @@
 
 namespace System::Text::Encodings::Web {
 
-    /// Encodes strings for safe embedding in HTML by escaping special characters.
+    /** Encodes strings for safe embedding in HTML by escaping special characters. */
     class HtmlEncoder {
     public:
-        /// HTML-encodes the entire string (& < > " ' are escaped).
+        /** HTML-encodes the entire string (& < > " ' are escaped). */
         static std::string Encode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
@@ -26,13 +26,13 @@ namespace System::Text::Encodings::Web {
             return out;
         }
 
-        /// Returns the default HtmlEncoder singleton.
+        /** Returns the default HtmlEncoder singleton. */
         static const HtmlEncoder& Default() {
             static HtmlEncoder instance;
             return instance;
         }
 
-        /// HTML-encodes a substring defined by startIndex and characterCount.
+        /** HTML-encodes a substring defined by startIndex and characterCount. */
         std::string Encode(const std::string& value, std::size_t startIndex, int characterCount) const {
             return Encode(value.substr(startIndex, static_cast<std::size_t>(characterCount)));
         }

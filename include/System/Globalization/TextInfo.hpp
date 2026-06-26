@@ -12,7 +12,7 @@ namespace System::Globalization {
 using SharpRuntime::charcs;
 using SharpRuntime::intcs;
 
-/// <summary>Defines text properties and behaviors, such as casing, that are specific to a writing system.</summary>
+/** <summary>Defines text properties and behaviors, such as casing, that are specific to a writing system.</summary> */
 class TextInfo {
 public:
     explicit TextInfo(const std::string& cultureName = "en-US") : _cultureName(cultureName) {}
@@ -23,13 +23,13 @@ public:
     [[nodiscard]] std::string getListSeparatorProperty() const { return _listSeparator; }
     void setListSeparatorProperty(const std::string& value) { _listSeparator = value; }
 
-    /// <summary>Converts a character to lowercase.</summary>
+    /** <summary>Converts a character to lowercase.</summary> */
     charcs ToLower(charcs c) const {
         if (c < 128) return static_cast<charcs>(std::tolower(static_cast<int>(c)));
         return static_cast<charcs>(std::towlower(static_cast<wint_t>(c)));
     }
 
-    /// <summary>Converts a string to lowercase.</summary>
+    /** <summary>Converts a string to lowercase.</summary> */
     std::u16string ToLower(const std::u16string& str) const {
         std::u16string result = str;
         for (auto& c : result) c = ToLower(c);
@@ -43,13 +43,13 @@ public:
         return result;
     }
 
-    /// <summary>Converts a character to uppercase.</summary>
+    /** <summary>Converts a character to uppercase.</summary> */
     charcs ToUpper(charcs c) const {
         if (c < 128) return static_cast<charcs>(std::toupper(static_cast<int>(c)));
         return static_cast<charcs>(std::towupper(static_cast<wint_t>(c)));
     }
 
-    /// <summary>Converts a string to uppercase.</summary>
+    /** <summary>Converts a string to uppercase.</summary> */
     std::u16string ToUpper(const std::u16string& str) const {
         std::u16string result = str;
         for (auto& c : result) c = ToUpper(c);
@@ -63,7 +63,7 @@ public:
         return result;
     }
 
-    /// <summary>Converts a string to title case (each word starts with uppercase).</summary>
+    /** <summary>Converts a string to title case (each word starts with uppercase).</summary> */
     std::string ToTitleCase(const std::string& str) const {
         std::string result = str;
         bool newWord = true;

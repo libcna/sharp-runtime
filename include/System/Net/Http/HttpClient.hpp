@@ -15,10 +15,12 @@
 
 namespace System::Net::Http {
 
-/// Sends HTTP/1.1 requests and receives HTTP responses.
-///
-/// Supports HTTP (plain TCP, port 80 by default). HTTPS is not currently supported.
-/// On Emscripten, all methods throw System::PlatformNotSupportedException.
+/**
+ * Sends HTTP/1.1 requests and receives HTTP responses.
+ * 
+ * Supports HTTP (plain TCP, port 80 by default). HTTPS is not currently supported.
+ * On Emscripten, all methods throw System::PlatformNotSupportedException.
+ */
 class HttpClient {
 public:
     HttpClient();
@@ -30,20 +32,20 @@ public:
 
     // ---- Synchronous API ----
 
-    /// Sends the given request and returns the response.
+    /** Sends the given request and returns the response. */
     std::shared_ptr<HttpResponseMessage> Send(std::shared_ptr<HttpRequestMessage> request);
 
-    /// Sends a GET request to url.
+    /** Sends a GET request to url. */
     std::shared_ptr<HttpResponseMessage> Get(const std::string& url);
 
-    /// Sends a POST request with the given content.
+    /** Sends a POST request with the given content. */
     std::shared_ptr<HttpResponseMessage> Post(const std::string& url,
                                               std::shared_ptr<HttpContent> content);
 
-    /// GET and returns the response body as a UTF-8 string. Throws on non-2xx.
+    /** GET and returns the response body as a UTF-8 string. Throws on non-2xx. */
     std::string GetString(const std::string& url);
 
-    /// GET and returns the response body as raw bytes. Throws on non-2xx.
+    /** GET and returns the response body as raw bytes. Throws on non-2xx. */
     std::vector<SharpRuntime::bytecs> GetByteArray(const std::string& url);
 
     // ---- Async API (backed by TaskT / std::async on POSIX+Windows; throws on Emscripten) ----
@@ -80,8 +82,10 @@ public:
         std::string path;
     };
 
-    /// Parses an absolute HTTP URL into its components.
-    /// Throws std::invalid_argument for malformed or non-HTTP URLs.
+    /**
+     * Parses an absolute HTTP URL into its components.
+     * Throws std::invalid_argument for malformed or non-HTTP URLs.
+     */
     static ParsedUrl parseUrl(const std::string& url);
 
 private:

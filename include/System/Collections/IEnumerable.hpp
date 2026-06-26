@@ -17,7 +17,7 @@ namespace System::Collections
     public:
         virtual ~IEnumerable() = default;
 
-        /// Returns an enumerator that iterates through the collection.
+        /** Returns an enumerator that iterates through the collection. */
         [[nodiscard]] virtual IEnumerator* GetEnumerator() = 0;
     };
 }

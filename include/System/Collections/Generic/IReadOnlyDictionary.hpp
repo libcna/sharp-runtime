@@ -17,13 +17,13 @@ namespace System::Collections::Generic {
     template<typename TKey, typename TValue>
     class IReadOnlyDictionary : public IReadOnlyCollection<KeyValuePair<TKey,TValue>> {
     public:
-        /// Destroys the dictionary.
+        /** Destroys the dictionary. */
         virtual ~IReadOnlyDictionary() = default;
-        /// Returns a const reference to the value associated with the given key.
+        /** Returns a const reference to the value associated with the given key. */
         [[nodiscard]] virtual const TValue& operator[](const TKey& key) const = 0;
-        /// Returns true if the dictionary contains the specified key.
+        /** Returns true if the dictionary contains the specified key. */
         [[nodiscard]] virtual bool ContainsKey(const TKey& key) const = 0;
-        /// Gets the value associated with the specified key; returns true if found.
+        /** Gets the value associated with the specified key; returns true if found. */
         [[nodiscard]] virtual bool TryGetValue(const TKey& key, TValue& value) const = 0;
     };
 

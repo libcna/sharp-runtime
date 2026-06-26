@@ -19,8 +19,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit UriFormatException(const std::string& message) : FormatException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        UriFormatException(const std::string& message, const std::exception& inner)
-            : FormatException(message + " | inner: " + inner.what()) {}
+        UriFormatException(const std::string& message, std::exception_ptr inner)
+            : FormatException(message, std::move(inner)) {}
     };
 
 } // namespace System

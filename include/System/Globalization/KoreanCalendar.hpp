@@ -6,10 +6,12 @@
 
 namespace System::Globalization {
 
-/// <summary>
-/// Represents the Korean calendar. The year is Gregorian year + 2333.
-/// Gregorian 2000/01/01 = Korean 4333/01/01.
-/// </summary>
+/**
+ * <summary>
+ * Represents the Korean calendar. The year is Gregorian year + 2333.
+ * Gregorian 2000/01/01 = Korean 4333/01/01.
+ * </summary>
+ */
 class KoreanCalendar : public Calendar {
 public:
     static constexpr int KoreanEra = 1;
@@ -17,7 +19,7 @@ public:
     [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return KoreanEra; }
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
-    /// Returns the Korean year (Gregorian year + 2333).
+    /** Returns the Korean year (Gregorian year + 2333). */
     [[nodiscard]] int GetYear(const System::DateTime& time) const override {
         return time.getYearProperty() + 2333;
     }

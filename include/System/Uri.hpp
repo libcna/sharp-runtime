@@ -40,10 +40,10 @@ namespace System {
         std::string fragment_; ///< includes leading '#'
         bool        isAbsoluteUri_ = true;
 
-        /// Returns the well-known default port for the given scheme, or -1.
+        /** Returns the well-known default port for the given scheme, or -1. */
         static int defaultPortForScheme(const std::string& scheme);
 
-        /// Parses @p uriString into component fields. Called by all constructors.
+        /** Parses @p uriString into component fields. Called by all constructors. */
         void parse(const std::string& uriString);
 
     public:
@@ -70,34 +70,34 @@ namespace System {
          */
         Uri(const Uri& baseUri, const std::string& relativeUri);
 
-        /// @brief Returns the entire URI string (the value passed to the constructor).
+        /** @brief Returns the entire URI string (the value passed to the constructor). */
         [[nodiscard]] const std::string& getAbsoluteUriProperty()  const;
 
-        /// @brief Returns the scheme (e.g. "https"), lower-case as parsed.
+        /** @brief Returns the scheme (e.g. "https"), lower-case as parsed. */
         [[nodiscard]] const std::string& getSchemeProperty()        const;
 
-        /// @brief Returns the host name or IP address (without port).
+        /** @brief Returns the host name or IP address (without port). */
         [[nodiscard]] const std::string& getHostProperty()          const;
 
-        /// @brief Returns the port number, or the scheme default, or -1 if none.
+        /** @brief Returns the port number, or the scheme default, or -1 if none. */
         [[nodiscard]] int                getPortProperty()           const;
 
-        /// @brief Returns the absolute path component (starting with '/').
+        /** @brief Returns the absolute path component (starting with '/'). */
         [[nodiscard]] const std::string& getAbsolutePathProperty()  const;
 
-        /// @brief Returns the query string including the leading '?', or empty.
+        /** @brief Returns the query string including the leading '?', or empty. */
         [[nodiscard]] const std::string& getQueryProperty()         const;
 
-        /// @brief Returns the fragment including the leading '#', or empty.
+        /** @brief Returns the fragment including the leading '#', or empty. */
         [[nodiscard]] const std::string& getFragmentProperty()      const;
 
-        /// @brief Returns the user-info component (before '@'), or empty.
+        /** @brief Returns the user-info component (before '@'), or empty. */
         [[nodiscard]] const std::string& getUserInfoProperty()       const;
 
-        /// @brief Returns @c true if this URI is absolute.
+        /** @brief Returns @c true if this URI is absolute. */
         [[nodiscard]] bool               getIsAbsoluteUriProperty() const;
 
-        /// @brief Returns the path and query concatenated.
+        /** @brief Returns the path and query concatenated. */
         [[nodiscard]] std::string getPathAndQueryProperty() const;
 
         /**
@@ -106,10 +106,10 @@ namespace System {
          */
         [[nodiscard]] std::string getAuthorityProperty() const;
 
-        /// @brief Returns @c true if the host is localhost/127.0.0.1/::1.
+        /** @brief Returns @c true if the host is localhost/127.0.0.1/::1. */
         [[nodiscard]] bool getIsLoopbackProperty() const;
 
-        /// @brief Returns the original URI string.
+        /** @brief Returns the original URI string. */
         [[nodiscard]] std::string ToString() const;
 
         bool operator==(const Uri& other) const;

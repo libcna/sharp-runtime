@@ -5,23 +5,23 @@
 
 namespace System::Text::Json {
 
-    /// Specifies the type of a JSON value.
+    /** Specifies the type of a JSON value. */
     enum class JsonValueKind {
-        /// No value has been set.
+        /** No value has been set. */
         Undefined = 0,
-        /// A JSON object (key-value pairs).
+        /** A JSON object (key-value pairs). */
         Object    = 1,
-        /// A JSON array.
+        /** A JSON array. */
         Array     = 2,
-        /// A JSON string.
+        /** A JSON string. */
         String    = 3,
-        /// A JSON number.
+        /** A JSON number. */
         Number    = 4,
-        /// The JSON literal true.
+        /** The JSON literal true. */
         True      = 5,
-        /// The JSON literal false.
+        /** The JSON literal false. */
         False     = 6,
-        /// The JSON literal null.
+        /** The JSON literal null. */
         Null      = 7,
     };
 

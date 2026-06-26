@@ -22,7 +22,7 @@ namespace System::Linq {
      * @note Status: DONE
      */
 
-    /// @brief Returns elements that satisfy @p predicate.
+    /** @brief Returns elements that satisfy @p predicate. */
     template<typename T>
     std::vector<T> Where(const std::vector<T>& source,
                          std::function<bool(const T&)> predicate)
@@ -33,7 +33,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Projects each element using @p selector.
+    /** @brief Projects each element using @p selector. */
     template<typename T, typename R>
     std::vector<R> Select(const std::vector<T>& source,
                           std::function<R(const T&)> selector)
@@ -45,7 +45,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns the first element matching @p predicate, or default T{} if none.
+    /** @brief Returns the first element matching @p predicate, or default T{} if none. */
     template<typename T>
     T FirstOrDefault(const std::vector<T>& source,
                      std::function<bool(const T&)> predicate)
@@ -55,14 +55,14 @@ namespace System::Linq {
         return T{};
     }
 
-    /// @brief Returns the first element, or default T{} if the sequence is empty.
+    /** @brief Returns the first element, or default T{} if the sequence is empty. */
     template<typename T>
     T FirstOrDefault(const std::vector<T>& source)
     {
         return source.empty() ? T{} : source.front();
     }
 
-    /// @brief Returns the first element matching @p predicate; throws if none found.
+    /** @brief Returns the first element matching @p predicate; throws if none found. */
     template<typename T>
     T First(const std::vector<T>& source,
             std::function<bool(const T&)> predicate)
@@ -72,7 +72,7 @@ namespace System::Linq {
         throw std::invalid_argument("Sequence contains no matching element.");
     }
 
-    /// @brief Returns the first element; throws if the sequence is empty.
+    /** @brief Returns the first element; throws if the sequence is empty. */
     template<typename T>
     T First(const std::vector<T>& source)
     {
@@ -80,7 +80,7 @@ namespace System::Linq {
         return source.front();
     }
 
-    /// @brief Returns the last element matching @p predicate, or default T{} if none.
+    /** @brief Returns the last element matching @p predicate, or default T{} if none. */
     template<typename T>
     T LastOrDefault(const std::vector<T>& source,
                     std::function<bool(const T&)> predicate)
@@ -93,14 +93,14 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns the last element, or default T{} if empty.
+    /** @brief Returns the last element, or default T{} if empty. */
     template<typename T>
     T LastOrDefault(const std::vector<T>& source)
     {
         return source.empty() ? T{} : source.back();
     }
 
-    /// @brief Returns true if any element satisfies @p predicate.
+    /** @brief Returns true if any element satisfies @p predicate. */
     template<typename T>
     bool Any(const std::vector<T>& source,
              std::function<bool(const T&)> predicate)
@@ -110,11 +110,11 @@ namespace System::Linq {
         return false;
     }
 
-    /// @brief Returns true if the sequence contains at least one element.
+    /** @brief Returns true if the sequence contains at least one element. */
     template<typename T>
     bool Any(const std::vector<T>& source) { return !source.empty(); }
 
-    /// @brief Returns true if all elements satisfy @p predicate (true for empty sequences).
+    /** @brief Returns true if all elements satisfy @p predicate (true for empty sequences). */
     template<typename T>
     bool All(const std::vector<T>& source,
              std::function<bool(const T&)> predicate)
@@ -124,7 +124,7 @@ namespace System::Linq {
         return true;
     }
 
-    /// @brief Returns the number of elements satisfying @p predicate.
+    /** @brief Returns the number of elements satisfying @p predicate. */
     template<typename T>
     intcs Count(const std::vector<T>& source,
                 std::function<bool(const T&)> predicate)
@@ -135,18 +135,18 @@ namespace System::Linq {
         return n;
     }
 
-    /// @brief Returns the total number of elements.
+    /** @brief Returns the total number of elements. */
     template<typename T>
     intcs Count(const std::vector<T>& source)
     {
         return static_cast<intcs>(source.size());
     }
 
-    /// @brief Returns the input sequence as a vector (identity; mirrors .NET ToList()).
+    /** @brief Returns the input sequence as a vector (identity; mirrors .NET ToList()). */
     template<typename T>
     std::vector<T> ToList(const std::vector<T>& source) { return source; }
 
-    /// @brief Returns the sum of all elements (requires operator+).
+    /** @brief Returns the sum of all elements (requires operator+). */
     template<typename T>
     T Sum(const std::vector<T>& source)
     {
@@ -155,7 +155,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns the sum of a projected value (requires operator+).
+    /** @brief Returns the sum of a projected value (requires operator+). */
     template<typename T, typename R>
     R Sum(const std::vector<T>& source, std::function<R(const T&)> selector)
     {
@@ -164,7 +164,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns the minimum element (requires operator<).
+    /** @brief Returns the minimum element (requires operator<). */
     template<typename T>
     T Min(const std::vector<T>& source)
     {
@@ -172,7 +172,7 @@ namespace System::Linq {
         return *std::min_element(source.begin(), source.end());
     }
 
-    /// @brief Returns the maximum element (requires operator<).
+    /** @brief Returns the maximum element (requires operator<). */
     template<typename T>
     T Max(const std::vector<T>& source)
     {
@@ -180,7 +180,7 @@ namespace System::Linq {
         return *std::max_element(source.begin(), source.end());
     }
 
-    /// @brief Returns elements sorted ascending by @p keySelector.
+    /** @brief Returns elements sorted ascending by @p keySelector. */
     template<typename T, typename Key>
     std::vector<T> OrderBy(const std::vector<T>& source,
                            std::function<Key(const T&)> keySelector)
@@ -191,7 +191,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns elements sorted descending by @p keySelector.
+    /** @brief Returns elements sorted descending by @p keySelector. */
     template<typename T, typename Key>
     std::vector<T> OrderByDescending(const std::vector<T>& source,
                                      std::function<Key(const T&)> keySelector)
@@ -202,7 +202,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns distinct elements (preserves first occurrence; requires operator==).
+    /** @brief Returns distinct elements (preserves first occurrence; requires operator==). */
     template<typename T>
     std::vector<T> Distinct(const std::vector<T>& source)
     {
@@ -216,7 +216,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns the elements in reverse order.
+    /** @brief Returns the elements in reverse order. */
     template<typename T>
     std::vector<T> Reverse(const std::vector<T>& source)
     {
@@ -224,7 +224,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Skips the first @p count elements and returns the rest.
+    /** @brief Skips the first @p count elements and returns the rest. */
     template<typename T>
     std::vector<T> Skip(const std::vector<T>& source, intcs count)
     {
@@ -233,7 +233,7 @@ namespace System::Linq {
         return std::vector<T>(source.begin() + count, source.end());
     }
 
-    /// @brief Returns the first @p count elements.
+    /** @brief Returns the first @p count elements. */
     template<typename T>
     std::vector<T> Take(const std::vector<T>& source, intcs count)
     {
@@ -242,7 +242,7 @@ namespace System::Linq {
         return std::vector<T>(source.begin(), source.begin() + n);
     }
 
-    /// @brief Concatenates two sequences.
+    /** @brief Concatenates two sequences. */
     template<typename T>
     std::vector<T> Concat(const std::vector<T>& first, const std::vector<T>& second)
     {
@@ -251,7 +251,7 @@ namespace System::Linq {
         return result;
     }
 
-    /// @brief Returns true if @p source contains @p value (requires operator==).
+    /** @brief Returns true if @p source contains @p value (requires operator==). */
     template<typename T>
     bool Contains(const std::vector<T>& source, const T& value)
     {

@@ -28,7 +28,7 @@ namespace System {
          *
          * C++ counterpart of .NET NullReferenceException(string, Exception).
          */
-        NullReferenceException(const std::string& message, const std::exception& innerException);
+        NullReferenceException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System

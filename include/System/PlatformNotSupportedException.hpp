@@ -18,8 +18,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit PlatformNotSupportedException(const std::string& message) : NotSupportedException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        PlatformNotSupportedException(const std::string& message, const std::exception& inner)
-            : NotSupportedException(message + " | inner: " + inner.what()) {}
+        PlatformNotSupportedException(const std::string& message, std::exception_ptr inner)
+            : NotSupportedException(message, std::move(inner)) {}
     };
 
 } // namespace System

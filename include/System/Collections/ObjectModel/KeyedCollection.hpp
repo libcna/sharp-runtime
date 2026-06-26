@@ -22,7 +22,7 @@ namespace System::Collections::ObjectModel {
         /** @brief Extracts the key from the given item. Must be implemented by subclass. */
         virtual TKey GetKeyForItem(const TItem& item) const = 0;
 
-        /// Inserts item at index and rebuilds the key index.
+        /** Inserts item at index and rebuilds the key index. */
         void InsertItem(int index, const TItem& item) override {
             TKey key = GetKeyForItem(item);
             keyIndex_[key] = index;
@@ -31,7 +31,7 @@ namespace System::Collections::ObjectModel {
             rebuildIndex();
         }
 
-        /// Removes the item at index and rebuilds the key index.
+        /** Removes the item at index and rebuilds the key index. */
         void RemoveItem(int index) override {
             TKey key = GetKeyForItem(this->items_[index]);
             keyIndex_.erase(key);
@@ -39,20 +39,20 @@ namespace System::Collections::ObjectModel {
             rebuildIndex();
         }
 
-        /// Clears all items and the key index.
+        /** Clears all items and the key index. */
         void ClearItems() override {
             keyIndex_.clear();
             Collection<TItem>::ClearItems();
         }
 
     public:
-        /// Default-constructs an empty KeyedCollection.
+        /** Default-constructs an empty KeyedCollection. */
         KeyedCollection() = default;
 
-        /// Returns true if the collection contains an item with the given key.
+        /** Returns true if the collection contains an item with the given key. */
         [[nodiscard]] bool Contains(const TKey& key) const { return keyIndex_.count(key) > 0; }
 
-        /// Removes the item with the given key; returns true if found and removed.
+        /** Removes the item with the given key; returns true if found and removed. */
         bool Remove(const TKey& key) {
             auto it = keyIndex_.find(key);
             if (it == keyIndex_.end()) return false;
@@ -60,12 +60,12 @@ namespace System::Collections::ObjectModel {
             return true;
         }
 
-        /// Returns a const reference to the item with the given key.
+        /** Returns a const reference to the item with the given key. */
         [[nodiscard]] const TItem& operator[](const TKey& key) const {
             return this->items_.at(static_cast<size_t>(keyIndex_.at(key)));
         }
 
-        /// Returns a reference to the item with the given key.
+        /** Returns a reference to the item with the given key. */
         TItem& operator[](const TKey& key) {
             return this->items_.at(static_cast<size_t>(keyIndex_.at(key)));
         }

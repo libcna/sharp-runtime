@@ -11,8 +11,8 @@ namespace System {
     public:
         TimeZoneNotFoundException() : Exception("The time zone could not be found.") {}
         explicit TimeZoneNotFoundException(const std::string& message) : Exception(message) {}
-        TimeZoneNotFoundException(const std::string& message, const std::exception& inner)
-            : Exception(message + " | inner: " + inner.what()) {}
+        TimeZoneNotFoundException(const std::string& message, std::exception_ptr inner)
+            : Exception(message, std::move(inner)) {}
     };
 
 } // namespace System

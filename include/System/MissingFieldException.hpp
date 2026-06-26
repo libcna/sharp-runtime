@@ -22,8 +22,8 @@ namespace System {
         MissingFieldException(const std::string& className, const std::string& fieldName)
             : MissingMemberException("Field not found: " + className + "." + fieldName) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        MissingFieldException(const std::string& message, const std::exception& innerException)
-            : MissingMemberException(message + " | inner: " + innerException.what()) {}
+        MissingFieldException(const std::string& message, std::exception_ptr innerException)
+            : MissingMemberException(message, std::move(innerException)) {}
     };
 
 } // namespace System

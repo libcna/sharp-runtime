@@ -8,53 +8,53 @@
 
 namespace System::IO {
 
-    /// Specifies the type of a drive.
+    /** Specifies the type of a drive. */
     enum class DriveType {
-        /// The type of drive is not known.
+        /** The type of drive is not known. */
         Unknown         = 0,
-        /// The drive does not have a root directory.
+        /** The drive does not have a root directory. */
         NoRootDirectory = 1,
-        /// The drive is a removable storage device such as a USB flash drive.
+        /** The drive is a removable storage device such as a USB flash drive. */
         Removable       = 2,
-        /// The drive is a fixed disk.
+        /** The drive is a fixed disk. */
         Fixed           = 3,
-        /// The drive is a network drive.
+        /** The drive is a network drive. */
         Network         = 4,
-        /// The drive is an optical disc device.
+        /** The drive is an optical disc device. */
         CDRom           = 5,
-        /// The drive is a RAM disk.
+        /** The drive is a RAM disk. */
         Ram             = 6,
     };
 
-    /// Provides access to information on a drive.
+    /** Provides access to information on a drive. */
     class DriveInfo {
         std::string name_;
 
     public:
-        /// Constructs a DriveInfo for the specified drive name.
+        /** Constructs a DriveInfo for the specified drive name. */
         explicit DriveInfo(const std::string& driveName) : name_(driveName) {}
 
-        /// Returns the name of the drive.
+        /** Returns the name of the drive. */
         [[nodiscard]] const std::string& getNameProperty() const { return name_; }
-        /// Returns true if the drive is ready (root directory exists).
+        /** Returns true if the drive is ready (root directory exists). */
         [[nodiscard]] bool               getIsReadyProperty()    const { return Directory::Exists(name_); }
-        /// Returns the drive type (always Fixed in this implementation).
+        /** Returns the drive type (always Fixed in this implementation). */
         [[nodiscard]] DriveType          getDriveTypeProperty()  const { return DriveType::Fixed; }
-        /// Returns the amount of available free space in bytes (stub returns 0).
+        /** Returns the amount of available free space in bytes (stub returns 0). */
         [[nodiscard]] long long          getAvailableFreeSpaceProperty()  const { return 0LL; }
-        /// Returns the total amount of free space in bytes (stub returns 0).
+        /** Returns the total amount of free space in bytes (stub returns 0). */
         [[nodiscard]] long long          getTotalFreeSpaceProperty()      const { return 0LL; }
-        /// Returns the total size of the drive in bytes (stub returns 0).
+        /** Returns the total size of the drive in bytes (stub returns 0). */
         [[nodiscard]] long long          getTotalSizeProperty()           const { return 0LL; }
-        /// Returns the volume label of the drive.
+        /** Returns the volume label of the drive. */
         [[nodiscard]] std::string        getVolumeLabel()                 const { return name_; }
-        /// Returns the name of the file system, such as NTFS or FAT32 (stub returns "Unknown").
+        /** Returns the name of the file system, such as NTFS or FAT32 (stub returns "Unknown"). */
         [[nodiscard]] std::string        getDriveFormatProperty()         const { return "Unknown"; }
 
-        /// Returns the drive name as a string.
+        /** Returns the drive name as a string. */
         [[nodiscard]] std::string ToString() const { return name_; }
 
-        /// Returns a collection of DriveInfo objects for all logical drives on the computer.
+        /** Returns a collection of DriveInfo objects for all logical drives on the computer. */
         static std::vector<DriveInfo> GetDrives();
     };
 

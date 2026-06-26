@@ -18,10 +18,10 @@ namespace System::Collections::Generic {
     template<typename T>
     class IReadOnlyList : public IReadOnlyCollection<T> {
     public:
-        /// Destroys the list.
+        /** Destroys the list. */
         virtual ~IReadOnlyList() = default;
 
-        /// Gets the element at the specified zero-based index.
+        /** Gets the element at the specified zero-based index. */
         [[nodiscard]] virtual const T& operator[](int index) const = 0;
     };
 

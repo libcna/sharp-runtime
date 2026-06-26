@@ -6,22 +6,22 @@
 
 namespace System::Globalization {
 
-/// <summary>Thrown when a culture identifier is not available on the current platform.</summary>
+/** <summary>Thrown when a culture identifier is not available on the current platform.</summary> */
 class CultureNotFoundException : public System::ArgumentException {
     std::string invalidCultureName_;
 public:
-    /// Constructs with a default "Culture is not supported." message.
+    /** Constructs with a default "Culture is not supported." message. */
     CultureNotFoundException() : ArgumentException("Culture is not supported.") {}
-    /// Constructs with a custom @p message.
+    /** Constructs with a custom @p message. */
     explicit CultureNotFoundException(const std::string& message) : ArgumentException(message) {}
-    /// Constructs with @p message and the @p invalidCultureName that caused the exception.
+    /** Constructs with @p message and the @p invalidCultureName that caused the exception. */
     CultureNotFoundException(const std::string& message, const std::string& invalidCultureName)
         : ArgumentException(message, invalidCultureName), invalidCultureName_(invalidCultureName) {}
-    /// Constructs with @p message and wraps an @p inner exception's what() text.
-    CultureNotFoundException(const std::string& message, const std::exception& inner)
-        : ArgumentException(message + " | inner: " + inner.what()) {}
+    /** Constructs with @p message and wraps an @p inner exception's what() text. */
+    CultureNotFoundException(const std::string& message, std::exception_ptr inner)
+        : ArgumentException(message, std::move(inner)) {}
 
-    /// @return The culture name that could not be found, or empty if not set.
+    /** @return The culture name that could not be found, or empty if not set. */
     [[nodiscard]] const std::string& getInvalidCultureNameProperty() const { return invalidCultureName_; }
 };
 

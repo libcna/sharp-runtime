@@ -12,7 +12,7 @@
 
 namespace System::Xml::Linq {
 
-    /// Represents an XML element with a name, optional text value, attributes, and child elements.
+    /** Represents an XML element with a name, optional text value, attributes, and child elements. */
     class XElement {
         XName name_;
         std::string value_;
@@ -20,65 +20,65 @@ namespace System::Xml::Linq {
         std::vector<std::shared_ptr<XElement>> children_;
 
     public:
-        /// Constructs an empty element with the given XName.
+        /** Constructs an empty element with the given XName. */
         explicit XElement(const XName& name) : name_(name) {}
 
-        /// Constructs an empty element with a plain string name.
+        /** Constructs an empty element with a plain string name. */
         explicit XElement(const std::string& name) : name_(name) {}
 
-        /// Constructs an element with an XName and an initial text value.
+        /** Constructs an element with an XName and an initial text value. */
         XElement(const XName& name, const std::string& value) : name_(name), value_(value) {}
 
-        /// @return The qualified name of the element.
+        /** @return The qualified name of the element. */
         [[nodiscard]] const XName&       getNameProperty()  const { return name_; }
 
-        /// @return The text content of the element.
+        /** @return The text content of the element. */
         [[nodiscard]] const std::string& getValueProperty() const { return value_; }
 
-        /// Sets the text content of the element.
+        /** Sets the text content of the element. */
         void setValueProperty(const std::string& v)               { value_ = v; }
 
         // Attributes
 
-        /// Appends an attribute to this element.
+        /** Appends an attribute to this element. */
         void Add(std::shared_ptr<XAttribute> attr) { attributes_.push_back(std::move(attr)); }
 
-        /// Appends a child element to this element.
+        /** Appends a child element to this element. */
         void Add(std::shared_ptr<XElement> child)  { children_.push_back(std::move(child)); }
 
-        /// Returns the first attribute matching @p name, or nullptr.
+        /** Returns the first attribute matching @p name, or nullptr. */
         [[nodiscard]] std::shared_ptr<XAttribute> Attribute(const XName& name) const {
             for (auto& a : attributes_)
                 if (a->getNameProperty() == name) return a;
             return nullptr;
         }
 
-        /// Returns the first attribute matching the plain string @p name, or nullptr.
+        /** Returns the first attribute matching the plain string @p name, or nullptr. */
         [[nodiscard]] std::shared_ptr<XAttribute> Attribute(const std::string& name) const {
             return Attribute(XName(name));
         }
 
-        /// @return All attributes of this element.
+        /** @return All attributes of this element. */
         [[nodiscard]] const std::vector<std::shared_ptr<XAttribute>>& getAttributesProperty() const { return attributes_; }
 
         // Children
 
-        /// Returns the first direct child element matching @p name, or nullptr.
+        /** Returns the first direct child element matching @p name, or nullptr. */
         [[nodiscard]] std::shared_ptr<XElement> Element(const XName& name) const {
             for (auto& c : children_)
                 if (c->getNameProperty() == name) return c;
             return nullptr;
         }
 
-        /// Returns the first direct child element matching the plain string @p name, or nullptr.
+        /** Returns the first direct child element matching the plain string @p name, or nullptr. */
         [[nodiscard]] std::shared_ptr<XElement> Element(const std::string& name) const {
             return Element(XName(name));
         }
 
-        /// @return All direct child elements.
+        /** @return All direct child elements. */
         [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements() const { return children_; }
 
-        /// Returns all direct child elements whose name matches @p name.
+        /** Returns all direct child elements whose name matches @p name. */
         [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements(const XName& name) const {
             std::vector<std::shared_ptr<XElement>> result;
             for (auto& c : children_)
@@ -86,12 +86,12 @@ namespace System::Xml::Linq {
             return result;
         }
 
-        /// Returns all direct child elements whose name matches the plain string @p name.
+        /** Returns all direct child elements whose name matches the plain string @p name. */
         [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements(const std::string& name) const {
             return Elements(XName(name));
         }
 
-        /// Returns all descendant elements (recursive) whose name matches @p name.
+        /** Returns all descendant elements (recursive) whose name matches @p name. */
         [[nodiscard]] std::vector<std::shared_ptr<XElement>> Descendants(const XName& name) const {
             std::vector<std::shared_ptr<XElement>> result;
             for (auto& c : children_) {
@@ -102,23 +102,27 @@ namespace System::Xml::Linq {
             return result;
         }
 
-        /// Returns the value of the attribute named @p name, or std::nullopt if absent.
+        /** Returns the value of the attribute named @p name, or std::nullopt if absent. */
         [[nodiscard]] std::optional<std::string> getAttributeValue(const std::string& name) const {
             auto a = Attribute(name);
             if (a) return a->getValueProperty();
             return std::nullopt;
         }
 
-        /// Serialises the element to a string.
-        /// @param indent If true, apply indentation.
+        /**
+         * Serialises the element to a string.
+         * @param indent If true, apply indentation.
+         */
         [[nodiscard]] std::string ToString(bool indent = false) const {
             std::ostringstream oss;
             writeXml(oss, 0, indent);
             return oss.str();
         }
 
-        /// Parses XML text into an XElement (stub — requires XML parser backend).
-        /// @param xml The XML source text (currently ignored).
+        /**
+         * Parses XML text into an XElement (stub — requires XML parser backend).
+         * @param xml The XML source text (currently ignored).
+         */
         static std::shared_ptr<XElement> Parse(const std::string& /*xml*/) {
             // Stub — requires XML parser backend (tinyxml2/pugixml)
             return std::make_shared<XElement>("root");

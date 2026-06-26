@@ -11,7 +11,7 @@
 
 namespace System::Net::Http {
 
-/// Represents an HTTP response, including status code, headers, and body content.
+/** Represents an HTTP response, including status code, headers, and body content. */
 class HttpResponseMessage {
     System::Net::HttpStatusCode                    statusCode_;
     std::string                                    reasonPhrase_;
@@ -31,13 +31,13 @@ public:
     [[nodiscard]] std::shared_ptr<HttpContent> getContentProperty() const { return content_; }
     void setContentProperty(std::shared_ptr<HttpContent> v)               { content_ = std::move(v); }
 
-    /// True when StatusCode is in the 200–299 range.
+    /** True when StatusCode is in the 200–299 range. */
     [[nodiscard]] bool getIsSuccessStatusCodeProperty() const {
         int c = static_cast<int>(statusCode_);
         return c >= 200 && c < 300;
     }
 
-    /// Throws std::runtime_error if the response indicates failure.
+    /** Throws std::runtime_error if the response indicates failure. */
     void EnsureSuccessStatusCode() const {
         if (!getIsSuccessStatusCodeProperty())
             throw std::runtime_error(

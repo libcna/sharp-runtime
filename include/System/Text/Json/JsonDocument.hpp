@@ -10,7 +10,7 @@
 
 namespace System::Text::Json {
 
-    /// Represents a parsed JSON document providing read-only access via a root JsonElement.
+    /** Represents a parsed JSON document providing read-only access via a root JsonElement. */
     class JsonDocument : public System::IDisposable {
         std::shared_ptr<JsonElement> root_;
         bool disposed_ = false;
@@ -48,22 +48,22 @@ namespace System::Text::Json {
     public:
         ~JsonDocument() override = default;
 
-        /// Releases the root element and marks the document as disposed.
+        /** Releases the root element and marks the document as disposed. */
         void Dispose() override { disposed_ = true; root_.reset(); }
 
-        /// Gets the root JsonElement of this document.
+        /** Gets the root JsonElement of this document. */
         [[nodiscard]] const JsonElement& getRootElementProperty() const {
             if (!root_) throw std::runtime_error("Document disposed.");
             return *root_;
         }
 
-        /// Parses a JSON string and returns a JsonDocument; throws on invalid input.
+        /** Parses a JSON string and returns a JsonDocument; throws on invalid input. */
         static std::shared_ptr<JsonDocument> Parse(const std::string& json) {
             auto j = nlohmann::json::parse(json); // throws nlohmann::json::parse_error on bad input
             return std::shared_ptr<JsonDocument>(new JsonDocument(fromNlohmann(j)));
         }
 
-        /// Parses a JSON value (alias for Parse).
+        /** Parses a JSON value (alias for Parse). */
         static std::shared_ptr<JsonDocument> ParseValue(const std::string& json) {
             return Parse(json);
         }

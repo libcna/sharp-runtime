@@ -14,7 +14,7 @@ namespace System::Globalization {
 using SharpRuntime::charcs;
 using SharpRuntime::intcs;
 
-/// <summary>Implements a set of methods for culture-sensitive string comparisons.</summary>
+/** <summary>Implements a set of methods for culture-sensitive string comparisons.</summary> */
 class CompareInfo {
 public:
     explicit CompareInfo(const std::string& name = "en-US") : _name(name) {}
@@ -24,7 +24,7 @@ public:
 
     [[nodiscard]] const std::string& getNameProperty() const { return _name; }
 
-    /// <summary>Compares two strings. Returns negative, zero, or positive.</summary>
+    /** <summary>Compares two strings. Returns negative, zero, or positive.</summary> */
     intcs Compare(const std::string& s1, const std::string& s2,
                   CompareOptions options = CompareOptions::None) const {
         if (hasFlag(options, CompareOptions::IgnoreCase))
@@ -81,7 +81,7 @@ public:
     static bool IsSortable(charcs /*ch*/) { return true; }
     static bool IsSortable(const std::string& /*text*/) { return true; }
 
-    /// <summary>Gets the SortKey for a string (byte-level key for this stub).</summary>
+    /** <summary>Gets the SortKey for a string (byte-level key for this stub).</summary> */
     SortKey GetSortKey(const std::string& source,
                        CompareOptions /*options*/ = CompareOptions::None) const {
         std::vector<bytecs> key(source.begin(), source.end());

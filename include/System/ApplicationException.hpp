@@ -18,8 +18,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit ApplicationException(const std::string& message) : Exception(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        ApplicationException(const std::string& message, const std::exception& inner)
-            : Exception(message + " | inner: " + inner.what()) {}
+        ApplicationException(const std::string& message, std::exception_ptr inner)
+            : Exception(message, std::move(inner)) {}
     };
 
 } // namespace System

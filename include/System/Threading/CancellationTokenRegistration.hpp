@@ -8,23 +8,23 @@
 
 namespace System::Threading {
 
-    /// Represents a callback registration with a CancellationToken that can be deregistered.
+    /** Represents a callback registration with a CancellationToken that can be deregistered. */
     class CancellationTokenRegistration : public System::IDisposable {
         std::shared_ptr<bool> active_;
 
     public:
-        /// Constructs an active CancellationTokenRegistration.
+        /** Constructs an active CancellationTokenRegistration. */
         CancellationTokenRegistration() : active_(std::make_shared<bool>(true)) {}
 
-        /// Deregisters the callback associated with this registration.
+        /** Deregisters the callback associated with this registration. */
         void Dispose() override {
             if (active_) *active_ = false;
         }
 
-        /// Attempts to deregister the associated callback; equivalent to Dispose.
+        /** Attempts to deregister the associated callback; equivalent to Dispose. */
         void Unregister() { Dispose(); }
 
-        /// Returns true if the registration has not been disposed.
+        /** Returns true if the registration has not been disposed. */
         [[nodiscard]] bool getIsActiveProperty() const {
             return active_ && *active_;
         }

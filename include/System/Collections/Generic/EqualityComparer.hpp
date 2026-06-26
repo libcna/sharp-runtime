@@ -19,12 +19,12 @@ namespace System::Collections::Generic {
     template<typename T>
     class EqualityComparer {
     public:
-        /// Destroys the comparer.
+        /** Destroys the comparer. */
         virtual ~EqualityComparer() = default;
 
-        /// Determines whether two objects of type T are equal.
+        /** Determines whether two objects of type T are equal. */
         virtual bool   Equals(const T& x, const T& y) const = 0;
-        /// Returns a hash code for the specified object of type T.
+        /** Returns a hash code for the specified object of type T. */
         virtual size_t GetHashCode(const T& obj) const = 0;
 
         /** @brief Returns a default equality comparer using operator== and std::hash. */

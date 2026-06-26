@@ -29,25 +29,27 @@ public:
     static constexpr float NegativeInfinity  = -std::numeric_limits<float>::infinity();     ///< Negative infinity.
     static constexpr float NegativeZero      = -0.0f;                                       ///< Negative zero.
 
-    /// Returns true if @p f is Not-a-Number (NaN).
+    /** Returns true if @p f is Not-a-Number (NaN). */
     static bool IsNaN(float f)               { return std::isnan(f); }
-    /// Returns true if @p f is positive or negative infinity.
+    /** Returns true if @p f is positive or negative infinity. */
     static bool IsInfinity(float f)          { return std::isinf(f); }
-    /// Returns true if @p f is positive infinity.
+    /** Returns true if @p f is positive infinity. */
     static bool IsPositiveInfinity(float f)  { return std::isinf(f) && f > 0.0f; }
-    /// Returns true if @p f is negative infinity.
+    /** Returns true if @p f is negative infinity. */
     static bool IsNegativeInfinity(float f)  { return std::isinf(f) && f < 0.0f; }
-    /// Returns true if @p f is a finite number (not infinity or NaN).
+    /** Returns true if @p f is a finite number (not infinity or NaN). */
     static bool IsFinite(float f)            { return std::isfinite(f); }
-    /// Returns true if @p f is a normalised (not denormalised) finite number.
+    /** Returns true if @p f is a normalised (not denormalised) finite number. */
     static bool IsNormal(float f)            { return std::isnormal(f); }
-    /// Returns true if @p f is a subnormal (denormalised) number.
+    /** Returns true if @p f is a subnormal (denormalised) number. */
     static bool IsSubnormal(float f)         { return std::fpclassify(f) == FP_SUBNORMAL; }
 
-    /// @brief Converts the string representation of a number to its float equivalent.
-    /// @param s String to parse ("NaN", "Infinity", "-Infinity", or a decimal number).
-    /// @return Parsed float value.
-    /// @throws std::invalid_argument if the string is not a valid floating-point literal.
+    /**
+     * @brief Converts the string representation of a number to its float equivalent.
+     * @param s String to parse ("NaN", "Infinity", "-Infinity", or a decimal number).
+     * @return Parsed float value.
+     * @throws std::invalid_argument if the string is not a valid floating-point literal.
+     */
     static float Parse(const std::string& s) {
         if (s == "NaN")       return std::numeric_limits<float>::quiet_NaN();
         if (s == "Infinity")  return  std::numeric_limits<float>::infinity();
@@ -59,10 +61,12 @@ public:
         return result;
     }
 
-    /// @brief Tries to convert a string to a float without throwing.
-    /// @param s String to parse.
-    /// @param result Receives the parsed value on success, or 0.0f on failure.
-    /// @return True if parsing succeeded; false otherwise.
+    /**
+     * @brief Tries to convert a string to a float without throwing.
+     * @param s String to parse.
+     * @param result Receives the parsed value on success, or 0.0f on failure.
+     * @return True if parsing succeeded; false otherwise.
+     */
     static bool TryParse(const std::string& s, float& result) {
         if (s == "NaN")       { result = std::numeric_limits<float>::quiet_NaN(); return true; }
         if (s == "Infinity")  { result =  std::numeric_limits<float>::infinity(); return true; }
@@ -72,8 +76,10 @@ public:
         return true;
     }
 
-    /// @brief Converts the float @p value to its string representation.
-    /// @return "NaN", "Infinity", "-Infinity", or the shortest round-trip decimal string.
+    /**
+     * @brief Converts the float @p value to its string representation.
+     * @return "NaN", "Infinity", "-Infinity", or the shortest round-trip decimal string.
+     */
     static std::string ToString(float value) {
         if (std::isnan(value)) return "NaN";
         if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
@@ -83,7 +89,7 @@ public:
         return std::to_string(value);
     }
 
-    /// @brief Converts @p value to a string using format specifier ("F2", "E3", "G", "R").
+    /** @brief Converts @p value to a string using format specifier ("F2", "E3", "G", "R"). */
     static std::string ToString(float value, const std::string& format) {
         if (format.empty()) return ToString(value);
         if (std::isnan(value)) return "NaN";

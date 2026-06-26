@@ -36,24 +36,24 @@ namespace System::Xml {
         std::unique_ptr<XmlReaderState> state_;
 
     public:
-        /// @brief Internal constructor used by factory methods; prefer @c Create() / @c CreateFromString().
+        /** @brief Internal constructor used by factory methods; prefer @c Create() / @c CreateFromString(). */
         explicit XmlReader(std::unique_ptr<XmlReaderState> s);
 
         ~XmlReader();
 
-        /// @brief Returns the type of the current node.
+        /** @brief Returns the type of the current node. */
         [[nodiscard]] XmlNodeType getNodeTypeProperty() const;
 
-        /// @brief Returns the qualified name of the current node.
+        /** @brief Returns the qualified name of the current node. */
         [[nodiscard]] std::string getNameProperty() const;
 
-        /// @brief Returns the text value of the current node (Text/CDATA/Comment).
+        /** @brief Returns the text value of the current node (Text/CDATA/Comment). */
         [[nodiscard]] std::string getValueProperty() const;
 
-        /// @brief Returns @c true if the current element has no child nodes.
+        /** @brief Returns @c true if the current element has no child nodes. */
         [[nodiscard]] bool getIsEmptyElementProperty() const;
 
-        /// @brief Returns the current read state.
+        /** @brief Returns the current read state. */
         [[nodiscard]] ReadState getReadStateProperty() const;
 
         /**
@@ -106,7 +106,7 @@ namespace System::Xml {
          */
         void ReadEndElement();
 
-        /// @brief Closes the reader and releases resources.
+        /** @brief Closes the reader and releases resources. */
         void Close();
 
         /**

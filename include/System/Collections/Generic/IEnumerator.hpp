@@ -20,7 +20,7 @@ namespace System::Collections::Generic
     public:
         ~IEnumerator() override = default;
 
-        /// Returns the current element.
+        /** Returns the current element. */
         [[nodiscard]] virtual const T& Current() const = 0;
 
         void* getCurrent() const override

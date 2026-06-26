@@ -5,15 +5,15 @@
 
 namespace System::Text {
 
-    /// Specifies the Unicode normalization form for string normalization.
+    /** Specifies the Unicode normalization form for string normalization. */
     enum class NormalizationForm {
-        /// Canonical decomposition followed by canonical composition.
+        /** Canonical decomposition followed by canonical composition. */
         FormC  = 1,
-        /// Canonical decomposition.
+        /** Canonical decomposition. */
         FormD  = 2,
-        /// Compatibility decomposition followed by canonical composition.
+        /** Compatibility decomposition followed by canonical composition. */
         FormKC = 5,
-        /// Compatibility decomposition.
+        /** Compatibility decomposition. */
         FormKD = 6,
     };
 

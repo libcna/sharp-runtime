@@ -7,7 +7,7 @@
 
 namespace System::Runtime::InteropServices
 {
-    /// Base class for exceptions thrown by, or related to, external (unmanaged) code.
+    /** Base class for exceptions thrown by, or related to, external (unmanaged) code. */
     class ExternalException : public System::SystemException
     {
     public:
@@ -17,8 +17,8 @@ namespace System::Runtime::InteropServices
         explicit ExternalException(const std::string& message)
             : System::SystemException(message) {}
 
-        ExternalException(const std::string& message, const std::exception& inner)
-            : System::SystemException(message + " [inner: " + inner.what() + "]") {}
+        ExternalException(const std::string& message, std::exception_ptr inner)
+            : System::SystemException(message, std::move(inner)) {}
 
         ~ExternalException() override = default;
     };

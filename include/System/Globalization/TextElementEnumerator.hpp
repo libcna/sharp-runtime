@@ -10,7 +10,7 @@ namespace System::Globalization {
 
 using SharpRuntime::intcs;
 
-/// <summary>Enumerates the text elements of a string, where each element may be one or more chars (grapheme cluster).</summary>
+/** <summary>Enumerates the text elements of a string, where each element may be one or more chars (grapheme cluster).</summary> */
 class TextElementEnumerator {
 public:
     explicit TextElementEnumerator(const std::string& str)
@@ -31,16 +31,16 @@ public:
         return true;
     }
 
-    /// <summary>Returns the current text element as a string.</summary>
+    /** <summary>Returns the current text element as a string.</summary> */
     std::string GetTextElement() const {
         if (_elementIndex < 0) throw std::runtime_error("Enumeration not started");
         return _current;
     }
 
-    /// <summary>Gets the current text element.</summary>
+    /** <summary>Gets the current text element.</summary> */
     std::string getCurrent() const { return GetTextElement(); }
 
-    /// <summary>Gets the index of the current text element in the original string.</summary>
+    /** <summary>Gets the index of the current text element in the original string.</summary> */
     intcs getElementIndexProperty() const { return _elementIndex; }
 
     void Reset() { _pos = 0; _elementIndex = -1; _current.clear(); }

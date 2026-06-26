@@ -18,7 +18,7 @@ namespace System::IO {
      */
     class TextReader {
     public:
-        /// Destroys the TextReader.
+        /** Destroys the TextReader. */
         virtual ~TextReader() = default;
 
         /** @brief Reads the next character without changing the state of the reader. Returns -1 at end. */
@@ -33,7 +33,7 @@ namespace System::IO {
         /** @brief Reads all characters from the current position to the end. */
         [[nodiscard]] virtual std::string ReadToEnd() { return ""; }
 
-        /// Closes the reader and releases any resources.
+        /** Closes the reader and releases any resources. */
         virtual void Close() {}
     };
 

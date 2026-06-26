@@ -17,19 +17,19 @@ namespace System::Text::RegularExpressions {
     class MatchCollection {
         std::vector<Match> matches_;
     public:
-        /// Constructs an empty MatchCollection.
+        /** Constructs an empty MatchCollection. */
         MatchCollection() = default;
-        /// Constructs a MatchCollection from a vector of Match objects.
+        /** Constructs a MatchCollection from a vector of Match objects. */
         explicit MatchCollection(std::vector<Match> m) : matches_(std::move(m)) {}
 
-        /// Gets the number of matches in the collection.
+        /** Gets the number of matches in the collection. */
         [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(matches_.size()); }
-        /// Returns the match at the given index.
+        /** Returns the match at the given index. */
         [[nodiscard]] const Match& operator[](intcs i) const { return matches_[i]; }
 
-        /// Returns an iterator to the first match.
+        /** Returns an iterator to the first match. */
         auto begin() const { return matches_.begin(); }
-        /// Returns an iterator past the last match.
+        /** Returns an iterator past the last match. */
         auto end()   const { return matches_.end(); }
     };
 

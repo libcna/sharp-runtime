@@ -11,20 +11,20 @@ namespace System::Globalization {
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
-/// <summary>Represents the result of mapping a string to its sort key for culture-sensitive comparison.</summary>
+/** <summary>Represents the result of mapping a string to its sort key for culture-sensitive comparison.</summary> */
 class SortKey {
 public:
     SortKey() = default;
     SortKey(const std::string& originalString, const std::vector<bytecs>& keyData)
         : _string(originalString), _keyData(keyData) {}
 
-    /// <summary>Gets the original string used to create this SortKey.</summary>
+    /** <summary>Gets the original string used to create this SortKey.</summary> */
     [[nodiscard]] const std::string& getOriginalStringProperty() const { return _string; }
 
-    /// <summary>Gets the byte array representing the current SortKey.</summary>
+    /** <summary>Gets the byte array representing the current SortKey.</summary> */
     [[nodiscard]] std::vector<bytecs> getKeyDataProperty() const { return _keyData; }
 
-    /// <summary>Compares two SortKey objects.</summary>
+    /** <summary>Compares two SortKey objects.</summary> */
     static intcs Compare(const SortKey& sortkey1, const SortKey& sortkey2) {
         // Lexicographic byte comparison
         size_t n = std::min(sortkey1._keyData.size(), sortkey2._keyData.size());

@@ -6,12 +6,14 @@
 
 namespace System::Diagnostics {
 
-    /// @brief Modifies code generation for the just-in-time (JIT) debugger.
-    ///
-    /// C++ counterpart of .NET System.Diagnostics.DebuggableAttribute.
+    /**
+     * @brief Modifies code generation for the just-in-time (JIT) debugger.
+     * 
+     * C++ counterpart of .NET System.Diagnostics.DebuggableAttribute.
+     */
     class DebuggableAttribute : public System::Attribute {
     public:
-        /// @brief Flags that control debugger behavior for generated code.
+        /** @brief Flags that control debugger behavior for generated code. */
         enum class DebuggingModes {
             None                            = 0,   ///< No special debugging modes.
             Default                         = 1,   ///< Enable default debugging support.
@@ -26,9 +28,11 @@ namespace System::Diagnostics {
         DebuggingModes debuggingModes_ = DebuggingModes::None;
 
     public:
-        /// @brief Constructs the attribute controlling JIT tracking and optimization.
-        /// @param isJITTrackingEnabled    true to enable JIT tracking.
-        /// @param isJITOptimizerDisabled  true to disable JIT optimizations.
+        /**
+         * @brief Constructs the attribute controlling JIT tracking and optimization.
+         * @param isJITTrackingEnabled    true to enable JIT tracking.
+         * @param isJITOptimizerDisabled  true to disable JIT optimizations.
+         */
         DebuggableAttribute(bool isJITTrackingEnabled, bool isJITOptimizerDisabled)
             : isJITTrackingEnabled_(isJITTrackingEnabled),
               isJITOptimizerDisabled_(isJITOptimizerDisabled) {
@@ -37,15 +41,17 @@ namespace System::Diagnostics {
                 debuggingModes_ = static_cast<DebuggingModes>(static_cast<int>(debuggingModes_) | static_cast<int>(DebuggingModes::DisableOptimizations));
         }
 
-        /// @brief Constructs the attribute with explicit debugging mode flags.
-        /// @param modes Combination of DebuggingModes values.
+        /**
+         * @brief Constructs the attribute with explicit debugging mode flags.
+         * @param modes Combination of DebuggingModes values.
+         */
         explicit DebuggableAttribute(DebuggingModes modes) : debuggingModes_(modes) {}
 
-        /// @return true if JIT tracking is enabled.
+        /** @return true if JIT tracking is enabled. */
         [[nodiscard]] bool            getIsJITTrackingEnabledProperty()   const { return isJITTrackingEnabled_; }
-        /// @return true if JIT optimizations are disabled.
+        /** @return true if JIT optimizations are disabled. */
         [[nodiscard]] bool            getIsJITOptimizerDisabledProperty()  const { return isJITOptimizerDisabled_; }
-        /// @return The active combination of DebuggingModes flags.
+        /** @return The active combination of DebuggingModes flags. */
         [[nodiscard]] DebuggingModes  getDebuggingFlagsProperty()          const { return debuggingModes_; }
     };
 

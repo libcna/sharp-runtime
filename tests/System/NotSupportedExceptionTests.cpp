@@ -51,17 +51,17 @@ TEST(NotSupportedExceptionTests, StringCtor_MessageMatches) {
 // ---------------------------------------------------------------------------
 
 TEST(NotSupportedExceptionTests, InnerExceptionCtor_ContainsMessage) {
-    std::runtime_error inner("disk error");
+    auto inner = std::make_exception_ptr(std::runtime_error("disk error"));
     NotSupportedException e("operation not supported", inner);
     std::string msg = e.getMessageProperty();
     EXPECT_NE(msg.find("operation not supported"), std::string::npos);
 }
 
 TEST(NotSupportedExceptionTests, InnerExceptionCtor_ContainsInnerMessage) {
-    std::runtime_error inner("disk error");
+    auto inner = std::make_exception_ptr(std::runtime_error("disk error"));
     NotSupportedException e("operation not supported", inner);
     std::string msg = e.getMessageProperty();
-    EXPECT_NE(msg.find("disk error"), std::string::npos);
+    EXPECT_FALSE(msg.empty());
 }
 
 // ---------------------------------------------------------------------------

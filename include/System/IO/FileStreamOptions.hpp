@@ -9,23 +9,23 @@
 
 namespace System::IO {
 
-    /// Specifies options used for creating a FileStream.
+    /** Specifies options used for creating a FileStream. */
     class FileStreamOptions {
     public:
-        /// How the operating system should open a file.
+        /** How the operating system should open a file. */
         FileMode   Mode    = FileMode::Open;
-        /// Defines the access mode for the file.
+        /** Defines the access mode for the file. */
         FileAccess Access  = FileAccess::Read;
-        /// Controls how other FileStream objects can access the file.
+        /** Controls how other FileStream objects can access the file. */
         FileShare  Share   = FileShare::Read;
-        /// Additional options that apply when creating the FileStream.
+        /** Additional options that apply when creating the FileStream. */
         FileOptions Options = FileOptions::None;
-        /// Number of bytes to preallocate on disk; 0 means no preallocation.
+        /** Number of bytes to preallocate on disk; 0 means no preallocation. */
         long long  PreallocationSize = 0;
-        /// Size of the internal buffer in bytes.
+        /** Size of the internal buffer in bytes. */
         int        BufferSize = 4096;
 
-        /// Initializes FileStreamOptions with default values.
+        /** Initializes FileStreamOptions with default values. */
         FileStreamOptions() = default;
     };
 

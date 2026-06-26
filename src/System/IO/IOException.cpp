@@ -18,4 +18,7 @@ namespace System::IO {
     IOException::IOException(const std::string& message)
         : System::SystemException(message) {}
 
+    IOException::IOException(const std::string& message, std::exception_ptr inner)
+        : System::SystemException(message, std::move(inner)) {}
+
 } // namespace System::IO

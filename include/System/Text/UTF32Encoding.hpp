@@ -8,24 +8,24 @@
 
 namespace System::Text {
 
-    /// UTF-32 encoding; defaults to little-endian with byte-order mark.
+    /** UTF-32 encoding; defaults to little-endian with byte-order mark. */
     class UTF32Encoding : public Encoding {
         bool bigEndian_;
         bool byteOrderMark_;
 
     public:
-        /// Constructs a UTF-32 LE encoding with a byte-order mark.
+        /** Constructs a UTF-32 LE encoding with a byte-order mark. */
         UTF32Encoding() : bigEndian_(false), byteOrderMark_(true) {}
-        /// Constructs a UTF-32 encoding with the specified endianness and BOM setting.
+        /** Constructs a UTF-32 encoding with the specified endianness and BOM setting. */
         UTF32Encoding(bool bigEndian, bool byteOrderMark)
             : bigEndian_(bigEndian), byteOrderMark_(byteOrderMark) {}
 
-        /// Returns the encoding name "utf-32".
+        /** Returns the encoding name "utf-32". */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "utf-32"; }
-        /// Returns the code page 12000 (UTF-32 LE).
+        /** Returns the code page 12000 (UTF-32 LE). */
         [[nodiscard]] int getCodePageProperty() const override { return 12000; }
 
-        /// Encodes a string to a UTF-32 byte sequence.
+        /** Encodes a string to a UTF-32 byte sequence. */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> result;
             if (byteOrderMark_ && !bigEndian_) {
@@ -49,7 +49,7 @@ namespace System::Text {
             return result;
         }
 
-        /// Decodes a UTF-32 byte range to a string (ASCII range only in this partial implementation).
+        /** Decodes a UTF-32 byte range to a string (ASCII range only in this partial implementation). */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                              SharpRuntime::intcs index,
                                              SharpRuntime::intcs count) const override {

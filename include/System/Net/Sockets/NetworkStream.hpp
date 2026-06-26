@@ -22,7 +22,7 @@ namespace System::Net::Sockets {
         int fd_ = -1;
 
     public:
-        /// @brief Takes ownership of @p fd (will close on destruction/Close).
+        /** @brief Takes ownership of @p fd (will close on destruction/Close). */
         explicit NetworkStream(int fd);
         ~NetworkStream();
 
@@ -30,7 +30,7 @@ namespace System::Net::Sockets {
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
         void  Close() override;
 
-        /// @brief Not supported — TCP streams are not seekable.
+        /** @brief Not supported — TCP streams are not seekable. */
         [[nodiscard]] intcs getLengthProperty() const override;
 
         [[nodiscard]] bool getCanReadProperty()  const override { return fd_ >= 0; }

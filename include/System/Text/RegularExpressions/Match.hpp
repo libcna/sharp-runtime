@@ -22,27 +22,27 @@ namespace System::Text::RegularExpressions {
         std::smatch match_;
         bool success_;
     public:
-        /// Constructs an empty (unsuccessful) Match.
+        /** Constructs an empty (unsuccessful) Match. */
         Match() : success_(false) {}
-        /// Constructs a Match from a std::smatch result.
+        /** Constructs a Match from a std::smatch result. */
         explicit Match(const std::smatch& m) : match_(m), success_(m.ready() && !m.empty()) {}
 
-        /// Returns true if the match was successful.
+        /** Returns true if the match was successful. */
         [[nodiscard]] bool getSuccessProperty() const { return success_; }
-        /// Gets the matched substring, or empty string if unsuccessful.
+        /** Gets the matched substring, or empty string if unsuccessful. */
         [[nodiscard]] std::string getValueProperty() const { return success_ ? match_[0].str() : ""; }
-        /// Gets the zero-based index of the match in the input string, or -1 if unsuccessful.
+        /** Gets the zero-based index of the match in the input string, or -1 if unsuccessful. */
         [[nodiscard]] intcs getIndexProperty() const  { return success_ ? static_cast<intcs>(match_.position(0)) : -1; }
-        /// Gets the length of the matched substring, or 0 if unsuccessful.
+        /** Gets the length of the matched substring, or 0 if unsuccessful. */
         [[nodiscard]] intcs getLengthProperty() const { return success_ ? static_cast<intcs>(match_[0].length()) : 0; }
 
-        /// Gets the value of the capture group at the given index.
+        /** Gets the value of the capture group at the given index. */
         [[nodiscard]] std::string Group(intcs index) const {
             if (!success_ || index >= static_cast<intcs>(match_.size())) return "";
             return match_[index].str();
         }
 
-        /// Returns a singleton empty (unsuccessful) Match.
+        /** Returns a singleton empty (unsuccessful) Match. */
         static const Match& Empty() { static Match m; return m; }
     };
 

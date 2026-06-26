@@ -12,17 +12,17 @@ namespace System::IO {
      * @note Status: Implemented
      */
     enum class FileShare : int {
-        /// Declines sharing of the current file.
+        /** Declines sharing of the current file. */
         None        = 0,
-        /// Allows subsequent opening for reading.
+        /** Allows subsequent opening for reading. */
         Read        = 1,
-        /// Allows subsequent opening for writing.
+        /** Allows subsequent opening for writing. */
         Write       = 2,
-        /// Allows subsequent opening for reading or writing.
+        /** Allows subsequent opening for reading or writing. */
         ReadWrite   = 3,
-        /// Allows subsequent deleting of the file.
+        /** Allows subsequent deleting of the file. */
         Delete      = 4,
-        /// Makes the file handle inheritable by child processes.
+        /** Makes the file handle inheritable by child processes. */
         Inheritable = 16
     };
 

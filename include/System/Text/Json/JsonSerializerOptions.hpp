@@ -6,43 +6,43 @@
 
 namespace System::Text::Json {
 
-    /// Specifies naming policy for JSON property names.
+    /** Specifies naming policy for JSON property names. */
     enum class JsonNamingPolicy {
-        /// camelCase naming (e.g. "myProperty").
+        /** camelCase naming (e.g. "myProperty"). */
         CamelCase           = 0,
-        /// snake_case lowercase naming.
+        /** snake_case lowercase naming. */
         SnakeCaseLower      = 1,
-        /// SNAKE_CASE uppercase naming.
+        /** SNAKE_CASE uppercase naming. */
         SnakeCaseUpper      = 2,
-        /// kebab-case lowercase naming.
+        /** kebab-case lowercase naming. */
         KebabCaseLower      = 3,
-        /// KEBAB-CASE uppercase naming.
+        /** KEBAB-CASE uppercase naming. */
         KebabCaseUpper      = 4,
     };
 
-    /// Controls how JSON comments are handled during reading.
+    /** Controls how JSON comments are handled during reading. */
     enum class JsonCommentHandling : uint8_t {
-        /// Comments are not allowed; an exception is thrown.
+        /** Comments are not allowed; an exception is thrown. */
         Disallow = 0,
-        /// Comments are ignored.
+        /** Comments are ignored. */
         Skip     = 1,
-        /// Comments are treated as valid tokens.
+        /** Comments are treated as valid tokens. */
         Allow    = 2,
     };
 
-    /// Controls how numbers are handled during JSON serialization/deserialization.
+    /** Controls how numbers are handled during JSON serialization/deserialization. */
     enum class JsonNumberHandling {
-        /// Strict numeric handling (no string conversion).
+        /** Strict numeric handling (no string conversion). */
         Strict                      = 0,
-        /// Numbers may be read from JSON strings.
+        /** Numbers may be read from JSON strings. */
         AllowReadingFromString      = 1,
-        /// Numbers are written as JSON strings.
+        /** Numbers are written as JSON strings. */
         WriteAsString               = 2,
-        /// Named floating-point literals (NaN, Infinity) are allowed.
+        /** Named floating-point literals (NaN, Infinity) are allowed. */
         AllowNamedFloatingPointLiterals = 4,
     };
 
-    /// Provides options to control JSON serialization and deserialization behavior.
+    /** Provides options to control JSON serialization and deserialization behavior. */
     class JsonSerializerOptions {
         bool writeIndented_ = false;
         bool allowTrailingCommas_ = false;
@@ -51,32 +51,32 @@ namespace System::Text::Json {
         JsonCommentHandling readCommentHandling_ = JsonCommentHandling::Disallow;
 
     public:
-        /// Constructs default options (no indentation, strict comments, case-sensitive).
+        /** Constructs default options (no indentation, strict comments, case-sensitive). */
         JsonSerializerOptions() = default;
 
-        /// Returns true if JSON output should be indented.
+        /** Returns true if JSON output should be indented. */
         [[nodiscard]] bool getWriteIndentedProperty()              const { return writeIndented_; }
-        /// Returns true if trailing commas in JSON are allowed.
+        /** Returns true if trailing commas in JSON are allowed. */
         [[nodiscard]] bool getAllowTrailingCommasProperty()        const { return allowTrailingCommas_; }
-        /// Returns true if property name matching is case-insensitive.
+        /** Returns true if property name matching is case-insensitive. */
         [[nodiscard]] bool getPropertyNameCaseInsensitiveProperty() const { return propertyNameCaseInsensitive_; }
-        /// Gets the maximum allowed depth when reading JSON (0 = unlimited).
+        /** Gets the maximum allowed depth when reading JSON (0 = unlimited). */
         [[nodiscard]] int  getMaxDepthProperty()                   const { return maxDepth_; }
-        /// Gets the comment-handling mode used when reading JSON.
+        /** Gets the comment-handling mode used when reading JSON. */
         [[nodiscard]] JsonCommentHandling getReadCommentHandlingProperty() const { return readCommentHandling_; }
 
-        /// Sets whether JSON output should be indented.
+        /** Sets whether JSON output should be indented. */
         void setWriteIndentedProperty(bool v)               { writeIndented_ = v; }
-        /// Sets whether trailing commas in JSON are allowed.
+        /** Sets whether trailing commas in JSON are allowed. */
         void setAllowTrailingCommasProperty(bool v)         { allowTrailingCommas_ = v; }
-        /// Sets whether property name matching is case-insensitive.
+        /** Sets whether property name matching is case-insensitive. */
         void setPropertyNameCaseInsensitiveProperty(bool v) { propertyNameCaseInsensitive_ = v; }
-        /// Sets the maximum allowed depth when reading JSON.
+        /** Sets the maximum allowed depth when reading JSON. */
         void setMaxDepthProperty(int v)                     { maxDepth_ = v; }
-        /// Sets the comment-handling mode used when reading JSON.
+        /** Sets the comment-handling mode used when reading JSON. */
         void setReadCommentHandlingProperty(JsonCommentHandling v) { readCommentHandling_ = v; }
 
-        /// Returns the default JsonSerializerOptions instance.
+        /** Returns the default JsonSerializerOptions instance. */
         static const JsonSerializerOptions& Default() {
             static JsonSerializerOptions opts;
             return opts;

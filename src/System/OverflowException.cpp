@@ -14,7 +14,7 @@ namespace System {
     OverflowException::OverflowException(const std::string& message)
         : ArithmeticException(message) {}
 
-    OverflowException::OverflowException(const std::string& message, const std::exception& innerException)
-        : ArithmeticException(message + " | inner: " + innerException.what()) {}
+    OverflowException::OverflowException(const std::string& message, std::exception_ptr innerException)
+        : ArithmeticException(message, std::move(innerException)) {}
 
 } // namespace System

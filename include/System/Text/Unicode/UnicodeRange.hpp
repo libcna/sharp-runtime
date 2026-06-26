@@ -6,13 +6,13 @@
 
 namespace System::Text::Unicode {
 
-    /// Represents a contiguous range of Unicode code points in the BMP.
+    /** Represents a contiguous range of Unicode code points in the BMP. */
     class UnicodeRange {
         int firstCodePoint_;
         int length_;
 
     public:
-        /// Constructs a UnicodeRange starting at firstCodePoint with the given length; throws if out of BMP bounds.
+        /** Constructs a UnicodeRange starting at firstCodePoint with the given length; throws if out of BMP bounds. */
         UnicodeRange(int firstCodePoint, int length)
             : firstCodePoint_(firstCodePoint), length_(length) {
             if (firstCodePoint < 0 || firstCodePoint > 0xFFFF)
@@ -21,12 +21,12 @@ namespace System::Text::Unicode {
                 throw std::out_of_range("length out of range.");
         }
 
-        /// Gets the first code point in the range.
+        /** Gets the first code point in the range. */
         [[nodiscard]] int getFirstCodePointProperty() const { return firstCodePoint_; }
-        /// Gets the number of code points in the range.
+        /** Gets the number of code points in the range. */
         [[nodiscard]] int getLengthProperty()         const { return length_; }
 
-        /// Creates a UnicodeRange spanning from firstCharacter to lastCharacter (inclusive).
+        /** Creates a UnicodeRange spanning from firstCharacter to lastCharacter (inclusive). */
         static UnicodeRange Create(char16_t firstCharacter, char16_t lastCharacter) {
             if (firstCharacter > lastCharacter)
                 throw std::invalid_argument("firstCharacter must be <= lastCharacter.");

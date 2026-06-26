@@ -13,27 +13,27 @@ namespace System::IO::IsolatedStorage {
      * @note Status: Implemented
      */
     enum class IsolatedStorageScope {
-        /// No isolation scope.
+        /** No isolation scope. */
         None         = 0x00,
-        /// The isolated store is scoped to the current user.
+        /** The isolated store is scoped to the current user. */
         User         = 0x01,
-        /// The isolated store is scoped to the application domain.
+        /** The isolated store is scoped to the application domain. */
         Domain       = 0x02,
-        /// The isolated store is scoped to the calling assembly.
+        /** The isolated store is scoped to the calling assembly. */
         Assembly     = 0x04,
-        /// The isolated store is scoped to roaming user data.
+        /** The isolated store is scoped to roaming user data. */
         Roaming      = 0x08,
-        /// The isolated store is scoped to the machine.
+        /** The isolated store is scoped to the machine. */
         Machine      = 0x10,
-        /// The isolated store is scoped to the application.
+        /** The isolated store is scoped to the application. */
         Application  = 0x20
     };
 
-    /// Returns the bitwise OR of two IsolatedStorageScope values.
+    /** Returns the bitwise OR of two IsolatedStorageScope values. */
     inline IsolatedStorageScope operator|(IsolatedStorageScope a, IsolatedStorageScope b) {
         return static_cast<IsolatedStorageScope>(static_cast<int>(a) | static_cast<int>(b));
     }
-    /// Returns the bitwise AND of two IsolatedStorageScope values.
+    /** Returns the bitwise AND of two IsolatedStorageScope values. */
     inline IsolatedStorageScope operator&(IsolatedStorageScope a, IsolatedStorageScope b) {
         return static_cast<IsolatedStorageScope>(static_cast<int>(a) & static_cast<int>(b));
     }

@@ -17,9 +17,9 @@ namespace System::Collections::Generic {
     template<typename T>
     class Comparer {
     public:
-        /// Destroys the comparer.
+        /** Destroys the comparer. */
         virtual ~Comparer() = default;
-        /// When overridden in a derived class, compares two objects and returns an ordering integer.
+        /** When overridden in a derived class, compares two objects and returns an ordering integer. */
         virtual int Compare(const T& x, const T& y) const = 0;
 
         /** @brief Returns a default comparer that uses operator<. */

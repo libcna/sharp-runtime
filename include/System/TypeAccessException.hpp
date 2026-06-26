@@ -45,8 +45,8 @@ namespace System {
          * @param message The error message that explains the reason for the exception.
          * @param inner   The exception that is the cause of the current exception.
          */
-        TypeAccessException(const std::string& message, const std::exception& inner)
-            : TypeLoadException(message + " | inner: " + inner.what()) {}
+        TypeAccessException(const std::string& message, std::exception_ptr inner)
+            : TypeLoadException(message, std::move(inner)) {}
     };
 
 } // namespace System

@@ -23,7 +23,7 @@ namespace System::Net::Sockets {
         [[maybe_unused]] int  fd_        = -1;
         [[maybe_unused]] bool connected_ = false;
 
-        /// @brief Constructs a TcpClient that already owns a connected socket fd (used by TcpListener).
+        /** @brief Constructs a TcpClient that already owns a connected socket fd (used by TcpListener). */
         explicit TcpClient(int connectedFd);
         friend class TcpListener;
 
@@ -32,22 +32,22 @@ namespace System::Net::Sockets {
         explicit TcpClient(const IPEndPoint& localEP);
         ~TcpClient();
 
-        /// @brief Connects to a remote host by name and port.
+        /** @brief Connects to a remote host by name and port. */
         void Connect(const std::string& hostname, int port);
 
-        /// @brief Connects to the specified remote endpoint.
+        /** @brief Connects to the specified remote endpoint. */
         void Connect(const IPEndPoint& remoteEP);
 
-        /// @brief Closes the underlying socket.
+        /** @brief Closes the underlying socket. */
         void Close();
 
-        /// @brief Returns true when a connection has been established.
+        /** @brief Returns true when a connection has been established. */
         [[nodiscard]] bool getConnectedProperty() const { return connected_; }
 
-        /// @brief Returns the number of bytes available to read without blocking.
+        /** @brief Returns the number of bytes available to read without blocking. */
         [[nodiscard]] int Available() const;
 
-        /// @brief Returns a NetworkStream for reading and writing (dup-ed fd).
+        /** @brief Returns a NetworkStream for reading and writing (dup-ed fd). */
         [[nodiscard]] std::shared_ptr<NetworkStream> GetStream() const;
     };
 
@@ -69,16 +69,16 @@ namespace System::Net::Sockets {
         TcpListener(const IPAddress& addr, int port);
         ~TcpListener();
 
-        /// @brief Starts listening for incoming connections (bind + listen).
+        /** @brief Starts listening for incoming connections (bind + listen). */
         void Start();
 
-        /// @brief Stops listening and closes the socket.
+        /** @brief Stops listening and closes the socket. */
         void Stop();
 
-        /// @brief Accepts a pending connection (blocks until a client connects).
+        /** @brief Accepts a pending connection (blocks until a client connects). */
         TcpClient AcceptTcpClient();
 
-        /// @brief Returns the local endpoint (valid after Start()).
+        /** @brief Returns the local endpoint (valid after Start()). */
         [[nodiscard]] const IPEndPoint& getLocalEndpointProperty() const { return local_; }
     };
 

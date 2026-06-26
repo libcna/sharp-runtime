@@ -16,7 +16,7 @@ namespace System::Threading {
 
     using SharpRuntime::intcs;
 
-    /// Delegate type for timer callbacks — counterpart of .NET System.Threading.TimerCallback.
+    /** Delegate type for timer callbacks — counterpart of .NET System.Threading.TimerCallback. */
     using TimerCallback = std::function<void(void*)>;
 
     /**
@@ -43,7 +43,7 @@ namespace System::Threading {
         std::thread            thread_;
 
     public:
-        /// Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds).
+        /** Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds). */
         Timer(std::function<void(void*)> callback, void* state, intcs dueTime, intcs period)
             : state_(std::make_shared<State>())
         {
@@ -60,12 +60,12 @@ namespace System::Threading {
 #endif
         }
 
-        /// Destroys the Timer and stops the background thread.
+        /** Destroys the Timer and stops the background thread. */
         ~Timer() { Dispose(); }
 
-        /// Copying is not allowed.
+        /** Copying is not allowed. */
         Timer(const Timer&) = delete;
-        /// Copy assignment is not allowed.
+        /** Copy assignment is not allowed. */
         Timer& operator=(const Timer&) = delete;
 
         /** @brief Changes the timer's due time and period. Pass -1 to disable. */
@@ -74,7 +74,7 @@ namespace System::Threading {
             state_->period  = period;
         }
 
-        /// Stops the timer and releases the background thread.
+        /** Stops the timer and releases the background thread. */
         void Dispose() {
             if (state_) state_->running = false;
             if (thread_.joinable()) thread_.detach();

@@ -10,7 +10,7 @@
 
 namespace System::Threading {
 
-    /// A counting semaphore that limits the number of threads accessing a resource concurrently.
+    /** A counting semaphore that limits the number of threads accessing a resource concurrently. */
     class Semaphore : public WaitHandle {
         int count_;
         int maxCount_;
@@ -18,14 +18,14 @@ namespace System::Threading {
         std::condition_variable cv_;
 
     public:
-        /// Constructs a Semaphore with the given initial and maximum counts.
+        /** Constructs a Semaphore with the given initial and maximum counts. */
         Semaphore(int initialCount, int maximumCount)
             : count_(initialCount), maxCount_(maximumCount) {}
-        /// Constructs a named Semaphore (naming is not truly cross-process; the name is ignored).
+        /** Constructs a named Semaphore (naming is not truly cross-process; the name is ignored). */
         Semaphore(int initialCount, int maximumCount, const std::string& /*name*/)
             : count_(initialCount), maxCount_(maximumCount) {}
 
-        /// Blocks until the semaphore count is greater than zero, then decrements it.
+        /** Blocks until the semaphore count is greater than zero, then decrements it. */
         bool WaitOne() override {
             std::unique_lock<std::mutex> lock(mtx_);
             cv_.wait(lock, [this]{ return count_ > 0; });
@@ -33,7 +33,7 @@ namespace System::Threading {
             return true;
         }
 
-        /// Blocks until the count is greater than zero or the timeout elapses; returns true on success.
+        /** Blocks until the count is greater than zero or the timeout elapses; returns true on success. */
         bool WaitOne(int milliseconds) override {
             std::unique_lock<std::mutex> lock(mtx_);
             bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
@@ -42,10 +42,10 @@ namespace System::Threading {
             return ok;
         }
 
-        /// Releases the semaphore once and returns the count before the release.
+        /** Releases the semaphore once and returns the count before the release. */
         int Release() { return Release(1); }
 
-        /// Releases the semaphore releaseCount times and returns the count before the release.
+        /** Releases the semaphore releaseCount times and returns the count before the release. */
         int Release(int releaseCount) {
             std::unique_lock<std::mutex> lock(mtx_);
             if (count_ + releaseCount > maxCount_)

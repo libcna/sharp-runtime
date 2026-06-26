@@ -44,8 +44,10 @@ namespace System::Numerics {
                                             const std::vector<uint32_t>& b);
         static std::vector<uint32_t> divMagByLimb(const std::vector<uint32_t>& a,
                                                    uint32_t b, uint32_t& rem);
-        /// Knuth Algorithm D: divide magnitude a by b (b has ≥2 limbs).
-        /// Returns {quotient, remainder} magnitudes.
+        /**
+         * Knuth Algorithm D: divide magnitude a by b (b has ≥2 limbs).
+         * Returns {quotient, remainder} magnitudes.
+         */
         static std::pair<std::vector<uint32_t>, std::vector<uint32_t>>
                divmodMag(std::vector<uint32_t> a, std::vector<uint32_t> b);
 
@@ -56,29 +58,29 @@ namespace System::Numerics {
         // Constructors
         // ------------------------------------------------------------------
 
-        /// @brief Initialises to zero.
+        /** @brief Initialises to zero. */
         BigInteger();
 
-        /// @brief Constructs from a signed 32-bit integer.
+        /** @brief Constructs from a signed 32-bit integer. */
         BigInteger(intcs v);  // NOLINT(*-explicit-*)
 
-        /// @brief Constructs from a signed 64-bit integer.
+        /** @brief Constructs from a signed 64-bit integer. */
         BigInteger(longcs v); // NOLINT(*-explicit-*)
 
         // ------------------------------------------------------------------
         // Properties
         // ------------------------------------------------------------------
 
-        /// @brief Returns @c true if the value is zero.
+        /** @brief Returns @c true if the value is zero. */
         [[nodiscard]] bool getIsZeroProperty()     const;
 
-        /// @brief Returns @c true if the value is one.
+        /** @brief Returns @c true if the value is one. */
         [[nodiscard]] bool getIsOneProperty()      const;
 
-        /// @brief Returns @c true if the value is negative.
+        /** @brief Returns @c true if the value is negative. */
         [[nodiscard]] bool getIsNegativeProperty() const;
 
-        /// @brief Returns -1, 0, or +1 for negative, zero, positive.
+        /** @brief Returns -1, 0, or +1 for negative, zero, positive. */
         [[nodiscard]] int Sign() const;
 
         // ------------------------------------------------------------------
@@ -101,7 +103,7 @@ namespace System::Numerics {
          */
         static bool TryParse(const std::string& s, BigInteger& result);
 
-        /// @brief Returns the decimal string representation.
+        /** @brief Returns the decimal string representation. */
         [[nodiscard]] std::string ToString() const;
 
         // ------------------------------------------------------------------

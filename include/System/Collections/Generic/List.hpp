@@ -99,7 +99,7 @@ namespace System::Collections::Generic
             return new Enumerator(items_);
         }
 
-        /// Returns the underlying std::vector for STL interop.
+        /** Returns the underlying std::vector for STL interop. */
         [[nodiscard]] const std::vector<T>& ToVector() const { return items_; }
         [[nodiscard]] std::vector<T>& ToVector() { return items_; }
 
@@ -108,53 +108,53 @@ namespace System::Collections::Generic
         [[nodiscard]] auto begin() const { return items_.cbegin(); }
         [[nodiscard]] auto end()   const { return items_.cend(); }
 
-        /// @brief Appends all elements of @p collection to the end of the list.
+        /** @brief Appends all elements of @p collection to the end of the list. */
         void AddRange(const std::vector<T>& collection) {
             items_.insert(items_.end(), collection.begin(), collection.end());
         }
 
-        /// @brief Appends all elements of another List to the end of this list.
+        /** @brief Appends all elements of another List to the end of this list. */
         void AddRange(const List<T>& other) { AddRange(other.items_); }
 
-        /// @brief Inserts all elements of @p collection at @p index.
+        /** @brief Inserts all elements of @p collection at @p index. */
         void InsertRange(int index, const std::vector<T>& collection) {
             items_.insert(items_.begin() + index, collection.begin(), collection.end());
         }
 
-        /// @brief Returns a new List containing @p count elements starting at @p index.
+        /** @brief Returns a new List containing @p count elements starting at @p index. */
         [[nodiscard]] List<T> GetRange(int index, int count) const {
             if (index < 0 || count < 0 || index + count > static_cast<int>(items_.size()))
                 throw std::out_of_range("GetRange: index or count out of range.");
             return List<T>(std::vector<T>(items_.begin() + index, items_.begin() + index + count));
         }
 
-        /// @brief Returns a copy of all elements as a std::vector (equivalent to .NET ToArray()).
+        /** @brief Returns a copy of all elements as a std::vector (equivalent to .NET ToArray()). */
         [[nodiscard]] std::vector<T> ToArray() const { return items_; }
 
-        /// @brief Sorts the list in ascending order using operator<.
+        /** @brief Sorts the list in ascending order using operator<. */
         void Sort() {
             std::sort(items_.begin(), items_.end());
         }
 
-        /// @brief Sorts the list using a comparison function (returns negative/zero/positive).
+        /** @brief Sorts the list using a comparison function (returns negative/zero/positive). */
         void Sort(std::function<int(const T&, const T&)> comparison) {
             std::sort(items_.begin(), items_.end(),
                       [&](const T& a, const T& b) { return comparison(a, b) < 0; });
         }
 
-        /// @brief Reverses the order of elements in the list in place.
+        /** @brief Reverses the order of elements in the list in place. */
         void Reverse() {
             std::reverse(items_.begin(), items_.end());
         }
 
-        /// @brief Returns the first element satisfying @p predicate, or default T{} if none.
+        /** @brief Returns the first element satisfying @p predicate, or default T{} if none. */
         [[nodiscard]] T Find(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (predicate(item)) return item;
             return T{};
         }
 
-        /// @brief Returns a new List of all elements satisfying @p predicate.
+        /** @brief Returns a new List of all elements satisfying @p predicate. */
         [[nodiscard]] List<T> FindAll(std::function<bool(const T&)> predicate) const {
             List<T> result;
             for (const auto& item : items_)
@@ -162,21 +162,21 @@ namespace System::Collections::Generic
             return result;
         }
 
-        /// @brief Returns the index of the first element satisfying @p predicate, or -1 if none.
+        /** @brief Returns the index of the first element satisfying @p predicate, or -1 if none. */
         [[nodiscard]] int FindIndex(std::function<bool(const T&)> predicate) const {
             for (int i = 0; i < static_cast<int>(items_.size()); ++i)
                 if (predicate(items_[i])) return i;
             return -1;
         }
 
-        /// @brief Returns the index of the last element satisfying @p predicate, or -1 if none.
+        /** @brief Returns the index of the last element satisfying @p predicate, or -1 if none. */
         [[nodiscard]] int FindLastIndex(std::function<bool(const T&)> predicate) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (predicate(items_[i])) return i;
             return -1;
         }
 
-        /// @brief Removes all elements satisfying @p predicate; returns count removed.
+        /** @brief Removes all elements satisfying @p predicate; returns count removed. */
         int RemoveAll(std::function<bool(const T&)> predicate) {
             auto it = std::remove_if(items_.begin(), items_.end(), predicate);
             int count = static_cast<int>(items_.end() - it);
@@ -184,26 +184,26 @@ namespace System::Collections::Generic
             return count;
         }
 
-        /// @brief Applies @p action to every element.
+        /** @brief Applies @p action to every element. */
         void ForEach(std::function<void(const T&)> action) const {
             for (const auto& item : items_) action(item);
         }
 
-        /// @brief Returns true if any element satisfies @p predicate.
+        /** @brief Returns true if any element satisfies @p predicate. */
         [[nodiscard]] bool Exists(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (predicate(item)) return true;
             return false;
         }
 
-        /// @brief Returns true if all elements satisfy @p predicate (true for empty list).
+        /** @brief Returns true if all elements satisfy @p predicate (true for empty list). */
         [[nodiscard]] bool TrueForAll(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (!predicate(item)) return false;
             return true;
         }
 
-        /// @brief Performs a binary search on a sorted list; returns index or bitwise complement of insertion point.
+        /** @brief Performs a binary search on a sorted list; returns index or bitwise complement of insertion point. */
         [[nodiscard]] int BinarySearch(const T& item) const {
             auto it = std::lower_bound(items_.begin(), items_.end(), item);
             if (it != items_.end() && *it == item)
@@ -211,42 +211,42 @@ namespace System::Collections::Generic
             return ~static_cast<int>(it - items_.begin());
         }
 
-        /// Returns the zero-based index of the first occurrence of @p item starting at @p startIndex, or -1.
+        /** Returns the zero-based index of the first occurrence of @p item starting at @p startIndex, or -1. */
         [[nodiscard]] int IndexOf(const T& item, int startIndex) const {
             for (int i = startIndex; i < static_cast<int>(items_.size()); ++i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /// Returns the zero-based index of the last occurrence of @p item, or -1.
+        /** Returns the zero-based index of the last occurrence of @p item, or -1. */
         [[nodiscard]] int LastIndexOf(const T& item) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /// Returns the zero-based index of the last occurrence of @p item at or before @p startIndex, or -1.
+        /** Returns the zero-based index of the last occurrence of @p item at or before @p startIndex, or -1. */
         [[nodiscard]] int LastIndexOf(const T& item, int startIndex) const {
             for (int i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /// @brief Returns the current capacity of the internal storage.
+        /** @brief Returns the current capacity of the internal storage. */
         [[nodiscard]] int getCapacityProperty() const {
             return static_cast<int>(items_.capacity());
         }
 
-        /// @brief Ensures the internal storage can hold at least @p capacity elements without reallocation.
+        /** @brief Ensures the internal storage can hold at least @p capacity elements without reallocation. */
         void EnsureCapacity(int capacity) {
             if (capacity > static_cast<int>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
         }
 
-        /// @brief Reduces the internal storage to fit the current element count.
+        /** @brief Reduces the internal storage to fit the current element count. */
         void TrimExcess() { items_.shrink_to_fit(); }
 
-        /// @brief Returns a new List<TOutput> by applying @p converter to each element.
+        /** @brief Returns a new List<TOutput> by applying @p converter to each element. */
         template<typename TOutput>
         [[nodiscard]] List<TOutput> ConvertAll(std::function<TOutput(const T&)> converter) const {
             List<TOutput> result;
@@ -255,24 +255,24 @@ namespace System::Collections::Generic
             return result;
         }
 
-        /// @brief Returns a read-only wrapper around this list's current elements.
+        /** @brief Returns a read-only wrapper around this list's current elements. */
         [[nodiscard]] System::Collections::ObjectModel::ReadOnlyCollection<T> AsReadOnly() const {
             return System::Collections::ObjectModel::ReadOnlyCollection<T>(items_);
         }
 
-        /// @brief Returns the last element satisfying @p predicate, or default T{} if none.
+        /** @brief Returns the last element satisfying @p predicate, or default T{} if none. */
         [[nodiscard]] T FindLast(std::function<bool(const T&)> predicate) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (predicate(items_[static_cast<size_t>(i)])) return items_[static_cast<size_t>(i)];
             return T{};
         }
 
-        /// @brief Removes @p count elements starting at @p index.
+        /** @brief Removes @p count elements starting at @p index. */
         void RemoveRange(int index, int count) {
             items_.erase(items_.begin() + index, items_.begin() + index + count);
         }
 
-        /// @brief Reverses the elements in the range [@p index, @p index + @p count).
+        /** @brief Reverses the elements in the range [@p index, @p index + @p count). */
         void Reverse(int index, int count) {
             std::reverse(items_.begin() + index, items_.begin() + index + count);
         }

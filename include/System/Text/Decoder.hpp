@@ -18,7 +18,7 @@ namespace System::Text {
     class Decoder {
         std::shared_ptr<Encoding> encoding_;
     public:
-        /// Constructs a Decoder wrapping the given Encoding.
+        /** Constructs a Decoder wrapping the given Encoding. */
         explicit Decoder(std::shared_ptr<Encoding> encoding) : encoding_(std::move(encoding)) {}
 
         /** @brief Decodes a byte buffer into a string. */
@@ -28,7 +28,7 @@ namespace System::Text {
             return encoding_->GetString(bytes, index, count);
         }
 
-        /// Decodes a byte vector to a string, with optional offset and count.
+        /** Decodes a byte vector to a string, with optional offset and count. */
         [[nodiscard]] std::string GetString(const std::vector<SharpRuntime::bytecs>& bytes,
                                             SharpRuntime::intcs index = 0,
                                             SharpRuntime::intcs count = -1) const {

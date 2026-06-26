@@ -33,8 +33,8 @@ namespace System {
          *
          * C++ counterpart of .NET StackOverflowException(string, Exception).
          */
-        StackOverflowException(const std::string& message, const std::exception& innerException)
-            : SystemException(message + " | inner: " + innerException.what()) {}
+        StackOverflowException(const std::string& message, std::exception_ptr innerException)
+            : SystemException(message, std::move(innerException)) {}
     };
 
 } // namespace System

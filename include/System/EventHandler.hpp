@@ -80,7 +80,7 @@ namespace System
          */
         using HandlerType = std::function<void(Object* sender, const TEventArgs& e)>;
 
-        /// Token type returned by Add(); used to remove a specific handler via Remove().
+        /** Token type returned by Add(); used to remove a specific handler via Remove(). */
         using Token = std::size_t;
 
     private:

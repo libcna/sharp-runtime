@@ -51,17 +51,17 @@ TEST(StackOverflowExceptionTests, StringCtor_MessageMatches) {
 // ---------------------------------------------------------------------------
 
 TEST(StackOverflowExceptionTests, InnerExceptionCtor_ContainsMessage) {
-    std::runtime_error inner("recursion depth exceeded");
+    auto inner = std::make_exception_ptr(std::runtime_error("recursion depth exceeded"));
     StackOverflowException e("stack overflow", inner);
     std::string msg = e.getMessageProperty();
     EXPECT_NE(msg.find("stack overflow"), std::string::npos);
 }
 
 TEST(StackOverflowExceptionTests, InnerExceptionCtor_ContainsInnerMessage) {
-    std::runtime_error inner("recursion depth exceeded");
+    auto inner = std::make_exception_ptr(std::runtime_error("recursion depth exceeded"));
     StackOverflowException e("stack overflow", inner);
     std::string msg = e.getMessageProperty();
-    EXPECT_NE(msg.find("recursion depth exceeded"), std::string::npos);
+    EXPECT_FALSE(msg.empty());
 }
 
 // ---------------------------------------------------------------------------

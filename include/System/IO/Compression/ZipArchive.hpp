@@ -31,24 +31,24 @@ namespace System::IO::Compression {
         std::shared_ptr<ZipArchiveEntryState> state_;
 
     public:
-        /// @brief Default-constructs an invalid (empty) entry.
+        /** @brief Default-constructs an invalid (empty) entry. */
         ZipArchiveEntry() = default;
 
-        /// @brief Internal constructor used by ZipArchive; prefer the archive's factory methods.
+        /** @brief Internal constructor used by ZipArchive; prefer the archive's factory methods. */
         explicit ZipArchiveEntry(std::shared_ptr<ZipArchiveEntryState> s);
 
         ~ZipArchiveEntry() = default;
 
-        /// @brief Returns @c true if this entry was successfully obtained from an archive.
+        /** @brief Returns @c true if this entry was successfully obtained from an archive. */
         [[nodiscard]] bool IsValid() const;
 
-        /// @brief Returns the file name of the entry (without directory path).
+        /** @brief Returns the file name of the entry (without directory path). */
         [[nodiscard]] std::string getNameProperty() const;
 
-        /// @brief Returns the full relative path of the entry within the archive.
+        /** @brief Returns the full relative path of the entry within the archive. */
         [[nodiscard]] std::string getFullNameProperty() const;
 
-        /// @brief Returns the uncompressed size in bytes.
+        /** @brief Returns the uncompressed size in bytes. */
         [[nodiscard]] long long getLengthProperty() const;
 
         /**

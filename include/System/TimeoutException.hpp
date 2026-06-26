@@ -19,6 +19,6 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit TimeoutException(const std::string& message);
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        TimeoutException(const std::string& message, const std::exception& innerException);
+        TimeoutException(const std::string& message, std::exception_ptr innerException);
     };
 } // namespace System

@@ -20,19 +20,19 @@ namespace System::Collections::Generic
     public:
         ~IList() override = default;
 
-        /// Gets the element at the specified index.
+        /** Gets the element at the specified index. */
         [[nodiscard]] virtual const T& operator[](int index) const = 0;
 
-        /// Gets or sets the element at the specified index (non-const).
+        /** Gets or sets the element at the specified index (non-const). */
         virtual T& operator[](int index) = 0;
 
-        /// Returns the index of the first occurrence of the specified item, or -1.
+        /** Returns the index of the first occurrence of the specified item, or -1. */
         [[nodiscard]] virtual int IndexOf(const T& item) const = 0;
 
-        /// Inserts an item at the specified index.
+        /** Inserts an item at the specified index. */
         virtual void Insert(int index, const T& item) = 0;
 
-        /// Removes the element at the specified index.
+        /** Removes the element at the specified index. */
         virtual void RemoveAt(int index) = 0;
     };
 }

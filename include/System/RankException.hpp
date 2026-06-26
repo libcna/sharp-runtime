@@ -11,8 +11,8 @@ namespace System {
     public:
         RankException() : SystemException("Attempted to operate on an array with the incorrect number of dimensions.") {}
         explicit RankException(const std::string& message) : SystemException(message) {}
-        RankException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        RankException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System

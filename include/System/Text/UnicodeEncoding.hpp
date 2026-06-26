@@ -17,10 +17,10 @@ namespace System::Text {
      */
     class UnicodeEncoding : public Encoding {
     public:
-        /// Default constructor (UTF-16 LE, no BOM).
+        /** Default constructor (UTF-16 LE, no BOM). */
         UnicodeEncoding() = default;
 
-        /// Encodes a string to UTF-16 LE bytes (ASCII range only in this partial implementation).
+        /** Encodes a string to UTF-16 LE bytes (ASCII range only in this partial implementation). */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
             std::vector<SharpRuntime::bytecs> out;
             out.reserve(s.size() * 2);
@@ -31,7 +31,7 @@ namespace System::Text {
             return out;
         }
 
-        /// Decodes a UTF-16 LE byte range to a string (BMP ASCII range only).
+        /** Decodes a UTF-16 LE byte range to a string (BMP ASCII range only). */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                             SharpRuntime::intcs index,
                                             SharpRuntime::intcs count) const override {
@@ -41,7 +41,7 @@ namespace System::Text {
             return out;
         }
 
-        /// Returns the encoding name "utf-16".
+        /** Returns the encoding name "utf-16". */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "utf-16"; }
     };
 

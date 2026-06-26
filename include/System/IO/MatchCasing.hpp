@@ -5,13 +5,13 @@
 
 namespace System::IO {
 
-    /// Controls case sensitivity when matching file names against a search pattern.
+    /** Controls case sensitivity when matching file names against a search pattern. */
     enum class MatchCasing {
-        /// Use the case sensitivity rules of the current platform.
+        /** Use the case sensitivity rules of the current platform. */
         PlatformDefault  = 0,
-        /// Match using case-sensitive comparison.
+        /** Match using case-sensitive comparison. */
         CaseSensitive    = 1,
-        /// Match using case-insensitive comparison.
+        /** Match using case-insensitive comparison. */
         CaseInsensitive  = 2,
     };
 

@@ -5,11 +5,11 @@
 
 namespace System::IO {
 
-    /// Specifies whether to search only the top-level directory or all subdirectories.
+    /** Specifies whether to search only the top-level directory or all subdirectories. */
     enum class SearchOption {
-        /// Includes only the top directory.
+        /** Includes only the top directory. */
         TopDirectoryOnly = 0,
-        /// Includes the top directory and all subdirectories.
+        /** Includes the top directory and all subdirectories. */
         AllDirectories   = 1,
     };
 

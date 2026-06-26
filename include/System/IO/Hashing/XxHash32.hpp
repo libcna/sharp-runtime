@@ -34,7 +34,7 @@ namespace System::IO::Hashing {
         void processBlock(const uint8_t* block);
 
     public:
-        /// @brief Constructs the hasher with an optional seed value.
+        /** @brief Constructs the hasher with an optional seed value. */
         explicit XxHash32(uint32_t seed = 0);
 
         void Reset() override;
@@ -43,10 +43,10 @@ namespace System::IO::Hashing {
         void Append(const uint8_t* source, size_t length) override;
         void GetCurrentHash(uint8_t* dest, size_t len) override;
 
-        /// @brief Returns the current hash as a native 32-bit integer.
+        /** @brief Returns the current hash as a native 32-bit integer. */
         [[nodiscard]] uint32_t GetCurrentHashAsUInt32();
 
-        /// @brief One-shot hash of the given byte vector.
+        /** @brief One-shot hash of the given byte vector. */
         static uint32_t HashToUInt32(const std::vector<uint8_t>& source, uint32_t seed = 0);
     };
 

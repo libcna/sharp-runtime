@@ -10,7 +10,7 @@
 
 namespace System::Threading {
 
-    /// Represents a thread-synchronisation event.
+    /** Represents a thread-synchronisation event. */
     class EventWaitHandle : public WaitHandle {
         EventResetMode mode_;
         std::atomic<bool> set_{false};
@@ -18,11 +18,11 @@ namespace System::Threading {
         std::condition_variable cv_;
 
     public:
-        /// Constructs an EventWaitHandle with the specified initial state and reset mode.
+        /** Constructs an EventWaitHandle with the specified initial state and reset mode. */
         EventWaitHandle(bool initialState, EventResetMode mode)
             : mode_(mode), set_(initialState) {}
 
-        /// Sets the event to the signalled state.
+        /** Sets the event to the signalled state. */
         void Set() {
             set_.store(true, std::memory_order_release);
             if (mode_ == EventResetMode::ManualReset)
@@ -31,10 +31,10 @@ namespace System::Threading {
                 cv_.notify_one();
         }
 
-        /// Sets the event to the non-signalled state.
+        /** Sets the event to the non-signalled state. */
         void Reset() { set_.store(false, std::memory_order_release); }
 
-        /// Blocks until the event is signalled; auto-resets if the mode is AutoReset.
+        /** Blocks until the event is signalled; auto-resets if the mode is AutoReset. */
         bool WaitOne() override {
             std::unique_lock<std::mutex> lock(mtx_);
             cv_.wait(lock, [this]{ return set_.load(std::memory_order_acquire); });
@@ -43,7 +43,7 @@ namespace System::Threading {
             return true;
         }
 
-        /// Blocks until the event is signalled or the timeout elapses; returns true if signalled.
+        /** Blocks until the event is signalled or the timeout elapses; returns true if signalled. */
         bool WaitOne(int milliseconds) override {
             std::unique_lock<std::mutex> lock(mtx_);
             bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),

@@ -19,7 +19,7 @@ namespace System {
         : SystemException(message) {}
 
     NotSupportedException::NotSupportedException(const std::string& message,
-                                                 const std::exception& innerException)
-        : SystemException(message + " | inner: " + innerException.what()) {}
+                                                 std::exception_ptr innerException)
+        : SystemException(message, std::move(innerException)) {}
 
 } // namespace System

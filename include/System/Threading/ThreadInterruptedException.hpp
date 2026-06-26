@@ -25,8 +25,8 @@ namespace System::Threading {
          * @param message The error message.
          * @param inner   The exception that caused this exception.
          */
-        ThreadInterruptedException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        ThreadInterruptedException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System::Threading

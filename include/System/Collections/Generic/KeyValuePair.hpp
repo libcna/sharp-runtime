@@ -15,23 +15,23 @@ namespace System::Collections::Generic {
      */
     template<typename TKey, typename TValue>
     struct KeyValuePair {
-        /// The key component of the pair.
+        /** The key component of the pair. */
         TKey  Key;
-        /// The value component of the pair.
+        /** The value component of the pair. */
         TValue Value;
 
-        /// Default-constructs a KeyValuePair with default-initialized key and value.
+        /** Default-constructs a KeyValuePair with default-initialized key and value. */
         KeyValuePair() = default;
-        /// Constructs a KeyValuePair with copies of the given key and value.
+        /** Constructs a KeyValuePair with copies of the given key and value. */
         KeyValuePair(const TKey& key, const TValue& value) : Key(key), Value(value) {}
-        /// Constructs a KeyValuePair by moving the given key and value.
+        /** Constructs a KeyValuePair by moving the given key and value. */
         KeyValuePair(TKey&& key, TValue&& value) : Key(std::move(key)), Value(std::move(value)) {}
 
-        /// Returns true if both key and value compare equal to the other pair.
+        /** Returns true if both key and value compare equal to the other pair. */
         bool operator==(const KeyValuePair& other) const {
             return Key == other.Key && Value == other.Value;
         }
-        /// Returns true if the pairs are not equal.
+        /** Returns true if the pairs are not equal. */
         bool operator!=(const KeyValuePair& other) const { return !(*this == other); }
     };
 

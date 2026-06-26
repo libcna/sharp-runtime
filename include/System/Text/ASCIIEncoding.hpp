@@ -17,17 +17,17 @@ namespace System::Text {
      */
     class ASCIIEncoding : public Encoding {
     public:
-        /// Default constructor.
+        /** Default constructor. */
         ASCIIEncoding() = default;
         ~ASCIIEncoding() override = default;
 
-        /// Encodes a string to ASCII bytes; characters above 127 are replaced by '?'.
+        /** Encodes a string to ASCII bytes; characters above 127 are replaced by '?'. */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& str) const override;
-        /// Decodes an ASCII byte range to a string.
+        /** Decodes an ASCII byte range to a string. */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                             SharpRuntime::intcs index,
                                             SharpRuntime::intcs count) const override;
-        /// Returns the encoding name "us-ascii".
+        /** Returns the encoding name "us-ascii". */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "us-ascii"; }
     };
 

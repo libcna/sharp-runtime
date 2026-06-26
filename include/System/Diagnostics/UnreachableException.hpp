@@ -11,8 +11,8 @@ namespace System::Diagnostics {
     public:
         UnreachableException() : Exception("The program executed an instruction that was thought to be unreachable.") {}
         explicit UnreachableException(const std::string& message) : Exception(message) {}
-        UnreachableException(const std::string& message, const std::exception& inner)
-            : Exception(message + " | inner: " + inner.what()) {}
+        UnreachableException(const std::string& message, std::exception_ptr inner)
+            : Exception(message, std::move(inner)) {}
     };
 
 } // namespace System::Diagnostics

@@ -7,22 +7,22 @@
 
 namespace System::Globalization {
 
-/// <summary>Defines the period of daylight saving time, including the start, end, and time delta.</summary>
+/** <summary>Defines the period of daylight saving time, including the start, end, and time delta.</summary> */
 class DaylightTime {
     System::DateTime start_;
     System::DateTime end_;
     System::TimeSpan delta_;
 
 public:
-    /// Constructs a DaylightTime with the given @p start, @p end, and clock @p delta.
+    /** Constructs a DaylightTime with the given @p start, @p end, and clock @p delta. */
     DaylightTime(const System::DateTime& start, const System::DateTime& end, const System::TimeSpan& delta)
         : start_(start), end_(end), delta_(delta) {}
 
-    /// @return The date and time when daylight saving time begins.
+    /** @return The date and time when daylight saving time begins. */
     [[nodiscard]] const System::DateTime& getStartProperty() const { return start_; }
-    /// @return The date and time when daylight saving time ends.
+    /** @return The date and time when daylight saving time ends. */
     [[nodiscard]] const System::DateTime& getEndProperty()   const { return end_; }
-    /// @return The clock offset applied when daylight saving time is in effect.
+    /** @return The clock offset applied when daylight saving time is in effect. */
     [[nodiscard]] const System::TimeSpan& getDeltaProperty() const { return delta_; }
 };
 

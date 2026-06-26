@@ -6,22 +6,24 @@
 
 namespace System::Net::Http {
 
-/// Represents an HTTP method (verb), mirroring .NET System.Net.Http.HttpMethod.
+/** Represents an HTTP method (verb), mirroring .NET System.Net.Http.HttpMethod. */
 class HttpMethod {
     std::string method_;
 public:
-    /// @brief Constructs an HttpMethod with the given verb string.
-    /// @param method HTTP verb string (e.g. "GET", "POST").
+    /**
+     * @brief Constructs an HttpMethod with the given verb string.
+     * @param method HTTP verb string (e.g. "GET", "POST").
+     */
     explicit HttpMethod(const std::string& method) : method_(method) {}
 
-    /// Returns the HTTP method string (e.g. "GET").
+    /** Returns the HTTP method string (e.g. "GET"). */
     [[nodiscard]] const std::string& getMethodProperty() const { return method_; }
-    /// Returns the HTTP method string.
+    /** Returns the HTTP method string. */
     [[nodiscard]] std::string ToString() const { return method_; }
 
-    /// Returns true if both HttpMethod instances represent the same verb.
+    /** Returns true if both HttpMethod instances represent the same verb. */
     bool operator==(const HttpMethod& o) const { return method_ == o.method_; }
-    /// Returns true if the two HttpMethod instances represent different verbs.
+    /** Returns true if the two HttpMethod instances represent different verbs. */
     bool operator!=(const HttpMethod& o) const { return method_ != o.method_; }
 
     static const HttpMethod& Get()     { static HttpMethod m("GET");     return m; } ///< The HTTP GET method.

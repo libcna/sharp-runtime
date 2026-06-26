@@ -19,8 +19,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit MulticastNotSupportedException(const std::string& message) : SystemException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        MulticastNotSupportedException(const std::string& message, const std::exception& innerException)
-            : SystemException(message + " | inner: " + innerException.what()) {}
+        MulticastNotSupportedException(const std::string& message, std::exception_ptr innerException)
+            : SystemException(message, std::move(innerException)) {}
     };
 
 } // namespace System

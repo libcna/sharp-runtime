@@ -17,7 +17,7 @@ namespace System::ComponentModel
         PropertyDescriptorCollection() = default;
         virtual ~PropertyDescriptorCollection() = default;
 
-        /// Returns the number of property descriptors in the collection.
+        /** Returns the number of property descriptors in the collection. */
         [[nodiscard]] virtual int getCountProperty() const { return 0; }
     };
 }

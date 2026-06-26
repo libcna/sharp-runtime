@@ -10,43 +10,47 @@
 
 namespace System::Net::Http {
 
-/// Represents an HTTP request message, mirroring .NET System.Net.Http.HttpRequestMessage.
+/** Represents an HTTP request message, mirroring .NET System.Net.Http.HttpRequestMessage. */
 class HttpRequestMessage {
     HttpMethod                                     method_;
     std::string                                    uri_;
     std::shared_ptr<HttpContent>                   content_;
     std::unordered_map<std::string, std::string>   headers_;
 public:
-    /// Constructs an HttpRequestMessage with the default GET method and an empty URI.
+    /** Constructs an HttpRequestMessage with the default GET method and an empty URI. */
     HttpRequestMessage() : method_(HttpMethod::Get()) {}
 
-    /// @brief Constructs an HttpRequestMessage with the given method and URI.
-    /// @param method HTTP method (verb).
-    /// @param uri    Request URI string.
+    /**
+     * @brief Constructs an HttpRequestMessage with the given method and URI.
+     * @param method HTTP method (verb).
+     * @param uri    Request URI string.
+     */
     HttpRequestMessage(const HttpMethod& method, const std::string& uri)
         : method_(method), uri_(uri) {}
 
-    /// Returns the HTTP method of this request.
+    /** Returns the HTTP method of this request. */
     [[nodiscard]] const HttpMethod& getMethodProperty() const { return method_; }
-    /// Sets the HTTP method of this request.
+    /** Sets the HTTP method of this request. */
     void setMethodProperty(const HttpMethod& v)               { method_ = v; }
 
-    /// Returns the request URI string.
+    /** Returns the request URI string. */
     [[nodiscard]] const std::string& getRequestUriProperty() const { return uri_; }
-    /// Sets the request URI string.
+    /** Sets the request URI string. */
     void setRequestUriProperty(const std::string& v)               { uri_ = v; }
 
-    /// Returns the content body of this request (may be null).
+    /** Returns the content body of this request (may be null). */
     [[nodiscard]] std::shared_ptr<HttpContent> getContentProperty() const { return content_; }
-    /// Sets the content body of this request.
+    /** Sets the content body of this request. */
     void setContentProperty(std::shared_ptr<HttpContent> v)               { content_ = std::move(v); }
 
-    /// @brief Adds or replaces a request header.
-    /// @param name  Header name.
-    /// @param value Header value.
+    /**
+     * @brief Adds or replaces a request header.
+     * @param name  Header name.
+     * @param value Header value.
+     */
     void setHeader(const std::string& name, const std::string& value) { headers_[name] = value; }
 
-    /// Returns the map of all request headers.
+    /** Returns the map of all request headers. */
     [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeaders() const {
         return headers_;
     }

@@ -6,16 +6,16 @@
 
 namespace System::Collections {
 
-    /// Non-generic key/value pair used by IDictionary.
+    /** Non-generic key/value pair used by IDictionary. */
     struct DictionaryEntry {
-        /// The key of the entry.
+        /** The key of the entry. */
         std::any Key;
-        /// The value of the entry.
+        /** The value of the entry. */
         std::any Value;
 
-        /// Default-constructs a DictionaryEntry with empty key and value.
+        /** Default-constructs a DictionaryEntry with empty key and value. */
         DictionaryEntry() = default;
-        /// Constructs a DictionaryEntry with the given key and value.
+        /** Constructs a DictionaryEntry with the given key and value. */
         DictionaryEntry(std::any key, std::any value) : Key(std::move(key)), Value(std::move(value)) {}
     };
 

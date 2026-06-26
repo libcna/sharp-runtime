@@ -54,7 +54,7 @@ namespace System {
          * @param message A string that describes the error.
          * @param inner   The exception that is the cause of the current exception.
          */
-        NotImplementedException(const std::string& message, const std::exception& inner);
+        NotImplementedException(const std::string& message, std::exception_ptr inner);
     };
 
 } // namespace System

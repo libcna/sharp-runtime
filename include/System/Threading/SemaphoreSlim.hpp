@@ -23,11 +23,11 @@ namespace System::Threading {
         intcs                   count_;
         intcs                   maxCount_;
     public:
-        /// Constructs a SemaphoreSlim with the given initial and maximum counts.
+        /** Constructs a SemaphoreSlim with the given initial and maximum counts. */
         explicit SemaphoreSlim(intcs initialCount, intcs maxCount = 0x7fffffff)
             : count_(initialCount), maxCount_(maxCount) {}
 
-        /// Returns the current count of the semaphore.
+        /** Returns the current count of the semaphore. */
         [[nodiscard]] intcs getCurrentCountProperty() const { return count_; }
 
         /** @brief Blocks until the semaphore can be entered. */
@@ -57,7 +57,7 @@ namespace System::Threading {
             return prev;
         }
 
-        /// Releases resources used by the SemaphoreSlim.
+        /** Releases resources used by the SemaphoreSlim. */
         void Dispose() {}
     };
 

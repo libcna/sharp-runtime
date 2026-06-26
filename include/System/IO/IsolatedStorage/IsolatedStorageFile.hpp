@@ -28,84 +28,84 @@ namespace System::IO::IsolatedStorage
         std::filesystem::path rootDirectory_; ///< Root directory of this isolated storage scope.
         bool disposed_ = false;               ///< True after Close()/Dispose().
 
-        /// Returns the full absolute path for a relative path inside the store.
+        /** Returns the full absolute path for a relative path inside the store. */
         [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath) const;
 
     public:
-        /// Constructs an IsolatedStorageFile rooted at @p rootDirectory.
+        /** Constructs an IsolatedStorageFile rooted at @p rootDirectory. */
         explicit IsolatedStorageFile(const std::filesystem::path& rootDirectory);
 
-        /// Returns an isolated storage scoped to the current application.
+        /** Returns an isolated storage scoped to the current application. */
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForApplication();
 
-        /// Returns an isolated storage scoped to the current assembly (same root as application).
+        /** Returns an isolated storage scoped to the current assembly (same root as application). */
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForAssembly();
 
         // --- File operations ---
 
-        /// Returns true if the specified relative path exists as a file in isolated storage.
+        /** Returns true if the specified relative path exists as a file in isolated storage. */
         [[nodiscard]] bool FileExists(const std::string& relativePath) const;
 
-        /// Opens a file inside isolated storage with the specified mode.
+        /** Opens a file inside isolated storage with the specified mode. */
         [[nodiscard]] IsolatedStorageFileStream OpenFile(
             const std::string& relativePath,
             System::IO::FileMode mode) const;
 
-        /// Creates a new file (or truncates an existing one) and returns its stream.
+        /** Creates a new file (or truncates an existing one) and returns its stream. */
         [[nodiscard]] IsolatedStorageFileStream CreateFile(const std::string& relativePath) const;
 
-        /// Deletes the specified file from isolated storage.
+        /** Deletes the specified file from isolated storage. */
         void DeleteFile(const std::string& relativePath) const;
 
-        /// Copies @p sourceFileName to @p destinationFileName; does not overwrite by default.
+        /** Copies @p sourceFileName to @p destinationFileName; does not overwrite by default. */
         void CopyFile(const std::string& sourceFileName, const std::string& destinationFileName) const;
 
-        /// Copies @p sourceFileName to @p destinationFileName; overwrites if @p overwrite is true.
+        /** Copies @p sourceFileName to @p destinationFileName; overwrites if @p overwrite is true. */
         void CopyFile(const std::string& sourceFileName, const std::string& destinationFileName, bool overwrite) const;
 
-        /// Moves (renames) a file within isolated storage.
+        /** Moves (renames) a file within isolated storage. */
         void MoveFile(const std::string& sourceFileName, const std::string& destinationFileName) const;
 
-        /// Returns names of all files matching @p searchPattern ("*" matches everything).
+        /** Returns names of all files matching @p searchPattern ("*" matches everything). */
         [[nodiscard]] std::vector<std::string> GetFileNames(const std::string& searchPattern = "*") const;
 
         // --- Directory operations ---
 
-        /// Returns true if the specified relative path exists as a directory in isolated storage.
+        /** Returns true if the specified relative path exists as a directory in isolated storage. */
         [[nodiscard]] bool DirectoryExists(const std::string& relativePath) const;
 
-        /// Creates the specified directory (and any intermediate directories) inside isolated storage.
+        /** Creates the specified directory (and any intermediate directories) inside isolated storage. */
         void CreateDirectory(const std::string& relativePath) const;
 
-        /// Deletes the specified directory and all its contents from isolated storage.
+        /** Deletes the specified directory and all its contents from isolated storage. */
         void DeleteDirectory(const std::string& relativePath) const;
 
-        /// Moves (renames) a directory within isolated storage.
+        /** Moves (renames) a directory within isolated storage. */
         void MoveDirectory(const std::string& sourceDirectoryName, const std::string& destinationDirectoryName) const;
 
-        /// Returns names of all directories matching @p searchPattern ("*" matches everything).
+        /** Returns names of all directories matching @p searchPattern ("*" matches everything). */
         [[nodiscard]] std::vector<std::string> GetDirectoryNames(const std::string& searchPattern = "*") const;
 
         // --- Store lifecycle ---
 
-        /// Removes the entire isolated storage store and all its contents.
+        /** Removes the entire isolated storage store and all its contents. */
         void Remove();
 
-        /// Closes the isolated storage file (marks as disposed).
+        /** Closes the isolated storage file (marks as disposed). */
         void Close();
 
-        /// Releases all resources used by the isolated storage.
+        /** Releases all resources used by the isolated storage. */
         void Dispose();
 
         // --- Space properties ---
 
-        /// Returns the available free space in the store's volume in bytes.
+        /** Returns the available free space in the store's volume in bytes. */
         [[nodiscard]] SharpRuntime::longcs getAvailableFreeSpaceProperty() const;
 
-        /// Returns the approximate used size of the store in bytes (sum of all file sizes).
+        /** Returns the approximate used size of the store in bytes (sum of all file sizes). */
         [[nodiscard]] SharpRuntime::longcs getUsedSizeProperty() const;
 
-        /// Returns the root directory path for this isolated storage scope.
+        /** Returns the root directory path for this isolated storage scope. */
         [[nodiscard]] const std::filesystem::path& getRootDirectoryProperty() const;
     };
 }

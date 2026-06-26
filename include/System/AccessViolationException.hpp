@@ -18,8 +18,8 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit AccessViolationException(const std::string& message) : SystemException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        AccessViolationException(const std::string& message, const std::exception& inner)
-            : SystemException(message + " | inner: " + inner.what()) {}
+        AccessViolationException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {}
     };
 
 } // namespace System

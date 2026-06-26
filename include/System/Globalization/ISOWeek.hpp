@@ -7,13 +7,13 @@
 
 namespace System::Globalization {
 
-/// <summary>Provides static helpers for ISO 8601 week-based calendars.</summary>
+/** <summary>Provides static helpers for ISO 8601 week-based calendars.</summary> */
 class ISOWeek {
 public:
-    /// Not instantiable — all members are static.
+    /** Not instantiable — all members are static. */
     ISOWeek() = delete;
 
-    /// @return The ISO 8601 week number (1–53) for @p date.
+    /** @return The ISO 8601 week number (1–53) for @p date. */
     static int GetWeekOfYear(const System::DateTime& date) {
         // Use the standard algorithm: Thursday in the week determines the year.
         int doy = date.getDayOfYearProperty();
@@ -26,7 +26,7 @@ public:
         return w;
     }
 
-    /// @return The ISO 8601 week-year for @p date (may differ from the calendar year near year boundaries).
+    /** @return The ISO 8601 week-year for @p date (may differ from the calendar year near year boundaries). */
     static int GetYear(const System::DateTime& date) {
         int w = GetWeekOfYear(date);
         int month = date.getMonthProperty();
@@ -35,7 +35,7 @@ public:
         return date.getYearProperty();
     }
 
-    /// @return 52 or 53, depending on whether the ISO week year @p year has a long (53-week) year.
+    /** @return 52 or 53, depending on whether the ISO week year @p year has a long (53-week) year. */
     static int GetWeeksInYear(int year) {
         // A year has 53 weeks if Jan 1 or Dec 31 is Thursday.
         auto isLong = [](int y) {
@@ -45,7 +45,7 @@ public:
         return isLong(year) ? 53 : 52;
     }
 
-    /// @return The DateTime of the first day (Monday) of ISO week 1 in @p year.
+    /** @return The DateTime of the first day (Monday) of ISO week 1 in @p year. */
     static System::DateTime GetYearStart(int year) {
         // First Monday on or before Jan 4
         System::DateTime jan4(year, 1, 4);
@@ -54,7 +54,7 @@ public:
         return jan4.AddDays(1 - isoDow);
     }
 
-    /// @return The DateTime of the last day (Sunday) of the last ISO week in @p year.
+    /** @return The DateTime of the last day (Sunday) of the last ISO week in @p year. */
     static System::DateTime GetYearEnd(int year) {
         return GetYearStart(year + 1).AddDays(-1);
     }

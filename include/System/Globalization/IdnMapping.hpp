@@ -7,31 +7,33 @@
 
 namespace System::Globalization {
 
-/// <summary>
-/// Supports the use of non-ASCII characters for Internet domain names.
-/// Implements Punycode (RFC 3492) / IDNA (RFC 3490) encoding and decoding.
-///
-/// GetAscii() converts a Unicode domain name to its ACE (xn--) ASCII representation.
-/// GetUnicode() reverses the conversion.
-///
-/// ASCII-only labels are passed through unchanged.
-/// </summary>
+/**
+ * <summary>
+ * Supports the use of non-ASCII characters for Internet domain names.
+ * Implements Punycode (RFC 3492) / IDNA (RFC 3490) encoding and decoding.
+ * 
+ * GetAscii() converts a Unicode domain name to its ACE (xn--) ASCII representation.
+ * GetUnicode() reverses the conversion.
+ * 
+ * ASCII-only labels are passed through unchanged.
+ * </summary>
+ */
 class IdnMapping {
 public:
     IdnMapping() = default;
 
-    /// When true, unassigned Unicode code points are allowed.
+    /** When true, unassigned Unicode code points are allowed. */
     [[nodiscard]] bool getAllowUnassignedProperty() const { return allowUnassigned_; }
     void setAllowUnassignedProperty(bool v) { allowUnassigned_ = v; }
 
-    /// When true, validates labels against RFC 1123 Std3 name rules.
+    /** When true, validates labels against RFC 1123 Std3 name rules. */
     [[nodiscard]] bool getUseStd3AsciiRulesProperty() const { return useStd3_; }
     void setUseStd3AsciiRulesProperty(bool v) { useStd3_ = v; }
 
-    /// Converts a Unicode (UTF-8) domain name to its Punycode ASCII form.
+    /** Converts a Unicode (UTF-8) domain name to its Punycode ASCII form. */
     [[nodiscard]] std::string GetAscii(const std::string& unicode) const;
 
-    /// Converts a Punycode ASCII domain name back to Unicode (UTF-8).
+    /** Converts a Punycode ASCII domain name back to Unicode (UTF-8). */
     [[nodiscard]] std::string GetUnicode(const std::string& ascii) const;
 
     bool operator==(const IdnMapping& o) const {

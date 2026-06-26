@@ -7,17 +7,19 @@
 
 namespace System::Globalization {
 
-/// <summary>
-/// Represents the Japanese calendar. Month and day are the same as Gregorian;
-/// the year is counted from the start of the current imperial era.
-///
-/// Eras (most recent first):
-///   5 – Reiwa   (2019-05-01 AD)
-///   4 – Heisei  (1989-01-08 AD)
-///   3 – Showa   (1926-12-25 AD)
-///   2 – Taisho  (1912-07-30 AD)
-///   1 – Meiji   (1868-01-01 AD)
-/// </summary>
+/**
+ * <summary>
+ * Represents the Japanese calendar. Month and day are the same as Gregorian;
+ * the year is counted from the start of the current imperial era.
+ * 
+ * Eras (most recent first):
+ *   5 – Reiwa   (2019-05-01 AD)
+ *   4 – Heisei  (1989-01-08 AD)
+ *   3 – Showa   (1926-12-25 AD)
+ *   2 – Taisho  (1912-07-30 AD)
+ *   1 – Meiji   (1868-01-01 AD)
+ * </summary>
+ */
 class JapaneseCalendar : public Calendar {
 public:
     static constexpr int MeijiEra   = 1;
@@ -38,7 +40,7 @@ public:
         throw std::out_of_range("JapaneseCalendar: date is before Meiji era (1868-01-01).");
     }
 
-    /// Returns the year within the current imperial era.
+    /** Returns the year within the current imperial era. */
     [[nodiscard]] int GetYear(const System::DateTime& time) const override {
         int era = GetEra(time);
         int gy  = time.getYearProperty();

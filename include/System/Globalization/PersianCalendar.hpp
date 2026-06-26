@@ -7,7 +7,7 @@
 
 namespace System::Globalization {
 
-/// <summary>Represents the Persian (Solar Hijri) calendar.</summary>
+/** <summary>Represents the Persian (Solar Hijri) calendar.</summary> */
 class PersianCalendar : public Calendar {
 public:
     static constexpr int PersianEra = 1;
@@ -15,7 +15,7 @@ public:
     [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return PersianEra; }
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
-    /// <summary>Converts a Gregorian DateTime to Persian year.</summary>
+    /** <summary>Converts a Gregorian DateTime to Persian year.</summary> */
     [[nodiscard]] int GetYear(const System::DateTime& time) const override {
         int g_y = time.getYearProperty(), g_m = time.getMonthProperty(), g_d = time.getDayProperty();
         return gregorianToPersian(g_y, g_m, g_d).year;

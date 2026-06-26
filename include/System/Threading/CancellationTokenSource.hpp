@@ -19,21 +19,21 @@ namespace System::Threading {
         std::shared_ptr<std::atomic<bool>> flag_ = std::make_shared<std::atomic<bool>>(false);
         bool disposed_ = false;
     public:
-        /// Initializes a new CancellationTokenSource.
+        /** Initializes a new CancellationTokenSource. */
         CancellationTokenSource() = default;
 
-        /// Returns the CancellationToken associated with this source.
+        /** Returns the CancellationToken associated with this source. */
         [[nodiscard]] CancellationToken getTokenProperty() const {
             return CancellationToken(flag_);
         }
 
-        /// Returns true if cancellation has been requested.
+        /** Returns true if cancellation has been requested. */
         [[nodiscard]] bool getIsCancellationRequestedProperty() const { return flag_->load(); }
 
-        /// Signals cancellation to all linked CancellationToken holders.
+        /** Signals cancellation to all linked CancellationToken holders. */
         void Cancel() { flag_->store(true); }
 
-        /// Releases resources used by this CancellationTokenSource.
+        /** Releases resources used by this CancellationTokenSource. */
         void Dispose() { disposed_ = true; }
     };
 

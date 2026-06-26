@@ -11,13 +11,13 @@
 
 namespace System::Threading {
 
-    /// Provides a pool of threads that can be used to execute tasks, post work items, and other operations.
+    /** Provides a pool of threads that can be used to execute tasks, post work items, and other operations. */
     class ThreadPool {
     public:
-        /// Prevents instantiation — all members are static.
+        /** Prevents instantiation — all members are static. */
         ThreadPool() = delete;
 
-        /// Queues the callback for execution on a detached thread; returns true on success.
+        /** Queues the callback for execution on a detached thread; returns true on success. */
         static bool QueueUserWorkItem(std::function<void()> callBack) {
 #if defined(__EMSCRIPTEN__)
             (void)callBack;
@@ -28,7 +28,7 @@ namespace System::Threading {
 #endif
         }
 
-        /// Queues the callback with a state argument for execution on a detached thread; returns true on success.
+        /** Queues the callback with a state argument for execution on a detached thread; returns true on success. */
         static bool QueueUserWorkItem(std::function<void(void*)> callBack, void* state) {
 #if defined(__EMSCRIPTEN__)
             (void)callBack; (void)state;
@@ -39,13 +39,13 @@ namespace System::Threading {
 #endif
         }
 
-        /// Retrieves the minimum number of threads the pool maintains.
+        /** Retrieves the minimum number of threads the pool maintains. */
         static void GetMinThreads(int& workerThreads, int& completionPortThreads) {
             workerThreads = 1;
             completionPortThreads = 1;
         }
 
-        /// Retrieves the maximum number of concurrent threads.
+        /** Retrieves the maximum number of concurrent threads. */
         static void GetMaxThreads(int& workerThreads, int& completionPortThreads) {
 #if defined(__EMSCRIPTEN__)
             workerThreads = 1;
@@ -56,9 +56,9 @@ namespace System::Threading {
 #endif
         }
 
-        /// Sets the minimum number of threads the pool maintains; always returns true in this stub.
+        /** Sets the minimum number of threads the pool maintains; always returns true in this stub. */
         static bool SetMinThreads(int /*workerThreads*/, int /*completionPortThreads*/) { return true; }
-        /// Sets the maximum number of concurrent threads; always returns true in this stub.
+        /** Sets the maximum number of concurrent threads; always returns true in this stub. */
         static bool SetMaxThreads(int /*workerThreads*/, int /*completionPortThreads*/) { return true; }
     };
 

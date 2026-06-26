@@ -24,19 +24,19 @@ namespace System::IO::IsolatedStorage {
     public:
         virtual ~IsolatedStorage() = default;
 
-        /// Returns the isolation scope for this store.
+        /** Returns the isolation scope for this store. */
         [[nodiscard]] IsolatedStorageScope getScopeProperty() const { return scope_; }
 
-        /// Returns the available free space in bytes (stub returns 0).
+        /** Returns the available free space in bytes (stub returns 0). */
         [[nodiscard]] virtual longcs getAvailableFreeSpaceProperty() const { return 0; }
-        /// Returns the maximum size quota in bytes (stub returns 0).
+        /** Returns the maximum size quota in bytes (stub returns 0). */
         [[nodiscard]] virtual longcs getQuotaProperty() const { return 0; }
-        /// Returns the used space in bytes (stub returns 0).
+        /** Returns the used space in bytes (stub returns 0). */
         [[nodiscard]] virtual longcs getUsedSizeProperty() const { return 0; }
 
-        /// Removes the isolated storage scope and all its contents.
+        /** Removes the isolated storage scope and all its contents. */
         virtual void Remove() = 0;
-        /// Closes the isolated storage.
+        /** Closes the isolated storage. */
         virtual void Close()  {}
     };
 

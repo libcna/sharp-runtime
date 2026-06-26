@@ -8,28 +8,28 @@
 
 namespace System::ComponentModel {
 
-    /// Specifies the default value for a property.
+    /** Specifies the default value for a property. */
     class DefaultValueAttribute : public System::Attribute {
         std::any value_;
     public:
-        /// @param v Default value as bool.
+        /** @param v Default value as bool. */
         explicit DefaultValueAttribute(bool v)        : value_(v) {}
-        /// @param v Default value as int.
+        /** @param v Default value as int. */
         explicit DefaultValueAttribute(int v)         : value_(v) {}
-        /// @param v Default value as long.
+        /** @param v Default value as long. */
         explicit DefaultValueAttribute(long v)        : value_(v) {}
-        /// @param v Default value as double.
+        /** @param v Default value as double. */
         explicit DefaultValueAttribute(double v)      : value_(v) {}
-        /// @param v Default value as float.
+        /** @param v Default value as float. */
         explicit DefaultValueAttribute(float v)       : value_(v) {}
-        /// @param v Default value as char.
+        /** @param v Default value as char. */
         explicit DefaultValueAttribute(char v)        : value_(v) {}
-        /// @param v Default value as string.
+        /** @param v Default value as string. */
         explicit DefaultValueAttribute(const std::string& v) : value_(v) {}
-        /// @param v Default value as a type-erased std::any.
+        /** @param v Default value as a type-erased std::any. */
         explicit DefaultValueAttribute(const std::any& v) : value_(v) {}
 
-        /// @return The default value as a type-erased std::any.
+        /** @return The default value as a type-erased std::any. */
         [[nodiscard]] const std::any& getValueProperty() const { return value_; }
     };
 

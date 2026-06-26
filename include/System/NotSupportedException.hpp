@@ -33,7 +33,7 @@ namespace System {
          *
          * C++ counterpart of .NET NotSupportedException(string, Exception).
          */
-        NotSupportedException(const std::string& message, const std::exception& innerException);
+        NotSupportedException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System

@@ -26,28 +26,28 @@ namespace System::Collections::Concurrent {
         mutable std::mutex             mutex_;
         std::unordered_map<TKey,TValue> map_;
     public:
-        /// Default-constructs an empty ConcurrentDictionary.
+        /** Default-constructs an empty ConcurrentDictionary. */
         ConcurrentDictionary() = default;
 
-        /// Gets the number of key/value pairs in the dictionary (thread-safe).
+        /** Gets the number of key/value pairs in the dictionary (thread-safe). */
         [[nodiscard]] intcs getCountProperty() const {
             std::lock_guard<std::mutex> lk(mutex_);
             return static_cast<intcs>(map_.size());
         }
 
-        /// Returns true if the dictionary contains no elements (thread-safe).
+        /** Returns true if the dictionary contains no elements (thread-safe). */
         [[nodiscard]] bool getIsEmptyProperty() const {
             std::lock_guard<std::mutex> lk(mutex_);
             return map_.empty();
         }
 
-        /// Thread-safely adds key/value only if key is not already present; returns true if added.
+        /** Thread-safely adds key/value only if key is not already present; returns true if added. */
         bool TryAdd(const TKey& key, const TValue& value) {
             std::lock_guard<std::mutex> lk(mutex_);
             return map_.emplace(key, value).second;
         }
 
-        /// Thread-safely retrieves the value for key; returns true if found.
+        /** Thread-safely retrieves the value for key; returns true if found. */
         bool TryGetValue(const TKey& key, TValue& value) const {
             std::lock_guard<std::mutex> lk(mutex_);
             auto it = map_.find(key);
@@ -56,7 +56,7 @@ namespace System::Collections::Concurrent {
             return true;
         }
 
-        /// Thread-safely removes the entry for key and outputs its value; returns true if removed.
+        /** Thread-safely removes the entry for key and outputs its value; returns true if removed. */
         bool TryRemove(const TKey& key, TValue& value) {
             std::lock_guard<std::mutex> lk(mutex_);
             auto it = map_.find(key);
@@ -66,7 +66,7 @@ namespace System::Collections::Concurrent {
             return true;
         }
 
-        /// Thread-safely updates the value for key if the current value equals comparisonValue; returns true if updated.
+        /** Thread-safely updates the value for key if the current value equals comparisonValue; returns true if updated. */
         bool TryUpdate(const TKey& key, const TValue& newValue, const TValue& comparisonValue) {
             std::lock_guard<std::mutex> lk(mutex_);
             auto it = map_.find(key);
@@ -75,20 +75,20 @@ namespace System::Collections::Concurrent {
             return true;
         }
 
-        /// Returns a reference to the value for key, inserting a default if not present (thread-safe).
+        /** Returns a reference to the value for key, inserting a default if not present (thread-safe). */
         TValue& operator[](const TKey& key) {
             std::lock_guard<std::mutex> lk(mutex_);
             return map_[key];
         }
 
-        /// Thread-safely returns the value for key if present, otherwise inserts and returns defaultValue.
+        /** Thread-safely returns the value for key if present, otherwise inserts and returns defaultValue. */
         TValue GetOrAdd(const TKey& key, const TValue& defaultValue) {
             std::lock_guard<std::mutex> lk(mutex_);
             auto [it, inserted] = map_.emplace(key, defaultValue);
             return it->second;
         }
 
-        /// Thread-safely returns the value for key if present, otherwise inserts the value produced by factory.
+        /** Thread-safely returns the value for key if present, otherwise inserts the value produced by factory. */
         TValue GetOrAdd(const TKey& key, std::function<TValue(const TKey&)> factory) {
             std::lock_guard<std::mutex> lk(mutex_);
             auto it = map_.find(key);
@@ -98,7 +98,7 @@ namespace System::Collections::Concurrent {
             return v;
         }
 
-        /// Thread-safely adds addValue if key is absent, or replaces the existing value using updateFactory.
+        /** Thread-safely adds addValue if key is absent, or replaces the existing value using updateFactory. */
         TValue AddOrUpdate(const TKey& key, const TValue& addValue,
                            std::function<TValue(const TKey&, const TValue&)> updateFactory) {
             std::lock_guard<std::mutex> lk(mutex_);
@@ -108,19 +108,19 @@ namespace System::Collections::Concurrent {
             return it->second;
         }
 
-        /// Returns true if the dictionary contains the specified key (thread-safe).
+        /** Returns true if the dictionary contains the specified key (thread-safe). */
         [[nodiscard]] bool ContainsKey(const TKey& key) const {
             std::lock_guard<std::mutex> lk(mutex_);
             return map_.count(key) > 0;
         }
 
-        /// Thread-safely removes all elements from the dictionary.
+        /** Thread-safely removes all elements from the dictionary. */
         void Clear() {
             std::lock_guard<std::mutex> lk(mutex_);
             map_.clear();
         }
 
-        /// Returns a snapshot vector of all keys (thread-safe).
+        /** Returns a snapshot vector of all keys (thread-safe). */
         [[nodiscard]] std::vector<TKey> Keys() const {
             std::lock_guard<std::mutex> lk(mutex_);
             std::vector<TKey> k;
@@ -128,7 +128,7 @@ namespace System::Collections::Concurrent {
             return k;
         }
 
-        /// Returns a snapshot vector of all values (thread-safe).
+        /** Returns a snapshot vector of all values (thread-safe). */
         [[nodiscard]] std::vector<TValue> Values() const {
             std::lock_guard<std::mutex> lk(mutex_);
             std::vector<TValue> v;

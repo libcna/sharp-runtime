@@ -40,13 +40,13 @@ namespace System::IO::Compression {
 
         ~GZipStream() override;
 
-        /// @brief Returns @c true when mode is Decompress.
+        /** @brief Returns @c true when mode is Decompress. */
         [[nodiscard]] bool getCanReadProperty()  const override;
 
-        /// @brief Returns @c true when mode is Compress.
+        /** @brief Returns @c true when mode is Compress. */
         [[nodiscard]] bool getCanWriteProperty() const override;
 
-        /// @brief Not supported — always throws NotImplementedException.
+        /** @brief Not supported — always throws NotImplementedException. */
         [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override;
 
         /**

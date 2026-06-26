@@ -23,8 +23,8 @@ namespace System {
             : MissingMemberException(message) {}
 
         /** @brief Initializes a new instance with the class name, method name, and an inner exception. */
-        MissingMethodException(const std::string& message, const std::exception& innerException)
-            : MissingMemberException(message + " | inner: " + innerException.what()) {}
+        MissingMethodException(const std::string& message, std::exception_ptr innerException)
+            : MissingMemberException(message, std::move(innerException)) {}
 
         /**
          * @brief Initializes a new instance with the class name and the method name.

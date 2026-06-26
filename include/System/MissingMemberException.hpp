@@ -35,8 +35,8 @@ namespace System {
          *
          * C++ counterpart of .NET MissingMemberException(string, Exception).
          */
-        MissingMemberException(const std::string& message, const std::exception& inner)
-            : MemberAccessException(message + " | inner: " + inner.what()) {}
+        MissingMemberException(const std::string& message, std::exception_ptr inner)
+            : MemberAccessException(message, std::move(inner)) {}
     };
 
 } // namespace System

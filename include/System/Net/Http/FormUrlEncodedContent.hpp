@@ -10,11 +10,13 @@
 
 namespace System::Net::Http {
 
-/// HTTP content encoded as application/x-www-form-urlencoded.
-///
-/// Accepts a list of name-value pairs and encodes them according to
-/// RFC 3986 / HTML form encoding: spaces become '+', other special
-/// characters are percent-encoded as %XX. Pairs are separated by '&'.
+/**
+ * HTTP content encoded as application/x-www-form-urlencoded.
+ * 
+ * Accepts a list of name-value pairs and encodes them according to
+ * RFC 3986 / HTML form encoding: spaces become '+', other special
+ * characters are percent-encoded as %XX. Pairs are separated by '&'.
+ */
 class FormUrlEncodedContent : public HttpContent {
     std::string encoded_;
 
@@ -37,8 +39,10 @@ class FormUrlEncodedContent : public HttpContent {
     }
 
 public:
-    /// Constructs the content from a list of name-value pairs.
-    /// @param nameValueCollection  Key-value pairs to encode.
+    /**
+     * Constructs the content from a list of name-value pairs.
+     * @param nameValueCollection  Key-value pairs to encode.
+     */
     explicit FormUrlEncodedContent(
         const std::vector<std::pair<std::string, std::string>>& nameValueCollection)
     {
@@ -50,15 +54,15 @@ public:
         }
     }
 
-    /// @return The URL-encoded form string (e.g. "name=Alice&age=30").
+    /** @return The URL-encoded form string (e.g. "name=Alice&age=30"). */
     [[nodiscard]] std::string ReadAsString() const override { return encoded_; }
 
-    /// @return The URL-encoded form string as a UTF-8 byte array.
+    /** @return The URL-encoded form string as a UTF-8 byte array. */
     [[nodiscard]] std::vector<SharpRuntime::bytecs> ReadAsByteArray() const override {
         return std::vector<SharpRuntime::bytecs>(encoded_.begin(), encoded_.end());
     }
 
-    /// @return "application/x-www-form-urlencoded"
+    /** @return "application/x-www-form-urlencoded" */
     [[nodiscard]] std::string getContentType() const override {
         return "application/x-www-form-urlencoded";
     }

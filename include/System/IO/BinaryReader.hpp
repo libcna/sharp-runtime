@@ -35,49 +35,49 @@ namespace System::IO
         explicit BinaryReader(Stream* stream, bool leaveOpen = false);
         virtual ~BinaryReader();
 
-        /// Gets the underlying stream.
+        /** Gets the underlying stream. */
         [[nodiscard]] Stream* getBaseStreamProperty() const { return stream_; }
 
-        /// Reads one byte and advances the stream position.
+        /** Reads one byte and advances the stream position. */
         [[nodiscard]] virtual bytecs ReadByte();
 
-        /// Reads a signed byte.
+        /** Reads a signed byte. */
         [[nodiscard]] virtual int8_t ReadSByte();
 
-        /// Reads a 2-byte signed integer (little-endian).
+        /** Reads a 2-byte signed integer (little-endian). */
         [[nodiscard]] virtual shortcs ReadInt16();
 
-        /// Reads a 2-byte unsigned integer (little-endian).
+        /** Reads a 2-byte unsigned integer (little-endian). */
         [[nodiscard]] virtual ushortcs ReadUInt16();
 
-        /// Reads a 4-byte signed integer (little-endian).
+        /** Reads a 4-byte signed integer (little-endian). */
         [[nodiscard]] virtual intcs ReadInt32();
 
-        /// Reads a 4-byte unsigned integer (little-endian).
+        /** Reads a 4-byte unsigned integer (little-endian). */
         [[nodiscard]] virtual uint32_t ReadUInt32();
 
-        /// Reads an 8-byte signed integer (little-endian).
+        /** Reads an 8-byte signed integer (little-endian). */
         [[nodiscard]] virtual longcs ReadInt64();
 
-        /// Reads an 8-byte unsigned integer (little-endian).
+        /** Reads an 8-byte unsigned integer (little-endian). */
         [[nodiscard]] virtual uint64_t ReadUInt64();
 
-        /// Reads a 4-byte IEEE 754 float (little-endian).
+        /** Reads a 4-byte IEEE 754 float (little-endian). */
         [[nodiscard]] virtual Single ReadSingle();
 
-        /// Reads a 4-byte IEEE 754 double (little-endian).
+        /** Reads a 4-byte IEEE 754 double (little-endian). */
         [[nodiscard]] virtual double ReadDouble();
 
-        /// Reads a boolean (one byte; non-zero = true).
+        /** Reads a boolean (one byte; non-zero = true). */
         [[nodiscard]] virtual bool ReadBoolean();
 
-        /// Reads a UTF-8 string prefixed with its 7-bit encoded length.
+        /** Reads a UTF-8 string prefixed with its 7-bit encoded length. */
         [[nodiscard]] virtual std::string ReadString();
 
-        /// Reads exactly count bytes into the caller-supplied buffer.
+        /** Reads exactly count bytes into the caller-supplied buffer. */
         virtual intcs Read(bytecs buffer[], intcs offset, intcs count);
 
-        /// Closes the reader and, unless leaveOpen was set, the underlying stream.
+        /** Closes the reader and, unless leaveOpen was set, the underlying stream. */
         virtual void Close();
     };
 }

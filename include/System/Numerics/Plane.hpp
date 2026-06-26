@@ -12,7 +12,7 @@
 
 namespace System::Numerics {
 
-/// <summary>Represents a plane in three-dimensional space defined by a normal vector and a distance.</summary>
+/** <summary>Represents a plane in three-dimensional space defined by a normal vector and a distance.</summary> */
 struct Plane {
     Vector3 Normal{};
     float D{0.0f};
@@ -33,36 +33,36 @@ struct Plane {
         return ss.str();
     }
 
-    /// <summary>Creates a Plane from three points on the plane.</summary>
+    /** <summary>Creates a Plane from three points on the plane.</summary> */
     static Plane CreateFromVertices(Vector3 p1, Vector3 p2, Vector3 p3) {
         Vector3 n = Vector3::Normalize(Vector3::Cross(p2-p1, p3-p1));
         return {n, -Vector3::Dot(n,p1)};
     }
 
-    /// <summary>Returns the dot product of a plane and a 4D vector.</summary>
+    /** <summary>Returns the dot product of a plane and a 4D vector.</summary> */
     static float Dot(const Plane& plane, Vector4 value) {
         return plane.Normal.X*value.X + plane.Normal.Y*value.Y
              + plane.Normal.Z*value.Z + plane.D*value.W;
     }
 
-    /// <summary>Returns the dot product of a plane and a normal vector.</summary>
+    /** <summary>Returns the dot product of a plane and a normal vector.</summary> */
     static float DotNormal(const Plane& plane, Vector3 value) {
         return Vector3::Dot(plane.Normal, value);
     }
 
-    /// <summary>Returns the dot product of a plane and a coordinate vector.</summary>
+    /** <summary>Returns the dot product of a plane and a coordinate vector.</summary> */
     static float DotCoordinate(const Plane& plane, Vector3 value) {
         return Vector3::Dot(plane.Normal, value) + plane.D;
     }
 
-    /// <summary>Normalizes the normal vector of a plane.</summary>
+    /** <summary>Normalizes the normal vector of a plane.</summary> */
     static Plane Normalize(const Plane& plane) {
         float len = plane.Normal.Length();
         if (len < 1e-10f) return plane;
         return {plane.Normal / len, plane.D / len};
     }
 
-    /// <summary>Transforms a plane by a matrix.</summary>
+    /** <summary>Transforms a plane by a matrix.</summary> */
     static Plane Transform(const Plane& plane, const Matrix4x4& m) {
         Matrix4x4 inv;
         Matrix4x4::Invert(m, inv);
@@ -71,7 +71,7 @@ struct Plane {
         return {v.X,v.Y,v.Z,v.W};
     }
 
-    /// <summary>Transforms a plane by a quaternion rotation.</summary>
+    /** <summary>Transforms a plane by a quaternion rotation.</summary> */
     static Plane Transform(const Plane& plane, const Quaternion& q) {
         return Transform(plane, Matrix4x4::CreateFromQuaternion(q));
     }

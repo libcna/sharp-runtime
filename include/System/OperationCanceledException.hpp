@@ -29,7 +29,7 @@ namespace System {
          *
          * C++ counterpart of .NET OperationCanceledException(string, Exception).
          */
-        OperationCanceledException(const std::string& message, const std::exception& innerException);
+        OperationCanceledException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System

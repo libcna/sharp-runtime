@@ -8,29 +8,29 @@
 
 namespace System::IO {
 
-    /// Options for controlling file-system enumeration behaviour.
+    /** Options for controlling file-system enumeration behaviour. */
     class EnumerationOptions {
     public:
-        /// When true, subdirectories are searched recursively.
+        /** When true, subdirectories are searched recursively. */
         bool RecurseSubdirectories      = false;
-        /// When true, inaccessible directories are silently skipped.
+        /** When true, inaccessible directories are silently skipped. */
         bool IgnoreInaccessible         = true;
-        /// When true, special entries such as "." and ".." are returned.
+        /** When true, special entries such as "." and ".." are returned. */
         bool ReturnSpecialDirectories   = false;
-        /// Maximum recursion depth; INT_MAX means unlimited.
+        /** Maximum recursion depth; INT_MAX means unlimited. */
         int  MaxRecursionDepth          = INT_MAX;
-        /// Controls case sensitivity when matching names.
+        /** Controls case sensitivity when matching names. */
         MatchCasing  MatchCasingValue   = MatchCasing::PlatformDefault;
-        /// Controls how search patterns are interpreted.
+        /** Controls how search patterns are interpreted. */
         MatchType    MatchTypeValue      = MatchType::Simple;
-        /// Specifies whether to return files, directories, or both.
+        /** Specifies whether to return files, directories, or both. */
         SearchTarget SearchTargetValue  = SearchTarget::Files;
-        /// File attributes that cause an entry to be skipped.
+        /** File attributes that cause an entry to be skipped. */
         FileAttributes AttributesToSkip = static_cast<FileAttributes>(0x022); // Hidden | System
-        /// File attributes that an entry must have to be returned.
+        /** File attributes that an entry must have to be returned. */
         FileAttributes AttributesToMatch = FileAttributes::Normal;
 
-        /// Initializes EnumerationOptions with default values.
+        /** Initializes EnumerationOptions with default values. */
         EnumerationOptions() = default;
     };
 

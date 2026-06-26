@@ -8,10 +8,10 @@
 
 namespace System::Text::Encodings::Web {
 
-    /// Encodes strings for safe embedding in JavaScript literals.
+    /** Encodes strings for safe embedding in JavaScript literals. */
     class JavaScriptEncoder {
     public:
-        /// Escapes special characters in the given string for JavaScript embedding.
+        /** Escapes special characters in the given string for JavaScript embedding. */
         static std::string Encode(const std::string& value) {
             std::string out;
             out.reserve(value.size());
@@ -31,7 +31,7 @@ namespace System::Text::Encodings::Web {
             return out;
         }
 
-        /// Returns the default JavaScriptEncoder singleton.
+        /** Returns the default JavaScriptEncoder singleton. */
         static const JavaScriptEncoder& Default() {
             static JavaScriptEncoder instance;
             return instance;

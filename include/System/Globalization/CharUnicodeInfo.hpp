@@ -13,12 +13,12 @@ namespace System::Globalization {
 using SharpRuntime::charcs;
 using SharpRuntime::intcs;
 
-/// <summary>Retrieves information about a Unicode character, such as its category and numeric value.</summary>
+/** <summary>Retrieves information about a Unicode character, such as its category and numeric value.</summary> */
 class CharUnicodeInfo {
 public:
     CharUnicodeInfo() = delete;
 
-    /// <summary>Gets the decimal digit value of a character, or -1 if not a decimal digit.</summary>
+    /** <summary>Gets the decimal digit value of a character, or -1 if not a decimal digit.</summary> */
     static intcs GetDecimalDigitValue(charcs ch) {
         if (ch >= u'0' && ch <= u'9') return static_cast<intcs>(ch - u'0');
         return -1;
@@ -28,7 +28,7 @@ public:
         return GetDecimalDigitValue(s[static_cast<size_t>(index)]);
     }
 
-    /// <summary>Gets the digit value of a character, or -1 if not a digit.</summary>
+    /** <summary>Gets the digit value of a character, or -1 if not a digit.</summary> */
     static intcs GetDigitValue(charcs ch) {
         return GetDecimalDigitValue(ch);
     }
@@ -37,7 +37,7 @@ public:
         return GetDigitValue(s[static_cast<size_t>(index)]);
     }
 
-    /// <summary>Gets the numeric value of a Unicode character (-1.0 if not numeric).</summary>
+    /** <summary>Gets the numeric value of a Unicode character (-1.0 if not numeric).</summary> */
     static double GetNumericValue(charcs ch) {
         if (ch >= u'0' && ch <= u'9') return static_cast<double>(ch - u'0');
         // Superscript digits U+00B2, U+00B3, U+00B9
@@ -55,7 +55,7 @@ public:
         return GetNumericValue(s[static_cast<size_t>(index)]);
     }
 
-    /// <summary>Gets the Unicode category of a character.</summary>
+    /** <summary>Gets the Unicode category of a character.</summary> */
     static UnicodeCategory GetUnicodeCategory(charcs ch) {
         return GetUnicodeCategory(static_cast<intcs>(ch));
     }

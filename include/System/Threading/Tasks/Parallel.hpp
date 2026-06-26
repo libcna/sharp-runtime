@@ -14,39 +14,39 @@
 
 namespace System::Threading::Tasks {
 
-    /// Options to configure the behaviour of a parallel loop.
+    /** Options to configure the behaviour of a parallel loop. */
     struct ParallelOptions {
-        /// Maximum number of concurrent iterations; -1 means unlimited.
+        /** Maximum number of concurrent iterations; -1 means unlimited. */
         int MaxDegreeOfParallelism = -1; // -1 = unlimited
     };
 
-    /// Provides status and control for the current parallel loop iteration.
+    /** Provides status and control for the current parallel loop iteration. */
     struct ParallelLoopState {
         bool shouldStop_  = false;
         bool isExceptional_ = false;
 
-        /// Requests that the loop stop after the current iteration completes.
+        /** Requests that the loop stop after the current iteration completes. */
         void Stop()  { shouldStop_ = true; }
-        /// Requests that the loop break after the current iteration completes.
+        /** Requests that the loop break after the current iteration completes. */
         void Break() { shouldStop_ = true; }
-        /// Returns true if the current iteration should exit.
+        /** Returns true if the current iteration should exit. */
         [[nodiscard]] bool getShouldExitCurrentIterationProperty() const { return shouldStop_; }
-        /// Returns true if any iteration threw an exception.
+        /** Returns true if any iteration threw an exception. */
         [[nodiscard]] bool getIsExceptionalProperty()              const { return isExceptional_; }
     };
 
-    /// Reports whether a parallel loop ran to completion.
+    /** Reports whether a parallel loop ran to completion. */
     struct ParallelLoopResult {
         bool isCompleted_  = false;
         bool lowestBreakIteration_ = false;
-        /// Returns true if the loop ran to completion without being stopped or broken.
+        /** Returns true if the loop ran to completion without being stopped or broken. */
         [[nodiscard]] bool getIsCompletedProperty() const { return isCompleted_; }
     };
 
-    /// Provides support for parallel loops and regions.
+    /** Provides support for parallel loops and regions. */
     class Parallel {
     public:
-        /// Executes a for loop from fromInclusive to toExclusive in parallel.
+        /** Executes a for loop from fromInclusive to toExclusive in parallel. */
         static ParallelLoopResult For(int fromInclusive, int toExclusive, std::function<void(int)> body) {
 #if defined(__EMSCRIPTEN__)
             (void)fromInclusive; (void)toExclusive; (void)body;
@@ -64,7 +64,7 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /// Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts.
+        /** Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts. */
         static ParallelLoopResult For(int fromInclusive, int toExclusive, const ParallelOptions& opts,
                                        std::function<void(int)> body) {
 #if defined(__EMSCRIPTEN__)
@@ -92,7 +92,7 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /// Executes a foreach loop over source in parallel.
+        /** Executes a foreach loop over source in parallel. */
         template<typename TSource>
         static ParallelLoopResult ForEach(const std::vector<TSource>& source, std::function<void(TSource)> body) {
 #if defined(__EMSCRIPTEN__)
@@ -111,7 +111,7 @@ namespace System::Threading::Tasks {
 #endif
         }
 
-        /// Executes all actions in parallel, blocking until all have completed.
+        /** Executes all actions in parallel, blocking until all have completed. */
         static void Invoke(std::initializer_list<std::function<void()>> actions) {
 #if defined(__EMSCRIPTEN__)
             (void)actions;

@@ -34,7 +34,7 @@ namespace System::Xml {
          */
         void WriteStartDocument();
 
-        /// @brief Finalises the document (no-op for tinyxml2 DOM, flushes to file if path was set).
+        /** @brief Finalises the document (no-op for tinyxml2 DOM, flushes to file if path was set). */
         void WriteEndDocument();
 
         /**
@@ -91,10 +91,10 @@ namespace System::Xml {
          */
         [[nodiscard]] std::string ToString() const;
 
-        /// @brief Flushes and, if a file path was provided to @c Create(), saves to that file.
+        /** @brief Flushes and, if a file path was provided to @c Create(), saves to that file. */
         void Flush();
 
-        /// @brief Same as @c Flush(); releases resources.
+        /** @brief Same as @c Flush(); releases resources. */
         void Close();
 
         /**

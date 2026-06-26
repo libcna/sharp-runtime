@@ -22,7 +22,7 @@ namespace System {
         /** @brief Initializes a new instance with the specified error message. */
         explicit OverflowException(const std::string& message);
         /** @brief Initializes a new instance with the specified message and inner exception. */
-        OverflowException(const std::string& message, const std::exception& innerException);
+        OverflowException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System

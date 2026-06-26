@@ -20,16 +20,16 @@ namespace System::IO {
         std::string fileName_;
 
     public:
-        /// Initializes a FileNotFoundException with a default message.
+        /** Initializes a FileNotFoundException with a default message. */
         FileNotFoundException();
-        /// Initializes a FileNotFoundException with the specified C-string message.
+        /** Initializes a FileNotFoundException with the specified C-string message. */
         explicit FileNotFoundException(const char* message);
-        /// Initializes a FileNotFoundException with the specified message.
+        /** Initializes a FileNotFoundException with the specified message. */
         explicit FileNotFoundException(const std::string& message);
-        /// Initializes a FileNotFoundException with a message and the name of the file that was not found.
+        /** Initializes a FileNotFoundException with a message and the name of the file that was not found. */
         FileNotFoundException(const std::string& message, const std::string& fileName);
 
-        /// Returns the name of the file that was not found.
+        /** Returns the name of the file that was not found. */
         [[nodiscard]] const std::string& getFileNameProperty() const { return fileName_; }
     };
 

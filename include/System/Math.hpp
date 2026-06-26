@@ -176,22 +176,22 @@ namespace System
          */
         [[nodiscard]] static double Clamp(double value, double min, double max);
 
-        /// Returns the absolute value of a 64-bit signed integer.
+        /** Returns the absolute value of a 64-bit signed integer. */
         [[nodiscard]] static longcs Abs(longcs value);
-        /// Returns the smaller of two 64-bit signed integers.
+        /** Returns the smaller of two 64-bit signed integers. */
         [[nodiscard]] static longcs Min(longcs a, longcs b);
-        /// Returns the larger of two 64-bit signed integers.
+        /** Returns the larger of two 64-bit signed integers. */
         [[nodiscard]] static longcs Max(longcs a, longcs b);
-        /// Clamps a 64-bit signed integer to [@p min, @p max].
+        /** Clamps a 64-bit signed integer to [@p min, @p max]. */
         [[nodiscard]] static longcs Clamp(longcs value, longcs min, longcs max);
 
-        /// Returns the absolute value of a single-precision float.
+        /** Returns the absolute value of a single-precision float. */
         [[nodiscard]] static float Abs(float value)              { return std::abs(value); }
-        /// Returns the smaller of two single-precision floats.
+        /** Returns the smaller of two single-precision floats. */
         [[nodiscard]] static float Min(float a, float b)         { return a < b ? a : b; }
-        /// Returns the larger of two single-precision floats.
+        /** Returns the larger of two single-precision floats. */
         [[nodiscard]] static float Max(float a, float b)         { return a > b ? a : b; }
-        /// Clamps a single-precision float to [@p min, @p max].
+        /** Clamps a single-precision float to [@p min, @p max]. */
         [[nodiscard]] static float Clamp(float value, float min, float max) {
             return value < min ? min : (value > max ? max : value);
         }
@@ -237,147 +237,147 @@ namespace System
          */
         [[nodiscard]] static double Pow(double x, double y);
 
-        /// @brief Returns the natural (base-e) logarithm of @p d.
+        /** @brief Returns the natural (base-e) logarithm of @p d. */
         [[nodiscard]] static double Log(double d);
-        /// @brief Returns the logarithm of @p a in the specified @p newBase.
+        /** @brief Returns the logarithm of @p a in the specified @p newBase. */
         [[nodiscard]] static double Log(double a, double newBase);
-        /// @brief Returns the base-2 logarithm of @p x.
+        /** @brief Returns the base-2 logarithm of @p x. */
         [[nodiscard]] static double Log2(double x);
-        /// @brief Returns the base-10 logarithm of @p d.
+        /** @brief Returns the base-10 logarithm of @p d. */
         [[nodiscard]] static double Log10(double d);
-        /// @brief Returns e raised to the power @p d.
+        /** @brief Returns e raised to the power @p d. */
         [[nodiscard]] static double Exp(double d);
 
-        /// @brief Returns the angle whose sine is @p d (in radians).
+        /** @brief Returns the angle whose sine is @p d (in radians). */
         [[nodiscard]] static double Asin(double d);
-        /// @brief Returns the angle whose cosine is @p d (in radians).
+        /** @brief Returns the angle whose cosine is @p d (in radians). */
         [[nodiscard]] static double Acos(double d);
-        /// @brief Returns the angle whose tangent is @p d (in radians).
+        /** @brief Returns the angle whose tangent is @p d (in radians). */
         [[nodiscard]] static double Atan(double d);
-        /// @brief Returns the angle (in radians) whose tangent is the quotient of @p y and @p x.
+        /** @brief Returns the angle (in radians) whose tangent is the quotient of @p y and @p x. */
         [[nodiscard]] static double Atan2(double y, double x);
 
-        /// @brief Returns the hyperbolic sine of @p value.
+        /** @brief Returns the hyperbolic sine of @p value. */
         [[nodiscard]] static double Sinh(double value);
-        /// @brief Returns the hyperbolic cosine of @p value.
+        /** @brief Returns the hyperbolic cosine of @p value. */
         [[nodiscard]] static double Cosh(double value);
-        /// @brief Returns the hyperbolic tangent of @p value.
+        /** @brief Returns the hyperbolic tangent of @p value. */
         [[nodiscard]] static double Tanh(double value);
 
-        /// @brief Returns an integer indicating the sign of a 32-bit integer (-1, 0, or 1).
+        /** @brief Returns an integer indicating the sign of a 32-bit integer (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(intcs value);
-        /// @brief Returns an integer indicating the sign of a double (-1, 0, or 1).
+        /** @brief Returns an integer indicating the sign of a double (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(double value);
-        /// @brief Returns an integer indicating the sign of a 64-bit integer (-1, 0, or 1).
+        /** @brief Returns an integer indicating the sign of a 64-bit integer (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(longcs value);
-        /// @brief Returns an integer indicating the sign of a single-precision float (-1, 0, or 1).
+        /** @brief Returns an integer indicating the sign of a single-precision float (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(float value);
 
-        /// @brief Returns the integral part of @p d (discards the fractional part).
+        /** @brief Returns the integral part of @p d (discards the fractional part). */
         [[nodiscard]] static double Truncate(double d);
 
-        /// @brief Returns the IEEE 754 remainder of @p x divided by @p y.
+        /** @brief Returns the IEEE 754 remainder of @p x divided by @p y. */
         [[nodiscard]] static double IEEERemainder(double x, double y);
 
-        /// @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient.
+        /** @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient. */
         static intcs DivRem(intcs a, intcs b, intcs& result);
-        /// @brief Divides @p a by @p b (64-bit) and stores the remainder in @p result; returns the quotient.
+        /** @brief Divides @p a by @p b (64-bit) and stores the remainder in @p result; returns the quotient. */
         static longcs DivRem(longcs a, longcs b, longcs& result);
 
-        /// @brief Returns the value with the greater magnitude; if equal magnitudes, returns the positive one.
+        /** @brief Returns the value with the greater magnitude; if equal magnitudes, returns the positive one. */
         [[nodiscard]] static double MaxMagnitude(double x, double y);
-        /// @brief Returns the value with the lesser magnitude; if equal magnitudes, returns the negative one.
+        /** @brief Returns the value with the lesser magnitude; if equal magnitudes, returns the negative one. */
         [[nodiscard]] static double MinMagnitude(double x, double y);
 
-        /// @brief Returns the 64-bit product of two 32-bit integers.
+        /** @brief Returns the 64-bit product of two 32-bit integers. */
         [[nodiscard]] static longcs BigMul(intcs a, intcs b);
 
-        /// @brief Returns @p x multiplied by 2 raised to the power @p n (scalbn).
+        /** @brief Returns @p x multiplied by 2 raised to the power @p n (scalbn). */
         [[nodiscard]] static double ScaleB(double x, intcs n);
 
-        /// @brief Returns the cube root of @p x.
+        /** @brief Returns the cube root of @p x. */
         [[nodiscard]] static double Cbrt(double x);
 
-        /// @brief Returns the angle whose hyperbolic cosine is @p d.
+        /** @brief Returns the angle whose hyperbolic cosine is @p d. */
         [[nodiscard]] static double Acosh(double d);
 
-        /// @brief Returns the angle whose hyperbolic sine is @p d.
+        /** @brief Returns the angle whose hyperbolic sine is @p d. */
         [[nodiscard]] static double Asinh(double d);
 
-        /// @brief Returns the angle whose hyperbolic tangent is @p d.
+        /** @brief Returns the angle whose hyperbolic tangent is @p d. */
         [[nodiscard]] static double Atanh(double d);
 
-        /// @brief Rounds @p value to @p digits decimal places using banker's rounding.
+        /** @brief Rounds @p value to @p digits decimal places using banker's rounding. */
         [[nodiscard]] static double Round(double value, intcs digits);
 
-        /// @brief Returns a value with the magnitude of @p x and the sign of @p y.
+        /** @brief Returns a value with the magnitude of @p x and the sign of @p y. */
         [[nodiscard]] static double CopySign(double x, double y);
 
-        /// @brief Returns the smallest value greater than @p x.
+        /** @brief Returns the smallest value greater than @p x. */
         [[nodiscard]] static double BitIncrement(double x);
 
-        /// @brief Returns the largest value less than @p x.
+        /** @brief Returns the largest value less than @p x. */
         [[nodiscard]] static double BitDecrement(double x);
 
-        /// @brief Returns @p x × @p y + @p z computed as a single fused operation.
+        /** @brief Returns @p x × @p y + @p z computed as a single fused operation. */
         [[nodiscard]] static double FusedMultiplyAdd(double x, double y, double z);
 
         // ------------------------------------------------------------------
         // short / sbyte / byte / uint / ulong / ushort overloads
         // ------------------------------------------------------------------
 
-        /// @brief Returns the absolute value of a 16-bit signed integer.
+        /** @brief Returns the absolute value of a 16-bit signed integer. */
         [[nodiscard]] static shortcs Abs(shortcs value) { return value < 0 ? static_cast<shortcs>(-value) : value; }
-        /// @brief Returns the absolute value of a signed byte.
+        /** @brief Returns the absolute value of a signed byte. */
         [[nodiscard]] static sbytecs Abs(sbytecs value) { return value < 0 ? static_cast<sbytecs>(-value) : value; }
 
-        /// @brief Returns the smaller of two 16-bit signed integers.
+        /** @brief Returns the smaller of two 16-bit signed integers. */
         [[nodiscard]] static shortcs  Min(shortcs a,  shortcs b)  { return a < b ? a : b; }
-        /// @brief Returns the larger of two 16-bit signed integers.
+        /** @brief Returns the larger of two 16-bit signed integers. */
         [[nodiscard]] static shortcs  Max(shortcs a,  shortcs b)  { return a > b ? a : b; }
-        /// @brief Clamps a 16-bit signed integer to [@p min, @p max].
+        /** @brief Clamps a 16-bit signed integer to [@p min, @p max]. */
         [[nodiscard]] static shortcs  Clamp(shortcs v, shortcs mn, shortcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
 
-        /// @brief Returns the smaller of two signed bytes.
+        /** @brief Returns the smaller of two signed bytes. */
         [[nodiscard]] static sbytecs Min(sbytecs a, sbytecs b)  { return a < b ? a : b; }
-        /// @brief Returns the larger of two signed bytes.
+        /** @brief Returns the larger of two signed bytes. */
         [[nodiscard]] static sbytecs Max(sbytecs a, sbytecs b)  { return a > b ? a : b; }
-        /// @brief Clamps a signed byte to [@p min, @p max].
+        /** @brief Clamps a signed byte to [@p min, @p max]. */
         [[nodiscard]] static sbytecs Clamp(sbytecs v, sbytecs mn, sbytecs mx) { return v < mn ? mn : v > mx ? mx : v; }
 
-        /// @brief Returns the smaller of two unsigned bytes.
+        /** @brief Returns the smaller of two unsigned bytes. */
         [[nodiscard]] static bytecs  Min(bytecs a,  bytecs b)   { return a < b ? a : b; }
-        /// @brief Returns the larger of two unsigned bytes.
+        /** @brief Returns the larger of two unsigned bytes. */
         [[nodiscard]] static bytecs  Max(bytecs a,  bytecs b)   { return a > b ? a : b; }
-        /// @brief Clamps an unsigned byte to [@p min, @p max].
+        /** @brief Clamps an unsigned byte to [@p min, @p max]. */
         [[nodiscard]] static bytecs  Clamp(bytecs v, bytecs mn, bytecs mx)  { return v < mn ? mn : v > mx ? mx : v; }
 
-        /// @brief Returns the smaller of two 32-bit unsigned integers.
+        /** @brief Returns the smaller of two 32-bit unsigned integers. */
         [[nodiscard]] static uintcs  Min(uintcs a,  uintcs b)   { return a < b ? a : b; }
-        /// @brief Returns the larger of two 32-bit unsigned integers.
+        /** @brief Returns the larger of two 32-bit unsigned integers. */
         [[nodiscard]] static uintcs  Max(uintcs a,  uintcs b)   { return a > b ? a : b; }
-        /// @brief Clamps a 32-bit unsigned integer to [@p min, @p max].
+        /** @brief Clamps a 32-bit unsigned integer to [@p min, @p max]. */
         [[nodiscard]] static uintcs  Clamp(uintcs v, uintcs mn, uintcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
 
-        /// @brief Returns the smaller of two 64-bit unsigned integers.
+        /** @brief Returns the smaller of two 64-bit unsigned integers. */
         [[nodiscard]] static ulongcs Min(ulongcs a, ulongcs b)  { return a < b ? a : b; }
-        /// @brief Returns the larger of two 64-bit unsigned integers.
+        /** @brief Returns the larger of two 64-bit unsigned integers. */
         [[nodiscard]] static ulongcs Max(ulongcs a, ulongcs b)  { return a > b ? a : b; }
-        /// @brief Clamps a 64-bit unsigned integer to [@p min, @p max].
+        /** @brief Clamps a 64-bit unsigned integer to [@p min, @p max]. */
         [[nodiscard]] static ulongcs Clamp(ulongcs v, ulongcs mn, ulongcs mx) { return v < mn ? mn : v > mx ? mx : v; }
 
-        /// @brief Returns the smaller of two 16-bit unsigned integers.
+        /** @brief Returns the smaller of two 16-bit unsigned integers. */
         [[nodiscard]] static ushortcs Min(ushortcs a, ushortcs b)  { return a < b ? a : b; }
-        /// @brief Returns the larger of two 16-bit unsigned integers.
+        /** @brief Returns the larger of two 16-bit unsigned integers. */
         [[nodiscard]] static ushortcs Max(ushortcs a, ushortcs b)  { return a > b ? a : b; }
-        /// @brief Clamps a 16-bit unsigned integer to [@p min, @p max].
+        /** @brief Clamps a 16-bit unsigned integer to [@p min, @p max]. */
         [[nodiscard]] static ushortcs Clamp(ushortcs v, ushortcs mn, ushortcs mx) { return v < mn ? mn : v > mx ? mx : v; }
 
         // ------------------------------------------------------------------
         // ILogB / BigMul(long,long,long&) / DivRem pair overloads
         // ------------------------------------------------------------------
 
-        /// @brief Returns the base-2 integer logarithm of @p x (std::ilogb).
+        /** @brief Returns the base-2 integer logarithm of @p x (std::ilogb). */
         [[nodiscard]] static intcs ILogB(double x) { return static_cast<intcs>(std::ilogb(x)); }
 
         /**
@@ -392,11 +392,11 @@ namespace System
             return static_cast<longcs>(product);
         }
 
-        /// @brief Divides @p a by @p b and returns {quotient, remainder} as a pair.
+        /** @brief Divides @p a by @p b and returns {quotient, remainder} as a pair. */
         [[nodiscard]] static std::pair<intcs, intcs> DivRem(intcs a, intcs b) {
             return { a / b, a % b };
         }
-        /// @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair.
+        /** @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair. */
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs a, longcs b) {
             return { a / b, a % b };
         }
