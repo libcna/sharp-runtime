@@ -7,7 +7,15 @@
 
 namespace System::Globalization {
 
-/** <summary>Represents the proleptic Gregorian calendar.</summary> */
+/**
+ * @brief Represents the proleptic Gregorian calendar.
+ *
+ * C++ counterpart of .NET System.Globalization.GregorianCalendar.
+ * The Gregorian calendar is the standard civil calendar used worldwide.
+ * Leap year rule: divisible by 4, except centuries unless also divisible by 400.
+ * Inherits all Calendar base implementations; only era and calendar-type members
+ * are overridden here.
+ */
 class GregorianCalendar : public Calendar {
     GregorianCalendarTypes type_;
 
@@ -16,22 +24,61 @@ public:
     static constexpr int MinYear = 1;    ///< Minimum supported Gregorian year.
     static constexpr int MaxYear = 9999; ///< Maximum supported Gregorian year.
 
-    /** Constructs a Localized-type GregorianCalendar. */
+    /**
+     * @brief Constructs a GregorianCalendar with the Localized type.
+     *
+     * C++ counterpart of .NET GregorianCalendar().
+     */
     GregorianCalendar() : type_(GregorianCalendarTypes::Localized) {}
-    /** Constructs a GregorianCalendar of the specified @p type. */
+
+    /**
+     * @brief Constructs a GregorianCalendar of the specified type.
+     *
+     * C++ counterpart of .NET GregorianCalendar(GregorianCalendarTypes).
+     * @param type The Gregorian calendar type variant.
+     */
     explicit GregorianCalendar(GregorianCalendarTypes type) : type_(type) {}
 
-    /** @return The Gregorian calendar type (e.g. Localized, USEnglish). */
+    /**
+     * @brief Gets the Gregorian calendar type variant.
+     *
+     * C++ counterpart of .NET GregorianCalendar.CalendarType.
+     * @return The GregorianCalendarTypes value for this instance.
+     */
     [[nodiscard]] GregorianCalendarTypes getCalendarTypeProperty() const { return type_; }
-    /** Sets the Gregorian calendar type to @p t. */
+
+    /**
+     * @brief Sets the Gregorian calendar type variant.
+     *
+     * C++ counterpart of .NET GregorianCalendar.CalendarType setter.
+     * @param t The new GregorianCalendarTypes value.
+     */
     void setCalendarTypeProperty(GregorianCalendarTypes t) { type_ = t; }
 
-    /** @return Always ADEra (1). */
+    /**
+     * @brief Returns the era for the given DateTime.
+     *
+     * C++ counterpart of .NET GregorianCalendar.GetEra(DateTime).
+     * @return Always ADEra (1); the Gregorian calendar has a single era.
+     */
     [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return ADEra; }
-    /** @return Always 1 — the Gregorian calendar has a single era. */
+
+    /**
+     * @brief Returns the number of eras in this calendar.
+     *
+     * @return Always 1; the Gregorian calendar has only the Anno Domini era.
+     */
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
-    /** @return True if @p year is a Gregorian leap year. */
+    /**
+     * @brief Determines whether the specified year is a Gregorian leap year.
+     *
+     * C++ counterpart of .NET GregorianCalendar.IsLeapYear(int, int).
+     * Leap year rule: divisible by 4, except centuries unless also divisible by 400.
+     * @param year The four-digit year.
+     * @param era  The era (ignored; always AD).
+     * @return true if @p year is a leap year; otherwise false.
+     */
     [[nodiscard]] bool IsLeapYear(int year, int era = Calendar::CurrentEra) const override {
         (void)era;
         return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
