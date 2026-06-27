@@ -6,22 +6,56 @@
 
 namespace System::Globalization {
 
-/** <summary>Represents the Julian calendar. Every 4th year is a leap year; no century exception.</summary> */
+/**
+ * @brief Represents the Julian calendar.
+ *
+ * C++ counterpart of .NET System.Globalization.JulianCalendar.
+ * In the Julian calendar every year divisible by 4 is a leap year;
+ * there is no century exception (unlike Gregorian). This produces a drift
+ * of approximately one day every 128 years relative to the solar year.
+ */
 class JulianCalendar : public Calendar {
 public:
     static constexpr int JulianEra = 1; ///< The only era value for this calendar.
 
-    /** @return Always JulianEra (1). */
+    /**
+     * @brief Returns the era for the given DateTime.
+     *
+     * C++ counterpart of .NET JulianCalendar.GetEra(DateTime).
+     * @return Always JulianEra (1).
+     */
     [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return JulianEra; }
-    /** @return Always 1 — the Julian calendar has a single era. */
+
+    /**
+     * @brief Returns the number of eras in this calendar.
+     *
+     * @return Always 1; the Julian calendar has a single era.
+     */
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
-    /** @return True if @p year is divisible by 4 (Julian leap year rule). */
+    /**
+     * @brief Determines whether the specified year is a Julian leap year.
+     *
+     * C++ counterpart of .NET JulianCalendar.IsLeapYear(int, int).
+     * Every year divisible by 4 is a leap year (no century exception).
+     * @param year The year to check.
+     * @param era  The era (ignored; always Julian).
+     * @return true if @p year is divisible by 4; otherwise false.
+     */
     [[nodiscard]] bool IsLeapYear(int year, int /*era*/ = CurrentEra) const override {
         return year % 4 == 0;
     }
 
-    /** @return Number of days in the given Julian month (accounts for Julian leap years). */
+    /**
+     * @brief Returns the number of days in the specified Julian month.
+     *
+     * C++ counterpart of .NET JulianCalendar.GetDaysInMonth(int, int, int).
+     * Uses the Julian leap year rule: every year divisible by 4 gives February 29 days.
+     * @param year  The year.
+     * @param month The month (1–12).
+     * @param era   The era (ignored).
+     * @return The number of days in the specified month.
+     */
     [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         if (month == 2 && IsLeapYear(year)) return 29;
