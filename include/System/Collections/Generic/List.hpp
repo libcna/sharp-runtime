@@ -11,19 +11,19 @@
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 
-namespace System::Collections::Generic
-{
-    /**
-     * @brief A strongly typed list of objects accessible by index.
-     *
-     * C++ counterpart of the .NET System.Collections.Generic.List<T> class.
-     * Backed by std::vector<T>.
-     *
-     * @tparam T The type of elements in the list.
-     */
-    template<typename T>
-    class List : public IList<T>
-    {
+namespace System::Collections::Generic {
+
+/**
+ * @brief Represents a strongly typed list of objects that can be accessed by index.
+ *
+ * C++ counterpart of .NET System.Collections.Generic.List<T>.
+ * Backed by std::vector<T>; provides O(1) amortized Add, O(1) indexed access,
+ * and full IList<T> compliance.
+ *
+ * @tparam T The type of elements in the list.
+ */
+template<typename T>
+class List : public IList<T> {
     private:
         std::vector<T> items_;
 
@@ -99,8 +99,14 @@ namespace System::Collections::Generic
             return new Enumerator(items_);
         }
 
-        /** Returns the underlying std::vector for STL interop. */
+        /**
+         * @brief Returns the underlying std::vector for STL interop.
+         *
+         * Not part of the .NET API; provided for direct interop with std::vector<T>.
+         * @return A const reference to the internal storage.
+         */
         [[nodiscard]] const std::vector<T>& ToVector() const { return items_; }
+        /** @brief Returns the underlying std::vector for STL interop (mutable). */
         [[nodiscard]] std::vector<T>& ToVector() { return items_; }
 
         auto begin() { return items_.begin(); }
@@ -108,53 +114,104 @@ namespace System::Collections::Generic
         [[nodiscard]] auto begin() const { return items_.cbegin(); }
         [[nodiscard]] auto end()   const { return items_.cend(); }
 
-        /** @brief Appends all elements of @p collection to the end of the list. */
+        /**
+         * @brief Appends the elements of @p collection to the end of the list.
+         *
+         * C++ counterpart of .NET List<T>.AddRange(IEnumerable<T>).
+         * @param collection The elements to add.
+         */
         void AddRange(const std::vector<T>& collection) {
             items_.insert(items_.end(), collection.begin(), collection.end());
         }
 
-        /** @brief Appends all elements of another List to the end of this list. */
+        /**
+         * @brief Appends all elements of another List<T> to the end of this list.
+         * @param other The list whose elements to append.
+         */
         void AddRange(const List<T>& other) { AddRange(other.items_); }
 
-        /** @brief Inserts all elements of @p collection at @p index. */
+        /**
+         * @brief Inserts the elements of @p collection into the list at @p index.
+         *
+         * C++ counterpart of .NET List<T>.InsertRange(int, IEnumerable<T>).
+         * @param index      The zero-based index at which insertion begins.
+         * @param collection The elements to insert.
+         */
         void InsertRange(int index, const std::vector<T>& collection) {
             items_.insert(items_.begin() + index, collection.begin(), collection.end());
         }
 
-        /** @brief Returns a new List containing @p count elements starting at @p index. */
+        /**
+         * @brief Creates a shallow copy of a range of elements.
+         *
+         * C++ counterpart of .NET List<T>.GetRange(int, int).
+         * @param index The zero-based index at which the range starts.
+         * @param count The number of elements in the range.
+         * @return A new List<T> containing the specified range.
+         */
         [[nodiscard]] List<T> GetRange(int index, int count) const {
             if (index < 0 || count < 0 || index + count > static_cast<int>(items_.size()))
                 throw std::out_of_range("GetRange: index or count out of range.");
             return List<T>(std::vector<T>(items_.begin() + index, items_.begin() + index + count));
         }
 
-        /** @brief Returns a copy of all elements as a std::vector (equivalent to .NET ToArray()). */
+        /**
+         * @brief Copies the elements to a new array.
+         *
+         * C++ counterpart of .NET List<T>.ToArray().
+         * @return A std::vector<T> containing copies of the list's elements.
+         */
         [[nodiscard]] std::vector<T> ToArray() const { return items_; }
 
-        /** @brief Sorts the list in ascending order using operator<. */
+        /**
+         * @brief Sorts the elements in the list using the default comparer.
+         *
+         * C++ counterpart of .NET List<T>.Sort().
+         */
         void Sort() {
             std::sort(items_.begin(), items_.end());
         }
 
-        /** @brief Sorts the list using a comparison function (returns negative/zero/positive). */
+        /**
+         * @brief Sorts the elements using a comparison delegate.
+         *
+         * C++ counterpart of .NET List<T>.Sort(Comparison<T>).
+         * @param comparison A function returning negative/zero/positive.
+         */
         void Sort(std::function<int(const T&, const T&)> comparison) {
             std::sort(items_.begin(), items_.end(),
                       [&](const T& a, const T& b) { return comparison(a, b) < 0; });
         }
 
-        /** @brief Reverses the order of elements in the list in place. */
+        /**
+         * @brief Reverses the order of all elements in the list.
+         *
+         * C++ counterpart of .NET List<T>.Reverse().
+         */
         void Reverse() {
             std::reverse(items_.begin(), items_.end());
         }
 
-        /** @brief Returns the first element satisfying @p predicate, or default T{} if none. */
+        /**
+         * @brief Searches for an element matching the predicate and returns it.
+         *
+         * C++ counterpart of .NET List<T>.Find(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return The first matching element, or default T{} if none found.
+         */
         [[nodiscard]] T Find(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (predicate(item)) return item;
             return T{};
         }
 
-        /** @brief Returns a new List of all elements satisfying @p predicate. */
+        /**
+         * @brief Retrieves all elements that match the conditions defined by the predicate.
+         *
+         * C++ counterpart of .NET List<T>.FindAll(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return A new List<T> of all matching elements.
+         */
         [[nodiscard]] List<T> FindAll(std::function<bool(const T&)> predicate) const {
             List<T> result;
             for (const auto& item : items_)
@@ -162,21 +219,41 @@ namespace System::Collections::Generic
             return result;
         }
 
-        /** @brief Returns the index of the first element satisfying @p predicate, or -1 if none. */
+        /**
+         * @brief Searches for an element matching the predicate and returns the index of its
+         *        first occurrence, or -1 if not found.
+         *
+         * C++ counterpart of .NET List<T>.FindIndex(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return The index of the first matching element, or -1.
+         */
         [[nodiscard]] int FindIndex(std::function<bool(const T&)> predicate) const {
             for (int i = 0; i < static_cast<int>(items_.size()); ++i)
                 if (predicate(items_[i])) return i;
             return -1;
         }
 
-        /** @brief Returns the index of the last element satisfying @p predicate, or -1 if none. */
+        /**
+         * @brief Searches for an element matching the predicate and returns the index of its
+         *        last occurrence, or -1 if not found.
+         *
+         * C++ counterpart of .NET List<T>.FindLastIndex(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return The index of the last matching element, or -1.
+         */
         [[nodiscard]] int FindLastIndex(std::function<bool(const T&)> predicate) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (predicate(items_[i])) return i;
             return -1;
         }
 
-        /** @brief Removes all elements satisfying @p predicate; returns count removed. */
+        /**
+         * @brief Removes all elements matching the predicate.
+         *
+         * C++ counterpart of .NET List<T>.RemoveAll(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return The number of elements removed.
+         */
         int RemoveAll(std::function<bool(const T&)> predicate) {
             auto it = std::remove_if(items_.begin(), items_.end(), predicate);
             int count = static_cast<int>(items_.end() - it);
@@ -184,26 +261,50 @@ namespace System::Collections::Generic
             return count;
         }
 
-        /** @brief Applies @p action to every element. */
+        /**
+         * @brief Performs the specified action on each element of the list.
+         *
+         * C++ counterpart of .NET List<T>.ForEach(Action<T>).
+         * @param action The action to perform on each element.
+         */
         void ForEach(std::function<void(const T&)> action) const {
             for (const auto& item : items_) action(item);
         }
 
-        /** @brief Returns true if any element satisfies @p predicate. */
+        /**
+         * @brief Determines whether the list contains elements matching the predicate.
+         *
+         * C++ counterpart of .NET List<T>.Exists(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return true if any element matches; otherwise false.
+         */
         [[nodiscard]] bool Exists(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (predicate(item)) return true;
             return false;
         }
 
-        /** @brief Returns true if all elements satisfy @p predicate (true for empty list). */
+        /**
+         * @brief Determines whether every element in the list matches the predicate.
+         *
+         * C++ counterpart of .NET List<T>.TrueForAll(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return true if every element matches, or the list is empty; otherwise false.
+         */
         [[nodiscard]] bool TrueForAll(std::function<bool(const T&)> predicate) const {
             for (const auto& item : items_)
                 if (!predicate(item)) return false;
             return true;
         }
 
-        /** @brief Performs a binary search on a sorted list; returns index or bitwise complement of insertion point. */
+        /**
+         * @brief Searches a sorted list for a value using the default comparer.
+         *
+         * C++ counterpart of .NET List<T>.BinarySearch(T).
+         * @param item The value to search for.
+         * @return The zero-based index if found; the bitwise complement of the
+         *         insertion point if not found.
+         */
         [[nodiscard]] int BinarySearch(const T& item) const {
             auto it = std::lower_bound(items_.begin(), items_.end(), item);
             if (it != items_.end() && *it == item)
@@ -211,42 +312,83 @@ namespace System::Collections::Generic
             return ~static_cast<int>(it - items_.begin());
         }
 
-        /** Returns the zero-based index of the first occurrence of @p item starting at @p startIndex, or -1. */
+        /**
+         * @brief Searches for the specified object starting at @p startIndex.
+         *
+         * C++ counterpart of .NET List<T>.IndexOf(T, int).
+         * @param item       The value to locate.
+         * @param startIndex The zero-based index to start searching at.
+         * @return The index of the first occurrence, or -1 if not found.
+         */
         [[nodiscard]] int IndexOf(const T& item, int startIndex) const {
             for (int i = startIndex; i < static_cast<int>(items_.size()); ++i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /** Returns the zero-based index of the last occurrence of @p item, or -1. */
+        /**
+         * @brief Searches for the last occurrence of @p item in the entire list.
+         *
+         * C++ counterpart of .NET List<T>.LastIndexOf(T).
+         * @param item The value to locate.
+         * @return The index of the last occurrence, or -1 if not found.
+         */
         [[nodiscard]] int LastIndexOf(const T& item) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /** Returns the zero-based index of the last occurrence of @p item at or before @p startIndex, or -1. */
+        /**
+         * @brief Searches for the last occurrence of @p item at or before @p startIndex.
+         *
+         * C++ counterpart of .NET List<T>.LastIndexOf(T, int).
+         * @param item       The value to locate.
+         * @param startIndex The zero-based index to start searching backward from.
+         * @return The index of the last occurrence, or -1 if not found.
+         */
         [[nodiscard]] int LastIndexOf(const T& item, int startIndex) const {
             for (int i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
 
-        /** @brief Returns the current capacity of the internal storage. */
+        /**
+         * @brief Gets the total number of elements the internal storage can hold without resizing.
+         *
+         * C++ counterpart of .NET List<T>.Capacity.
+         * @return The current capacity.
+         */
         [[nodiscard]] int getCapacityProperty() const {
             return static_cast<int>(items_.capacity());
         }
 
-        /** @brief Ensures the internal storage can hold at least @p capacity elements without reallocation. */
+        /**
+         * @brief Ensures that the list can hold at least @p capacity elements.
+         *
+         * C++ counterpart of .NET List<T>.EnsureCapacity(int).
+         * @param capacity The minimum capacity to ensure.
+         */
         void EnsureCapacity(int capacity) {
             if (capacity > static_cast<int>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
         }
 
-        /** @brief Reduces the internal storage to fit the current element count. */
+        /**
+         * @brief Sets the capacity to the actual number of elements, reducing memory overhead.
+         *
+         * C++ counterpart of .NET List<T>.TrimExcess().
+         */
         void TrimExcess() { items_.shrink_to_fit(); }
 
-        /** @brief Returns a new List<TOutput> by applying @p converter to each element. */
+        /**
+         * @brief Converts the elements in the list to another type and returns a new list.
+         *
+         * C++ counterpart of .NET List<T>.ConvertAll<TOutput>(Converter<T,TOutput>).
+         * @tparam TOutput The type of the elements of the target list.
+         * @param converter A function that converts each element to @p TOutput.
+         * @return A new List<TOutput> containing the converted elements.
+         */
         template<typename TOutput>
         [[nodiscard]] List<TOutput> ConvertAll(std::function<TOutput(const T&)> converter) const {
             List<TOutput> result;
@@ -255,26 +397,50 @@ namespace System::Collections::Generic
             return result;
         }
 
-        /** @brief Returns a read-only wrapper around this list's current elements. */
+        /**
+         * @brief Returns a read-only wrapper around this list.
+         *
+         * C++ counterpart of .NET List<T>.AsReadOnly().
+         * @return A ReadOnlyCollection<T> wrapping this list's elements.
+         */
         [[nodiscard]] System::Collections::ObjectModel::ReadOnlyCollection<T> AsReadOnly() const {
             return System::Collections::ObjectModel::ReadOnlyCollection<T>(items_);
         }
 
-        /** @brief Returns the last element satisfying @p predicate, or default T{} if none. */
+        /**
+         * @brief Searches for the last element matching the predicate.
+         *
+         * C++ counterpart of .NET List<T>.FindLast(Predicate<T>).
+         * @param predicate The condition to test each element against.
+         * @return The last matching element, or default T{} if none found.
+         */
         [[nodiscard]] T FindLast(std::function<bool(const T&)> predicate) const {
             for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
                 if (predicate(items_[static_cast<size_t>(i)])) return items_[static_cast<size_t>(i)];
             return T{};
         }
 
-        /** @brief Removes @p count elements starting at @p index. */
+        /**
+         * @brief Removes a range of elements from the list.
+         *
+         * C++ counterpart of .NET List<T>.RemoveRange(int, int).
+         * @param index The zero-based starting index of the range to remove.
+         * @param count The number of elements to remove.
+         */
         void RemoveRange(int index, int count) {
             items_.erase(items_.begin() + index, items_.begin() + index + count);
         }
 
-        /** @brief Reverses the elements in the range [@p index, @p index + @p count). */
+        /**
+         * @brief Reverses the order of the elements in the specified range.
+         *
+         * C++ counterpart of .NET List<T>.Reverse(int, int).
+         * @param index The zero-based starting index of the range to reverse.
+         * @param count The number of elements in the range to reverse.
+         */
         void Reverse(int index, int count) {
             std::reverse(items_.begin() + index, items_.begin() + index + count);
         }
-    };
-}
+};
+
+} // namespace System::Collections::Generic
