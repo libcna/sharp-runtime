@@ -1,0 +1,294 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include "System/Collections/Generic/List.hpp"
+#include "System/Collections/Generic/LinkedList.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include <string>
+#include <vector>
+
+using namespace System::Collections::Generic;
+
+// ---- List<int> core IList interface ----
+TEST(GenListTests, AddAndCount) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_EQ(lst.getCountProperty(), 3);
+}
+
+TEST(GenListTests, IndexAccess) {
+    List<int> lst;
+    lst.Add(10); lst.Add(20);
+    EXPECT_EQ(lst[0], 10);
+    EXPECT_EQ(lst[1], 20);
+}
+
+TEST(GenListTests, MutableIndexAccess) {
+    List<int> lst;
+    lst.Add(0);
+    lst[0] = 42;
+    EXPECT_EQ(lst[0], 42);
+}
+
+TEST(GenListTests, Contains) {
+    List<int> lst;
+    lst.Add(5);
+    EXPECT_TRUE(lst.Contains(5));
+    EXPECT_FALSE(lst.Contains(99));
+}
+
+TEST(GenListTests, Remove) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    EXPECT_TRUE(lst.Remove(1));
+    EXPECT_EQ(lst.getCountProperty(), 1);
+}
+
+TEST(GenListTests, Clear) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    lst.Clear();
+    EXPECT_EQ(lst.getCountProperty(), 0);
+}
+
+TEST(GenListTests, IndexOf) {
+    List<int> lst;
+    lst.Add(5); lst.Add(10); lst.Add(15);
+    EXPECT_EQ(lst.IndexOf(10), 1);
+    EXPECT_EQ(lst.IndexOf(99), -1);
+}
+
+TEST(GenListTests, Insert) {
+    List<int> lst;
+    lst.Add(1); lst.Add(3);
+    lst.Insert(1, 2);
+    EXPECT_EQ(lst[1], 2);
+    EXPECT_EQ(lst.getCountProperty(), 3);
+}
+
+TEST(GenListTests, RemoveAt) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    lst.RemoveAt(1);
+    EXPECT_EQ(lst.getCountProperty(), 2);
+    EXPECT_EQ(lst[1], 3);
+}
+
+TEST(GenListTests, GetEnumerator) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    auto* e = lst.GetEnumerator();
+    int sum = 0;
+    while (e->MoveNext()) sum += e->Current();
+    EXPECT_EQ(sum, 6);
+    delete e;
+}
+
+TEST(GenListTests, RangeForLoop) {
+    List<int> lst;
+    lst.Add(4); lst.Add(5); lst.Add(6);
+    int sum = 0;
+    for (int v : lst) sum += v;
+    EXPECT_EQ(sum, 15);
+}
+
+// ---- List<int> higher-level methods ----
+TEST(GenListTests, Sort) {
+    List<int> lst;
+    lst.Add(3); lst.Add(1); lst.Add(2);
+    lst.Sort();
+    EXPECT_EQ(lst[0], 1);
+    EXPECT_EQ(lst[2], 3);
+}
+
+TEST(GenListTests, SortWithComparison) {
+    List<int> lst;
+    lst.Add(1); lst.Add(3); lst.Add(2);
+    lst.Sort([](const int& a, const int& b) { return b - a; }); // descending
+    EXPECT_EQ(lst[0], 3);
+    EXPECT_EQ(lst[2], 1);
+}
+
+TEST(GenListTests, Reverse) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    lst.Reverse();
+    EXPECT_EQ(lst[0], 3);
+    EXPECT_EQ(lst[2], 1);
+}
+
+TEST(GenListTests, Find) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_EQ(lst.Find([](const int& x) { return x > 1; }), 2);
+}
+
+TEST(GenListTests, FindAll) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    auto evens = lst.FindAll([](const int& x) { return x % 2 == 0; });
+    EXPECT_EQ(evens.getCountProperty(), 2);
+}
+
+TEST(GenListTests, FindIndex) {
+    List<int> lst;
+    lst.Add(10); lst.Add(20); lst.Add(30);
+    EXPECT_EQ(lst.FindIndex([](const int& x) { return x > 15; }), 1);
+}
+
+TEST(GenListTests, RemoveAll) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    int removed = lst.RemoveAll([](const int& x) { return x % 2 == 0; });
+    EXPECT_EQ(removed, 2);
+    EXPECT_EQ(lst.getCountProperty(), 2);
+}
+
+TEST(GenListTests, ForEach) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    int sum = 0;
+    lst.ForEach([&sum](const int& x) { sum += x; });
+    EXPECT_EQ(sum, 6);
+}
+
+TEST(GenListTests, Exists) {
+    List<int> lst;
+    lst.Add(5); lst.Add(10);
+    EXPECT_TRUE(lst.Exists([](const int& x) { return x == 10; }));
+    EXPECT_FALSE(lst.Exists([](const int& x) { return x == 99; }));
+}
+
+TEST(GenListTests, TrueForAll) {
+    List<int> lst;
+    lst.Add(2); lst.Add(4); lst.Add(6);
+    EXPECT_TRUE(lst.TrueForAll([](const int& x) { return x % 2 == 0; }));
+    lst.Add(3);
+    EXPECT_FALSE(lst.TrueForAll([](const int& x) { return x % 2 == 0; }));
+}
+
+TEST(GenListTests, BinarySearch) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    EXPECT_EQ(lst.BinarySearch(3), 2);
+    EXPECT_LT(lst.BinarySearch(99), 0); // bitwise complement
+}
+
+TEST(GenListTests, AddRange) {
+    List<int> lst;
+    lst.Add(1);
+    std::vector<int> v{2, 3, 4};
+    lst.AddRange(v);
+    EXPECT_EQ(lst.getCountProperty(), 4);
+}
+
+TEST(GenListTests, GetRange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3); lst.Add(4);
+    auto sub = lst.GetRange(1, 2);
+    EXPECT_EQ(sub.getCountProperty(), 2);
+    EXPECT_EQ(sub[0], 2);
+}
+
+TEST(GenListTests, ToArray) {
+    List<int> lst;
+    lst.Add(7); lst.Add(8);
+    auto v = lst.ToArray();
+    ASSERT_EQ(v.size(), 2u);
+    EXPECT_EQ(v[0], 7);
+}
+
+TEST(GenListTests, EnsureCapacityAndTrimExcess) {
+    List<int> lst;
+    lst.EnsureCapacity(100);
+    EXPECT_GE(lst.getCapacityProperty(), 100);
+    lst.Add(1);
+    lst.TrimExcess();
+    EXPECT_EQ(lst.getCapacityProperty(), 1);
+}
+
+TEST(GenListTests, ConvertAll) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    auto strs = lst.ConvertAll<std::string>([](const int& x) { return std::to_string(x); });
+    EXPECT_EQ(strs[0], "1");
+    EXPECT_EQ(strs[2], "3");
+}
+
+// ---- LinkedListNode Next/Previous ----
+TEST(GenLinkedListNodeTests, NextProperty) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto n = ll.getFirstProperty();
+    ASSERT_TRUE(static_cast<bool>(n));
+    auto next = n.getNextProperty();
+    EXPECT_TRUE(static_cast<bool>(next));
+    EXPECT_EQ(next.getValueProperty(), 2);
+}
+
+TEST(GenLinkedListNodeTests, PreviousProperty) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto n = ll.getLastProperty();
+    auto prev = n.getPreviousProperty();
+    EXPECT_TRUE(static_cast<bool>(prev));
+    EXPECT_EQ(prev.getValueProperty(), 2);
+}
+
+TEST(GenLinkedListNodeTests, NextOfLastIsNull) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    auto n = ll.getLastProperty();
+    EXPECT_FALSE(static_cast<bool>(n.getNextProperty()));
+}
+
+TEST(GenLinkedListNodeTests, PreviousOfFirstIsNull) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    auto n = ll.getFirstProperty();
+    EXPECT_FALSE(static_cast<bool>(n.getPreviousProperty()));
+}
+
+// ---- LinkedList CopyTo and GetEnumerator ----
+TEST(GenLinkedListTests, CopyTo) {
+    LinkedList<int> ll;
+    ll.AddLast(10); ll.AddLast(20); ll.AddLast(30);
+    std::vector<int> dest(3);
+    ll.CopyTo(dest, 0);
+    EXPECT_EQ(dest[0], 10);
+    EXPECT_EQ(dest[2], 30);
+}
+
+TEST(GenLinkedListTests, GetEnumerator) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto* e = ll.GetEnumerator();
+    int sum = 0;
+    while (e->MoveNext()) sum += e->Current();
+    EXPECT_EQ(sum, 6);
+    delete e;
+}
+
+// ---- KeyNotFoundException ----
+TEST(GenKeyNotFoundExceptionTests, DefaultMessage) {
+    try { throw KeyNotFoundException(); }
+    catch (const KeyNotFoundException& ex) {
+        EXPECT_NE(std::string(ex.what()).find("key"), std::string::npos);
+    }
+}
+
+TEST(GenKeyNotFoundExceptionTests, CustomMessage) {
+    try { throw KeyNotFoundException("no such key"); }
+    catch (const KeyNotFoundException& ex) {
+        EXPECT_EQ(std::string(ex.what()), "no such key");
+    }
+}
+
+TEST(GenKeyNotFoundExceptionTests, WithInnerException) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    try { throw KeyNotFoundException("outer", inner); }
+    catch (const KeyNotFoundException& ex) {
+        EXPECT_EQ(std::string(ex.what()), "outer");
+    }
+}
