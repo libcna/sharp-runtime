@@ -45,12 +45,12 @@ namespace System {
         /** @brief Random instances are not copyable. */
         Random& operator=(const Random&) = delete;
 
+        virtual ~Random() = default;
+
         /** @brief Move constructor. */
         Random(Random&&) noexcept = default;
         /** @brief Move-assignment operator. */
         Random& operator=(Random&&) noexcept = default;
-
-        ~Random() = default;
 
         // -------------------------------------------------------------------------
         // Shared instance
@@ -69,18 +69,28 @@ namespace System {
         // Int overloads
         // -------------------------------------------------------------------------
 
+    protected:
+        /**
+         * @brief Returns a random floating-point number between 0.0 and 1.0 (exclusive).
+         *
+         * C++ counterpart of .NET Random.Sample(). Override in a subclass to provide a
+         * custom distribution; the base implementation delegates to NextDouble().
+         */
+        virtual double Sample() { return NextDouble(); }
+
+    public:
         /**
          * @brief Returns a non-negative random integer in [0, int.MaxValue).
          * @return A 32-bit signed integer ≥ 0 and < Int32.MaxValue.
          */
-        intcs Next();
+        virtual intcs Next();
 
         /**
          * @brief Returns a non-negative random integer in [0, maxValue).
          * @param maxValue Exclusive upper bound; must be ≥ 0.
          * @throws System::ArgumentOutOfRangeException if maxValue < 0.
          */
-        intcs Next(intcs maxValue);
+        virtual intcs Next(intcs maxValue);
 
         /**
          * @brief Returns a random integer in [minValue, maxValue).
@@ -88,7 +98,7 @@ namespace System {
          * @param maxValue Exclusive upper bound; must be ≥ minValue.
          * @throws System::ArgumentOutOfRangeException if minValue > maxValue.
          */
-        intcs Next(intcs minValue, intcs maxValue);
+        virtual intcs Next(intcs minValue, intcs maxValue);
 
         // -------------------------------------------------------------------------
         // Int64 overloads
@@ -98,14 +108,14 @@ namespace System {
          * @brief Returns a non-negative random 64-bit integer in [0, Int64.MaxValue).
          * @return A 64-bit signed integer ≥ 0 and < Int64.MaxValue.
          */
-        longcs NextInt64();
+        virtual longcs NextInt64();
 
         /**
          * @brief Returns a non-negative random 64-bit integer in [0, maxValue).
          * @param maxValue Exclusive upper bound; must be ≥ 0.
          * @throws System::ArgumentOutOfRangeException if maxValue < 0.
          */
-        longcs NextInt64(longcs maxValue);
+        virtual longcs NextInt64(longcs maxValue);
 
         /**
          * @brief Returns a random 64-bit integer in [minValue, maxValue).
@@ -113,7 +123,7 @@ namespace System {
          * @param maxValue Exclusive upper bound; must be ≥ minValue.
          * @throws System::ArgumentOutOfRangeException if minValue > maxValue.
          */
-        longcs NextInt64(longcs minValue, longcs maxValue);
+        virtual longcs NextInt64(longcs minValue, longcs maxValue);
 
         // -------------------------------------------------------------------------
         // Generic integer overloads
@@ -186,13 +196,13 @@ namespace System {
          * @brief Returns a random single-precision float in [0.0f, 1.0f).
          * @return A float ≥ 0.0f and < 1.0f.
          */
-        float NextSingle();
+        virtual float NextSingle();
 
         /**
          * @brief Returns a random double-precision float in [0.0, 1.0).
          * @return A double ≥ 0.0 and < 1.0.
          */
-        double NextDouble();
+        virtual double NextDouble();
 
         // -------------------------------------------------------------------------
         // Byte buffers
@@ -202,7 +212,7 @@ namespace System {
          * @brief Fills a byte vector with random values.
          * @param buffer Vector to fill; its size determines the number of bytes generated.
          */
-        void NextBytes(std::vector<bytecs>& buffer);
+        virtual void NextBytes(std::vector<bytecs>& buffer);
 
         /**
          * @brief Fills a Span<byte> with random values.
@@ -210,7 +220,7 @@ namespace System {
          * C++ counterpart of .NET Random.NextBytes(Span<byte>).
          * @param buffer Span over mutable storage to fill with random bytes.
          */
-        void NextBytes(Span<bytecs> buffer);
+        virtual void NextBytes(Span<bytecs> buffer);
 
         // -------------------------------------------------------------------------
         // Collection utilities

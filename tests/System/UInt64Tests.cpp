@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <gtest/gtest.h>
+#include "System/UInt64.hpp"
+
+using System::UInt64;
+
+TEST(UInt64Test, MaxValue) {
+    EXPECT_EQ(UInt64::MaxValue, 18446744073709551615ULL);
+}
+
+TEST(UInt64Test, MinValue) {
+    EXPECT_EQ(UInt64::MinValue, 0ULL);
+}
+
+TEST(UInt64Test, ParseBasic) {
+    EXPECT_EQ(UInt64::Parse("12345"), 12345ULL);
+}
+
+TEST(UInt64Test, ParseZero) {
+    EXPECT_EQ(UInt64::Parse("0"), 0ULL);
+}
+
+TEST(UInt64Test, ParseLarge) {
+    EXPECT_EQ(UInt64::Parse("18446744073709551615"), 18446744073709551615ULL);
+}
+
+TEST(UInt64Test, ParseInvalidThrows) {
+    EXPECT_THROW(UInt64::Parse("abc"), std::invalid_argument);
+}
+
+TEST(UInt64Test, TryParseSuccess) {
+    uint64_t result = 0;
+    EXPECT_TRUE(UInt64::TryParse("999", result));
+    EXPECT_EQ(result, 999ULL);
+}
+
+TEST(UInt64Test, TryParseFailure) {
+    uint64_t result = 0;
+    EXPECT_FALSE(UInt64::TryParse("xyz", result));
+}
+
+TEST(UInt64Test, ToStringDecimal) {
+    EXPECT_EQ(UInt64::ToString(1000ULL), "1000");
+}
+
+TEST(UInt64Test, ToStringHex) {
+    EXPECT_EQ(UInt64::ToString(255ULL, "X"), "FF");
+}
+
+TEST(UInt64Test, ToStringPadded) {
+    EXPECT_EQ(UInt64::ToString(10ULL, "D4"), "0010");
+}

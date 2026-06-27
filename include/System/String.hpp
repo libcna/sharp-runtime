@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/StringComparison.hpp"
 #include "System/StringSplitOptions.hpp"
 
 namespace System
@@ -85,6 +86,20 @@ namespace System
         static bool EndsWith(const std::string& value, char ch);
 
         /**
+         * @brief Returns true if @p value starts with @p prefix using the specified comparison rules.
+         *
+         * C++ counterpart of .NET String.StartsWith(string, StringComparison).
+         */
+        static bool StartsWith(const std::string& value, const std::string& prefix, StringComparison comparisonType);
+
+        /**
+         * @brief Returns true if @p value ends with @p suffix using the specified comparison rules.
+         *
+         * C++ counterpart of .NET String.EndsWith(string, StringComparison).
+         */
+        static bool EndsWith(const std::string& value, const std::string& suffix, StringComparison comparisonType);
+
+        /**
          * @brief Returns true if @p value contains @p substr.
          *
          * C++ counterpart of .NET String.Contains(string).
@@ -99,6 +114,13 @@ namespace System
         static bool Contains(const std::string& value, char ch);
 
         /**
+         * @brief Returns true if @p value contains @p substr using the specified comparison rules.
+         *
+         * C++ counterpart of .NET String.Contains(string, StringComparison).
+         */
+        static bool Contains(const std::string& value, const std::string& substr, StringComparison comparisonType);
+
+        /**
          * @brief Compares @p a and @p b ordinally; returns negative/zero/positive.
          *
          * C++ counterpart of .NET String.Compare(string, string).
@@ -111,6 +133,13 @@ namespace System
          * C++ counterpart of .NET String.Compare(string, string, bool).
          */
         static SharpRuntime::intcs Compare(const std::string& a, const std::string& b, bool ignoreCase);
+
+        /**
+         * @brief Compares @p a and @p b using the specified StringComparison rules.
+         *
+         * C++ counterpart of .NET String.Compare(string, string, StringComparison).
+         */
+        static SharpRuntime::intcs Compare(const std::string& a, const std::string& b, StringComparison comparisonType);
 
         /**
          * @brief Performs a byte-by-byte ordinal comparison of @p a and @p b.
@@ -129,9 +158,16 @@ namespace System
         /**
          * @brief Returns true if @p a and @p b are equal with optional case-insensitivity.
          *
-         * C++ counterpart of .NET String.Equals(string, string, StringComparison).
+         * C++ counterpart of .NET String.Equals(string, string, bool).
          */
         static bool Equals(const std::string& a, const std::string& b, bool ignoreCase);
+
+        /**
+         * @brief Returns true if @p a and @p b are equal under the specified StringComparison rules.
+         *
+         * C++ counterpart of .NET String.Equals(string, string, StringComparison).
+         */
+        static bool Equals(const std::string& a, const std::string& b, StringComparison comparisonType);
 
         // -----------------------------------------------------------------------
         // IndexOf / LastIndexOf
@@ -185,6 +221,20 @@ namespace System
          * C++ counterpart of .NET String.IndexOfAny(char[]).
          */
         static SharpRuntime::intcs IndexOfAny(const std::string& value, const std::vector<char>& anyOf);
+
+        /**
+         * @brief Returns the first occurrence of @p substr using the specified comparison rules, or -1.
+         *
+         * C++ counterpart of .NET String.IndexOf(string, StringComparison).
+         */
+        static SharpRuntime::intcs IndexOf(const std::string& value, const std::string& substr, StringComparison comparisonType);
+
+        /**
+         * @brief Returns the last occurrence of @p substr using the specified comparison rules, or -1.
+         *
+         * C++ counterpart of .NET String.LastIndexOf(string, StringComparison).
+         */
+        static SharpRuntime::intcs LastIndexOf(const std::string& value, const std::string& substr, StringComparison comparisonType);
 
         /**
          * @brief Returns the zero-based index of the last occurrence of @p substr in @p value, or -1.
@@ -481,6 +531,13 @@ namespace System
         {
             return Join(separator, std::vector<std::string>(values));
         }
+
+        /**
+         * @brief Joins all strings in @p values with a single-character @p separator between them.
+         *
+         * C++ counterpart of .NET String.Join(char, string[]).
+         */
+        static std::string Join(char separator, const std::vector<std::string>& values);
 
         /**
          * @brief Joins all integers in @p values with @p separator between them.

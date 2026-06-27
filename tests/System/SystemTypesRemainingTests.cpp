@@ -527,7 +527,7 @@ TEST(IndexTests, NegativeValue_Throws) {
 // ===========================================================================
 
 TEST(RangeTests, All_StartsAtZeroEndsAtLength) {
-    Range r = Range::All();
+    Range r = Range::getAllProperty();
     auto [offset, length] = r.GetOffsetAndLength(10);
     EXPECT_EQ(offset, 0);
     EXPECT_EQ(length, 10);

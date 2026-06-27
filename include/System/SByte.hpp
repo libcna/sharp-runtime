@@ -118,6 +118,80 @@ namespace System {
             return (value > 0) - (value < 0);
         }
 
+        /** @brief Returns the absolute value of @p value. C++ counterpart of .NET SByte.Abs(sbyte). */
+        [[nodiscard]] static sbytecs Abs(sbytecs value) {
+            if (value == MinValue)
+                throw std::overflow_error("Negating SByte.MinValue would overflow.");
+            return value < 0 ? static_cast<sbytecs>(-value) : value;
+        }
+
+        /**
+         * @brief Returns a value with the magnitude of @p value and the sign of @p sign.
+         * C++ counterpart of .NET SByte.CopySign(sbyte, sbyte).
+         */
+        [[nodiscard]] static sbytecs CopySign(sbytecs value, sbytecs sign) noexcept {
+            sbytecs abs = value < 0 ? static_cast<sbytecs>(-value) : value;
+            return sign < 0 ? static_cast<sbytecs>(-abs) : abs;
+        }
+
+        /** @brief Returns true if @p value is negative. C++ counterpart of .NET SByte.IsNegative(sbyte). */
+        [[nodiscard]] static bool IsNegative(sbytecs value) noexcept { return value < 0; }
+
+        /** @brief Returns true if @p value is positive (> 0). C++ counterpart of .NET SByte.IsPositive(sbyte). */
+        [[nodiscard]] static bool IsPositive(sbytecs value) noexcept { return value > 0; }
+
+        /**
+         * @brief Returns the base-10 logarithm of @p value, truncated to sbyte.
+         * C++ counterpart of .NET SByte.Log10(sbyte).
+         * @throws std::domain_error if value is <= 0.
+         */
+        [[nodiscard]] static sbytecs Log10(sbytecs value) {
+            if (value <= 0) throw std::domain_error("Log10 requires a positive value.");
+            sbytecs result = 0;
+            while (value >= 10) { value /= 10; ++result; }
+            return result;
+        }
+
+        /**
+         * @brief Returns the value with greater magnitude; if magnitudes are equal, returns @p x.
+         * C++ counterpart of .NET SByte.MaxMagnitude(sbyte, sbyte).
+         */
+        [[nodiscard]] static sbytecs MaxMagnitude(sbytecs x, sbytecs y) noexcept {
+            sbytecs ax = x < 0 ? static_cast<sbytecs>(-x) : x;
+            sbytecs ay = y < 0 ? static_cast<sbytecs>(-y) : y;
+            return ax >= ay ? x : y;
+        }
+
+        /**
+         * @brief Returns the value with smaller magnitude; if magnitudes are equal, returns @p x.
+         * C++ counterpart of .NET SByte.MinMagnitude(sbyte, sbyte).
+         */
+        [[nodiscard]] static sbytecs MinMagnitude(sbytecs x, sbytecs y) noexcept {
+            sbytecs ax = x < 0 ? static_cast<sbytecs>(-x) : x;
+            sbytecs ay = y < 0 ? static_cast<sbytecs>(-y) : y;
+            return ax <= ay ? x : y;
+        }
+
+        /**
+         * @brief Rotates @p value left by @p rotateAmount bits within an 8-bit field.
+         * C++ counterpart of .NET SByte.RotateLeft(sbyte, int).
+         */
+        [[nodiscard]] static sbytecs RotateLeft(sbytecs value, int rotateAmount) noexcept {
+            uint8_t uv = static_cast<uint8_t>(value);
+            int shift = rotateAmount & 7;
+            return static_cast<sbytecs>((uv << shift) | (uv >> (8 - shift)));
+        }
+
+        /**
+         * @brief Rotates @p value right by @p rotateAmount bits within an 8-bit field.
+         * C++ counterpart of .NET SByte.RotateRight(sbyte, int).
+         */
+        [[nodiscard]] static sbytecs RotateRight(sbytecs value, int rotateAmount) noexcept {
+            uint8_t uv = static_cast<uint8_t>(value);
+            int shift = rotateAmount & 7;
+            return static_cast<sbytecs>((uv >> shift) | (uv << (8 - shift)));
+        }
+
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
          * C++ counterpart of .NET SByte.DivRem(sbyte,sbyte).

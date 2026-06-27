@@ -49,6 +49,11 @@ namespace System {
           objectName_(objectName) {
     }
 
+    ObjectDisposedException::ObjectDisposedException(const std::string& message, std::exception_ptr inner)
+        : InvalidOperationException(message, std::move(inner)),
+          objectName_("") {
+    }
+
     const std::string& ObjectDisposedException::getObjectNameProperty() const
     {
         return objectName_;

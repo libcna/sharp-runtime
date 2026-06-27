@@ -17,7 +17,6 @@ namespace System::Collections::Concurrent {
      * Wraps std::queue with std::mutex.
      * Partial C++ counterpart of .NET System.Collections.Concurrent.ConcurrentQueue<T>.
      *
-     * @note Status: Partial
      */
     template<typename T>
     class ConcurrentQueue {

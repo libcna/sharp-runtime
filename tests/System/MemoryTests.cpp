@@ -3,8 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Memory.hpp"
+#include "System/ArraySegment.hpp"
+#include "System/ReadOnlyMemory.hpp"
 
 using System::Memory;
+using System::ArraySegment;
+using System::ReadOnlyMemory;
 using SharpRuntime::intcs;
 
 // ---------------------------------------------------------------------------
@@ -318,4 +322,33 @@ TEST(MemoryTests, ToString_EmptyMemory_ContainsZero) {
     Memory<int> m;
     std::string s = m.ToString();
     EXPECT_NE(s.find("0"), std::string::npos);
+}
+
+TEST(MemoryTests, ConvertFromArraySegment_Length) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v, 1, 3);
+    Memory<int> m(seg);
+    EXPECT_EQ(m.getLengthProperty(), 3);
+}
+
+TEST(MemoryTests, ConvertFromArraySegment_Values) {
+    std::vector<int> v = {10, 20, 30, 40};
+    ArraySegment<int> seg(v, 1, 2);
+    Memory<int> m(seg);
+    auto arr = m.ToArray();
+    EXPECT_EQ(arr[0], 20);
+    EXPECT_EQ(arr[1], 30);
+}
+
+TEST(MemoryTests, ConvertToReadOnlyMemory_Length) {
+    std::vector<int> v = {1, 2, 3};
+    Memory<int> m(v);
+    ReadOnlyMemory<int> rom = m;
+    EXPECT_EQ(rom.getLengthProperty(), 3);
+}
+
+TEST(MemoryTests, ConvertToReadOnlyMemory_Empty) {
+    Memory<int> m;
+    ReadOnlyMemory<int> rom = m;
+    EXPECT_TRUE(rom.getIsEmptyProperty());
 }

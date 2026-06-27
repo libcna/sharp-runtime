@@ -10,6 +10,8 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Span.hpp"
+#include "System/ArraySegment.hpp"
+#include "System/ReadOnlyMemory.hpp"
 
 namespace System {
 
@@ -53,6 +55,17 @@ namespace System {
         explicit Memory(std::vector<T>& array)
             : data_(&array), offset_(0),
               length_(static_cast<intcs>(array.size())) {}
+
+        /**
+         * @brief Initializes a Memory&lt;T&gt; from an ArraySegment&lt;T&gt;.
+         *
+         * C++ counterpart of .NET implicit operator Memory&lt;T&gt;(ArraySegment&lt;T&gt;).
+         * @param segment The source segment.
+         */
+        Memory(const ArraySegment<T>& segment)
+            : data_(segment.getArrayProperty()),
+              offset_(segment.getOffsetProperty()),
+              length_(segment.getCountProperty()) {}
 
         /**
          * @brief Initializes a Memory&lt;T&gt; over a sub-range of @p array.
@@ -244,6 +257,20 @@ namespace System {
             std::ostringstream oss;
             oss << "System.Memory<T>[" << length_ << "]";
             return oss.str();
+        }
+
+        // -----------------------------------------------------------------------
+        // Conversion to ReadOnlyMemory<T>
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Converts this Memory&lt;T&gt; to a ReadOnlyMemory&lt;T&gt;.
+         *
+         * C++ counterpart of .NET implicit operator ReadOnlyMemory&lt;T&gt;(Memory&lt;T&gt;).
+         */
+        operator ReadOnlyMemory<T>() const noexcept {
+            if (data_ == nullptr) return ReadOnlyMemory<T>{};
+            return ReadOnlyMemory<T>(data_->data() + offset_, length_);
         }
     };
 

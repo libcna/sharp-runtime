@@ -10,7 +10,7 @@
 namespace System {
 
     SystemException::SystemException()
-        : Exception() {}
+        : Exception("System error.") {}
 
     SystemException::SystemException(const char* str)
         : Exception(str) {}

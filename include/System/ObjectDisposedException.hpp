@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <exception>
 #include <string>
 
 #include "System/InvalidOperationException.hpp"
@@ -12,11 +13,7 @@ namespace System {
     /**
      * @brief The exception that is thrown when accessing an object that was disposed.
      *
-     * This is a partial C++ counterpart of the .NET System::ObjectDisposedException type.
-     *
-     * @note Status: Partial.
-     * @note Serialization, HResult, inner exception handling, and Type-based overloads
-     * are not implemented here.
+     * C++ counterpart of .NET System.ObjectDisposedException.
      */
     class ObjectDisposedException : public InvalidOperationException {
     private:
@@ -65,6 +62,15 @@ namespace System {
          * @param message Error message.
          */
         ObjectDisposedException(const std::string& objectName, const std::string& message);
+
+        /**
+         * @brief Initializes a new instance with the specified message and inner exception.
+         *
+         * C++ counterpart of .NET ObjectDisposedException(string, Exception).
+         * @param message Error message.
+         * @param inner   The exception that caused this exception.
+         */
+        ObjectDisposedException(const std::string& message, std::exception_ptr inner);
 
         /**
          * @brief Gets the name of the disposed object.

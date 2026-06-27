@@ -40,7 +40,8 @@ namespace detail {
  */
 template<typename T1>
 struct ValueTuple1 {
-    T1 Item1; ///< The first (and only) element.
+    /** @brief The first (and only) element. */
+    T1 Item1;
 
     /** @brief Default-constructs all elements. */
     ValueTuple1() = default;
@@ -100,8 +101,10 @@ struct ValueTuple1 {
  */
 template<typename T1, typename T2>
 struct ValueTuple2 {
-    T1 Item1; ///< The first element.
-    T2 Item2; ///< The second element.
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
 
     /** @brief Default-constructs all elements. */
     ValueTuple2() = default;
@@ -165,9 +168,12 @@ struct ValueTuple2 {
  */
 template<typename T1, typename T2, typename T3>
 struct ValueTuple3 {
-    T1 Item1; ///< The first element.
-    T2 Item2; ///< The second element.
-    T3 Item3; ///< The third element.
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
+    /** @brief The third element. */
+    T3 Item3;
 
     /** @brief Default-constructs all elements. */
     ValueTuple3() = default;
@@ -231,10 +237,14 @@ struct ValueTuple3 {
  */
 template<typename T1, typename T2, typename T3, typename T4>
 struct ValueTuple4 {
-    T1 Item1; ///< The first element.
-    T2 Item2; ///< The second element.
-    T3 Item3; ///< The third element.
-    T4 Item4; ///< The fourth element.
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
+    /** @brief The third element. */
+    T3 Item3;
+    /** @brief The fourth element. */
+    T4 Item4;
 
     /** @brief Default-constructs all elements. */
     ValueTuple4() = default;
@@ -512,14 +522,22 @@ ValueTuple7<T1,T2,T3,T4,T5,T6,T7> MakeValueTuple(T1 i1, T2 i2, T3 i3, T4 i4,
 template<typename T1, typename T2, typename T3, typename T4,
          typename T5, typename T6, typename T7, typename TRest>
 struct ValueTuple8 {
-    T1    Item1; ///< The first element.
-    T2    Item2; ///< The second element.
-    T3    Item3; ///< The third element.
-    T4    Item4; ///< The fourth element.
-    T5    Item5; ///< The fifth element.
-    T6    Item6; ///< The sixth element.
-    T7    Item7; ///< The seventh element.
-    TRest Rest;  ///< The remaining elements (another ValueTupleN).
+    /** @brief The first element. */
+    T1    Item1;
+    /** @brief The second element. */
+    T2    Item2;
+    /** @brief The third element. */
+    T3    Item3;
+    /** @brief The fourth element. */
+    T4    Item4;
+    /** @brief The fifth element. */
+    T5    Item5;
+    /** @brief The sixth element. */
+    T6    Item6;
+    /** @brief The seventh element. */
+    T7    Item7;
+    /** @brief The remaining elements (another ValueTupleN). */
+    TRest Rest;
 
     /** @brief Default-constructs all elements. */
     ValueTuple8() = default;

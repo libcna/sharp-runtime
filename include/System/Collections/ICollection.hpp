@@ -6,13 +6,12 @@
 
 namespace System::Collections {
 
-    /**
-     * @brief Defines size, enumerators, and synchronization methods for all non-generic collections.
-     *
-     * Partial C++ counterpart of .NET System.Collections.ICollection.
-     *
-     * @note Status: Stub
-     */
+/**
+ * @brief Defines size, enumerators, and synchronization methods for all non-generic collections.
+ *
+ * C++ counterpart of .NET System.Collections.ICollection.
+ * Because C++ has no runtime Array type, CopyTo accepts a void* destination pointer.
+ */
 class ICollection : public IEnumerable {
 public:
     /** @brief Virtual destructor for safe polymorphic destruction. */
@@ -24,6 +23,15 @@ public:
      * C++ counterpart of .NET ICollection.Count.
      */
     [[nodiscard]] virtual int getCountProperty() const = 0;
+
+    /**
+     * @brief Copies the elements of the collection into an array starting at the given index.
+     *
+     * C++ counterpart of .NET ICollection.CopyTo(Array, int).
+     * @param array Pointer to the destination array buffer.
+     * @param index Zero-based index at which copying begins.
+     */
+    virtual void CopyTo(void* array, int index) = 0;
 
     /**
      * @brief Gets an object that can be used to synchronize access to the collection.

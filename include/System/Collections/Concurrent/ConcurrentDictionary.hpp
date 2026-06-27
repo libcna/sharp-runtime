@@ -19,7 +19,6 @@ namespace System::Collections::Concurrent {
      * Wraps std::unordered_map with std::mutex.
      * Partial C++ counterpart of .NET System.Collections.Concurrent.ConcurrentDictionary<TKey,TValue>.
      *
-     * @note Status: Partial
      */
     template<typename TKey, typename TValue>
     class ConcurrentDictionary {

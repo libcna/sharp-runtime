@@ -177,7 +177,7 @@ TEST(ReadOnlyMemoryTests, ToArray_CopiesData) {
     EXPECT_EQ(arr[1], 8);
 }
 TEST(ReadOnlyMemoryTests, Empty_IsEmpty) {
-    auto e = System::ReadOnlyMemory<int>::Empty();
+    auto e = System::ReadOnlyMemory<int>::getEmptyProperty();
     EXPECT_TRUE(e.getIsEmptyProperty());
 }
 

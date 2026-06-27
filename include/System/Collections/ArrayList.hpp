@@ -64,6 +64,19 @@ public:
     [[nodiscard]] int getCountProperty() const override { return static_cast<int>(_items.size()); }
 
     /**
+     * @brief Copies the elements of the list into the given buffer starting at @p index.
+     *
+     * C++ counterpart of .NET ArrayList.CopyTo(Array, int).
+     * @param array Pointer to a std::any[] destination buffer.
+     * @param index Zero-based index at which copying begins.
+     */
+    void CopyTo(void* array, int index) override {
+        auto* dest = static_cast<std::any*>(array);
+        for (size_t i = 0; i < _items.size(); ++i)
+            dest[static_cast<size_t>(index) + i] = _items[i];
+    }
+
+    /**
      * @brief Returns the currently allocated capacity of the internal storage.
      *
      * C++ counterpart of .NET ArrayList.Capacity.
@@ -108,6 +121,28 @@ public:
     // -----------------------------------------------------------------------
     // Element access
     // -----------------------------------------------------------------------
+
+    /**
+     * @brief Returns a pointer to the element at the given index.
+     *
+     * C++ counterpart of .NET IList indexer getter (this[int index]).
+     * @param index Zero-based index.
+     * @return Pointer to the std::any element at @p index.
+     */
+    [[nodiscard]] void* getItem(intcs index) const override {
+        return const_cast<std::any*>(&_items.at(static_cast<size_t>(index)));
+    }
+
+    /**
+     * @brief Sets the element at the given index.
+     *
+     * C++ counterpart of .NET IList indexer setter (this[int index] = value).
+     * @param index Zero-based index.
+     * @param value Pointer to a std::any to store; if null, stores an empty std::any.
+     */
+    void setItem(intcs index, void* value) override {
+        _items.at(static_cast<size_t>(index)) = value ? *static_cast<std::any*>(value) : std::any{};
+    }
 
     /**
      * @brief Returns a reference to the element at the given index.

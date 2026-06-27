@@ -692,4 +692,67 @@ namespace System
         return std::hash<std::string>{}(value);
     }
 
+    // -----------------------------------------------------------------------
+    // StringComparison helpers
+    // -----------------------------------------------------------------------
+
+    static std::string sc_toLower(const std::string& s) {
+        std::string r = s;
+        std::transform(r.begin(), r.end(), r.begin(),
+            [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        return r;
+    }
+
+    static bool sc_isIgnoreCase(StringComparison c) {
+        return c == StringComparison::CurrentCultureIgnoreCase  ||
+               c == StringComparison::InvariantCultureIgnoreCase ||
+               c == StringComparison::OrdinalIgnoreCase;
+    }
+
+    SharpRuntime::intcs String::Compare(const std::string& a, const std::string& b, StringComparison comparisonType) {
+        return Compare(a, b, sc_isIgnoreCase(comparisonType));
+    }
+
+    bool String::Equals(const std::string& a, const std::string& b, StringComparison comparisonType) {
+        return Equals(a, b, sc_isIgnoreCase(comparisonType));
+    }
+
+    bool String::Contains(const std::string& value, const std::string& substr, StringComparison comparisonType) {
+        if (sc_isIgnoreCase(comparisonType))
+            return sc_toLower(value).find(sc_toLower(substr)) != std::string::npos;
+        return value.find(substr) != std::string::npos;
+    }
+
+    bool String::StartsWith(const std::string& value, const std::string& prefix, StringComparison comparisonType) {
+        if (sc_isIgnoreCase(comparisonType))
+            return StartsWith(sc_toLower(value), sc_toLower(prefix));
+        return StartsWith(value, prefix);
+    }
+
+    bool String::EndsWith(const std::string& value, const std::string& suffix, StringComparison comparisonType) {
+        if (sc_isIgnoreCase(comparisonType))
+            return EndsWith(sc_toLower(value), sc_toLower(suffix));
+        return EndsWith(value, suffix);
+    }
+
+    SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr, StringComparison comparisonType) {
+        if (sc_isIgnoreCase(comparisonType)) {
+            auto pos = sc_toLower(value).find(sc_toLower(substr));
+            return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+        }
+        return IndexOf(value, substr);
+    }
+
+    SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr, StringComparison comparisonType) {
+        if (sc_isIgnoreCase(comparisonType)) {
+            auto pos = sc_toLower(value).rfind(sc_toLower(substr));
+            return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
+        }
+        return LastIndexOf(value, substr);
+    }
+
+    std::string String::Join(char separator, const std::vector<std::string>& values) {
+        return Join(std::string(1, separator), values);
+    }
+
 }

@@ -2,40 +2,87 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <string>
+#include <stdexcept>
 #include "System/Index.hpp"
 
 namespace System {
 
-    /** <summary>Represents a range that has start and end indexes. Corresponds to C# System.Range.</summary> */
-    class Range {
+    /**
+     * @brief Represents a range that has start and end indexes.
+     *
+     * C++ counterpart of .NET System.Range. Used with Index to express slices of
+     * collections. The range [start, end) is half-open: start is inclusive, end is
+     * exclusive.
+     */
+    struct Range {
+    private:
         Index start_;
         Index end_;
 
+        static std::string indexToString(const Index& idx) {
+            std::string s = idx.getIsFromEndProperty() ? "^" : "";
+            s += std::to_string(idx.getValueProperty());
+            return s;
+        }
+
+        static bool indexEquals(const Index& a, const Index& b) noexcept {
+            return a.getValueProperty() == b.getValueProperty() &&
+                   a.getIsFromEndProperty() == b.getIsFromEndProperty();
+        }
+
     public:
-        /** Constructs a Range that covers the entire collection (equivalent to Range.All()). */
-        Range() : start_(Index::Start()), end_(Index::End()) {}
         /**
-         * Constructs a Range with explicit start and end indexes.
+         * @brief Constructs a Range that covers the entire collection (equivalent to Range.All).
+         */
+        Range() : start_(Index::Start()), end_(Index::End()) {}
+
+        /**
+         * @brief Constructs a Range with explicit start and end indexes.
          * @param start Inclusive start index.
-         * @param end Exclusive end index.
+         * @param end   Exclusive end index.
          */
         Range(Index start, Index end) : start_(start), end_(end) {}
 
-        /** Returns the inclusive start index of the range. */
+        /** @brief Returns the inclusive start index of the range. */
         [[nodiscard]] const Index& getStartProperty() const noexcept { return start_; }
-        /** Returns the exclusive end index of the range. */
-        [[nodiscard]] const Index& getEndProperty()   const noexcept { return end_; }
 
-        /** Holds the resolved offset and length for a given collection size. */
+        /** @brief Returns the exclusive end index of the range. */
+        [[nodiscard]] const Index& getEndProperty() const noexcept { return end_; }
+
+        /**
+         * @brief Returns a Range that covers all elements of a collection (0..^0).
+         *
+         * C++ counterpart of .NET Range.All.
+         */
+        [[nodiscard]] static Range getAllProperty() { return Range(Index::Start(), Index::End()); }
+
+        /**
+         * @brief Returns a Range that starts at the specified index and ends at the end of the collection.
+         * @param start Inclusive start index.
+         */
+        [[nodiscard]] static Range StartAt(Index start) { return Range(start, Index::End()); }
+
+        /**
+         * @brief Returns a Range from the beginning of the collection to the specified end index.
+         * @param end Exclusive end index.
+         */
+        [[nodiscard]] static Range EndAt(Index end) { return Range(Index::Start(), end); }
+
+        /** @brief Holds the resolved offset and length for a given collection size. */
         struct OffsetAndLength {
-            int Offset; ///< Zero-based start offset.
-            int Length; ///< Number of elements covered.
+            /** @brief Zero-based start offset. */
+            int Offset;
+            /** @brief Number of elements covered. */
+            int Length;
         };
 
         /**
-         * Calculates the offset and length of the range relative to a collection of @p length elements.
+         * @brief Calculates the start offset and length of the range relative to a collection of the given size.
+         *
+         * C++ counterpart of .NET Range.GetOffsetAndLength(int).
          * @param length Total number of elements in the collection.
-         * @return Resolved OffsetAndLength.
+         * @return Resolved OffsetAndLength value.
          * @throws std::out_of_range if the resolved end index precedes the start index.
          */
         [[nodiscard]] OffsetAndLength GetOffsetAndLength(int length) const {
@@ -45,18 +92,41 @@ namespace System {
             return { start, end - start };
         }
 
-        /** Returns a Range that covers all elements (0..^0). */
-        static Range All()               { return Range(Index::Start(), Index::End()); }
         /**
-         * Returns a Range from @p start to the end of the collection.
-         * @param start Inclusive start index.
+         * @brief Returns true if this range equals the specified other range.
+         *
+         * C++ counterpart of .NET Range.Equals(Range).
+         * @param other The range to compare.
          */
-        static Range StartAt(Index start){ return Range(start, Index::End()); }
+        [[nodiscard]] bool Equals(const Range& other) const noexcept {
+            return indexEquals(start_, other.start_) && indexEquals(end_, other.end_);
+        }
+
         /**
-         * Returns a Range from the beginning of the collection to @p end.
-         * @param end Exclusive end index.
+         * @brief Returns a hash code for this range.
+         *
+         * C++ counterpart of .NET Range.GetHashCode().
          */
-        static Range EndAt(Index end)    { return Range(Index::Start(), end); }
+        [[nodiscard]] int GetHashCode() const noexcept {
+            int h1 = start_.getValueProperty() ^ (start_.getIsFromEndProperty() ? 0x10000 : 0);
+            int h2 = end_.getValueProperty()   ^ (end_.getIsFromEndProperty()   ? 0x20000 : 0);
+            return h1 ^ (h2 * 397);
+        }
+
+        /**
+         * @brief Returns a string representation of this range in C# range expression syntax.
+         *
+         * C++ counterpart of .NET Range.ToString(). Examples: "0..^0", "1..5", "^2..^0".
+         */
+        [[nodiscard]] std::string ToString() const {
+            return indexToString(start_) + ".." + indexToString(end_);
+        }
+
+        /** @brief Returns true if the two ranges are equal. */
+        friend bool operator==(const Range& lhs, const Range& rhs) noexcept { return lhs.Equals(rhs); }
+
+        /** @brief Returns true if the two ranges are not equal. */
+        friend bool operator!=(const Range& lhs, const Range& rhs) noexcept { return !lhs.Equals(rhs); }
     };
 
 } // namespace System

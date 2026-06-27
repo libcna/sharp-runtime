@@ -157,6 +157,58 @@ namespace System::Buffers {
             std::copy(data_.begin() + start_, data_.begin() + end_,
                       destination.getPointer());
         }
+
+        // -----------------------------------------------------------------------
+        // Enumerator
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Enumerates the ReadOnlyMemory&lt;T&gt; segments of a ReadOnlySequence&lt;T&gt;.
+         *
+         * C++ counterpart of .NET System.Buffers.ReadOnlySequence&lt;T&gt;.Enumerator.
+         * Because this implementation is always a single contiguous segment,
+         * the enumerator yields exactly one ReadOnlyMemory view.
+         */
+        struct Enumerator {
+        private:
+            const ReadOnlySequence<T>* seq_;
+            int step_ = -1;  // -1: before first, 0: on first (and only), 1: done
+
+        public:
+            /**
+             * @brief Constructs an Enumerator for the specified sequence.
+             * @param sequence The sequence to enumerate.
+             */
+            explicit Enumerator(const ReadOnlySequence<T>& sequence)
+                : seq_(&sequence) {}
+
+            /**
+             * @brief Gets the current ReadOnlyMemory segment.
+             *
+             * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Enumerator.Current.
+             */
+            [[nodiscard]] System::ReadOnlyMemory<T> getCurrent() const {
+                return seq_->First();
+            }
+
+            /**
+             * @brief Advances the enumerator to the next segment.
+             *
+             * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Enumerator.MoveNext().
+             * @return true on the first call (the single segment); false thereafter.
+             */
+            bool MoveNext() {
+                ++step_;
+                return step_ == 0;
+            }
+        };
+
+        /**
+         * @brief Returns an Enumerator for iterating the sequence segments.
+         *
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.GetEnumerator().
+         */
+        [[nodiscard]] Enumerator GetEnumerator() const { return Enumerator(*this); }
     };
 
 } // namespace System::Buffers

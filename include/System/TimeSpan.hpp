@@ -94,13 +94,14 @@ namespace System {
         static constexpr longcs TicksPerTenthSecond = TicksPerMillisecond * 100;
 
     public:
-        static const TimeSpan Zero;     ///< A TimeSpan of zero duration.
+        /** @brief A TimeSpan of zero duration. C++ counterpart of .NET TimeSpan.Zero. */
+        static const TimeSpan Zero;
 
-    public:
-        static const TimeSpan MaxValue; ///< The maximum representable TimeSpan.
+        /** @brief The maximum representable TimeSpan. C++ counterpart of .NET TimeSpan.MaxValue. */
+        static const TimeSpan MaxValue;
 
-    public:
-        static const TimeSpan MinValue; ///< The minimum representable TimeSpan.
+        /** @brief The minimum representable TimeSpan. C++ counterpart of .NET TimeSpan.MinValue. */
+        static const TimeSpan MinValue;
 
     private:
         longcs ticks_internal;

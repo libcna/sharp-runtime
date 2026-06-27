@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/MidpointRounding.hpp"
 
 namespace System
 {
@@ -24,8 +25,6 @@ namespace System
      * logarithmic, and other common mathematical functions.
      *
      * C++ counterpart of .NET System.Math.
-     *
-     * @note Status: DONE
      */
     class Math
     {
@@ -33,14 +32,12 @@ namespace System
         Math() = delete;
         ~Math() = delete;
 
-        /**
-         * @brief Represents the base of natural logarithms.
-         *
-         * @note Status: Ported
-         */
-        static constexpr double E   = 2.71828'18284'59045'2354;  ///< Base of natural logarithms.
-        static constexpr double PI  = 3.14159'26535'89793'23846; ///< Ratio of a circle's circumference to its diameter.
-        static constexpr double Tau = 6.28318'53071'79586'47692; ///< Two times PI (full circle in radians).
+        /** @brief The base of natural logarithms, e ≈ 2.718. */
+        static constexpr double E   = 2.71828'18284'59045'2354;
+        /** @brief The ratio of a circle's circumference to its diameter, π ≈ 3.14159. */
+        static constexpr double PI  = 3.14159'26535'89793'23846;
+        /** @brief Two times PI (τ = 2π), a full circle in radians. */
+        static constexpr double Tau = 6.28318'53071'79586'47692;
 
         /**
          * @brief Returns the sine of the specified angle.
@@ -50,7 +47,6 @@ namespace System
          * @param value Angle in radians.
          * @return Sine of the angle.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Sin(double value);
 
@@ -62,7 +58,6 @@ namespace System
          * @param value Angle in radians.
          * @return Cosine of the angle.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Cos(double value);
 
@@ -74,7 +69,6 @@ namespace System
          * @param value Angle in radians.
          * @return Tangent of the angle.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Tan(double value);
 
@@ -84,7 +78,6 @@ namespace System
          * @param value Input value.
          * @return Square root of the input value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Sqrt(double value);
 
@@ -94,7 +87,6 @@ namespace System
          * @param value Input value.
          * @return Absolute value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Abs(double value);
 
@@ -104,7 +96,6 @@ namespace System
          * @param value Input value.
          * @return Absolute value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static intcs Abs(intcs value);
 
@@ -115,7 +106,6 @@ namespace System
          * @param b Second value.
          * @return Smaller value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static intcs Min(intcs a, intcs b);
 
@@ -126,7 +116,6 @@ namespace System
          * @param b Second value.
          * @return Smaller value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Min(double a, double b);
 
@@ -137,7 +126,6 @@ namespace System
          * @param b Second value.
          * @return Larger value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static intcs Max(intcs a, intcs b);
 
@@ -148,7 +136,6 @@ namespace System
          * @param b Second value.
          * @return Larger value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Max(double a, double b);
 
@@ -160,7 +147,6 @@ namespace System
          * @param max Maximum allowed value.
          * @return Clamped value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static intcs Clamp(intcs value, intcs min, intcs max);
 
@@ -172,7 +158,6 @@ namespace System
          * @param max Maximum allowed value.
          * @return Clamped value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Clamp(double value, double min, double max);
 
@@ -202,7 +187,6 @@ namespace System
          * @param value Input value.
          * @return Rounded value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Round(double value);
 
@@ -212,7 +196,6 @@ namespace System
          * @param value Input value.
          * @return Floor of the input value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Floor(double value);
 
@@ -222,7 +205,6 @@ namespace System
          * @param value Input value.
          * @return Ceiling of the input value.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Ceiling(double value);
 
@@ -233,7 +215,6 @@ namespace System
          * @param y Exponent value.
          * @return x raised to the power y.
          *
-         * @note Status: IMPLEMENTED
          */
         [[nodiscard]] static double Pow(double x, double y);
 
@@ -400,5 +381,46 @@ namespace System
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs a, longcs b) {
             return { a / b, a % b };
         }
+
+        // ------------------------------------------------------------------
+        // MidpointRounding overloads for Round
+        // ------------------------------------------------------------------
+
+        /** @brief Rounds @p value to the nearest integer using the specified rounding convention. */
+        [[nodiscard]] static double Round(double value, MidpointRounding mode) {
+            switch (mode) {
+                case MidpointRounding::ToEven:             return std::nearbyint(value);
+                case MidpointRounding::AwayFromZero:       return std::round(value);
+                case MidpointRounding::ToZero:             return std::trunc(value);
+                case MidpointRounding::ToNegativeInfinity: return std::floor(value);
+                case MidpointRounding::ToPositiveInfinity: return std::ceil(value);
+                default:                                   return std::nearbyint(value);
+            }
+        }
+
+        /** @brief Rounds @p value to @p digits decimal places using the specified rounding convention. */
+        [[nodiscard]] static double Round(double value, intcs digits, MidpointRounding mode) {
+            double factor = std::pow(10.0, static_cast<double>(digits));
+            return Round(value * factor, mode) / factor;
+        }
+
+        // ------------------------------------------------------------------
+        // SinCos
+        // ------------------------------------------------------------------
+
+        /** Holds the result of SinCos — the sine and cosine of an angle computed simultaneously. */
+        struct SinCosResult { double Sin; double Cos; };
+
+        /** @brief Computes the sine and cosine of @p x simultaneously. Returns a SinCosResult with Sin and Cos fields. */
+        [[nodiscard]] static SinCosResult SinCos(double x) {
+            return { std::sin(x), std::cos(x) };
+        }
+
+        // ------------------------------------------------------------------
+        // ReciprocalSqrtEstimate
+        // ------------------------------------------------------------------
+
+        /** @brief Returns an estimate of the reciprocal square root of @p d (1/sqrt(d)). */
+        [[nodiscard]] static double ReciprocalSqrtEstimate(double d) { return 1.0 / std::sqrt(d); }
     };
 }

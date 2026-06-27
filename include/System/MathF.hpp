@@ -218,6 +218,18 @@ namespace System {
             if (ax == ay) return std::signbit(x) ? x : y;
             return y;
         }
+
+        /** Holds the result of SinCos — the sine and cosine of an angle computed simultaneously. */
+        struct SinCosResult { float Sin; float Cos; };
+
+        /**
+         * @brief Computes the sine and cosine of @p x simultaneously.
+         * @param x Angle in radians.
+         * @return A SinCosResult with Sin and Cos fields.
+         */
+        static SinCosResult SinCos(float x) {
+            return { std::sin(x), std::cos(x) };
+        }
     };
 
 } // namespace System

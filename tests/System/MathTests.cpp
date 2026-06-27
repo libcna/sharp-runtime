@@ -466,3 +466,37 @@ TEST(MathTests, MinMagnitude_SmallerFirst)  { EXPECT_EQ(Math::MinMagnitude(2.0, 
 TEST(MathTests, MinMagnitude_SmallerSecond) { EXPECT_EQ(Math::MinMagnitude(-7.0, 2.0),  2.0); }
 TEST(MathTests, MinMagnitude_Equal_ReturnsNegative) { EXPECT_EQ(Math::MinMagnitude(-3.0, 3.0), -3.0); }
 TEST(MathTests, MinMagnitude_NaN_Propagates) { EXPECT_TRUE(std::isnan(Math::MinMagnitude(std::numeric_limits<double>::quiet_NaN(), 1.0))); }
+
+TEST(MathTests, SinCos_Zero) {
+    auto r = Math::SinCos(0.0);
+    EXPECT_NEAR(r.Sin, 0.0, 1e-12);
+    EXPECT_NEAR(r.Cos, 1.0, 1e-12);
+}
+
+TEST(MathTests, SinCos_PiOver2) {
+    auto r = Math::SinCos(Math::PI / 2.0);
+    EXPECT_NEAR(r.Sin, 1.0, 1e-10);
+    EXPECT_NEAR(r.Cos, 0.0, 1e-10);
+}
+
+TEST(MathTests, Round_MidpointRounding_ToEven) {
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::ToEven), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(3.5, System::MidpointRounding::ToEven), 4.0);
+}
+
+TEST(MathTests, Round_MidpointRounding_AwayFromZero) {
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::AwayFromZero), 3.0);
+    EXPECT_DOUBLE_EQ(Math::Round(-2.5, System::MidpointRounding::AwayFromZero), -3.0);
+}
+
+TEST(MathTests, Round_Digits_MidpointRounding) {
+    EXPECT_NEAR(Math::Round(1.455, 2, System::MidpointRounding::AwayFromZero), 1.46, 1e-9);
+}
+
+TEST(MathTests, ReciprocalSqrtEstimate_Four) {
+    EXPECT_NEAR(Math::ReciprocalSqrtEstimate(4.0), 0.5, 1e-10);
+}
+
+TEST(MathTests, ReciprocalSqrtEstimate_One) {
+    EXPECT_NEAR(Math::ReciprocalSqrtEstimate(1.0), 1.0, 1e-10);
+}

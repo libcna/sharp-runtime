@@ -435,8 +435,8 @@ TEST(DictionaryEntryTests, DefaultCtor_NoThrow) {
 
 TEST(DictionaryEntryTests, KeyValue_Stored) {
     DictionaryEntry de(std::any(42), std::any(std::string("hello")));
-    EXPECT_EQ(std::any_cast<int>(de.Key), 42);
-    EXPECT_EQ(std::any_cast<std::string>(de.Value), "hello");
+    EXPECT_EQ(std::any_cast<int>(de.getKeyProperty()), 42);
+    EXPECT_EQ(std::any_cast<std::string>(de.getValueProperty()), "hello");
 }
 
 // ===========================================================================
