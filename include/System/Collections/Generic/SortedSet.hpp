@@ -7,111 +7,238 @@
 
 namespace System::Collections::Generic {
 
-    /** Represents a collection of objects maintained in sorted order with no duplicate elements. */
-    template<typename T>
-    class SortedSet {
-        std::set<T> data_;
+/**
+ * @brief Represents a collection of objects maintained in sorted order with no duplicate elements.
+ *
+ * C++ counterpart of .NET System.Collections.Generic.SortedSet<T>.
+ * Backed by std::set<T>; provides O(log n) Add, Remove, and Contains.
+ *
+ * @tparam T The type of elements in the set (must support operator< for ordering).
+ */
+template<typename T>
+class SortedSet {
+    std::set<T> data_;
 
-    public:
-        /** Default-constructs an empty SortedSet. */
-        SortedSet() = default;
+public:
+    /** @brief Initializes a new empty SortedSet. */
+    SortedSet() = default;
 
-        /** Constructs a SortedSet from an initializer list. */
-        explicit SortedSet(std::initializer_list<T> items) : data_(items) {}
+    /**
+     * @brief Initializes a SortedSet with elements from an initializer list.
+     * @param items The initial elements.
+     */
+    explicit SortedSet(std::initializer_list<T> items) : data_(items) {}
 
-        /** Gets the number of elements in the SortedSet. */
-        [[nodiscard]] int  getCountProperty()  const { return static_cast<int>(data_.size()); }
-        /** Returns true if the SortedSet contains no elements. */
-        [[nodiscard]] bool getIsEmptyProperty() const { return data_.empty(); }
+    /**
+     * @brief Gets the number of elements in the SortedSet.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Count.
+     * @return The number of elements.
+     */
+    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_.size()); }
 
-        /** Gets the minimum element in the SortedSet. */
-        [[nodiscard]] const T& getMinProperty() const { return *data_.begin(); }
-        /** Gets the maximum element in the SortedSet. */
-        [[nodiscard]] const T& getMaxProperty() const { return *data_.rbegin(); }
+    /**
+     * @brief Gets a value indicating whether the SortedSet contains no elements.
+     * @return true if the set is empty; otherwise false.
+     */
+    [[nodiscard]] bool getIsEmptyProperty() const { return data_.empty(); }
 
-        /** Adds the specified element; returns true if it was added, false if already present. */
-        bool Add(const T& item) { return data_.insert(item).second; }
+    /**
+     * @brief Gets the minimum value in the SortedSet.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Min.
+     * @return A const reference to the smallest element.
+     */
+    [[nodiscard]] const T& getMinProperty() const { return *data_.begin(); }
 
-        /** Removes the specified element; returns true if it was found and removed. */
-        bool Remove(const T& item) { return data_.erase(item) > 0; }
+    /**
+     * @brief Gets the maximum value in the SortedSet.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Max.
+     * @return A const reference to the largest element.
+     */
+    [[nodiscard]] const T& getMaxProperty() const { return *data_.rbegin(); }
 
-        /** Returns true if the SortedSet contains the specified element. */
-        [[nodiscard]] bool Contains(const T& item) const {
-            return data_.find(item) != data_.end();
+    /**
+     * @brief Adds the specified element to the set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Add(T).
+     * @param item The element to add.
+     * @return true if the element was added; false if it was already present.
+     */
+    bool Add(const T& item) { return data_.insert(item).second; }
+
+    /**
+     * @brief Removes the specified element from the set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Remove(T).
+     * @param item The element to remove.
+     * @return true if the element was found and removed; otherwise false.
+     */
+    bool Remove(const T& item) { return data_.erase(item) > 0; }
+
+    /**
+     * @brief Determines whether the set contains the specified element.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Contains(T).
+     * @param item The element to locate.
+     * @return true if found; otherwise false.
+     */
+    [[nodiscard]] bool Contains(const T& item) const {
+        return data_.find(item) != data_.end();
+    }
+
+    /**
+     * @brief Removes all elements from the set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Clear().
+     */
+    void Clear() { data_.clear(); }
+
+    /**
+     * @brief Modifies the set to contain all elements in itself and the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.UnionWith(IEnumerable<T>).
+     * @param other The set of elements to add.
+     */
+    void UnionWith(const SortedSet<T>& other) {
+        for (const auto& x : other.data_) data_.insert(x);
+    }
+
+    /**
+     * @brief Modifies the set to contain only elements also present in the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.IntersectWith(IEnumerable<T>).
+     * @param other The set to intersect with.
+     */
+    void IntersectWith(const SortedSet<T>& other) {
+        std::set<T> result;
+        for (const auto& x : data_) if (other.Contains(x)) result.insert(x);
+        data_ = std::move(result);
+    }
+
+    /**
+     * @brief Removes all elements in the specified set from the current set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.ExceptWith(IEnumerable<T>).
+     * @param other The set of elements to remove.
+     */
+    void ExceptWith(const SortedSet<T>& other) {
+        for (const auto& x : other.data_) data_.erase(x);
+    }
+
+    /**
+     * @brief Modifies the set so it contains only elements present in one set but not both.
+     *
+     * C++ counterpart of .NET SortedSet<T>.SymmetricExceptWith(IEnumerable<T>).
+     * @param other The set to compare to.
+     */
+    void SymmetricExceptWith(const SortedSet<T>& other) {
+        for (const auto& x : other.data_) {
+            auto it = data_.find(x);
+            if (it != data_.end()) data_.erase(it);
+            else data_.insert(x);
         }
+    }
 
-        /** Removes all elements from the SortedSet. */
-        void Clear() { data_.clear(); }
+    /**
+     * @brief Determines whether the set is a subset of the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.IsSubsetOf(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if every element of this set is in @p other; otherwise false.
+     */
+    [[nodiscard]] bool IsSubsetOf(const SortedSet<T>& other) const {
+        for (const auto& x : data_) if (!other.Contains(x)) return false;
+        return true;
+    }
 
-        /** Modifies the SortedSet to contain all elements in itself and the specified collection. */
-        void UnionWith(const SortedSet<T>& other) {
-            for (auto& x : other.data_) data_.insert(x);
-        }
+    /**
+     * @brief Determines whether the set is a superset of the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.IsSupersetOf(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if every element of @p other is in this set; otherwise false.
+     */
+    [[nodiscard]] bool IsSupersetOf(const SortedSet<T>& other) const {
+        return other.IsSubsetOf(*this);
+    }
 
-        /** Modifies the SortedSet to contain only elements also present in the specified collection. */
-        void IntersectWith(const SortedSet<T>& other) {
-            std::set<T> result;
-            for (auto& x : data_) if (other.Contains(x)) result.insert(x);
-            data_ = std::move(result);
-        }
+    /**
+     * @brief Determines whether the set is a proper (strict) subset of the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.IsProperSubsetOf(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if this set is a subset of @p other and @p other has more elements.
+     */
+    [[nodiscard]] bool IsProperSubsetOf(const SortedSet<T>& other) const {
+        return IsSubsetOf(other) && !SetEquals(other);
+    }
 
-        /** Removes all elements in the specified collection from the SortedSet. */
-        void ExceptWith(const SortedSet<T>& other) {
-            for (auto& x : other.data_) data_.erase(x);
-        }
+    /**
+     * @brief Determines whether the set is a proper (strict) superset of the specified set.
+     *
+     * C++ counterpart of .NET SortedSet<T>.IsProperSupersetOf(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if this set is a superset of @p other and has more elements.
+     */
+    [[nodiscard]] bool IsProperSupersetOf(const SortedSet<T>& other) const {
+        return IsSupersetOf(other) && !SetEquals(other);
+    }
 
-        /** Returns true if every element of this set is contained in the other set. */
-        [[nodiscard]] bool IsSubsetOf(const SortedSet<T>& other) const {
-            for (auto& x : data_) if (!other.Contains(x)) return false;
-            return true;
-        }
+    /**
+     * @brief Determines whether the set and the specified set contain the same elements.
+     *
+     * C++ counterpart of .NET SortedSet<T>.SetEquals(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if the two sets are equal; otherwise false.
+     */
+    [[nodiscard]] bool SetEquals(const SortedSet<T>& other) const {
+        return data_ == other.data_;
+    }
 
-        /** Returns true if every element of the other set is contained in this set. */
-        [[nodiscard]] bool IsSupersetOf(const SortedSet<T>& other) const {
-            return other.IsSubsetOf(*this);
-        }
+    /**
+     * @brief Determines whether the set and the specified set share any common elements.
+     *
+     * C++ counterpart of .NET SortedSet<T>.Overlaps(IEnumerable<T>).
+     * @param other The set to compare to.
+     * @return true if at least one element is common to both; otherwise false.
+     */
+    [[nodiscard]] bool Overlaps(const SortedSet<T>& other) const {
+        for (const auto& x : other.data_)
+            if (data_.find(x) != data_.end()) return true;
+        return false;
+    }
 
-        /** Returns true if this set and the other set contain the same elements. */
-        [[nodiscard]] bool SetEquals(const SortedSet<T>& other) const {
-            return data_ == other.data_;
-        }
+    /**
+     * @brief Returns a view of elements in the inclusive range [@p lower, @p upper].
+     *
+     * C++ counterpart of .NET SortedSet<T>.GetViewBetween(T, T).
+     * @param lower The minimum value (inclusive).
+     * @param upper The maximum value (inclusive).
+     * @return A new SortedSet<T> containing elements in the range.
+     */
+    [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {
+        SortedSet<T> view;
+        for (auto it = data_.lower_bound(lower); it != data_.end() && !(*it > upper); ++it)
+            view.Add(*it);
+        return view;
+    }
 
-        /** Modifies this set to contain only elements present in either set, but not both. */
-        void SymmetricExceptWith(const SortedSet<T>& other) {
-            for (auto& x : other.data_) {
-                auto it = data_.find(x);
-                if (it != data_.end()) data_.erase(it);
-                else data_.insert(x);
-            }
-        }
+    /**
+     * @brief Copies the set elements to a new vector in sorted order.
+     *
+     * C++ counterpart of .NET SortedSet<T>.CopyTo(T[]).
+     * @return A std::vector<T> containing all elements in ascending order.
+     */
+    [[nodiscard]] std::vector<T> ToVector() const {
+        return std::vector<T>(data_.begin(), data_.end());
+    }
 
-        /** Returns true if this set is a proper subset of the other (subset and not equal). */
-        [[nodiscard]] bool IsProperSubsetOf(const SortedSet<T>& other) const {
-            return IsSubsetOf(other) && !SetEquals(other);
-        }
-
-        /** Returns true if this set is a proper superset of the other (superset and not equal). */
-        [[nodiscard]] bool IsProperSupersetOf(const SortedSet<T>& other) const {
-            return IsSupersetOf(other) && !SetEquals(other);
-        }
-
-        /** Returns a view of elements that fall within the specified inclusive range [lower, upper]. */
-        [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {
-            SortedSet<T> view;
-            for (auto it = data_.lower_bound(lower); it != data_.end() && *it <= upper; ++it)
-                view.Add(*it);
-            return view;
-        }
-
-        /** Copies the SortedSet elements to a new vector. */
-        [[nodiscard]] std::vector<T> ToVector() const {
-            return std::vector<T>(data_.begin(), data_.end());
-        }
-
-        /** Returns a const iterator to the beginning of the SortedSet. */
-        auto begin() const { return data_.begin(); }
-        /** Returns a const iterator past the end of the SortedSet. */
-        auto end()   const { return data_.end(); }
-    };
+    /** @brief Returns a const iterator to the beginning of the SortedSet (STL interop). */
+    auto begin() const { return data_.begin(); }
+    /** @brief Returns a const iterator past the end of the SortedSet (STL interop). */
+    auto end()   const { return data_.end(); }
+};
 
 } // namespace System::Collections::Generic
