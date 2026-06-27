@@ -56,6 +56,51 @@ public:
     [[nodiscard]] bool getIsRightToLeftProperty() const { return false; }
 
     /**
+     * @brief Gets the ANSI code page for this writing system.
+     *
+     * C++ counterpart of .NET TextInfo.ANSICodePage.
+     * Stub — always returns 0.
+     * @return Always 0.
+     */
+    [[nodiscard]] intcs getANSICodePageProperty() const { return 0; }
+
+    /**
+     * @brief Gets the EBCDIC code page for this writing system.
+     *
+     * C++ counterpart of .NET TextInfo.EBCDICCodePage.
+     * Stub — always returns 0.
+     * @return Always 0.
+     */
+    [[nodiscard]] intcs getEBCDICCodePageProperty() const { return 0; }
+
+    /**
+     * @brief Gets the culture locale identifier.
+     *
+     * C++ counterpart of .NET TextInfo.LCID.
+     * Stub — always returns 0.
+     * @return Always 0.
+     */
+    [[nodiscard]] intcs getLCIDProperty() const { return 0; }
+
+    /**
+     * @brief Gets the Macintosh code page for this writing system.
+     *
+     * C++ counterpart of .NET TextInfo.MacCodePage.
+     * Stub — always returns 0.
+     * @return Always 0.
+     */
+    [[nodiscard]] intcs getMacCodePageProperty() const { return 0; }
+
+    /**
+     * @brief Gets the OEM code page for this writing system.
+     *
+     * C++ counterpart of .NET TextInfo.OEMCodePage.
+     * Stub — always returns 0.
+     * @return Always 0.
+     */
+    [[nodiscard]] intcs getOEMCodePageProperty() const { return 0; }
+
+    /**
      * @brief Gets the list separator for this writing system.
      *
      * C++ counterpart of .NET TextInfo.ListSeparator.

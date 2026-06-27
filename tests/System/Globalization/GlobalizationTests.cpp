@@ -291,9 +291,9 @@ TEST(StringInfoTests, GetNextTextElementLength_PastEnd_IsZero) {
 TEST(StringInfoTests, ParseCombiningCharacters_SplitsEachByte) {
     auto v = StringInfo::ParseCombiningCharacters("abc");
     ASSERT_EQ(v.size(), 3u);
-    EXPECT_EQ(v[0], "a");
-    EXPECT_EQ(v[1], "b");
-    EXPECT_EQ(v[2], "c");
+    EXPECT_EQ(v[0], 0); // starting index of 'a'
+    EXPECT_EQ(v[1], 1); // starting index of 'b'
+    EXPECT_EQ(v[2], 2); // starting index of 'c'
 }
 
 TEST(StringInfoTests, ParseCombiningCharacters_EmptyString_EmptyResult) {
@@ -304,7 +304,7 @@ TEST(StringInfoTests, ParseCombiningCharacters_EmptyString_EmptyResult) {
 TEST(StringInfoTests, ParseCombiningCharacters_SingleChar) {
     auto v = StringInfo::ParseCombiningCharacters("Z");
     ASSERT_EQ(v.size(), 1u);
-    EXPECT_EQ(v[0], "Z");
+    EXPECT_EQ(v[0], 0); // starting index of 'Z'
 }
 
 // ===========================================================================

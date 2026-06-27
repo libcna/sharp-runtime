@@ -19,6 +19,42 @@ public:
     static constexpr int JulianEra = 1; ///< The only era value for this calendar.
 
     /**
+     * @brief Gets the earliest date supported by JulianCalendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.MinSupportedDateTime.
+     * @return DateTime(1, 1, 1).
+     */
+    [[nodiscard]] System::DateTime getMinSupportedDateTimeProperty() const override {
+        return System::DateTime(1, 1, 1);
+    }
+
+    /**
+     * @brief Gets the latest date supported by JulianCalendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.MaxSupportedDateTime.
+     * @return DateTime(9999, 12, 31).
+     */
+    [[nodiscard]] System::DateTime getMaxSupportedDateTimeProperty() const override {
+        return System::DateTime(9999, 12, 31);
+    }
+
+    /**
+     * @brief Gets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.TwoDigitYearMax.
+     * @return The maximum two-digit year (default 2029).
+     */
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+
+    /**
+     * @brief Sets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.TwoDigitYearMax setter.
+     * @param value The new maximum two-digit year.
+     */
+    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
+
+    /**
      * @brief Returns the era for the given DateTime.
      *
      * C++ counterpart of .NET JulianCalendar.GetEra(DateTime).
@@ -61,6 +97,9 @@ public:
         if (month == 2 && IsLeapYear(year)) return 29;
         return days[month];
     }
+
+private:
+    int twoDigitYearMax_{2029};
 };
 
 } // namespace System::Globalization

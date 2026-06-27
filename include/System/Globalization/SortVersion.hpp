@@ -55,24 +55,46 @@ public:
     [[nodiscard]] const std::array<uint8_t, 16>& getSortIdProperty() const { return sortId_; }
 
     /**
+     * @brief Determines whether this SortVersion equals another.
+     *
+     * C++ counterpart of .NET SortVersion.Equals(SortVersion).
+     * @param other The SortVersion to compare.
+     * @return true if both fullVersion and sortId are equal.
+     */
+    [[nodiscard]] bool Equals(const SortVersion& other) const {
+        return fullVersion_ == other.fullVersion_ && sortId_ == other.sortId_;
+    }
+
+    /**
+     * @brief Returns a hash code for this SortVersion.
+     *
+     * C++ counterpart of .NET SortVersion.GetHashCode().
+     * @return A hash derived from fullVersion and the first 4 bytes of sortId.
+     */
+    [[nodiscard]] int GetHashCode() const {
+        int h = fullVersion_;
+        for (int i = 0; i < 4 && i < static_cast<int>(sortId_.size()); ++i)
+            h = h * 31 + sortId_[i];
+        return h;
+    }
+
+    /**
      * @brief Returns true if both SortVersion instances have equal version and sort ID.
      *
-     * C++ counterpart of .NET SortVersion.Equals(object).
+     * C++ counterpart of .NET SortVersion equality operator.
      * @param o The SortVersion to compare.
      * @return true if both fullVersion and sortId are equal.
      */
-    bool operator==(const SortVersion& o) const {
-        return fullVersion_ == o.fullVersion_ && sortId_ == o.sortId_;
-    }
+    bool operator==(const SortVersion& o) const { return Equals(o); }
 
     /**
      * @brief Returns true if either the version or sort ID differs.
      *
-     * C++ counterpart of .NET SortVersion inequality.
+     * C++ counterpart of .NET SortVersion inequality operator.
      * @param o The SortVersion to compare.
      * @return true if the instances differ.
      */
-    bool operator!=(const SortVersion& o) const { return !(*this == o); }
+    bool operator!=(const SortVersion& o) const { return !Equals(o); }
 };
 
 } // namespace System::Globalization

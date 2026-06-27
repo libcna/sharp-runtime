@@ -12,10 +12,48 @@ namespace System::Globalization {
  * C++ counterpart of .NET System.Globalization.KoreanCalendar.
  * The Korean calendar uses the same month/day/time structure as the Gregorian calendar,
  * but adds 2333 to the Gregorian year. For example, Gregorian 2000-01-01 = Korean 4333-01-01.
+ * The offset 2333 derives from the traditional year of the legendary founding of Gojoseon (2333 BCE).
  */
 class KoreanCalendar : public Calendar {
 public:
-    static constexpr int KoreanEra = 1; ///< The only era value for this calendar.
+    static constexpr int KoreanEra      = 1;    ///< The only era value for this calendar.
+    static constexpr int GregorianOffset = 2333; ///< Years added to the Gregorian year to obtain the Korean year.
+
+    /**
+     * @brief Gets the earliest date supported by KoreanCalendar.
+     *
+     * C++ counterpart of .NET KoreanCalendar.MinSupportedDateTime.
+     * @return DateTime(1, 1, 1) — Korean year 2334.
+     */
+    [[nodiscard]] System::DateTime getMinSupportedDateTimeProperty() const override {
+        return System::DateTime(1, 1, 1);
+    }
+
+    /**
+     * @brief Gets the latest date supported by KoreanCalendar.
+     *
+     * C++ counterpart of .NET KoreanCalendar.MaxSupportedDateTime.
+     * @return DateTime(9999, 12, 31) — Korean year 12332.
+     */
+    [[nodiscard]] System::DateTime getMaxSupportedDateTimeProperty() const override {
+        return System::DateTime(9999, 12, 31);
+    }
+
+    /**
+     * @brief Gets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET KoreanCalendar.TwoDigitYearMax.
+     * @return The maximum two-digit year (default 4362 = Gregorian 2029 + 2333).
+     */
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+
+    /**
+     * @brief Sets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET KoreanCalendar.TwoDigitYearMax setter.
+     * @param value The new maximum two-digit year.
+     */
+    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -41,8 +79,95 @@ public:
      * @return The Korean year (Gregorian year + 2333).
      */
     [[nodiscard]] int GetYear(const System::DateTime& time) const override {
-        return time.getYearProperty() + 2333;
+        return time.getYearProperty() + GregorianOffset;
     }
+
+    /**
+     * @brief Determines whether the specified Korean year is a leap year.
+     *
+     * C++ counterpart of .NET KoreanCalendar.IsLeapYear(int, int).
+     * The Korean year is converted to the Gregorian year before applying the Gregorian leap rule.
+     * @param year Korean year.
+     * @param era  Era (unused; always KoreanEra).
+     * @return true if the corresponding Gregorian year is a leap year.
+     */
+    [[nodiscard]] bool IsLeapYear(int year, int /*era*/ = CurrentEra) const override {
+        int gy = year - GregorianOffset;
+        return (gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0);
+    }
+
+    /**
+     * @brief Returns false; the Korean calendar has no leap months.
+     *
+     * C++ counterpart of .NET KoreanCalendar.IsLeapMonth(int, int, int).
+     */
+    [[nodiscard]] bool IsLeapMonth(int /*year*/, int /*month*/, int /*era*/ = CurrentEra) const override {
+        return false;
+    }
+
+    /**
+     * @brief Determines whether the specified Korean date is a leap day.
+     *
+     * C++ counterpart of .NET KoreanCalendar.IsLeapDay(int, int, int, int).
+     * @param year  Korean year.
+     * @param month Month (1–12).
+     * @param day   Day (1–31).
+     * @param era   Era (unused).
+     * @return true if the date is February 29 in a leap year.
+     */
+    [[nodiscard]] bool IsLeapDay(int year, int month, int day, int /*era*/ = CurrentEra) const override {
+        return month == 2 && day == 29 && IsLeapYear(year);
+    }
+
+    /**
+     * @brief Returns the number of days in the specified Korean month.
+     *
+     * C++ counterpart of .NET KoreanCalendar.GetDaysInMonth(int, int, int).
+     * The Korean year is converted to Gregorian before computing the day count.
+     * @param year  Korean year.
+     * @param month Month (1–12).
+     * @param era   Era (unused).
+     * @return Number of days in the specified month.
+     */
+    [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
+        static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return (month == 2 && IsLeapYear(year)) ? 29 : days[month];
+    }
+
+    /**
+     * @brief Returns the number of days in the specified Korean year.
+     *
+     * C++ counterpart of .NET KoreanCalendar.GetDaysInYear(int, int).
+     * @param year Korean year.
+     * @param era  Era (unused).
+     * @return 366 for leap years, 365 otherwise.
+     */
+    [[nodiscard]] int GetDaysInYear(int year, int /*era*/ = CurrentEra) const override {
+        return IsLeapYear(year) ? 366 : 365;
+    }
+
+    /**
+     * @brief Returns a DateTime from the Korean date and time components.
+     *
+     * C++ counterpart of .NET KoreanCalendar.ToDateTime(int, int, int, int, int, int, int, int).
+     * The Korean year is converted to Gregorian by subtracting 2333.
+     * @param year        Korean year.
+     * @param month       Month (1–12).
+     * @param day         Day (1–31).
+     * @param hour        Hour (0–23).
+     * @param minute      Minute (0–59).
+     * @param second      Second (0–59).
+     * @param millisecond Millisecond (0–999).
+     * @param era         Era (unused).
+     * @return The Gregorian DateTime corresponding to the given Korean date components.
+     */
+    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
+                                int second, int millisecond, int /*era*/ = CurrentEra) const override {
+        return System::DateTime(year - GregorianOffset, month, day, hour, minute, second, millisecond);
+    }
+
+private:
+    int twoDigitYearMax_{4362};
 };
 
 } // namespace System::Globalization

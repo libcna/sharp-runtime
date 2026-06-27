@@ -4,6 +4,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "System/Globalization/TextElementEnumerator.hpp"
 
 namespace System::Globalization {
 
@@ -113,17 +114,45 @@ public:
     }
 
     /**
-     * @brief Returns the text elements of the given string as a vector of strings.
+     * @brief Returns the starting byte indices of each text element in the given string.
      *
      * C++ counterpart of .NET StringInfo.ParseCombiningCharacters(string).
-     * Stub — each entry is a single character (no combining-character grouping).
+     * Stub — each entry is the byte index of a character (no combining-character grouping).
      * @param str The source string.
-     * @return A vector where each entry contains one character from @p str.
+     * @return A vector of zero-based byte indices, one per character in @p str.
      */
-    static std::vector<std::string> ParseCombiningCharacters(const std::string& str) {
-        std::vector<std::string> result;
-        for (char c : str) result.push_back(std::string(1, c));
+    static std::vector<int> ParseCombiningCharacters(const std::string& str) {
+        std::vector<int> result;
+        result.reserve(str.size());
+        for (int i = 0; i < static_cast<int>(str.size()); ++i)
+            result.push_back(i);
         return result;
+    }
+
+    /**
+     * @brief Returns a TextElementEnumerator for the entire string.
+     *
+     * C++ counterpart of .NET StringInfo.GetTextElementEnumerator(string).
+     * @param str The string to enumerate.
+     * @return A TextElementEnumerator positioned before the first element.
+     */
+    static TextElementEnumerator GetTextElementEnumerator(const std::string& str) {
+        return TextElementEnumerator(str);
+    }
+
+    /**
+     * @brief Returns a TextElementEnumerator starting at the given index.
+     *
+     * C++ counterpart of .NET StringInfo.GetTextElementEnumerator(string, int).
+     * @param str   The string to enumerate.
+     * @param index The zero-based byte index at which to start enumeration.
+     * @return A TextElementEnumerator positioned before the first element at @p index.
+     * @throws std::out_of_range if @p index is negative or greater than the string length.
+     */
+    static TextElementEnumerator GetTextElementEnumerator(const std::string& str, int index) {
+        if (index < 0 || index > static_cast<int>(str.size()))
+            throw std::out_of_range("index");
+        return TextElementEnumerator(str.substr(index));
     }
 };
 

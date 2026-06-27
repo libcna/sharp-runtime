@@ -79,6 +79,18 @@ public:
     }
 
     /**
+     * @brief Returns a hash code for this SortKey based on its key data.
+     *
+     * C++ counterpart of .NET SortKey.GetHashCode().
+     * @return A hash derived from the key data bytes.
+     */
+    [[nodiscard]] intcs GetHashCode() const {
+        std::size_t h = 0;
+        for (auto b : keyData_) h = h * 31 + b;
+        return static_cast<intcs>(h);
+    }
+
+    /**
      * @brief Returns a string representation of this SortKey.
      *
      * C++ counterpart of .NET SortKey.ToString().

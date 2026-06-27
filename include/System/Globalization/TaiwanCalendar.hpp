@@ -16,8 +16,44 @@ namespace System::Globalization {
  */
 class TaiwanCalendar : public Calendar {
 public:
-    static constexpr int TaiwanEra      = 1;    ///< The only era value for this calendar.
-    static constexpr int GregorianOffset = 1911; ///< Offset subtracted from the Gregorian year to get the ROC year.
+    static constexpr int TaiwanEra       = 1;    ///< The only era value for this calendar.
+    static constexpr int GregorianOffset = 1911;  ///< Offset subtracted from Gregorian year to get ROC year.
+
+    /**
+     * @brief Gets the earliest date supported by TaiwanCalendar.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.MinSupportedDateTime.
+     * @return DateTime(1912, 1, 1) — the first day of the Republic of China calendar.
+     */
+    [[nodiscard]] System::DateTime getMinSupportedDateTimeProperty() const override {
+        return System::DateTime(1912, 1, 1);
+    }
+
+    /**
+     * @brief Gets the latest date supported by TaiwanCalendar.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.MaxSupportedDateTime.
+     * @return DateTime(9999, 12, 31).
+     */
+    [[nodiscard]] System::DateTime getMaxSupportedDateTimeProperty() const override {
+        return System::DateTime(9999, 12, 31);
+    }
+
+    /**
+     * @brief Gets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.TwoDigitYearMax.
+     * @return The maximum two-digit year (default 99).
+     */
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+
+    /**
+     * @brief Sets the last two-digit year that maps into the range of this calendar.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.TwoDigitYearMax setter.
+     * @param value The new maximum two-digit year.
+     */
+    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -45,6 +81,93 @@ public:
     [[nodiscard]] int GetYear(const System::DateTime& time) const override {
         return time.getYearProperty() - GregorianOffset;
     }
+
+    /**
+     * @brief Determines whether the specified Taiwan year is a leap year.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.IsLeapYear(int, int).
+     * The Taiwan year is converted to the Gregorian year before applying the Gregorian leap rule.
+     * @param year Taiwan (ROC) year.
+     * @param era  Era (unused; always TaiwanEra).
+     * @return true if the corresponding Gregorian year is a leap year.
+     */
+    [[nodiscard]] bool IsLeapYear(int year, int /*era*/ = CurrentEra) const override {
+        int gy = year + GregorianOffset;
+        return (gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0);
+    }
+
+    /**
+     * @brief Returns false; the Taiwan calendar has no leap months.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.IsLeapMonth(int, int, int).
+     */
+    [[nodiscard]] bool IsLeapMonth(int /*year*/, int /*month*/, int /*era*/ = CurrentEra) const override {
+        return false;
+    }
+
+    /**
+     * @brief Determines whether the specified Taiwan date is a leap day.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.IsLeapDay(int, int, int, int).
+     * @param year  Taiwan (ROC) year.
+     * @param month Month (1–12).
+     * @param day   Day (1–31).
+     * @param era   Era (unused).
+     * @return true if the date is February 29 in a leap year.
+     */
+    [[nodiscard]] bool IsLeapDay(int year, int month, int day, int /*era*/ = CurrentEra) const override {
+        return month == 2 && day == 29 && IsLeapYear(year);
+    }
+
+    /**
+     * @brief Returns the number of days in the specified Taiwan month.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.GetDaysInMonth(int, int, int).
+     * The Taiwan year is converted to Gregorian before computing the day count.
+     * @param year  Taiwan (ROC) year.
+     * @param month Month (1–12).
+     * @param era   Era (unused).
+     * @return Number of days in the specified month.
+     */
+    [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
+        static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return (month == 2 && IsLeapYear(year)) ? 29 : days[month];
+    }
+
+    /**
+     * @brief Returns the number of days in the specified Taiwan year.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.GetDaysInYear(int, int).
+     * @param year Taiwan (ROC) year.
+     * @param era  Era (unused).
+     * @return 366 for leap years, 365 otherwise.
+     */
+    [[nodiscard]] int GetDaysInYear(int year, int /*era*/ = CurrentEra) const override {
+        return IsLeapYear(year) ? 366 : 365;
+    }
+
+    /**
+     * @brief Returns a DateTime from the Taiwan date and time components.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.ToDateTime(int, int, int, int, int, int, int, int).
+     * The Taiwan year is converted to Gregorian by adding 1911.
+     * @param year        Taiwan (ROC) year.
+     * @param month       Month (1–12).
+     * @param day         Day (1–31).
+     * @param hour        Hour (0–23).
+     * @param minute      Minute (0–59).
+     * @param second      Second (0–59).
+     * @param millisecond Millisecond (0–999).
+     * @param era         Era (unused).
+     * @return The Gregorian DateTime corresponding to the given Taiwan date components.
+     */
+    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
+                                int second, int millisecond, int /*era*/ = CurrentEra) const override {
+        return System::DateTime(year + GregorianOffset, month, day, hour, minute, second, millisecond);
+    }
+
+private:
+    int twoDigitYearMax_{99};
 };
 
 } // namespace System::Globalization

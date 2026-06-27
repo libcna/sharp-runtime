@@ -65,8 +65,8 @@ TEST(StringInfoBatch33Test, GetNextTextElementLength) {
 TEST(StringInfoBatch33Test, ParseCombiningCharacters) {
     auto v = StringInfo::ParseCombiningCharacters("hi");
     ASSERT_EQ(v.size(), 2u);
-    EXPECT_EQ(v[0], "h");
-    EXPECT_EQ(v[1], "i");
+    EXPECT_EQ(v[0], 0); // starting byte index of 'h'
+    EXPECT_EQ(v[1], 1); // starting byte index of 'i'
 }
 
 // ===========================================================================
