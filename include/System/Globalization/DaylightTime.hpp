@@ -7,22 +7,51 @@
 
 namespace System::Globalization {
 
-/** <summary>Defines the period of daylight saving time, including the start, end, and time delta.</summary> */
+/**
+ * @brief Defines the period of daylight saving time, including the start, end, and time delta.
+ *
+ * C++ counterpart of .NET System.Globalization.DaylightTime.
+ */
 class DaylightTime {
     System::DateTime start_;
     System::DateTime end_;
     System::TimeSpan delta_;
 
 public:
-    /** Constructs a DaylightTime with the given @p start, @p end, and clock @p delta. */
-    DaylightTime(const System::DateTime& start, const System::DateTime& end, const System::TimeSpan& delta)
+    /**
+     * @brief Constructs a DaylightTime with the given start, end, and clock delta.
+     *
+     * C++ counterpart of .NET DaylightTime(DateTime, DateTime, TimeSpan).
+     * @param start The date and time when daylight saving time begins.
+     * @param end   The date and time when daylight saving time ends.
+     * @param delta The clock offset applied during daylight saving time.
+     */
+    DaylightTime(const System::DateTime& start, const System::DateTime& end,
+                 const System::TimeSpan& delta)
         : start_(start), end_(end), delta_(delta) {}
 
-    /** @return The date and time when daylight saving time begins. */
+    /**
+     * @brief Gets the date and time when daylight saving time begins.
+     *
+     * C++ counterpart of .NET DaylightTime.Start.
+     * @return The start of daylight saving time.
+     */
     [[nodiscard]] const System::DateTime& getStartProperty() const { return start_; }
-    /** @return The date and time when daylight saving time ends. */
-    [[nodiscard]] const System::DateTime& getEndProperty()   const { return end_; }
-    /** @return The clock offset applied when daylight saving time is in effect. */
+
+    /**
+     * @brief Gets the date and time when daylight saving time ends.
+     *
+     * C++ counterpart of .NET DaylightTime.End.
+     * @return The end of daylight saving time.
+     */
+    [[nodiscard]] const System::DateTime& getEndProperty() const { return end_; }
+
+    /**
+     * @brief Gets the clock offset applied when daylight saving time is in effect.
+     *
+     * C++ counterpart of .NET DaylightTime.Delta.
+     * @return The time delta for daylight saving time.
+     */
     [[nodiscard]] const System::TimeSpan& getDeltaProperty() const { return delta_; }
 };
 

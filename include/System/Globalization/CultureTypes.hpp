@@ -5,22 +5,41 @@
 
 namespace System::Globalization {
 
-    enum class CultureTypes {
-        NeutralCultures         = 0x0001,
-        SpecificCultures        = 0x0002,
-        InstalledWin32Cultures  = 0x0004,
-        AllCultures             = 0x0007,
-        UserCustomCulture       = 0x0008,
-        ReplacementCultures     = 0x0010,
-        WindowsOnlyCultures     = 0x0020,
-        FrameworkCultures       = 0x0040,
-    };
+/**
+ * @brief Defines the types of culture lists that can be retrieved using GetCultures.
+ *
+ * C++ counterpart of .NET System.Globalization.CultureTypes.
+ * Values may be combined with the | operator.
+ */
+enum class CultureTypes {
+    NeutralCultures        = 0x0001, ///< Cultures with only a language, no region (e.g. "en").
+    SpecificCultures       = 0x0002, ///< Cultures specific to both a language and region (e.g. "en-US").
+    InstalledWin32Cultures = 0x0004, ///< Cultures installed in the Windows operating system.
+    AllCultures            = 0x0007, ///< All cultures recognized by .NET (NeutralCultures | SpecificCultures | InstalledWin32Cultures).
+    UserCustomCulture      = 0x0008, ///< Custom cultures created by the user.
+    ReplacementCultures    = 0x0010, ///< Custom cultures that replace shipped cultures.
+    WindowsOnlyCultures    = 0x0020, ///< @deprecated Cultures that are specific to Windows and not cross-platform.
+    FrameworkCultures      = 0x0040, ///< @deprecated Cultures that ship with the .NET Framework.
+};
 
-    inline CultureTypes operator|(CultureTypes a, CultureTypes b) {
-        return static_cast<CultureTypes>(static_cast<int>(a) | static_cast<int>(b));
-    }
-    inline CultureTypes operator&(CultureTypes a, CultureTypes b) {
-        return static_cast<CultureTypes>(static_cast<int>(a) & static_cast<int>(b));
-    }
+/**
+ * @brief Combines two CultureTypes values with bitwise OR.
+ * @param a First type set.
+ * @param b Second type set.
+ * @return The combined type set.
+ */
+inline CultureTypes operator|(CultureTypes a, CultureTypes b) {
+    return static_cast<CultureTypes>(static_cast<int>(a) | static_cast<int>(b));
+}
+
+/**
+ * @brief Masks two CultureTypes values with bitwise AND.
+ * @param a First type set.
+ * @param b Second type set.
+ * @return The masked type set.
+ */
+inline CultureTypes operator&(CultureTypes a, CultureTypes b) {
+    return static_cast<CultureTypes>(static_cast<int>(a) & static_cast<int>(b));
+}
 
 } // namespace System::Globalization
