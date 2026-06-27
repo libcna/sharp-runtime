@@ -11,41 +11,84 @@ namespace System::Globalization {
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
-/** <summary>Represents the result of mapping a string to its sort key for culture-sensitive comparison.</summary> */
+/**
+ * @brief Represents the result of mapping a string to its sort key for culture-sensitive comparison.
+ *
+ * C++ counterpart of .NET System.Globalization.SortKey.
+ * Sort keys allow efficient repeated comparisons. The key data is a byte array
+ * derived from the original string according to the culture's sort rules.
+ */
 class SortKey {
 public:
+    /** @brief Constructs an empty SortKey. */
     SortKey() = default;
+
+    /**
+     * @brief Constructs a SortKey from an original string and its pre-computed byte key.
+     *
+     * @param originalString The original string used to create this sort key.
+     * @param keyData        The byte array representing the sort key.
+     */
     SortKey(const std::string& originalString, const std::vector<bytecs>& keyData)
-        : _string(originalString), _keyData(keyData) {}
+        : string_(originalString), keyData_(keyData) {}
 
-    /** <summary>Gets the original string used to create this SortKey.</summary> */
-    [[nodiscard]] const std::string& getOriginalStringProperty() const { return _string; }
+    /**
+     * @brief Gets the original string used to create this SortKey.
+     *
+     * C++ counterpart of .NET SortKey.OriginalString.
+     * @return A const reference to the original string.
+     */
+    [[nodiscard]] const std::string& getOriginalStringProperty() const { return string_; }
 
-    /** <summary>Gets the byte array representing the current SortKey.</summary> */
-    [[nodiscard]] std::vector<bytecs> getKeyDataProperty() const { return _keyData; }
+    /**
+     * @brief Gets the byte array representing this SortKey.
+     *
+     * C++ counterpart of .NET SortKey.KeyData.
+     * @return A copy of the key data byte vector.
+     */
+    [[nodiscard]] std::vector<bytecs> getKeyDataProperty() const { return keyData_; }
 
-    /** <summary>Compares two SortKey objects.</summary> */
+    /**
+     * @brief Compares two SortKey objects using lexicographic byte order.
+     *
+     * C++ counterpart of .NET SortKey.Compare(SortKey, SortKey).
+     * @param sortkey1 The first SortKey.
+     * @param sortkey2 The second SortKey.
+     * @return Negative if sortkey1 < sortkey2, zero if equal, positive if sortkey1 > sortkey2.
+     */
     static intcs Compare(const SortKey& sortkey1, const SortKey& sortkey2) {
-        // Lexicographic byte comparison
-        size_t n = std::min(sortkey1._keyData.size(), sortkey2._keyData.size());
+        size_t n = std::min(sortkey1.keyData_.size(), sortkey2.keyData_.size());
         for (size_t i = 0; i < n; ++i) {
-            if (sortkey1._keyData[i] < sortkey2._keyData[i]) return -1;
-            if (sortkey1._keyData[i] > sortkey2._keyData[i]) return  1;
+            if (sortkey1.keyData_[i] < sortkey2.keyData_[i]) return -1;
+            if (sortkey1.keyData_[i] > sortkey2.keyData_[i]) return  1;
         }
-        if (sortkey1._keyData.size() < sortkey2._keyData.size()) return -1;
-        if (sortkey1._keyData.size() > sortkey2._keyData.size()) return  1;
+        if (sortkey1.keyData_.size() < sortkey2.keyData_.size()) return -1;
+        if (sortkey1.keyData_.size() > sortkey2.keyData_.size()) return  1;
         return 0;
     }
 
+    /**
+     * @brief Returns true if both SortKey instances have identical original strings and key data.
+     *
+     * C++ counterpart of .NET SortKey.Equals(object).
+     * @param other The SortKey to compare.
+     * @return true if equal; otherwise false.
+     */
     bool operator==(const SortKey& other) const {
-        return _string == other._string && _keyData == other._keyData;
+        return string_ == other.string_ && keyData_ == other.keyData_;
     }
 
-    std::string ToString() const { return "SortKey - " + _string; }
+    /**
+     * @brief Returns a string representation of this SortKey.
+     *
+     * C++ counterpart of .NET SortKey.ToString().
+     * @return A string in the form "SortKey - <original>".
+     */
+    [[nodiscard]] std::string ToString() const { return "SortKey - " + string_; }
 
 private:
-    std::string _string;
-    std::vector<bytecs> _keyData;
+    std::string string_;
+    std::vector<bytecs> keyData_;
 };
 
 } // namespace System::Globalization
