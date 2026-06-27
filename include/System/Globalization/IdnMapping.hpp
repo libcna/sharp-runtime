@@ -8,34 +8,81 @@
 namespace System::Globalization {
 
 /**
- * <summary>
- * Supports the use of non-ASCII characters for Internet domain names.
+ * @brief Supports the use of non-ASCII characters for Internet domain names.
+ *
+ * C++ counterpart of .NET System.Globalization.IdnMapping.
  * Implements Punycode (RFC 3492) / IDNA (RFC 3490) encoding and decoding.
- * 
- * GetAscii() converts a Unicode domain name to its ACE (xn--) ASCII representation.
- * GetUnicode() reverses the conversion.
- * 
- * ASCII-only labels are passed through unchanged.
- * </summary>
+ * GetAscii() converts a Unicode domain name to its ACE (xn--) ASCII representation;
+ * GetUnicode() reverses the conversion. ASCII-only labels are passed through unchanged.
  */
 class IdnMapping {
 public:
+    /**
+     * @brief Constructs an IdnMapping with default settings.
+     *
+     * C++ counterpart of .NET IdnMapping().
+     * AllowUnassigned and UseStd3AsciiRules default to false.
+     */
     IdnMapping() = default;
 
-    /** When true, unassigned Unicode code points are allowed. */
+    /**
+     * @brief Gets a value indicating whether unassigned Unicode code points are allowed.
+     *
+     * C++ counterpart of .NET IdnMapping.AllowUnassigned.
+     * @return true if unassigned code points are permitted; otherwise false.
+     */
     [[nodiscard]] bool getAllowUnassignedProperty() const { return allowUnassigned_; }
+
+    /**
+     * @brief Sets whether unassigned Unicode code points are allowed.
+     *
+     * C++ counterpart of .NET IdnMapping.AllowUnassigned setter.
+     * @param v true to allow unassigned code points; false to reject them.
+     */
     void setAllowUnassignedProperty(bool v) { allowUnassigned_ = v; }
 
-    /** When true, validates labels against RFC 1123 Std3 name rules. */
+    /**
+     * @brief Gets a value indicating whether Std3 ASCII naming rules are applied.
+     *
+     * C++ counterpart of .NET IdnMapping.UseStd3AsciiRules.
+     * @return true if RFC 1123 Std3 naming rules are enforced; otherwise false.
+     */
     [[nodiscard]] bool getUseStd3AsciiRulesProperty() const { return useStd3_; }
+
+    /**
+     * @brief Sets whether Std3 ASCII naming rules are applied.
+     *
+     * C++ counterpart of .NET IdnMapping.UseStd3AsciiRules setter.
+     * @param v true to enforce RFC 1123 Std3 rules; false to disable.
+     */
     void setUseStd3AsciiRulesProperty(bool v) { useStd3_ = v; }
 
-    /** Converts a Unicode (UTF-8) domain name to its Punycode ASCII form. */
+    /**
+     * @brief Converts a Unicode (UTF-8) domain name to its Punycode ASCII form.
+     *
+     * C++ counterpart of .NET IdnMapping.GetAscii(string).
+     * Labels already in ASCII are passed through unchanged.
+     * @param unicode The Unicode domain name to encode.
+     * @return The ACE (xn--) ASCII representation.
+     */
     [[nodiscard]] std::string GetAscii(const std::string& unicode) const;
 
-    /** Converts a Punycode ASCII domain name back to Unicode (UTF-8). */
+    /**
+     * @brief Converts a Punycode ASCII domain name back to Unicode (UTF-8).
+     *
+     * C++ counterpart of .NET IdnMapping.GetUnicode(string).
+     * @param ascii The ACE-encoded ASCII domain name to decode.
+     * @return The decoded Unicode domain name.
+     */
     [[nodiscard]] std::string GetUnicode(const std::string& ascii) const;
 
+    /**
+     * @brief Returns true if both IdnMapping instances have the same settings.
+     *
+     * C++ counterpart of .NET IdnMapping.Equals(object).
+     * @param o The other IdnMapping instance.
+     * @return true if AllowUnassigned and UseStd3AsciiRules are equal.
+     */
     bool operator==(const IdnMapping& o) const {
         return allowUnassigned_ == o.allowUnassigned_ && useStd3_ == o.useStd3_;
     }
@@ -45,15 +92,15 @@ private:
     bool useStd3_         = false;
 
     // ---- Punycode constants (RFC 3492) ----
-    static constexpr int Base      = 36;
-    static constexpr int Tmin      = 1;
-    static constexpr int Tmax      = 26;
-    static constexpr int Skew      = 38;
-    static constexpr int Damp      = 700;
+    static constexpr int Base        = 36;
+    static constexpr int Tmin        = 1;
+    static constexpr int Tmax        = 26;
+    static constexpr int Skew        = 38;
+    static constexpr int Damp        = 700;
     static constexpr int InitialBias = 72;
-    static constexpr int InitialN  = 0x80;
-    static constexpr int LabelMax  = 63;
-    static constexpr int NameMax   = 255;
+    static constexpr int InitialN    = 0x80;
+    static constexpr int LabelMax    = 63;
+    static constexpr int NameMax     = 255;
 
     // ---- UTF-8 helpers ----
     static std::u32string utf8ToCodePoints(const std::string& s);
@@ -65,7 +112,7 @@ private:
     static char encodeDigit(int d);
     static int  decodeDigit(char c);
 
-    static std::string encodeLabel(const std::u32string& label);
+    static std::string    encodeLabel(const std::u32string& label);
     static std::u32string decodeLabel(const std::string& label);
 };
 
