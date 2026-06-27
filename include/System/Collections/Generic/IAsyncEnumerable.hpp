@@ -3,36 +3,35 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include "System/Collections/Generic/IAsyncEnumerator.hpp"
 #include "System/Threading/CancellationToken.hpp"
 
 namespace System::Collections::Generic {
 
-    template<typename T>
-    class IAsyncEnumerator;
+/**
+ * @brief Exposes an asynchronous enumerator that provides asynchronous iteration over a sequence of values.
+ *
+ * C++ counterpart of .NET System.Collections.Generic.IAsyncEnumerable<T>.
+ * In C++, async behaviour is approximated synchronously — GetAsyncEnumerator() returns
+ * a shared_ptr to IAsyncEnumerator<T> which iterates synchronously.
+ *
+ * @tparam T The type of objects to enumerate.
+ */
+template<typename T>
+class IAsyncEnumerable {
+public:
+    /** @brief Virtual destructor for safe polymorphic destruction. */
+    virtual ~IAsyncEnumerable() = default;
 
-    /** Exposes an asynchronous enumerator that provides asynchronous iteration over a sequence of values. */
-    template<typename T>
-    class IAsyncEnumerable {
-    public:
-        /** Destroys the enumerable. */
-        virtual ~IAsyncEnumerable() = default;
-        /** Returns an async enumerator that iterates through the collection (approximated synchronously in C++). */
-        [[nodiscard]] virtual std::shared_ptr<IAsyncEnumerator<T>> GetAsyncEnumerator(
-            System::Threading::CancellationToken cancellationToken = {}) = 0;
-    };
-
-    /** Supports asynchronous iteration over a sequence of values. */
-    template<typename T>
-    class IAsyncEnumerator {
-    public:
-        /** Destroys the enumerator. */
-        virtual ~IAsyncEnumerator() = default;
-        /** Advances the enumerator asynchronously to the next element; returns true if another element is available. */
-        virtual bool MoveNextAsync() = 0;
-        /** Gets the element at the current position of the enumerator. */
-        [[nodiscard]] virtual const T& getCurrent() const = 0;
-        /** Performs application-defined tasks associated with freeing resources asynchronously. */
-        virtual void DisposeAsync() {}
-    };
+    /**
+     * @brief Returns an asynchronous enumerator that iterates through the collection.
+     *
+     * C++ counterpart of .NET IAsyncEnumerable<T>.GetAsyncEnumerator(CancellationToken).
+     * @param cancellationToken A CancellationToken that may be used to cancel the iteration.
+     * @return A shared_ptr to an IAsyncEnumerator<T> for the collection.
+     */
+    [[nodiscard]] virtual std::shared_ptr<IAsyncEnumerator<T>> GetAsyncEnumerator(
+        System::Threading::CancellationToken cancellationToken = {}) = 0;
+};
 
 } // namespace System::Collections::Generic
