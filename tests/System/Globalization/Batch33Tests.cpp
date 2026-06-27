@@ -1,0 +1,215 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+//
+// Tests for Batch 33:
+//   StringInfo:            constructors, getters, SubstringByTextElements, static helpers
+//   TaiwanCalendar:        era constant, GetEra, GetErasCount, GetYear
+//   TextElementEnumerator: MoveNext/GetTextElement/Reset, ASCII and UTF-8 multi-byte
+//   TextInfo:              ToLower/ToUpper/ToTitleCase, Clone, ReadOnly, operator==
+#include <gtest/gtest.h>
+#include "System/Globalization/StringInfo.hpp"
+#include "System/Globalization/TaiwanCalendar.hpp"
+#include "System/Globalization/TextElementEnumerator.hpp"
+#include "System/Globalization/TextInfo.hpp"
+#include "System/DateTime.hpp"
+
+using System::Globalization::StringInfo;
+using System::Globalization::TaiwanCalendar;
+using System::Globalization::TextElementEnumerator;
+using System::Globalization::TextInfo;
+
+// ===========================================================================
+// StringInfo
+// ===========================================================================
+
+TEST(StringInfoBatch33Test, DefaultCtor) {
+    StringInfo si;
+    EXPECT_EQ(si.getStringProperty(), "");
+    EXPECT_EQ(si.getLengthInTextElementsProperty(), 0);
+}
+
+TEST(StringInfoBatch33Test, StringCtor) {
+    StringInfo si("hello");
+    EXPECT_EQ(si.getStringProperty(), "hello");
+    EXPECT_EQ(si.getLengthInTextElementsProperty(), 5);
+}
+
+TEST(StringInfoBatch33Test, SetString) {
+    StringInfo si;
+    si.setStringProperty("world");
+    EXPECT_EQ(si.getStringProperty(), "world");
+}
+
+TEST(StringInfoBatch33Test, SubstringByTextElements_StartOnly) {
+    StringInfo si("hello");
+    EXPECT_EQ(si.SubstringByTextElements(2), "llo");
+}
+
+TEST(StringInfoBatch33Test, SubstringByTextElements_StartAndLength) {
+    StringInfo si("hello");
+    EXPECT_EQ(si.SubstringByTextElements(1, 3), "ell");
+}
+
+TEST(StringInfoBatch33Test, GetNextTextElement) {
+    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 0), "a");
+    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 2), "c");
+    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 5), "");
+}
+
+TEST(StringInfoBatch33Test, GetNextTextElementLength) {
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 0), 1);
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 9), 0);
+}
+
+TEST(StringInfoBatch33Test, ParseCombiningCharacters) {
+    auto v = StringInfo::ParseCombiningCharacters("hi");
+    ASSERT_EQ(v.size(), 2u);
+    EXPECT_EQ(v[0], "h");
+    EXPECT_EQ(v[1], "i");
+}
+
+// ===========================================================================
+// TaiwanCalendar
+// ===========================================================================
+
+TEST(TaiwanCalendarBatch33Test, EraConstant) {
+    EXPECT_EQ(TaiwanCalendar::TaiwanEra,      1);
+    EXPECT_EQ(TaiwanCalendar::GregorianOffset, 1911);
+}
+
+TEST(TaiwanCalendarBatch33Test, GetEra) {
+    TaiwanCalendar tc;
+    EXPECT_EQ(tc.GetEra(System::DateTime(2024, 1, 1)), TaiwanCalendar::TaiwanEra);
+}
+
+TEST(TaiwanCalendarBatch33Test, GetErasCount) {
+    TaiwanCalendar tc;
+    EXPECT_EQ(tc.GetErasCount(), 1);
+}
+
+TEST(TaiwanCalendarBatch33Test, GetYear_2024_Is113) {
+    TaiwanCalendar tc;
+    EXPECT_EQ(tc.GetYear(System::DateTime(2024, 6, 1)), 113);
+}
+
+TEST(TaiwanCalendarBatch33Test, GetYear_1912_Is1) {
+    TaiwanCalendar tc;
+    EXPECT_EQ(tc.GetYear(System::DateTime(1912, 1, 1)), 1);
+}
+
+// ===========================================================================
+// TextElementEnumerator
+// ===========================================================================
+
+TEST(TextElementEnumeratorBatch33Test, ASCIIString) {
+    TextElementEnumerator e("hi");
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_EQ(e.GetTextElement(), "h");
+    EXPECT_EQ(e.getElementIndexProperty(), 0);
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_EQ(e.GetTextElement(), "i");
+    EXPECT_FALSE(e.MoveNext());
+}
+
+TEST(TextElementEnumeratorBatch33Test, EmptyString) {
+    TextElementEnumerator e("");
+    EXPECT_FALSE(e.MoveNext());
+}
+
+TEST(TextElementEnumeratorBatch33Test, BeforeFirstMoveNext_Throws) {
+    TextElementEnumerator e("x");
+    EXPECT_THROW(e.GetTextElement(), std::runtime_error);
+}
+
+TEST(TextElementEnumeratorBatch33Test, Reset) {
+    TextElementEnumerator e("ab");
+    e.MoveNext();
+    e.Reset();
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_EQ(e.GetTextElement(), "a");
+}
+
+TEST(TextElementEnumeratorBatch33Test, UTF8TwoByteSequence) {
+    // "ü" in UTF-8 is 2 bytes: 0xC3 0xBC
+    std::string s = "\xC3\xBC";
+    TextElementEnumerator e(s);
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_EQ(e.GetTextElement(), s);
+    EXPECT_FALSE(e.MoveNext());
+}
+
+TEST(TextElementEnumeratorBatch33Test, GetCurrent_SameAsGetTextElement) {
+    TextElementEnumerator e("z");
+    e.MoveNext();
+    EXPECT_EQ(e.getCurrent(), e.GetTextElement());
+}
+
+// ===========================================================================
+// TextInfo
+// ===========================================================================
+
+TEST(TextInfoBatch33Test, DefaultCultureName) {
+    TextInfo ti;
+    EXPECT_EQ(ti.getCultureNameProperty(), "en-US");
+}
+
+TEST(TextInfoBatch33Test, CustomCultureName) {
+    TextInfo ti("fr-FR");
+    EXPECT_EQ(ti.getCultureNameProperty(), "fr-FR");
+}
+
+TEST(TextInfoBatch33Test, DefaultNotReadOnly) {
+    TextInfo ti;
+    EXPECT_FALSE(ti.getIsReadOnlyProperty());
+}
+
+TEST(TextInfoBatch33Test, IsRightToLeft_AlwaysFalse) {
+    TextInfo ti;
+    EXPECT_FALSE(ti.getIsRightToLeftProperty());
+}
+
+TEST(TextInfoBatch33Test, ListSeparator) {
+    TextInfo ti;
+    EXPECT_EQ(ti.getListSeparatorProperty(), ",");
+    ti.setListSeparatorProperty(";");
+    EXPECT_EQ(ti.getListSeparatorProperty(), ";");
+}
+
+TEST(TextInfoBatch33Test, ToLower_String) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToLower(std::string("HELLO")), "hello");
+}
+
+TEST(TextInfoBatch33Test, ToUpper_String) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToUpper(std::string("hello")), "HELLO");
+}
+
+TEST(TextInfoBatch33Test, ToTitleCase) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("hello world"), "Hello World");
+}
+
+TEST(TextInfoBatch33Test, Clone_IsMutable) {
+    auto ro = TextInfo::ReadOnly(TextInfo());
+    auto clone = ro.Clone();
+    EXPECT_FALSE(clone.getIsReadOnlyProperty());
+}
+
+TEST(TextInfoBatch33Test, ReadOnly_MakesReadOnly) {
+    TextInfo ti;
+    auto ro = TextInfo::ReadOnly(ti);
+    EXPECT_TRUE(ro.getIsReadOnlyProperty());
+}
+
+TEST(TextInfoBatch33Test, EqualityOperator) {
+    TextInfo a("en-US"), b("en-US"), c("fr-FR");
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == c);
+}
+
+TEST(TextInfoBatch33Test, ToString) {
+    TextInfo ti("de-DE");
+    EXPECT_EQ(ti.ToString(), "TextInfo - de-DE");
+}

@@ -10,46 +10,85 @@ namespace System::Globalization {
 
 using SharpRuntime::intcs;
 
-/** <summary>Enumerates the text elements of a string, where each element may be one or more chars (grapheme cluster).</summary> */
+/**
+ * @brief Enumerates the text elements of a string.
+ *
+ * C++ counterpart of .NET System.Globalization.TextElementEnumerator.
+ * Each text element may span one or more chars (grapheme cluster). This implementation
+ * advances by UTF-8 code units: ASCII characters produce single-byte elements, and
+ * multi-byte sequences are kept together. Combining-character grouping is not performed.
+ */
 class TextElementEnumerator {
 public:
+    /**
+     * @brief Constructs a TextElementEnumerator over the given string.
+     *
+     * C++ counterpart of .NET StringInfo.GetTextElementEnumerator(string).
+     * @param str The string to enumerate.
+     */
     explicit TextElementEnumerator(const std::string& str)
-        : _str(str), _pos(0), _elementIndex(-1), _current{} {}
+        : str_(str), pos_(0), elementIndex_(-1), current_{} {}
 
+    /**
+     * @brief Advances the enumerator to the next text element.
+     *
+     * C++ counterpart of .NET TextElementEnumerator.MoveNext().
+     * @return true if there is a next element; false if enumeration is complete.
+     */
     bool MoveNext() {
-        if (_pos >= _str.size()) return false;
-        _elementIndex = static_cast<intcs>(_pos);
-        // Simple: advance by one UTF-8 sequence (handle multi-byte)
-        unsigned char c = static_cast<unsigned char>(_str[_pos]);
+        if (pos_ >= str_.size()) return false;
+        elementIndex_ = static_cast<intcs>(pos_);
+        unsigned char c = static_cast<unsigned char>(str_[pos_]);
         size_t len = 1;
-        if ((c & 0x80) == 0)       len = 1;
+        if      ((c & 0x80) == 0x00) len = 1;
         else if ((c & 0xE0) == 0xC0) len = 2;
         else if ((c & 0xF0) == 0xE0) len = 3;
         else if ((c & 0xF8) == 0xF0) len = 4;
-        _current = _str.substr(_pos, std::min(len, _str.size() - _pos));
-        _pos += len;
+        current_ = str_.substr(pos_, std::min(len, str_.size() - pos_));
+        pos_ += len;
         return true;
     }
 
-    /** <summary>Returns the current text element as a string.</summary> */
-    std::string GetTextElement() const {
-        if (_elementIndex < 0) throw std::runtime_error("Enumeration not started");
-        return _current;
+    /**
+     * @brief Returns the current text element as a string.
+     *
+     * C++ counterpart of .NET TextElementEnumerator.GetTextElement().
+     * @return The current text element.
+     * @throws std::runtime_error if MoveNext() has not been called.
+     */
+    [[nodiscard]] std::string GetTextElement() const {
+        if (elementIndex_ < 0) throw std::runtime_error("Enumeration not started");
+        return current_;
     }
 
-    /** <summary>Gets the current text element.</summary> */
-    std::string getCurrent() const { return GetTextElement(); }
+    /**
+     * @brief Gets the current text element.
+     *
+     * C++ counterpart of .NET TextElementEnumerator.Current.
+     * @return The current text element string.
+     */
+    [[nodiscard]] std::string getCurrent() const { return GetTextElement(); }
 
-    /** <summary>Gets the index of the current text element in the original string.</summary> */
-    intcs getElementIndexProperty() const { return _elementIndex; }
+    /**
+     * @brief Gets the index of the current text element in the original string.
+     *
+     * C++ counterpart of .NET TextElementEnumerator.ElementIndex.
+     * @return The zero-based byte index of the current element, or -1 before the first MoveNext().
+     */
+    [[nodiscard]] intcs getElementIndexProperty() const { return elementIndex_; }
 
-    void Reset() { _pos = 0; _elementIndex = -1; _current.clear(); }
+    /**
+     * @brief Resets the enumerator to the beginning of the string.
+     *
+     * C++ counterpart of .NET TextElementEnumerator.Reset().
+     */
+    void Reset() { pos_ = 0; elementIndex_ = -1; current_.clear(); }
 
 private:
-    std::string _str;
-    size_t _pos;
-    intcs _elementIndex;
-    std::string _current;
+    std::string str_;
+    size_t pos_;
+    intcs elementIndex_;
+    std::string current_;
 };
 
 } // namespace System::Globalization
