@@ -1,53 +1,54 @@
-# Instrukce pro iterativní review plan.sqlite3
+# Instructions for iterative review of plan.sqlite3
 
-## Inicializace (při každém novém kontextu)
+## Initialization (at the start of each new context)
 
-1. Přečti `CLAUDE.md` a `NEXT.md`.
-2. Otevři `plan.sqlite3` — tabulka `task` se sloupci: `id, namespace, name, type, internal, outofscope, status`.
+1. Read `CLAUDE.md` and `NEXT.md`.
+2. Open `plan.sqlite3` — table `task` with columns: `id, namespace, name, type, internal, outofscope, status`.
 
-## Workflow — jedna iterace
+## Workflow — one iteration
 
-### Krok 1 — Vyber další položku
+### Step 1 — Select the next item
 
-- Vezmi první záznam kde `status = ''` nebo `status = 'todo'` (přeskoč `ignore` a `ported`).
-- **Priorita:** namespace začínající `System` má přednost před ostatními.
+- Take the first record where `status = ''` or `status = 'todo'` (skip `ignore` and `ported`).
+- **Priority:** namespaces starting with `System` take precedence over others.
 
-### Krok 2 — Popiš položku
+### Step 2 — Describe the item
 
-Vypiš:
+Print:
 
 | namespace | name | type | status |
 |-----------|------|------|--------|
-| <hodnota> | <hodnota> | <hodnota> | <aktuální hodnota> |
-Poté stručně popiš, co daný typ dělá (podívej se do `/rv/tmp/runtime/src/libraries/`), a navrhni svůj názor — zda má smysl portovat do sharp-runtime (např. reflexe, threading, diagnostics apod. mohou být out of scope).
+| <value> | <value> | <value> | <current value> |
 
-### Krok 3 — Otázka uživateli
+Then briefly describe what the type does (look in `/rv/tmp/runtime/src/libraries/`), and give your opinion — whether it makes sense to port into sharp-runtime (e.g. reflection, threading, diagnostics etc. may be out of scope).
 
-> **Mám portovat?**
+### Step 3 — Ask the user
 
-- **Ano** → zkontroluj, zda příslušný soubor v sharp-runtime již existuje:
-  - **Existuje** → **nelze rovnou označit jako `ported`** — soubor musí být zkontrolován dle celého checklistu v `CLAUDE.md` (API surface, doc-comments, SPDX, build, testy) jako by ještě neexistoval. Teprve po úspěšné kontrole nastav `status = 'ported'`.
-  - **Neexistuje** → portuj dle checklistu v `CLAUDE.md`, po dokončení nastav `status = 'ported'`.
-- **Ne** → nastav `status = 'ignore'`, pak se zeptej:
+> **Should I port this?**
+
+- **Yes** → check whether the corresponding file already exists in sharp-runtime:
+  - **Exists** → **do not mark as `ported` immediately** — the file must be reviewed against the full checklist in `CLAUDE.md` (API surface, doc-comments, SPDX, build, tests) as if it did not exist yet. Only set `status = 'ported'` after a successful review.
+  - **Does not exist** → port it according to the checklist in `CLAUDE.md`, then set `status = 'ported'`.
+- **No** → set `status = 'ignore'`, then ask:
 
 > **Out of scope?**
 
-  - **Ano** → nastav `outofscope = 1`.
-  - **Ne** → nastav `outofscope = 0`.
+  - **Yes** → set `outofscope = 1`.
+  - **No** → set `outofscope = 0`.
 
-### Krok 4 — Ulož do DB a přejdi na další iteraci
+### Step 4 — Save to DB and move to the next iteration
 
 ```sql
 UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') WHERE id = ...;
 ```
 
-## Povolené hodnoty `status`
+## Allowed `status` values
 
-| Hodnota | Význam |
-|---------|--------|
-| `''`    | Dosud nerozhodnuto |
-| `todo`  | Bude portováno |
-| `ported`| Hotovo, splňuje checklist |
-| `ignore`| Přeskočit (mimo rozsah nebo irelevantní) |
+| Value | Meaning |
+|-------|---------|
+| `''`    | Not yet decided |
+| `todo`  | Will be ported |
+| `ported`| Done, satisfies the checklist |
+| `ignore`| Skip (out of scope or irrelevant) |
 
-> `in_progress` **neexistuje** — portování probíhá přímo, bez mezistavu.
+> `in_progress` **does not exist** — porting happens directly, with no intermediate state.
