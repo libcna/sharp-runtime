@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **3080+ tests passing.** `./build/SharpRuntimeTests` must show no failures.
+2. **6626+ tests passing.** `./build/SharpRuntimeTests` must show no failures.
 3. **Push only to `develop`.** Never push to `master` or create tags without explicit per-action user approval.
 4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`.
@@ -53,6 +53,21 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 
 ---
 
+## Parity philosophy
+
+sharp-runtime and .NET will naturally differ — C++ has no GC, no IL, no runtime reflection, and no delegate infrastructure. The goal is **maximum practical parity**: the public API, method semantics, default values, error messages, and algorithmic behaviour should match .NET as closely as C++ allows.
+
+Known permanent deviations (not bugs, not TODO):
+- **Reflection** (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`, etc.) — completely out of scope. Stubs are the correct end state.
+- **GC** (`System::GC`) — all methods are no-ops. Memory is managed by RAII / `std::shared_ptr`.
+- **Delegates** — mapped to `std::function<>` type aliases; no multicast, no `BeginInvoke`.
+- **Serialization** (`[Serializable]`, `SerializationInfo`) — ignored; not needed for game code.
+- **P/Invoke / interop** — out of scope.
+
+When a method cannot be meaningfully implemented (e.g. it requires reflection), it should throw `System::NotImplementedException` with a comment explaining why — never silently return a wrong value.
+
+---
+
 ## Porting checklist — criteria for `ported` / ✅ DONE
 
 A type may be marked `ported` only when **all** of the following hold:
@@ -81,10 +96,16 @@ Every `.hpp` and `.cpp` file starts with:
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 ```
 
-### 5. Clean build
+### 5. Logic parity with .NET reference
+- Compare the C++ implementation in sharp-runtime against the reference C# source in `/rv/tmp/runtime/src/libraries/`.
+- All non-trivial method bodies must match the .NET logic (algorithm, edge-case handling, error conditions).
+- Verify that default messages, constants, and HResult/error codes match the .NET source where applicable.
+- Discrepancies must be either fixed or explicitly documented as intentional deviations.
+
+### 6. Clean build
 - `cmake --build build --parallel 4` — **zero errors, zero warnings**.
 
-### 6. Tests passing
+### 7. Tests passing
 - `./build/SharpRuntimeTests` — all tests pass (no failures, no crashes).
 - At least basic GoogleTest coverage exists for the ported type's key methods.
 
@@ -100,19 +121,18 @@ Every `.hpp` and `.cpp` file starts with:
 
 ---
 
-## plan.md namespace review workflow
+## plan.sqlite3 namespace review workflow
 
-`plan.md` contains a numbered table of all .NET namespaces from dotnet/runtime. The **Status column starts empty** for each namespace. The workflow for filling it in:
+`plan.sqlite3` (table `task`) tracks all .NET types from dotnet/runtime. The **status column starts empty** for each type. The workflow for filling it in:
 
-1. For each namespace where Status is empty, describe what classes/enums/interfaces it contains (look in `/rv/tmp/runtime/src/libraries/`).
-2. Ask the user: **todo / ignore / ported / in_progress**
-   - `todo` — needs to be ported/implemented in sharp-runtime
-   - `ignore` — out of scope (too complex, platform-specific, or irrelevant to game dev)
-   - `ported` — already implemented in sharp-runtime
-   - `in_progress` — partially implemented, work ongoing
-3. Write the chosen status into the table and move to the next namespace.
+1. For each type where status is empty or `todo`, look up what it does in `/rv/tmp/runtime/src/libraries/`.
+2. Describe it to the user and ask: **yes (port it) / no (ignore)**
+   - **yes** → check if the file exists in sharp-runtime, review against the full checklist, port or fix, then set `status = 'ported'`
+   - **no** → set `status = 'ignore'`, then ask whether `outofscope = 1`
 
-Do this one namespace at a time. Never batch-decide without asking.
+Valid status values: `''` (unset), `todo`, `ported`, `ignore`. **`in_progress` does not exist** — porting happens directly with no intermediate state.
+
+Do this one type at a time. Never batch-decide without asking.
 
 ---
 
