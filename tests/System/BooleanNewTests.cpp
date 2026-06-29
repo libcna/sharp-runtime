@@ -51,3 +51,53 @@ TEST(BooleanNewTests, TrueString_IsTrue) {
 TEST(BooleanNewTests, FalseString_IsFalse) {
     EXPECT_EQ(std::string(Boolean::FalseString), "False");
 }
+
+// ---------------------------------------------------------------------------
+// Parse / TryParse — case-insensitive and whitespace trimming (.NET parity)
+// ---------------------------------------------------------------------------
+
+TEST(BooleanNewTests, Parse_UppercaseTRUE_ReturnsTrue) {
+    EXPECT_TRUE(Boolean::Parse("TRUE"));
+}
+TEST(BooleanNewTests, Parse_UppercaseFALSE_ReturnsFalse) {
+    EXPECT_FALSE(Boolean::Parse("FALSE"));
+}
+TEST(BooleanNewTests, Parse_MixedCase_ReturnsTrue) {
+    EXPECT_TRUE(Boolean::Parse("tRuE"));
+}
+TEST(BooleanNewTests, Parse_MixedCaseFalse_ReturnsFalse) {
+    EXPECT_FALSE(Boolean::Parse("fAlSe"));
+}
+TEST(BooleanNewTests, Parse_LeadingWhitespace_ReturnsTrue) {
+    EXPECT_TRUE(Boolean::Parse("  True"));
+}
+TEST(BooleanNewTests, Parse_TrailingWhitespace_ReturnsFalse) {
+    EXPECT_FALSE(Boolean::Parse("False  "));
+}
+TEST(BooleanNewTests, Parse_BothWhitespace_ReturnsTrue) {
+    EXPECT_TRUE(Boolean::Parse("  true  "));
+}
+TEST(BooleanNewTests, Parse_InvalidString_Throws) {
+    EXPECT_THROW(Boolean::Parse("yes"), std::invalid_argument);
+}
+
+TEST(BooleanNewTests, TryParse_UppercaseTRUE_Succeeds) {
+    bool r = false;
+    EXPECT_TRUE(Boolean::TryParse("TRUE", r));
+    EXPECT_TRUE(r);
+}
+TEST(BooleanNewTests, TryParse_UppercaseFALSE_Succeeds) {
+    bool r = true;
+    EXPECT_TRUE(Boolean::TryParse("FALSE", r));
+    EXPECT_FALSE(r);
+}
+TEST(BooleanNewTests, TryParse_WhitespacePadded_Succeeds) {
+    bool r = false;
+    EXPECT_TRUE(Boolean::TryParse("\t True \n", r));
+    EXPECT_TRUE(r);
+}
+TEST(BooleanNewTests, TryParse_InvalidString_ReturnsFalse) {
+    bool r = true;
+    EXPECT_FALSE(Boolean::TryParse("maybe", r));
+    EXPECT_FALSE(r);
+}

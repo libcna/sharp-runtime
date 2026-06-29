@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 
@@ -27,24 +29,32 @@ namespace System {
          * @brief Parses a string as a Boolean value.
          *
          * C++ counterpart of .NET Boolean.Parse(string).
-         * Accepts "True"/"true" and "False"/"false".
+         * Case-insensitive; leading/trailing whitespace is ignored.
          * @throws std::invalid_argument if the string is not recognised.
          */
         [[nodiscard]] static bool Parse(const std::string& s) {
-            if (s == "True"  || s == "true")  return true;
-            if (s == "False" || s == "false") return false;
-            throw std::invalid_argument("String must be 'True' or 'False'.");
+            bool result;
+            if (!TryParse(s, result))
+                throw std::invalid_argument("String was not recognized as a valid Boolean.");
+            return result;
         }
 
         /**
          * @brief Attempts to parse a string as a Boolean value.
          *
          * C++ counterpart of .NET Boolean.TryParse(string, out bool).
+         * Case-insensitive; leading/trailing whitespace is ignored.
          * @return true if @p s was successfully parsed; false otherwise.
          */
         static bool TryParse(const std::string& s, bool& result) {
-            if (s == "True"  || s == "true")  { result = true;  return true; }
-            if (s == "False" || s == "false") { result = false; return true; }
+            auto notws = [](unsigned char c) { return !std::isspace(c); };
+            auto b = std::find_if(s.begin(), s.end(), notws);
+            auto e = std::find_if(s.rbegin(), s.rend(), notws).base();
+            std::string t(b, e < b ? b : e);
+            std::transform(t.begin(), t.end(), t.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (t == "true")  { result = true;  return true; }
+            if (t == "false") { result = false; return true; }
             result = false; return false;
         }
 
