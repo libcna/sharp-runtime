@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-06-26 (branch: develop) — 6626 tests passing*
+*Last updated: 2026-06-29 (branch: develop) — 8142 tests passing*
 
 ---
 
@@ -8,7 +8,7 @@
 **sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
 - **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting — driven by a `plan.sqlite3` namespace review workflow. The user approves each type one at a time ("ano" = yes); Claude ports, tests, and commits. Currently working through the `System` namespace alphabetically.
+- **Phase:** Active porting — driven by a `plan.sqlite3` namespace review workflow. The user approves each type one at a time before work begins. Currently working through the `System` namespace alphabetically.
 - **Header count:** ~567 `.hpp` files across `System`, `System.Collections`, `System.IO`, `System.Text`, `System.Threading`, `System.Net`, `System.Numerics`, `System.Diagnostics`, `System.Globalization`, `System.Xml`, `System.Buffers`, etc.
 - **Key architectural decisions:** No runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (int32_t), `bytecs` (uint8_t), etc. Inner exceptions use `std::exception_ptr`.
 
@@ -20,10 +20,10 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **6626 tests passing** across 695 test suites. Zero failures.
+- **8142 tests passing** across 892 test suites. Zero failures.
 
 ### What works
-- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half`, `Single`, `Double`, `Decimal` (+ OACurrency), `Guid`, `BitConverter`, `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode`, `Void`, `Index`, `Lazy<T>`
+- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half`, `Single`, `Double`, `Decimal` (+ OACurrency), `Guid`, `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode`, `Void`, `Index`, `Lazy<T>`
 - Delegates/Events: `Func<T>`, `Converter<T,R>`, `EventHandler<T>`, `EventArgs`, `Delegate`
 - Attributes: `Attribute`, `FlagsAttribute`, `ObsoleteAttribute`, `SerializableAttribute`, `CLSCompliantAttribute`
 - Enums: `Casing`, `CrashReason`, `GCCollectionMode`, `GCKind`, `GCLatencyMode`, `GCNotificationStatus`, `EnvironmentVariableTarget`, `MidpointRounding`
@@ -70,25 +70,24 @@ All on branch `develop`, most recent first:
 
 | Commit | Change |
 |--------|--------|
-| `310e4c7` | Systematic fix: all 33 remaining `const std::exception& inner` ctors → `std::exception_ptr`; `IOException` gains `(string, exception_ptr)` ctor; 6 `.cpp` bodies updated; 15+ test callers migrated to `make_exception_ptr`; 279 `include/System/**/*.hpp` headers converted `///` → `/** */` automatically |
-| `986ce5c` | NEXT.md: update to 6626 tests; document exception_ptr pattern, plan.sqlite3 workflow, workflow rules |
-| `0850ea3` | Port Int16→IntPtr + InvalidCast/Operation/TimeZone exceptions; fix inner-exception ctors; add integer type tests |
-| `db3fe72` | Port interfaces ISpanParsable→IUtf8SpanParsable + Index; fix IndexOutOfRange/InsufficientMemory/OutOfMemory inner-exception ctors |
-| `ee73141` | Port GC/Guid/Half/HashCode/Func + interfaces IAsyncDisposable→IEquatable; add tests for all |
-| `c896617` | Port Environment→Func: fix inner-exception ctors, add tests for EventHandler/FlagsAttribute/FormattableString/Func/FormatException/ExecutionEngineException |
+| `e9c4fec` | Port Boolean: fix Parse/TryParse to be case-insensitive with whitespace trimming (.NET parity); add 12 new case/whitespace tests |
+| `315324a` | Port BitConverter: add GetBytes/To* overloads for Half, BFloat16, Int128, UInt128; BFloat16 bit-reinterpretation quartet; fix missing `<algorithm>` in Int128.hpp and UInt128.hpp; 14 new tests |
+| `4b4ff33` | Port BinaryData: fix ownership, add FromStream/ToStream, implicit operators |
+| `9ed4090` | CLAUDE.md: add parity philosophy, logic-parity checklist step, fix test count and plan.sqlite3 workflow |
 
-### Systematic fix applied this session
-All exception classes have been migrated from `const std::exception& inner` → `std::exception_ptr inner`. All 567 `include/System/**/*.hpp` headers now use Doxygen `/** */` (zero `///` remaining). Test callers updated: `make_exception_ptr` pattern, inner message no longer checked in `what()`.
+### Fixes applied this session
+- `Int128.hpp` and `UInt128.hpp` both used `std::reverse` without `#include <algorithm>` — fixed.
+- `Boolean.Parse`/`TryParse` now correctly case-insensitive and whitespace-trimming per .NET spec.
 
 ---
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 6626 tests pass.
+**No active technical blocker.** Build is clean, all 8142 tests pass.
 
-The workflow is user-driven: user approves each type with "ano" before porting begins. The assistant must **always ask before porting or ignoring** — this was violated in a prior session and must not happen again.
+The workflow is user-driven: user approves each type with "ano" (yes in Czech) before porting begins. The assistant must **always ask before porting or ignoring** — this was violated in a prior session and must not happen again.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`): `LoaderOptimizationAttribute`, `LocalDataStoreSlot`, `MDArray`, `MTAThreadAttribute`, `MarshalByRefObject`, `Math`, `MathF`, `MemberAccessException`, `Memory`, `MemoryExtensions`, …
+Next unprocessed type in `System` namespace (from `plan.sqlite3`): `Buffer` — a static class for low-level byte-array operations. Its `BlockCopy`/`ByteLength`/`GetByte`/`SetByte` methods require `System::Array` which does not exist in sharp-runtime; only `MemoryCopy` is directly portable.
 
 ---
 
@@ -136,7 +135,7 @@ include/
     IO/                                 ← Stream, File, Path, Compression/, Hashing/
     Text/                               ← StringBuilder, Encoding, Json/, Encodings/
     Threading/                          ← Thread, Monitor, Tasks/, LazyThreadSafetyMode
-    Numerics/                           ← BigInteger, Vector*, Matrix*, Quaternion
+    Numerics/                           ← BigInteger, Vector*, Matrix*, Quaternion, BFloat16
     Diagnostics/                        ← Debug, Stopwatch, Activity
     Globalization/                      ← CultureInfo, Calendar, DateTimeFormatInfo
     Net/                                ← IPAddress, Http/, Sockets/
@@ -149,7 +148,7 @@ plan.sqlite3                            ← tracks porting status per type (todo
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **6626+ tests passing** — never go below the watermark.
+2. **8142+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
@@ -176,9 +175,10 @@ plan.sqlite3                            ← tracks porting status per type (todo
 | `SharpRuntime::charcs` | `char16_t` | `char` |
 
 ### plan.sqlite3 workflow
-- Table `task`, columns: `id, namespace, name, type, internal, status`
-- Status values: `ported`, `ignored`, `todo`, `in_progress`, `''` (empty = unset)
-- Query next unset: `SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 8;`
+- Table `task`, columns: `id, namespace, name, type, internal, outofscope, status`
+- Status values: `ported`, `ignore`, `todo`, `''` (empty = unset). **`in_progress` does not exist.**
+- Current counts: 30 ported, 6 ignored, 1071 remaining in System namespace
+- Query next unset: `SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='' OR status='todo') ORDER BY id LIMIT 1;`
 - **Never set status without user approval per type**
 
 ### Inner exception ctor pattern (correct)
@@ -218,10 +218,10 @@ cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 ./build/SharpRuntimeTests
 
 # Run a specific suite
-./build/SharpRuntimeTests --gtest_filter="Environment*"
+./build/SharpRuntimeTests --gtest_filter="BitConverter*"
 
 # Check next unset types in System namespace
-sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 8;"
+sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='' OR status='todo') ORDER BY id LIMIT 8;"
 
 # Verify no /// Doxygen remains
 grep -rl "^\s*///" include/System/ | wc -l
@@ -230,7 +230,7 @@ grep -rl "^\s*///" include/System/ | wc -l
 grep -rl "const std::exception& inner" include/System/ | wc -l
 
 # Check .NET source for a type
-find /rv/tmp/runtime/src/libraries -name "Math.cs" | head -3
+find /rv/tmp/runtime/src/libraries -name "Buffer.cs" | head -3
 
 # Commit (GPG disabled — required in this environment)
 git -c commit.gpgsign=false commit -m "message"
@@ -245,18 +245,30 @@ git push origin develop
 
 Ordered by priority. Each fits one focused coding session. **User must approve each type with "ano" before work begins.**
 
-### Task 1 — Continue System namespace: LoaderOptimizationAttribute
-- **Goal:** Describe type → await "ano" → check/port → mark ported in DB.
-- **Query:** `SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 1;`
-- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`
+### Task 1 — System.Buffer
+- **Goal:** Describe to user → await "ano" → port `MemoryCopy` (two overloads, raw `std::memcpy` wrapper); stub/omit `BlockCopy`/`ByteLength`/`GetByte`/`SetByte` since `System::Array` does not exist.
+- **Files:** `include/System/Buffer.hpp` (create), `tests/System/BufferTests.cpp` (create)
+- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="Buffer*"`
 
-### Task 2 — Continue System namespace: remaining types (Math, MathF, MemberAccessException, Memory, …)
-- **Goal:** Work through unset types one at a time with user approval.
-- **Current count:** 110 unset types in System namespace.
-- **Verify:** Build clean, test count increases.
+### Task 2 — System.Byte
+- **Goal:** Describe to user → await "ano" → check/port the `Byte` struct helpers (Parse, TryParse, ToString, MinValue, MaxValue constants).
+- **Files:** `include/System/Byte.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Byte*"`
 
-### Task 3 — Move to next namespace after System
-- **Goal:** Once System is complete, begin `System.IO` or `System.Collections.Generic` via same user-approval workflow.
+### Task 3 — System.CLSCompliantAttribute
+- **Goal:** Describe to user → await "ano" → likely a one-line stub attribute class (CLS compliance is not enforced in C++).
+- **Files:** `include/System/CLSCompliantAttribute.hpp`
+- **Verify:** Build clean.
+
+### Task 4 — System.Char
+- **Goal:** Describe to user → await "ano" → full checklist review of existing `Char` implementation; verify API parity with .NET `System.Char`.
+- **Files:** `include/System/Char.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Char*"`
+
+### Task 5 — System.Console
+- **Goal:** Describe to user → await "ano" → `Console.WriteLine`/`Write`/`ReadLine` wrappers around `std::cout`/`std::cin`; `ForegroundColor`/`BackgroundColor` via ANSI codes on POSIX.
+- **Files:** `include/System/Console.hpp`, `src/System/Console.cpp`
+- **Verify:** Build clean, basic output test.
 
 ---
 
@@ -275,6 +287,7 @@ Ordered by priority. Each fits one focused coding session. **User must approve e
 - **No reintroduction of `///` Doxygen** — all headers now use `/** */`; never write `///` in new code.
 - **No `ArrayList.Sort()` without comparer** — `std::any` cannot be compared without type info.
 - **No mass rewrite or reformatting** in a single commit — incremental changes only.
+- **No `System.Buffer.BlockCopy`/`ByteLength`/`GetByte`/`SetByte`** — these require `System::Array` which does not exist and is out of scope.
 
 ---
 
@@ -284,23 +297,23 @@ Ordered by priority. Each fits one focused coding session. **User must approve e
 Read NEXT.md first to understand the current state of the project.
 
 Then open plan.sqlite3 and find the next unprocessed type:
-  sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='') ORDER BY name LIMIT 1;"
+  sqlite3 plan.sqlite3 "SELECT id,name,type FROM task WHERE namespace='System' AND (status IS NULL OR status='' OR status='todo') ORDER BY id LIMIT 1;"
 
 IMPORTANT workflow rule: describe the type to the user and WAIT for their approval ("ano")
 before doing any porting or ignoring. Never port or mark ignored without explicit approval.
 
 For each approved type:
   1. Check the existing header (include/System/<Type>.hpp) and tests.
-  2. Verify all 6 checklist items: full API, intcs/namespace syntax, Doxygen /** */, SPDX, build clean, tests pass.
+  2. Verify all checklist items: full API, intcs/namespace syntax, Doxygen /** */, SPDX, build clean, tests pass, logic parity with /rv/tmp/runtime/src/libraries/.
   3. Fix any issues found.
   4. Add tests if missing. Use Tests2 suffix if suite name already exists.
   5. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
-  6. Run: ./build/SharpRuntimeTests  (all 6626+ tests must pass)
-  7. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
+  6. Run: ./build/SharpRuntimeTests  (all 8142+ tests must pass)
+  7. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   8. Commit: git -c commit.gpgsign=false commit -m "..."
   9. Push: git push origin develop
 
-After a batch of types, update NEXT.md sections 2, 3, 4, 8.
+After a batch of types, update NEXT.md.
 
 First task: next unset type in System namespace — describe it and await user approval.
 ```
