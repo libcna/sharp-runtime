@@ -44,11 +44,11 @@ UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') W
 
 ## Allowed `status` values
 
-| Value | Meaning |
-|-------|---------|
-| `''`    | Not yet decided |
-| `todo`  | Will be ported |
-| `ported`| Done, satisfies the checklist |
+| Value | Meaning                           |
+|-------|-----------------------------------|
+| `''`    | Not yet decided                   |
+| `todo`  | Will be ported                    |
+| `ported`| Done, satisfies the checklist     |
 | `ignore`| Skip (out of scope or irrelevant) |
 
 > `in_progress` **does not exist** — porting happens directly, with no intermediate state.
