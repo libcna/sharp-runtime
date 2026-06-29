@@ -38,7 +38,7 @@ Poté stručně popiš, co daný typ dělá (podívej se do `/rv/tmp/runtime/src
 ### Krok 4 — Ulož do DB a přejdi na další iteraci
 
 ```sql
-UPDATE task SET status = '...', outofscope = ... WHERE id = ...;
+UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') WHERE id = ...;
 ```
 
 ## Povolené hodnoty `status`
