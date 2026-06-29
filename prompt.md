@@ -20,13 +20,15 @@ Print:
 |-----------|------|------|--------|
 | <value> | <value> | <value> | <current value> |
 
-Then briefly describe what the type does (look in `/rv/tmp/runtime/src/libraries/`), and give your opinion — whether it makes sense to port into sharp-runtime (e.g. reflection, threading, diagnostics etc. may be out of scope).
+Then briefly describe what the type does (look **only** in `/rv/tmp/runtime/src/libraries/` for the description — do **NOT** check sharp-runtime headers, tests, or any file under `include/` or `tests/` yet), and give your opinion — whether it makes sense to port into sharp-runtime (e.g. reflection, threading, diagnostics etc. may be out of scope).
+
+**STOP here. Output the table + description + question below. Do NOT open any sharp-runtime file before the user answers.**
 
 ### Step 3 — Ask the user
 
 > **Should I port this?**
 
-- **Yes** → check whether the corresponding file already exists in sharp-runtime:
+- **Yes** → only now check whether the corresponding file already exists in sharp-runtime:
   - **Exists** → **do not mark as `ported` immediately** — the file must be reviewed against the full checklist in `CLAUDE.md` (API surface, doc-comments, SPDX, build, tests) as if it did not exist yet. Only set `status = 'ported'` after a successful review.
   - **Does not exist** → port it according to the checklist in `CLAUDE.md`, then set `status = 'ported'`.
 - **No** → set `status = 'ignore'`, then ask:
