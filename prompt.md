@@ -15,12 +15,10 @@
 ### Krok 2 — Popiš položku
 
 Vypiš:
-```
-namespace:  <hodnota>
-name:       <hodnota>
-type:       <hodnota>
-status:     <aktuální hodnota>
-```
+
+| namespace | name | type | status |
+|-----------|------|------|--------|
+| <hodnota> | <hodnota> | <hodnota> | <aktuální hodnota> |
 Poté stručně popiš, co daný typ dělá (podívej se do `/rv/tmp/runtime/src/libraries/`), a navrhni svůj názor — zda má smysl portovat do sharp-runtime (např. reflexe, threading, diagnostics apod. mohou být out of scope).
 
 ### Krok 3 — Otázka uživateli
