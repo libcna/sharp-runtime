@@ -2,10 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <cstdint>
-#include <string>
-#include <stdexcept>
 #include <functional>
+#include <stdexcept>
+#include <string>
 
 #if defined(_MSC_VER)
 #  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."

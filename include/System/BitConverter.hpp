@@ -9,6 +9,9 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Half.hpp"
+#include "System/Int128.hpp"
+#include "System/UInt128.hpp"
+#include "System/Numerics/BFloat16.hpp"
 
 namespace System {
 
@@ -21,6 +24,7 @@ namespace System {
     using SharpRuntime::uintcs;
     using SharpRuntime::ulongcs;
     using SharpRuntime::charcs;
+    using Numerics::BFloat16;
 
     /**
      * @brief Converts base data types to an array of bytes, and an array of
@@ -85,6 +89,23 @@ namespace System {
         [[nodiscard]] static std::array<bytecs,8> GetBytes(double value) {
             std::array<bytecs,8> b; std::memcpy(b.data(), &value, 8); return b;
         }
+        /** @brief Returns the specified half-precision floating-point value as an array of bytes. */
+        [[nodiscard]] static std::array<bytecs,2> GetBytes(Half value) {
+            std::array<bytecs,2> b; std::memcpy(b.data(), &value, 2); return b;
+        }
+        /** @brief Returns the specified BFloat16 value as an array of bytes. */
+        [[nodiscard]] static std::array<bytecs,2> GetBytes(BFloat16 value) {
+            uint16_t raw = value.getBitsProperty();
+            std::array<bytecs,2> b; std::memcpy(b.data(), &raw, 2); return b;
+        }
+        /** @brief Returns the specified 128-bit signed integer value as an array of bytes. */
+        [[nodiscard]] static std::array<bytecs,16> GetBytes(Int128 value) {
+            std::array<bytecs,16> b; std::memcpy(b.data(), &value, 16); return b;
+        }
+        /** @brief Returns the specified 128-bit unsigned integer value as an array of bytes. */
+        [[nodiscard]] static std::array<bytecs,16> GetBytes(UInt128 value) {
+            std::array<bytecs,16> b; std::memcpy(b.data(), &value, 16); return b;
+        }
 
         // -----------------------------------------------------------------------
         // To* — byte array → value (raw pointer overloads)
@@ -110,6 +131,14 @@ namespace System {
         [[nodiscard]] static Single   ToSingle (const bytecs* v, intcs i) { Single   r; std::memcpy(&r, v+i, 4); return r; }
         /** @brief Returns a double-precision floating-point number converted from eight bytes at a specified position. */
         [[nodiscard]] static double   ToDouble (const bytecs* v, intcs i) { double   r; std::memcpy(&r, v+i, 8); return r; }
+        /** @brief Returns a half-precision floating-point number converted from two bytes at a specified position. */
+        [[nodiscard]] static Half     ToHalf   (const bytecs* v, intcs i) { Half     r; std::memcpy(&r, v+i, 2); return r; }
+        /** @brief Returns a BFloat16 value converted from two bytes at a specified position. */
+        [[nodiscard]] static BFloat16 ToBFloat16(const bytecs* v, intcs i) { uint16_t raw; std::memcpy(&raw, v+i, 2); return BFloat16(raw); }
+        /** @brief Returns a 128-bit signed integer converted from sixteen bytes at a specified position. */
+        [[nodiscard]] static Int128   ToInt128  (const bytecs* v, intcs i) { Int128   r; std::memcpy(&r, v+i, 16); return r; }
+        /** @brief Returns a 128-bit unsigned integer converted from sixteen bytes at a specified position. */
+        [[nodiscard]] static UInt128  ToUInt128 (const bytecs* v, intcs i) { UInt128  r; std::memcpy(&r, v+i, 16); return r; }
 
         // -----------------------------------------------------------------------
         // To* — vector overloads
@@ -135,6 +164,14 @@ namespace System {
         [[nodiscard]] static Single   ToSingle (const std::vector<bytecs>& v, intcs i) { return ToSingle (v.data(), i); }
         /** @brief Returns a double-precision float converted from eight bytes in a byte vector. */
         [[nodiscard]] static double   ToDouble (const std::vector<bytecs>& v, intcs i) { return ToDouble (v.data(), i); }
+        /** @brief Returns a half-precision float converted from two bytes in a byte vector. */
+        [[nodiscard]] static Half     ToHalf   (const std::vector<bytecs>& v, intcs i) { return ToHalf   (v.data(), i); }
+        /** @brief Returns a BFloat16 value converted from two bytes in a byte vector. */
+        [[nodiscard]] static BFloat16 ToBFloat16(const std::vector<bytecs>& v, intcs i) { return ToBFloat16(v.data(), i); }
+        /** @brief Returns a 128-bit signed integer converted from sixteen bytes in a byte vector. */
+        [[nodiscard]] static Int128   ToInt128  (const std::vector<bytecs>& v, intcs i) { return ToInt128  (v.data(), i); }
+        /** @brief Returns a 128-bit unsigned integer converted from sixteen bytes in a byte vector. */
+        [[nodiscard]] static UInt128  ToUInt128 (const std::vector<bytecs>& v, intcs i) { return ToUInt128 (v.data(), i); }
 
         // -----------------------------------------------------------------------
         // Bit-reinterpretation methods
@@ -164,6 +201,14 @@ namespace System {
         [[nodiscard]] static ushortcs HalfToUInt16Bits(Half value)   { return value.bits; }
         /** @brief Returns a half-precision float converted from the specified 16-bit unsigned integer bit pattern. */
         [[nodiscard]] static Half    UInt16BitsToHalf (ushortcs value){ return Half{value}; }
+        /** @brief Returns the specified BFloat16 value as a 16-bit signed integer bit pattern. */
+        [[nodiscard]] static shortcs  BFloat16ToInt16Bits (BFloat16 value) { return static_cast<shortcs>(value.getBitsProperty()); }
+        /** @brief Returns a BFloat16 value converted from the specified 16-bit signed integer bit pattern. */
+        [[nodiscard]] static BFloat16 Int16BitsToBFloat16 (shortcs value)  { return BFloat16(static_cast<uint16_t>(value)); }
+        /** @brief Returns the specified BFloat16 value as a 16-bit unsigned integer bit pattern. */
+        [[nodiscard]] static ushortcs BFloat16ToUInt16Bits(BFloat16 value) { return value.getBitsProperty(); }
+        /** @brief Returns a BFloat16 value converted from the specified 16-bit unsigned integer bit pattern. */
+        [[nodiscard]] static BFloat16 UInt16BitsToBFloat16(ushortcs value) { return BFloat16(value); }
 
         // -----------------------------------------------------------------------
         // ToString — bytes → hex string

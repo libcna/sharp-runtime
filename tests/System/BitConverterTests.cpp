@@ -304,3 +304,101 @@ TEST(BitConverterTests, HalfInt16Bits_RoundTrip) {
     System::Half h = BitConverter::Int16BitsToHalf(static_cast<SharpRuntime::shortcs>(0x3C00));
     EXPECT_EQ(BitConverter::HalfToInt16Bits(h), static_cast<SharpRuntime::shortcs>(0x3C00));
 }
+
+// ---------------------------------------------------------------------------
+// GetBytes(Half) / ToHalf
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, GetBytes_Half_SizeIsTwo) {
+    EXPECT_EQ(BitConverter::GetBytes(System::Half{0x3C00u}).size(), 2u);
+}
+TEST(BitConverterTests, RoundTrip_Half) {
+    System::Half h{0x4000u}; // 2.0 in half-precision
+    auto b = BitConverter::GetBytes(h);
+    EXPECT_EQ(BitConverter::ToHalf(b.data(), 0).bits, h.bits);
+}
+TEST(BitConverterTests, ToHalf_VectorOverload) {
+    System::Half h{0x3C00u};
+    auto arr = BitConverter::GetBytes(h);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToHalf(v, 0).bits, h.bits);
+}
+
+// ---------------------------------------------------------------------------
+// BFloat16 bit-reinterpretation
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, BFloat16ToInt16Bits_RoundTrip) {
+    System::Numerics::BFloat16 bf{uint16_t(0x3F80u)}; // 1.0 in BFloat16
+    SharpRuntime::shortcs bits = BitConverter::BFloat16ToInt16Bits(bf);
+    System::Numerics::BFloat16 back = BitConverter::Int16BitsToBFloat16(bits);
+    EXPECT_EQ(back.getBitsProperty(), bf.getBitsProperty());
+}
+TEST(BitConverterTests, BFloat16ToUInt16Bits_RoundTrip) {
+    System::Numerics::BFloat16 bf{uint16_t(0x3F80u)};
+    ushortcs bits = BitConverter::BFloat16ToUInt16Bits(bf);
+    EXPECT_EQ(bits, 0x3F80u);
+    EXPECT_EQ(BitConverter::UInt16BitsToBFloat16(bits).getBitsProperty(), 0x3F80u);
+}
+
+// ---------------------------------------------------------------------------
+// GetBytes(BFloat16) / ToBFloat16
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, GetBytes_BFloat16_SizeIsTwo) {
+    System::Numerics::BFloat16 bf{uint16_t(0x3F80u)};
+    EXPECT_EQ(BitConverter::GetBytes(bf).size(), 2u);
+}
+TEST(BitConverterTests, RoundTrip_BFloat16) {
+    System::Numerics::BFloat16 bf{uint16_t(0x4000u)};
+    auto b = BitConverter::GetBytes(bf);
+    EXPECT_EQ(BitConverter::ToBFloat16(b.data(), 0).getBitsProperty(), bf.getBitsProperty());
+}
+TEST(BitConverterTests, ToBFloat16_VectorOverload) {
+    System::Numerics::BFloat16 bf{uint16_t(0x3F80u)};
+    auto arr = BitConverter::GetBytes(bf);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToBFloat16(v, 0).getBitsProperty(), bf.getBitsProperty());
+}
+
+// ---------------------------------------------------------------------------
+// GetBytes(Int128) / ToInt128
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, GetBytes_Int128_SizeIsSixteen) {
+    EXPECT_EQ(BitConverter::GetBytes(System::Int128{}).size(), 16u);
+}
+TEST(BitConverterTests, RoundTrip_Int128) {
+    System::Int128 val(static_cast<__int128>(0x0102030405060708LL));
+    auto b = BitConverter::GetBytes(val);
+    EXPECT_EQ(b.size(), 16u);
+    System::Int128 back = BitConverter::ToInt128(b.data(), 0);
+    EXPECT_EQ(back, val);
+}
+TEST(BitConverterTests, ToInt128_VectorOverload) {
+    System::Int128 val(static_cast<__int128>(42));
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToInt128(v, 0), val);
+}
+
+// ---------------------------------------------------------------------------
+// GetBytes(UInt128) / ToUInt128
+// ---------------------------------------------------------------------------
+
+TEST(BitConverterTests, GetBytes_UInt128_SizeIsSixteen) {
+    EXPECT_EQ(BitConverter::GetBytes(System::UInt128{}).size(), 16u);
+}
+TEST(BitConverterTests, RoundTrip_UInt128) {
+    System::UInt128 val(static_cast<unsigned __int128>(0xDEADBEEFCAFEBABEull));
+    auto b = BitConverter::GetBytes(val);
+    EXPECT_EQ(b.size(), 16u);
+    System::UInt128 back = BitConverter::ToUInt128(b.data(), 0);
+    EXPECT_EQ(back, val);
+}
+TEST(BitConverterTests, ToUInt128_VectorOverload) {
+    System::UInt128 val(static_cast<unsigned __int128>(99));
+    auto arr = BitConverter::GetBytes(val);
+    std::vector<bytecs> v(arr.begin(), arr.end());
+    EXPECT_EQ(BitConverter::ToUInt128(v, 0), val);
+}
