@@ -23,12 +23,14 @@
  * @brief Defines the GetTypeName() override in the .cpp file.
  *
  * @param CLASS The fully-qualified class name (e.g. System::Foo).
- * @param NAME  The string literal to return as the type name.
+ * @param NAME  A quoted string literal with the fully-qualified .NET type name
+ *              (e.g. "System.Foo"). Must be a string literal — do not pass an
+ *              unquoted identifier, as NAME is used directly without stringization.
  */
 #define GetTypeNameCPP(CLASS, NAME) \
 const std::string& CLASS ::GetTypeName() const\
         {\
-            const static std::string type_name = #NAME;\
+            const static std::string type_name = NAME;\
             return type_name;\
         }
 
