@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <functional>
@@ -10,21 +11,29 @@
 #include <string>
 #include <vector>
 #include "System/ReadOnlyMemory.hpp"
+#include "System/IO/Stream.hpp"
+#include "System/IO/MemoryStream.hpp"
 
 namespace System {
 
     /**
      * @brief A lightweight abstraction for a payload of bytes that supports
-     * converting between string, bytes, and files.
+     * converting between string, bytes, streams, and files.
      *
      * C++ counterpart of .NET System.BinaryData.
-     * Wraps a ReadOnlyMemory&lt;uint8_t&gt; and provides factory methods and
-     * conversions. JSON serialization methods are omitted (out of scope for
-     * the game-dev port target).
+     * Owns its byte data via an internal std::vector<uint8_t>.
+     * JSON serialization/deserialization methods (FromObjectAsJson, ToObjectFromJson)
+     * are omitted as they require runtime type metadata that is out of scope for the
+     * game-dev port target.
+     *
+     * Intentional C++ deviations:
+     *  - Equals/operator== compare by content (bytes + media type). .NET BinaryData.Equals
+     *    uses reference equality and is marked [EditorBrowsable(Never)].
+     *  - GetHashCode is content-based (consistent with content-based Equals).
      */
     class BinaryData {
-        ReadOnlyMemory<uint8_t> bytes_;
-        std::string             mediaType_;
+        std::vector<uint8_t> bytes_;
+        std::string          mediaType_;
 
     public:
         // -----------------------------------------------------------------------
@@ -33,7 +42,7 @@ namespace System {
 
         /** @brief Returns an empty BinaryData instance. */
         [[nodiscard]] static const BinaryData& Empty() {
-            static BinaryData instance{ReadOnlyMemory<uint8_t>{}};
+            static BinaryData instance{std::vector<uint8_t>{}};
             return instance;
         }
 
@@ -42,37 +51,37 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided byte vector.
-         * @param data The data to wrap (copied into an internal vector).
+         * @brief Creates a BinaryData instance by copying the provided byte vector.
+         * @param data The data to copy.
          */
         explicit BinaryData(const std::vector<uint8_t>& data)
-            : bytes_(data.data(), static_cast<int>(data.size())) {}
-
-        /**
-         * @brief Creates a BinaryData instance by wrapping the provided byte vector
-         * and sets the media type.
-         * @param data      The data to wrap.
-         * @param mediaType MIME type string (e.g. "application/octet-stream").
-         */
-        BinaryData(const std::vector<uint8_t>& data, std::string mediaType)
-            : bytes_(data.data(), static_cast<int>(data.size())),
-              mediaType_(std::move(mediaType)) {}
-
-        /**
-         * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory.
-         * @param data Byte data to wrap.
-         */
-        explicit BinaryData(ReadOnlyMemory<uint8_t> data)
             : bytes_(data) {}
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory
+         * @brief Creates a BinaryData instance by copying the provided byte vector
          * and sets the media type.
-         * @param data      Byte data to wrap.
+         * @param data      The data to copy.
+         * @param mediaType MIME type string (e.g. "application/octet-stream").
+         */
+        BinaryData(const std::vector<uint8_t>& data, std::string mediaType)
+            : bytes_(data), mediaType_(std::move(mediaType)) {}
+
+        /**
+         * @brief Creates a BinaryData instance by copying the bytes from the provided ReadOnlyMemory.
+         * @param data Byte data to copy.
+         */
+        explicit BinaryData(ReadOnlyMemory<uint8_t> data)
+            : bytes_(data.getPointer(), data.getPointer() + data.getLengthProperty()) {}
+
+        /**
+         * @brief Creates a BinaryData instance by copying the bytes from the provided ReadOnlyMemory
+         * and sets the media type.
+         * @param data      Byte data to copy.
          * @param mediaType MIME type string.
          */
         BinaryData(ReadOnlyMemory<uint8_t> data, std::string mediaType)
-            : bytes_(data), mediaType_(std::move(mediaType)) {}
+            : bytes_(data.getPointer(), data.getPointer() + data.getLengthProperty()),
+              mediaType_(std::move(mediaType)) {}
 
         /**
          * @brief Creates a BinaryData instance from a string using UTF-8 encoding.
@@ -80,7 +89,7 @@ namespace System {
          */
         explicit BinaryData(const std::string& data)
             : bytes_(reinterpret_cast<const uint8_t*>(data.data()),
-                     static_cast<int>(data.size())) {}
+                     reinterpret_cast<const uint8_t*>(data.data()) + data.size()) {}
 
         /**
          * @brief Creates a BinaryData instance from a string using UTF-8 encoding
@@ -90,7 +99,7 @@ namespace System {
          */
         BinaryData(const std::string& data, std::string mediaType)
             : bytes_(reinterpret_cast<const uint8_t*>(data.data()),
-                     static_cast<int>(data.size())),
+                     reinterpret_cast<const uint8_t*>(data.data()) + data.size()),
               mediaType_(std::move(mediaType)) {}
 
         // -----------------------------------------------------------------------
@@ -102,7 +111,7 @@ namespace System {
          * @return Byte count.
          */
         [[nodiscard]] int getLengthProperty() const noexcept {
-            return bytes_.getLengthProperty();
+            return static_cast<int>(bytes_.size());
         }
 
         /**
@@ -110,7 +119,7 @@ namespace System {
          * @return true if the length is zero.
          */
         [[nodiscard]] bool getIsEmptyProperty() const noexcept {
-            return bytes_.getIsEmptyProperty();
+            return bytes_.empty();
         }
 
         /**
@@ -127,7 +136,7 @@ namespace System {
 
         /**
          * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory.
-         * @param data Byte data to wrap.
+         * @param data Byte data to copy.
          * @return New BinaryData instance.
          */
         [[nodiscard]] static BinaryData FromBytes(ReadOnlyMemory<uint8_t> data) {
@@ -137,7 +146,7 @@ namespace System {
         /**
          * @brief Creates a BinaryData instance by wrapping the provided ReadOnlyMemory
          * and sets the media type.
-         * @param data      Byte data to wrap.
+         * @param data      Byte data to copy.
          * @param mediaType MIME type string.
          * @return New BinaryData instance.
          */
@@ -147,8 +156,8 @@ namespace System {
         }
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided byte vector.
-         * @param data The array to wrap.
+         * @brief Creates a BinaryData instance by copying the provided byte vector.
+         * @param data The array to copy.
          * @return New BinaryData instance.
          */
         [[nodiscard]] static BinaryData FromBytes(const std::vector<uint8_t>& data) {
@@ -156,9 +165,9 @@ namespace System {
         }
 
         /**
-         * @brief Creates a BinaryData instance by wrapping the provided byte vector
+         * @brief Creates a BinaryData instance by copying the provided byte vector
          * and sets the media type.
-         * @param data      The array to wrap.
+         * @param data      The array to copy.
          * @param mediaType MIME type string.
          * @return New BinaryData instance.
          */
@@ -215,6 +224,36 @@ namespace System {
             return BinaryData(bytes, std::move(mediaType));
         }
 
+        /**
+         * @brief Creates a BinaryData instance by reading all remaining bytes from the stream.
+         * The stream is not disposed by this method.
+         * @param stream The stream to read from.
+         * @return New BinaryData instance containing all bytes read.
+         */
+        [[nodiscard]] static BinaryData FromStream(System::IO::Stream& stream) {
+            return FromStream(stream, "");
+        }
+
+        /**
+         * @brief Creates a BinaryData instance by reading all remaining bytes from the stream
+         * and sets the media type.
+         * The stream is not disposed by this method.
+         * @param stream    The stream to read from.
+         * @param mediaType MIME type string.
+         * @return New BinaryData instance containing all bytes read.
+         */
+        [[nodiscard]] static BinaryData FromStream(System::IO::Stream& stream,
+                                                    std::string mediaType) {
+            std::vector<uint8_t> bytes;
+            std::array<uint8_t, 4096> buf{};
+            SharpRuntime::intcs n;
+            while ((n = stream.Read(buf.data(), 0,
+                                    static_cast<SharpRuntime::intcs>(buf.size()))) > 0) {
+                bytes.insert(bytes.end(), buf.begin(), buf.begin() + n);
+            }
+            return BinaryData(bytes, std::move(mediaType));
+        }
+
         // -----------------------------------------------------------------------
         // Conversion methods
         // -----------------------------------------------------------------------
@@ -224,24 +263,36 @@ namespace System {
          * @return A string decoded from the bytes of this instance.
          */
         [[nodiscard]] std::string ToString() const {
-            return std::string(reinterpret_cast<const char*>(bytes_.getPointer()),
-                               static_cast<std::size_t>(bytes_.getLengthProperty()));
+            return std::string(reinterpret_cast<const char*>(bytes_.data()), bytes_.size());
         }
 
         /**
-         * @brief Converts the BinaryData to a byte vector.
+         * @brief Converts the BinaryData to a byte vector (copy).
          * @return A vector containing a copy of the underlying bytes.
          */
         [[nodiscard]] std::vector<uint8_t> ToArray() const {
-            return bytes_.ToArray();
+            return bytes_;
         }
 
         /**
          * @brief Returns a read-only view over the underlying bytes.
+         *
+         * The returned ReadOnlyMemory is valid only for the lifetime of this BinaryData instance.
          * @return ReadOnlyMemory&lt;uint8_t&gt; over the backing store.
          */
         [[nodiscard]] ReadOnlyMemory<uint8_t> ToMemory() const noexcept {
-            return bytes_;
+            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+        }
+
+        /**
+         * @brief Converts the BinaryData to a read-only MemoryStream over the underlying bytes.
+         *
+         * C++ counterpart of .NET BinaryData.ToStream().
+         * @return A MemoryStream wrapping a copy of the underlying bytes.
+         */
+        [[nodiscard]] System::IO::MemoryStream ToStream() const {
+            return System::IO::MemoryStream(bytes_.data(),
+                                             static_cast<SharpRuntime::intcs>(bytes_.size()));
         }
 
         /**
@@ -259,21 +310,42 @@ namespace System {
          * @return The byte at the specified index.
          */
         [[nodiscard]] uint8_t operator[](int index) const {
-            return bytes_[index];
+            return bytes_[static_cast<std::size_t>(index)];
         }
 
         /**
-         * @brief Determines whether this instance is equal to another BinaryData.
+         * @brief Defines an implicit conversion from BinaryData to ReadOnlyMemory&lt;uint8_t&gt;.
          *
-         * C++ counterpart of .NET BinaryData.Equals(object). Two instances are equal
-         * when they have the same length, the same bytes, and the same media type.
+         * The returned view is valid only for the lifetime of this BinaryData instance.
+         * C++ counterpart of .NET implicit operator ReadOnlyMemory&lt;byte&gt;.
+         */
+        operator ReadOnlyMemory<uint8_t>() const noexcept {
+            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+        }
+
+        /**
+         * @brief Defines an implicit conversion from BinaryData to ReadOnlySpan&lt;uint8_t&gt;.
+         *
+         * The returned view is valid only for the lifetime of this BinaryData instance.
+         * C++ counterpart of .NET implicit operator ReadOnlySpan&lt;byte&gt;.
+         */
+        operator ReadOnlySpan<uint8_t>() const noexcept {
+            return ReadOnlySpan<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+        }
+
+        /**
+         * @brief Determines whether this instance is equal to another BinaryData by value.
+         *
+         * Intentional C++ deviation: .NET BinaryData.Equals uses reference equality
+         * (ReferenceEquals) and is marked [EditorBrowsable(Never)]. In C++ value semantics
+         * are natural, so this compares bytes and media type for content equality.
          * @param other The BinaryData to compare with.
          * @return true if both instances contain the same bytes and media type.
          */
         [[nodiscard]] bool Equals(const BinaryData& other) const {
             if (getLengthProperty() != other.getLengthProperty()) return false;
             if (mediaType_ != other.mediaType_) return false;
-            return ToArray() == other.ToArray();
+            return bytes_ == other.bytes_;
         }
 
         /** @brief Returns true if both instances have the same bytes and media type. */
@@ -283,15 +355,17 @@ namespace System {
         bool operator!=(const BinaryData& other) const { return !Equals(other); }
 
         /**
-         * @brief Returns a hash code for this instance.
+         * @brief Returns a content-based hash code for this instance.
          *
-         * C++ counterpart of .NET BinaryData.GetHashCode().
+         * Intentional C++ deviation: .NET BinaryData.GetHashCode() uses identity hash
+         * (base.GetHashCode(), marked [EditorBrowsable(Never)]). In C++ a content-based
+         * hash is more useful and consistent with the content-based Equals above.
          */
         [[nodiscard]] int GetHashCode() const noexcept {
             std::size_t h = std::hash<int>{}(getLengthProperty());
             h ^= std::hash<std::string>{}(mediaType_) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            if (getLengthProperty() > 0) {
-                h ^= std::hash<uint8_t>{}((*this)[0]) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            if (!bytes_.empty()) {
+                h ^= std::hash<uint8_t>{}(bytes_[0]) + 0x9e3779b9 + (h << 6) + (h >> 2);
             }
             return static_cast<int>(h & 0x7fffffff);
         }

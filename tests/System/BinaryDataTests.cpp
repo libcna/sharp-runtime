@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/BinaryData.hpp"
+#include "System/IO/MemoryStream.hpp"
 
 using System::BinaryData;
 
@@ -44,4 +45,42 @@ TEST(BinaryDataTests, FromBytes_VectorWithMediaType_Stored) {
     auto bd = BinaryData::FromBytes(v, "image/png");
     EXPECT_EQ(bd.getMediaTypeProperty(), "image/png");
     EXPECT_EQ(bd.getLengthProperty(), 3);
+}
+
+TEST(BinaryDataTests, FromStream_ReadsAllBytes) {
+    std::vector<uint8_t> v{10, 20, 30, 40};
+    System::IO::MemoryStream ms(v.data(), static_cast<int>(v.size()));
+    auto bd = BinaryData::FromStream(ms);
+    EXPECT_EQ(bd.getLengthProperty(), 4);
+    EXPECT_EQ(bd[0], 10);
+    EXPECT_EQ(bd[3], 40);
+}
+
+TEST(BinaryDataTests, FromStream_WithMediaType) {
+    std::vector<uint8_t> v{1, 2};
+    System::IO::MemoryStream ms(v.data(), static_cast<int>(v.size()));
+    auto bd = BinaryData::FromStream(ms, "application/octet-stream");
+    EXPECT_EQ(bd.getMediaTypeProperty(), "application/octet-stream");
+    EXPECT_EQ(bd.getLengthProperty(), 2);
+}
+
+TEST(BinaryDataTests, ToStream_CorrectBytes) {
+    auto bd = BinaryData::FromString("hello");
+    auto ms = bd.ToStream();
+    std::vector<uint8_t> buf(5);
+    ms.Read(buf.data(), 0, 5);
+    EXPECT_EQ(buf[0], static_cast<uint8_t>('h'));
+    EXPECT_EQ(buf[4], static_cast<uint8_t>('o'));
+}
+
+TEST(BinaryDataTests, ImplicitConversion_ToReadOnlyMemory) {
+    auto bd = BinaryData::FromString("abc");
+    System::ReadOnlyMemory<uint8_t> rom = bd;
+    EXPECT_EQ(rom.getLengthProperty(), 3);
+}
+
+TEST(BinaryDataTests, ImplicitConversion_ToReadOnlySpan) {
+    auto bd = BinaryData::FromString("xyz");
+    System::ReadOnlySpan<uint8_t> ros = bd;
+    EXPECT_EQ(ros.getLengthProperty(), 3);
 }
