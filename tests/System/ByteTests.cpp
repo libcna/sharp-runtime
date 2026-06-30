@@ -45,6 +45,20 @@ TEST(ByteTests, TryParse_Overflow_ReturnsFalse) {
     bytecs r = 0;
     EXPECT_FALSE(Byte::TryParse("256", r));
 }
+TEST(ByteTests, Parse_TrailingGarbage_Throws) {
+    EXPECT_THROW(Byte::Parse("128abc"), std::invalid_argument);
+}
+TEST(ByteTests, Parse_TrailingWhitespace_Ok) {
+    EXPECT_EQ(Byte::Parse("128 "), bytecs(128));
+}
+TEST(ByteTests, Parse_LeadingWhitespaceAndSign_Ok) {
+    EXPECT_EQ(Byte::Parse("  +42"), bytecs(42));
+}
+TEST(ByteTests, TryParse_TrailingGarbage_ReturnsFalse) {
+    bytecs r = 0;
+    EXPECT_FALSE(Byte::TryParse("12 3", r));
+    EXPECT_EQ(r, bytecs(0));
+}
 
 // ---------------------------------------------------------------------------
 // ToString
@@ -239,4 +253,18 @@ TEST(ByteTests, Log2_128_IsSeven) { EXPECT_EQ(Byte::Log2(bytecs(128)), bytecs(7)
 TEST(ByteTests, Log2_255_IsSeven) { EXPECT_EQ(Byte::Log2(bytecs(255)), bytecs(7)); }
 TEST(ByteTests, Log2_Zero_Throws) {
     EXPECT_THROW(Byte::Log2(bytecs(0)), std::domain_error);
+}
+
+// ---------------------------------------------------------------------------
+// Log10
+// ---------------------------------------------------------------------------
+
+TEST(ByteTests, Log10_One_IsZero) { EXPECT_EQ(Byte::Log10(bytecs(1)), bytecs(0)); }
+TEST(ByteTests, Log10_Nine_IsZero) { EXPECT_EQ(Byte::Log10(bytecs(9)), bytecs(0)); }
+TEST(ByteTests, Log10_Ten_IsOne) { EXPECT_EQ(Byte::Log10(bytecs(10)), bytecs(1)); }
+TEST(ByteTests, Log10_99_IsOne) { EXPECT_EQ(Byte::Log10(bytecs(99)), bytecs(1)); }
+TEST(ByteTests, Log10_100_IsTwo) { EXPECT_EQ(Byte::Log10(bytecs(100)), bytecs(2)); }
+TEST(ByteTests, Log10_255_IsTwo) { EXPECT_EQ(Byte::Log10(bytecs(255)), bytecs(2)); }
+TEST(ByteTests, Log10_Zero_Throws) {
+    EXPECT_THROW(Byte::Log10(bytecs(0)), std::domain_error);
 }

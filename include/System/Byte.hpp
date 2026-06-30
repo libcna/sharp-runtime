@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -218,6 +219,20 @@ namespace System {
             return static_cast<bytecs>(std::bit_width(static_cast<uint32_t>(value)) - 1);
         }
 
+        /**
+         * @brief Returns the base-10 logarithm of @p value, truncated to Byte.
+         *
+         * C++ counterpart of .NET Byte.Log10(byte).
+         * @throws std::domain_error if @p value is 0.
+         */
+        [[nodiscard]] static bytecs Log10(bytecs value) {
+            if (value == 0) throw std::domain_error("Log10 of zero is undefined.");
+            bytecs result = 0;
+            unsigned v = static_cast<unsigned>(value);
+            while (v >= 10) { v /= 10; ++result; }
+            return result;
+        }
+
         // -----------------------------------------------------------------------
         // Parse / TryParse / ToString
         // -----------------------------------------------------------------------
@@ -225,20 +240,30 @@ namespace System {
         /**
          * @brief Parses @p s as a decimal Byte value.
          *
-         * C++ counterpart of .NET Byte.Parse(string).
+         * C++ counterpart of .NET Byte.Parse(string) with NumberStyles.Integer:
+         * leading/trailing whitespace and a leading sign are tolerated, but any
+         * trailing non-whitespace character is rejected.
          * @throws std::invalid_argument on bad format.
          * @throws std::out_of_range if the value is outside [0, 255].
          */
         [[nodiscard]] static bytecs Parse(const std::string& s) {
+            std::size_t pos = 0;
+            int v;
             try {
-                int v = std::stoi(s);
-                if (v < 0 || v > MaxValue)
-                    throw std::out_of_range("Value out of Byte range.");
-                return static_cast<bytecs>(v);
-            } catch (const std::out_of_range&) { throw; }
-              catch (...) {
-                  throw std::invalid_argument("Input string was not in a correct format.");
-              }
+                v = std::stoi(s, &pos);
+            } catch (const std::out_of_range&) {
+                throw std::out_of_range("Value out of Byte range.");
+            } catch (...) {
+                throw std::invalid_argument("Input string was not in a correct format.");
+            }
+            // Reject trailing non-whitespace (.NET NumberStyles.Integer parity).
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw std::invalid_argument("Input string was not in a correct format.");
+            }
+            if (v < 0 || v > MaxValue)
+                throw std::out_of_range("Value out of Byte range.");
+            return static_cast<bytecs>(v);
         }
 
         /**
