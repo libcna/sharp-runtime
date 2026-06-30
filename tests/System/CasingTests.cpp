@@ -10,8 +10,8 @@ TEST(CasingTests, Upper_IsZero) {
     EXPECT_EQ(static_cast<int>(Casing::Upper), 0);
 }
 
-TEST(CasingTests, Lower_IsTwo) {
-    EXPECT_EQ(static_cast<int>(Casing::Lower), 2);
+TEST(CasingTests, Lower_Is0x2020) {
+    EXPECT_EQ(static_cast<unsigned int>(Casing::Lower), 0x2020U);
 }
 
 TEST(CasingTests, ValuesAreDistinct) {
