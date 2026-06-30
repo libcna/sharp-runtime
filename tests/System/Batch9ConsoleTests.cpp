@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ConsoleColor.hpp"
 #include "System/ConsoleKey.hpp"
 #include "System/ConsoleKeyInfo.hpp"
@@ -134,6 +135,13 @@ TEST(ConsoleKeyInfoTests, AllModifiers_Combined) {
     EXPECT_NE(static_cast<int>(mods & ConsoleModifiers::Shift),   0);
     EXPECT_NE(static_cast<int>(mods & ConsoleModifiers::Alt),     0);
     EXPECT_NE(static_cast<int>(mods & ConsoleModifiers::Control), 0);
+}
+
+TEST(ConsoleKeyInfoTests, Constructor_ThrowsOnKeyOutOfRange) {
+    EXPECT_THROW(
+        ConsoleKeyInfo('\0', static_cast<ConsoleKey>(256), false, false, false),
+        System::ArgumentOutOfRangeException
+    );
 }
 
 // ===========================================================================

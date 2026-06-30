@@ -4,6 +4,7 @@
 #pragma once
 #include "System/ConsoleKey.hpp"
 #include "System/ConsoleModifiers.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
@@ -31,6 +32,8 @@ namespace System {
         ConsoleKeyInfo(char keyChar, ConsoleKey key, bool shift, bool alt, bool control)
             : keyChar_(keyChar), key_(key), mods_(ConsoleModifiers::None)
         {
+            if (static_cast<int>(key) < 0 || static_cast<int>(key) > 255)
+                throw ArgumentOutOfRangeException("key", "Console key values must be between 0 and 255 inclusive.");
             if (shift)   mods_ = mods_ | ConsoleModifiers::Shift;
             if (alt)     mods_ = mods_ | ConsoleModifiers::Alt;
             if (control) mods_ = mods_ | ConsoleModifiers::Control;
