@@ -18,6 +18,9 @@
 
 namespace System {
 
+    using SharpRuntime::ushortcs;
+    using SharpRuntime::sbytecs;
+
     namespace {
         intcs parseIntBase(const std::string& value, int base) {
             if (value.empty()) throw FormatException("Input string was not in a correct format.");
@@ -187,6 +190,20 @@ namespace System {
             result.push_back(static_cast<bytecs>((hexVal(s[i]) << 4) | hexVal(s[i + 1])));
         }
         return result;
+    }
+
+    ushortcs Convert::ToUInt16(const std::string& value)
+    {
+        intcs v = ToInt32(value);
+        if (v < 0 || v > 65535) throw OverflowException("Value is out of UInt16 range.");
+        return static_cast<ushortcs>(v);
+    }
+
+    sbytecs Convert::ToSByte(const std::string& value)
+    {
+        intcs v = ToInt32(value);
+        if (v < -128 || v > 127) throw OverflowException("Value is out of SByte range.");
+        return static_cast<sbytecs>(v);
     }
 
     uint32_t Convert::ToUInt32(const std::string& value)

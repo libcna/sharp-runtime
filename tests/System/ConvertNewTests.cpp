@@ -11,6 +11,10 @@ using SharpRuntime::intcs;
 using SharpRuntime::longcs;
 using SharpRuntime::shortcs;
 using SharpRuntime::bytecs;
+using SharpRuntime::ushortcs;
+using SharpRuntime::sbytecs;
+using SharpRuntime::uintcs;
+using SharpRuntime::ulongcs;
 
 // ---------------------------------------------------------------------------
 // ToBoolean — new overloads
@@ -137,3 +141,53 @@ TEST(ConvertTests, ToHexStringUpper_RoundTripWithFromHex) {
     auto back = Convert::FromHexString(hex);
     EXPECT_EQ(original, back);
 }
+
+// ---------------------------------------------------------------------------
+// ToBoolean — uint/ulong/ushort/sbyte overloads
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToBoolean_FromUInt_Zero)    { EXPECT_FALSE(Convert::ToBoolean(uintcs(0))); }
+TEST(ConvertTests, ToBoolean_FromUInt_NonZero) { EXPECT_TRUE(Convert::ToBoolean(uintcs(42))); }
+TEST(ConvertTests, ToBoolean_FromULong_Zero)   { EXPECT_FALSE(Convert::ToBoolean(ulongcs(0))); }
+TEST(ConvertTests, ToBoolean_FromULong_NonZero){ EXPECT_TRUE(Convert::ToBoolean(ulongcs(1))); }
+TEST(ConvertTests, ToBoolean_FromUShort_Zero)  { EXPECT_FALSE(Convert::ToBoolean(ushortcs(0))); }
+TEST(ConvertTests, ToBoolean_FromSByte_NonZero){ EXPECT_TRUE(Convert::ToBoolean(sbytecs(-1))); }
+
+// ---------------------------------------------------------------------------
+// ToUInt16
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToUInt16_Identity)           { EXPECT_EQ(Convert::ToUInt16(ushortcs(1000)), 1000u); }
+TEST(ConvertTests, ToUInt16_FromByte)           { EXPECT_EQ(Convert::ToUInt16(bytecs(255)), 255u); }
+TEST(ConvertTests, ToUInt16_FromBool_True)      { EXPECT_EQ(Convert::ToUInt16(true), 1u); }
+TEST(ConvertTests, ToUInt16_FromBool_False)     { EXPECT_EQ(Convert::ToUInt16(false), 0u); }
+TEST(ConvertTests, ToUInt16_FromInt_Valid)      { EXPECT_EQ(Convert::ToUInt16(intcs(65535)), ushortcs(65535)); }
+TEST(ConvertTests, ToUInt16_FromInt_Overflow)   { EXPECT_THROW(Convert::ToUInt16(intcs(65536)), System::OverflowException); }
+TEST(ConvertTests, ToUInt16_FromInt_Negative)   { EXPECT_THROW(Convert::ToUInt16(intcs(-1)),  System::OverflowException); }
+TEST(ConvertTests, ToUInt16_FromShort_Valid)    { EXPECT_EQ(Convert::ToUInt16(shortcs(100)), 100u); }
+TEST(ConvertTests, ToUInt16_FromShort_Negative) { EXPECT_THROW(Convert::ToUInt16(shortcs(-1)), System::OverflowException); }
+TEST(ConvertTests, ToUInt16_FromLong_Valid)     { EXPECT_EQ(Convert::ToUInt16(longcs(0)), 0u); }
+TEST(ConvertTests, ToUInt16_FromLong_Overflow)  { EXPECT_THROW(Convert::ToUInt16(longcs(70000)), System::OverflowException); }
+TEST(ConvertTests, ToUInt16_FromDouble_Valid)   { EXPECT_EQ(Convert::ToUInt16(1.9), ushortcs(1)); }
+TEST(ConvertTests, ToUInt16_FromDouble_Overflow){ EXPECT_THROW(Convert::ToUInt16(-1.0), System::OverflowException); }
+TEST(ConvertTests, ToUInt16_FromString_Valid)   { EXPECT_EQ(Convert::ToUInt16(std::string("1000")), 1000u); }
+TEST(ConvertTests, ToUInt16_FromString_Overflow){ EXPECT_THROW(Convert::ToUInt16(std::string("65536")), System::OverflowException); }
+
+// ---------------------------------------------------------------------------
+// ToSByte
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToSByte_Identity)            { EXPECT_EQ(Convert::ToSByte(sbytecs(-5)), sbytecs(-5)); }
+TEST(ConvertTests, ToSByte_FromBool_True)       { EXPECT_EQ(Convert::ToSByte(true), sbytecs(1)); }
+TEST(ConvertTests, ToSByte_FromBool_False)      { EXPECT_EQ(Convert::ToSByte(false), sbytecs(0)); }
+TEST(ConvertTests, ToSByte_FromByte_Valid)      { EXPECT_EQ(Convert::ToSByte(bytecs(127)), sbytecs(127)); }
+TEST(ConvertTests, ToSByte_FromByte_Overflow)   { EXPECT_THROW(Convert::ToSByte(bytecs(128)), System::OverflowException); }
+TEST(ConvertTests, ToSByte_FromShort_Valid)     { EXPECT_EQ(Convert::ToSByte(shortcs(-128)), sbytecs(-128)); }
+TEST(ConvertTests, ToSByte_FromShort_Overflow)  { EXPECT_THROW(Convert::ToSByte(shortcs(128)), System::OverflowException); }
+TEST(ConvertTests, ToSByte_FromInt_Valid)       { EXPECT_EQ(Convert::ToSByte(intcs(0)), sbytecs(0)); }
+TEST(ConvertTests, ToSByte_FromInt_Overflow)    { EXPECT_THROW(Convert::ToSByte(intcs(200)), System::OverflowException); }
+TEST(ConvertTests, ToSByte_FromLong_Overflow)   { EXPECT_THROW(Convert::ToSByte(longcs(-200)), System::OverflowException); }
+TEST(ConvertTests, ToSByte_FromDouble_Valid)    { EXPECT_EQ(Convert::ToSByte(-1.0), sbytecs(-1)); }
+TEST(ConvertTests, ToSByte_FromDouble_Overflow) { EXPECT_THROW(Convert::ToSByte(200.0), System::OverflowException); }
+TEST(ConvertTests, ToSByte_FromString_Valid)    { EXPECT_EQ(Convert::ToSByte(std::string("-1")), sbytecs(-1)); }
+TEST(ConvertTests, ToSByte_FromString_Overflow) { EXPECT_THROW(Convert::ToSByte(std::string("200")), System::OverflowException); }

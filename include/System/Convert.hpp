@@ -20,6 +20,10 @@ namespace System {
     using SharpRuntime::shortcs;
     using SharpRuntime::bytecs;
     using SharpRuntime::Single;
+    using SharpRuntime::sbytecs;
+    using SharpRuntime::ushortcs;
+    using SharpRuntime::uintcs;
+    using SharpRuntime::ulongcs;
 
     /**
      * @brief Converts a base data type to another base data type.
@@ -50,6 +54,14 @@ namespace System {
         [[nodiscard]] static bool ToBoolean(double value)        { return value != 0.0; }
         /** @brief Converts a float to Boolean (non-zero → true). */
         [[nodiscard]] static bool ToBoolean(float value)         { return value != 0.0f; }
+        /** @brief Converts an unsigned 32-bit integer to Boolean (non-zero → true). */
+        [[nodiscard]] static bool ToBoolean(uintcs value)        { return value != 0u; }
+        /** @brief Converts an unsigned 64-bit integer to Boolean (non-zero → true). */
+        [[nodiscard]] static bool ToBoolean(ulongcs value)       { return value != 0ull; }
+        /** @brief Converts an unsigned 16-bit integer to Boolean (non-zero → true). */
+        [[nodiscard]] static bool ToBoolean(ushortcs value)      { return value != 0; }
+        /** @brief Converts a signed byte to Boolean (non-zero → true). */
+        [[nodiscard]] static bool ToBoolean(sbytecs value)       { return value != 0; }
         /**
          * @brief Converts a string to Boolean.
          *
@@ -368,6 +380,137 @@ namespace System {
          * @throws FormatException if the string is not a valid unsigned integer.
          */
         [[nodiscard]] static uint64_t ToUInt64(const std::string& value);
+
+        // ===================================================================
+        // ToUInt16
+        // ===================================================================
+
+        /** @brief Returns the same unsigned 16-bit integer. */
+        [[nodiscard]] static ushortcs ToUInt16(ushortcs value)  { return value; }
+        /** @brief Converts a byte to unsigned 16-bit integer. */
+        [[nodiscard]] static ushortcs ToUInt16(bytecs value)    { return static_cast<ushortcs>(value); }
+        /** @brief Converts a Boolean to unsigned 16-bit integer (true → 1, false → 0). */
+        [[nodiscard]] static ushortcs ToUInt16(bool value)      { return value ? ushortcs(1) : ushortcs(0); }
+        /**
+         * @brief Converts a 32-bit integer to unsigned 16-bit integer.
+         *
+         * @throws OverflowException if outside [0, 65535].
+         */
+        [[nodiscard]] static ushortcs ToUInt16(intcs value)
+        {
+            if (value < 0 || value > 65535)
+                throw OverflowException("Value is out of UInt16 range.");
+            return static_cast<ushortcs>(value);
+        }
+        /**
+         * @brief Converts a 16-bit signed integer to unsigned 16-bit integer.
+         *
+         * @throws OverflowException if negative.
+         */
+        [[nodiscard]] static ushortcs ToUInt16(shortcs value)
+        {
+            if (value < 0)
+                throw OverflowException("Value is out of UInt16 range.");
+            return static_cast<ushortcs>(value);
+        }
+        /**
+         * @brief Converts a 64-bit integer to unsigned 16-bit integer.
+         *
+         * @throws OverflowException if outside [0, 65535].
+         */
+        [[nodiscard]] static ushortcs ToUInt16(longcs value)
+        {
+            if (value < 0 || value > 65535)
+                throw OverflowException("Value is out of UInt16 range.");
+            return static_cast<ushortcs>(value);
+        }
+        /**
+         * @brief Converts a double to unsigned 16-bit integer (truncates).
+         *
+         * @throws OverflowException if outside [0, 65535].
+         */
+        [[nodiscard]] static ushortcs ToUInt16(double value)
+        {
+            if (value < 0.0 || value > 65535.0)
+                throw OverflowException("Value is out of UInt16 range.");
+            return static_cast<ushortcs>(value);
+        }
+        /**
+         * @brief Converts a string to unsigned 16-bit integer.
+         *
+         * @throws OverflowException if outside [0, 65535].
+         */
+        [[nodiscard]] static ushortcs ToUInt16(const std::string& value);
+
+        // ===================================================================
+        // ToSByte
+        // ===================================================================
+
+        /** @brief Returns the same signed byte. */
+        [[nodiscard]] static sbytecs ToSByte(sbytecs value)  { return value; }
+        /** @brief Converts a Boolean to signed byte (true → 1, false → 0). */
+        [[nodiscard]] static sbytecs ToSByte(bool value)     { return value ? sbytecs(1) : sbytecs(0); }
+        /**
+         * @brief Converts a byte to signed byte.
+         *
+         * @throws OverflowException if greater than 127.
+         */
+        [[nodiscard]] static sbytecs ToSByte(bytecs value)
+        {
+            if (value > 127u)
+                throw OverflowException("Value is out of SByte range.");
+            return static_cast<sbytecs>(value);
+        }
+        /**
+         * @brief Converts a 16-bit integer to signed byte.
+         *
+         * @throws OverflowException if outside [-128, 127].
+         */
+        [[nodiscard]] static sbytecs ToSByte(shortcs value)
+        {
+            if (value < -128 || value > 127)
+                throw OverflowException("Value is out of SByte range.");
+            return static_cast<sbytecs>(value);
+        }
+        /**
+         * @brief Converts a 32-bit integer to signed byte.
+         *
+         * @throws OverflowException if outside [-128, 127].
+         */
+        [[nodiscard]] static sbytecs ToSByte(intcs value)
+        {
+            if (value < -128 || value > 127)
+                throw OverflowException("Value is out of SByte range.");
+            return static_cast<sbytecs>(value);
+        }
+        /**
+         * @brief Converts a 64-bit integer to signed byte.
+         *
+         * @throws OverflowException if outside [-128, 127].
+         */
+        [[nodiscard]] static sbytecs ToSByte(longcs value)
+        {
+            if (value < -128 || value > 127)
+                throw OverflowException("Value is out of SByte range.");
+            return static_cast<sbytecs>(value);
+        }
+        /**
+         * @brief Converts a double to signed byte (truncates).
+         *
+         * @throws OverflowException if outside [-128, 127].
+         */
+        [[nodiscard]] static sbytecs ToSByte(double value)
+        {
+            if (value < -128.0 || value > 127.0)
+                throw OverflowException("Value is out of SByte range.");
+            return static_cast<sbytecs>(value);
+        }
+        /**
+         * @brief Converts a string to signed byte.
+         *
+         * @throws OverflowException if outside [-128, 127].
+         */
+        [[nodiscard]] static sbytecs ToSByte(const std::string& value);
 
         // ===================================================================
         // ToString
