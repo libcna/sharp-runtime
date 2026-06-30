@@ -14,6 +14,7 @@
 #include "System/SByte.hpp"
 #include "System/Boolean.hpp"
 #include "System/Char.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Single.hpp"
 #include "System/Double.hpp"
 
@@ -399,7 +400,7 @@ TEST(CharTests, ConvertToUtf32) {
 }
 
 TEST(CharTests, ConvertToUtf32InvalidThrows) {
-    EXPECT_THROW(Char::ConvertToUtf32(u'a', u'b'), std::invalid_argument);
+    EXPECT_THROW(Char::ConvertToUtf32(u'a', u'b'), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

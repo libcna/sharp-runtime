@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Char.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ArgumentException.hpp"
 
 using System::Char;
 using SharpRuntime::charcs;
@@ -66,10 +68,11 @@ TEST(CharTests2, Equals_DiffChar_False) {
 // ---------------------------------------------------------------------------
 
 TEST(CharTests2, GetHashCode_EqualsCodeUnit) {
-    EXPECT_EQ(Char::GetHashCode(u'A'), static_cast<int>(u'A'));
+    auto v = static_cast<int>(u'A');
+    EXPECT_EQ(Char::GetHashCode(u'A'), v | (v << 16));
 }
 
-TEST(CharTests2, GetHashCode_Zero_IsZero) {
+TEST(CharTests2, GetHashCode_NullChar_IsZero) {
     EXPECT_EQ(Char::GetHashCode(u'\0'), 0);
 }
 
@@ -92,4 +95,241 @@ TEST(CharTests2, TryParse_Empty_ReturnsFalse) {
 TEST(CharTests2, TryParse_MultiChar_ReturnsFalse) {
     charcs r = u'\0';
     EXPECT_FALSE(Char::TryParse("AB", r));
+}
+
+// ---------------------------------------------------------------------------
+// IsBetween
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, IsBetween_InRange_True) {
+    EXPECT_TRUE(Char::IsBetween(u'C', u'A', u'Z'));
+    EXPECT_TRUE(Char::IsBetween(u'A', u'A', u'Z'));
+    EXPECT_TRUE(Char::IsBetween(u'Z', u'A', u'Z'));
+}
+
+TEST(CharTests2, IsBetween_OutOfRange_False) {
+    EXPECT_FALSE(Char::IsBetween(u'a', u'A', u'Z'));
+    EXPECT_FALSE(Char::IsBetween(u'0', u'A', u'Z'));
+}
+
+// ---------------------------------------------------------------------------
+// IsControl — new formula: (((uint)c + 1) & ~0x80) <= 0x20
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, IsControl_NUL_True) {
+    EXPECT_TRUE(Char::IsControl(u'\0'));
+}
+
+TEST(CharTests2, IsControl_Tab_True) {
+    EXPECT_TRUE(Char::IsControl(u'\t'));
+}
+
+TEST(CharTests2, IsControl_DEL_True) {
+    EXPECT_TRUE(Char::IsControl(static_cast<charcs>(0x7F)));
+}
+
+TEST(CharTests2, IsControl_Space_False) {
+    EXPECT_FALSE(Char::IsControl(u' '));
+}
+
+TEST(CharTests2, IsControl_Letter_False) {
+    EXPECT_FALSE(Char::IsControl(u'A'));
+}
+
+// ---------------------------------------------------------------------------
+// IsSeparator — tab/newline are NOT separators; space IS
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, IsSeparator_Space_True) {
+    EXPECT_TRUE(Char::IsSeparator(u' '));
+}
+
+TEST(CharTests2, IsSeparator_NoBreakSpace_True) {
+    EXPECT_TRUE(Char::IsSeparator(static_cast<charcs>(0x00A0)));
+}
+
+TEST(CharTests2, IsSeparator_Tab_False) {
+    EXPECT_FALSE(Char::IsSeparator(u'\t'));
+}
+
+TEST(CharTests2, IsSeparator_Newline_False) {
+    EXPECT_FALSE(Char::IsSeparator(u'\n'));
+}
+
+TEST(CharTests2, IsSeparator_Letter_False) {
+    EXPECT_FALSE(Char::IsSeparator(u'A'));
+}
+
+// ---------------------------------------------------------------------------
+// IsNumber — broader than IsDigit
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, IsNumber_Digit_True) {
+    EXPECT_TRUE(Char::IsNumber(u'5'));
+}
+
+TEST(CharTests2, IsNumber_Letter_False) {
+    EXPECT_FALSE(Char::IsNumber(u'A'));
+}
+
+// ---------------------------------------------------------------------------
+// GetNumericValue — returns double
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, GetNumericValue_Digit_ReturnsValue) {
+    EXPECT_DOUBLE_EQ(Char::GetNumericValue(u'7'), 7.0);
+}
+
+TEST(CharTests2, GetNumericValue_NonNumeric_ReturnsNeg1) {
+    EXPECT_DOUBLE_EQ(Char::GetNumericValue(u'A'), -1.0);
+}
+
+TEST(CharTests2, GetNumericValue_Zero_Returns0) {
+    EXPECT_DOUBLE_EQ(Char::GetNumericValue(u'0'), 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// GetUnicodeCategory
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, GetUnicodeCategory_UppercaseLetter) {
+    EXPECT_EQ(Char::GetUnicodeCategory(u'A'),
+              System::Globalization::UnicodeCategory::UppercaseLetter);
+}
+
+TEST(CharTests2, GetUnicodeCategory_LowercaseLetter) {
+    EXPECT_EQ(Char::GetUnicodeCategory(u'z'),
+              System::Globalization::UnicodeCategory::LowercaseLetter);
+}
+
+TEST(CharTests2, GetUnicodeCategory_Digit) {
+    EXPECT_EQ(Char::GetUnicodeCategory(u'3'),
+              System::Globalization::UnicodeCategory::DecimalDigitNumber);
+}
+
+// ---------------------------------------------------------------------------
+// ConvertFromUtf32
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, ConvertFromUtf32_ASCII_SingleByte) {
+    EXPECT_EQ(Char::ConvertFromUtf32(65), "A");
+}
+
+TEST(CharTests2, ConvertFromUtf32_BMP_UTF8) {
+    // U+00E9 (é) → UTF-8 0xC3 0xA9
+    std::string s = Char::ConvertFromUtf32(0x00E9);
+    EXPECT_EQ(s.size(), 2u);
+    EXPECT_EQ(static_cast<unsigned char>(s[0]), 0xC3u);
+    EXPECT_EQ(static_cast<unsigned char>(s[1]), 0xA9u);
+}
+
+TEST(CharTests2, ConvertFromUtf32_Supplementary_FourBytes) {
+    // U+1F600 → UTF-8 F0 9F 98 80
+    std::string s = Char::ConvertFromUtf32(0x1F600);
+    EXPECT_EQ(s.size(), 4u);
+    EXPECT_EQ(static_cast<unsigned char>(s[0]), 0xF0u);
+}
+
+TEST(CharTests2, ConvertFromUtf32_Surrogate_Throws) {
+    EXPECT_THROW(Char::ConvertFromUtf32(0xD800), System::ArgumentOutOfRangeException);
+}
+
+TEST(CharTests2, ConvertFromUtf32_NegativeValue_Throws) {
+    EXPECT_THROW(Char::ConvertFromUtf32(-1), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// ConvertToUtf32(char, char)
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, ConvertToUtf32_ValidPair_CorrectValue) {
+    // U+1F600 = (D83D, DE00)
+    charcs high = static_cast<charcs>(0xD83D);
+    charcs low  = static_cast<charcs>(0xDE00);
+    EXPECT_EQ(Char::ConvertToUtf32(high, low), 0x1F600);
+}
+
+TEST(CharTests2, ConvertToUtf32_InvalidHigh_Throws) {
+    EXPECT_THROW(Char::ConvertToUtf32(u'A', static_cast<charcs>(0xDC00)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(CharTests2, ConvertToUtf32_InvalidLow_Throws) {
+    EXPECT_THROW(Char::ConvertToUtf32(static_cast<charcs>(0xD800), u'A'),
+                 System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// String-indexed overloads
+// ---------------------------------------------------------------------------
+
+TEST(CharTests2, StringIndex_IsDigit_True) {
+    EXPECT_TRUE(Char::IsDigit("abc3xyz", 3));
+}
+
+TEST(CharTests2, StringIndex_IsDigit_False) {
+    EXPECT_FALSE(Char::IsDigit("abc3xyz", 0));
+}
+
+TEST(CharTests2, StringIndex_IsDigit_OutOfRange_Throws) {
+    EXPECT_THROW(Char::IsDigit("abc", 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(CharTests2, StringIndex_IsLetter_True) {
+    EXPECT_TRUE(Char::IsLetter("a1", 0));
+}
+
+TEST(CharTests2, StringIndex_IsLetter_False) {
+    EXPECT_FALSE(Char::IsLetter("a1", 1));
+}
+
+TEST(CharTests2, StringIndex_IsUpper_True) {
+    EXPECT_TRUE(Char::IsUpper("Ab", 0));
+}
+
+TEST(CharTests2, StringIndex_IsUpper_False) {
+    EXPECT_FALSE(Char::IsUpper("Ab", 1));
+}
+
+TEST(CharTests2, StringIndex_IsLower_True) {
+    EXPECT_TRUE(Char::IsLower("Ab", 1));
+}
+
+TEST(CharTests2, StringIndex_IsWhiteSpace_True) {
+    EXPECT_TRUE(Char::IsWhiteSpace("a b", 1));
+}
+
+TEST(CharTests2, StringIndex_IsWhiteSpace_False) {
+    EXPECT_FALSE(Char::IsWhiteSpace("a b", 0));
+}
+
+TEST(CharTests2, StringIndex_IsControl_True) {
+    std::string s = "a\tb";
+    EXPECT_TRUE(Char::IsControl(s, 1));
+}
+
+TEST(CharTests2, StringIndex_IsSeparator_Space_True) {
+    EXPECT_TRUE(Char::IsSeparator("a b", 1));
+}
+
+TEST(CharTests2, StringIndex_IsSeparator_Tab_False) {
+    std::string s = "a\tb";
+    EXPECT_FALSE(Char::IsSeparator(s, 1));
+}
+
+TEST(CharTests2, StringIndex_GetNumericValue_Digit) {
+    EXPECT_DOUBLE_EQ(Char::GetNumericValue("a5b", 1), 5.0);
+}
+
+TEST(CharTests2, StringIndex_GetUnicodeCategory_Letter) {
+    EXPECT_EQ(Char::GetUnicodeCategory("Ab", 0),
+              System::Globalization::UnicodeCategory::UppercaseLetter);
+}
+
+TEST(CharTests2, StringIndex_ConvertToUtf32_BMP) {
+    EXPECT_EQ(Char::ConvertToUtf32("ABC", 1), static_cast<int>(u'B'));
+}
+
+TEST(CharTests2, StringIndex_IsSurrogatePair_False_ForASCII) {
+    EXPECT_FALSE(Char::IsSurrogatePair("AB", 0));
 }
