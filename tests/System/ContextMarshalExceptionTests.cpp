@@ -12,6 +12,11 @@ TEST(ContextMarshalExceptionTests2, DefaultCtor_HasMessage) {
     EXPECT_FALSE(std::string(ex.what()).empty());
 }
 
+TEST(ContextMarshalExceptionTests2, DefaultCtor_MessageMatchesDotNet) {
+    ContextMarshalException ex;
+    EXPECT_EQ(std::string(ex.what()), "Attempted to marshal an object across a context boundary.");
+}
+
 TEST(ContextMarshalExceptionTests2, MessageCtor_StoresMessage) {
     ContextMarshalException ex("bad marshal");
     EXPECT_EQ(std::string(ex.what()), "bad marshal");

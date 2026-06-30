@@ -22,7 +22,7 @@ namespace System {
          * C++ counterpart of .NET ContextMarshalException().
          */
         ContextMarshalException()
-            : SystemException("Cannot marshal an object across a context boundary.") {}
+            : SystemException("Attempted to marshal an object across a context boundary.") {}
 
         /**
          * @brief Initializes a new instance with the specified error message.
