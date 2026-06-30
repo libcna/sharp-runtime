@@ -38,11 +38,18 @@ Then briefly describe what the type does (look **only** in `/rv/tmp/runtime/src/
   - **Yes** → set `outofscope = 1`.
   - **No** → set `outofscope = 0`.
 
-### Step 4 — Save to DB and move to the next iteration
+### Step 4 — Save to DB, commit, and move to the next iteration
 
 ```sql
 UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') WHERE id = ...;
 ```
+
+After porting a type (status set to `ported`), you **must** create a new git
+commit containing the changes for that port — the header, any `.cpp` body, and
+the tests. Commit only the files related to this port; do not bundle unrelated
+changes. Use `git -c commit.gpgsign=false commit` (GPG signing times out in this
+environment). Push only to `develop`, and only when the user asks.
+
 
 ## Allowed `status` values
 
