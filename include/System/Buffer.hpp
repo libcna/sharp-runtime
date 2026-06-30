@@ -35,8 +35,8 @@ namespace System {
          * (at @p dstOffset).
          *
          * C++ counterpart of .NET Buffer.BlockCopy(Array, int, Array, int, int).
-         * Uses std::memcpy; behaviour is undefined for overlapping regions —
-         * use MemoryCopy when overlap is possible.
+         * Uses std::memmove, so overlapping source and destination regions are
+         * safe — matching .NET, whose BlockCopy copies via Memmove.
          *
          * @param src       Pointer to the source region.
          * @param srcOffset Byte offset into @p src.
@@ -46,9 +46,9 @@ namespace System {
          */
         static void BlockCopy(const void* src, intcs srcOffset,
                                void* dst, intcs dstOffset, intcs count) {
-            std::memcpy(static_cast<bytecs*>(dst) + dstOffset,
-                        static_cast<const bytecs*>(src) + srcOffset,
-                        static_cast<size_t>(count));
+            std::memmove(static_cast<bytecs*>(dst) + dstOffset,
+                         static_cast<const bytecs*>(src) + srcOffset,
+                         static_cast<size_t>(count));
         }
 
         /**
@@ -65,9 +65,9 @@ namespace System {
          */
         static void BlockCopy(const std::vector<bytecs>& src, intcs srcOffset,
                                std::vector<bytecs>& dst, intcs dstOffset, intcs count) {
-            std::memcpy(dst.data() + dstOffset,
-                        src.data() + srcOffset,
-                        static_cast<size_t>(count));
+            std::memmove(dst.data() + dstOffset,
+                         src.data() + srcOffset,
+                         static_cast<size_t>(count));
         }
 
         /**
@@ -88,9 +88,9 @@ namespace System {
         template<typename T>
         static void BlockCopy(const std::vector<T>& src, intcs srcOffset,
                                std::vector<T>& dst, intcs dstOffset, intcs count) {
-            std::memcpy(reinterpret_cast<bytecs*>(dst.data()) + dstOffset,
-                        reinterpret_cast<const bytecs*>(src.data()) + srcOffset,
-                        static_cast<size_t>(count));
+            std::memmove(reinterpret_cast<bytecs*>(dst.data()) + dstOffset,
+                         reinterpret_cast<const bytecs*>(src.data()) + srcOffset,
+                         static_cast<size_t>(count));
         }
 
         // -----------------------------------------------------------------------

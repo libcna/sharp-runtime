@@ -161,6 +161,17 @@ TEST(BufferTests, BlockCopy_RawPointer_ZeroCount_NoOp) {
     EXPECT_EQ(dst[0], 0x00);
 }
 
+TEST(BufferTests, BlockCopy_RawPointer_OverlapSafe) {
+    // .NET Buffer.BlockCopy copies via Memmove, so overlapping regions are safe.
+    uint8_t buf[6] = {1, 2, 3, 4, 5, 6};
+    // Shift bytes [0..3] one position to the right within the same buffer.
+    Buffer::BlockCopy(buf, 0, buf, 1, 4);
+    EXPECT_EQ(buf[1], 1);
+    EXPECT_EQ(buf[2], 2);
+    EXPECT_EQ(buf[3], 3);
+    EXPECT_EQ(buf[4], 4);
+}
+
 // ---------------------------------------------------------------------------
 // ByteLength — extra types
 // ---------------------------------------------------------------------------
