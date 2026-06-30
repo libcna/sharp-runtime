@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/CharEnumerator.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::CharEnumerator;
 
@@ -29,14 +30,14 @@ TEST(CharEnumeratorTests, Current_AfterFirstMoveNext_IsFirstChar) {
 
 TEST(CharEnumeratorTests, Current_BeforeMoveNext_Throws) {
     CharEnumerator e("Hi");
-    EXPECT_THROW(e.getCurrentProperty(), std::invalid_argument);
+    EXPECT_THROW(e.getCurrentProperty(), System::InvalidOperationException);
 }
 
 TEST(CharEnumeratorTests, Current_AfterEnd_Throws) {
     CharEnumerator e("X");
     e.MoveNext();
     e.MoveNext();
-    EXPECT_THROW(e.getCurrentProperty(), std::invalid_argument);
+    EXPECT_THROW(e.getCurrentProperty(), System::InvalidOperationException);
 }
 
 TEST(CharEnumeratorTests, Iterates_AllChars) {

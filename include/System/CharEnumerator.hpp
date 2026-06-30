@@ -4,6 +4,7 @@
 #pragma once
 #include <stdexcept>
 #include <string>
+#include "System/InvalidOperationException.hpp"
 
 namespace System {
 
@@ -56,7 +57,7 @@ namespace System {
          */
         [[nodiscard]] char getCurrentProperty() const {
             if (index_ < 0 || index_ >= static_cast<int>(str_.size()))
-                throw std::invalid_argument(
+                throw InvalidOperationException(
                     "Enumeration has either not started or has already finished.");
             return str_[static_cast<std::string::size_type>(index_)];
         }
