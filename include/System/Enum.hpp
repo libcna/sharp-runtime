@@ -59,8 +59,8 @@ namespace System {
          * @return The value cast to int.
          */
         template<typename TEnum>
-        [[nodiscard]] static int ToInt32(TEnum value) noexcept {
-            return static_cast<int>(value);
+        [[nodiscard]] static SharpRuntime::intcs ToInt32(TEnum value) noexcept {
+            return static_cast<SharpRuntime::intcs>(value);
         }
 
         /**
@@ -73,7 +73,7 @@ namespace System {
          * @return The enum constant with the specified underlying value.
          */
         template<typename TEnum>
-        [[nodiscard]] static TEnum ToObject(int value) noexcept {
+        [[nodiscard]] static TEnum ToObject(SharpRuntime::intcs value) noexcept {
             return static_cast<TEnum>(value);
         }
 
