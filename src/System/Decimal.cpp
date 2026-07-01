@@ -131,6 +131,22 @@ Decimal::Decimal(double v) {
     normalize();
 }
 
+Decimal::Decimal(float v) : Decimal(double(v)) {}
+
+Decimal::Decimal(uintcs v)
+    : mantissa_(v), scale_(0), negative_(false) {}
+
+Decimal::Decimal(ulongcs v)
+    : mantissa_(v), scale_(0), negative_(false) {}
+
+Decimal::Decimal(intcs lo, intcs mid, intcs hi, bool isNegative, bytecs scale) {
+    if (scale > 28)
+        throw std::out_of_range("Decimal scale must be in range 0-28.");
+    mantissa_ = (u128(uint32_t(hi)) << 64) | (u128(uint32_t(mid)) << 32) | u128(uint32_t(lo));
+    scale_    = scale;
+    negative_ = isNegative && mantissa_ != 0;
+}
+
 // ---------------------------------------------------------------------------
 // Static constants
 // ---------------------------------------------------------------------------
@@ -152,16 +168,105 @@ double Decimal::ToDouble() const {
 
 float     Decimal::ToSingle() const { return float(ToDouble()); }
 
-int Decimal::ToInt32() const {
+intcs Decimal::ToInt32() const {
     Decimal t = Truncate(*this);
-    int v = (int)(uint32_t)(t.mantissa_);
-    return t.negative_ ? -v : v;
+    if (t.mantissa_ > u128(UINT32_MAX))
+        throw std::overflow_error("Value was either too large or too small for an Int32.");
+    uint32_t mag = uint32_t(t.mantissa_);
+    int64_t v = t.negative_ ? -int64_t(mag) : int64_t(mag);
+    if (v < INT32_MIN || v > INT32_MAX)
+        throw std::overflow_error("Value was either too large or too small for an Int32.");
+    return intcs(v);
 }
 
-long long Decimal::ToInt64() const {
+longcs Decimal::ToInt64() const {
     Decimal t = Truncate(*this);
-    long long v = (long long)(uint64_t)(t.mantissa_);
-    return t.negative_ ? -v : v;
+    if (t.mantissa_ > u128(UINT64_MAX))
+        throw std::overflow_error("Value was either too large or too small for an Int64.");
+    uint64_t mag = uint64_t(t.mantissa_);
+    if (t.negative_) {
+        if (mag > (uint64_t(1) << 63))
+            throw std::overflow_error("Value was either too large or too small for an Int64.");
+        return mag == (uint64_t(1) << 63) ? INT64_MIN : -static_cast<longcs>(mag);
+    }
+    if (mag > uint64_t(INT64_MAX))
+        throw std::overflow_error("Value was either too large or too small for an Int64.");
+    return static_cast<longcs>(mag);
+}
+
+uintcs Decimal::ToUInt32() const {
+    Decimal t = Truncate(*this);
+    if (t.mantissa_ > u128(UINT32_MAX))
+        throw std::overflow_error("Value was either too large or too small for a UInt32.");
+    uint32_t mag = uint32_t(t.mantissa_);
+    if (t.negative_ && mag != 0)
+        throw std::overflow_error("Value was either too large or too small for a UInt32.");
+    return mag;
+}
+
+ulongcs Decimal::ToUInt64() const {
+    Decimal t = Truncate(*this);
+    if (t.mantissa_ > u128(UINT64_MAX))
+        throw std::overflow_error("Value was either too large or too small for a UInt64.");
+    uint64_t mag = uint64_t(t.mantissa_);
+    if (t.negative_ && mag != 0)
+        throw std::overflow_error("Value was either too large or too small for a UInt64.");
+    return mag;
+}
+
+bytecs Decimal::ToByte(const Decimal& value) {
+    uintcs temp;
+    try {
+        temp = value.ToUInt32();
+    } catch (const std::overflow_error&) {
+        throw std::overflow_error("Value was either too large or too small for an unsigned byte.");
+    }
+    if (temp != bytecs(temp))
+        throw std::overflow_error("Value was either too large or too small for an unsigned byte.");
+    return bytecs(temp);
+}
+
+sbytecs Decimal::ToSByte(const Decimal& value) {
+    intcs temp;
+    try {
+        temp = value.ToInt32();
+    } catch (const std::overflow_error&) {
+        throw std::overflow_error("Value was either too large or too small for a signed byte.");
+    }
+    if (temp != sbytecs(temp))
+        throw std::overflow_error("Value was either too large or too small for a signed byte.");
+    return sbytecs(temp);
+}
+
+shortcs Decimal::ToInt16(const Decimal& value) {
+    intcs temp;
+    try {
+        temp = value.ToInt32();
+    } catch (const std::overflow_error&) {
+        throw std::overflow_error("Value was either too large or too small for an Int16.");
+    }
+    if (temp != shortcs(temp))
+        throw std::overflow_error("Value was either too large or too small for an Int16.");
+    return shortcs(temp);
+}
+
+ushortcs Decimal::ToUInt16(const Decimal& value) {
+    uintcs temp;
+    try {
+        temp = value.ToUInt32();
+    } catch (const std::overflow_error&) {
+        throw std::overflow_error("Value was either too large or too small for a UInt16.");
+    }
+    if (temp != ushortcs(temp))
+        throw std::overflow_error("Value was either too large or too small for a UInt16.");
+    return ushortcs(temp);
+}
+
+void Decimal::GetBits(const Decimal& d, intcs& lo, intcs& mid, intcs& hi, intcs& flags) {
+    lo  = intcs(uint32_t(d.mantissa_));
+    mid = intcs(uint32_t(d.mantissa_ >> 32));
+    hi  = intcs(uint32_t(d.mantissa_ >> 64));
+    flags = intcs((uint32_t(d.scale_) << 16) | (d.negative_ ? 0x80000000u : 0u));
 }
 
 // ---------------------------------------------------------------------------
@@ -345,16 +450,46 @@ Decimal Decimal::Ceiling(const Decimal& d) {
     return t;
 }
 
-Decimal Decimal::Round(const Decimal& d, int decimals) {
+Decimal Decimal::Round(const Decimal& d, int decimals, MidpointRounding mode) {
     if (decimals < 0 || decimals > 28)
         throw std::out_of_range("decimals must be in range 0-28.");
     if (d.scale_ <= uint8_t(decimals)) return d;
-    u128 m = d.mantissa_; uint8_t s = d.scale_;
-    while (s > uint8_t(decimals)) {
-        uint32_t rem = uint32_t(m % 10);
-        m /= 10; if (rem >= 5) ++m; --s;
+
+    int dropCount = int(d.scale_) - decimals;
+    u128 divisor = 1;
+    for (int i = 0; i < dropCount; ++i) divisor *= 10;
+
+    u128 m = d.mantissa_;
+    u128 quotient  = m / divisor;
+    u128 remainder = m % divisor;
+    u128 halfDivisor = divisor / 2;
+
+    bool roundUp;
+    switch (mode) {
+        case MidpointRounding::ToEven:
+            if (remainder > halfDivisor) roundUp = true;
+            else if (remainder < halfDivisor) roundUp = false;
+            else roundUp = (quotient % 2) != 0;
+            break;
+        case MidpointRounding::AwayFromZero:
+            roundUp = remainder >= halfDivisor;
+            break;
+        case MidpointRounding::ToZero:
+            roundUp = false;
+            break;
+        case MidpointRounding::ToNegativeInfinity:
+            roundUp = d.negative_ && remainder != 0;
+            break;
+        case MidpointRounding::ToPositiveInfinity:
+            roundUp = !d.negative_ && remainder != 0;
+            break;
+        default:
+            roundUp = false;
+            break;
     }
-    return Decimal(m, uint8_t(decimals), d.negative_ && m != 0);
+    if (roundUp) ++quotient;
+
+    return Decimal(quotient, uint8_t(decimals), d.negative_ && quotient != 0);
 }
 
 } // namespace System

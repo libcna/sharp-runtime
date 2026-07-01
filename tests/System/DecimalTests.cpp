@@ -260,7 +260,10 @@ TEST(DecimalTests, Ceiling) {
 TEST(DecimalTests, Round) {
     EXPECT_EQ(Decimal::Round(Decimal::Parse("3.456"), 2), Decimal::Parse("3.46"));
     EXPECT_EQ(Decimal::Round(Decimal::Parse("3.454"), 2), Decimal::Parse("3.45"));
-    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.5"),   0), Decimal(3));
+    // .NET's default Round(decimal, int) uses MidpointRounding.ToEven (banker's rounding):
+    // 2.5 rounds to 2 (nearest even), not 3.
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("2.5"),   0), Decimal(2));
+    EXPECT_EQ(Decimal::Round(Decimal::Parse("3.5"),   0), Decimal(4));
     EXPECT_EQ(Decimal::Round(Decimal::Parse("2.4"),   0), Decimal(2));
 }
 
