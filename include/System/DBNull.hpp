@@ -57,7 +57,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] bool ToBoolean() const override {
-            throw InvalidCastException("Cannot convert DBNull to Boolean.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -67,7 +67,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] char ToChar() const override {
-            throw InvalidCastException("Cannot convert DBNull to Char.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -77,7 +77,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] int8_t ToSByte() const override {
-            throw InvalidCastException("Cannot convert DBNull to SByte.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -87,7 +87,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] uint8_t ToByte() const override {
-            throw InvalidCastException("Cannot convert DBNull to Byte.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -97,7 +97,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] int16_t ToInt16() const override {
-            throw InvalidCastException("Cannot convert DBNull to Int16.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -107,7 +107,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] uint16_t ToUInt16() const override {
-            throw InvalidCastException("Cannot convert DBNull to UInt16.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -117,7 +117,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] int32_t ToInt32() const override {
-            throw InvalidCastException("Cannot convert DBNull to Int32.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -127,7 +127,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] uint32_t ToUInt32() const override {
-            throw InvalidCastException("Cannot convert DBNull to UInt32.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -137,7 +137,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] int64_t ToInt64() const override {
-            throw InvalidCastException("Cannot convert DBNull to Int64.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -147,7 +147,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] uint64_t ToUInt64() const override {
-            throw InvalidCastException("Cannot convert DBNull to UInt64.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -157,7 +157,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] float ToSingle() const override {
-            throw InvalidCastException("Cannot convert DBNull to Single.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         /**
@@ -167,7 +167,7 @@ namespace System {
          * @throws InvalidCastException always.
          */
         [[nodiscard]] double ToDouble() const override {
-            throw InvalidCastException("Cannot convert DBNull to Double.");
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
         // -----------------------------------------------------------------------
