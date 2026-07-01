@@ -13,9 +13,9 @@ namespace System {
     enum class EnvironmentVariableTarget {
         /** @brief The environment variable is stored or retrieved from the process environment block. */
         Process = 0,
-        /** @brief The environment variable is stored or retrieved from the HKEY_CURRENT_USER registry key (Windows only; falls back to Process on other platforms). */
+        /** @brief The environment variable is stored or retrieved from the HKEY_CURRENT_USER registry key (Windows only; validated but otherwise a no-op on other platforms, matching .NET). */
         User    = 1,
-        /** @brief The environment variable is stored or retrieved from the HKEY_LOCAL_MACHINE registry key (Windows only; falls back to Process on other platforms). */
+        /** @brief The environment variable is stored or retrieved from the HKEY_LOCAL_MACHINE registry key (Windows only; validated but otherwise a no-op on other platforms, matching .NET). */
         Machine = 2,
     };
 
