@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <algorithm>
 #include <gtest/gtest.h>
 #include "System/Environment.hpp"
 #include "System/Version.hpp"
@@ -53,18 +54,18 @@ TEST(EnvironmentTests, ProcessorCount_AtLeastOne) {
 // ---------------------------------------------------------------------------
 
 TEST(EnvironmentTests, Is64BitProcess_ReturnsBool) {
-    bool v = Environment::Is64BitProcess();
+    bool v = Environment::Is64BitProcess;
     (void)v;
 }
 
 TEST(EnvironmentTests, Is64BitOperatingSystem_ReturnsBool) {
-    bool v = Environment::Is64BitOperatingSystem();
+    bool v = Environment::Is64BitOperatingSystem;
     (void)v;
 }
 
 TEST(EnvironmentTests, Is64BitOS_EqualsIs64BitProcess) {
     // This implementation delegates OS check to process check
-    EXPECT_EQ(Environment::Is64BitOperatingSystem(), Environment::Is64BitProcess());
+    EXPECT_EQ(Environment::Is64BitOperatingSystem, Environment::Is64BitProcess);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,4 +511,98 @@ TEST(EnvironmentTests, Version_MajorAtLeastOne) {
 TEST(EnvironmentTests, Version_MinorNonNegative) {
     System::Version v = Environment::getVersionProperty();
     EXPECT_GE(v.Minor, 0);
+}
+
+// ---------------------------------------------------------------------------
+// EnvironmentVariableTarget — User/Machine are no-ops (matches .NET on non-Windows)
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetEnvironmentVariable_UserTarget_ReturnsEmpty) {
+    Environment::SetEnvironmentVariable("SHARP_TARGET_NOOP_VAR", "process-value");
+    EXPECT_TRUE(Environment::GetEnvironmentVariable(
+        "SHARP_TARGET_NOOP_VAR", System::EnvironmentVariableTarget::User).empty());
+}
+
+TEST(EnvironmentTests, GetEnvironmentVariable_MachineTarget_ReturnsEmpty) {
+    Environment::SetEnvironmentVariable("SHARP_TARGET_NOOP_VAR2", "process-value");
+    EXPECT_TRUE(Environment::GetEnvironmentVariable(
+        "SHARP_TARGET_NOOP_VAR2", System::EnvironmentVariableTarget::Machine).empty());
+}
+
+TEST(EnvironmentTests, SetEnvironmentVariable_UserTarget_DoesNotAffectProcess) {
+    Environment::SetEnvironmentVariable("SHARP_TARGET_SET_NOOP", "unset", System::EnvironmentVariableTarget::Process);
+    Environment::SetEnvironmentVariable("SHARP_TARGET_SET_NOOP", "user-value",
+                                        System::EnvironmentVariableTarget::User);
+    EXPECT_EQ(Environment::GetEnvironmentVariable("SHARP_TARGET_SET_NOOP"), "unset");
+}
+
+TEST(EnvironmentTests, GetEnvironmentVariables_UserTarget_IsEmpty) {
+    auto vars = Environment::GetEnvironmentVariables(System::EnvironmentVariableTarget::User);
+    EXPECT_TRUE(vars.empty());
+}
+
+TEST(EnvironmentTests, GetEnvironmentVariables_MachineTarget_IsEmpty) {
+    auto vars = Environment::GetEnvironmentVariables(System::EnvironmentVariableTarget::Machine);
+    EXPECT_TRUE(vars.empty());
+}
+
+// ---------------------------------------------------------------------------
+// SetEnvironmentVariable — name validation (matches .NET Environment.ValidateVariable)
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SetEnvironmentVariable_EmptyName_Throws) {
+    EXPECT_THROW(Environment::SetEnvironmentVariable("", "value"), System::ArgumentException);
+}
+
+TEST(EnvironmentTests, SetEnvironmentVariable_NameContainsEquals_Throws) {
+    EXPECT_THROW(Environment::SetEnvironmentVariable("BAD=NAME", "value"), System::ArgumentException);
+}
+
+TEST(EnvironmentTests, SetEnvironmentVariable_NameStartsWithNull_Throws) {
+    std::string name("\0abc", 4);
+    EXPECT_THROW(Environment::SetEnvironmentVariable(name, "value"), System::ArgumentException);
+}
+
+TEST(EnvironmentTests, SetEnvironmentVariable_WithUserTarget_EmptyName_Throws) {
+    EXPECT_THROW(Environment::SetEnvironmentVariable("", "value", System::EnvironmentVariableTarget::User),
+                 System::ArgumentException);
+}
+
+// ---------------------------------------------------------------------------
+// ExitCode
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, ExitCode_DefaultsToZero) {
+    EXPECT_EQ(Environment::getExitCodeProperty(), 0);
+}
+
+TEST(EnvironmentTests, ExitCode_SetGet_RoundTrip) {
+    Environment::setExitCodeProperty(42);
+    EXPECT_EQ(Environment::getExitCodeProperty(), 42);
+    Environment::setExitCodeProperty(0); // restore default for other tests
+}
+
+// ---------------------------------------------------------------------------
+// GetLogicalDrives
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, GetLogicalDrives_NonEmpty) {
+    auto drives = Environment::GetLogicalDrives();
+    EXPECT_FALSE(drives.empty());
+}
+
+#ifndef _WIN32
+TEST(EnvironmentTests, GetLogicalDrives_ContainsRoot) {
+    auto drives = Environment::GetLogicalDrives();
+    EXPECT_NE(std::find(drives.begin(), drives.end(), "/"), drives.end());
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// SystemDirectory
+// ---------------------------------------------------------------------------
+
+TEST(EnvironmentTests, SystemDirectory_MatchesGetFolderPathSystem) {
+    EXPECT_EQ(Environment::getSystemDirectoryProperty(),
+              Environment::GetFolderPath(Environment::SpecialFolder::System));
 }

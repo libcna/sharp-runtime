@@ -10,6 +10,7 @@
 #include <vector>
 #include <cstdlib>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
 #include "System/OperatingSystem.hpp"
 #include "System/TimeSpan.hpp"
@@ -249,10 +250,13 @@ public:
      * @brief Gets the value of an environment variable from the specified target.
      *
      * C++ counterpart of .NET Environment.GetEnvironmentVariable(string, EnvironmentVariableTarget).
-     * Only EnvironmentVariableTarget::Process is supported; other targets fall back to Process.
+     * This port has no Windows-registry (or other persistent-store) backing, so — matching
+     * .NET's own behavior on non-Windows platforms — only EnvironmentVariableTarget::Process
+     * is functional; User/Machine always return an empty string.
      */
     [[nodiscard]] static std::string GetEnvironmentVariable(
-            const std::string& name, EnvironmentVariableTarget) {
+            const std::string& name, EnvironmentVariableTarget target) {
+        if (target != EnvironmentVariableTarget::Process) return std::string();
         return GetEnvironmentVariable(name);
     }
 
@@ -267,10 +271,13 @@ public:
     /**
      * @brief Returns all environment variables from the specified target.
      *
-     * Only EnvironmentVariableTarget::Process is supported; other targets fall back to Process.
+     * This port has no Windows-registry (or other persistent-store) backing, so — matching
+     * .NET's own behavior on non-Windows platforms — only EnvironmentVariableTarget::Process
+     * is functional; User/Machine always return an empty map.
      */
     [[nodiscard]] static std::map<std::string, std::string> GetEnvironmentVariables(
-            EnvironmentVariableTarget) {
+            EnvironmentVariableTarget target) {
+        if (target != EnvironmentVariableTarget::Process) return {};
         return GetEnvironmentVariables();
     }
 
@@ -279,6 +286,8 @@ public:
      *
      * C++ counterpart of .NET Environment.SetEnvironmentVariable(string, string).
      * Pass an empty string for @p value to remove the variable.
+     * @throws ArgumentException if @p name is empty, starts with a null character,
+     *         or contains an '=' character (matches .NET Environment.ValidateVariable).
      */
     static void SetEnvironmentVariable(const std::string& name, const std::string& value);
 
@@ -286,12 +295,14 @@ public:
      * @brief Sets an environment variable for the specified target.
      *
      * C++ counterpart of .NET Environment.SetEnvironmentVariable(string, string, EnvironmentVariableTarget).
-     * Only EnvironmentVariableTarget::Process is supported; other targets delegate to Process.
+     * This port has no Windows-registry (or other persistent-store) backing, so — matching
+     * .NET's own behavior on non-Windows platforms — only EnvironmentVariableTarget::Process
+     * is functional; User/Machine are validated but otherwise no-ops.
+     * @throws ArgumentException if @p name is empty, starts with a null character,
+     *         or contains an '=' character (matches .NET Environment.ValidateVariable).
      */
     static void SetEnvironmentVariable(const std::string& name, const std::string& value,
-                                       EnvironmentVariableTarget) {
-        SetEnvironmentVariable(name, value);
-    }
+                                       EnvironmentVariableTarget target);
 
     /**
      * @brief Replaces each environment variable token (%VAR%) with its value.
@@ -321,6 +332,23 @@ public:
         return GetFolderPath(folder);
     }
 
+    /**
+     * @brief Gets the path to the system directory.
+     *
+     * C++ counterpart of .NET Environment.SystemDirectory.
+     */
+    [[nodiscard]] static std::string getSystemDirectoryProperty() {
+        return GetFolderPath(SpecialFolder::System);
+    }
+
+    /**
+     * @brief Gets the names of the logical drives / mount points on this computer.
+     *
+     * C++ counterpart of .NET Environment.GetLogicalDrives().
+     * POSIX has no drive-letter concept; this port returns the single root mount ("/").
+     */
+    [[nodiscard]] static std::vector<std::string> GetLogicalDrives();
+
     // -------------------------------------------------------------------------
     // Hardware & OS
     // -------------------------------------------------------------------------
@@ -344,14 +372,14 @@ public:
      *
      * C++ counterpart of .NET Environment.Is64BitProcess.
      */
-    [[nodiscard]] static bool Is64BitProcess() { return sizeof(void*) == 8; }
+    static constexpr bool Is64BitProcess = (sizeof(void*) == 8);
 
     /**
      * @brief Gets a value indicating whether the operating system is 64-bit.
      *
      * C++ counterpart of .NET Environment.Is64BitOperatingSystem.
      */
-    [[nodiscard]] static bool Is64BitOperatingSystem() { return Is64BitProcess(); }
+    static constexpr bool Is64BitOperatingSystem = Is64BitProcess;
 
     // -------------------------------------------------------------------------
     // Machine / user identity
@@ -467,11 +495,24 @@ public:
     // -------------------------------------------------------------------------
 
     /**
+     * @brief Gets or sets the exit code to be used when the process terminates.
+     *
+     * C++ counterpart of .NET Environment.ExitCode.
+     * Unlike .NET, this port has no implicit "return from Main" convention, so setting
+     * this property alone does not terminate the process — call Exit() explicitly, or
+     * read getExitCodeProperty() from your own main() before returning it.
+     */
+    [[nodiscard]] static SharpRuntime::intcs getExitCodeProperty() { return s_exitCode; }
+
+    /** @brief Sets the exit code to be used when the process terminates. */
+    static void setExitCodeProperty(SharpRuntime::intcs exitCode) { s_exitCode = exitCode; }
+
+    /**
      * @brief Terminates the current process with the specified exit code.
      *
      * C++ counterpart of .NET Environment.Exit(int).
      */
-    static void Exit(SharpRuntime::intcs exitCode) { std::exit(exitCode); }
+    static void Exit(SharpRuntime::intcs exitCode) { s_exitCode = exitCode; std::exit(exitCode); }
 
     /**
      * @brief Terminates the process immediately without running finalizers.
@@ -489,6 +530,9 @@ public:
      * @param exception The exception that caused the failure.
      */
     static void FailFast(const std::string&, const std::exception&) { std::abort(); }
+
+private:
+    static inline SharpRuntime::intcs s_exitCode = 0;
 };
 
 } // namespace System

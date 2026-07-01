@@ -25,6 +25,7 @@
 #  include <sys/utsname.h>
 #  include <cstdio>
 #endif
+#include <cstring>
 #include <sstream>
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -134,7 +135,16 @@ std::string Environment::getUserNameProperty() {
 #endif
 }
 
+static void validateEnvironmentVariableName(const std::string& name) {
+    ArgumentException::ThrowIfNullOrEmpty(name, "variable");
+    if (name[0] == '\0')
+        throw ArgumentException("The first char in the string is the null character.", "variable");
+    if (name.find('=') != std::string::npos)
+        throw ArgumentException("Environment variable name cannot contain equal character.", "variable");
+}
+
 void Environment::SetEnvironmentVariable(const std::string& name, const std::string& value) {
+    validateEnvironmentVariableName(name);
 #if defined(_WIN32)
     if (value.empty())
         _putenv_s(name.c_str(), "");
@@ -145,6 +155,30 @@ void Environment::SetEnvironmentVariable(const std::string& name, const std::str
         ::unsetenv(name.c_str());
     else
         ::setenv(name.c_str(), value.c_str(), 1);
+#endif
+}
+
+void Environment::SetEnvironmentVariable(const std::string& name, const std::string& value,
+                                         EnvironmentVariableTarget target) {
+    if (target == EnvironmentVariableTarget::Process) {
+        SetEnvironmentVariable(name, value);
+        return;
+    }
+    // No Windows-registry (or other persistent-store) backing in this port, so — matching
+    // .NET's own behavior on non-Windows platforms — User/Machine are validated but otherwise no-ops.
+    validateEnvironmentVariableName(name);
+}
+
+std::vector<std::string> Environment::GetLogicalDrives() {
+#if defined(_WIN32)
+    std::vector<std::string> drives;
+    char buf[512];
+    DWORD len = GetLogicalDriveStringsA(static_cast<DWORD>(sizeof(buf)), buf);
+    for (char* p = buf; p < buf + len; p += std::strlen(p) + 1)
+        drives.emplace_back(p);
+    return drives;
+#else
+    return { "/" };
 #endif
 }
 
