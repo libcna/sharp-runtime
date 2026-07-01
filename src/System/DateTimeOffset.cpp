@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTimeOffset.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -16,25 +18,14 @@
 #include <time.h>
 #endif
 
-namespace System {
+namespace {
 
-    DateTimeOffset::DateTimeOffset()
-        : dateTime_(DateTime()), offset_(TimeSpan::Zero) {}
+    using namespace System;
 
-    DateTimeOffset::DateTimeOffset(const DateTime& dateTime, const TimeSpan& offset)
-        : dateTime_(dateTime), offset_(offset) {}
-
-    // -------------------------------------------------------------------------
-    // Static factory
-    // -------------------------------------------------------------------------
-
-    DateTimeOffset DateTimeOffset::getUtcNowProperty() {
-        return DateTimeOffset(DateTime::getNowProperty(), TimeSpan::Zero);
-    }
-
-    DateTimeOffset DateTimeOffset::getNowProperty() {
-        // system_clock::now() is UTC; get the local offset to compute local DateTime
-        DateTime utc = DateTime::getNowProperty();
+    // Returns the system's current local UTC offset in ticks. DST-transition history is
+    // not modelled; callers apply this as an approximation for any point in time,
+    // consistent with System::TimeZoneInfo's own documented limitations.
+    longcs currentLocalOffsetTicks() {
         long offset_secs = 0;
 #if defined(_WIN32)
         TIME_ZONE_INFORMATION tz{};
@@ -49,7 +40,73 @@ namespace System {
         localtime_r(&t, &local_tm);
         offset_secs = local_tm.tm_gmtoff;
 #endif
-        TimeSpan off = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
+        return static_cast<longcs>(offset_secs) * TimeSpan::TicksPerSecond;
+    }
+
+    // C++ counterpart of .NET DateTimeOffset's private ValidateOffset/ValidateDate helpers.
+    void validateOffsetAndRange(const DateTime& clockDateTime, const TimeSpan& offset) {
+        constexpr longcs maxOffsetMinutes = 14 * 60;
+
+        if (offset.getTicksProperty() % TimeSpan::TicksPerMinute != 0) {
+            throw ArgumentException("Offset must be specified in whole minutes.", "offset");
+        }
+
+        const longcs offsetMinutes = offset.getTicksProperty() / TimeSpan::TicksPerMinute;
+        if (offsetMinutes < -maxOffsetMinutes || offsetMinutes > maxOffsetMinutes) {
+            throw ArgumentOutOfRangeException("offset", "Offset must be within plus or minus 14 hours.");
+        }
+
+        const longcs utcTicks = clockDateTime.getTicksProperty() - offset.getTicksProperty();
+        if (utcTicks < 0 || utcTicks > DateTime::MaxTicks) {
+            throw ArgumentOutOfRangeException("offset",
+                "The UTC time represented when the offset is applied must be between year 0 and 10,000.");
+        }
+    }
+
+} // namespace
+
+namespace System {
+
+    DateTimeOffset::DateTimeOffset()
+        : dateTime_(DateTime()), offset_(TimeSpan::Zero) {}
+
+    DateTimeOffset::DateTimeOffset(const DateTime& dateTime, const TimeSpan& offset)
+        : dateTime_(dateTime), offset_(offset) {
+        validateOffsetAndRange(dateTime_, offset_);
+    }
+
+    DateTimeOffset::DateTimeOffset(const DateTime& dateTime)
+        : DateTimeOffset(dateTime, TimeSpan::Zero) {}
+
+    DateTimeOffset::DateTimeOffset(longcs ticks, const TimeSpan& offset)
+        : DateTimeOffset(DateTime(ticks), offset) {}
+
+    DateTimeOffset::DateTimeOffset(intcs year, intcs month, intcs day,
+                                   intcs hour, intcs minute, intcs second,
+                                   const TimeSpan& offset)
+        : DateTimeOffset(DateTime(year, month, day, hour, minute, second), offset) {}
+
+    DateTimeOffset::DateTimeOffset(intcs year, intcs month, intcs day,
+                                   intcs hour, intcs minute, intcs second, intcs millisecond,
+                                   const TimeSpan& offset)
+        : DateTimeOffset(DateTime(year, month, day, hour, minute, second, millisecond), offset) {}
+
+    const DateTimeOffset DateTimeOffset::MinValue{DateTime::MinValue, TimeSpan::Zero};
+    const DateTimeOffset DateTimeOffset::MaxValue{DateTime::MaxValue, TimeSpan::Zero};
+    const DateTimeOffset DateTimeOffset::UnixEpoch{DateTime::UnixEpoch, TimeSpan::Zero};
+
+    // -------------------------------------------------------------------------
+    // Static factory
+    // -------------------------------------------------------------------------
+
+    DateTimeOffset DateTimeOffset::getUtcNowProperty() {
+        return DateTimeOffset(DateTime::getNowProperty(), TimeSpan::Zero);
+    }
+
+    DateTimeOffset DateTimeOffset::getNowProperty() {
+        // system_clock::now() is UTC; get the local offset to compute local DateTime
+        DateTime utc = DateTime::getNowProperty();
+        TimeSpan off(currentLocalOffsetTicks());
         return DateTimeOffset(utc.Add(off), off);
     }
 
@@ -59,6 +116,14 @@ namespace System {
 
     const DateTime& DateTimeOffset::getDateTimeProperty() const { return dateTime_; }
     const TimeSpan& DateTimeOffset::getOffsetProperty()   const { return offset_; }
+
+    intcs DateTimeOffset::getTotalOffsetMinutesProperty() const {
+        return static_cast<intcs>(offset_.getTicksProperty() / TimeSpan::TicksPerMinute);
+    }
+
+    longcs DateTimeOffset::getTicksProperty() const {
+        return dateTime_.getTicksProperty();
+    }
 
     longcs DateTimeOffset::getUtcTicksProperty() const {
         return dateTime_.getTicksProperty() - offset_.getTicksProperty();
@@ -72,12 +137,24 @@ namespace System {
     intcs DateTimeOffset::getSecondProperty()      const { return dateTime_.getSecondProperty(); }
     intcs DateTimeOffset::getMillisecondProperty() const { return dateTime_.getMillisecondProperty(); }
 
+    DayOfWeek DateTimeOffset::getDayOfWeekProperty() const { return dateTime_.getDayOfWeekProperty(); }
+    intcs DateTimeOffset::getDayOfYearProperty()     const { return dateTime_.getDayOfYearProperty(); }
+    TimeSpan DateTimeOffset::getTimeOfDayProperty()  const { return dateTime_.getTimeOfDayProperty(); }
+
     DateTime DateTimeOffset::getDateProperty() const {
         return DateTime(dateTime_.getYearProperty(), dateTime_.getMonthProperty(), dateTime_.getDayProperty());
     }
 
     DateTime DateTimeOffset::getUtcDateTimeProperty() const {
         return DateTime(getUtcTicksProperty());
+    }
+
+    DateTime DateTimeOffset::getLocalDateTimeProperty() const {
+        return ToLocalTime().getDateTimeProperty();
+    }
+
+    DateTimeOffset DateTimeOffset::ToOffset(const TimeSpan& offset) const {
+        return DateTimeOffset(getUtcDateTimeProperty().Add(offset), offset);
     }
 
     // -------------------------------------------------------------------------
@@ -124,6 +201,10 @@ namespace System {
         return AddMonths(years * 12);
     }
 
+    DateTimeOffset DateTimeOffset::AddTicks(longcs ticks) const {
+        return DateTimeOffset(dateTime_.AddTicks(ticks), offset_);
+    }
+
     TimeSpan DateTimeOffset::Subtract(const DateTimeOffset& other) const {
         return TimeSpan(getUtcTicksProperty() - other.getUtcTicksProperty());
     }
@@ -134,6 +215,52 @@ namespace System {
 
     DateTimeOffset DateTimeOffset::ToUniversalTime() const {
         return DateTimeOffset(getUtcDateTimeProperty(), TimeSpan::Zero);
+    }
+
+    DateTimeOffset DateTimeOffset::ToLocalTime() const {
+        DateTime utc = getUtcDateTimeProperty();
+        TimeSpan off(currentLocalOffsetTicks());
+        return DateTimeOffset(utc.Add(off), off);
+    }
+
+    // -------------------------------------------------------------------------
+    // Unix time conversions
+    // -------------------------------------------------------------------------
+
+    DateTimeOffset DateTimeOffset::FromUnixTimeSeconds(longcs seconds) {
+        constexpr longcs unixEpochSeconds = DateTime::UnixEpochTicks / DateTime::TicksPerSecond;
+        constexpr longcs minSeconds = 0 - unixEpochSeconds;
+        constexpr longcs maxSeconds = DateTime::MaxTicks / DateTime::TicksPerSecond - unixEpochSeconds;
+        if (seconds < minSeconds || seconds > maxSeconds) {
+            throw ArgumentOutOfRangeException("seconds", std::to_string(seconds),
+                "Valid values are between " + std::to_string(minSeconds) + " and " +
+                std::to_string(maxSeconds) + ", inclusive.");
+        }
+        const longcs ticks = seconds * DateTime::TicksPerSecond + DateTime::UnixEpochTicks;
+        return DateTimeOffset(DateTime(ticks), TimeSpan::Zero);
+    }
+
+    DateTimeOffset DateTimeOffset::FromUnixTimeMilliseconds(longcs milliseconds) {
+        constexpr longcs unixEpochMilliseconds = DateTime::UnixEpochTicks / DateTime::TicksPerMillisecond;
+        constexpr longcs minMilliseconds = 0 - unixEpochMilliseconds;
+        constexpr longcs maxMilliseconds = DateTime::MaxTicks / DateTime::TicksPerMillisecond - unixEpochMilliseconds;
+        if (milliseconds < minMilliseconds || milliseconds > maxMilliseconds) {
+            throw ArgumentOutOfRangeException("milliseconds", std::to_string(milliseconds),
+                "Valid values are between " + std::to_string(minMilliseconds) + " and " +
+                std::to_string(maxMilliseconds) + ", inclusive.");
+        }
+        const longcs ticks = milliseconds * DateTime::TicksPerMillisecond + DateTime::UnixEpochTicks;
+        return DateTimeOffset(DateTime(ticks), TimeSpan::Zero);
+    }
+
+    longcs DateTimeOffset::ToUnixTimeSeconds() const {
+        constexpr longcs unixEpochSeconds = DateTime::UnixEpochTicks / DateTime::TicksPerSecond;
+        return getUtcTicksProperty() / DateTime::TicksPerSecond - unixEpochSeconds;
+    }
+
+    longcs DateTimeOffset::ToUnixTimeMilliseconds() const {
+        constexpr longcs unixEpochMilliseconds = DateTime::UnixEpochTicks / DateTime::TicksPerMillisecond;
+        return getUtcTicksProperty() / DateTime::TicksPerMillisecond - unixEpochMilliseconds;
     }
 
     // -------------------------------------------------------------------------
@@ -226,8 +353,25 @@ namespace System {
         return (a < b) ? -1 : (a > b) ? 1 : 0;
     }
 
+    intcs DateTimeOffset::Compare(const DateTimeOffset& first, const DateTimeOffset& second) {
+        return first.CompareTo(second);
+    }
+
     bool DateTimeOffset::Equals(const DateTimeOffset& other) const {
         return getUtcTicksProperty() == other.getUtcTicksProperty();
+    }
+
+    bool DateTimeOffset::Equals(const DateTimeOffset& first, const DateTimeOffset& second) {
+        return first.getUtcTicksProperty() == second.getUtcTicksProperty();
+    }
+
+    bool DateTimeOffset::EqualsExact(const DateTimeOffset& other) const {
+        return getUtcTicksProperty() == other.getUtcTicksProperty() && offset_ == other.offset_;
+    }
+
+    intcs DateTimeOffset::GetHashCode() const {
+        const longcs t = getUtcTicksProperty();
+        return static_cast<intcs>(t) ^ static_cast<intcs>(t >> 32);
     }
 
     bool DateTimeOffset::operator==(const DateTimeOffset& other) const { return Equals(other); }

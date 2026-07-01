@@ -497,7 +497,7 @@ TEST(DateTimeOffsetTests, CtorWithDateTime_StoresDateTime) {
 }
 
 TEST(DateTimeOffsetTests, CtorWithOffset_StoresOffset) {
-    DateTime dt;
+    DateTime dt(2020, 1, 1, 12, 0, 0);
     TimeSpan offset = TimeSpan::FromHours(2);
     DateTimeOffset dto(dt, offset);
     EXPECT_NEAR(dto.getOffsetProperty().getTotalHoursProperty(), 2.0, 1e-9);
@@ -510,7 +510,7 @@ TEST(DateTimeOffsetTests, Equality_SameValues) {
 }
 
 TEST(DateTimeOffsetTests, Inequality_DifferentOffset) {
-    DateTime dt;
+    DateTime dt(2020, 1, 1, 12, 0, 0);
     DateTimeOffset a(dt, TimeSpan()), b(dt, TimeSpan::FromHours(1));
     EXPECT_NE(a, b);
 }
