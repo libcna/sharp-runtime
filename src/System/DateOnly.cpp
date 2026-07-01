@@ -4,6 +4,7 @@
 
 #include "System/DateOnly.hpp"
 #include "System/DateTime.hpp"
+#include "System/TimeOnly.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -85,6 +86,12 @@ DateOnly DateOnly::AddYears(int n) const {
 
 DateOnly DateOnly::FromDateTime(const DateTime& dt) {
     return DateOnly(dt.getYearProperty(), dt.getMonthProperty(), dt.getDayProperty());
+}
+
+DateTime DateOnly::ToDateTime(const TimeOnly& time) const {
+    return DateTime(year_, month_, day_,
+                     time.getHourProperty(), time.getMinuteProperty(),
+                     time.getSecondProperty(), time.getMillisecondProperty());
 }
 
 bool DateOnly::TryParse(const std::string& s, DateOnly& result) {

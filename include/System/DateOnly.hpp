@@ -10,7 +10,8 @@
 
 namespace System {
 
-    class DateTime; // forward declaration for FromDateTime
+    class DateTime; // forward declaration for FromDateTime/ToDateTime
+    class TimeOnly; // forward declaration for ToDateTime
 
     using SharpRuntime::intcs;
 
@@ -104,6 +105,13 @@ namespace System {
         [[nodiscard]] bool Equals(const DateOnly& other) const { return *this == other; }
 
         /**
+         * @brief Returns a hash code for this DateOnly.
+         *
+         * C++ counterpart of .NET DateOnly.GetHashCode().
+         */
+        [[nodiscard]] intcs GetHashCode() const { return getDayNumberProperty(); }
+
+        /**
          * @brief Deconstructs this instance into year, month, and day components.
          *
          * C++ counterpart of .NET DateOnly.Deconstruct(out int, out int, out int).
@@ -141,6 +149,14 @@ namespace System {
          * @param dt The DateTime to extract the date from.
          */
         [[nodiscard]] static DateOnly FromDateTime(const DateTime& dt);
+
+        /**
+         * @brief Returns a DateTime set to the date of this instance and the time of @p time.
+         *
+         * C++ counterpart of .NET DateOnly.ToDateTime(TimeOnly).
+         * @param time The time of day.
+         */
+        [[nodiscard]] DateTime ToDateTime(const TimeOnly& time) const;
 
         /**
          * @brief Parses a date string in the form "yyyy-MM-dd".

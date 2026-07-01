@@ -200,6 +200,29 @@ TEST(DateOnlyTests, Deconstruct) {
     EXPECT_EQ(y, 2025); EXPECT_EQ(m, 11); EXPECT_EQ(day, 7);
 }
 
+TEST(DateOnlyTests, GetHashCode_MatchesDayNumber) {
+    System::DateOnly d(2025, 6, 14);
+    EXPECT_EQ(d.GetHashCode(), d.getDayNumberProperty());
+}
+
+TEST(DateOnlyTests, GetHashCode_DifferentDatesDiffer) {
+    System::DateOnly a(2025, 6, 14), b(2025, 6, 15);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(DateOnlyTests, ToDateTime_CombinesDateAndTime) {
+    DateOnly d(2025, 6, 14);
+    TimeOnly t(14, 30, 45, 500);
+    DateTime dt = d.ToDateTime(t);
+    EXPECT_EQ(dt.getYearProperty(),        2025);
+    EXPECT_EQ(dt.getMonthProperty(),       6);
+    EXPECT_EQ(dt.getDayProperty(),         14);
+    EXPECT_EQ(dt.getHourProperty(),        14);
+    EXPECT_EQ(dt.getMinuteProperty(),      30);
+    EXPECT_EQ(dt.getSecondProperty(),      45);
+    EXPECT_EQ(dt.getMillisecondProperty(), 500);
+}
+
 // ===========================================================================
 // TimeOnly — AddHours / AddMinutes
 // ===========================================================================
