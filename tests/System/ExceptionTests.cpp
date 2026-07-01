@@ -72,6 +72,39 @@ TEST(ExceptionTests, IsStdException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, HResult_DefaultsToCorEException) {
+    Exception e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131500u));
+}
+
+TEST(ExceptionTests, HResult_SetGet_RoundTrip) {
+    Exception e;
+    e.setHResultProperty(42);
+    EXPECT_EQ(e.getHResultProperty(), 42);
+}
+
+TEST(ExceptionTests, Source_DefaultsToEmpty) {
+    Exception e;
+    EXPECT_TRUE(e.getSourceProperty().empty());
+}
+
+TEST(ExceptionTests, Source_SetGet_RoundTrip) {
+    Exception e;
+    e.setSourceProperty("MyAssembly");
+    EXPECT_EQ(e.getSourceProperty(), "MyAssembly");
+}
+
+TEST(ExceptionTests, HelpLink_DefaultsToEmpty) {
+    Exception e;
+    EXPECT_TRUE(e.getHelpLinkProperty().empty());
+}
+
+TEST(ExceptionTests, HelpLink_SetGet_RoundTrip) {
+    Exception e;
+    e.setHelpLinkProperty("https://example.com/help");
+    EXPECT_EQ(e.getHelpLinkProperty(), "https://example.com/help");
+}
+
 // ---------------------------------------------------------------------------
 // SystemException
 // ---------------------------------------------------------------------------

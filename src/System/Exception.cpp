@@ -46,6 +46,30 @@ namespace System {
         return data_;
     }
 
+    const std::string& Exception::getHelpLinkProperty() const {
+        return helpLink_;
+    }
+
+    void Exception::setHelpLinkProperty(const std::string& value) {
+        helpLink_ = value;
+    }
+
+    const std::string& Exception::getSourceProperty() const {
+        return source_;
+    }
+
+    void Exception::setSourceProperty(const std::string& value) {
+        source_ = value;
+    }
+
+    SharpRuntime::intcs Exception::getHResultProperty() const {
+        return hResult_;
+    }
+
+    void Exception::setHResultProperty(SharpRuntime::intcs value) {
+        hResult_ = value;
+    }
+
     const char* Exception::what() const noexcept {
         return message_.c_str();
     }
