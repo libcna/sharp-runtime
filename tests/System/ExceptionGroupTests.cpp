@@ -41,6 +41,11 @@ TEST(DuplicateWaitObjectExceptionNewTests, ParamNameMessageCtor_StoresMessage) {
     System::DuplicateWaitObjectException e("items", "custom msg");
     EXPECT_NE(std::string(e.what()).find("custom msg"), std::string::npos);
 }
+TEST(DuplicateWaitObjectExceptionNewTests, InnerExceptionCtor_ContainsBoth) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::DuplicateWaitObjectException e("outer", inner);
+    EXPECT_NE(std::string(e.what()).find("outer"), std::string::npos);
+}
 
 // ---------------------------------------------------------------------------
 // EntryPointNotFoundException

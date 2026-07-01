@@ -32,6 +32,14 @@ namespace System {
          */
         DuplicateWaitObjectException(const std::string& parameterName, const std::string& message)
             : ArgumentException(message, parameterName) {}
+
+        /**
+         * @brief Initializes a new instance with a message and an inner exception.
+         *
+         * C++ counterpart of .NET DuplicateWaitObjectException(string, Exception).
+         */
+        DuplicateWaitObjectException(const std::string& message, std::exception_ptr innerException)
+            : ArgumentException(message, std::move(innerException)) {}
     };
 
 } // namespace System
