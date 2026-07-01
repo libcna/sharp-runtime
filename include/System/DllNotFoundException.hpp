@@ -15,7 +15,7 @@ namespace System {
     class DllNotFoundException : public TypeLoadException {
     public:
         /** @brief Initializes a new instance with the default DLL-not-found message. */
-        DllNotFoundException() : TypeLoadException("Unable to load the DLL.") {}
+        DllNotFoundException() : TypeLoadException("Dll was not found.") {}
         /** @brief Initializes a new instance with the specified error message. */
         explicit DllNotFoundException(const std::string& message) : TypeLoadException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */

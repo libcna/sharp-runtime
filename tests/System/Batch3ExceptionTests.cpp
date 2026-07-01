@@ -51,7 +51,8 @@ TEST(DllNotFoundExceptionNewTests, IsA_TypeLoadException) {
 }
 TEST(DllNotFoundExceptionNewTests, DefaultMsg_ContainsDLL) {
     System::DllNotFoundException e;
-    EXPECT_NE(std::string(e.what()).find("DLL"), std::string::npos);
+    // .NET's actual resource string (SR.Arg_DllNotFoundException) is "Dll was not found."
+    EXPECT_NE(std::string(e.what()).find("Dll"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
