@@ -21,8 +21,12 @@ namespace System {
      *
      * Partial C++ counterpart of .NET System.DateTime.
      *
-     * @note Status: Partial — calendar component properties (Year, Month, Day, …) and
-     *   three-argument constructors were added in session 33. DateTimeKind is not stored.
+     * @note Status: Partial — DateTimeKind is not stored/tracked (all values behave as
+     *   Unspecified/UTC); ToLocalTime/ToUniversalTime/SpecifyKind are therefore not
+     *   provided. OLE Automation date, FILETIME, and binary-serialization conversions
+     *   (ToOADate/FromOADate, ToFileTime/FromFileTime, ToBinary/FromBinary) are out of
+     *   scope. Culture-aware ToString/Parse overloads (IFormatProvider) are not provided;
+     *   ToString(format)/Parse/TryParse use invariant numeric tokens only.
      */
     class DateTime : public Object {
     public:
@@ -33,6 +37,8 @@ namespace System {
         static constexpr longcs TicksPerDay         = 864000000000LL;
         /** @brief Ticks from the .NET epoch (0001-01-01) to the Unix epoch (1970-01-01). */
         static constexpr longcs UnixEpochTicks      = 621355968000000000LL;
+        /** @brief The maximum tick value representable (9999-12-31 23:59:59.9999999). */
+        static constexpr longcs MaxTicks            = 3155378975999999999LL;
 
     private:
         longcs ticks_;
@@ -113,6 +119,13 @@ namespace System {
          */
         DateTime(int year, int month, int day,
                  int hour, int minute, int second, int millisecond);
+
+        /** @brief The smallest possible value of DateTime (0001-01-01 00:00:00). */
+        static const DateTime MinValue;
+        /** @brief The largest possible value of DateTime (9999-12-31 23:59:59.9999999). */
+        static const DateTime MaxValue;
+        /** @brief Represents the point in time when Unix time begins (1970-01-01 00:00:00 UTC). */
+        static const DateTime UnixEpoch;
 
         /**
          * @brief Gets the number of 100-nanosecond ticks since the .NET epoch.
@@ -217,6 +230,39 @@ namespace System {
         [[nodiscard]] DateTime AddMilliseconds(int milliseconds) const;
 
         /**
+         * @brief Returns a new DateTime with the specified number of 100-nanosecond ticks added.
+         *
+         * @param value Number of ticks to add (may be negative).
+         * @return A new DateTime.
+         * @throws std::out_of_range if the result is outside the representable range.
+         */
+        [[nodiscard]] DateTime AddTicks(longcs value) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of months added.
+         *
+         * If the resulting day would be invalid for the resulting month, the day is
+         * clamped to the last valid day of that month (e.g. Jan 31 + 1 month = Feb 28/29).
+         *
+         * @param months Number of months to add (may be negative; must be in [-120000, 120000]).
+         * @return A new DateTime.
+         * @throws std::out_of_range if @p months is out of range or the resulting year is outside [1, 9999].
+         */
+        [[nodiscard]] DateTime AddMonths(int months) const;
+
+        /**
+         * @brief Returns a new DateTime with the specified number of years added.
+         *
+         * If the current date is February 29 and the resulting year is not a leap year,
+         * the result is clamped to February 28.
+         *
+         * @param value Number of years to add (may be negative; must be in [-10000, 10000]).
+         * @return A new DateTime.
+         * @throws std::out_of_range if @p value is out of range or the resulting year is outside [1, 9999].
+         */
+        [[nodiscard]] DateTime AddYears(int value) const;
+
+        /**
          * @brief Subtracts the specified time span from this instance.
          *
          * @param value Time span to subtract.
@@ -288,12 +334,67 @@ namespace System {
          */
         static bool TryParse(const std::string& s, DateTime& result);
 
+        using Object::Equals;
+
+        /**
+         * @brief Determines whether this instance is equal to @p value.
+         *
+         * C++ counterpart of .NET DateTime.Equals(DateTime).
+         */
+        [[nodiscard]] bool Equals(const DateTime& value) const { return *this == value; }
+
+        /**
+         * @brief Compares this instance to a specified DateTime value.
+         *
+         * C++ counterpart of .NET DateTime.CompareTo(DateTime).
+         * @return Less than zero if this instance is earlier than @p value, zero if equal,
+         *         greater than zero if this instance is later than @p value.
+         */
+        [[nodiscard]] intcs CompareTo(const DateTime& value) const {
+            if (ticks_ > value.ticks_) return 1;
+            if (ticks_ < value.ticks_) return -1;
+            return 0;
+        }
+
+        /**
+         * @brief Returns a hash code for this DateTime.
+         *
+         * C++ counterpart of .NET DateTime.GetHashCode().
+         */
+        [[nodiscard]] intcs GetHashCode() const {
+            return static_cast<intcs>(ticks_) ^ static_cast<intcs>(ticks_ >> 32);
+        }
+
+        /**
+         * @brief Determines whether the specified year is a leap year.
+         *
+         * C++ counterpart of .NET DateTime.IsLeapYear(int).
+         * @throws std::out_of_range if @p year is outside [1, 9999].
+         */
+        [[nodiscard]] static bool IsLeapYear(int year);
+
+        /**
+         * @brief Returns the number of days in the specified month and year.
+         *
+         * C++ counterpart of .NET DateTime.DaysInMonth(int, int).
+         * @throws std::out_of_range if @p month is outside [1, 12] or @p year is outside [1, 9999].
+         */
+        [[nodiscard]] static int DaysInMonth(int year, int month);
+
         [[nodiscard]] bool operator==(const DateTime& other) const;
         [[nodiscard]] bool operator!=(const DateTime& other) const;
         [[nodiscard]] bool operator<(const DateTime& other)  const;
         [[nodiscard]] bool operator<=(const DateTime& other) const;
         [[nodiscard]] bool operator>(const DateTime& other)  const;
         [[nodiscard]] bool operator>=(const DateTime& other) const;
+
+        /** @brief Returns a new DateTime that is this instance plus @p value. */
+        [[nodiscard]] DateTime operator+(const TimeSpan& value) const { return Add(value); }
+        /** @brief Returns a new DateTime that is this instance minus @p value. */
+        [[nodiscard]] DateTime operator-(const TimeSpan& value) const { return Subtract(value); }
+        /** @brief Returns the TimeSpan elapsed between @p other and this instance. */
+        [[nodiscard]] TimeSpan operator-(const DateTime& other) const { return Subtract(other); }
+
         GetTypeNameHPP()
     };
 

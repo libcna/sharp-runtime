@@ -148,9 +148,61 @@ namespace System {
         return TimeSpan(ticks_ - value.ticks_);
     }
 
+    DateTime DateTime::AddTicks(longcs value) const {
+        const longcs newTicks = ticks_ + value;
+        if (newTicks < 0 || newTicks > MaxTicks)
+            throw std::out_of_range("DateTime: resulting ticks out of range");
+        return DateTime(newTicks);
+    }
+
+    DateTime DateTime::AddMonths(int months) const {
+        if (months < -120000 || months > 120000)
+            throw std::out_of_range("DateTime: months out of range");
+
+        const int year  = getYearProperty();
+        const int month = getMonthProperty();
+        const int day   = getDayProperty();
+
+        int m = month + months;
+        const int q = (m > 0) ? (m - 1) / 12 : m / 12 - 1;
+        const int y = year + q;
+        m -= q * 12;
+
+        if (y < 1 || y > 9999)
+            throw std::out_of_range("DateTime: resulting year out of range");
+
+        const int d = std::min(day, DaysInMonth(y, m));
+        const longcs timeOfDay = ticks_ % TicksPerDay;
+        return DateTime(dateToTicks(y, m, d) + timeOfDay);
+    }
+
+    DateTime DateTime::AddYears(int value) const {
+        if (value < -10000 || value > 10000)
+            throw std::out_of_range("DateTime: years out of range");
+        return AddMonths(value * 12);
+    }
+
+    bool DateTime::IsLeapYear(int year) {
+        if (year < 1 || year > 9999)
+            throw std::out_of_range("DateTime: year out of range");
+        return (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0);
+    }
+
+    int DateTime::DaysInMonth(int year, int month) {
+        if (month < 1 || month > 12)
+            throw std::out_of_range("DateTime: month out of range");
+        static const int dpm365[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        static const int dpm366[] = {31,29,31,30,31,30,31,31,30,31,30,31};
+        return (IsLeapYear(year) ? dpm366 : dpm365)[month - 1];
+    }
+
     // -------------------------------------------------------------------------
     // Static factories
     // -------------------------------------------------------------------------
+
+    const DateTime DateTime::MinValue{0LL};
+    const DateTime DateTime::MaxValue{DateTime::MaxTicks};
+    const DateTime DateTime::UnixEpoch{DateTime::UnixEpochTicks};
 
     DateTime DateTime::getNowProperty() {
         using namespace std::chrono;

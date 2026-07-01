@@ -311,3 +311,197 @@ TEST(DateTimeTests, TryParse_BadMonth_ReturnsFalse) {
     DateTime dt;
     EXPECT_FALSE(DateTime::TryParse("2024-13-01", dt));
 }
+
+// ---------------------------------------------------------------------------
+// MinValue / MaxValue / UnixEpoch
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, MinValue_IsZeroTicks) {
+    EXPECT_EQ(DateTime::MinValue.getTicksProperty(), 0LL);
+}
+
+TEST(DateTimeTests, MaxValue_Is_9999_12_31) {
+    EXPECT_EQ(DateTime::MaxValue.getYearProperty(),  9999);
+    EXPECT_EQ(DateTime::MaxValue.getMonthProperty(), 12);
+    EXPECT_EQ(DateTime::MaxValue.getDayProperty(),   31);
+}
+
+TEST(DateTimeTests, UnixEpoch_Is_1970_01_01) {
+    EXPECT_EQ(DateTime::UnixEpoch.getTicksProperty(), kUnixEpochTicks);
+    EXPECT_EQ(DateTime::UnixEpoch.getYearProperty(),  1970);
+    EXPECT_EQ(DateTime::UnixEpoch.getMonthProperty(), 1);
+    EXPECT_EQ(DateTime::UnixEpoch.getDayProperty(),   1);
+}
+
+// ---------------------------------------------------------------------------
+// Equals / CompareTo / GetHashCode
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, Equals_SameTicks) {
+    DateTime a(1000LL), b(1000LL);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(DateTimeTests, Equals_DifferentTicks) {
+    DateTime a(1000LL), b(2000LL);
+    EXPECT_FALSE(a.Equals(b));
+}
+
+TEST(DateTimeTests, CompareTo_Less) {
+    DateTime a(1000LL), b(2000LL);
+    EXPECT_LT(a.CompareTo(b), 0);
+}
+
+TEST(DateTimeTests, CompareTo_Equal) {
+    DateTime a(1000LL), b(1000LL);
+    EXPECT_EQ(a.CompareTo(b), 0);
+}
+
+TEST(DateTimeTests, CompareTo_Greater) {
+    DateTime a(2000LL), b(1000LL);
+    EXPECT_GT(a.CompareTo(b), 0);
+}
+
+TEST(DateTimeTests, GetHashCode_SameTicksMatch) {
+    DateTime a(123456789LL), b(123456789LL);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(DateTimeTests, GetHashCode_DifferentTicksDiffer) {
+    DateTime a(1000LL), b(2000LL);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+// ---------------------------------------------------------------------------
+// IsLeapYear / DaysInMonth
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, IsLeapYear_DivisibleBy4) {
+    EXPECT_TRUE(DateTime::IsLeapYear(2024));
+}
+
+TEST(DateTimeTests, IsLeapYear_DivisibleBy100NotLeap) {
+    EXPECT_FALSE(DateTime::IsLeapYear(1900));
+}
+
+TEST(DateTimeTests, IsLeapYear_DivisibleBy400IsLeap) {
+    EXPECT_TRUE(DateTime::IsLeapYear(2000));
+}
+
+TEST(DateTimeTests, IsLeapYear_OutOfRangeThrows) {
+    EXPECT_THROW(DateTime::IsLeapYear(0), std::out_of_range);
+    EXPECT_THROW(DateTime::IsLeapYear(10000), std::out_of_range);
+}
+
+TEST(DateTimeTests, DaysInMonth_February_LeapYear) {
+    EXPECT_EQ(DateTime::DaysInMonth(2024, 2), 29);
+}
+
+TEST(DateTimeTests, DaysInMonth_February_NonLeapYear) {
+    EXPECT_EQ(DateTime::DaysInMonth(2023, 2), 28);
+}
+
+TEST(DateTimeTests, DaysInMonth_January) {
+    EXPECT_EQ(DateTime::DaysInMonth(2024, 1), 31);
+}
+
+TEST(DateTimeTests, DaysInMonth_OutOfRangeThrows) {
+    EXPECT_THROW(DateTime::DaysInMonth(2024, 0), std::out_of_range);
+    EXPECT_THROW(DateTime::DaysInMonth(2024, 13), std::out_of_range);
+}
+
+// ---------------------------------------------------------------------------
+// AddMonths / AddYears / AddTicks
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, AddMonths_SimpleForward) {
+    DateTime dt(2024, 1, 15);
+    DateTime r = dt.AddMonths(2);
+    EXPECT_EQ(r.getYearProperty(),  2024);
+    EXPECT_EQ(r.getMonthProperty(), 3);
+    EXPECT_EQ(r.getDayProperty(),   15);
+}
+
+TEST(DateTimeTests, AddMonths_ClampsDay) {
+    DateTime dt(2024, 1, 31);
+    DateTime r = dt.AddMonths(1); // Feb 2024 has 29 days
+    EXPECT_EQ(r.getMonthProperty(), 2);
+    EXPECT_EQ(r.getDayProperty(),   29);
+}
+
+TEST(DateTimeTests, AddMonths_CrossYear) {
+    DateTime dt(2024, 11, 15);
+    DateTime r = dt.AddMonths(3);
+    EXPECT_EQ(r.getYearProperty(),  2025);
+    EXPECT_EQ(r.getMonthProperty(), 2);
+}
+
+TEST(DateTimeTests, AddMonths_Negative) {
+    DateTime dt(2024, 3, 15);
+    DateTime r = dt.AddMonths(-2);
+    EXPECT_EQ(r.getMonthProperty(), 1);
+}
+
+TEST(DateTimeTests, AddMonths_PreservesTimeOfDay) {
+    DateTime dt(2024, 1, 15, 10, 30, 0);
+    DateTime r = dt.AddMonths(1);
+    EXPECT_EQ(r.getHourProperty(),   10);
+    EXPECT_EQ(r.getMinuteProperty(), 30);
+}
+
+TEST(DateTimeTests, AddMonths_OutOfRangeThrows) {
+    DateTime dt(2024, 1, 15);
+    EXPECT_THROW(dt.AddMonths(-200000), std::out_of_range);
+}
+
+TEST(DateTimeTests, AddYears_LeapDayClamps) {
+    DateTime dt(2020, 2, 29);
+    DateTime r = dt.AddYears(1);
+    EXPECT_EQ(r.getYearProperty(),  2021);
+    EXPECT_EQ(r.getMonthProperty(), 2);
+    EXPECT_EQ(r.getDayProperty(),   28);
+}
+
+TEST(DateTimeTests, AddYears_OutOfRangeThrows) {
+    DateTime dt(2024, 1, 15);
+    EXPECT_THROW(dt.AddYears(-20000), std::out_of_range);
+}
+
+TEST(DateTimeTests, AddTicks_Simple) {
+    DateTime dt(1000LL);
+    DateTime r = dt.AddTicks(500LL);
+    EXPECT_EQ(r.getTicksProperty(), 1500LL);
+}
+
+TEST(DateTimeTests, AddTicks_BelowMinThrows) {
+    DateTime dt(0LL);
+    EXPECT_THROW(dt.AddTicks(-1LL), std::out_of_range);
+}
+
+TEST(DateTimeTests, AddTicks_AboveMaxThrows) {
+    DateTime dt(DateTime::MaxValue);
+    EXPECT_THROW(dt.AddTicks(1LL), std::out_of_range);
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic operators
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeTests, OperatorPlus_TimeSpan) {
+    DateTime dt(kUnixEpochTicks);
+    DateTime r = dt + TimeSpan::FromDays(1.0);
+    EXPECT_EQ(r.getTicksProperty(), kUnixEpochTicks + kTicksPerDay);
+}
+
+TEST(DateTimeTests, OperatorMinus_TimeSpan) {
+    DateTime dt(kUnixEpochTicks + kTicksPerDay);
+    DateTime r = dt - TimeSpan::FromDays(1.0);
+    EXPECT_EQ(r.getTicksProperty(), kUnixEpochTicks);
+}
+
+TEST(DateTimeTests, OperatorMinus_DateTime) {
+    DateTime a(kUnixEpochTicks + kTicksPerDay);
+    DateTime b(kUnixEpochTicks);
+    TimeSpan diff = a - b;
+    EXPECT_EQ(diff.getTicksProperty(), kTicksPerDay);
+}
