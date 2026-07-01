@@ -65,6 +65,13 @@ namespace System
      * This is not a perfect architectural match to .NET internals, but it is a
      * practical compatibility layer for source-porting XNA/.NET code to C++.
      *
+     * .NET's non-generic @c EventHandler delegate (@c sender / @c EventArgs) is covered by
+     * instantiating this template as @c EventHandler<System::EventArgs>. The newer two-type-parameter
+     * @c EventHandler<TSender, TEventArgs> delegate (which parameterizes the sender type instead of
+     * fixing it to @c object) is intentionally not modeled — it is a recent BCL addition not used by
+     * ported XNA/.NET game code, and this class always passes the sender as @c Object*, matching the
+     * non-generic and single-generic .NET delegates.
+     *
      * @tparam TEventArgs The type of event arguments passed to subscribed handlers.
      */
     template<typename TEventArgs>
