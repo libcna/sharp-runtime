@@ -34,3 +34,13 @@ TEST(EventArgsTests, Empty_CanBeUsed) {
     auto handler = [](const EventArgs&) { return true; };
     EXPECT_TRUE(handler(EventArgs::Empty));
 }
+
+TEST(EventArgsTests, VirtualDestructor_RunsDerivedDestructor) {
+    static bool destroyed = false;
+    struct TestArgs : public EventArgs {
+        ~TestArgs() override { destroyed = true; }
+    };
+    EventArgs* ptr = new TestArgs();
+    delete ptr;
+    EXPECT_TRUE(destroyed);
+}

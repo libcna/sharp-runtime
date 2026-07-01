@@ -22,6 +22,9 @@ namespace System {
 
         /** @brief Initializes a new instance of the EventArgs class. */
         EventArgs() = default;
+
+        /** @brief Virtual destructor so derived event-data classes can be safely destroyed through an EventArgs pointer/reference. */
+        virtual ~EventArgs() = default;
     };
 
 }
