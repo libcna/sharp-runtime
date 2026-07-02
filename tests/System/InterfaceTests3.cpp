@@ -96,11 +96,11 @@ TEST(IUtf8SpanFormattableTests2, TryFormatUtf8_WithProvider_IgnoresProviderAndDe
 // ---------------------------------------------------------------------------
 struct Utf8ParsableInt : public System::IUtf8SpanParsable<Utf8ParsableInt> {
     int value = 0;
-    Utf8ParsableInt ParseUtf8(const System::Span<uint8_t>& s) const override {
+    Utf8ParsableInt ParseUtf8(const System::ReadOnlySpan<uint8_t>& s) const override {
         std::string str(reinterpret_cast<const char*>(s.getPointer()), s.getLengthProperty());
         Utf8ParsableInt r; r.value = std::stoi(str); return r;
     }
-    bool TryParseUtf8(const System::Span<uint8_t>& s, Utf8ParsableInt& result) const noexcept override {
+    bool TryParseUtf8(const System::ReadOnlySpan<uint8_t>& s, Utf8ParsableInt& result) const noexcept override {
         try {
             std::string str(reinterpret_cast<const char*>(s.getPointer()), s.getLengthProperty());
             result.value = std::stoi(str); return true;
