@@ -1,63 +1,76 @@
-# Instructions for iterative review of plan.sqlite3
+# Instructions for autonomous review of plan.sqlite3
 
 ## Initialization (at the start of each new context)
 
 1. Read `CLAUDE.md` and `NEXT.md`.
 2. Open `plan.sqlite3` — table `task` with columns: `id, namespace, name, type, internal, outofscope, status`.
 
-## Workflow — one iteration
+All progress state lives in `plan.sqlite3` (status column) and git history (commits per port).
+This file is safe to re-read from a completely fresh context after any compaction/reset — resume
+by re-running Step 1, no conversation memory required.
+
+## Workflow — one iteration (fully autonomous, no per-item confirmation)
 
 ### Step 1 — Select the next item
 
-- Take the first record where `status = ''` or `status = 'todo'` (skip `ignore` and `ported`).
+- Take the first record where `status = ''` or `status = 'todo'` (skip `ignore`, `ported`, and `tobedecided`).
 - **Priority:** namespaces starting with `System` take precedence over others.
 
-### Step 2 — Describe the item
+### Step 2 — Decide (no user confirmation)
 
-Print:
+Look **only** in `/rv/tmp/runtime/src/libraries/` for what the type does, then classify it yourself:
 
-| namespace | name | type | status |
-|-----------|------|------|--------|
-| <value> | <value> | <value> | <current value> |
+- **Clearly worth porting** (ordinary data/logic type, no hard blocker) → go to Step 3.
+- **Clearly out of scope** — reflection, IL emit/codegen, GC internals, P/Invoke/interop, serialization
+  infrastructure, or anything else `CLAUDE.md`'s "Known permanent deviations" section already names →
+  `status = 'ignore'`, `outofscope = 1`.
+- **Clearly irrelevant/duplicate/not applicable** to a C++ game-code runtime, but not one of the
+  permanent-deviation categories → `status = 'ignore'`, `outofscope = 0`.
+- **Genuinely ambiguous** (you cannot confidently classify it without human judgment) →
+  `status = 'tobedecided'`. Do not guess, do not port. Move on to the next item.
 
-Then briefly describe what the type does (look **only** in `/rv/tmp/runtime/src/libraries/` for the description — do **NOT** check sharp-runtime headers, tests, or any file under `include/` or `tests/` yet), and give your opinion — whether it makes sense to port into sharp-runtime (e.g. reflection, threading, diagnostics etc. may be out of scope).
+Do not stop to ask the user which bucket an item belongs in — make the call and proceed.
 
-**STOP here. Output the table + description + question below. Do NOT open any sharp-runtime file before the user answers.**
+### Step 3 — Port (only when Step 2 decided "port")
 
-### Step 3 — Ask the user
+- Check whether the file already exists in sharp-runtime:
+  - **Exists** → review against the full checklist in `CLAUDE.md` (API surface, doc-comments, SPDX,
+    logic parity with .NET, build, tests) as if it were new. Fix any gaps found — do not rubber-stamp.
+  - **Does not exist** → implement it per the `CLAUDE.md` checklist.
+- Build clean (`cmake --build build --parallel 4`, zero errors/warnings) and all tests passing
+  (`./build/SharpRuntimeTests`) before moving on.
+- Set `status = 'ported'`.
 
-> **Should I port this?**
-
-- **Yes** → only now check whether the corresponding file already exists in sharp-runtime:
-  - **Exists** → **do not mark as `ported` immediately** — the file must be reviewed against the full checklist in `CLAUDE.md` (API surface, doc-comments, SPDX, build, tests) as if it did not exist yet. Only set `status = 'ported'` after a successful review.
-  - **Does not exist** → port it according to the checklist in `CLAUDE.md`, then set `status = 'ported'`.
-- **No** → set `status = 'ignore'`, then ask:
-
-> **Out of scope?**
-
-  - **Yes** → set `outofscope = 1`.
-  - **No** → set `outofscope = 0`.
-
-### Step 4 — Save to DB, commit, and move to the next iteration
+### Step 4 — Save to DB, commit, and continue
 
 ```sql
 UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') WHERE id = ...;
 ```
 
-After porting a type (status set to `ported`), you **must** create a new git
-commit containing the changes for that port — the header, any `.cpp` body, and
-the tests. Commit only the files related to this port; do not bundle unrelated
-changes. Use `git -c commit.gpgsign=false commit` (GPG signing times out in this
-environment). Push only to `develop`, and only when the user asks.
+After porting a type (`status = 'ported'`), create a new git commit containing only the files for
+that port — header, any `.cpp` body, and tests. Use `git -c commit.gpgsign=false commit` (GPG signing
+times out in this environment). **Never push** — push to `develop` only when the user explicitly asks
+in that turn.
 
+For `ignore` / `tobedecided` decisions, updating `plan.sqlite3` is enough — no commit needed
+(`plan.sqlite3` is gitignored).
+
+Then loop back to Step 1 for the next item. **Do not stop between items to ask the user — keep going.**
 
 ## Allowed `status` values
 
-| Value | Meaning                           |
-|-------|-----------------------------------|
-| `''`    | Not yet decided                   |
-| `todo`  | Will be ported                    |
-| `ported`| Done, satisfies the checklist     |
-| `ignore`| Skip (out of scope or irrelevant) |
+| Value | Meaning |
+|-------|---------|
+| `''` | Not yet decided |
+| `todo` | Will be ported |
+| `ported` | Done, satisfies the checklist |
+| `ignore` | Skip (out of scope or irrelevant) |
+| `tobedecided` | Ambiguous — deferred for the user to decide by hand later |
 
 > `in_progress` **does not exist** — porting happens directly, with no intermediate state.
+
+## When to still stop and ask
+
+Only interrupt the autonomous flow for things no reasonable heuristic can resolve safely: a build
+that won't go green after genuine effort, a destructive/irreversible action, or an explicit user
+instruction that conflicts with this file. Otherwise keep processing the queue.

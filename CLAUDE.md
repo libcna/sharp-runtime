@@ -123,16 +123,17 @@ Every `.hpp` and `.cpp` file starts with:
 
 ## plan.sqlite3 namespace review workflow
 
-`plan.sqlite3` (table `task`) tracks all .NET types from dotnet/runtime. The **status column starts empty** for each type. The workflow for filling it in:
+`plan.sqlite3` (table `task`) tracks all .NET types from dotnet/runtime. The **status column starts empty** for each type. Full workflow detail lives in `prompt.md` — this is the summary:
 
-1. For each type where status is empty or `todo`, look up what it does in `/rv/tmp/runtime/src/libraries/`.
-2. Describe it to the user and ask: **yes (port it) / no (ignore)**
-   - **yes** → check if the file exists in sharp-runtime, review against the full checklist, port or fix, then set `status = 'ported'`
-   - **no** → set `status = 'ignore'`, then ask whether `outofscope = 1`
+1. For each type where status is `''` or `todo` (System-namespace types first), look up what it does in `/rv/tmp/runtime/src/libraries/` and classify it **without asking the user**:
+   - **Port it** → check if the file exists in sharp-runtime, review against the full checklist, port or fix, then set `status = 'ported'` and commit.
+   - **Out of scope / irrelevant** → set `status = 'ignore'`, and set `outofscope = 1` for permanent-deviation categories (reflection, GC internals, P/Invoke, serialization infra, etc.) or `outofscope = 0` otherwise.
+   - **Genuinely ambiguous** → set `status = 'tobedecided'` rather than guessing; the user reviews these by hand later.
+2. Keep processing items back-to-back — do not stop between items to ask for confirmation.
 
-Valid status values: `''` (unset), `todo`, `ported`, `ignore`. **`in_progress` does not exist** — porting happens directly with no intermediate state.
+Valid status values: `''` (unset), `todo`, `ported`, `ignore`, `tobedecided`. **`in_progress` does not exist** — porting happens directly with no intermediate state.
 
-Do this one type at a time. Never batch-decide without asking.
+State lives in `plan.sqlite3` + git history, not conversation memory, so this process resumes cleanly after any context reset — just re-open `prompt.md` and continue from Step 1.
 
 ---
 
