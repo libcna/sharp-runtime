@@ -51,6 +51,11 @@ namespace System::IO
         /** Returns true if the stream was created as writable. */
         [[nodiscard]] bool  getCanWriteProperty() const override { return writable_; }
 
+        /** Returns the current read/write position within the buffer. */
+        [[nodiscard]] intcs getPositionProperty() const override { return position_; }
+        /** Sets the current read/write position within the buffer. Throws ArgumentOutOfRangeException if negative. */
+        void setPositionProperty(intcs value) override;
+
         /** @brief Returns the underlying buffer as a vector. */
         [[nodiscard]] const std::vector<bytecs>& ToArray() const { return data_; }
 

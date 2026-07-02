@@ -63,6 +63,19 @@ namespace System::IO
         /** Returns true if this stream supports reading. */
         [[nodiscard]] virtual bool getCanReadProperty()  const { return true; }
 
+        /**
+         * Returns the current position within the stream.
+         * Default implementation throws NotSupportedException; override in seekable streams.
+         */
+        [[nodiscard]] virtual intcs getPositionProperty() const;
+
+        /**
+         * Sets the current position within the stream.
+         * Default implementation throws NotSupportedException; override in seekable streams.
+         * @param value The new position within the stream.
+         */
+        virtual void setPositionProperty(intcs value);
+
         /** Flushes any buffered data to the underlying device. Default is a no-op. */
         virtual void Flush() {}
     };

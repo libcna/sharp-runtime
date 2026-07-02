@@ -9,6 +9,8 @@
 #include "System/IO/MemoryStream.hpp"
 #include "System/IO/StringReader.hpp"
 #include "System/IO/StringWriter.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 
 using System::IO::MemoryStream;
 using System::IO::StringReader;
@@ -135,6 +137,67 @@ TEST(MemoryStreamTests, WriteReadRoundtrip) {
 
     EXPECT_EQ(readback[0], 0xDEu);
     EXPECT_EQ(readback[3], 0xEFu);
+}
+
+// ---------------------------------------------------------------------------
+// MemoryStream — Position
+// ---------------------------------------------------------------------------
+
+TEST(MemoryStreamTests, PositionStartsAtZero) {
+    MemoryStream ms;
+    EXPECT_EQ(ms.getPositionProperty(), 0);
+}
+
+TEST(MemoryStreamTests, PositionAdvancesOnWrite) {
+    MemoryStream ms;
+    ms.WriteByte(1); ms.WriteByte(2);
+    EXPECT_EQ(ms.getPositionProperty(), 2);
+}
+
+TEST(MemoryStreamTests, PositionAdvancesOnRead) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    uint8_t dst[2] = {};
+    ms.Read(dst, 0, 2);
+    EXPECT_EQ(ms.getPositionProperty(), 2);
+}
+
+TEST(MemoryStreamTests, SetPositionSeeksForRewrite) {
+    MemoryStream ms;
+    uint8_t payload[] = {0xAA, 0xBB, 0xCC};
+    ms.Write(payload, 0, 3);
+    ms.setPositionProperty(1);
+    ms.WriteByte(0xFF);
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+    EXPECT_EQ(ms.ToArray()[1], 0xFFu);
+}
+
+TEST(MemoryStreamTests, SetPositionNegativeThrows) {
+    MemoryStream ms;
+    EXPECT_THROW(ms.setPositionProperty(-1), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// Stream — default Position behavior for non-seekable streams
+// ---------------------------------------------------------------------------
+
+namespace {
+    class NonSeekableTestStream final : public System::IO::Stream {
+    public:
+        System::IO::intcs Read(System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override { return 0; }
+        void Close() override {}
+        [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+    };
+}
+
+TEST(StreamTests, DefaultGetPositionThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.getPositionProperty(), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultSetPositionThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.setPositionProperty(0), System::NotSupportedException);
 }
 
 // ---------------------------------------------------------------------------

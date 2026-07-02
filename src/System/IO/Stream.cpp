@@ -14,4 +14,12 @@ namespace System::IO {
         Write(&value, 0, 1);
     }
 
+    intcs Stream::getPositionProperty() const {
+        throw System::NotSupportedException("Stream does not support seeking.");
+    }
+
+    void Stream::setPositionProperty(intcs) {
+        throw System::NotSupportedException("Stream does not support seeking.");
+    }
+
 } // namespace System::IO

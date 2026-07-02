@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/MemoryStream.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <algorithm>
 
 namespace System::IO
@@ -49,5 +50,12 @@ namespace System::IO
     intcs MemoryStream::getLengthProperty() const
     {
         return static_cast<intcs>(data_.size());
+    }
+
+    void MemoryStream::setPositionProperty(intcs value)
+    {
+        if (value < 0)
+            throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        position_ = value;
     }
 }
