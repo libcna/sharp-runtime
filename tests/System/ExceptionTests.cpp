@@ -435,6 +435,16 @@ TEST(FieldAccessExceptionTests, InnerExceptionCtor_ContainsBoth) {
     EXPECT_NE(msg.find("cannot access field"), std::string::npos);
 }
 
+TEST(FieldAccessExceptionTests, HResult_MatchesCorEFieldAccess) {
+    constexpr SharpRuntime::intcs corEFieldAccess = static_cast<SharpRuntime::intcs>(0x80131507);
+    System::FieldAccessException defaultCtor;
+    System::FieldAccessException messageCtor("cannot access field");
+    System::FieldAccessException innerCtor("cannot access field", std::make_exception_ptr(std::runtime_error("root cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corEFieldAccess);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corEFieldAccess);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corEFieldAccess);
+}
+
 // ---------------------------------------------------------------------------
 // OutOfMemoryException
 // ---------------------------------------------------------------------------
