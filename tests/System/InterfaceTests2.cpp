@@ -172,3 +172,16 @@ TEST(ISpanFormattableTests2, TryFormat_WritesValue) {
     EXPECT_TRUE(sfi.TryFormat(buf, sizeof(buf), written, ""));
     EXPECT_EQ(std::string(buf, written), "77");
 }
+
+TEST(ISpanFormattableTests2, TryFormat_WithProvider_IgnoresProviderAndDelegates) {
+    // Default TryFormat(..., provider) implementation forwards to the 4-arg overload
+    // without requiring implementers to override it (matching the IFormattable::ToString fix).
+    // Invoked through the base interface, since the derived class's 4-arg override
+    // otherwise hides the base's 5-arg overload from unqualified name lookup.
+    SpanFormattableInt2 sfi(123);
+    const System::ISpanFormattable& base = sfi;
+    char buf[32];
+    std::size_t written = 0;
+    EXPECT_TRUE(base.TryFormat(buf, sizeof(buf), written, "", nullptr));
+    EXPECT_EQ(std::string(buf, written), "123");
+}
