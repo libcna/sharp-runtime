@@ -143,6 +143,36 @@ TEST(GCTests, GCMemoryInfo_PauseDuration_IsZero) {
     EXPECT_EQ(info.getPauseDurationProperty(), TimeSpan::Zero);
 }
 
+TEST(GCTests, GCMemoryInfo_PinnedObjectsCount_IsZero) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_EQ(info.getPinnedObjectsCountProperty(), 0LL);
+}
+
+TEST(GCTests, GCMemoryInfo_FinalizationPendingCount_IsZero) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_EQ(info.getFinalizationPendingCountProperty(), 0LL);
+}
+
+TEST(GCTests, GCMemoryInfo_PromotedBytes_IsZero) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_EQ(info.getPromotedBytesProperty(), 0LL);
+}
+
+TEST(GCTests, GCMemoryInfo_PauseTimePercentage_IsZero) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_DOUBLE_EQ(info.getPauseTimePercentageProperty(), 0.0);
+}
+
+TEST(GCTests, GCMemoryInfo_GenerationInfo_IsEmpty) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_TRUE(info.getGenerationInfoProperty().empty());
+}
+
+TEST(GCTests, GCMemoryInfo_PauseDurations_IsEmpty) {
+    GCMemoryInfo info = GC::GetGCMemoryInfo();
+    EXPECT_TRUE(info.getPauseDurationsProperty().empty());
+}
+
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------

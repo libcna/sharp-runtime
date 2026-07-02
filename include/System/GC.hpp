@@ -4,7 +4,9 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <vector>
 #include "System/GCCollectionMode.hpp"
+#include "System/GCGenerationInfo.hpp"
 #include "System/GCNotificationStatus.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -26,7 +28,7 @@ namespace System {
      * @brief Provides memory usage information about the garbage collector.
      *
      * C++ counterpart of .NET System.GCMemoryInfo.
-     * All properties return zero in this stub implementation.
+     * All properties return zero/empty in this stub implementation.
      */
     struct GCMemoryInfo {
         /** @brief Gets the total available memory for the GC to use. */
@@ -49,9 +51,21 @@ namespace System {
         [[nodiscard]] bool      getConcurrentProperty()                const noexcept { return false; }
         /** @brief Returns true when this info was produced by a compacting GC. */
         [[nodiscard]] bool      getCompactedProperty()                 const noexcept { return false; }
-        /** @brief Returns true when this info was produced by a pinned-object-heap GC. */
-        [[nodiscard]] bool      getPinnedObjectsCountProperty()        const noexcept { return false; }
-        /** @brief Gets the pause duration for this GC. */
+        /** @brief Gets the number of pinned objects the GC observed. */
+        [[nodiscard]] long long getPinnedObjectsCountProperty()        const noexcept { return 0LL; }
+        /** @brief Gets the number of objects ready for finalization this GC observed. */
+        [[nodiscard]] long long getFinalizationPendingCountProperty()  const noexcept { return 0LL; }
+        /** @brief Gets the number of bytes promoted to the next generation. */
+        [[nodiscard]] long long getPromotedBytesProperty()             const noexcept { return 0LL; }
+        /** @brief Gets the percentage of time spent paused for this GC, relative to its duration. */
+        [[nodiscard]] double    getPauseTimePercentageProperty()       const noexcept { return 0.0; }
+        /** @brief Gets per-generation size/fragmentation info; always empty in this port. */
+        [[nodiscard]] std::vector<GCGenerationInfo> getGenerationInfoProperty() const {
+            return {};
+        }
+        /** @brief Gets the pause durations observed for this GC; always empty in this port. */
+        [[nodiscard]] std::vector<TimeSpan> getPauseDurationsProperty() const { return {}; }
+        /** @brief Gets the pause duration for this GC. Convenience alias kept for existing callers. */
         [[nodiscard]] TimeSpan  getPauseDurationProperty()             const noexcept { return TimeSpan::Zero; }
     };
 
