@@ -52,7 +52,7 @@ TEST(ISpanParsableTests2, ParseFromSpan) {
 // ---------------------------------------------------------------------------
 // IUtf8SpanFormattable
 // ---------------------------------------------------------------------------
-struct Utf8FormattableInt : public System::IUtf8SpanFormattable<Utf8FormattableInt> {
+struct Utf8FormattableInt : public System::IUtf8SpanFormattable {
     int value;
     explicit Utf8FormattableInt(int v) : value(v) {}
     bool TryFormatUtf8(System::Span<uint8_t> dest, int& bytesWritten,
@@ -74,6 +74,21 @@ TEST(IUtf8SpanFormattableTests2, TryFormatUtf8_WritesBytes) {
     EXPECT_EQ(written, 2);
     EXPECT_EQ(buf[0], '9');
     EXPECT_EQ(buf[1], '9');
+}
+
+TEST(IUtf8SpanFormattableTests2, TryFormatUtf8_WithProvider_IgnoresProviderAndDelegates) {
+    // Default 4-arg TryFormatUtf8(..., provider) forwards to the 3-arg overload without
+    // requiring implementers to override it. Invoked through the base interface, since the
+    // derived class's 3-arg override otherwise hides the base's 4-arg overload from
+    // unqualified name lookup.
+    Utf8FormattableInt fi(7);
+    const System::IUtf8SpanFormattable& base = fi;
+    uint8_t buf[32];
+    System::Span<uint8_t> span(buf, sizeof(buf));
+    int written = 0;
+    EXPECT_TRUE(base.TryFormatUtf8(span, written, "", nullptr));
+    EXPECT_EQ(written, 1);
+    EXPECT_EQ(buf[0], '7');
 }
 
 // ---------------------------------------------------------------------------
