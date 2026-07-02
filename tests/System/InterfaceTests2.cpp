@@ -45,6 +45,12 @@ TEST(IFormattableTests2, ToString_ReturnsString) {
     EXPECT_EQ(fv.ToString("D"), "42");
 }
 
+TEST(IFormattableTests2, ToString_WithProvider_DefaultsToOneArgOverload) {
+    FormattableVal fv(42);
+    const System::IFormattable& base = fv;
+    EXPECT_EQ(base.ToString("D", nullptr), "42");
+}
+
 // ---------------------------------------------------------------------------
 // IObservable / IObserver
 // ---------------------------------------------------------------------------
