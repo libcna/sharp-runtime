@@ -9,16 +9,28 @@ namespace System {
         constexpr const char* DefaultMsg = "One of the identified items was in an invalid format.";
     }
 
+    namespace {
+        constexpr SharpRuntime::intcs CorEFormat = static_cast<SharpRuntime::intcs>(0x80131537); // COR_E_FORMAT
+    }
+
     FormatException::FormatException()
-        : SystemException(DefaultMsg) {}
+        : SystemException(DefaultMsg) {
+        setHResultProperty(CorEFormat);
+    }
 
     FormatException::FormatException(const char* message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(CorEFormat);
+    }
 
     FormatException::FormatException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(CorEFormat);
+    }
 
     FormatException::FormatException(const std::string& message, std::exception_ptr inner)
-        : SystemException(message, std::move(inner)) {}
+        : SystemException(message, std::move(inner)) {
+        setHResultProperty(CorEFormat);
+    }
 
 } // namespace System

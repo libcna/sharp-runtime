@@ -26,3 +26,8 @@ TEST(FormatExceptionTests, IsA_SystemException) {
     System::FormatException e;
     EXPECT_NE(dynamic_cast<System::SystemException*>(&e), nullptr);
 }
+
+TEST(FormatExceptionTests, HResult_MatchesCorEFormat) {
+    constexpr SharpRuntime::intcs corEFormat = static_cast<SharpRuntime::intcs>(0x80131537);
+    EXPECT_EQ(System::FormatException().getHResultProperty(), corEFormat);
+}
