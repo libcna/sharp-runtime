@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-02 (branch: develop) — 8467 tests passing*
+*Last updated: 2026-07-02 (branch: feature/work) — 8569 tests passing*
 
 ---
 
@@ -21,15 +21,15 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8467 tests passing** across 895 test suites. Zero failures.
+- **8569 tests passing** across 895 test suites. Zero failures.
 
 ### What works
-- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half`, `Single`, `Double`, `Decimal` (+ OACurrency), `Guid`, `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode`, `Void`, `Index`, `Lazy<T>`
+- Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
 - Delegates/Events: `Func<T>` (full `FuncT..FuncT16` arities), `Action`/`ActionT..ActionT16`, `Converter<T,R>`, `EventHandler<T>`, `EventArgs`, `Delegate`
 - Attributes: `Attribute`, `FlagsAttribute`, `ObsoleteAttribute`, `SerializableAttribute`, `CLSCompliantAttribute`
 - Enums: `Casing`, `CrashReason`, `GCCollectionMode`, `GCKind`, `GCLatencyMode`, `GCNotificationStatus`, `EnvironmentVariableTarget`, `MidpointRounding`
-- Formatting: `FormattableString`, `FormattableStringFactory`, `IFormatProvider`, `IFormattable` (now includes the `ToString(format, provider)` overload), `ISpanFormattable`, `IUtf8SpanFormattable<T>`, `ICustomFormatter`
-- Interfaces: `IAsyncDisposable` (`DisposeAsync()` returns `ValueTask`), `IAsyncResult` (full 4-member surface incl. `AsyncState`/`AsyncWaitHandle`), `ICloneable`, `IComparable<T>`, `IConvertible` (full surface incl. `ToDecimal`/`ToDateTime`), `IDisposable`, `IEquatable<T>`, `IObservable<T>`, `IObserver<T>`, `IParsable<T>`, `IProgress<T>`, `IServiceProvider`, `ISpanParsable<T>`, `IUtf8SpanParsable<T>`
+- Formatting: `FormattableString`, `FormattableStringFactory`, `IFormatProvider`, `IFormattable` (now includes the `ToString(format, provider)` overload), `ISpanFormattable` (now includes the `TryFormat(..., provider)` overload), `IUtf8SpanFormattable` (fixed: was wrongly generic over `<TSelf>`, now matches .NET's non-generic interface; added the `provider` overload), `ICustomFormatter`
+- Interfaces: `IAsyncDisposable` (`DisposeAsync()` returns `ValueTask`), `IAsyncResult` (full 4-member surface incl. `AsyncState`/`AsyncWaitHandle`), `ICloneable`, `IComparable<T>`, `IConvertible` (full surface incl. `ToDecimal`/`ToDateTime`), `IDisposable`, `IEquatable<T>`, `IObservable<T>`, `IObserver<T>` (both now document the C++-template variance gap), `IParsable<T>`, `IProgress<T>` (documents variance gap), `IServiceProvider`, `ISpanParsable<T>`, `IUtf8SpanParsable<T>` (fixed: was taking a mutable `Span<byte>` instead of `ReadOnlySpan<byte>`; added the `provider` overload)
 - Time: `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `TimeZoneInfo`, `TimeProvider`, `Stopwatch`
 - Exceptions: full hierarchy — all `std::exception_ptr` inner-exception ctors, `HResult`/`Source`/`HelpLink` on the `Exception` base, `HResult` now correctly set per-type on `ExecutionEngineException`/`FieldAccessException`/`FormatException` (was previously inheriting the base `COR_E_EXCEPTION` default — audit other exception types for the same gap, see §5), all `/** */` Doxygen on all types
 - Collections (non-generic): `ArrayList` (full API), `BitArray` (full API), `Hashtable`, `Queue`, `Stack`, `Comparer`, `IList`, `ICollection`, `IComparer`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`
@@ -67,10 +67,20 @@
 
 ## 3. Recent changes
 
-All on branch `develop`, most recent first (38 commits since the previous NEXT.md update on 2026-06-29 — showing the most recent batch):
+All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `361ce17` | Port IUtf8SpanParsable: fixed mutable `Span<byte>` → `ReadOnlySpan<byte>`, added `IFormatProvider` overloads, removed misleading "Stub" status, updated 3 test implementers |
+| `99dc25d` | Port IUtf8SpanFormattable: fixed wrong `<TSelf>` generic arity (.NET's interface isn't generic), added `IFormatProvider` overload, updated 2 test implementers |
+| `4f91f45` | Port ISpanFormattable: added missing `TryFormat(..., IFormatProvider)` overload (known gap from previous NEXT.md) |
+| `01939a2` | Port IProgress: documented C++-template variance gap (no code change needed otherwise) |
+| `4bdc703` | Port IParsable: documented static-abstract → instance-virtual mapping (no code change needed otherwise) |
+| `73af3f9` | Port IObservable/IObserver: documented C++-template variance gap (no code change needed otherwise) |
+| `2edaed4` | Port HashCode: added per-process random seed (matches .NET's documented non-determinism contract), `AddBytes(ReadOnlySpan<byte>)` overload |
+| `0ff26c8` | Port Half: **fixed two real bugs** — `FromSingle()` truncated instead of rounding (now correct IEEE 754 round-to-nearest-even); `ToSingle()` mis-scaled subnormals by ~2^85 (was treating the half mantissa as a float subnormal's mantissa). Also fixed `NaN` bits (0x7E00 → correct 0xFE00) and `operator==`/`!=` (was bit-exact, now correct IEEE semantics for NaN/±0). Added `NegativeZero`/`One`/`NegativeOne`/`E`/`Pi`/`Tau`, `IsNormal`/`IsSubnormal`, full arithmetic operators, `ToDouble`/`FromDouble`, `Parse`/`TryParse`, `ToString(format)`, `TryFormat` |
+| `b1625fc` | Port Guid: **fixed a real bug** — `ToByteArray()`/byte-array ctor used the same byte order as `ToString()`, but .NET's actual default `ToByteArray()` is little-endian for the first three fields (verified against real dotnet/runtime test vectors); added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, component ctors, span-based Parse/TryParse/TryFormat/TryWriteBytes, `GetHashCode` |
+| `1c549f5` | Port Stream.Position: get/set `Position` property matching .NET's full `Stream` API |
 | `d01d1b4` | Port IFormattable: add `ToString(format, IFormatProvider)` overload (default forwards to 1-arg version); stale doc-comment corrected |
 | `00e651b` | Port IConvertible: add missing `ToDecimal()`/`ToDateTime()`; implement in `DBNull` |
 | `d61ffb8` | Port IAsyncResult: add missing `AsyncState`/`AsyncWaitHandle` properties |
@@ -109,16 +119,15 @@ types ported before `bab45c2` have the same gap** and check `HResult` against `H
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 8467 tests pass.
+**No active technical blocker.** Build is clean, all 8569 tests pass.
 
 The workflow is now autonomous (§3a) — do **not** revert to asking the user before each type; that was
 the old behavior and has been intentionally replaced.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `Guid`, `Half`,
-`HashCode`, `IObservable`, `IObserver`, `IParsable`, `IProgress`, `IServiceProvider`, `ISpanFormattable`
-(known related gap: its `TryFormat` is also missing the `IFormatProvider` parameter that `.NET` declares
-— fix while there, same pattern as the IFormattable fix in `d01d1b4`), `ISpanParsable`, `IStructuralComparable`, …
-944 `todo` + 62 empty items remain across all namespaces; 139 were in `System` at last count.
+Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `Index`,
+`IndexOutOfRangeException`, `InsufficientExecutionStackException`, `InsufficientMemoryException`,
+`Int128`, `Int16`, `Int32`, …
+932 `todo` + 62 empty items remain across all namespaces (107 `ported` so far).
 
 ---
 
@@ -135,7 +144,6 @@ Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing
 | incomplete | `ArrayList.Sort()` (no-arg) — cannot sort `std::any` without type info; throws |
 | incomplete | `ArrayList.GetEnumerator()` — returns `nullptr`; not yet iterable via `IEnumerator*` |
 | incomplete | `CopyTo(Array, int)` — `System.Array` type does not exist; skipped on all collections |
-| incomplete | `ISpanFormattable::TryFormat` — missing the `IFormatProvider` parameter .NET declares; fix when this item comes up in `plan.sqlite3` (id 2748) |
 | audit needed | Exception types ported before `bab45c2` may set no per-type `HResult` — see §3a |
 | stub | `System::SynchronizationContext` — `Progress<T>` calls handlers synchronously |
 | stub | `System::GC` — all methods are no-ops (by design — this is the correct end state, not a gap) |
@@ -146,7 +154,6 @@ Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing
 | needs verification | Emscripten build — never CI-tested; POSIX guards exist but not validated |
 | design note | `ArrayList` compares `std::any` elements by `type_info` only; meaningful value comparison requires a typed `IComparer` |
 | workflow risk | Duplicate test suite names cause linker errors — always check `--gtest_filter` output and use `Tests2` suffix when collisions exist |
-| in-flight (not this session) | Uncommitted changes to `Stream.hpp`/`MemoryStream.hpp`/`StreamTests.cpp` were present in the working tree as of 2026-07-02 (adding `Position` get/set) — belongs to a different, unfinished piece of work; do not discard, but do not assume it's done either |
 
 ---
 
@@ -183,7 +190,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **8467+ tests passing** — never go below the watermark.
+2. **8569+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
@@ -212,7 +219,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 ### plan.sqlite3 workflow (see prompt.md for the full canonical version)
 - Table `task`, columns: `id, namespace, name, type, internal, outofscope, status`
 - Status values: `ported`, `ignore`, `todo`, `tobedecided`, `''` (empty = unset). **`in_progress` does not exist.**
-- Current counts: 95 ported, 6 ignore, 944 todo, 62 empty (unset), plus large `ignored`/`in_progress` legacy buckets not part of the active workflow
+- Current counts: 107 ported, 6 ignore, 932 todo, 62 empty (unset), plus large `ignored`/`in_progress` legacy buckets not part of the active workflow
 - Query next unset: `sqlite3 plan.sqlite3 "SELECT id,namespace,name,type FROM task WHERE (status='' OR status='todo') ORDER BY (CASE WHEN namespace LIKE 'System%' THEN 0 ELSE 1 END), namespace, name LIMIT 1;"`
 - **Fully autonomous — no per-type user approval required** (changed 2026-07-02)
 
@@ -291,30 +298,30 @@ git push origin develop
 Ordered by `plan.sqlite3` processing order. Workflow is now autonomous (§3a) — no approval needed,
 just classify and proceed per `prompt.md`.
 
-### Task 1 — System.Guid
-- **Goal:** Full checklist review of the existing `Guid` struct against `.NET`'s ref surface (many overloads: byte-array ctors, `ReadOnlySpan<byte>` ctors incl. big-endian, `Parse`/`TryParse` family, `IComparable`/`IEquatable`/`IFormattable`/`IParsable`/`ISpanFormattable`/`IUtf8SpanFormattable`/`IUtf8SpanParsable` interface conformance).
-- **Files:** `include/System/Guid.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Guid*"`
+### Task 1 — System.Index
+- **Goal:** Full checklist review of the existing `Index` struct (from-end indexing, `^` operator equivalent) against `.NET`'s ref surface.
+- **Files:** `include/System/Index.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Index*"`
 
-### Task 2 — System.Half
-- **Goal:** Full checklist review of the existing `Half` struct (IEEE 754 binary16) against `.NET`'s ref surface.
-- **Files:** `include/System/Half.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Half*"`
+### Task 2 — System.IndexOutOfRangeException
+- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` (`COR_E_INDEXOUTOFRANGE`) since this type may predate the `HResult` property being added to `Exception`.
+- **Files:** `include/System/IndexOutOfRangeException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="IndexOutOfRangeException*"`
 
-### Task 3 — System.HashCode
-- **Goal:** Full checklist review of `HashCode.Combine`/`Add`/`ToHashCode` against `.NET`'s ref surface.
-- **Files:** `include/System/HashCode.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="HashCode*"`
+### Task 3 — System.InsufficientExecutionStackException
+- **Goal:** Checklist review of this small (23-line) exception type; same `HResult` audit as Task 2 (`COR_E_INSUFFICIENTEXECUTIONSTACK`).
+- **Files:** `include/System/InsufficientExecutionStackException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InsufficientExecutionStackException*"`
 
-### Task 4 — System.IObservable / System.IObserver
-- **Goal:** Checklist review of both generic interfaces together (they're a pair — `IObservable<T>.Subscribe(IObserver<T>)`).
-- **Files:** `include/System/IObservable.hpp`, `include/System/IObserver.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="IObservable*:IObserver*"`
+### Task 4 — System.InsufficientMemoryException
+- **Goal:** Checklist review; same `HResult` audit as Task 2 (`COR_E_INSUFFICIENTMEMORY`). Note in .NET this derives from `OutOfMemoryException`, not `SystemException` directly — verify the C++ base class matches.
+- **Files:** `include/System/InsufficientMemoryException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InsufficientMemoryException*"`
 
-### Task 5 — System.ISpanFormattable
-- **Goal:** Checklist review; known gap going in — `TryFormat` is missing the `IFormatProvider` parameter .NET declares (`bool TryFormat(Span<char>, out int, ReadOnlySpan<char>, IFormatProvider?)`). Fix the same way `IFormattable::ToString` was fixed in `d01d1b4` (non-pure default overload forwarding to the simpler one, so existing implementers aren't broken).
-- **Files:** `include/System/ISpanFormattable.hpp`, `tests/System/InterfaceTests2.cpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="ISpanFormattable*"`
+### Task 5 — System.Int128
+- **Goal:** Full checklist review of the existing `Int128` struct (336 lines — likely substantial already) against `.NET`'s ref surface; focus on arithmetic overflow behavior, `Parse`/`TryParse`, and any generic-math-interface methods that should be excluded per this port's documented deviations.
+- **Files:** `include/System/Int128.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Int128*"`
 
 ---
 
@@ -334,7 +341,6 @@ just classify and proceed per `prompt.md`.
 - **No mass rewrite or reformatting** in a single commit — incremental changes only.
 - **No `System.Buffer.BlockCopy`/`ByteLength`/`GetByte`/`SetByte`** — these require `System::Array` which does not exist and is out of scope.
 - **No per-item user confirmation in the plan.sqlite3 workflow** — this was the *old* rule and has been intentionally reversed as of 2026-07-02 (§3a). Do not reintroduce it; classify and proceed autonomously per `prompt.md`.
-- **No touching the in-flight `Stream`/`MemoryStream` `Position` changes** currently sitting uncommitted in the working tree unless you're the one continuing that specific piece of work — see §5.
 
 ---
 
@@ -354,7 +360,7 @@ For each item, per prompt.md:
      (API surface, doc-comments, SPDX, logic parity incl. HResult where applicable, build, tests)
      as if it were new — fix gaps, don't rubber-stamp.
   3. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests  (all 8467+ tests must pass)
+  4. Run: ./build/SharpRuntimeTests  (all 8569+ tests must pass)
   5. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   6. Commit only the files for that port: git -c commit.gpgsign=false commit -m "..."
   7. Loop back to step 1 — keep going, do not stop to ask between items.
