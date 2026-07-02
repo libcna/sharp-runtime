@@ -5,8 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <random>
 #include <vector>
 #include "System/Collections/Generic/IEqualityComparer.hpp"
+#include "System/Span.hpp"
 
 namespace System {
 
@@ -15,11 +17,25 @@ namespace System {
      * a single hash code.
      *
      * This is a C++ counterpart of .NET System.HashCode.
-     * The internal algorithm is FNV-1a; exact hash values will differ from
-     * the .NET xxHash32-based implementation, but the API contract is identical.
+     * The internal algorithm is FNV-1a; exact hash values will differ from the
+     * .NET xxHash32-based implementation, but the API contract is identical —
+     * including .NET's deliberate non-determinism: like .NET, the initial state
+     * is mixed with a random seed generated once per process, so Combine()/
+     * ToHashCode() results are consistent within a run but differ across runs
+     * (by design, to discourage persisting hash codes and to resist
+     * hash-flooding). GetHashCode()/Equals(object) are intentionally not
+     * ported: .NET only defines them to make HashCode itself throw
+     * NotSupportedException if misused as a hashable/comparable value, a
+     * concern that doesn't apply here since nothing in C++ implicitly calls
+     * them on a plain struct.
      */
     class HashCode {
-        uint32_t hash_ = 2166136261u; // FNV offset basis
+        static uint32_t GlobalSeed() noexcept {
+            static const uint32_t seed = std::random_device{}();
+            return seed;
+        }
+
+        uint32_t hash_ = 2166136261u ^ GlobalSeed(); // FNV offset basis, mixed with the per-process seed
 
         static constexpr uint32_t FNV_PRIME = 16777619u;
 
@@ -66,6 +82,15 @@ namespace System {
          */
         void AddBytes(const std::vector<uint8_t>& bytes) noexcept {
             AddBytes(bytes.data(), bytes.size());
+        }
+
+        /**
+         * @brief Adds a span of bytes to the hash code.
+         * C++ counterpart of .NET HashCode.AddBytes(ReadOnlySpan&lt;byte&gt;).
+         * @param value The span of bytes to add.
+         */
+        void AddBytes(const ReadOnlySpan<uint8_t>& value) noexcept {
+            AddBytes(value.getPointer(), static_cast<std::size_t>(value.getLengthProperty()));
         }
 
         /**

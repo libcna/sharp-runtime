@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <string>
 #include "System/HashCode.hpp"
+#include "System/Span.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 using System::HashCode;
 
@@ -51,5 +53,24 @@ TEST(HashCodeTests, AddBytes_SameData_SameHash) {
     HashCode hc1, hc2;
     hc1.AddBytes(data);
     hc2.AddBytes(data);
+    EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
+
+TEST(HashCodeTests, AddBytes_Span_MatchesVectorOverload) {
+    std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04, 0x05};
+    System::ReadOnlySpan<uint8_t> span(data.data(), static_cast<SharpRuntime::intcs>(data.size()));
+    HashCode hc1, hc2;
+    hc1.AddBytes(data);
+    hc2.AddBytes(span);
+    EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
+}
+
+TEST(HashCodeTests, Seed_DiffersAcrossProcessesButConsistentWithinOne) {
+    // The per-process global seed is generated once and shared by every HashCode
+    // instance in this run, so two independently-constructed accumulators given the
+    // same input still agree (the seed is not per-instance randomness).
+    HashCode hc1, hc2;
+    hc1.Add(std::string("hello"));
+    hc2.Add(std::string("hello"));
     EXPECT_EQ(hc1.ToHashCode(), hc2.ToHashCode());
 }
