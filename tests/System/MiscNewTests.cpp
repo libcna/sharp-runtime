@@ -2,10 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 // Tests for ParamArrayAttribute, AsyncCallback, ICustomFormatter
+#include <any>
 #include <gtest/gtest.h>
 #include "System/ParamArrayAttribute.hpp"
 #include "System/AsyncCallback.hpp"
 #include "System/IAsyncResult.hpp"
+#include "System/Threading/EventWaitHandle.hpp"
 
 // ---------------------------------------------------------------------------
 // ParamArrayAttribute
@@ -22,8 +24,12 @@ TEST(ParamArrayAttributeTests, IsA_Attribute) {
 // AsyncCallback
 // ---------------------------------------------------------------------------
 struct DummyAsyncResult : System::IAsyncResult {
+    std::any state;
+    mutable System::Threading::EventWaitHandle waitHandle{true, System::Threading::EventResetMode::ManualReset};
     bool getIsCompletedProperty() const noexcept override { return true; }
     bool getCompletedSynchronouslyProperty() const noexcept override { return false; }
+    const std::any& getAsyncStateProperty() const override { return state; }
+    System::Threading::WaitHandle& getAsyncWaitHandleProperty() const override { return waitHandle; }
 };
 
 TEST(AsyncCallbackTests, Callable_InvokesAction) {

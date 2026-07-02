@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 // Minimal tests for pure interfaces: IAsyncDisposable, IAsyncResult, ICloneable,
 // IComparable, IConvertible, ICustomFormatter
+#include <any>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@
 #include "System/ICloneable.hpp"
 #include "System/IComparable.hpp"
 #include "System/ICustomFormatter.hpp"
+#include "System/Threading/EventWaitHandle.hpp"
 
 // ---------------------------------------------------------------------------
 // IAsyncDisposable
@@ -40,8 +42,12 @@ TEST(IAsyncDisposableTests2, IsPolymorphic) {
 // IAsyncResult
 // ---------------------------------------------------------------------------
 struct SyncResult : public System::IAsyncResult {
+    std::any state;
+    mutable System::Threading::EventWaitHandle waitHandle{true, System::Threading::EventResetMode::ManualReset};
     bool getIsCompletedProperty() const override { return true; }
     bool getCompletedSynchronouslyProperty() const override { return true; }
+    const std::any& getAsyncStateProperty() const override { return state; }
+    System::Threading::WaitHandle& getAsyncWaitHandleProperty() const override { return waitHandle; }
 };
 
 TEST(IAsyncResultTests2, IsCompleted_ReturnsTrue) {
@@ -52,6 +58,22 @@ TEST(IAsyncResultTests2, IsCompleted_ReturnsTrue) {
 TEST(IAsyncResultTests2, CompletedSynchronously_ReturnsTrue) {
     SyncResult r;
     EXPECT_TRUE(r.getCompletedSynchronouslyProperty());
+}
+
+TEST(IAsyncResultTests2, AsyncState_DefaultsToEmpty) {
+    SyncResult r;
+    EXPECT_FALSE(r.getAsyncStateProperty().has_value());
+}
+
+TEST(IAsyncResultTests2, AsyncState_HoldsAssignedValue) {
+    SyncResult r;
+    r.state = std::string("payload");
+    EXPECT_EQ(std::any_cast<std::string>(r.getAsyncStateProperty()), "payload");
+}
+
+TEST(IAsyncResultTests2, AsyncWaitHandle_IsAccessible) {
+    SyncResult r;
+    EXPECT_NO_THROW(r.getAsyncWaitHandleProperty());
 }
 
 // ---------------------------------------------------------------------------

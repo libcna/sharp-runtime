@@ -4,6 +4,7 @@
 // Batch 4 tests: ResolveEventHandler, IAsyncResult, AccessViolationException,
 // DataMisalignedException, PlatformNotSupportedException, GCGenerationInfo
 // (EXCEPT_SIMPLE covers DefaultCtor_WhatNotEmpty/MessageCtor/IsA for the exception types)
+#include <any>
 #include <gtest/gtest.h>
 #include "System/ResolveEventHandler.hpp"
 #include "System/ResolveEventArgs.hpp"
@@ -14,6 +15,7 @@
 #include "System/GCGenerationInfo.hpp"
 #include "System/SystemException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/Threading/EventWaitHandle.hpp"
 
 // ---------------------------------------------------------------------------
 // ResolveEventHandler
@@ -38,13 +40,21 @@ TEST(ResolveEventHandlerTests, ValidHandler_IsTruthy) {
 // IAsyncResult
 // ---------------------------------------------------------------------------
 struct SyncResult : System::IAsyncResult {
+    std::any state;
+    mutable System::Threading::EventWaitHandle waitHandle{true, System::Threading::EventResetMode::ManualReset};
     bool getIsCompletedProperty()            const noexcept override { return true; }
     bool getCompletedSynchronouslyProperty() const noexcept override { return true; }
+    const std::any& getAsyncStateProperty() const override { return state; }
+    System::Threading::WaitHandle& getAsyncWaitHandleProperty() const override { return waitHandle; }
 };
 
 struct AsyncResult : System::IAsyncResult {
+    std::any state;
+    mutable System::Threading::EventWaitHandle waitHandle{false, System::Threading::EventResetMode::ManualReset};
     bool getIsCompletedProperty()            const noexcept override { return false; }
     bool getCompletedSynchronouslyProperty() const noexcept override { return false; }
+    const std::any& getAsyncStateProperty() const override { return state; }
+    System::Threading::WaitHandle& getAsyncWaitHandleProperty() const override { return waitHandle; }
 };
 
 TEST(IAsyncResultTests, Completed_ReturnsTrue) {
