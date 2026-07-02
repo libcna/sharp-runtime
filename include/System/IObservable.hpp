@@ -12,11 +12,16 @@ namespace System {
      * @brief Defines a provider for push-based notification.
      *
      * C++ counterpart of .NET System.IObservable<T>.
+     * @note .NET declares this interface covariant (`IObservable<out T>`), so
+     *   `IObservable<Derived>` is usable wherever `IObservable<Base>` is expected.
+     *   C++ class templates have no equivalent variance mechanism, so
+     *   `IObservable<Derived>` and `IObservable<Base>` are unrelated types here.
      * @tparam T The object that provides notification information.
      */
     template<typename T>
     class IObservable {
     public:
+        /** @brief Virtual destructor for safe polymorphic destruction. */
         virtual ~IObservable() = default;
 
         /**
