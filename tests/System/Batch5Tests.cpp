@@ -134,7 +134,10 @@ TEST(ICloneableTests, Clone_IsIndependent) {
 // ---------------------------------------------------------------------------
 struct DisposableResource : System::IAsyncDisposable {
     bool disposed = false;
-    void DisposeAsync() override { disposed = true; }
+    System::Threading::Tasks::ValueTask DisposeAsync() override {
+        disposed = true;
+        return System::Threading::Tasks::ValueTask::CompletedTask();
+    }
 };
 
 TEST(IAsyncDisposableTests, DisposeAsync_CallsImpl) {
