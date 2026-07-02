@@ -64,6 +64,12 @@ namespace System {
      * uses deterministic RAII rather than a tracing GC. The class exists so that
      * ported game code that calls GC.Collect() or GC.SuppressFinalize() compiles
      * and links without modification.
+     *
+     * @note AllocateArray<T>/AllocateUninitializedArray<T> and GetConfigurationVariables()
+     * are intentionally omitted: the first two return a GC-tracked managed array with no
+     * C++ equivalent (use a native array or std::vector<T> directly instead), and the third
+     * returns an IReadOnlyDictionary<string, object> describing real GC configuration, which
+     * does not exist in this port.
      */
     class GC {
     public:
@@ -304,6 +310,43 @@ namespace System {
         }
 
         /**
+         * @brief Attempts to disallow garbage collection, optionally disallowing a
+         * full blocking collection, during the execution of a critical path.
+         *
+         * C++ counterpart of .NET GC.TryStartNoGCRegion(long, bool).
+         * Always returns false in this port (no GC to suppress).
+         */
+        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, bool disallowFullBlockingGC) {
+            (void)totalSize; (void)disallowFullBlockingGC;
+            return false;
+        }
+
+        /**
+         * @brief Attempts to disallow garbage collection, specifying the amount of
+         * memory to reserve in the large object heap, during a critical path.
+         *
+         * C++ counterpart of .NET GC.TryStartNoGCRegion(long, long).
+         * Always returns false in this port (no GC to suppress).
+         */
+        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, long long lohSize) {
+            (void)totalSize; (void)lohSize;
+            return false;
+        }
+
+        /**
+         * @brief Attempts to disallow garbage collection, specifying the large object
+         * heap size and whether to disallow a full blocking collection.
+         *
+         * C++ counterpart of .NET GC.TryStartNoGCRegion(long, long, bool).
+         * Always returns false in this port (no GC to suppress).
+         */
+        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, long long lohSize,
+                                                      bool disallowFullBlockingGC) {
+            (void)totalSize; (void)lohSize; (void)disallowFullBlockingGC;
+            return false;
+        }
+
+        /**
          * @brief Ends the no-GC region latency mode.
          *
          * C++ counterpart of .NET GC.EndNoGCRegion().
@@ -361,6 +404,18 @@ namespace System {
         }
 
         /**
+         * @brief Returns the status of a registered notification for a full GC approach,
+         * using a TimeSpan timeout.
+         *
+         * C++ counterpart of .NET GC.WaitForFullGCApproach(TimeSpan).
+         * Always returns GCNotificationStatus::Succeeded in this port.
+         */
+        [[nodiscard]] static GCNotificationStatus WaitForFullGCApproach(TimeSpan timeout) {
+            (void)timeout;
+            return GCNotificationStatus::Succeeded;
+        }
+
+        /**
          * @brief Returns the status of a registered notification for a full GC completion.
          *
          * C++ counterpart of .NET GC.WaitForFullGCComplete(int).
@@ -370,6 +425,18 @@ namespace System {
             int millisecondsTimeout = -1)
         {
             (void)millisecondsTimeout;
+            return GCNotificationStatus::Succeeded;
+        }
+
+        /**
+         * @brief Returns the status of a registered notification for a full GC completion,
+         * using a TimeSpan timeout.
+         *
+         * C++ counterpart of .NET GC.WaitForFullGCComplete(TimeSpan).
+         * Always returns GCNotificationStatus::Succeeded in this port.
+         */
+        [[nodiscard]] static GCNotificationStatus WaitForFullGCComplete(TimeSpan timeout) {
+            (void)timeout;
             return GCNotificationStatus::Succeeded;
         }
 

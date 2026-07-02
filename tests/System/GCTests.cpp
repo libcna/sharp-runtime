@@ -212,6 +212,18 @@ TEST(GCTests, TryStartNoGCRegion_ReturnsFalse) {
     EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024));
 }
 
+TEST(GCTests, TryStartNoGCRegion_WithDisallowFullBlockingGC_ReturnsFalse) {
+    EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024, true));
+}
+
+TEST(GCTests, TryStartNoGCRegion_WithLohSize_ReturnsFalse) {
+    EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024, 512LL * 1024));
+}
+
+TEST(GCTests, TryStartNoGCRegion_WithLohSizeAndDisallowFullBlockingGC_ReturnsFalse) {
+    EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024, 512LL * 1024, true));
+}
+
 TEST(GCTests, EndNoGCRegion_DoesNotThrow) {
     EXPECT_NO_THROW(GC::EndNoGCRegion());
 }
@@ -242,12 +254,20 @@ TEST(GCTests, WaitForFullGCApproach_DefaultTimeout_ReturnsSucceeded) {
     EXPECT_EQ(GC::WaitForFullGCApproach(), GCNotificationStatus::Succeeded);
 }
 
+TEST(GCTests, WaitForFullGCApproach_TimeSpanTimeout_ReturnsSucceeded) {
+    EXPECT_EQ(GC::WaitForFullGCApproach(TimeSpan::FromSeconds(1)), GCNotificationStatus::Succeeded);
+}
+
 TEST(GCTests, WaitForFullGCComplete_ReturnsSucceeded) {
     EXPECT_EQ(GC::WaitForFullGCComplete(0), GCNotificationStatus::Succeeded);
 }
 
 TEST(GCTests, WaitForFullGCComplete_DefaultTimeout_ReturnsSucceeded) {
     EXPECT_EQ(GC::WaitForFullGCComplete(), GCNotificationStatus::Succeeded);
+}
+
+TEST(GCTests, WaitForFullGCComplete_TimeSpanTimeout_ReturnsSucceeded) {
+    EXPECT_EQ(GC::WaitForFullGCComplete(TimeSpan::FromSeconds(1)), GCNotificationStatus::Succeeded);
 }
 
 // ---------------------------------------------------------------------------
