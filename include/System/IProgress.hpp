@@ -11,6 +11,10 @@ namespace System {
      * C++ counterpart of .NET System.IProgress<T>. Implement this interface
      * to receive notifications about the progress of an operation.
      *
+     * @note .NET declares this interface contravariant (`IProgress<in T>`), so
+     *   `IProgress<Base>` is usable wherever `IProgress<Derived>` is expected.
+     *   C++ class templates have no equivalent variance mechanism, so
+     *   `IProgress<Derived>` and `IProgress<Base>` are unrelated types here.
      * @tparam T The type of progress update value.
      */
     template<typename T>
