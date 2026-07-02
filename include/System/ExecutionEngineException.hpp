@@ -27,7 +27,9 @@ namespace System {
          * C++ counterpart of .NET ExecutionEngineException().
          */
         ExecutionEngineException()
-            : SystemException("Internal error in the runtime.") {}
+            : SystemException("Internal error in the runtime.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131506)); // COR_E_EXECUTIONENGINE
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -36,7 +38,9 @@ namespace System {
          * @param message The error message that explains the reason for the exception.
          */
         explicit ExecutionEngineException(const std::string& message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131506)); // COR_E_EXECUTIONENGINE
+        }
 
         /**
          * @brief Initializes a new instance with a specified error message and a
@@ -47,7 +51,9 @@ namespace System {
          * @param inner   The exception that is the cause of the current exception.
          */
         ExecutionEngineException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, std::move(inner)) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131506)); // COR_E_EXECUTIONENGINE
+        }
     };
 
 } // namespace System
