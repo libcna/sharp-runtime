@@ -5,6 +5,9 @@
 
 #include "System/Guid.hpp"
 #include "System/FormatException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/OverflowException.hpp"
+#include "System/Span.hpp"
 
 using System::Guid;
 
@@ -151,16 +154,21 @@ TEST(GuidTests, NewGuidTwoCallsDiffer) {
 }
 
 TEST(GuidTests, NewGuidVersion4Bits) {
-    // RFC 4122: byte[6] upper nibble must be 0x4 (version 4)
+    // RFC 4122: byte[6] upper nibble must be 0x4 (version 4). ToByteArray(true) is
+    // the RFC-4122/network-byte-order layout; the default ToByteArray() is little-endian
+    // for the first three components (matching .NET) and does not put the version
+    // nibble at a fixed index.
     Guid g = Guid::NewGuid();
-    const auto& b = g.ToByteArray();
+    const auto b = g.ToByteArray(true);
     EXPECT_EQ(b[6] & 0xF0u, 0x40u);
+    EXPECT_EQ(g.getVersionProperty(), 4);
 }
 
 TEST(GuidTests, NewGuidVariantBits) {
-    // RFC 4122: byte[8] top two bits must be 0b10xxxxxx
+    // RFC 4122: byte[8] top two bits must be 0b10xxxxxx (unaffected by byte order,
+    // since it is one of the trailing 8 bytes that are never reordered).
     Guid g = Guid::NewGuid();
-    const auto& b = g.ToByteArray();
+    const auto b = g.ToByteArray(true);
     EXPECT_EQ(b[8] & 0xC0u, 0x80u);
 }
 
@@ -235,7 +243,14 @@ TEST(GuidTests, ToString_P_HasParens) {
     EXPECT_EQ(g.ToString("P"), "(550e8400-e29b-41d4-a716-446655440000)");
 }
 TEST(GuidTests, ToString_InvalidFormat_Throws) {
-    EXPECT_THROW(Guid::NewGuid().ToString("X"), System::FormatException);
+    EXPECT_THROW(Guid::NewGuid().ToString("Z"), System::FormatException);
+}
+
+TEST(GuidTests, ToString_X_HasHexLiteralForm) {
+    // Official .NET test vector (s_testGuid, GuidTests.cs ToStringTestData)
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_EQ(g.ToString("X"), "{0xa8a110d5,0xfc49,0x43c5,{0xbf,0x46,0x80,0x2d,0xb8,0xf8,0x43,0xff}}");
+    EXPECT_EQ(g.ToString("x"), g.ToString("X"));
 }
 
 // ---------------------------------------------------------------------------
@@ -310,4 +325,252 @@ TEST(GuidTests, OperatorGreaterOrEqual_Greater) {
     Guid hi("00000000-0000-0000-0000-000000000002");
     EXPECT_TRUE(hi >= lo);
     EXPECT_FALSE(lo >= hi);
+}
+
+// ---------------------------------------------------------------------------
+// AllBitsSet
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, AllBitsSetIsAllFs) {
+    EXPECT_EQ(Guid::getAllBitsSetProperty().ToString(), "ffffffff-ffff-ffff-ffff-ffffffffffff");
+}
+
+// ---------------------------------------------------------------------------
+// ToByteArray(bigEndian) — official .NET test vectors from GuidTests.cs ToByteArray()
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, ToByteArray_DefaultIsNativeLittleEndianForFirstThreeComponents) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    std::array<uint8_t, 16> expected = {
+        0xd5, 0x10, 0xa1, 0xa8, 0x49, 0xfc, 0xc5, 0x43,
+        0xbf, 0x46, 0x80, 0x2d, 0xb8, 0xf8, 0x43, 0xff
+    };
+    EXPECT_EQ(g.ToByteArray(), expected);
+    EXPECT_EQ(g.ToByteArray(false), expected);
+}
+
+TEST(GuidTests, ToByteArray_BigEndianMatchesStringOrder) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    std::array<uint8_t, 16> expected = {
+        0xa8, 0xa1, 0x10, 0xd5, 0xfc, 0x49, 0x43, 0xc5,
+        0xbf, 0x46, 0x80, 0x2d, 0xb8, 0xf8, 0x43, 0xff
+    };
+    EXPECT_EQ(g.ToByteArray(true), expected);
+}
+
+TEST(GuidTests, ByteArrayCtor_NativeOrderRoundTripsThroughToByteArray) {
+    // .NET GuidTests.cs GuidCtorArrayTestData: byte[]{0x44,0x33,0x22,0x11,0x66,0x55,0x88,0x77,
+    // 0x99,0x00,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF} -> Guid("11223344-5566-7788-9900-aabbccddeeff")
+    std::array<uint8_t, 16> nativeOrder = {
+        0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 0x88, 0x77,
+        0x99, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+    };
+    Guid g(nativeOrder);
+    EXPECT_EQ(g, Guid("11223344-5566-7788-9900-aabbccddeeff"));
+}
+
+TEST(GuidTests, ByteArrayCtor_BigEndianOrder) {
+    std::array<uint8_t, 16> bigEndianOrder = {
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+        0x99, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+    };
+    Guid g(bigEndianOrder, true);
+    EXPECT_EQ(g, Guid("11223344-5566-7788-9900-aabbccddeeff"));
+}
+
+TEST(GuidTests, ReadOnlySpanCtor_WrongLengthThrows) {
+    std::array<uint8_t, 4> shortArr = {1, 2, 3, 4};
+    System::ReadOnlySpan<uint8_t> span(shortArr.data(), static_cast<SharpRuntime::intcs>(shortArr.size()));
+    EXPECT_THROW(Guid{span}, System::ArgumentException);
+}
+
+// ---------------------------------------------------------------------------
+// Component constructors — official .NET test vectors from GuidTests.cs
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, ComponentCtor_UintUshortUshortBytes_MatchesTestGuid) {
+    // s_testGuid = "a8a110d5-fc49-43c5-bf46-802db8f843ff"
+    Guid g(0xa8a110d5u, static_cast<uint16_t>(0xfc49), static_cast<uint16_t>(0x43c5),
+           0xbf, 0x46, 0x80, 0x2d, 0xb8, 0xf8, 0x43, 0xff);
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, ComponentCtor_IntShortShortByteArray) {
+    std::array<uint8_t, 8> d = {0, 1, 2, 3, 4, 5, 6, 7};
+    Guid g(1, 2, 3, d);
+    EXPECT_EQ(g, Guid("00000001-0002-0003-0001-020304050607"));
+}
+
+TEST(GuidTests, ComponentCtor_IntShortShortBytes) {
+    Guid g(2147483647, static_cast<int16_t>(32767), static_cast<int16_t>(32767),
+           0xA, 0xB, 0xC, 0xD, 0xE, 0xF, 0xAA, 0xBB);
+    EXPECT_EQ(g, Guid("7fffffff-7fff-7fff-0a0b-0c0d0e0faabb"));
+}
+
+// ---------------------------------------------------------------------------
+// Variant / Version
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, Variant_ForRfc4122Guid) {
+    Guid g = Guid::NewGuid();
+    // Variant is the top 4 bits of _d; RFC 4122 variant is 0b10xx -> value in [8, 11].
+    EXPECT_GE(g.getVariantProperty(), 8);
+    EXPECT_LE(g.getVariantProperty(), 11);
+}
+
+TEST(GuidTests, Version_ForNewGuidIsFour) {
+    Guid g = Guid::NewGuid();
+    EXPECT_EQ(g.getVersionProperty(), 4);
+}
+
+// ---------------------------------------------------------------------------
+// CreateVersion7
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, CreateVersion7_HasVersionSevenAndRfc4122Variant) {
+    Guid g = Guid::CreateVersion7();
+    EXPECT_EQ(g.getVersionProperty(), 7);
+    EXPECT_GE(g.getVariantProperty(), 8);
+    EXPECT_LE(g.getVariantProperty(), 11);
+}
+
+TEST(GuidTests, CreateVersion7_TwoCallsDiffer) {
+    Guid g1 = Guid::CreateVersion7();
+    Guid g2 = Guid::CreateVersion7();
+    EXPECT_NE(g1, g2);
+}
+
+// ---------------------------------------------------------------------------
+// ParseExact / TryParseExact
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, ParseExact_D) {
+    Guid g = Guid::ParseExact("a8a110d5-fc49-43c5-bf46-802db8f843ff", "D");
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, ParseExact_N) {
+    Guid g = Guid::ParseExact("a8a110d5fc4943c5bf46802db8f843ff", "N");
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, ParseExact_X) {
+    Guid g = Guid::ParseExact(
+        "{0xa8a110d5,0xfc49,0x43c5,{0xbf,0x46,0x80,0x2d,0xb8,0xf8,0x43,0xff}}", "X");
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, ParseExact_WrongFormatThrows) {
+    // Valid "D" text parsed with "N" exact format must fail.
+    EXPECT_THROW(Guid::ParseExact("a8a110d5-fc49-43c5-bf46-802db8f843ff", "N"), System::FormatException);
+}
+
+TEST(GuidTests, ParseExact_InvalidFormatSpecifierThrows) {
+    EXPECT_THROW(Guid::ParseExact("a8a110d5-fc49-43c5-bf46-802db8f843ff", "Q"), System::FormatException);
+}
+
+TEST(GuidTests, TryParseExact_Valid) {
+    Guid g;
+    EXPECT_TRUE(Guid::TryParseExact("{a8a110d5-fc49-43c5-bf46-802db8f843ff}", "B", g));
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, TryParseExact_WrongFormatReturnsFalse) {
+    Guid g;
+    EXPECT_FALSE(Guid::TryParseExact("a8a110d5-fc49-43c5-bf46-802db8f843ff", "N", g));
+}
+
+// ---------------------------------------------------------------------------
+// Parse auto-detection of "X" format
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, Parse_ValidX_Parses) {
+    Guid g = Guid::Parse("{0xa8a110d5,0xfc49,0x43c5,{0xbf,0x46,0x80,0x2d,0xb8,0xf8,0x43,0xff}}");
+    EXPECT_EQ(g, Guid("a8a110d5-fc49-43c5-bf46-802db8f843ff"));
+}
+
+TEST(GuidTests, Parse_X_OverflowingComponentThrowsOverflow) {
+    // 9-digit hex component overflows a 32-bit value.
+    EXPECT_THROW(
+        Guid::Parse("{0x1a8a110d5,0xfc49,0x43c5,{0xbf,0x46,0x80,0x2d,0xb8,0xf8,0x43,0xff}}"),
+        System::OverflowException);
+}
+
+// ---------------------------------------------------------------------------
+// TryFormat / TryFormatUtf8
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, TryFormat_FitsBuffer) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    char buf[36];
+    SharpRuntime::intcs written = 0;
+    System::Span<char> dest(buf, 36);
+    EXPECT_TRUE(g.TryFormat(dest, written));
+    EXPECT_EQ(written, 36);
+    EXPECT_EQ(std::string(buf, 36), "a8a110d5-fc49-43c5-bf46-802db8f843ff");
+}
+
+TEST(GuidTests, TryFormat_TooSmallReturnsFalse) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    char buf[10];
+    SharpRuntime::intcs written = -1;
+    System::Span<char> dest(buf, 10);
+    EXPECT_FALSE(g.TryFormat(dest, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(GuidTests, TryFormatUtf8_FitsBuffer) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    uint8_t buf[32];
+    SharpRuntime::intcs written = 0;
+    System::Span<uint8_t> dest(buf, 32);
+    EXPECT_TRUE(g.TryFormatUtf8(dest, written, "N"));
+    EXPECT_EQ(written, 32);
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(buf), 32), "a8a110d5fc4943c5bf46802db8f843ff");
+}
+
+// ---------------------------------------------------------------------------
+// TryWriteBytes
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, TryWriteBytes_TooSmallReturnsFalse) {
+    Guid g = Guid::NewGuid();
+    uint8_t buf[8];
+    System::Span<uint8_t> dest(buf, 8);
+    EXPECT_FALSE(g.TryWriteBytes(dest));
+}
+
+TEST(GuidTests, TryWriteBytes_WritesNativeOrder) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    uint8_t buf[16] = {};
+    System::Span<uint8_t> dest(buf, 16);
+    EXPECT_TRUE(g.TryWriteBytes(dest));
+    auto expected = g.ToByteArray();
+    for (int i = 0; i < 16; ++i) EXPECT_EQ(buf[i], expected[static_cast<size_t>(i)]);
+}
+
+TEST(GuidTests, TryWriteBytes_BigEndian) {
+    Guid g("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    uint8_t buf[16] = {};
+    System::Span<uint8_t> dest(buf, 16);
+    SharpRuntime::intcs written = 0;
+    EXPECT_TRUE(g.TryWriteBytes(dest, true, written));
+    EXPECT_EQ(written, 16);
+    auto expected = g.ToByteArray(true);
+    for (int i = 0; i < 16; ++i) EXPECT_EQ(buf[i], expected[static_cast<size_t>(i)]);
+}
+
+// ---------------------------------------------------------------------------
+// GetHashCode
+// ---------------------------------------------------------------------------
+
+TEST(GuidTests, GetHashCode_EqualGuidsHaveEqualHashCodes) {
+    Guid a("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    Guid b("a8a110d5-fc49-43c5-bf46-802db8f843ff");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(GuidTests, GetHashCode_EmptyIsZero) {
+    // All 16 bytes zero XORs to zero regardless of byte order.
+    EXPECT_EQ(Guid::Empty.GetHashCode(), 0);
 }
