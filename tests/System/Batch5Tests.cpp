@@ -76,6 +76,8 @@ struct IntConvertible : System::IConvertible {
     uint64_t ToUInt64() const override { return static_cast<uint64_t>(val); }
     float ToSingle() const override { return static_cast<float>(val); }
     double ToDouble() const override { return static_cast<double>(val); }
+    System::Decimal ToDecimal() const override { return System::Decimal(val); }
+    System::DateTime ToDateTime() const override { return System::DateTime(); }
     std::string ToString() const override { return std::to_string(val); }
 };
 
@@ -103,6 +105,14 @@ TEST(IConvertibleTests, PolymorphicAccess_ViaBasePtr) {
     IntConvertible concrete(99);
     System::IConvertible* p = &concrete;
     EXPECT_EQ(p->ToInt32(), 99);
+}
+TEST(IConvertibleTests, ToDecimal_ReturnsValue) {
+    IntConvertible ic(13);
+    EXPECT_EQ(ic.ToDecimal().ToInt32(), 13);
+}
+TEST(IConvertibleTests, ToDateTime_DoesNotThrow) {
+    IntConvertible ic(0);
+    EXPECT_NO_THROW(ic.ToDateTime());
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "System/DateTime.hpp"
+#include "System/Decimal.hpp"
 #include "System/TypeCode.hpp"
 
 namespace System {
@@ -43,6 +45,10 @@ namespace System {
         [[nodiscard]] virtual float ToSingle() const = 0;
         /** @brief Converts this value to a double-precision floating-point number. */
         [[nodiscard]] virtual double ToDouble() const = 0;
+        /** @brief Converts this value to a Decimal number. */
+        [[nodiscard]] virtual Decimal ToDecimal() const = 0;
+        /** @brief Converts this value to a DateTime. */
+        [[nodiscard]] virtual DateTime ToDateTime() const = 0;
         /** @brief Converts this value to its string representation. */
         [[nodiscard]] virtual std::string ToString() const = 0;
     };

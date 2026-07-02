@@ -170,6 +170,26 @@ namespace System {
             throw InvalidCastException("Object cannot be cast from DBNull to other types.");
         }
 
+        /**
+         * @brief Not supported. Always throws InvalidCastException.
+         *
+         * C++ counterpart of .NET IConvertible.ToDecimal(IFormatProvider).
+         * @throws InvalidCastException always.
+         */
+        [[nodiscard]] Decimal ToDecimal() const override {
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
+        }
+
+        /**
+         * @brief Not supported. Always throws InvalidCastException.
+         *
+         * C++ counterpart of .NET IConvertible.ToDateTime(IFormatProvider).
+         * @throws InvalidCastException always.
+         */
+        [[nodiscard]] DateTime ToDateTime() const override {
+            throw InvalidCastException("Object cannot be cast from DBNull to other types.");
+        }
+
         // -----------------------------------------------------------------------
         // ToString
         // -----------------------------------------------------------------------

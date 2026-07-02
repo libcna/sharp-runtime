@@ -37,6 +37,14 @@ TEST(DBNullTests, ToUInt64ThrowsInvalidCastException) {
     EXPECT_THROW(DBNull::Value().ToUInt64(), InvalidCastException);
 }
 
+TEST(DBNullTests, ToDecimalThrowsInvalidCastException) {
+    EXPECT_THROW(DBNull::Value().ToDecimal(), InvalidCastException);
+}
+
+TEST(DBNullTests, ToDateTimeThrowsInvalidCastException) {
+    EXPECT_THROW(DBNull::Value().ToDateTime(), InvalidCastException);
+}
+
 TEST(DBNullTests, InvalidCastExceptionMessageMatchesDotNet) {
     try {
         DBNull::Value().ToInt32();
