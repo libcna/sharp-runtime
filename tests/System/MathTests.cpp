@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 #include <numbers>
+#include <stdexcept>
 
 #include "System/Math.hpp"
 
@@ -52,6 +54,24 @@ TEST(MathTests, AbsIntNegative) {
 
 TEST(MathTests, AbsIntZero) {
     EXPECT_EQ(Math::Abs(0), 0);
+}
+
+TEST(MathTests, Abs_IntMinValue_Throws) {
+    // .NET's Math.Abs(int) throws OverflowException for int.MinValue, since its
+    // magnitude does not fit in a signed 32-bit integer - verified against Math.cs.
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::intcs>::min()), std::overflow_error);
+}
+
+TEST(MathTests, Abs_LongMinValue_Throws) {
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::longcs>::min()), std::overflow_error);
+}
+
+TEST(MathTests, Abs_ShortMinValue_Throws) {
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::shortcs>::min()), std::overflow_error);
+}
+
+TEST(MathTests, Abs_SByteMinValue_Throws) {
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::sbytecs>::min()), std::overflow_error);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +125,15 @@ TEST(MathTests, ClampDoubleBasic) {
     EXPECT_NEAR(Math::Clamp(4.0, 1.0, 3.0), 3.0, kEps);
 }
 
+TEST(MathTests, Clamp_MinGreaterThanMax_Throws) {
+    // .NET's Math.Clamp throws ArgumentException if min > max, for every overload -
+    // verified against Math.cs.
+    EXPECT_THROW(Math::Clamp(5, 10, 0), std::invalid_argument);
+    EXPECT_THROW(Math::Clamp(5.0, 10.0, 0.0), std::invalid_argument);
+    EXPECT_THROW(Math::Clamp(5.0f, 10.0f, 0.0f), std::invalid_argument);
+    EXPECT_THROW(Math::Clamp(static_cast<SharpRuntime::longcs>(5), static_cast<SharpRuntime::longcs>(10), static_cast<SharpRuntime::longcs>(0)), std::invalid_argument);
+}
+
 // ---------------------------------------------------------------------------
 // Floor / Ceiling / Round
 // ---------------------------------------------------------------------------
@@ -131,13 +160,17 @@ TEST(MathTests, CeilingNegative) {
     EXPECT_NEAR(Math::Ceiling(-1.1), -1.0, kEps);
 }
 
-TEST(MathTests, RoundHalfUp) {
-    EXPECT_NEAR(Math::Round(2.5), 3.0, kEps);
+TEST(MathTests, Round_DefaultIsBankersRounding_ToEven) {
+    // .NET's Math.Round(double) with no digits/mode defaults to MidpointRounding.ToEven
+    // (banker's rounding): Round(2.5) == 2.0, not 3.0 - verified against Math.cs and
+    // matches Python's round() (which uses the same IEEE 754 round-to-nearest-even).
+    EXPECT_NEAR(Math::Round(2.5), 2.0, kEps);
+    EXPECT_NEAR(Math::Round(3.5), 4.0, kEps);
     EXPECT_NEAR(Math::Round(2.4), 2.0, kEps);
 }
 
 TEST(MathTests, RoundNegative) {
-    EXPECT_NEAR(Math::Round(-2.5), -3.0, kEps);
+    EXPECT_NEAR(Math::Round(-2.5), -2.0, kEps);
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +321,15 @@ TEST(MathTests, Sign_Negative) { EXPECT_EQ(Math::Sign(-3),  -1); }
 TEST(MathTests, Sign_Zero)     { EXPECT_EQ(Math::Sign(0),    0); }
 TEST(MathTests, Sign_DoublePos) { EXPECT_EQ(Math::Sign(2.5),  1); }
 TEST(MathTests, Sign_DoubleNeg) { EXPECT_EQ(Math::Sign(-1.5),-1); }
+TEST(MathTests, Sign_Double_NaN_Throws) {
+    // .NET's Math.Sign(double) throws ArithmeticException for NaN rather than
+    // silently returning 0 (both comparisons against NaN are false) - verified
+    // against Math.cs.
+    EXPECT_THROW(Math::Sign(std::numeric_limits<double>::quiet_NaN()), System::ArithmeticException);
+}
+TEST(MathTests, Sign_Float_NaN_Throws) {
+    EXPECT_THROW(Math::Sign(std::numeric_limits<float>::quiet_NaN()), System::ArithmeticException);
+}
 
 // ---------------------------------------------------------------------------
 // Truncate
@@ -361,7 +403,29 @@ TEST(MathTests, Atanh_RoundTrip) { EXPECT_NEAR(Math::Atanh(std::tanh(0.7)), 0.7,
 // ---------------------------------------------------------------------------
 TEST(MathTests, Round_TwoDigits)   { EXPECT_NEAR(Math::Round(3.14159, 2), 3.14, 1e-10); }
 TEST(MathTests, Round_ZeroDigits)  { EXPECT_NEAR(Math::Round(2.7, 0),     3.0,  1e-10); }
-TEST(MathTests, Round_ThreeDigits) { EXPECT_NEAR(Math::Round(1.2345, 3),  1.235, 1e-6); }
+TEST(MathTests, Round_ThreeDigits) {
+    // 1.2345 rounded to 3 digits is a tie in exact decimal, but round-to-even applies
+    // to the actual double value (which is a hair below the mathematical 1.2345) -
+    // matches Python's round(1.2345, 3) == 1.234, and .NET's default ToEven mode.
+    EXPECT_NEAR(Math::Round(1.2345, 3), 1.234, 1e-6);
+}
+
+TEST(MathTests, Round_Digits_OutOfRange_Throws) {
+    // .NET's Math.Round(double, int) throws ArgumentOutOfRangeException if digits
+    // is outside [0, 15] - verified against Math.cs.
+    EXPECT_THROW(Math::Round(1.5, -1), std::out_of_range);
+    EXPECT_THROW(Math::Round(1.5, 16), std::out_of_range);
+    EXPECT_NO_THROW(Math::Round(1.5, 0));
+    EXPECT_NO_THROW(Math::Round(1.5, 15));
+}
+
+TEST(MathTests, Round_Digits_LargeMagnitude_ReturnedUnchanged) {
+    // Values with magnitude >= 1e16 have no fractional part representable in a
+    // double, so .NET's Math.Round(double, int) returns them unchanged rather than
+    // multiplying by a power of ten (which could lose precision or overflow).
+    double huge = 1.2345e17;
+    EXPECT_EQ(Math::Round(huge, 2), huge);
+}
 
 // ---------------------------------------------------------------------------
 // CopySign

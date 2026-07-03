@@ -37,7 +37,9 @@ namespace System
 
     intcs Math::Abs(intcs value)
     {
-        return std::abs(value);
+        if (value == std::numeric_limits<intcs>::min())
+            throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+        return value < 0 ? -value : value;
     }
 
     intcs Math::Min(intcs a, intcs b)
@@ -62,6 +64,10 @@ namespace System
 
     intcs Math::Clamp(intcs value, intcs min, intcs max)
     {
+        if (min > max)
+        {
+            throw std::invalid_argument("min cannot be greater than max.");
+        }
         if (value < min)
         {
             return min;
@@ -75,6 +81,10 @@ namespace System
 
     double Math::Clamp(double value, double min, double max)
     {
+        if (min > max)
+        {
+            throw std::invalid_argument("min cannot be greater than max.");
+        }
         if (value < min)
         {
             return min;
@@ -86,11 +96,17 @@ namespace System
         return value;
     }
 
-    longcs Math::Abs(longcs value)   { return value < 0 ? -value : value; }
+    longcs Math::Abs(longcs value)
+    {
+        if (value == std::numeric_limits<longcs>::min())
+            throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+        return value < 0 ? -value : value;
+    }
     longcs Math::Min(longcs a, longcs b) { return a < b ? a : b; }
     longcs Math::Max(longcs a, longcs b) { return a > b ? a : b; }
     longcs Math::Clamp(longcs value, longcs min, longcs max)
     {
+        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
         if (value < min) return min;
         if (value > max) return max;
         return value;
@@ -98,7 +114,10 @@ namespace System
 
     double Math::Round(double value)
     {
-        return std::round(value);
+        // .NET's Math.Round(double) with no digits/mode defaults to MidpointRounding.ToEven
+        // (banker's rounding), NOT round-half-away-from-zero - std::round(2.5) == 3.0 but
+        // Math.Round(2.5) == 2.0 in .NET.
+        return Round(value, MidpointRounding::ToEven);
     }
 
     double Math::Floor(double value)
@@ -142,7 +161,8 @@ namespace System
     {
         if (value < 0.0) return -1;
         if (value > 0.0) return  1;
-        return 0;
+        if (value == 0.0) return 0;
+        throw ArithmeticException("Function does not accept floating point Not-a-Number values.");
     }
 
     intcs Math::Sign(longcs value)
@@ -156,7 +176,8 @@ namespace System
     {
         if (value < 0.0f) return -1;
         if (value > 0.0f) return  1;
-        return 0;
+        if (value == 0.0f) return 0;
+        throw ArithmeticException("Function does not accept floating point Not-a-Number values.");
     }
 
     double Math::Truncate(double d) { return std::trunc(d); }
@@ -213,8 +234,7 @@ namespace System
 
     double Math::Round(double value, intcs digits)
     {
-        double factor = std::pow(10.0, static_cast<double>(digits));
-        return std::round(value * factor) / factor;
+        return Round(value, digits, MidpointRounding::ToEven);
     }
 
     double Math::CopySign(double x, double y)           { return std::copysign(x, y); }
