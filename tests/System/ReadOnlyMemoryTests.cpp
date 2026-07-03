@@ -3,8 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/ReadOnlyMemory.hpp"
+#include "System/Memory.hpp"
+#include "System/ArraySegment.hpp"
 
 using System::ReadOnlyMemory;
+using System::Memory;
+using System::ArraySegment;
 
 TEST(ReadOnlyMemoryTest, DefaultCtor_IsEmpty) {
     ReadOnlyMemory<int> m;
@@ -108,4 +112,70 @@ TEST(ReadOnlyMemoryTest, ToString_ContainsLength) {
     std::vector<int> v = {1, 2, 3};
     ReadOnlyMemory<int> m(v);
     EXPECT_NE(m.ToString().find("3"), std::string::npos);
+}
+
+TEST(ReadOnlyMemoryTest, GetHashCode_SameRegion_SameHash) {
+    std::vector<int> v = {1, 2, 3};
+    ReadOnlyMemory<int> a(v);
+    ReadOnlyMemory<int> b(v);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(ReadOnlyMemoryTest, GetHashCode_DifferentRegion_LikelyDifferent) {
+    std::vector<int> v1 = {1, 2, 3};
+    std::vector<int> v2 = {1, 2, 3};
+    ReadOnlyMemory<int> a(v1);
+    ReadOnlyMemory<int> b(v2);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(ReadOnlyMemoryTest, CopyTo_CopiesElements) {
+    std::vector<int> src = {1, 2, 3};
+    std::vector<int> dst(3, 0);
+    ReadOnlyMemory<int> source(src);
+    Memory<int> destination(dst);
+    source.CopyTo(destination);
+    EXPECT_EQ(dst[0], 1);
+    EXPECT_EQ(dst[1], 2);
+    EXPECT_EQ(dst[2], 3);
+}
+
+TEST(ReadOnlyMemoryTest, CopyTo_DestTooShort_Throws) {
+    std::vector<int> src = {1, 2, 3};
+    std::vector<int> dst(1, 0);
+    ReadOnlyMemory<int> source(src);
+    Memory<int> destination(dst);
+    EXPECT_THROW(source.CopyTo(destination), std::invalid_argument);
+}
+
+TEST(ReadOnlyMemoryTest, TryCopyTo_Success_ReturnsTrue) {
+    std::vector<int> src = {1, 2, 3};
+    std::vector<int> dst(3, 0);
+    ReadOnlyMemory<int> source(src);
+    Memory<int> destination(dst);
+    EXPECT_TRUE(source.TryCopyTo(destination));
+    EXPECT_EQ(dst[1], 2);
+}
+
+TEST(ReadOnlyMemoryTest, TryCopyTo_DestTooShort_ReturnsFalse) {
+    std::vector<int> src = {1, 2, 3};
+    std::vector<int> dst(1, 0);
+    ReadOnlyMemory<int> source(src);
+    Memory<int> destination(dst);
+    EXPECT_FALSE(source.TryCopyTo(destination));
+}
+
+TEST(ReadOnlyMemoryTest, Pin_PointerMatchesData) {
+    std::vector<int> v = {10, 20, 30};
+    ReadOnlyMemory<int> m(v);
+    auto handle = m.Pin();
+    EXPECT_EQ(handle.getPointerProperty(), static_cast<const void*>(v.data()));
+}
+
+TEST(ReadOnlyMemoryTest, ConvertFromArraySegment_Length) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v, 1, 3);
+    ReadOnlyMemory<int> m(seg);
+    EXPECT_EQ(m.getLengthProperty(), 3);
+    EXPECT_EQ(m[0], 2);
 }

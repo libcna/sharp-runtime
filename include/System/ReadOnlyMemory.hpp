@@ -2,15 +2,26 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <string>
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArraySegment.hpp"
+#include "System/Buffers/MemoryHandle.hpp"
 #include "System/Span.hpp"
 
 namespace System {
 
     using SharpRuntime::intcs;
+
+    // Forward declaration only (not a full #include) to avoid a circular dependency:
+    // Memory.hpp already includes this header for its ReadOnlyMemory<T> conversion
+    // operator. CopyTo/TryCopyTo below take Memory<T>& by reference and only need
+    // Memory<T>'s definition at the point their template bodies are instantiated,
+    // by which time the calling translation unit will already have Memory.hpp
+    // included (it needs a concrete Memory<T> to pass in).
+    template<typename T> class Memory;
 
     /**
      * @brief Represents a contiguous region of read-only memory.
@@ -46,6 +57,16 @@ namespace System {
          */
         explicit ReadOnlyMemory(const std::vector<T>& v) noexcept
             : ptr_(v.data()), length_(static_cast<intcs>(v.size())) {}
+
+        /**
+         * @brief Constructs a ReadOnlyMemory<T> from an ArraySegment<T>.
+         *
+         * C++ counterpart of .NET implicit operator ReadOnlyMemory<T>(ArraySegment<T>).
+         * @param segment The source segment.
+         */
+        ReadOnlyMemory(const ArraySegment<T>& segment) noexcept
+            : ptr_(segment.getArrayProperty() ? segment.getArrayProperty()->data() + segment.getOffsetProperty() : nullptr),
+              length_(segment.getCountProperty()) {}
 
         /**
          * @brief Returns the number of elements in this memory region.
@@ -122,6 +143,36 @@ namespace System {
         }
 
         /**
+         * @brief Copies the contents into @p destination.
+         *
+         * C++ counterpart of .NET ReadOnlyMemory<T>.CopyTo(Memory<T>).
+         * @throws std::invalid_argument if destination is shorter than this region.
+         */
+        void CopyTo(Memory<T>& destination) const {
+            getSpanProperty().CopyTo(destination.getSpanProperty());
+        }
+
+        /**
+         * @brief Attempts to copy the contents into @p destination.
+         *
+         * C++ counterpart of .NET ReadOnlyMemory<T>.TryCopyTo(Memory<T>).
+         * @return true on success; false if the destination is too short.
+         */
+        [[nodiscard]] bool TryCopyTo(Memory<T>& destination) const noexcept {
+            return getSpanProperty().TryCopyTo(destination.getSpanProperty());
+        }
+
+        /**
+         * @brief Returns a handle exposing a raw pointer to this memory region.
+         *
+         * C++ counterpart of .NET ReadOnlyMemory<T>.Pin(). No actual pinning occurs -
+         * this port has no GC - matching Memory<T>.Pin()'s deviation for the same reason.
+         */
+        [[nodiscard]] Buffers::MemoryHandle Pin() const noexcept {
+            return Buffers::MemoryHandle(const_cast<void*>(static_cast<const void*>(ptr_)));
+        }
+
+        /**
          * @brief Returns a string description of this memory region.
          *
          * C++ counterpart of .NET ReadOnlyMemory<T>.ToString().
@@ -138,6 +189,17 @@ namespace System {
          */
         [[nodiscard]] bool Equals(const ReadOnlyMemory<T>& other) const noexcept {
             return ptr_ == other.ptr_ && length_ == other.length_;
+        }
+
+        /**
+         * @brief Returns a hash code based on the backing pointer and length.
+         *
+         * C++ counterpart of .NET ReadOnlyMemory<T>.GetHashCode().
+         */
+        [[nodiscard]] intcs GetHashCode() const noexcept {
+            std::size_t h = std::hash<const void*>{}(ptr_);
+            h ^= std::hash<intcs>{}(length_) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return static_cast<intcs>(h & 0x7fffffff);
         }
 
         /** @brief Returns true if the two instances refer to the same memory region. */
