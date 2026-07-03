@@ -137,6 +137,20 @@ TEST(InsufficientExecutionStackExceptionTests, HResult_MatchesCorEInsufficientEx
 }
 EXCEPT_SIMPLE(InsufficientMemoryException)
 EXCEPT_SIMPLE(InvalidCastException)
+TEST(InvalidCastExceptionTests, HResult_MatchesCorEInvalidCast) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80004002);
+    System::InvalidCastException defaultCtor;
+    System::InvalidCastException messageCtor("bad cast");
+    System::InvalidCastException innerCtor("bad cast", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
+TEST(InvalidCastExceptionTests, ErrorCodeCtor_UsesCustomHResult) {
+    System::InvalidCastException ex("custom cast failure", static_cast<SharpRuntime::intcs>(42));
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(42));
+    EXPECT_NE(std::string(ex.what()).find("custom cast failure"), std::string::npos);
+}
 EXCEPT_SIMPLE(InvalidProgramException)
 EXCEPT_SIMPLE(InvalidTimeZoneException)
 EXCEPT_SIMPLE(MemberAccessException)

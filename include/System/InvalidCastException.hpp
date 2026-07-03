@@ -21,5 +21,13 @@ namespace System {
         explicit InvalidCastException(const std::string& message);
         /** @brief Initializes a new instance with the specified message and inner exception. */
         InvalidCastException(const std::string& message, std::exception_ptr innerException);
+        /**
+         * @brief Initializes a new instance with the specified message and a custom HResult error code.
+         *
+         * C++ counterpart of .NET InvalidCastException(string, int).
+         * @param message   A description of the error.
+         * @param errorCode The HResult that describes the error.
+         */
+        InvalidCastException(const std::string& message, SharpRuntime::intcs errorCode);
     };
 } // namespace System
