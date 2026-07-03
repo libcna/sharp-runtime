@@ -16,18 +16,22 @@ namespace System {
 
     NotImplementedException::NotImplementedException()
         : SystemException(DefaultNotImplementedMessage) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004001)); // E_NOTIMPL
     }
 
     NotImplementedException::NotImplementedException(const char* message)
         : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004001)); // E_NOTIMPL
     }
 
     NotImplementedException::NotImplementedException(const std::string& message)
         : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004001)); // E_NOTIMPL
     }
 
     NotImplementedException::NotImplementedException(const std::string& message, std::exception_ptr inner)
         : SystemException(message, std::move(inner)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80004001)); // E_NOTIMPL
     }
 
 } // namespace System

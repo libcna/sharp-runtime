@@ -323,6 +323,18 @@ TEST(ExceptionTests, NotImplementedExceptionIsSystemException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, NotImplementedException_HResult_MatchesENotImpl) {
+    // .NET's NotImplementedException uses HResults.E_NOTIMPL (a standard COM
+    // HResult), not a COR_E_* value - verified against NotImplementedException.cs.
+    constexpr SharpRuntime::intcs eNotImpl = static_cast<SharpRuntime::intcs>(0x80004001);
+    NotImplementedException defaultCtor;
+    NotImplementedException messageCtor("not done yet");
+    NotImplementedException innerCtor("not done yet", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), eNotImpl);
+    EXPECT_EQ(messageCtor.getHResultProperty(), eNotImpl);
+    EXPECT_EQ(innerCtor.getHResultProperty(), eNotImpl);
+}
+
 // ---------------------------------------------------------------------------
 // NotSupportedException
 // ---------------------------------------------------------------------------
@@ -330,6 +342,16 @@ TEST(ExceptionTests, NotImplementedExceptionIsSystemException) {
 TEST(ExceptionTests, NotSupportedExceptionMessage) {
     NotSupportedException e("not supported");
     EXPECT_EQ(e.getMessageProperty(), "not supported");
+}
+
+TEST(ExceptionTests, NotSupportedException_HResult_MatchesCorENotSupported) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131515);
+    NotSupportedException defaultCtor;
+    NotSupportedException messageCtor("not supported");
+    NotSupportedException innerCtor("not supported", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
 }
 
 // ---------------------------------------------------------------------------
