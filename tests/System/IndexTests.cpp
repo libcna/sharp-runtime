@@ -39,7 +39,39 @@ TEST(IndexTests2, NegativeValue_Throws) {
     EXPECT_THROW(Index(-1), std::out_of_range);
 }
 
-TEST(IndexTests2, GetOffset_OutOfRange_Throws) {
+TEST(IndexTests2, GetOffset_OutOfRange_DoesNotThrow_MatchesDotNet) {
+    // .NET's Index.GetOffset does not validate the result against the collection
+    // length, by design (see Index.cs remarks) - validation is the caller's job
+    // (e.g. Range.GetOffsetAndLength).
     Index idx = Index::FromStart(10);
-    EXPECT_THROW(idx.GetOffset(5), std::out_of_range);
+    EXPECT_EQ(idx.GetOffset(5), 10);
+}
+
+TEST(IndexTests2, ImplicitConversion_FromInt_IsFromStart) {
+    Index idx = 3;
+    EXPECT_FALSE(idx.getIsFromEndProperty());
+    EXPECT_EQ(idx.getValueProperty(), 3);
+}
+
+TEST(IndexTests2, Equals_SameValueAndDirection_True) {
+    EXPECT_TRUE(Index::FromStart(2).Equals(Index::FromStart(2)));
+    EXPECT_TRUE(Index::FromStart(2) == Index::FromStart(2));
+}
+
+TEST(IndexTests2, Equals_DifferentDirection_False) {
+    EXPECT_FALSE(Index::FromStart(2).Equals(Index::FromEnd(2)));
+    EXPECT_TRUE(Index::FromStart(2) != Index::FromEnd(2));
+}
+
+TEST(IndexTests2, GetHashCode_MatchesForEqualIndexes) {
+    EXPECT_EQ(Index::FromStart(4).GetHashCode(), Index::FromStart(4).GetHashCode());
+    EXPECT_EQ(Index::FromEnd(1).GetHashCode(), Index::FromEnd(1).GetHashCode());
+}
+
+TEST(IndexTests2, ToString_FromStart) {
+    EXPECT_EQ(Index::FromStart(3).ToString(), "3");
+}
+
+TEST(IndexTests2, ToString_FromEnd) {
+    EXPECT_EQ(Index::FromEnd(1).ToString(), "^1");
 }

@@ -93,3 +93,15 @@ TEST(RangeTest, GetOffsetAndLength_OutOfOrder_Throws) {
     Range r(Index::FromStart(5), Index::FromStart(2));
     EXPECT_THROW(r.GetOffsetAndLength(10), std::out_of_range);
 }
+
+TEST(RangeTest, GetOffsetAndLength_EndBeyondLength_Throws) {
+    // Index.GetOffset does not itself validate against length (matches .NET), so this
+    // must be caught by Range.GetOffsetAndLength's own bounds check.
+    Range r(Index::FromStart(2), Index::FromStart(20));
+    EXPECT_THROW(r.GetOffsetAndLength(10), std::out_of_range);
+}
+
+TEST(RangeTest, GetOffsetAndLength_NegativeStart_Throws) {
+    Range r(Index::FromEnd(20), Index::FromStart(5));
+    EXPECT_THROW(r.GetOffsetAndLength(10), std::out_of_range);
+}
