@@ -128,6 +128,34 @@ public:
     }
 
     // -----------------------------------------------------------------------
+    // Comparison
+    // -----------------------------------------------------------------------
+
+    /**
+     * @brief Compares @p a to @p b and returns a signed integer.
+     *
+     * C++ counterpart of .NET Int32.CompareTo(int).
+     */
+    [[nodiscard]] static SharpRuntime::intcs CompareTo(
+            SharpRuntime::intcs a, SharpRuntime::intcs b) noexcept {
+        return (a < b) ? -1 : (a > b) ? 1 : 0;
+    }
+
+    /**
+     * @brief Returns true if @p a equals @p b.
+     *
+     * C++ counterpart of .NET Int32.Equals(int).
+     */
+    [[nodiscard]] static bool Equals(SharpRuntime::intcs a, SharpRuntime::intcs b) noexcept { return a == b; }
+
+    /**
+     * @brief Returns a hash code for @p value.
+     *
+     * C++ counterpart of .NET Int32.GetHashCode().
+     */
+    [[nodiscard]] static SharpRuntime::intcs GetHashCode(SharpRuntime::intcs value) noexcept { return value; }
+
+    // -----------------------------------------------------------------------
     // Arithmetic helpers
     // -----------------------------------------------------------------------
 
@@ -221,12 +249,16 @@ public:
      * @brief Returns the integer with the larger absolute value.
      *
      * C++ counterpart of .NET Int32.MaxMagnitude(int, int).
-     * If both have equal magnitude, returns the positive one.
+     * If both have equal magnitude, returns the positive one. MinValue has no
+     * representable positive magnitude, so it always wins (matching .NET, which
+     * special-cases it rather than comparing a wrapped-around magnitude).
      */
     [[nodiscard]] static SharpRuntime::intcs MaxMagnitude(
             SharpRuntime::intcs x, SharpRuntime::intcs y) noexcept {
-        int32_t ax = x < 0 ? (x == MinValue ? x : -x) : x;
-        int32_t ay = y < 0 ? (y == MinValue ? y : -y) : y;
+        if (x == MinValue) return x;
+        if (y == MinValue) return y;
+        int32_t ax = x < 0 ? -x : x;
+        int32_t ay = y < 0 ? -y : y;
         if (ax > ay) return x;
         if (ax == ay) return IsNegative(x) ? y : x;
         return y;
@@ -236,12 +268,16 @@ public:
      * @brief Returns the integer with the smaller absolute value.
      *
      * C++ counterpart of .NET Int32.MinMagnitude(int, int).
-     * If both have equal magnitude, returns the negative one.
+     * If both have equal magnitude, returns the negative one. MinValue has no
+     * representable positive magnitude, so it always loses (matching .NET, which
+     * special-cases it rather than comparing a wrapped-around magnitude).
      */
     [[nodiscard]] static SharpRuntime::intcs MinMagnitude(
             SharpRuntime::intcs x, SharpRuntime::intcs y) noexcept {
-        int32_t ax = x < 0 ? (x == MinValue ? x : -x) : x;
-        int32_t ay = y < 0 ? (y == MinValue ? y : -y) : y;
+        if (x == MinValue) return y;
+        if (y == MinValue) return x;
+        int32_t ax = x < 0 ? -x : x;
+        int32_t ay = y < 0 ? -y : y;
         if (ax < ay) return x;
         if (ax == ay) return IsNegative(x) ? x : y;
         return y;
