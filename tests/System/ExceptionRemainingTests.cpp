@@ -120,6 +120,21 @@ TEST(ExecutionEngineExceptionTests, InnerExceptionCtor_ContainsBoth) {
 EXCEPT_SIMPLE(FieldAccessException)
 EXCEPT_SIMPLE(IndexOutOfRangeException)
 EXCEPT_SIMPLE(InsufficientExecutionStackException)
+TEST(InsufficientExecutionStackExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::InsufficientExecutionStackException ex("stack too deep", inner);
+    std::string w = ex.what();
+    EXPECT_NE(w.find("stack too deep"), std::string::npos);
+}
+TEST(InsufficientExecutionStackExceptionTests, HResult_MatchesCorEInsufficientExecutionStack) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131578);
+    System::InsufficientExecutionStackException defaultCtor;
+    System::InsufficientExecutionStackException messageCtor("stack too deep");
+    System::InsufficientExecutionStackException innerCtor("stack too deep", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
 EXCEPT_SIMPLE(InsufficientMemoryException)
 EXCEPT_SIMPLE(InvalidCastException)
 EXCEPT_SIMPLE(InvalidProgramException)

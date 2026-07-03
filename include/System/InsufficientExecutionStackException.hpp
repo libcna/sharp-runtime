@@ -12,12 +12,41 @@ namespace System {
      *
      * C++ counterpart of .NET System.InsufficientExecutionStackException.
      */
-    class InsufficientExecutionStackException : public SystemException {
+    class InsufficientExecutionStackException final : public SystemException {
     public:
-        /** @brief Initializes a new instance with the default insufficient-stack message. */
-        InsufficientExecutionStackException() : SystemException("Insufficient stack to continue executing the program safely. This can happen from having too many functions on the call stack or function on the stack using too much stack space.") {}
-        /** @brief Initializes a new instance with the specified error message. */
-        explicit InsufficientExecutionStackException(const std::string& message) : SystemException(message) {}
+        /**
+         * @brief Initializes a new instance with the default insufficient-stack message.
+         *
+         * C++ counterpart of .NET InsufficientExecutionStackException().
+         */
+        InsufficientExecutionStackException()
+            : SystemException("Insufficient stack to continue executing the program safely. This can happen from having too many functions on the call stack or function on the stack using too much stack space.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131578)); // COR_E_INSUFFICIENTEXECUTIONSTACK
+        }
+
+        /**
+         * @brief Initializes a new instance with the specified error message.
+         *
+         * C++ counterpart of .NET InsufficientExecutionStackException(string).
+         * @param message A description of the error.
+         */
+        explicit InsufficientExecutionStackException(const std::string& message)
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131578)); // COR_E_INSUFFICIENTEXECUTIONSTACK
+        }
+
+        /**
+         * @brief Initializes a new instance with a specified error message and a
+         * reference to the inner exception that is the cause of this exception.
+         *
+         * C++ counterpart of .NET InsufficientExecutionStackException(string, Exception).
+         * @param message The error message that explains the reason for the exception.
+         * @param inner   The exception that is the cause of the current exception.
+         */
+        InsufficientExecutionStackException(const std::string& message, std::exception_ptr inner)
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131578)); // COR_E_INSUFFICIENTEXECUTIONSTACK
+        }
     };
 
 } // namespace System
