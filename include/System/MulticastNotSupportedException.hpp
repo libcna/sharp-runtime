@@ -12,15 +12,35 @@ namespace System {
      *
      * C++ counterpart of .NET System.MulticastNotSupportedException.
      */
-    class MulticastNotSupportedException : public SystemException {
+    class MulticastNotSupportedException final : public SystemException {
     public:
-        /** @brief Initializes a new instance with the default multicast message. */
-        MulticastNotSupportedException() : SystemException("Attempted to combine delegates that are not multicast.") {}
-        /** @brief Initializes a new instance with the specified error message. */
-        explicit MulticastNotSupportedException(const std::string& message) : SystemException(message) {}
-        /** @brief Initializes a new instance with the specified message and inner exception. */
+        /**
+         * @brief Initializes a new instance with the default multicast message.
+         *
+         * C++ counterpart of .NET MulticastNotSupportedException().
+         */
+        MulticastNotSupportedException() : SystemException("Attempted to combine delegates that are not multicast.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131514)); // COR_E_MULTICASTNOTSUPPORTED
+        }
+
+        /**
+         * @brief Initializes a new instance with the specified error message.
+         *
+         * C++ counterpart of .NET MulticastNotSupportedException(string).
+         */
+        explicit MulticastNotSupportedException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131514)); // COR_E_MULTICASTNOTSUPPORTED
+        }
+
+        /**
+         * @brief Initializes a new instance with the specified message and inner exception.
+         *
+         * C++ counterpart of .NET MulticastNotSupportedException(string, Exception).
+         */
         MulticastNotSupportedException(const std::string& message, std::exception_ptr innerException)
-            : SystemException(message, std::move(innerException)) {}
+            : SystemException(message, std::move(innerException)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131514)); // COR_E_MULTICASTNOTSUPPORTED
+        }
     };
 
 } // namespace System

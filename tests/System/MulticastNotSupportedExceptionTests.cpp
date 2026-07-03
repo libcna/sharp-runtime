@@ -26,3 +26,13 @@ TEST(MulticastNotSupportedExceptionTest, IsException) {
     MulticastNotSupportedException e("test");
     EXPECT_NO_THROW({ System::Exception& ref = e; (void)ref; });
 }
+
+TEST(MulticastNotSupportedExceptionTest, HResult_MatchesCorEMulticastNotSupported) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131514);
+    MulticastNotSupportedException defaultCtor;
+    MulticastNotSupportedException messageCtor("no multicast");
+    MulticastNotSupportedException innerCtor("no multicast", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
