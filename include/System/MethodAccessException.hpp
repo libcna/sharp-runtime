@@ -16,10 +16,16 @@ namespace System {
      */
     class MethodAccessException : public MemberAccessException {
     public:
-        /** @brief Initializes a new instance with a default message. */
+        /**
+         * @brief Initializes a new instance with a default message.
+         *
+         * C++ counterpart of .NET MethodAccessException().
+         */
         MethodAccessException()
             : MemberAccessException(
-                  "Attempted to access a method that is not accessible by the caller.") {}
+                  "Attempted to access a method that is not accessible by the caller.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131510)); // COR_E_METHODACCESS
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -28,7 +34,9 @@ namespace System {
          * @param message A description of the error.
          */
         explicit MethodAccessException(const std::string& message)
-            : MemberAccessException(message) {}
+            : MemberAccessException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131510)); // COR_E_METHODACCESS
+        }
 
         /**
          * @brief Initializes a new instance with the specified message and inner exception.
@@ -38,7 +46,9 @@ namespace System {
          * @param inner   The exception that caused this exception.
          */
         MethodAccessException(const std::string& message, std::exception_ptr inner)
-            : MemberAccessException(message, inner) {}
+            : MemberAccessException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131510)); // COR_E_METHODACCESS
+        }
     };
 
 } // namespace System
