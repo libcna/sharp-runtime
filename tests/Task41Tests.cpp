@@ -60,6 +60,70 @@ TEST(IntPtrTests, VoidPtrCtor) {
     EXPECT_EQ(static_cast<void*>(p), &x);
 }
 
+TEST(IntPtrTests, Size_MatchesSizeofIntptr) {
+    EXPECT_EQ(System::IntPtr::Size, static_cast<int>(sizeof(intptr_t)));
+}
+
+TEST(IntPtrTests, MaxValue_MinValue) {
+    EXPECT_EQ(System::IntPtr::MaxValue.value, std::numeric_limits<intptr_t>::max());
+    EXPECT_EQ(System::IntPtr::MinValue.value, std::numeric_limits<intptr_t>::min());
+}
+
+TEST(IntPtrTests, ToInt32_FitsInRange) {
+    System::IntPtr p(42);
+    EXPECT_EQ(p.ToInt32(), 42);
+}
+
+TEST(IntPtrTests, ToInt32_Overflow_Throws) {
+    if (sizeof(intptr_t) > sizeof(int32_t)) {
+        System::IntPtr p(static_cast<intptr_t>(std::numeric_limits<int64_t>::max()));
+        EXPECT_THROW(p.ToInt32(), std::overflow_error);
+    }
+}
+
+TEST(IntPtrTests, ToInt64_ReturnsValue) {
+    System::IntPtr p(12345);
+    EXPECT_EQ(p.ToInt64(), int64_t(12345));
+}
+
+TEST(IntPtrTests, ToPointer_RoundTrips) {
+    int x = 7;
+    System::IntPtr p(&x);
+    EXPECT_EQ(p.ToPointer(), static_cast<void*>(&x));
+}
+
+TEST(IntPtrTests, CompareTo_Ordering) {
+    EXPECT_LT(System::IntPtr(1).CompareTo(System::IntPtr(2)), 0);
+    EXPECT_EQ(System::IntPtr(2).CompareTo(System::IntPtr(2)), 0);
+    EXPECT_GT(System::IntPtr(3).CompareTo(System::IntPtr(2)), 0);
+}
+
+TEST(IntPtrTests, Equals_Method) {
+    EXPECT_TRUE(System::IntPtr(5).Equals(System::IntPtr(5)));
+    EXPECT_FALSE(System::IntPtr(5).Equals(System::IntPtr(6)));
+}
+
+TEST(IntPtrTests, GetHashCode_SameValueSameHash) {
+    EXPECT_EQ(System::IntPtr(9).GetHashCode(), System::IntPtr(9).GetHashCode());
+}
+
+TEST(IntPtrTests, ToString_Decimal) {
+    EXPECT_EQ(System::IntPtr(123).ToString(), "123");
+    EXPECT_EQ(System::IntPtr(-5).ToString(), "-5");
+}
+
+TEST(IntPtrTests, Add_Subtract_Static) {
+    System::IntPtr p(100);
+    EXPECT_EQ(System::IntPtr::Add(p, 5).value, intptr_t(105));
+    EXPECT_EQ(System::IntPtr::Subtract(p, 5).value, intptr_t(95));
+}
+
+TEST(IntPtrTests, Add_Subtract_Operators) {
+    System::IntPtr p(100);
+    EXPECT_EQ((p + 5).value, intptr_t(105));
+    EXPECT_EQ((p - 5).value, intptr_t(95));
+}
+
 // ===========================================================================
 // UIntPtr
 // ===========================================================================
