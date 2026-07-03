@@ -2,13 +2,18 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <concepts>
 #include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/InvalidOperationException.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a value type that can be assigned null.
@@ -121,24 +126,30 @@ namespace System {
          * C++ counterpart of .NET Nullable<T>.GetHashCode().
          * @return The hash code of the wrapped value, or 0 if HasValue is false.
          */
-        [[nodiscard]] std::size_t GetHashCode() const noexcept {
+        [[nodiscard]] intcs GetHashCode() const noexcept {
             if (!value_) return 0;
-            return std::hash<T>{}(*value_);
+            return static_cast<intcs>(std::hash<T>{}(*value_));
         }
 
         /**
          * @brief Returns the text representation of the value of the current
          * Nullable<T> object.
          *
-         * C++ counterpart of .NET Nullable<T>.ToString().
+         * C++ counterpart of .NET Nullable<T>.ToString(). Prefers a T::ToString()
+         * member (this port's usual convention) if T has one, falling back to
+         * stream insertion (operator<<) otherwise.
          * @return The string representation of the value if HasValue is true;
          *         an empty string if HasValue is false.
          */
         [[nodiscard]] std::string ToString() const {
             if (!value_) return "";
-            std::ostringstream oss;
-            oss << *value_;
-            return oss.str();
+            if constexpr (requires (const T& t) { { t.ToString() } -> std::convertible_to<std::string>; }) {
+                return value_->ToString();
+            } else {
+                std::ostringstream oss;
+                oss << *value_;
+                return oss.str();
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -147,6 +158,14 @@ namespace System {
 
         /** @brief Returns true if this Nullable has a value. */
         explicit operator bool() const noexcept { return value_.has_value(); }
+
+        /**
+         * @brief Extracts the wrapped value.
+         *
+         * C++ counterpart of .NET's explicit operator T(T? value) => value.Value.
+         * @throws InvalidOperationException if HasValue is false.
+         */
+        explicit operator T() const { return getValueProperty(); }
 
         /** @brief Returns true if both Nullable<T> instances are equal. */
         bool operator==(const Nullable<T>& other) const noexcept {
