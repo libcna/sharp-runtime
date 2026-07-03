@@ -2,11 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
+#include <concepts>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <type_traits>
+#include "System/InvalidOperationException.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
 
 namespace System {
@@ -21,22 +26,57 @@ namespace System {
      * constructor; the default is ExecutionAndPublication (exactly one thread
      * runs the factory; all others block until it completes).
      *
-     * Note: Lazy<T> is not copyable or movable because it owns a std::once_flag.
-     * Store it as a direct member or heap-allocate via std::unique_ptr.
+     * Deviation from .NET: in real PublicationOnly mode, multiple threads may run the
+     * factory concurrently and race to publish, with the losers' results discarded.
+     * This port instead serializes PublicationOnly behind a mutex (a single factory
+     * call at a time) to avoid data races that would be undefined behavior in C++;
+     * the observable contract that matters for game code - a failed attempt doesn't
+     * poison the instance, and the next access retries - is preserved.
+     *
+     * Note: Lazy<T> is not copyable or movable because it owns synchronization
+     * primitives (std::once_flag, std::mutex). Store it as a direct member or
+     * heap-allocate via std::unique_ptr.
      *
      * @tparam T The type of the lazily-initialized value.
      */
     template<typename T>
     class Lazy {
-        mutable std::once_flag       onceflag_;
-        mutable std::optional<T>     value_;
-        std::function<T()>           factory_;
-        mutable bool                 isValueCreated_ = false;
-        LazyThreadSafetyMode         mode_;
+        mutable std::once_flag             onceflag_;
+        mutable std::mutex                 publicationOnlyMutex_;
+        mutable std::optional<T>           value_;
+        mutable std::exception_ptr         cachedException_;
+        mutable std::atomic<std::thread::id> creatingThreadId_{};
+        std::function<T()>                 factory_;
+        mutable bool                       isValueCreated_ = false;
+        LazyThreadSafetyMode               mode_;
 
-        void initValue() const {
-            value_         = factory_();
-            isValueCreated_ = true;
+        // Detects the factory recursively accessing Value()/getValueProperty() on this
+        // same instance from the same thread. .NET turns this into a clean
+        // InvalidOperationException; left unguarded, the ExecutionAndPublication path
+        // below would instead deadlock (recursive std::call_once on the same flag from
+        // the same thread is undefined behavior). Must run *before* dispatching into
+        // std::call_once / the lock, since the deadlock happens at that layer, not
+        // inside the factory call itself.
+        void checkNotReentrant() const {
+            if (creatingThreadId_.load(std::memory_order_acquire) == std::this_thread::get_id()) {
+                throw InvalidOperationException("ValueFactory attempted to access the Value property of this instance.");
+            }
+        }
+
+        // Runs the factory and either publishes the value or (for modes that cache
+        // faults - None and ExecutionAndPublication) captures the exception so every
+        // subsequent access rethrows the same one, matching .NET's LazyHelper contract.
+        void initValue(bool cacheFaults) const {
+            creatingThreadId_.store(std::this_thread::get_id(), std::memory_order_release);
+            try {
+                value_ = factory_();
+                isValueCreated_ = true;
+                creatingThreadId_.store(std::thread::id{}, std::memory_order_release);
+            } catch (...) {
+                creatingThreadId_.store(std::thread::id{}, std::memory_order_release);
+                if (cacheFaults) cachedException_ = std::current_exception();
+                throw;
+            }
         }
 
     public:
@@ -138,22 +178,45 @@ namespace System {
 
         /**
          * @brief Gets the lazily-initialized value.
-         * The factory is invoked at most once. All subsequent calls return
-         * a reference to the cached value.
+         * The factory is invoked at most once (except in PublicationOnly mode, where a
+         * failed attempt may be retried). All subsequent calls return a reference to the
+         * cached value.
          *
-         * C++ counterpart of .NET Lazy<T>.Value.
+         * C++ counterpart of .NET Lazy<T>.Value. Matches .NET's fault-caching contract:
+         * in None and ExecutionAndPublication modes, if the factory throws, the same
+         * exception is rethrown on every later access rather than retrying the factory;
+         * in PublicationOnly mode, a failed attempt does not poison the instance and the
+         * next access retries.
          * @return Const reference to the initialized value.
-         * @throws Any exception thrown by the factory (propagated to the caller).
+         * @throws Any exception thrown by the factory (propagated to the caller), or
+         *         InvalidOperationException if the factory recursively accesses this
+         *         same Value() while it is already running.
          */
         [[nodiscard]] const T& getValueProperty() const {
-            if (mode_ == LazyThreadSafetyMode::ExecutionAndPublication) {
-                std::call_once(onceflag_, [this] {
-                    if (!isValueCreated_) initValue();
-                });
-            } else if (!isValueCreated_) {
-                initValue();
+            checkNotReentrant();
+            switch (mode_) {
+                case LazyThreadSafetyMode::ExecutionAndPublication: {
+                    std::call_once(onceflag_, [this] {
+                        if (!isValueCreated_ && !cachedException_) {
+                            try { initValue(/*cacheFaults=*/true); }
+                            catch (...) { /* cached inside initValue; swallow so the flag still completes */ }
+                        }
+                    });
+                    if (cachedException_) std::rethrow_exception(cachedException_);
+                    return *value_;
+                }
+                case LazyThreadSafetyMode::None: {
+                    if (cachedException_) std::rethrow_exception(cachedException_);
+                    if (!isValueCreated_) initValue(/*cacheFaults=*/true);
+                    return *value_;
+                }
+                case LazyThreadSafetyMode::PublicationOnly:
+                default: {
+                    std::lock_guard<std::mutex> lock(publicationOnlyMutex_);
+                    if (!isValueCreated_) initValue(/*cacheFaults=*/false);
+                    return *value_;
+                }
             }
-            return *value_;
         }
 
         /**
@@ -188,12 +251,24 @@ namespace System {
         /**
          * @brief Returns a string representation of this Lazy<T> instance.
          *
-         * C++ counterpart of .NET Lazy<T>.ToString(). Returns
-         * "Value is not created." when the value has not yet been initialized,
-         * or "Value is created." when it has.
+         * C++ counterpart of .NET Lazy<T>.ToString(). Matches .NET: if the value has
+         * already been created, returns @c Value().ToString() (or the equivalent for
+         * built-in numeric types, via std::to_string) - NOT a fixed placeholder string.
+         * Only when the value has not yet been created does this return the fixed
+         * "Value is not created." message, without triggering creation.
          */
         [[nodiscard]] std::string ToString() const {
-            return isValueCreated_ ? "Value is created." : "Value is not created.";
+            if (!isValueCreated_) return "Value is not created.";
+            if constexpr (requires (const T& t) { { t.ToString() } -> std::convertible_to<std::string>; }) {
+                return Value().ToString();
+            } else if constexpr (requires (const T& t) { { std::to_string(t) } -> std::convertible_to<std::string>; }) {
+                return std::to_string(Value());
+            } else {
+                // No .ToString() member and not std::to_string-able: this port has no
+                // universal object-to-string fallback (no runtime reflection), unlike
+                // .NET's Object.ToString(). Falls back to the type name only.
+                return "Value is created.";
+            }
         }
     };
 
