@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-03 (branch: feature/work) — 8692 tests passing*
+*Last updated: 2026-07-03 (branch: feature/work) — 8718 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8692 tests passing** across 896 test suites. Zero failures.
+- **8718 tests passing** across 896 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -71,6 +71,15 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `0bfa818` | Port MissingMethodException: fixed missing `HResult` (`COR_E_MISSINGMETHOD`) and dynamic-message format |
+| `17e3e2d` | Port MissingFieldException: fixed missing `HResult` (`COR_E_MISSINGFIELD`) and dynamic-message format |
+| `b9cdc44` | Port MissingMemberException (base of the two above, reviewed first): fixed missing `HResult` (`COR_E_MISSINGMEMBER`) and message format |
+| — | Port MidpointRounding: verified complete and correct, no changes needed |
+| `741e631` | Port MethodAccessException: fixed missing `HResult` (`COR_E_METHODACCESS`) |
+| `f326ac7` / `d5e48f9` | Port MathF / Math: **fixed real bugs in both** — `Max`/`Min` used `std::fmax`/`fmin` (returns the non-NaN side) instead of .NET's actual NaN-*propagating* semantics; `Sign` silently returned 0 for NaN instead of throwing `ArithmeticException`; `Round()` defaulted to away-from-zero via `std::round` instead of .NET's actual round-to-even default; `Math.Abs(int/long/short/sbyte)` didn't throw on `MinValue`; `Math.Clamp` never validated `min > max` across any of its 10 overloads; `MathF.Log(x,y)` didn't match .NET's IEEE-754 edge-case special-casing |
+| `ce2c9e9` | Port Memory: added missing `Pin()` (returns `MemoryHandle`, no-op pin since no GC) |
+| `7096215` | Port MemberAccessException: fixed missing `HResult` (`COR_E_MEMBERACCESS`) |
+| — | `System.MDArray`: classified `ignore`/out-of-scope — NativeAOT/CoreCLR internal type-system implementation detail, never a public API |
 | `79a93ac` | Port Lazy: **fixed three real bugs** — `ToString()` always returned a fixed placeholder instead of `Value().ToString()` once created; exception-caching semantics were backwards (None/ExecutionAndPublication should cache+rethrow the same exception, PublicationOnly should retry — the old code did the opposite via `std::call_once`'s built-in retry-on-exception behavior); a factory recursively accessing `Value()` deadlocked via recursive `std::call_once` instead of throwing `InvalidOperationException` like .NET — added a same-thread reentrancy check that runs before dispatching into the lock |
 | `d98ee9e` | Port InvalidTimeZoneException: verified against .NET (correctly derives from `Exception` not `SystemException`, correctly sets no custom `HResult`) — no code change, added tests locking in both facts |
 | `8f607d6` | Port InvalidProgramException: added missing `(message, innerException)` ctor and `HResult` (`COR_E_INVALIDPROGRAM`) |
@@ -133,15 +142,23 @@ types ported before `bab45c2` have the same gap** and check `HResult` against `H
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 8692 tests pass.
+**No active technical blocker.** Build is clean, all 8718 tests pass.
 
 The workflow is now autonomous (§3a) — do **not** revert to asking the user before each type; that was
 the old behavior and has been intentionally replaced.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `MDArray`,
-`Math`, `MathF`, `MemberAccessException`, `Memory`, `MemoryExtensions`, `MethodAccessException`,
-`MidpointRounding`, …
-918 `todo` + 62 empty items remain across all namespaces (121 `ported` so far).
+Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order):
+`MemoryExtensions`, `MulticastDelegate`, `MulticastNotSupportedException`, `NotFiniteNumberException`,
+`NotImplementedException`, `NotSupportedException`, `NullReferenceException`, `Nullable`, …
+908 `todo` + 62 empty items remain across all namespaces (130 `ported` so far).
+
+**Process note:** when delegating a review to a background fork (`Agent` tool with `subagent_type:
+"fork"`) while continuing other work yourself in parallel, be careful with `git add`/`git commit` — a
+bare `git commit` (no pathspec) commits *everything currently staged*, including anything the fork
+staged concurrently in the same working tree. This happened once this session (Math + MathF work landed
+in one commit under the MathF message) and had to be split after the fact with `git reset HEAD~1` +
+two accurate commits. Always run `git status --short` immediately before committing when a fork might
+be running concurrently, and only `git add` the exact files you intend for that commit.
 
 ---
 
@@ -204,7 +221,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **8692+ tests passing** — never go below the watermark.
+2. **8718+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
@@ -310,33 +327,33 @@ git push origin develop
 ## 8. Next smallest tasks
 
 Ordered by `plan.sqlite3` processing order. Workflow is now autonomous (§3a) — no approval needed,
-just classify and proceed per `prompt.md`. Previous batch (Index through Lazy — 14 types) is done,
-see §3 for what changed.
+just classify and proceed per `prompt.md`. Previous batches (Index through Lazy, MDArray through
+MissingMethodException — 24 types total) are done, see §3 for what changed.
 
-### Task 1 — System.MDArray
-- **Goal:** Look up what this actually is in `/rv/tmp/runtime/src/libraries/` first — `MDArray` isn't a standard .NET type name; likely means multi-dimensional array support, which may fall under the existing "no `System.Array`" scope gap (see NEXT.md §5) rather than being independently portable. Classify (port/ignore/tobedecided) based on what's actually found, don't assume.
-- **Files:** none yet — check `include/System/MDArray.hpp` existence first
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MDArray*"`
+### Task 1 — System.MemoryExtensions
+- **Goal:** Full checklist review of the existing `MemoryExtensions` class (765 lines, already noted "full" in NEXT.md §2 — verify that claim rather than trust it, same as Math/MathF turned out to have real gaps despite similar claims) against `.NET`'s ref surface. Large file — consider delegating to a fork to keep it out of the main context, same pattern used for `Math` this session.
+- **Files:** `include/System/MemoryExtensions.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MemoryExtensions*"`
 
-### Task 2 — System.Math
-- **Goal:** Full checklist review of the existing `Math` class (already has full overloads + BigMul/DivRem/ILogB per NEXT.md §2) against `.NET`'s ref surface — likely close to done, verify for gaps rather than assume completeness.
-- **Files:** `include/System/Math.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Math*"`
+### Task 2 — System.MulticastDelegate
+- **Goal:** Full checklist review against `.NET`'s ref surface. Note: this port's delegates map to `std::function<>` with no multicast support (documented permanent deviation per CLAUDE.md) — verify whether an existing header already covers this or whether it should be classified `tobedecided`/`ignore` given that deviation.
+- **Files:** check `include/System/MulticastDelegate.hpp` existence first
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MulticastDelegate*"`
 
-### Task 3 — System.MathF
-- **Goal:** Same as Task 2 but for the float-precision counterpart.
-- **Files:** `include/System/MathF.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MathF*"`
+### Task 3 — System.MulticastNotSupportedException
+- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` since this type may predate the `HResult` property being added to `Exception`.
+- **Files:** `include/System/MulticastNotSupportedException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MulticastNotSupportedException*"`
 
-### Task 4 — System.MemberAccessException
-- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` (`COR_E_MEMBERACCESS`) since this type may predate the `HResult` property being added to `Exception`.
-- **Files:** `include/System/MemberAccessException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MemberAccessException*"`
+### Task 4 — System.NotFiniteNumberException
+- **Goal:** Checklist review; same `HResult` audit as Task 3.
+- **Files:** `include/System/NotFiniteNumberException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="NotFiniteNumberException*"`
 
-### Task 5 — System.Memory
-- **Goal:** Full checklist review of the existing `Memory<T>` struct (Span/Memory family already ported per NEXT.md §2) against `.NET`'s ref surface.
-- **Files:** `include/System/Memory.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Memory*"`
+### Task 5 — System.NotImplementedException / NotSupportedException
+- **Goal:** Checklist review of both (likely small, standard 3-4 ctor exception types); same `HResult` audit as Task 3.
+- **Files:** `include/System/NotImplementedException.hpp`, `include/System/NotSupportedException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="NotImplementedException*:NotSupportedException*"`
 
 ---
 
@@ -375,7 +392,7 @@ For each item, per prompt.md:
      (API surface, doc-comments, SPDX, logic parity incl. HResult where applicable, build, tests)
      as if it were new — fix gaps, don't rubber-stamp.
   3. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests  (all 8692+ tests must pass)
+  4. Run: ./build/SharpRuntimeTests  (all 8718+ tests must pass)
   5. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   6. Commit only the files for that port: git -c commit.gpgsign=false commit -m "..."
   7. Loop back to step 1 — keep going, do not stop to ask between items.
