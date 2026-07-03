@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include <vector>
 #include "System/MemoryExtensions.hpp"
 
@@ -579,4 +580,75 @@ TEST(MemoryExtensionsTests, TrimEnd_SpanElements_Trailing) {
     auto span = MemoryExtensions::TrimEnd(ReadOnlySpan<int>(v), ReadOnlySpan<int>(trimVals));
     EXPECT_EQ(span.getLengthProperty(), 2);
     EXPECT_EQ(span[1], 2);
+}
+
+// ---------------------------------------------------------------------------
+// NaN equality: .NET's Contains/IndexOf/etc. constrain T to IEquatable<T> and
+// dispatch through .Equals, not ==. float.Equals(NaN) treats NaN as equal to
+// itself (unlike operator==, which is always false for NaN). Verified against
+// Single.cs: "obj == m_value || (IsNaN(obj) && IsNaN(m_value))".
+// ---------------------------------------------------------------------------
+
+TEST(MemoryExtensionsTests, Contains_FindsNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {1.0f, nan, 3.0f};
+    EXPECT_TRUE(MemoryExtensions::Contains(ReadOnlySpan<float>(v), nan));
+}
+
+TEST(MemoryExtensionsTests, IndexOf_FindsNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {1.0f, nan, 3.0f};
+    EXPECT_EQ(MemoryExtensions::IndexOf(ReadOnlySpan<float>(v), nan), 1);
+}
+
+TEST(MemoryExtensionsTests, LastIndexOf_FindsNaN_MatchingDotNetEquatable) {
+    double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<double> v = {nan, 2.0, nan};
+    EXPECT_EQ(MemoryExtensions::LastIndexOf(ReadOnlySpan<double>(v), nan), 2);
+}
+
+TEST(MemoryExtensionsTests, Count_CountsNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {nan, 1.0f, nan};
+    EXPECT_EQ(MemoryExtensions::Count(ReadOnlySpan<float>(v), nan), 2);
+}
+
+TEST(MemoryExtensionsTests, SequenceEqual_TreatsNaNAsEqual_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> a = {1.0f, nan, 3.0f};
+    std::vector<float> b = {1.0f, nan, 3.0f};
+    EXPECT_TRUE(MemoryExtensions::SequenceEqual(ReadOnlySpan<float>(a), ReadOnlySpan<float>(b)));
+}
+
+TEST(MemoryExtensionsTests, Replace_ReplacesNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {1.0f, nan, 3.0f};
+    Span<float> span(v);
+    MemoryExtensions::Replace(span, nan, 0.0f);
+    EXPECT_FLOAT_EQ(v[1], 0.0f);
+}
+
+TEST(MemoryExtensionsTests, IndexOfAny_FindsNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {1.0f, 2.0f, nan};
+    EXPECT_EQ(MemoryExtensions::IndexOfAny(ReadOnlySpan<float>(v), nan, 99.0f), 2);
+}
+
+TEST(MemoryExtensionsTests, ContainsAny_FindsNaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {1.0f, 2.0f, nan};
+    EXPECT_TRUE(MemoryExtensions::ContainsAny(ReadOnlySpan<float>(v), nan, 99.0f));
+}
+
+TEST(MemoryExtensionsTests, StartsWith_SingleElement_NaN_MatchingDotNetEquatable) {
+    float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> v = {nan, 2.0f};
+    EXPECT_TRUE(MemoryExtensions::StartsWith(ReadOnlySpan<float>(v), nan));
+}
+
+TEST(MemoryExtensionsTests, IntSpan_NaNPathNotTaken_StillOrdinaryEquality) {
+    // Non-floating-point T must still use plain equality (no NaN branch).
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_TRUE(MemoryExtensions::Contains(ReadOnlySpan<int>(v), 2));
+    EXPECT_FALSE(MemoryExtensions::Contains(ReadOnlySpan<int>(v), 4));
 }
