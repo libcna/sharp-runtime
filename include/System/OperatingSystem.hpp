@@ -245,8 +245,8 @@ namespace System {
          * C++ counterpart of .NET OperatingSystem.IsWindowsVersionAtLeast(int, int, int, int).
          * Version comparison is not implemented; returns IsWindows().
          */
-        static bool IsWindowsVersionAtLeast(int /*major*/, int /*minor*/ = 0,
-                                             int /*build*/ = 0, int /*revision*/ = 0) {
+        static bool IsWindowsVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0,
+                                             SharpRuntime::intcs /*build*/ = 0, SharpRuntime::intcs /*revision*/ = 0) {
             return IsWindows();
         }
 
@@ -256,7 +256,7 @@ namespace System {
          * C++ counterpart of .NET OperatingSystem.IsMacOSVersionAtLeast(int, int, int).
          * Version comparison is not implemented; returns IsMacOS().
          */
-        static bool IsMacOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+        static bool IsMacOSVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0, SharpRuntime::intcs /*build*/ = 0) {
             return IsMacOS();
         }
 
@@ -266,8 +266,8 @@ namespace System {
          * C++ counterpart of .NET OperatingSystem.IsFreeBSDVersionAtLeast(int, int, int, int).
          * Version comparison is not implemented; returns IsFreeBSD().
          */
-        static bool IsFreeBSDVersionAtLeast(int /*major*/, int /*minor*/ = 0,
-                                             int /*build*/ = 0, int /*revision*/ = 0) {
+        static bool IsFreeBSDVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0,
+                                             SharpRuntime::intcs /*build*/ = 0, SharpRuntime::intcs /*revision*/ = 0) {
             return IsFreeBSD();
         }
 
@@ -276,8 +276,8 @@ namespace System {
          *
          * C++ counterpart of .NET OperatingSystem.IsAndroidVersionAtLeast(int, int, int, int).
          */
-        static bool IsAndroidVersionAtLeast(int /*major*/, int /*minor*/ = 0,
-                                             int /*build*/ = 0, int /*revision*/ = 0) {
+        static bool IsAndroidVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0,
+                                             SharpRuntime::intcs /*build*/ = 0, SharpRuntime::intcs /*revision*/ = 0) {
             return false;
         }
 
@@ -286,7 +286,7 @@ namespace System {
          *
          * C++ counterpart of .NET OperatingSystem.IsIOSVersionAtLeast(int, int, int).
          */
-        static bool IsIOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+        static bool IsIOSVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0, SharpRuntime::intcs /*build*/ = 0) {
             return false;
         }
 
@@ -295,7 +295,7 @@ namespace System {
          *
          * C++ counterpart of .NET OperatingSystem.IsTvOSVersionAtLeast(int, int, int).
          */
-        static bool IsTvOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+        static bool IsTvOSVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0, SharpRuntime::intcs /*build*/ = 0) {
             return false;
         }
 
@@ -304,7 +304,7 @@ namespace System {
          *
          * C++ counterpart of .NET OperatingSystem.IsWatchOSVersionAtLeast(int, int, int).
          */
-        static bool IsWatchOSVersionAtLeast(int /*major*/, int /*minor*/ = 0, int /*build*/ = 0) {
+        static bool IsWatchOSVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0, SharpRuntime::intcs /*build*/ = 0) {
             return false;
         }
 
@@ -313,8 +313,8 @@ namespace System {
          *
          * C++ counterpart of .NET OperatingSystem.IsMacCatalystVersionAtLeast(int, int, int).
          */
-        static bool IsMacCatalystVersionAtLeast(int /*major*/, int /*minor*/ = 0,
-                                                 int /*build*/ = 0) {
+        static bool IsMacCatalystVersionAtLeast(SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0,
+                                                 SharpRuntime::intcs /*build*/ = 0) {
             return false;
         }
 
@@ -327,8 +327,8 @@ namespace System {
          * @param platform The platform name (case-insensitive).
          */
         static bool IsOSPlatformVersionAtLeast(const std::string& platform,
-                                               int /*major*/, int /*minor*/ = 0,
-                                               int /*build*/ = 0, int /*revision*/ = 0) {
+                                               SharpRuntime::intcs /*major*/, SharpRuntime::intcs /*minor*/ = 0,
+                                               SharpRuntime::intcs /*build*/ = 0, SharpRuntime::intcs /*revision*/ = 0) {
             return IsOSPlatform(platform);
         }
     };
