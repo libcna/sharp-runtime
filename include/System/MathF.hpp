@@ -4,6 +4,7 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include "System/ArithmeticException.hpp"
 #include "System/MidpointRounding.hpp"
 
 namespace System {
@@ -33,8 +34,14 @@ namespace System {
         static float Ceiling(float x)              { return std::ceil(x); }
         /** @brief Returns the largest integral value less than or equal to @p x. */
         static float Floor(float x)                { return std::floor(x); }
-        /** @brief Returns @p x rounded to the nearest integer. */
-        static float Round(float x)                { return std::round(x); }
+        /**
+         * @brief Returns @p x rounded to the nearest integer.
+         *
+         * C++ counterpart of .NET MathF.Round(float). Uses round-to-even (banker's
+         * rounding) for midpoint values, matching .NET's default - NOT std::round,
+         * which always rounds halfway cases away from zero.
+         */
+        static float Round(float x)                { return std::nearbyintf(x); }
         /** @brief Returns the integral part of @p x, discarding the fractional digits. */
         static float Truncate(float x)             { return std::trunc(x); }
         /** @brief Returns the square root of @p x. */
@@ -48,11 +55,23 @@ namespace System {
 
         /**
          * @brief Returns the logarithm of @p x in the specified base @p y.
+         *
+         * C++ counterpart of .NET MathF.Log(float, float). Matches .NET's explicit
+         * IEEE 754 special cases rather than a naive log(x)/log(y), which would
+         * disagree at these edges (e.g. y == 1 naively gives +-infinity or NaN
+         * depending on x, but .NET always returns NaN).
          * @param x Value whose logarithm is to be found.
          * @param y Logarithm base.
          * @return log_y(x).
          */
-        static float Log(float x, float y)         { return std::log(x) / std::log(y); }
+        static float Log(float x, float y) {
+            if (std::isnan(x)) return x;
+            if (std::isnan(y)) return y;
+            if (y == 1.0f) return std::numeric_limits<float>::quiet_NaN();
+            if (x != 1.0f && (y == 0.0f || y == std::numeric_limits<float>::infinity()))
+                return std::numeric_limits<float>::quiet_NaN();
+            return std::log(x) / std::log(y);
+        }
 
         /** @brief Returns the base-2 logarithm of @p x. */
         static float Log2(float x)                 { return std::log2(x); }
@@ -93,10 +112,36 @@ namespace System {
         static float Cosh(float x)                 { return std::cosh(x); }
         /** @brief Returns the hyperbolic tangent of @p x. */
         static float Tanh(float x)                 { return std::tanh(x); }
-        /** @brief Returns the larger of @p x and @p y (NaN-safe). */
-        static float Max(float x, float y)         { return std::fmax(x, y); }
-        /** @brief Returns the smaller of @p x and @p y (NaN-safe). */
-        static float Min(float x, float y)         { return std::fmin(x, y); }
+        /**
+         * @brief Returns the larger of @p x and @p y.
+         *
+         * C++ counterpart of .NET MathF.Max(float, float) (matches IEEE 754-2019
+         * `maximum`). Unlike std::fmax (which returns the non-NaN argument when one
+         * side is NaN), this propagates NaN if either argument is NaN, and treats
+         * +0 as greater than -0, matching .NET's actual semantics exactly.
+         */
+        static float Max(float x, float y) {
+            if (x != y) {
+                if (!std::isnan(x)) return y < x ? x : y;
+                return x;
+            }
+            return std::signbit(y) ? x : y;
+        }
+
+        /**
+         * @brief Returns the smaller of @p x and @p y.
+         *
+         * C++ counterpart of .NET MathF.Min(float, float) (matches IEEE 754-2019
+         * `minimum`). Unlike std::fmin, this propagates NaN if either argument is
+         * NaN, and treats +0 as greater than -0, matching .NET's actual semantics.
+         */
+        static float Min(float x, float y) {
+            if (x != y) {
+                if (!std::isnan(x)) return x < y ? x : y;
+                return x;
+            }
+            return std::signbit(x) ? x : y;
+        }
 
         /**
          * @brief Clamps @p v to the range [@p min, @p max].
@@ -108,8 +153,20 @@ namespace System {
             return v < min ? min : (v > max ? max : v);
         }
 
-        /** @brief Returns -1, 0, or 1 indicating the sign of @p x. */
-        static int Sign(float x)                   { return x < 0.0f ? -1 : (x > 0.0f ? 1 : 0); }
+        /**
+         * @brief Returns -1, 0, or 1 indicating the sign of @p x.
+         *
+         * C++ counterpart of .NET MathF.Sign(float) (via Math.Sign(float)).
+         * @throws System::ArithmeticException if @p x is NaN, matching .NET (a naive
+         *         comparison-based implementation would silently return 0 for NaN
+         *         instead, since all relational comparisons against NaN are false).
+         */
+        static int Sign(float x) {
+            if (x < 0.0f) return -1;
+            if (x > 0.0f) return 1;
+            if (x == 0.0f) return 0;
+            throw ArithmeticException("Function does not accept floating point Not-a-Number values.");
+        }
         /** @brief Returns true if @p x is Not-a-Number (NaN). */
         static bool IsNaN(float x)                 { return std::isnan(x); }
         /** @brief Returns true if @p x is positive or negative infinity. */
@@ -142,13 +199,17 @@ namespace System {
         static float FusedMultiplyAdd(float x, float y, float z) { return std::fma(x, y, z); }
 
         /**
-         * @brief Rounds @p x to @p digits decimal places using away-from-zero midpoint.
+         * @brief Rounds @p x to @p digits decimal places.
+         *
+         * C++ counterpart of .NET MathF.Round(float, int). Uses round-to-even
+         * (banker's rounding) for midpoint values, matching .NET's default
+         * (`Round(x, digits, MidpointRounding.ToEven)`) - NOT away-from-zero.
          * @param x      Value to round.
          * @param digits Number of decimal places.
          */
         static float Round(float x, int digits) {
             float factor = std::pow(10.0f, static_cast<float>(digits));
-            return std::round(x * factor) / factor;
+            return std::nearbyintf(x * factor) / factor;
         }
 
         /**
