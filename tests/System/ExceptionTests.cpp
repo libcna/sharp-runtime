@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "System/Exception.hpp"
 #include "System/SystemException.hpp"
@@ -539,6 +540,21 @@ TEST(InvalidTimeZoneExceptionTests, CatchableAsStdException) {
     try { throw System::InvalidTimeZoneException("tz error"); }
     catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
     EXPECT_TRUE(caught);
+}
+
+TEST(InvalidTimeZoneExceptionTests, DerivesDirectlyFromException_NotSystemException) {
+    // .NET's InvalidTimeZoneException : Exception, not SystemException (verified against
+    // InvalidTimeZoneException.cs) - unlike most exceptions reviewed in this batch.
+    static_assert(std::is_base_of_v<System::Exception, System::InvalidTimeZoneException>);
+    static_assert(!std::is_base_of_v<System::SystemException, System::InvalidTimeZoneException>);
+}
+
+TEST(InvalidTimeZoneExceptionTests, HResult_InheritsBaseDefault) {
+    // .NET sets no custom HResult on this type - it inherits Exception's COR_E_EXCEPTION
+    // default (verified against InvalidTimeZoneException.cs having no HResult assignment).
+    constexpr SharpRuntime::intcs corEException = static_cast<SharpRuntime::intcs>(0x80131500);
+    System::InvalidTimeZoneException ex;
+    EXPECT_EQ(ex.getHResultProperty(), corEException);
 }
 
 // ---------------------------------------------------------------------------
