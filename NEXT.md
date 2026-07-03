@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-03 (branch: feature/work) — 8737 tests passing*
+*Last updated: 2026-07-03 (branch: feature/work) — 8751 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8737 tests passing** across 896 test suites. Zero failures.
+- **8751 tests passing** across 896 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -71,6 +71,14 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `710e315` | Port Random: **fixed a real bug** — `GetItems`/`GetString` had no validation for empty `choices`, so `GetItems(emptyChoices, 0)` indexed an empty collection at `Next(0)` (undefined behavior) instead of throwing `ArgumentException` like .NET does (even when `length == 0`); restructured to match .NET's actual delegation chain so validation applies uniformly |
+| `21d42e8` | Port Progress: `Progress<T>(Action<T>)` now throws `ArgumentNullException` for a null/empty handler, matching .NET |
+| `e6a6d4e` | Port PlatformNotSupportedException: fixed missing `HResult` |
+| `f768e92` | Port OperationCanceledException: **added the entire missing `CancellationToken` surface** — 3 of 6 constructors and the `CancellationToken` property were absent — plus `HResult` |
+| `f1756a3` | Port OperatingSystem: verified complete/correct; fixed `int` → `SharpRuntime::intcs` param typing |
+| `0dd726d` | Port OverflowException: fixed missing `HResult` |
+| — | Object, ObsoleteAttribute, OrdinalComparer, ParamArrayAttribute, PlatformID, Predicate, ProcessCpuUsage: all verified complete and correct against .NET, no changes needed |
+| `b53d34f` | Port ObjectDisposedException: fixed missing `HResult` |
 | `abbdbbf` | Port Nullable: added missing `explicit operator T()` conversion (throws `InvalidOperationException` if no value, matching .NET); fixed `GetHashCode()` return type; fixed `ToString()` to prefer a `T::ToString()` member over `operator<<` (same fix pattern as `Lazy<T>` earlier) |
 | `9340c98` | Port NullReferenceException: fixed missing `HResult` (`E_POINTER` — a standard COM HResult, not `COR_E_*`) |
 | `521f0a6` | Port NotImplementedException (`E_NOTIMPL`) + NotSupportedException (`COR_E_NOTSUPPORTED`): fixed missing `HResult` on both |
@@ -149,19 +157,19 @@ types ported before `bab45c2` have the same gap** and check `HResult` against `H
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 8737 tests pass.
+**No active technical blocker.** Build is clean, all 8751 tests pass.
 
 The workflow is now autonomous (§3a) — do **not** revert to asking the user before each type; that was
 the old behavior and has been intentionally replaced.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `Object`,
-`ObjectDisposedException`, `ObsoleteAttribute`, `OperatingSystem`, `OperationCanceledException`,
-`OrdinalComparer`, `OverflowException`, `ParamArrayAttribute`, …
-900 `todo` + 62 empty items remain across all namespaces (138 `ported` so far). Note:
-`OutOfMemoryException` (id 2842) was fixed earlier this session as a side effect of reviewing
-`InsufficientMemoryException` (its subclass) but its own `plan.sqlite3` row wasn't marked `ported`
-until this checkpoint — worth double-checking `plan.sqlite3` status against actual code state
-occasionally, since side-effect fixes on base classes can leave the tracking row stale.
+Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order):
+`RankException`, `ReadOnlyMemory`, `RuntimeType`, `RuntimeTypeHandle`, `SByte`,
+`SerializableAttribute`, `Single`, `SpecialFolder`, …
+884 `todo` + 62 empty items remain across all namespaces (154 `ported` so far). Note:
+`OutOfMemoryException` and `Range` were fixed earlier in the session as side effects of reviewing
+other types (`InsufficientMemoryException`, `Index`) but their own `plan.sqlite3` rows weren't marked
+`ported` until later checkpoints — worth double-checking `plan.sqlite3` status against actual code
+state occasionally, since side-effect fixes on related types can leave the tracking row stale.
 
 **Process note:** when delegating a review to a background fork (`Agent` tool with `subagent_type:
 "fork"`) while continuing other work yourself in parallel, be careful with `git add`/`git commit` — a
@@ -232,7 +240,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **8737+ tests passing** — never go below the watermark.
+2. **8751+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
@@ -339,32 +347,32 @@ git push origin develop
 
 Ordered by `plan.sqlite3` processing order. Workflow is now autonomous (§3a) — no approval needed,
 just classify and proceed per `prompt.md`. Previous batches (Index through Lazy, MDArray through
-Nullable — 34 types total) are done, see §3 for what changed.
+Random — 44 types total) are done, see §3 for what changed.
 
-### Task 1 — System.Object
-- **Goal:** Full checklist review against `.NET`'s ref surface (Equals/GetHashCode/GetType/ToString/ReferenceEquals). `GetType()` is reflection-based and out of scope per CLAUDE.md — verify it's either omitted or throws `NotImplementedException` with a clear comment, not silently wrong.
-- **Files:** check `include/System/Object.hpp` existence first
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Object*"`
+### Task 1 — System.RankException
+- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` since this type may predate the `HResult` property being added to `Exception`.
+- **Files:** `include/System/RankException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="RankException*"`
 
-### Task 2 — System.ObjectDisposedException
-- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` since this type may predate the `HResult` property being added to `Exception`. Note: existing tests (`ObjectDisposedExceptionTest.IsInvalidOperationException`, seen earlier this session) confirm it derives from `InvalidOperationException`, not `SystemException` directly — verify the C++ base class matches before assuming a gap.
-- **Files:** `include/System/ObjectDisposedException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="ObjectDisposedException*"`
+### Task 2 — System.ReadOnlyMemory
+- **Goal:** Full checklist review of the existing `ReadOnlyMemory<T>` struct against `.NET`'s ref surface. `Memory<T>` was reviewed this session (added `Pin()`, fixed `GetHashCode` typing) — check whether `ReadOnlyMemory<T>` has the same `Pin()` gap or other parallel issues, since they're usually implemented in lockstep in .NET.
+- **Files:** `include/System/ReadOnlyMemory.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="ReadOnlyMemory*"`
 
-### Task 3 — System.ObsoleteAttribute
-- **Goal:** Full checklist review. Attributes generally have limited practical meaning without reflection/compiler support in C++ — verify what's already ported (`Attribute`, `FlagsAttribute`, `SerializableAttribute`, `CLSCompliantAttribute` per NEXT.md §2) does with attribute types, and match that pattern rather than inventing a new one.
-- **Files:** check `include/System/ObsoleteAttribute.hpp` existence first
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="ObsoleteAttribute*"`
+### Task 3 — System.RuntimeType / RuntimeTypeHandle
+- **Goal:** Both are reflection-adjacent (`RuntimeTypeHandle` backs `typeof(T)`/`Type.TypeHandle`). Check what's actually in `/rv/tmp/runtime/src/libraries/` before assuming out-of-scope — `RuntimeTypeHandle` is already listed as ported (full struct, not reflection metadata) per NEXT.md §2 "Runtime handles", so a real (if minimal) C++ mapping already exists; verify it rather than reclassifying. `RuntimeType` (the enum, not the reflection class `System.RuntimeType`) may be a distinct, simpler thing — check namespace/type column in plan.sqlite3 before conflating them.
+- **Files:** `include/System/RuntimeTypeHandle.hpp`; check `RuntimeType` existence separately
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="RuntimeType*"`
 
-### Task 4 — System.OperatingSystem
-- **Goal:** Full checklist review against `.NET`'s ref surface (platform detection: IsWindows/IsLinux/IsMacOS/Version, etc.). Likely POSIX-only or has platform-conditional logic — check for `#ifdef` guards per CLAUDE.md platform policy (no POSIX includes in public `.hpp`).
-- **Files:** check `include/System/OperatingSystem.hpp` existence first
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="OperatingSystem*"`
+### Task 4 — System.SByte
+- **Goal:** Full checklist review against `.NET`'s ref surface, same bar as this session's Int16/Int32/Int64 reviews (CompareTo/Equals/GetHashCode/Abs/Clamp/Max/Min/Sign/DivRem/IsEvenInteger/IsOddInteger/IsPow2/bit ops/Log2). Also worth checking: does `SByte.hpp` have the same `MaxMagnitude`/`MinMagnitude` `MinValue`-handling bug found in `Int32`/`Int64` this session? `SByteTests.cpp` already has `MaxMagnitude_Larger`/`MinMagnitude_Smaller` tests — check if they exercise the `MinValue` edge case or not.
+- **Files:** `include/System/SByte.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="SByte*"`
 
-### Task 5 — System.OperationCanceledException
-- **Goal:** Checklist review; same `HResult` audit as Task 2. Note this type has a `CancellationToken`-carrying constructor in .NET (`OperationCanceledException(string, CancellationToken)`) — verify whether that's present given `CancellationToken`/`CancellationTokenSource` are already ported per NEXT.md §2.
-- **Files:** `include/System/OperationCanceledException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="OperationCanceledException*"`
+### Task 5 — System.SerializableAttribute
+- **Goal:** Full checklist review. Like `ObsoleteAttribute`/`ParamArrayAttribute` (verified this session), likely a trivial marker-class port with no runtime behavior needed - match that established pattern.
+- **Files:** check `include/System/SerializableAttribute.hpp` existence first
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="SerializableAttribute*"`
 
 ---
 
@@ -403,7 +411,7 @@ For each item, per prompt.md:
      (API surface, doc-comments, SPDX, logic parity incl. HResult where applicable, build, tests)
      as if it were new — fix gaps, don't rubber-stamp.
   3. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests  (all 8737+ tests must pass)
+  4. Run: ./build/SharpRuntimeTests  (all 8751+ tests must pass)
   5. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   6. Commit only the files for that port: git -c commit.gpgsign=false commit -m "..."
   7. Loop back to step 1 — keep going, do not stop to ask between items.
