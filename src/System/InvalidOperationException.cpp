@@ -9,16 +9,24 @@ namespace System {
         "Operation is not valid due to the current state of the object.";
 
     InvalidOperationException::InvalidOperationException()
-        : SystemException(kDefaultMsg) {}
+        : SystemException(kDefaultMsg) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131509)); // COR_E_INVALIDOPERATION
+    }
 
     InvalidOperationException::InvalidOperationException(const char* message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131509)); // COR_E_INVALIDOPERATION
+    }
 
     InvalidOperationException::InvalidOperationException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131509)); // COR_E_INVALIDOPERATION
+    }
 
     InvalidOperationException::InvalidOperationException(
         const std::string& message, std::exception_ptr innerException)
-        : SystemException(message, std::move(innerException)) {}
+        : SystemException(message, std::move(innerException)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131509)); // COR_E_INVALIDOPERATION
+    }
 
 } // namespace System
