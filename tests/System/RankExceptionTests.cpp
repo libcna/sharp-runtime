@@ -30,3 +30,13 @@ TEST(RankExceptionTest, IsSystemException) {
 TEST(RankExceptionTest, Throwable) {
     EXPECT_THROW({ throw RankException("bad rank"); }, RankException);
 }
+
+TEST(RankExceptionTest, HResult_MatchesCorERank) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131517);
+    RankException defaultCtor;
+    RankException messageCtor("wrong number of dimensions");
+    RankException innerCtor("rank error", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
