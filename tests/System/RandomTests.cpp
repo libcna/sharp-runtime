@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "gtest/gtest.h"
 #include "System/Random.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 using SharpRuntime::intcs;
@@ -288,6 +289,27 @@ TEST(RandomTests, GetItems_CorrectLength) {
     EXPECT_EQ(result.size(), 6u);
 }
 
+TEST(RandomTests, GetItems_EmptyChoices_Throws) {
+    // .NET's GetItems throws ArgumentException for empty choices, even when
+    // length == 0 - verified against Random.cs.
+    System::Random rng(111);
+    std::vector<int> choices;
+    EXPECT_THROW(rng.GetItems(choices, 0), System::ArgumentException);
+}
+
+TEST(RandomTests, GetItems_NegativeLength_Throws) {
+    System::Random rng(111);
+    std::vector<int> choices = {1, 2, 3};
+    EXPECT_THROW(rng.GetItems(choices, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(RandomTests, GetItems_SpanDestination_EmptyChoices_Throws) {
+    System::Random rng(111);
+    std::vector<int> empty;
+    std::vector<int> dest(3);
+    EXPECT_THROW(rng.GetItems(System::ReadOnlySpan<int>(empty.data(), 0), System::Span<int>(dest.data(), 3)), System::ArgumentException);
+}
+
 TEST(RandomTests, GetItems_OnlyFromChoices) {
     System::Random rng(222);
     std::vector<int> choices = {10, 20, 30};
@@ -494,6 +516,18 @@ TEST(RandomTests, NextDouble_Seeded_Deterministic) {
 TEST(RandomTests, GetString_ZeroLength_Empty) {
     System::Random rng(6);
     EXPECT_TRUE(rng.GetString("abc", 0).empty());
+}
+
+TEST(RandomTests, GetString_EmptyChoices_Throws) {
+    // .NET's GetString throws ArgumentException for empty choices, even when
+    // length == 0 - verified against Random.cs.
+    System::Random rng(6);
+    EXPECT_THROW(rng.GetString("", 0), System::ArgumentException);
+}
+
+TEST(RandomTests, GetString_NegativeLength_Throws) {
+    System::Random rng(6);
+    EXPECT_THROW(rng.GetString("abc", -1), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

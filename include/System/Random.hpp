@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 
@@ -265,15 +266,12 @@ namespace System {
          * @param choices Non-empty source collection to sample from.
          * @param length  Number of elements to pick.
          * @return A new vector of size @p length.
+         * @throws ArgumentException if @p choices is empty.
+         * @throws ArgumentOutOfRangeException if @p length is negative.
          */
         template<typename T>
         std::vector<T> GetItems(const std::vector<T>& choices, intcs length) {
-            std::vector<T> result;
-            result.reserve(static_cast<std::size_t>(length));
-            for (intcs i = 0; i < length; ++i)
-                result.push_back(choices[static_cast<std::size_t>(
-                    Next(static_cast<intcs>(choices.size())))]);
-            return result;
+            return GetItems(ReadOnlySpan<T>(choices.data(), static_cast<intcs>(choices.size())), length);
         }
 
         /**
@@ -285,13 +283,14 @@ namespace System {
          * @param choices Non-empty source span to sample from.
          * @param length  Number of elements to pick.
          * @return A new vector of size @p length.
+         * @throws ArgumentException if @p choices is empty.
+         * @throws ArgumentOutOfRangeException if @p length is negative.
          */
         template<typename T>
         std::vector<T> GetItems(ReadOnlySpan<T> choices, intcs length) {
-            std::vector<T> result;
-            result.reserve(static_cast<std::size_t>(length));
-            for (intcs i = 0; i < length; ++i)
-                result.push_back(choices[Next(choices.getLengthProperty())]);
+            if (length < 0) throw ArgumentOutOfRangeException("length", "'length' must be a non-negative value.");
+            std::vector<T> result(static_cast<std::size_t>(length));
+            GetItems(choices, Span<T>(result.data(), length));
             return result;
         }
 
@@ -303,9 +302,11 @@ namespace System {
          * @tparam T Element type.
          * @param choices     Non-empty source span to sample from.
          * @param destination Span to fill; its length determines how many items are picked.
+         * @throws ArgumentException if @p choices is empty.
          */
         template<typename T>
         void GetItems(ReadOnlySpan<T> choices, Span<T> destination) {
+            if (choices.getLengthProperty() == 0) throw ArgumentException("Span may not be empty.", "choices");
             for (intcs i = 0; i < destination.getLengthProperty(); ++i)
                 destination[i] = choices[Next(choices.getLengthProperty())];
         }
@@ -321,6 +322,8 @@ namespace System {
          * @param choices Non-empty string of characters to sample from.
          * @param length  Number of characters in the returned string.
          * @return A new std::string of size @p length.
+         * @throws ArgumentException if @p choices is empty.
+         * @throws ArgumentOutOfRangeException if @p length is negative.
          */
         std::string GetString(const std::string& choices, intcs length);
 
