@@ -488,6 +488,18 @@ TEST(InsufficientMemoryExceptionTests, InnerExceptionCtor_ContainsBoth) {
     EXPECT_NE(msg.find("allocation failed"), std::string::npos);
 }
 
+TEST(InsufficientMemoryExceptionTests, HResult_MatchesCorEInsufficientMemory_NotBaseOutOfMemory) {
+    // InsufficientMemoryException overrides its base OutOfMemoryException's HResult
+    // (COR_E_OUTOFMEMORY, 0x8007000E) with its own (COR_E_INSUFFICIENTMEMORY, 0x8013153D).
+    constexpr SharpRuntime::intcs corEInsufficientMemory = static_cast<SharpRuntime::intcs>(0x8013153D);
+    System::InsufficientMemoryException defaultCtor;
+    System::InsufficientMemoryException messageCtor("low memory");
+    System::InsufficientMemoryException innerCtor("low memory", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corEInsufficientMemory);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corEInsufficientMemory);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corEInsufficientMemory);
+}
+
 // ---------------------------------------------------------------------------
 // InvalidTimeZoneException
 // ---------------------------------------------------------------------------
