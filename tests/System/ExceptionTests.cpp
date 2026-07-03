@@ -249,6 +249,18 @@ TEST(ExceptionTests, OverflowExceptionIsArithmeticException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, OverflowException_HResult_MatchesCorEOverflow_NotBaseArithmetic) {
+    // OverflowException overrides its base ArithmeticException's HResult
+    // (COR_E_ARITHMETIC, 0x80070216) with its own (COR_E_OVERFLOW, 0x80131516).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131516);
+    OverflowException defaultCtor;
+    OverflowException messageCtor("arithmetic overflow");
+    OverflowException innerCtor("arithmetic overflow", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
+
 TEST(ArithmeticExceptionTests, DefaultCtor_MessageContainsOverflow) {
     ArithmeticException ex;
     std::string msg = ex.what();
