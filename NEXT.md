@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-03 (branch: feature/work) — 8667 tests passing*
+*Last updated: 2026-07-03 (branch: feature/work) — 8692 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8667 tests passing** across 896 test suites. Zero failures.
+- **8692 tests passing** across 896 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -71,6 +71,12 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `79a93ac` | Port Lazy: **fixed three real bugs** — `ToString()` always returned a fixed placeholder instead of `Value().ToString()` once created; exception-caching semantics were backwards (None/ExecutionAndPublication should cache+rethrow the same exception, PublicationOnly should retry — the old code did the opposite via `std::call_once`'s built-in retry-on-exception behavior); a factory recursively accessing `Value()` deadlocked via recursive `std::call_once` instead of throwing `InvalidOperationException` like .NET — added a same-thread reentrancy check that runs before dispatching into the lock |
+| `d98ee9e` | Port InvalidTimeZoneException: verified against .NET (correctly derives from `Exception` not `SystemException`, correctly sets no custom `HResult`) — no code change, added tests locking in both facts |
+| `8f607d6` | Port InvalidProgramException: added missing `(message, innerException)` ctor and `HResult` (`COR_E_INVALIDPROGRAM`) |
+| `9c75be8` | Port InvalidOperationException: fixed missing `HResult` (`COR_E_INVALIDOPERATION`) |
+| `2cb0513` | Port InvalidCastException: added missing `(message, errorCode)` ctor and `HResult` (`COR_E_INVALIDCAST`) |
+| `a4a5ef0` | Port IntPtr: added `ToInt32`/`ToInt64`/`ToPointer`/`CompareTo`/`Equals`/`GetHashCode`/`ToString`/`Add`/`Subtract`/`MaxValue`/`MinValue`/`Size` — was down to just ctor/Zero/equality |
 | `dbe61df` | Port Int64: **fixed a real bug** — `Log2(0)` threw `std::domain_error`, but .NET's `BitOperations.Log2(0)` returns 0, not an error; added `BigMul` (now returns `Int128`), `CopySign`, `MaxMagnitude`, `MinMagnitude`, `IsNegative`, `IsPositive` |
 | `3cdba03` | Port Int32: **fixed a real bug** — `MaxMagnitude`/`MinMagnitude` computed `MinValue`'s magnitude as `MinValue` itself instead of treating it as unrepresentable/largest like .NET does, inverting results whenever `MinValue` was an operand; added missing `CompareTo`/`Equals`/`GetHashCode` |
 | `f46af96` | Port Int16: added the full math/comparison surface it was missing entirely (`CompareTo`, `Equals`, `GetHashCode`, `Abs`, `Clamp`, `Max`, `Min`, `Sign`, `DivRem`, `IsEvenInteger`, `IsOddInteger`, `IsPow2`, `LeadingZeroCount`, `PopCount`, `TrailingZeroCount`, `RotateLeft`, `RotateRight`, `Log2`) |
@@ -127,15 +133,15 @@ types ported before `bab45c2` have the same gap** and check `HResult` against `H
 
 ## 4. Current blocker / main problem
 
-**No active technical blocker.** Build is clean, all 8667 tests pass.
+**No active technical blocker.** Build is clean, all 8692 tests pass.
 
 The workflow is now autonomous (§3a) — do **not** revert to asking the user before each type; that was
 the old behavior and has been intentionally replaced.
 
-Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `IntPtr`,
-`InvalidCastException`, `InvalidOperationException`, `InvalidProgramException`,
-`InvalidTimeZoneException`, `Lazy`, `MDArray`, `Math`, …
-924 `todo` + 62 empty items remain across all namespaces (115 `ported` so far).
+Next unprocessed types in `System` namespace (from `plan.sqlite3`, in processing order): `MDArray`,
+`Math`, `MathF`, `MemberAccessException`, `Memory`, `MemoryExtensions`, `MethodAccessException`,
+`MidpointRounding`, …
+918 `todo` + 62 empty items remain across all namespaces (121 `ported` so far).
 
 ---
 
@@ -198,7 +204,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 
 ### Invariants that must not be broken
 1. **Zero errors, zero warnings** (`-Wall -Wextra -Werror`) before every commit.
-2. **8667+ tests passing** — never go below the watermark.
+2. **8692+ tests passing** — never go below the watermark.
 3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files).
 4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 5. **`SharpRuntime::intcs`** (= `int32_t`) in public APIs mirroring .NET `int` parameters.
@@ -304,34 +310,33 @@ git push origin develop
 ## 8. Next smallest tasks
 
 Ordered by `plan.sqlite3` processing order. Workflow is now autonomous (§3a) — no approval needed,
-just classify and proceed per `prompt.md`. Tasks 1-5 from the previous batch (Index,
-IndexOutOfRangeException, InsufficientExecutionStackException, InsufficientMemoryException, Int128)
-are done, plus Int16/Int32/Int64 picked up in the same session — see §3 for what changed.
+just classify and proceed per `prompt.md`. Previous batch (Index through Lazy — 14 types) is done,
+see §3 for what changed.
 
-### Task 1 — System.IntPtr
-- **Goal:** Full checklist review against `.NET`'s ref surface (native-size integer, pointer arithmetic, conversions).
-- **Files:** `include/System/IntPtr.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="IntPtr*"`
+### Task 1 — System.MDArray
+- **Goal:** Look up what this actually is in `/rv/tmp/runtime/src/libraries/` first — `MDArray` isn't a standard .NET type name; likely means multi-dimensional array support, which may fall under the existing "no `System.Array`" scope gap (see NEXT.md §5) rather than being independently portable. Classify (port/ignore/tobedecided) based on what's actually found, don't assume.
+- **Files:** none yet — check `include/System/MDArray.hpp` existence first
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MDArray*"`
 
-### Task 2 — System.InvalidCastException
-- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` (`COR_E_INVALIDCAST`) since this type may predate the `HResult` property being added to `Exception`.
-- **Files:** `include/System/InvalidCastException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InvalidCastException*"`
+### Task 2 — System.Math
+- **Goal:** Full checklist review of the existing `Math` class (already has full overloads + BigMul/DivRem/ILogB per NEXT.md §2) against `.NET`'s ref surface — likely close to done, verify for gaps rather than assume completeness.
+- **Files:** `include/System/Math.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Math*"`
 
-### Task 3 — System.InvalidOperationException
-- **Goal:** Checklist review; same `HResult` audit as Task 2 (`COR_E_INVALIDOPERATION`).
-- **Files:** `include/System/InvalidOperationException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InvalidOperationException*"`
+### Task 3 — System.MathF
+- **Goal:** Same as Task 2 but for the float-precision counterpart.
+- **Files:** `include/System/MathF.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MathF*"`
 
-### Task 4 — System.InvalidProgramException
-- **Goal:** Checklist review; same `HResult` audit as Task 2 (`COR_E_INVALIDPROGRAM`).
-- **Files:** `include/System/InvalidProgramException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InvalidProgramException*"`
+### Task 4 — System.MemberAccessException
+- **Goal:** Checklist review; per §3a, check `HResult` against `HResults.cs` (`COR_E_MEMBERACCESS`) since this type may predate the `HResult` property being added to `Exception`.
+- **Files:** `include/System/MemberAccessException.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="MemberAccessException*"`
 
-### Task 5 — System.InvalidTimeZoneException
-- **Goal:** Checklist review; same `HResult` audit as Task 2. Note this one is not in the standard `HResults.cs` COR_E_* list in older .NET — verify whether .NET actually sets a custom HResult for it or inherits the base `Exception` default before assuming it's a gap.
-- **Files:** `include/System/InvalidTimeZoneException.hpp`
-- **Verify:** `./build/SharpRuntimeTests --gtest_filter="InvalidTimeZoneException*"`
+### Task 5 — System.Memory
+- **Goal:** Full checklist review of the existing `Memory<T>` struct (Span/Memory family already ported per NEXT.md §2) against `.NET`'s ref surface.
+- **Files:** `include/System/Memory.hpp`
+- **Verify:** `./build/SharpRuntimeTests --gtest_filter="Memory*"`
 
 ---
 
@@ -370,7 +375,7 @@ For each item, per prompt.md:
      (API surface, doc-comments, SPDX, logic parity incl. HResult where applicable, build, tests)
      as if it were new — fix gaps, don't rubber-stamp.
   3. Run: cmake --build build --parallel 4  (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests  (all 8667+ tests must pass)
+  4. Run: ./build/SharpRuntimeTests  (all 8692+ tests must pass)
   5. Mark ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   6. Commit only the files for that port: git -c commit.gpgsign=false commit -m "..."
   7. Loop back to step 1 — keep going, do not stop to ask between items.
