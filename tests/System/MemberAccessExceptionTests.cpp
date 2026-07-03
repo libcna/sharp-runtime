@@ -26,3 +26,13 @@ TEST(MemberAccessExceptionTest, IsSystemException) {
     MemberAccessException e("test");
     EXPECT_NO_THROW({ System::SystemException& ref = e; (void)ref; });
 }
+
+TEST(MemberAccessExceptionTest, HResult_MatchesCorEMemberAccess) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x8013151A);
+    MemberAccessException defaultCtor;
+    MemberAccessException messageCtor("access denied");
+    MemberAccessException innerCtor("access denied", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
