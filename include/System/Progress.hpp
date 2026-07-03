@@ -4,6 +4,7 @@
 #pragma once
 #include <functional>
 #include <vector>
+#include "System/ArgumentNullException.hpp"
 #include "System/IProgress.hpp"
 
 namespace System {
@@ -53,9 +54,12 @@ namespace System {
          *
          * C++ counterpart of .NET Progress<T>(Action<T> handler).
          * @param handler Callback invoked with the reported value.
+         * @throws ArgumentNullException if @p handler is empty/null, matching .NET.
          */
         explicit Progress(std::function<void(T)> handler)
-            : handler_(std::move(handler)) {}
+            : handler_(std::move(handler)) {
+            if (!handler_) throw ArgumentNullException("handler");
+        }
 
         /**
          * @brief Reports a progress change, invoking all attached handlers.

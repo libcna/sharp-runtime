@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Progress.hpp"
+#include "System/ArgumentNullException.hpp"
 
 using System::Progress;
 
@@ -68,4 +69,10 @@ TEST(ProgressTest, StringProgress) {
     Progress<std::string> p([&](const std::string& s) { last = s; });
     p.Report("hello");
     EXPECT_EQ(last, "hello");
+}
+
+TEST(ProgressTest, NullHandlerCtor_Throws) {
+    // .NET's Progress<T>(Action<T>) throws ArgumentNullException for a null handler
+    // (verified against Progress.cs: ArgumentNullException.ThrowIfNull(handler)).
+    EXPECT_THROW(Progress<int>(std::function<void(int)>{}), System::ArgumentNullException);
 }
