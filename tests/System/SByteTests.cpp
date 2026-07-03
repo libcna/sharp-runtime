@@ -35,6 +35,15 @@ TEST(SByteTest, Abs_MinValue_Throws) { EXPECT_THROW(SByte::Abs(SByte::MinValue),
 
 TEST(SByteTest, CopySign_PositiveSign) { EXPECT_EQ(SByte::CopySign(sbytecs(-3), sbytecs(1)), sbytecs(3)); }
 TEST(SByteTest, CopySign_NegativeSign) { EXPECT_EQ(SByte::CopySign(sbytecs(3), sbytecs(-1)), sbytecs(-3)); }
+TEST(SByteTest, CopySign_MinValue_NonNegativeSign_Throws) {
+    EXPECT_THROW(SByte::CopySign(SByte::MinValue, sbytecs(1)), std::overflow_error);
+}
+TEST(SByteTest, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
+    // Matches .NET: the negation double-wraps back to MinValue without throwing
+    // when sign < 0 (verified against SByte.cs - the overflow check only runs in
+    // the sign >= 0 branch).
+    EXPECT_EQ(SByte::CopySign(SByte::MinValue, sbytecs(-1)), SByte::MinValue);
+}
 
 TEST(SByteTest, IsNegative_True)  { EXPECT_TRUE(SByte::IsNegative(sbytecs(-1))); }
 TEST(SByteTest, IsNegative_False) { EXPECT_FALSE(SByte::IsNegative(sbytecs(0))); }
@@ -47,6 +56,19 @@ TEST(SByteTest, Log10_Zero_Throws) { EXPECT_THROW(SByte::Log10(sbytecs(0)), std:
 
 TEST(SByteTest, MaxMagnitude_Larger)   { EXPECT_EQ(SByte::MaxMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(-10)); }
 TEST(SByteTest, MinMagnitude_Smaller)  { EXPECT_EQ(SByte::MinMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(5)); }
+
+// MaxMagnitude/MinMagnitude with MinValue: MinValue has no representable positive
+// magnitude, so .NET special-cases it to always win MaxMagnitude and always lose
+// MinMagnitude, regardless of the other operand (same bug class as Int32/Int64
+// found earlier this session).
+TEST(SByteTest, MaxMagnitude_MinValueAlwaysWins) {
+    EXPECT_EQ(SByte::MaxMagnitude(SByte::MinValue, sbytecs(5)), SByte::MinValue);
+    EXPECT_EQ(SByte::MaxMagnitude(sbytecs(5), SByte::MinValue), SByte::MinValue);
+}
+TEST(SByteTest, MinMagnitude_MinValueAlwaysLoses) {
+    EXPECT_EQ(SByte::MinMagnitude(SByte::MinValue, sbytecs(5)), sbytecs(5));
+    EXPECT_EQ(SByte::MinMagnitude(sbytecs(5), SByte::MinValue), sbytecs(5));
+}
 
 TEST(SByteTest, RotateLeft_OneStep) {
     EXPECT_EQ(SByte::RotateLeft(sbytecs(1), 1), sbytecs(2));
