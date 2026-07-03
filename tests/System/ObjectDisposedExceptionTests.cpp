@@ -43,3 +43,17 @@ TEST(ObjectDisposedExceptionTest, IsInvalidOperationException) {
     ObjectDisposedException e("obj");
     EXPECT_NO_THROW({ System::InvalidOperationException& ref = e; (void)ref; });
 }
+
+TEST(ObjectDisposedExceptionTest, HResult_MatchesCorEObjectDisposed_NotBaseInvalidOperation) {
+    // ObjectDisposedException overrides its base InvalidOperationException's HResult
+    // (COR_E_INVALIDOPERATION, 0x80131509) with its own (COR_E_OBJECTDISPOSED, 0x80131622).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131622);
+    ObjectDisposedException defaultCtor;
+    ObjectDisposedException objectNameCtor("MyStream");
+    ObjectDisposedException objectNameAndMessageCtor("MyStream", "Stream is closed");
+    ObjectDisposedException innerCtor("object disposed", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(objectNameCtor.getHResultProperty(), corE);
+    EXPECT_EQ(objectNameAndMessageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
