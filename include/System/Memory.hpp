@@ -12,6 +12,7 @@
 #include "System/Span.hpp"
 #include "System/ArraySegment.hpp"
 #include "System/ReadOnlyMemory.hpp"
+#include "System/Buffers/MemoryHandle.hpp"
 
 namespace System {
 
@@ -195,6 +196,25 @@ namespace System {
         }
 
         // -----------------------------------------------------------------------
+        // Pin
+        // -----------------------------------------------------------------------
+
+        /**
+         * @brief Returns a handle exposing a raw pointer to this memory region.
+         *
+         * C++ counterpart of .NET Memory&lt;T&gt;.Pin(). .NET's Pin() prevents the
+         * garbage collector from moving the backing array while the handle is alive;
+         * this port has no GC and the backing std::vector never moves on its own, so
+         * no actual pinning occurs - this exists for API/porting compatibility. As
+         * with Span/ToArray, the returned pointer is only valid as long as the
+         * backing vector is not reallocated (e.g. via push_back/resize) elsewhere.
+         */
+        [[nodiscard]] Buffers::MemoryHandle Pin() const noexcept {
+            if (data_ == nullptr) return Buffers::MemoryHandle{};
+            return Buffers::MemoryHandle(static_cast<void*>(data_->data() + offset_));
+        }
+
+        // -----------------------------------------------------------------------
         // ToArray
         // -----------------------------------------------------------------------
 
@@ -239,12 +259,12 @@ namespace System {
          *
          * C++ counterpart of .NET Memory&lt;T&gt;.GetHashCode().
          */
-        [[nodiscard]] int GetHashCode() const noexcept
+        [[nodiscard]] intcs GetHashCode() const noexcept
         {
             size_t h = std::hash<void*>{}(data_);
             h ^= std::hash<intcs>{}(offset_) + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= std::hash<intcs>{}(length_)  + 0x9e3779b9 + (h << 6) + (h >> 2);
-            return static_cast<int>(h & 0x7fffffff);
+            return static_cast<intcs>(h & 0x7fffffff);
         }
 
         /**
