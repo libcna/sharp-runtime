@@ -152,6 +152,21 @@ TEST(InvalidCastExceptionTests, ErrorCodeCtor_UsesCustomHResult) {
     EXPECT_NE(std::string(ex.what()).find("custom cast failure"), std::string::npos);
 }
 EXCEPT_SIMPLE(InvalidProgramException)
+TEST(InvalidProgramExceptionTests, InnerExceptionCtor_ContainsBoth) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::InvalidProgramException ex("bad IL", inner);
+    std::string w = ex.what();
+    EXPECT_NE(w.find("bad IL"), std::string::npos);
+}
+TEST(InvalidProgramExceptionTests, HResult_MatchesCorEInvalidProgram) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x8013153A);
+    System::InvalidProgramException defaultCtor;
+    System::InvalidProgramException messageCtor("bad IL");
+    System::InvalidProgramException innerCtor("bad IL", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
 EXCEPT_SIMPLE(InvalidTimeZoneException)
 EXCEPT_SIMPLE(MemberAccessException)
 EXCEPT_SIMPLE(MethodAccessException)
