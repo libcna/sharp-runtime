@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Int128.hpp"
 
 namespace System {
 
@@ -178,13 +179,76 @@ namespace System {
 
         /**
          * @brief Returns the floor of the base-2 logarithm of @p value.
-         * C++ counterpart of .NET Int64.Log2(long).
-         * @throws std::domain_error if @p value is <= 0.
+         * C++ counterpart of .NET Int64.Log2(long). Matches .NET: Log2(0) is 0, not an error
+         * (BitOperations.Log2(0) is documented to return 0).
+         * @throws std::domain_error if @p value is negative.
          */
         [[nodiscard]] static int Log2(longcs value) {
-            if (value <= 0) throw std::domain_error("Log2 requires a positive value.");
+            if (value < 0) throw std::domain_error("Log2 requires a non-negative value.");
+            if (value == 0) return 0;
             return std::bit_width(static_cast<uint64_t>(value)) - 1;
         }
+
+        /**
+         * @brief Produces the full 128-bit product of two 64-bit numbers.
+         * C++ counterpart of .NET Int64.BigMul(long, long).
+         */
+        [[nodiscard]] static Int128 BigMul(longcs left, longcs right) noexcept {
+            __int128 product = static_cast<__int128>(left) * static_cast<__int128>(right);
+            return Int128(static_cast<uint64_t>(static_cast<unsigned __int128>(product) >> 64),
+                          static_cast<uint64_t>(product));
+        }
+
+        /**
+         * @brief Copies the sign of @p sign to the magnitude of @p value.
+         * C++ counterpart of .NET Int64.CopySign(long, long).
+         * @throws std::overflow_error if @p value is MinValue and @p sign is non-negative
+         *         (its magnitude does not fit in a signed Int64).
+         */
+        [[nodiscard]] static longcs CopySign(longcs value, longcs sign) {
+            longcs absValue = value < 0 ? (value == MinValue ? value : -value) : value;
+            if (sign >= 0) {
+                if (absValue < 0) throw std::overflow_error("Negating MinValue is not representable.");
+                return absValue;
+            }
+            return -absValue;
+        }
+
+        /**
+         * @brief Returns the value with the larger absolute value.
+         * C++ counterpart of .NET Int64.MaxMagnitude(long, long). MinValue has no
+         * representable positive magnitude, so it always wins, matching .NET.
+         */
+        [[nodiscard]] static longcs MaxMagnitude(longcs x, longcs y) noexcept {
+            if (x == MinValue) return x;
+            if (y == MinValue) return y;
+            longcs ax = x < 0 ? -x : x;
+            longcs ay = y < 0 ? -y : y;
+            if (ax > ay) return x;
+            if (ax == ay) return IsNegative(x) ? y : x;
+            return y;
+        }
+
+        /**
+         * @brief Returns the value with the smaller absolute value.
+         * C++ counterpart of .NET Int64.MinMagnitude(long, long). MinValue has no
+         * representable positive magnitude, so it always loses, matching .NET.
+         */
+        [[nodiscard]] static longcs MinMagnitude(longcs x, longcs y) noexcept {
+            if (x == MinValue) return y;
+            if (y == MinValue) return x;
+            longcs ax = x < 0 ? -x : x;
+            longcs ay = y < 0 ? -y : y;
+            if (ax < ay) return x;
+            if (ax == ay) return IsNegative(x) ? x : y;
+            return y;
+        }
+
+        /** @brief Returns true if @p value is negative. C++ counterpart of .NET Int64.IsNegative(long). */
+        [[nodiscard]] static bool IsNegative(longcs value) noexcept { return value < 0; }
+
+        /** @brief Returns true if @p value is zero or positive. C++ counterpart of .NET Int64.IsPositive(long). */
+        [[nodiscard]] static bool IsPositive(longcs value) noexcept { return value >= 0; }
     };
 
 } // namespace System
