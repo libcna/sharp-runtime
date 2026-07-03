@@ -569,6 +569,16 @@ TEST(IndexOutOfRangeExceptionTests, CatchableAsStdException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(IndexOutOfRangeExceptionTests, HResult_MatchesCorEIndexOutOfRange) {
+    constexpr SharpRuntime::intcs corEIndexOutOfRange = static_cast<SharpRuntime::intcs>(0x80131508);
+    System::IndexOutOfRangeException defaultCtor;
+    System::IndexOutOfRangeException messageCtor("index 99 is out of range");
+    System::IndexOutOfRangeException innerCtor("index exceeded array size", std::make_exception_ptr(std::runtime_error("root cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corEIndexOutOfRange);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corEIndexOutOfRange);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corEIndexOutOfRange);
+}
+
 // ---------------------------------------------------------------------------
 // ContextMarshalException
 // ---------------------------------------------------------------------------
