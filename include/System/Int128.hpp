@@ -7,12 +7,15 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 #if defined(_MSC_VER)
 #  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."
 #endif
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a 128-bit signed integer.
@@ -44,12 +47,12 @@ namespace System {
         // ---------------------------------------------------------------
 
         /** @brief Represents the minimum value of Int128 (-2^127). */
-        static Int128 MinValue() noexcept {
+        static constexpr Int128 MinValue() noexcept {
             return Int128(static_cast<__int128>(static_cast<unsigned __int128>(1) << 127));
         }
 
         /** @brief Represents the maximum value of Int128 (2^127 - 1). */
-        static Int128 MaxValue() noexcept {
+        static constexpr Int128 MaxValue() noexcept {
             return Int128(~(static_cast<__int128>(static_cast<unsigned __int128>(1) << 127)));
         }
 
@@ -58,6 +61,9 @@ namespace System {
 
         /** @brief Gets an Int128 whose value is 1. */
         static constexpr Int128 One()  noexcept { return Int128(static_cast<__int128>(1)); }
+
+        /** @brief Gets an Int128 whose value is -1. C++ counterpart of .NET Int128.NegativeOne. */
+        static constexpr Int128 NegativeOne() noexcept { return Int128(static_cast<__int128>(-1)); }
 
         // ---------------------------------------------------------------
         // Properties
@@ -99,11 +105,11 @@ namespace System {
          *
          * C++ counterpart of .NET Int128.GetHashCode().
          */
-        [[nodiscard]] int GetHashCode() const noexcept {
+        [[nodiscard]] intcs GetHashCode() const noexcept {
             std::size_t seed = std::hash<uint64_t>{}(getLowerProperty());
             seed ^= std::hash<uint64_t>{}(getUpperProperty())
                   + 0x9e3779b9u + (seed << 6) + (seed >> 2);
-            return static_cast<int>(seed);
+            return static_cast<intcs>(seed);
         }
 
         /**
@@ -111,7 +117,7 @@ namespace System {
          * @param value The Int128 to compare with the current instance.
          * @return -1 if less than @p value; 0 if equal; 1 if greater than @p value.
          */
-        [[nodiscard]] int CompareTo(const Int128& value) const noexcept {
+        [[nodiscard]] intcs CompareTo(const Int128& value) const noexcept {
             if (*this < value) return -1;
             if (*this > value) return  1;
             return 0;
@@ -137,6 +143,49 @@ namespace System {
             if (neg) s += '-';
             std::reverse(s.begin(), s.end());
             return s;
+        }
+
+        /**
+         * @brief Converts the value of this Int128 to its equivalent string representation,
+         * using the specified format.
+         *
+         * C++ counterpart of .NET Int128.ToString(string). Supports "X"/"x" (hexadecimal),
+         * "D"/"d" (decimal), and "G"/"g" (general), each optionally followed by a minimum
+         * field width (e.g. "X32"), zero-padded.
+         * @param format The numeric format specifier.
+         * @return A string containing the formatted representation of this value.
+         */
+        [[nodiscard]] std::string ToString(const std::string& format) const {
+            if (format.empty()) return ToString();
+            char type = format[0];
+            int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            if (type == 'X' || type == 'x') {
+                auto uv = static_cast<unsigned __int128>(value_);
+                std::string s;
+                if (uv == 0) {
+                    s = "0";
+                } else {
+                    while (uv > 0) {
+                        int digit = static_cast<int>(uv & 0xF);
+                        s += static_cast<char>(digit < 10 ? '0' + digit : (type == 'X' ? 'A' : 'a') + (digit - 10));
+                        uv >>= 4;
+                    }
+                    std::reverse(s.begin(), s.end());
+                }
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            if (type == 'D' || type == 'd') {
+                std::string s = ToString();
+                if (width > 0) {
+                    bool neg = !s.empty() && s[0] == '-';
+                    std::string digits = neg ? s.substr(1) : s;
+                    while (static_cast<int>(digits.size()) < width) digits = "0" + digits;
+                    return neg ? "-" + digits : digits;
+                }
+                return s;
+            }
+            return ToString();
         }
 
         /**
@@ -189,10 +238,15 @@ namespace System {
 
         /**
          * @brief Computes the absolute value of the specified Int128.
+         *
+         * C++ counterpart of .NET Int128.Abs(Int128) (INumberBase&lt;TSelf&gt;.Abs).
          * @param value The value whose absolute value is to be computed.
          * @return The absolute value of @p value.
+         * @throws std::overflow_error if @p value is MinValue (its magnitude does not
+         *         fit in a signed Int128), matching .NET's OverflowException.
          */
-        [[nodiscard]] static Int128 Abs(const Int128& value) noexcept {
+        [[nodiscard]] static Int128 Abs(const Int128& value) {
+            if (value.value_ == MinValue().value_) throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
             return value.value_ < 0 ? Int128(-value.value_) : value;
         }
 
@@ -214,11 +268,11 @@ namespace System {
          * @param value The value whose leading zeros are to be counted.
          * @return The number of leading zero bits in @p value.
          */
-        [[nodiscard]] static int LeadingZeroCount(const Int128& value) noexcept {
+        [[nodiscard]] static intcs LeadingZeroCount(const Int128& value) noexcept {
             uint64_t hi = value.getUpperProperty();
-            if (hi != 0) return __builtin_clzll(hi);
+            if (hi != 0) return static_cast<intcs>(__builtin_clzll(hi));
             uint64_t lo = value.getLowerProperty();
-            if (lo != 0) return 64 + __builtin_clzll(lo);
+            if (lo != 0) return static_cast<intcs>(64 + __builtin_clzll(lo));
             return 128;
         }
 
@@ -227,11 +281,11 @@ namespace System {
          * @param value The value whose trailing zeros are to be counted.
          * @return The number of trailing zero bits in @p value.
          */
-        [[nodiscard]] static int TrailingZeroCount(const Int128& value) noexcept {
+        [[nodiscard]] static intcs TrailingZeroCount(const Int128& value) noexcept {
             uint64_t lo = value.getLowerProperty();
-            if (lo != 0) return __builtin_ctzll(lo);
+            if (lo != 0) return static_cast<intcs>(__builtin_ctzll(lo));
             uint64_t hi = value.getUpperProperty();
-            if (hi != 0) return 64 + __builtin_ctzll(hi);
+            if (hi != 0) return static_cast<intcs>(64 + __builtin_ctzll(hi));
             return 128;
         }
 
@@ -240,9 +294,9 @@ namespace System {
          * @param value The value whose set bits are to be counted.
          * @return The number of set bits in @p value.
          */
-        [[nodiscard]] static int PopCount(const Int128& value) noexcept {
-            return __builtin_popcountll(value.getLowerProperty())
-                 + __builtin_popcountll(value.getUpperProperty());
+        [[nodiscard]] static intcs PopCount(const Int128& value) noexcept {
+            return static_cast<intcs>(__builtin_popcountll(value.getLowerProperty())
+                 + __builtin_popcountll(value.getUpperProperty()));
         }
 
         /**
@@ -251,7 +305,7 @@ namespace System {
          * @param rotateAmount The number of bits to rotate by.
          * @return @p value rotated left by @p rotateAmount bits.
          */
-        [[nodiscard]] static Int128 RotateLeft(const Int128& value, int rotateAmount) noexcept {
+        [[nodiscard]] static Int128 RotateLeft(const Int128& value, intcs rotateAmount) noexcept {
             rotateAmount &= 127;
             if (rotateAmount == 0) return value;
             auto uv = static_cast<unsigned __int128>(value.value_);
@@ -265,12 +319,82 @@ namespace System {
          * @param rotateAmount The number of bits to rotate by.
          * @return @p value rotated right by @p rotateAmount bits.
          */
-        [[nodiscard]] static Int128 RotateRight(const Int128& value, int rotateAmount) noexcept {
+        [[nodiscard]] static Int128 RotateRight(const Int128& value, intcs rotateAmount) noexcept {
             rotateAmount &= 127;
             if (rotateAmount == 0) return value;
             auto uv = static_cast<unsigned __int128>(value.value_);
             return Int128(static_cast<__int128>(
                 (uv >> rotateAmount) | (uv << (128 - rotateAmount))));
+        }
+
+        /**
+         * @brief Clamps a value between an inclusive minimum and maximum.
+         *
+         * C++ counterpart of .NET Int128.Clamp(Int128,Int128,Int128) (INumber&lt;TSelf&gt;.Clamp).
+         * @param value The value to clamp.
+         * @param min   The inclusive lower bound.
+         * @param max   The inclusive upper bound.
+         * @throws std::invalid_argument if @p min is greater than @p max.
+         */
+        [[nodiscard]] static Int128 Clamp(const Int128& value, const Int128& min, const Int128& max) {
+            if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        /** @brief Returns the larger of two values. C++ counterpart of .NET Int128.Max(Int128,Int128). */
+        [[nodiscard]] static Int128 Max(const Int128& x, const Int128& y) noexcept { return x >= y ? x : y; }
+
+        /** @brief Returns the smaller of two values. C++ counterpart of .NET Int128.Min(Int128,Int128). */
+        [[nodiscard]] static Int128 Min(const Int128& x, const Int128& y) noexcept { return x <= y ? x : y; }
+
+        /**
+         * @brief Computes the sign of a value.
+         *
+         * C++ counterpart of .NET Int128.Sign(Int128) (INumber&lt;TSelf&gt;.Sign).
+         * @return -1 if @p value is negative, 0 if zero, 1 if positive.
+         */
+        [[nodiscard]] static intcs Sign(const Int128& value) noexcept {
+            if (value.value_ < 0) return -1;
+            if (value.value_ > 0) return 1;
+            return 0;
+        }
+
+        /** @brief Returns true if @p value is an even integer. C++ counterpart of .NET Int128.IsEvenInteger(Int128). */
+        [[nodiscard]] static bool IsEvenInteger(const Int128& value) noexcept {
+            return (value.getLowerProperty() & 1) == 0;
+        }
+
+        /** @brief Returns true if @p value is an odd integer. C++ counterpart of .NET Int128.IsOddInteger(Int128). */
+        [[nodiscard]] static bool IsOddInteger(const Int128& value) noexcept {
+            return (value.getLowerProperty() & 1) != 0;
+        }
+
+        /**
+         * @brief Returns true if @p value is a power of two.
+         *
+         * C++ counterpart of .NET Int128.IsPow2(Int128) (IBinaryNumber&lt;TSelf&gt;.IsPow2).
+         * Matches .NET: negative and zero values are never powers of two.
+         */
+        [[nodiscard]] static bool IsPow2(const Int128& value) noexcept {
+            return PopCount(value) == 1 && value.value_ > 0;
+        }
+
+        /**
+         * @brief Computes the base-2 logarithm (floor) of a value.
+         *
+         * C++ counterpart of .NET Int128.Log2(Int128) (IBinaryNumber&lt;TSelf&gt;.Log2).
+         * Matches .NET: Log2(0) is 0, not an error.
+         * @throws std::out_of_range if @p value is negative.
+         */
+        [[nodiscard]] static intcs Log2(const Int128& value) {
+            if (value.value_ < 0) throw std::out_of_range("value must be non-negative.");
+            uint64_t hi = value.getUpperProperty();
+            if (hi != 0) return static_cast<intcs>(64 + 63 - __builtin_clzll(hi));
+            uint64_t lo = value.getLowerProperty();
+            if (lo == 0) return 0;
+            return static_cast<intcs>(63 - __builtin_clzll(lo));
         }
 
         // ---------------------------------------------------------------
@@ -297,10 +421,21 @@ namespace System {
         Int128 operator~() const noexcept { return Int128(~value_); }
         /** @brief Returns the arithmetic negation of an Int128. */
         Int128 operator-() const noexcept { return Int128(-value_); }
-        /** @brief Shifts an Int128 left by n bits. */
-        Int128 operator<<(int n) const noexcept { return Int128(value_ << n); }
-        /** @brief Shifts an Int128 right by n bits (arithmetic/signed). */
-        Int128 operator>>(int n) const noexcept { return Int128(value_ >> n); }
+        /**
+         * @brief Shifts an Int128 left by n bits.
+         *
+         * C++ counterpart of .NET Int128 operator&lt;&lt;. Matches .NET: @p n is masked to
+         * its low 7 bits (mod 128) rather than being undefined behavior out of range,
+         * since the native @c __int128 shift operator does not auto-mask like C#'s does.
+         */
+        Int128 operator<<(intcs n) const noexcept { return Int128(value_ << (n & 127)); }
+        /**
+         * @brief Shifts an Int128 right by n bits (arithmetic/signed).
+         *
+         * C++ counterpart of .NET Int128 operator&gt;&gt;. Matches .NET: @p n is masked to
+         * its low 7 bits (mod 128) rather than being undefined behavior out of range.
+         */
+        Int128 operator>>(intcs n) const noexcept { return Int128(value_ >> (n & 127)); }
 
         // ---------------------------------------------------------------
         // Comparison operators
