@@ -23,9 +23,11 @@ namespace System {
         NormalizedHost          = 0x100,        /**< The normalised host name. */
         KeepDelimiter           = 0x40000000,   /**< Specifies that the delimiter should be included. */
         SerializationInfoString = 0x80000000,   /**< The complete URI. */
-        AbsoluteUri             = Scheme | UserInfo | Host | StrongPort | Path | Query | Fragment, /**< All absolute URI components. */
-        HostAndPort             = Host | StrongPort,  /**< The host and port. */
-        StrongAuthority         = UserInfo | Host | StrongPort, /**< The user-info, host, and port. */
+        AbsoluteUri             = Scheme | UserInfo | Host | Port | Path | Query | Fragment, /**< All absolute URI components. */
+        HostAndPort             = Host | StrongPort,  /**< The host and port, always including the port even if it is the default for the scheme. */
+        StrongAuthority         = UserInfo | Host | StrongPort, /**< The user-info, host, and port, always including the port. */
+        SchemeAndServer         = Scheme | Host | Port, /**< The scheme, host, and port. */
+        HttpRequestUrl          = Scheme | Host | Port | Path | Query, /**< The components needed to submit a request. */
         PathAndQuery            = Path | Query,  /**< The path and query. */
     };
 
