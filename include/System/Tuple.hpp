@@ -7,21 +7,31 @@
 #include <string>
 #include <tuple>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+
 namespace System {
+
+    using SharpRuntime::intcs;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 namespace detail {
-    inline int tupleHashCombine(int h1, int h2) noexcept
+    inline intcs tupleHashCombine(intcs h1, intcs h2) noexcept
     {
         return ((h1 << 5) + h1) ^ h2;
     }
+    /**
+     * Masks to the low 31 bits before narrowing std::hash<T>'s platform-dependent
+     * (often 64-bit) result down to intcs, so the truncation is a defined, positive
+     * value rather than implementation-defined narrowing of a possibly-negative bit
+     * pattern. Combined via tupleHashCombine exactly as .NET's Tuple.CombineHashCodes does.
+     */
     template<typename T>
-    int tupleHash(const T& val)
+    intcs tupleHash(const T& val)
     {
-        return static_cast<int>(std::hash<T>{}(val) & 0x7fffffff);
+        return static_cast<intcs>(std::hash<T>{}(val) & 0x7fffffff);
     }
     template<typename T>
     std::string tupleItemStr(const T& val)
@@ -29,6 +39,14 @@ namespace detail {
         std::ostringstream oss;
         oss << val;
         return oss.str();
+    }
+    /** @brief Three-way lexicographic comparison of a single element pair, matching .NET's Comparer<T>.Default.Compare. */
+    template<typename T>
+    intcs tupleCompare(const T& a, const T& b)
+    {
+        if (a < b) return -1;
+        if (b < a) return 1;
+        return 0;
     }
 } // namespace detail
 
@@ -63,6 +81,19 @@ struct Tuple1 {
     bool operator!=(const Tuple1& o) const { return !(*this == o); }
 
     /**
+     * @brief Compares this tuple to @p o element-by-element.
+     *
+     * C++ counterpart of .NET Tuple<T1>.CompareTo (via IStructuralComparable).
+     */
+    [[nodiscard]] intcs CompareTo(const Tuple1& o) const
+    {
+        return detail::tupleCompare(Item1, o.Item1);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple1& o) const { return CompareTo(o) < 0; }
+
+    /**
      * @brief Returns a string representation in the form "(item1)".
      *
      * C++ counterpart of .NET Tuple<T1>.ToString().
@@ -77,7 +108,7 @@ struct Tuple1 {
      *
      * C++ counterpart of .NET Tuple<T1>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHash(Item1);
     }
@@ -115,6 +146,21 @@ struct Tuple2 {
     bool operator!=(const Tuple2& o) const { return !(*this == o); }
 
     /**
+     * @brief Compares this tuple to @p o element-by-element.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2>.CompareTo (via IStructuralComparable).
+     */
+    [[nodiscard]] intcs CompareTo(const Tuple2& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item2, o.Item2);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple2& o) const { return CompareTo(o) < 0; }
+
+    /**
      * @brief Returns a string representation in the form "(item1, item2)".
      *
      * C++ counterpart of .NET Tuple<T1, T2>.ToString().
@@ -129,7 +175,7 @@ struct Tuple2 {
      *
      * C++ counterpart of .NET Tuple<T1, T2>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2));
     }
@@ -176,6 +222,23 @@ struct Tuple3 {
     bool operator!=(const Tuple3& o) const { return !(*this == o); }
 
     /**
+     * @brief Compares this tuple to @p o element-by-element.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3>.CompareTo (via IStructuralComparable).
+     */
+    [[nodiscard]] intcs CompareTo(const Tuple3& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item3, o.Item3);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple3& o) const { return CompareTo(o) < 0; }
+
+    /**
      * @brief Returns a string representation in the form "(item1, item2, item3)".
      *
      * C++ counterpart of .NET Tuple<T1, T2, T3>.ToString().
@@ -192,7 +255,7 @@ struct Tuple3 {
      *
      * C++ counterpart of .NET Tuple<T1, T2, T3>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(
             detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
@@ -247,6 +310,25 @@ struct Tuple4 {
     bool operator!=(const Tuple4& o) const { return !(*this == o); }
 
     /**
+     * @brief Compares this tuple to @p o element-by-element.
+     *
+     * C++ counterpart of .NET Tuple<T1, T2, T3, T4>.CompareTo (via IStructuralComparable).
+     */
+    [[nodiscard]] intcs CompareTo(const Tuple4& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item3, o.Item3);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item4, o.Item4);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple4& o) const { return CompareTo(o) < 0; }
+
+    /**
      * @brief Returns a string representation in the form "(item1, item2, item3, item4)".
      *
      * C++ counterpart of .NET Tuple<T1, T2, T3, T4>.ToString().
@@ -264,7 +346,7 @@ struct Tuple4 {
      *
      * C++ counterpart of .NET Tuple<T1, T2, T3, T4>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(
             detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
@@ -313,6 +395,23 @@ struct Tuple5 {
     }
     bool operator!=(const Tuple5& o) const { return !(*this == o); }
 
+    /** @brief Compares this tuple to @p o element-by-element (matches .NET's IStructuralComparable). */
+    [[nodiscard]] intcs CompareTo(const Tuple5& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item3, o.Item3);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item4, o.Item4);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item5, o.Item5);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple5& o) const { return CompareTo(o) < 0; }
+
     /** @brief Returns a string in the form "(item1, …, item5)". */
     [[nodiscard]] std::string ToString() const
     {
@@ -323,7 +422,7 @@ struct Tuple5 {
                    + detail::tupleItemStr(Item5) + ")";
     }
 
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(
             detail::tupleHashCombine(
@@ -367,6 +466,25 @@ struct Tuple6 {
     }
     bool operator!=(const Tuple6& o) const { return !(*this == o); }
 
+    /** @brief Compares this tuple to @p o element-by-element (matches .NET's IStructuralComparable). */
+    [[nodiscard]] intcs CompareTo(const Tuple6& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item3, o.Item3);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item4, o.Item4);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item5, o.Item5);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item6, o.Item6);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple6& o) const { return CompareTo(o) < 0; }
+
     [[nodiscard]] std::string ToString() const
     {
         return "(" + detail::tupleItemStr(Item1) + ", "
@@ -377,7 +495,7 @@ struct Tuple6 {
                    + detail::tupleItemStr(Item6) + ")";
     }
 
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(
             detail::tupleHashCombine(
@@ -423,6 +541,27 @@ struct Tuple7 {
     }
     bool operator!=(const Tuple7& o) const { return !(*this == o); }
 
+    /** @brief Compares this tuple to @p o element-by-element (matches .NET's IStructuralComparable). */
+    [[nodiscard]] intcs CompareTo(const Tuple7& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item3, o.Item3);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item4, o.Item4);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item5, o.Item5);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item6, o.Item6);
+        if (c != 0) return c;
+        return detail::tupleCompare(Item7, o.Item7);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple7& o) const { return CompareTo(o) < 0; }
+
     [[nodiscard]] std::string ToString() const
     {
         return "(" + detail::tupleItemStr(Item1) + ", "
@@ -434,7 +573,7 @@ struct Tuple7 {
                    + detail::tupleItemStr(Item7) + ")";
     }
 
-    [[nodiscard]] int GetHashCode() const
+    [[nodiscard]] intcs GetHashCode() const
     {
         return detail::tupleHashCombine(
             detail::tupleHashCombine(
