@@ -200,7 +200,7 @@ namespace System
     {
         return Format(format, std::string(1, arg0));
     }
-    std::string String::ToString(SharpRuntime::intcs value, int width, char fill)
+    std::string String::ToString(SharpRuntime::intcs value, SharpRuntime::intcs width, char fill)
     {
         std::ostringstream oss;
         oss << std::setw(width) << std::setfill(fill) << value;
@@ -256,6 +256,9 @@ namespace System
 
     std::string String::Substring(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length)
     {
+        if (startIndex < 0 || length < 0 ||
+            static_cast<size_t>(startIndex) + static_cast<size_t>(length) > value.size())
+            throw std::out_of_range("String::Substring: startIndex and length must refer to a location within the string.");
         return value.substr(static_cast<size_t>(startIndex), static_cast<size_t>(length));
     }
 
@@ -500,11 +503,16 @@ namespace System
 
     std::string String::Remove(const std::string& value, SharpRuntime::intcs startIndex)
     {
+        if (startIndex < 0 || static_cast<size_t>(startIndex) > value.size())
+            throw std::out_of_range("String::Remove: startIndex must be within the bounds of the string.");
         return value.substr(0, static_cast<size_t>(startIndex));
     }
 
     std::string String::Remove(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
     {
+        if (startIndex < 0 || count < 0 ||
+            static_cast<size_t>(startIndex) + static_cast<size_t>(count) > value.size())
+            throw std::out_of_range("String::Remove: startIndex and count must refer to a location within the string.");
         std::string result = value;
         result.erase(static_cast<size_t>(startIndex), static_cast<size_t>(count));
         return result;
@@ -648,14 +656,24 @@ namespace System
 
     SharpRuntime::intcs String::IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
     {
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex > len)
+            throw std::out_of_range("String::IndexOf: startIndex must be within the bounds of the string.");
+        if (count < 0 || count > len - startIndex)
+            throw std::out_of_range("String::IndexOf: count must refer to a location within the string.");
         SharpRuntime::intcs end = startIndex + count;
-        for (SharpRuntime::intcs i = startIndex; i < end && i < static_cast<SharpRuntime::intcs>(value.size()); ++i)
+        for (SharpRuntime::intcs i = startIndex; i < end; ++i)
             if (value[static_cast<size_t>(i)] == ch) return i;
         return -1;
     }
 
     SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
     {
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex > len)
+            throw std::out_of_range("String::IndexOf: startIndex must be within the bounds of the string.");
+        if (count < 0 || count > len - startIndex)
+            throw std::out_of_range("String::IndexOf: count must refer to a location within the string.");
         if (substr.empty()) return startIndex;
         SharpRuntime::intcs end = startIndex + count;
         auto pos = value.find(substr, static_cast<size_t>(startIndex));
@@ -665,6 +683,12 @@ namespace System
 
     SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
     {
+        if (value.empty()) return -1;
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex >= len)
+            throw std::out_of_range("String::LastIndexOf: startIndex must be within the bounds of the string.");
+        if (count < 0 || count > startIndex + 1)
+            throw std::out_of_range("String::LastIndexOf: count must refer to a location within the string.");
         SharpRuntime::intcs begin = startIndex - count + 1;
         for (SharpRuntime::intcs i = startIndex; i >= begin && i >= 0; --i)
             if (value[static_cast<size_t>(i)] == ch) return i;
@@ -673,6 +697,12 @@ namespace System
 
     SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count)
     {
+        if (value.empty()) return substr.empty() ? 0 : -1;
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex >= len)
+            throw std::out_of_range("String::LastIndexOf: startIndex must be within the bounds of the string.");
+        if (count < 0 || count > startIndex + 1)
+            throw std::out_of_range("String::LastIndexOf: count must refer to a location within the string.");
         if (substr.empty()) return startIndex;
         SharpRuntime::intcs begin = startIndex - count + 1;
         auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
@@ -687,9 +717,10 @@ namespace System
         return std::vector<char>(value.begin() + startIndex, value.begin() + startIndex + length);
     }
 
-    std::size_t String::GetHashCode(const std::string& value) noexcept
+    SharpRuntime::intcs String::GetHashCode(const std::string& value) noexcept
     {
-        return std::hash<std::string>{}(value);
+        std::size_t h = std::hash<std::string>{}(value);
+        return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
     }
 
     // -----------------------------------------------------------------------

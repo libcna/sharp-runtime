@@ -130,6 +130,12 @@ TEST(StringTests, Substring_WithLength) {
 TEST(StringTests, Substring_MiddleWithLength) {
     EXPECT_EQ(String::Substring("hello world", 6, 5), "world");
 }
+TEST(StringTests, Substring_LengthTooLong_Throws) {
+    EXPECT_THROW(String::Substring("abcde", 2, 100), std::out_of_range);
+}
+TEST(StringTests, Substring_NegativeLength_Throws) {
+    EXPECT_THROW(String::Substring("abcde", 0, -1), std::out_of_range);
+}
 
 // --- Trim ---
 
@@ -452,6 +458,12 @@ TEST(StringTests, Remove_StartIndex_Count) {
 TEST(StringTests, Remove_Count_Zero) {
     EXPECT_EQ(String::Remove("hello", 2, 0), "hello");
 }
+TEST(StringTests, Remove_CountTooLong_Throws) {
+    EXPECT_THROW(String::Remove("hello world", 2, 1000), std::out_of_range);
+}
+TEST(StringTests, Remove_StartIndexTooLarge_Throws) {
+    EXPECT_THROW(String::Remove("hello", 100), std::out_of_range);
+}
 
 // --- String::Insert ---
 TEST(StringTests, Insert_AtStart) {
@@ -618,6 +630,18 @@ TEST(StringTests, LastIndexOf_StringCount_Found) {
 }
 TEST(StringTests, LastIndexOf_StringCount_OutOfWindow) {
     EXPECT_EQ(String::LastIndexOf("abcabc", std::string("ab"), 1, 1), -1);
+}
+TEST(StringTests, IndexOf_CharCount_StartIndexOutOfRange_Throws) {
+    EXPECT_THROW(String::IndexOf("abc", 'a', 10, 1), std::out_of_range);
+}
+TEST(StringTests, IndexOf_CharCount_CountOutOfRange_Throws) {
+    EXPECT_THROW(String::IndexOf("abc", 'a', 0, 10), std::out_of_range);
+}
+TEST(StringTests, LastIndexOf_CharCount_StartIndexOutOfRange_Throws) {
+    EXPECT_THROW(String::LastIndexOf("abc", 'a', 10, 1), std::out_of_range);
+}
+TEST(StringTests, LastIndexOf_CharCount_CountOutOfRange_Throws) {
+    EXPECT_THROW(String::LastIndexOf("abc", 'a', 2, 10), std::out_of_range);
 }
 
 // ---------------------------------------------------------------------------
