@@ -7,8 +7,10 @@
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
@@ -218,6 +220,26 @@ TEST(ReadOnlyDictionaryTests, Values_HasAllValues) {
     auto vals = rd.getValuesProperty();
     EXPECT_EQ(vals.size(), 1u);
     EXPECT_EQ(vals[0], 10);
+}
+
+TEST(ReadOnlyDictionaryTests, OperatorBracket_Missing_ThrowsKeyNotFoundException) {
+    auto m = std::make_shared<std::unordered_map<std::string, int>>();
+    (*m)["key"] = 42;
+    ReadOnlyDictionary<std::string, int> rd(m);
+    EXPECT_THROW(rd["missing"], System::Collections::Generic::KeyNotFoundException);
+}
+
+TEST(ReadOnlyDictionaryTests, NullDictionary_ThrowsArgumentNullException) {
+    EXPECT_THROW(
+        (ReadOnlyDictionary<std::string, int>(std::shared_ptr<std::unordered_map<std::string, int>>())),
+        System::ArgumentNullException);
+}
+
+TEST(ReadOnlyDictionaryTests, Empty_IsEmptyAndCached) {
+    auto& empty1 = ReadOnlyDictionary<std::string, int>::Empty();
+    auto& empty2 = ReadOnlyDictionary<std::string, int>::Empty();
+    EXPECT_EQ(empty1.getCountProperty(), 0);
+    EXPECT_EQ(&empty1, &empty2);
 }
 
 // ===========================================================================
