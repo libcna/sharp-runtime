@@ -4,13 +4,31 @@
 #pragma once
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include "System/Span.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
+
+    namespace Detail {
+        // .NET's Contains/IndexOf/LastIndexOf/Count/Replace/*Any family constrain T to
+        // IEquatable<T> and dispatch through .Equals, not ==. For float/double, Equals
+        // treats NaN as equal to itself (float.Equals: "obj == m_value || (IsNaN(obj) &&
+        // IsNaN(m_value))"), unlike operator==, which is always false for NaN. A plain
+        // `==`-based port would silently fail to find/count/replace NaN elements.
+        template<typename T>
+        [[nodiscard]] inline bool MemoryExtensionsElementEquals(const T& a, const T& b) {
+            if constexpr (std::is_floating_point_v<T>) {
+                return a == b || (std::isnan(a) && std::isnan(b));
+            } else {
+                return a == b;
+            }
+        }
+    } // namespace Detail
 
     /**
      * @brief Extension-like static methods for Span<T> and ReadOnlySpan<T>.
@@ -131,7 +149,7 @@ namespace System {
         template<typename T>
         [[nodiscard]] static bool Contains(ReadOnlySpan<T> span, const T& value) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value) return true;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value)) return true;
             return false;
         }
 
@@ -153,7 +171,8 @@ namespace System {
         [[nodiscard]] static bool ContainsAny(ReadOnlySpan<T> span,
                                                const T& value0, const T& value1) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value0 || span[i] == value1) return true;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1)) return true;
             return false;
         }
 
@@ -166,7 +185,9 @@ namespace System {
         [[nodiscard]] static bool ContainsAny(ReadOnlySpan<T> span,
                                                const T& value0, const T& value1, const T& value2) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value0 || span[i] == value1 || span[i] == value2) return true;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value2)) return true;
             return false;
         }
 
@@ -179,7 +200,7 @@ namespace System {
         [[nodiscard]] static bool ContainsAny(ReadOnlySpan<T> span, ReadOnlySpan<T> values) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
                 for (SharpRuntime::intcs j = 0; j < values.getLengthProperty(); ++j)
-                    if (span[i] == values[j]) return true;
+                    if (Detail::MemoryExtensionsElementEquals(span[i], values[j])) return true;
             return false;
         }
 
@@ -195,7 +216,7 @@ namespace System {
         template<typename T>
         [[nodiscard]] static SharpRuntime::intcs IndexOf(ReadOnlySpan<T> span, const T& value) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value) return i;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value)) return i;
             return -1;
         }
 
@@ -223,7 +244,7 @@ namespace System {
             for (SharpRuntime::intcs i = 0; i <= sLen - vLen; ++i) {
                 bool match = true;
                 for (SharpRuntime::intcs j = 0; j < vLen && match; ++j)
-                    if (span[i + j] != value[j]) match = false;
+                    if (!Detail::MemoryExtensionsElementEquals(span[i + j], value[j])) match = false;
                 if (match) return i;
             }
             return -1;
@@ -241,7 +262,7 @@ namespace System {
         template<typename T>
         [[nodiscard]] static SharpRuntime::intcs LastIndexOf(ReadOnlySpan<T> span, const T& value) {
             for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
-                if (span[i] == value) return i;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value)) return i;
             return -1;
         }
 
@@ -269,7 +290,7 @@ namespace System {
             for (SharpRuntime::intcs i = sLen - vLen; i >= 0; --i) {
                 bool match = true;
                 for (SharpRuntime::intcs j = 0; j < vLen && match; ++j)
-                    if (span[i + j] != value[j]) match = false;
+                    if (!Detail::MemoryExtensionsElementEquals(span[i + j], value[j])) match = false;
                 if (match) return i;
             }
             return -1;
@@ -288,7 +309,7 @@ namespace System {
         [[nodiscard]] static bool SequenceEqual(ReadOnlySpan<T> a, ReadOnlySpan<T> b) {
             if (a.getLengthProperty() != b.getLengthProperty()) return false;
             for (SharpRuntime::intcs i = 0; i < a.getLengthProperty(); ++i)
-                if (a[i] != b[i]) return false;
+                if (!Detail::MemoryExtensionsElementEquals(a[i], b[i])) return false;
             return true;
         }
 
@@ -333,7 +354,7 @@ namespace System {
         [[nodiscard]] static SharpRuntime::intcs Count(ReadOnlySpan<T> span, const T& value) {
             SharpRuntime::intcs n = 0;
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value) ++n;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value)) ++n;
             return n;
         }
 
@@ -543,7 +564,8 @@ namespace System {
         [[nodiscard]] static SharpRuntime::intcs IndexOfAny(ReadOnlySpan<T> span,
                                                              const T& value0, const T& value1) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value0 || span[i] == value1) return i;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1)) return i;
             return -1;
         }
 
@@ -558,7 +580,9 @@ namespace System {
                                                              const T& value0, const T& value1,
                                                              const T& value2) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == value0 || span[i] == value1 || span[i] == value2) return i;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value2)) return i;
             return -1;
         }
 
@@ -573,7 +597,7 @@ namespace System {
                                                              ReadOnlySpan<T> values) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
                 for (SharpRuntime::intcs j = 0; j < values.getLengthProperty(); ++j)
-                    if (span[i] == values[j]) return i;
+                    if (Detail::MemoryExtensionsElementEquals(span[i], values[j])) return i;
             return -1;
         }
 
@@ -591,7 +615,8 @@ namespace System {
         [[nodiscard]] static SharpRuntime::intcs LastIndexOfAny(ReadOnlySpan<T> span,
                                                                  const T& value0, const T& value1) {
             for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
-                if (span[i] == value0 || span[i] == value1) return i;
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1)) return i;
             return -1;
         }
 
@@ -606,7 +631,7 @@ namespace System {
                                                                  ReadOnlySpan<T> values) {
             for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
                 for (SharpRuntime::intcs j = 0; j < values.getLengthProperty(); ++j)
-                    if (span[i] == values[j]) return i;
+                    if (Detail::MemoryExtensionsElementEquals(span[i], values[j])) return i;
             return -1;
         }
 
@@ -622,7 +647,7 @@ namespace System {
         template<typename T>
         static void Replace(Span<T> span, const T& oldValue, const T& newValue) {
             for (SharpRuntime::intcs i = 0; i < span.getLengthProperty(); ++i)
-                if (span[i] == oldValue) span[i] = newValue;
+                if (Detail::MemoryExtensionsElementEquals(span[i], oldValue)) span[i] = newValue;
         }
 
         // ---------------------------------------------------------------
@@ -639,7 +664,7 @@ namespace System {
                                                                      ReadOnlySpan<T> other) {
             SharpRuntime::intcs minLen = std::min(span.getLengthProperty(), other.getLengthProperty());
             for (SharpRuntime::intcs i = 0; i < minLen; ++i)
-                if (span[i] != other[i]) return i;
+                if (!Detail::MemoryExtensionsElementEquals(span[i], other[i])) return i;
             return minLen;
         }
 
@@ -654,7 +679,7 @@ namespace System {
          */
         template<typename T>
         [[nodiscard]] static bool StartsWith(ReadOnlySpan<T> span, const T& value) {
-            return span.getLengthProperty() > 0 && span[0] == value;
+            return span.getLengthProperty() > 0 && Detail::MemoryExtensionsElementEquals(span[0], value);
         }
 
         /**
@@ -665,7 +690,7 @@ namespace System {
         template<typename T>
         [[nodiscard]] static bool EndsWith(ReadOnlySpan<T> span, const T& value) {
             SharpRuntime::intcs len = span.getLengthProperty();
-            return len > 0 && span[len - 1] == value;
+            return len > 0 && Detail::MemoryExtensionsElementEquals(span[len - 1], value);
         }
 
         // ---------------------------------------------------------------
@@ -691,7 +716,7 @@ namespace System {
         [[nodiscard]] static ReadOnlySpan<T> TrimStart(ReadOnlySpan<T> span,
                                                          const T& trimElement) {
             SharpRuntime::intcs i = 0;
-            while (i < span.getLengthProperty() && span[i] == trimElement) ++i;
+            while (i < span.getLengthProperty() && Detail::MemoryExtensionsElementEquals(span[i], trimElement)) ++i;
             return span.Slice(i);
         }
 
@@ -704,7 +729,7 @@ namespace System {
         [[nodiscard]] static ReadOnlySpan<T> TrimEnd(ReadOnlySpan<T> span,
                                                        const T& trimElement) {
             SharpRuntime::intcs i = span.getLengthProperty() - 1;
-            while (i >= 0 && span[i] == trimElement) --i;
+            while (i >= 0 && Detail::MemoryExtensionsElementEquals(span[i], trimElement)) --i;
             return span.Slice(0, i + 1);
         }
 
@@ -735,7 +760,7 @@ namespace System {
             while (i < span.getLengthProperty()) {
                 bool found = false;
                 for (SharpRuntime::intcs j = 0; j < trimElements.getLengthProperty(); ++j)
-                    if (span[i] == trimElements[j]) { found = true; break; }
+                    if (Detail::MemoryExtensionsElementEquals(span[i], trimElements[j])) { found = true; break; }
                 if (!found) break;
                 ++i;
             }
@@ -754,7 +779,7 @@ namespace System {
             while (i >= 0) {
                 bool found = false;
                 for (SharpRuntime::intcs j = 0; j < trimElements.getLengthProperty(); ++j)
-                    if (span[i] == trimElements[j]) { found = true; break; }
+                    if (Detail::MemoryExtensionsElementEquals(span[i], trimElements[j])) { found = true; break; }
                 if (!found) break;
                 --i;
             }

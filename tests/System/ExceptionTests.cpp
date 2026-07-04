@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "System/Exception.hpp"
 #include "System/SystemException.hpp"
@@ -248,6 +249,18 @@ TEST(ExceptionTests, OverflowExceptionIsArithmeticException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, OverflowException_HResult_MatchesCorEOverflow_NotBaseArithmetic) {
+    // OverflowException overrides its base ArithmeticException's HResult
+    // (COR_E_ARITHMETIC, 0x80070216) with its own (COR_E_OVERFLOW, 0x80131516).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131516);
+    OverflowException defaultCtor;
+    OverflowException messageCtor("arithmetic overflow");
+    OverflowException innerCtor("arithmetic overflow", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
+
 TEST(ArithmeticExceptionTests, DefaultCtor_MessageContainsOverflow) {
     ArithmeticException ex;
     std::string msg = ex.what();
@@ -322,6 +335,18 @@ TEST(ExceptionTests, NotImplementedExceptionIsSystemException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(ExceptionTests, NotImplementedException_HResult_MatchesENotImpl) {
+    // .NET's NotImplementedException uses HResults.E_NOTIMPL (a standard COM
+    // HResult), not a COR_E_* value - verified against NotImplementedException.cs.
+    constexpr SharpRuntime::intcs eNotImpl = static_cast<SharpRuntime::intcs>(0x80004001);
+    NotImplementedException defaultCtor;
+    NotImplementedException messageCtor("not done yet");
+    NotImplementedException innerCtor("not done yet", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), eNotImpl);
+    EXPECT_EQ(messageCtor.getHResultProperty(), eNotImpl);
+    EXPECT_EQ(innerCtor.getHResultProperty(), eNotImpl);
+}
+
 // ---------------------------------------------------------------------------
 // NotSupportedException
 // ---------------------------------------------------------------------------
@@ -329,6 +354,16 @@ TEST(ExceptionTests, NotImplementedExceptionIsSystemException) {
 TEST(ExceptionTests, NotSupportedExceptionMessage) {
     NotSupportedException e("not supported");
     EXPECT_EQ(e.getMessageProperty(), "not supported");
+}
+
+TEST(ExceptionTests, NotSupportedException_HResult_MatchesCorENotSupported) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131515);
+    NotSupportedException defaultCtor;
+    NotSupportedException messageCtor("not supported");
+    NotSupportedException innerCtor("not supported", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +523,18 @@ TEST(InsufficientMemoryExceptionTests, InnerExceptionCtor_ContainsBoth) {
     EXPECT_NE(msg.find("allocation failed"), std::string::npos);
 }
 
+TEST(InsufficientMemoryExceptionTests, HResult_MatchesCorEInsufficientMemory_NotBaseOutOfMemory) {
+    // InsufficientMemoryException overrides its base OutOfMemoryException's HResult
+    // (COR_E_OUTOFMEMORY, 0x8007000E) with its own (COR_E_INSUFFICIENTMEMORY, 0x8013153D).
+    constexpr SharpRuntime::intcs corEInsufficientMemory = static_cast<SharpRuntime::intcs>(0x8013153D);
+    System::InsufficientMemoryException defaultCtor;
+    System::InsufficientMemoryException messageCtor("low memory");
+    System::InsufficientMemoryException innerCtor("low memory", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corEInsufficientMemory);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corEInsufficientMemory);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corEInsufficientMemory);
+}
+
 // ---------------------------------------------------------------------------
 // InvalidTimeZoneException
 // ---------------------------------------------------------------------------
@@ -529,6 +576,21 @@ TEST(InvalidTimeZoneExceptionTests, CatchableAsStdException) {
     EXPECT_TRUE(caught);
 }
 
+TEST(InvalidTimeZoneExceptionTests, DerivesDirectlyFromException_NotSystemException) {
+    // .NET's InvalidTimeZoneException : Exception, not SystemException (verified against
+    // InvalidTimeZoneException.cs) - unlike most exceptions reviewed in this batch.
+    static_assert(std::is_base_of_v<System::Exception, System::InvalidTimeZoneException>);
+    static_assert(!std::is_base_of_v<System::SystemException, System::InvalidTimeZoneException>);
+}
+
+TEST(InvalidTimeZoneExceptionTests, HResult_InheritsBaseDefault) {
+    // .NET sets no custom HResult on this type - it inherits Exception's COR_E_EXCEPTION
+    // default (verified against InvalidTimeZoneException.cs having no HResult assignment).
+    constexpr SharpRuntime::intcs corEException = static_cast<SharpRuntime::intcs>(0x80131500);
+    System::InvalidTimeZoneException ex;
+    EXPECT_EQ(ex.getHResultProperty(), corEException);
+}
+
 // ---------------------------------------------------------------------------
 // IndexOutOfRangeException
 // ---------------------------------------------------------------------------
@@ -567,6 +629,16 @@ TEST(IndexOutOfRangeExceptionTests, CatchableAsStdException) {
     try { throw System::IndexOutOfRangeException("oob"); }
     catch (const std::exception& e) { caught = true; EXPECT_NE(std::string(e.what()), ""); }
     EXPECT_TRUE(caught);
+}
+
+TEST(IndexOutOfRangeExceptionTests, HResult_MatchesCorEIndexOutOfRange) {
+    constexpr SharpRuntime::intcs corEIndexOutOfRange = static_cast<SharpRuntime::intcs>(0x80131508);
+    System::IndexOutOfRangeException defaultCtor;
+    System::IndexOutOfRangeException messageCtor("index 99 is out of range");
+    System::IndexOutOfRangeException innerCtor("index exceeded array size", std::make_exception_ptr(std::runtime_error("root cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corEIndexOutOfRange);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corEIndexOutOfRange);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corEIndexOutOfRange);
 }
 
 // ---------------------------------------------------------------------------

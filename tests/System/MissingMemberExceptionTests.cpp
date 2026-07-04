@@ -50,3 +50,20 @@ TEST(MissingMemberExceptionTests, Catchable_AsStdException) {
 TEST(MissingMemberExceptionTests, Catchable_AsMissingMemberException) {
     EXPECT_THROW({ throw MissingMemberException("x"); }, MissingMemberException);
 }
+
+TEST(MissingMemberExceptionTests, ClassMemberCtor_MatchesDotNetMessageFormat) {
+    MissingMemberException e("Foo", "Bar");
+    EXPECT_EQ(std::string(e.what()), "Member 'Foo.Bar' not found.");
+}
+
+TEST(MissingMemberExceptionTests, HResult_MatchesCorEMissingMember) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131512);
+    MissingMemberException defaultCtor;
+    MissingMemberException messageCtor("custom message");
+    MissingMemberException classMemberCtor("Foo", "Bar");
+    MissingMemberException innerCtor("outer msg", std::make_exception_ptr(std::runtime_error("inner cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(classMemberCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}

@@ -72,5 +72,43 @@ TEST(Int64NewTests, RotateRight_2_By1_Is1){ EXPECT_EQ(Int64::RotateRight(2LL, 1)
 
 TEST(Int64NewTests, Log2_One_IsZero)     { EXPECT_EQ(Int64::Log2(1LL), 0); }
 TEST(Int64NewTests, Log2_Two_IsOne)      { EXPECT_EQ(Int64::Log2(2LL), 1); }
-TEST(Int64NewTests, Log2_Zero_Throws)    { EXPECT_THROW(Int64::Log2(0LL), std::domain_error); }
+TEST(Int64NewTests, Log2_Zero_IsZero) {
+    // Matches .NET's actual BitOperations.Log2(0) semantics: 0, not an error.
+    EXPECT_EQ(Int64::Log2(0LL), 0);
+}
 TEST(Int64NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int64::Log2(-1LL), std::domain_error); }
+
+TEST(Int64NewTests, BigMul_SmallValues) {
+    System::Int128 result = Int64::BigMul(6LL, 7LL);
+    EXPECT_EQ(static_cast<long long>(result), 42LL);
+}
+TEST(Int64NewTests, BigMul_OverflowsInto128Bits) {
+    System::Int128 result = Int64::BigMul(Int64::MaxValue, Int64::MaxValue);
+    System::Int128 expected = System::Int128(static_cast<__int128>(Int64::MaxValue)) * System::Int128(static_cast<__int128>(Int64::MaxValue));
+    EXPECT_EQ(result, expected);
+}
+
+TEST(Int64NewTests, CopySign_PositiveSign_ReturnsPositive) { EXPECT_EQ(Int64::CopySign(-5LL, 3LL), 5LL); }
+TEST(Int64NewTests, CopySign_NegativeSign_ReturnsNegative) { EXPECT_EQ(Int64::CopySign(5LL, -3LL), -5LL); }
+TEST(Int64NewTests, CopySign_MinValue_NonNegativeSign_Throws) {
+    EXPECT_THROW(Int64::CopySign(Int64::MinValue, 1LL), std::overflow_error);
+}
+
+TEST(Int64NewTests, IsNegative_True)  { EXPECT_TRUE(Int64::IsNegative(-1LL)); }
+TEST(Int64NewTests, IsNegative_False) { EXPECT_FALSE(Int64::IsNegative(0LL)); }
+TEST(Int64NewTests, IsPositive_True)  { EXPECT_TRUE(Int64::IsPositive(0LL)); }
+TEST(Int64NewTests, IsPositive_False) { EXPECT_FALSE(Int64::IsPositive(-1LL)); }
+
+// MaxMagnitude/MinMagnitude with MinValue: MinValue has no representable positive
+// magnitude, so .NET special-cases it to always win MaxMagnitude and always lose
+// MinMagnitude, regardless of the other operand.
+TEST(Int64NewTests, MaxMagnitude_MinValueAlwaysWins) {
+    EXPECT_EQ(Int64::MaxMagnitude(Int64::MinValue, 5LL), Int64::MinValue);
+    EXPECT_EQ(Int64::MaxMagnitude(5LL, Int64::MinValue), Int64::MinValue);
+}
+TEST(Int64NewTests, MinMagnitude_MinValueAlwaysLoses) {
+    EXPECT_EQ(Int64::MinMagnitude(Int64::MinValue, 5LL), 5LL);
+    EXPECT_EQ(Int64::MinMagnitude(5LL, Int64::MinValue), 5LL);
+}
+TEST(Int64NewTests, MaxMagnitude_LargerFirst)  { EXPECT_EQ(Int64::MaxMagnitude(-10LL, 5LL), -10LL); }
+TEST(Int64NewTests, MinMagnitude_SmallerSecond){ EXPECT_EQ(Int64::MinMagnitude(-10LL, 5LL), 5LL); }

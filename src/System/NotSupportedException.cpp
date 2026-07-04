@@ -10,16 +10,24 @@ namespace System {
     }
 
     NotSupportedException::NotSupportedException()
-        : SystemException(DefaultMsg) {}
+        : SystemException(DefaultMsg) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131515)); // COR_E_NOTSUPPORTED
+    }
 
     NotSupportedException::NotSupportedException(const char* message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131515)); // COR_E_NOTSUPPORTED
+    }
 
     NotSupportedException::NotSupportedException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131515)); // COR_E_NOTSUPPORTED
+    }
 
     NotSupportedException::NotSupportedException(const std::string& message,
                                                  std::exception_ptr innerException)
-        : SystemException(message, std::move(innerException)) {}
+        : SystemException(message, std::move(innerException)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131515)); // COR_E_NOTSUPPORTED
+    }
 
 } // namespace System

@@ -14,6 +14,10 @@ namespace System {
      * pattern. Use together with IObservable<T>, which represents the provider
      * (source of notifications).
      *
+     * @note .NET declares this interface contravariant (`IObserver<in T>`), so
+     *   `IObserver<Base>` is usable wherever `IObserver<Derived>` is expected.
+     *   C++ class templates have no equivalent variance mechanism, so
+     *   `IObserver<Derived>` and `IObserver<Base>` are unrelated types here.
      * @tparam T The object that provides notification information.
      */
     template<typename T>

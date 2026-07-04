@@ -128,10 +128,16 @@ namespace System {
         /**
          * @brief Returns a value with the magnitude of @p value and the sign of @p sign.
          * C++ counterpart of .NET SByte.CopySign(sbyte, sbyte).
+         * @throws std::overflow_error if @p value is MinValue and @p sign is non-negative
+         *         (its magnitude does not fit in a signed SByte).
          */
-        [[nodiscard]] static sbytecs CopySign(sbytecs value, sbytecs sign) noexcept {
-            sbytecs abs = value < 0 ? static_cast<sbytecs>(-value) : value;
-            return sign < 0 ? static_cast<sbytecs>(-abs) : abs;
+        [[nodiscard]] static sbytecs CopySign(sbytecs value, sbytecs sign) {
+            sbytecs abs = value < 0 ? (value == MinValue ? value : static_cast<sbytecs>(-value)) : value;
+            if (sign >= 0) {
+                if (abs < 0) throw std::overflow_error("Negating MinValue is not representable.");
+                return abs;
+            }
+            return static_cast<sbytecs>(-abs);
         }
 
         /** @brief Returns true if @p value is negative. C++ counterpart of .NET SByte.IsNegative(sbyte). */
@@ -154,9 +160,15 @@ namespace System {
 
         /**
          * @brief Returns the value with greater magnitude; if magnitudes are equal, returns @p x.
-         * C++ counterpart of .NET SByte.MaxMagnitude(sbyte, sbyte).
+         *
+         * C++ counterpart of .NET SByte.MaxMagnitude(sbyte, sbyte). MinValue has no
+         * representable positive magnitude, so it always wins, matching .NET (which
+         * detects this via a wrapped-negation check; here via a direct equality check
+         * to avoid relying on signed-overflow behavior).
          */
         [[nodiscard]] static sbytecs MaxMagnitude(sbytecs x, sbytecs y) noexcept {
+            if (x == MinValue) return x;
+            if (y == MinValue) return y;
             sbytecs ax = x < 0 ? static_cast<sbytecs>(-x) : x;
             sbytecs ay = y < 0 ? static_cast<sbytecs>(-y) : y;
             return ax >= ay ? x : y;
@@ -164,9 +176,13 @@ namespace System {
 
         /**
          * @brief Returns the value with smaller magnitude; if magnitudes are equal, returns @p x.
-         * C++ counterpart of .NET SByte.MinMagnitude(sbyte, sbyte).
+         *
+         * C++ counterpart of .NET SByte.MinMagnitude(sbyte, sbyte). MinValue has no
+         * representable positive magnitude, so it always loses, matching .NET.
          */
         [[nodiscard]] static sbytecs MinMagnitude(sbytecs x, sbytecs y) noexcept {
+            if (x == MinValue) return y;
+            if (y == MinValue) return x;
             sbytecs ax = x < 0 ? static_cast<sbytecs>(-x) : x;
             sbytecs ay = y < 0 ? static_cast<sbytecs>(-y) : y;
             return ax <= ay ? x : y;

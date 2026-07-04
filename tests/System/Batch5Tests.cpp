@@ -247,7 +247,7 @@ TEST(UriFormatExceptionTests, IsA_FormatException) {
 // ---------------------------------------------------------------------------
 // IUtf8SpanFormattable
 // ---------------------------------------------------------------------------
-struct Utf8Int32 : System::IUtf8SpanFormattable<Utf8Int32> {
+struct Utf8Int32 : System::IUtf8SpanFormattable {
     int value;
     explicit Utf8Int32(int v) : value(v) {}
     bool TryFormatUtf8(System::Span<uint8_t> dest, int& written,

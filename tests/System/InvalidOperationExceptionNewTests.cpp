@@ -28,6 +28,15 @@ TEST(InvalidOperationExceptionNewTests, CStringCtor_MessageStored) {
     InvalidOperationException e("my custom error");
     EXPECT_EQ(std::string(e.what()), "my custom error");
 }
+TEST(InvalidOperationExceptionNewTests, HResult_MatchesCorEInvalidOperation) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131509);
+    InvalidOperationException defaultCtor;
+    InvalidOperationException messageCtor("bad state");
+    InvalidOperationException innerCtor("bad state", std::make_exception_ptr(std::runtime_error("inner")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}
 
 // NullReferenceException — additional tests
 TEST(NullReferenceExceptionNewTests, DefaultMsg_ContainsNull) {

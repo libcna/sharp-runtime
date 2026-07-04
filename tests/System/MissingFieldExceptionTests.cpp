@@ -33,3 +33,22 @@ TEST(MissingFieldExceptionTest, IsMissingMemberException) {
     MissingFieldException e("test");
     EXPECT_NO_THROW({ System::MissingMemberException& ref = e; (void)ref; });
 }
+
+TEST(MissingFieldExceptionTest, ClassFieldCtor_MatchesDotNetMessageFormat) {
+    MissingFieldException e("MyClass", "myField");
+    EXPECT_EQ(std::string(e.what()), "Field 'MyClass.myField' not found.");
+}
+
+TEST(MissingFieldExceptionTest, HResult_MatchesCorEMissingField_NotBaseMissingMember) {
+    // MissingFieldException overrides its base MissingMemberException's HResult
+    // (COR_E_MISSINGMEMBER, 0x80131512) with its own (COR_E_MISSINGFIELD, 0x80131511).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131511);
+    MissingFieldException defaultCtor;
+    MissingFieldException messageCtor("field missing");
+    MissingFieldException classFieldCtor("MyClass", "myField");
+    MissingFieldException innerCtor("field not found", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(classFieldCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}

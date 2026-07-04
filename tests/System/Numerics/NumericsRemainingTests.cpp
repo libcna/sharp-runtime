@@ -32,7 +32,9 @@ TEST(MathFTests, Floor_RoundsDown) {
     EXPECT_FLOAT_EQ(MathF::Floor(1.9f), 1.0f);
 }
 TEST(MathFTests, Round_MidpointToNearest) {
-    EXPECT_FLOAT_EQ(MathF::Round(2.5f), 3.0f);
+    // .NET's MathF.Round() rounds midpoints to even (banker's rounding) by default,
+    // not away from zero - verified against MathF.cs. 2.5 -> 2 (nearest even).
+    EXPECT_FLOAT_EQ(MathF::Round(2.5f), 2.0f);
 }
 TEST(MathFTests, Truncate_DropsDecimal) {
     EXPECT_FLOAT_EQ(MathF::Truncate(3.9f), 3.0f);

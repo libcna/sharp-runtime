@@ -31,3 +31,15 @@ TEST(NullReferenceExceptionTest, IsSystemException) {
     NullReferenceException e;
     EXPECT_NO_THROW({ System::SystemException& ref = e; (void)ref; });
 }
+
+TEST(NullReferenceExceptionTest, HResult_MatchesEPointer) {
+    // .NET's NullReferenceException uses HResults.E_POINTER (a standard COM
+    // HResult), not a COR_E_* value - verified against NullReferenceException.cs.
+    constexpr SharpRuntime::intcs ePointer = static_cast<SharpRuntime::intcs>(0x80004003);
+    NullReferenceException defaultCtor;
+    NullReferenceException messageCtor("null ref");
+    NullReferenceException innerCtor("null ref", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), ePointer);
+    EXPECT_EQ(messageCtor.getHResultProperty(), ePointer);
+    EXPECT_EQ(innerCtor.getHResultProperty(), ePointer);
+}

@@ -437,6 +437,127 @@ TEST(Int128Tests, MaxValue_IsPositive) {
     EXPECT_TRUE(System::Int128::MaxValue() > System::Int128::Zero());
 }
 
+TEST(Int128Tests, NegativeOne_IsMinusOne) {
+    EXPECT_EQ(static_cast<long long>(System::Int128::NegativeOne()), -1LL);
+}
+
+TEST(Int128Tests, Abs_MinValue_Throws) {
+    // .NET's Abs(Int128.MinValue) throws OverflowException, since -MinValue does
+    // not fit in a signed Int128 (matches Int64.Abs(Int64.MinValue) in this codebase).
+    EXPECT_THROW(System::Int128::Abs(System::Int128::MinValue()), std::overflow_error);
+}
+
+TEST(Int128Tests, ShiftLeft_MasksShiftAmountLike_DotNet) {
+    // .NET masks the shift amount to its low 7 bits (mod 128) instead of it being
+    // undefined behavior out of range, unlike raw __int128's native << operator.
+    System::Int128 v(1);
+    EXPECT_EQ(v << 128, v << 0);
+    EXPECT_EQ(v << 129, v << 1);
+}
+
+TEST(Int128Tests, ShiftRight_MasksShiftAmountLike_DotNet) {
+    System::Int128 v(4);
+    EXPECT_EQ(v >> 128, v >> 0);
+    EXPECT_EQ(v >> 129, v >> 1);
+}
+
+TEST(Int128Tests, ToString_Format_Hex) {
+    System::Int128 v(255);
+    EXPECT_EQ(v.ToString("X"), "FF");
+    EXPECT_EQ(v.ToString("x"), "ff");
+    EXPECT_EQ(v.ToString("X4"), "00FF");
+}
+
+TEST(Int128Tests, ToString_Format_Decimal) {
+    System::Int128 v(42);
+    EXPECT_EQ(v.ToString("D"), "42");
+    EXPECT_EQ(v.ToString("D5"), "00042");
+    System::Int128 neg(-42);
+    EXPECT_EQ(neg.ToString("D5"), "-00042");
+}
+
+TEST(Int128Tests, ToString_Format_General) {
+    EXPECT_EQ(System::Int128(7).ToString("G"), "7");
+}
+
+TEST(Int128Tests, Clamp_WithinRange_ReturnsValue) {
+    System::Int128 v(5);
+    EXPECT_EQ(System::Int128::Clamp(v, System::Int128(0), System::Int128(10)), v);
+}
+
+TEST(Int128Tests, Clamp_BelowMin_ReturnsMin) {
+    EXPECT_EQ(System::Int128::Clamp(System::Int128(-5), System::Int128(0), System::Int128(10)), System::Int128(0));
+}
+
+TEST(Int128Tests, Clamp_AboveMax_ReturnsMax) {
+    EXPECT_EQ(System::Int128::Clamp(System::Int128(50), System::Int128(0), System::Int128(10)), System::Int128(10));
+}
+
+TEST(Int128Tests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(System::Int128::Clamp(System::Int128(5), System::Int128(10), System::Int128(0)), std::invalid_argument);
+}
+
+TEST(Int128Tests, Max_ReturnsLarger) {
+    EXPECT_EQ(System::Int128::Max(System::Int128(3), System::Int128(7)), System::Int128(7));
+}
+
+TEST(Int128Tests, Min_ReturnsSmaller) {
+    EXPECT_EQ(System::Int128::Min(System::Int128(3), System::Int128(7)), System::Int128(3));
+}
+
+TEST(Int128Tests, Sign_Negative) {
+    EXPECT_EQ(System::Int128::Sign(System::Int128(-9)), -1);
+}
+
+TEST(Int128Tests, Sign_Zero) {
+    EXPECT_EQ(System::Int128::Sign(System::Int128::Zero()), 0);
+}
+
+TEST(Int128Tests, Sign_Positive) {
+    EXPECT_EQ(System::Int128::Sign(System::Int128(9)), 1);
+}
+
+TEST(Int128Tests, IsEvenInteger_True) {
+    EXPECT_TRUE(System::Int128::IsEvenInteger(System::Int128(4)));
+    EXPECT_FALSE(System::Int128::IsEvenInteger(System::Int128(5)));
+}
+
+TEST(Int128Tests, IsOddInteger_True) {
+    EXPECT_TRUE(System::Int128::IsOddInteger(System::Int128(5)));
+    EXPECT_FALSE(System::Int128::IsOddInteger(System::Int128(4)));
+}
+
+TEST(Int128Tests, IsPow2_PowersOfTwo) {
+    EXPECT_TRUE(System::Int128::IsPow2(System::Int128(1)));
+    EXPECT_TRUE(System::Int128::IsPow2(System::Int128(64)));
+    EXPECT_FALSE(System::Int128::IsPow2(System::Int128(63)));
+}
+
+TEST(Int128Tests, IsPow2_NegativeOrZero_False) {
+    // Matches .NET: negative values and zero are never powers of two.
+    EXPECT_FALSE(System::Int128::IsPow2(System::Int128::Zero()));
+    EXPECT_FALSE(System::Int128::IsPow2(System::Int128(-4)));
+}
+
+TEST(Int128Tests, Log2_Zero_IsZero) {
+    // Matches .NET: Log2(0) is 0, not an error.
+    EXPECT_EQ(System::Int128::Log2(System::Int128::Zero()), 0);
+}
+
+TEST(Int128Tests, Log2_PowerOfTwo) {
+    EXPECT_EQ(System::Int128::Log2(System::Int128(64)), 6);
+}
+
+TEST(Int128Tests, Log2_CrossesUpperHalf) {
+    // 2^64 requires the upper 64-bit word, exercising the hi != 0 branch.
+    System::Int128 v(uint64_t(1), uint64_t(0));
+    EXPECT_EQ(System::Int128::Log2(v), 64);
+}
+
+TEST(Int128Tests, Log2_Negative_Throws) {
+    EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), std::out_of_range);
+}
+
 // ===========================================================================
 // UInt128
 // ===========================================================================

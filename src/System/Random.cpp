@@ -110,11 +110,13 @@ namespace System {
 
     std::string Random::GetString(const std::string& choices, intcs length)
     {
-        std::string result;
-        result.reserve(static_cast<std::size_t>(length));
-        for (intcs i = 0; i < length; ++i)
-            result += choices[static_cast<std::size_t>(
-                Next(static_cast<intcs>(choices.size())))];
+        if (choices.empty()) throw ArgumentException("Span may not be empty.", "choices");
+        if (length < 0) throw ArgumentOutOfRangeException("length", "'length' must be a non-negative value.");
+        if (length == 0) return {};
+
+        std::string result(static_cast<std::size_t>(length), '\0');
+        GetItems(ReadOnlySpan<char>(choices.data(), static_cast<intcs>(choices.size())),
+                 Span<char>(result.data(), length));
         return result;
     }
 
@@ -122,12 +124,7 @@ namespace System {
     {
         static constexpr const char* upper = "0123456789ABCDEF";
         static constexpr const char* lower = "0123456789abcdef";
-        const char* chars = lowercase ? lower : upper;
-        std::string result;
-        result.reserve(static_cast<std::size_t>(stringLength));
-        for (intcs i = 0; i < stringLength; ++i)
-            result += chars[Next(16)];
-        return result;
+        return GetString(lowercase ? lower : upper, stringLength);
     }
 
     void Random::GetHexString(Span<char> destination, bool lowercase)
@@ -135,8 +132,7 @@ namespace System {
         static constexpr const char* upper = "0123456789ABCDEF";
         static constexpr const char* lower = "0123456789abcdef";
         const char* chars = lowercase ? lower : upper;
-        for (intcs i = 0; i < destination.getLengthProperty(); ++i)
-            destination[i] = chars[Next(16)];
+        GetItems(ReadOnlySpan<char>(chars, 16), destination);
     }
 
 } // namespace System

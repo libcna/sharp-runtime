@@ -56,3 +56,22 @@ TEST(MissingMethodExceptionTests, Catchable_AsStdException) {
 TEST(MissingMethodExceptionTests, Catchable_AsMissingMemberException) {
     EXPECT_THROW({ throw MissingMethodException(); }, System::MissingMemberException);
 }
+
+TEST(MissingMethodExceptionTests, ClassMethodCtor_MatchesDotNetMessageFormat) {
+    MissingMethodException e("MyClass", "MyMethod");
+    EXPECT_EQ(std::string(e.what()), "Method 'MyClass.MyMethod' not found.");
+}
+
+TEST(MissingMethodExceptionTests, HResult_MatchesCorEMissingMethod_NotBaseMissingMember) {
+    // MissingMethodException overrides its base MissingMemberException's HResult
+    // (COR_E_MISSINGMEMBER, 0x80131512) with its own (COR_E_MISSINGMETHOD, 0x80131513).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131513);
+    MissingMethodException defaultCtor;
+    MissingMethodException messageCtor("method missing");
+    MissingMethodException classMethodCtor("MyClass", "MyMethod");
+    MissingMethodException innerCtor("method not found", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(classMethodCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}

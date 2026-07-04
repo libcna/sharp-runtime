@@ -5,8 +5,11 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArithmeticException.hpp"
 #include "System/MidpointRounding.hpp"
 
 namespace System
@@ -95,7 +98,7 @@ namespace System
          *
          * @param value Input value.
          * @return Absolute value.
-         *
+         * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in a 32-bit signed integer).
          */
         [[nodiscard]] static intcs Abs(intcs value);
 
@@ -146,7 +149,7 @@ namespace System
          * @param min Minimum allowed value.
          * @param max Maximum allowed value.
          * @return Clamped value.
-         *
+         * @throws std::invalid_argument if @p min is greater than @p max.
          */
         [[nodiscard]] static intcs Clamp(intcs value, intcs min, intcs max);
 
@@ -157,17 +160,23 @@ namespace System
          * @param min Minimum allowed value.
          * @param max Maximum allowed value.
          * @return Clamped value.
-         *
+         * @throws std::invalid_argument if @p min is greater than @p max.
          */
         [[nodiscard]] static double Clamp(double value, double min, double max);
 
-        /** Returns the absolute value of a 64-bit signed integer. */
+        /**
+         * @brief Returns the absolute value of a 64-bit signed integer.
+         * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in a 64-bit signed integer).
+         */
         [[nodiscard]] static longcs Abs(longcs value);
         /** Returns the smaller of two 64-bit signed integers. */
         [[nodiscard]] static longcs Min(longcs a, longcs b);
         /** Returns the larger of two 64-bit signed integers. */
         [[nodiscard]] static longcs Max(longcs a, longcs b);
-        /** Clamps a 64-bit signed integer to [@p min, @p max]. */
+        /**
+         * @brief Clamps a 64-bit signed integer to [@p min, @p max].
+         * @throws std::invalid_argument if @p min is greater than @p max.
+         */
         [[nodiscard]] static longcs Clamp(longcs value, longcs min, longcs max);
 
         /** Returns the absolute value of a single-precision float. */
@@ -176,8 +185,12 @@ namespace System
         [[nodiscard]] static float Min(float a, float b)         { return a < b ? a : b; }
         /** Returns the larger of two single-precision floats. */
         [[nodiscard]] static float Max(float a, float b)         { return a > b ? a : b; }
-        /** Clamps a single-precision float to [@p min, @p max]. */
+        /**
+         * @brief Clamps a single-precision float to [@p min, @p max].
+         * @throws std::invalid_argument if @p min is greater than @p max.
+         */
         [[nodiscard]] static float Clamp(float value, float min, float max) {
+            if (min > max) throw std::invalid_argument("min cannot be greater than max.");
             return value < min ? min : (value > max ? max : value);
         }
 
@@ -247,11 +260,17 @@ namespace System
 
         /** @brief Returns an integer indicating the sign of a 32-bit integer (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(intcs value);
-        /** @brief Returns an integer indicating the sign of a double (-1, 0, or 1). */
+        /**
+         * @brief Returns an integer indicating the sign of a double (-1, 0, or 1).
+         * @throws ArithmeticException if @p value is NaN.
+         */
         [[nodiscard]] static intcs Sign(double value);
         /** @brief Returns an integer indicating the sign of a 64-bit integer (-1, 0, or 1). */
         [[nodiscard]] static intcs Sign(longcs value);
-        /** @brief Returns an integer indicating the sign of a single-precision float (-1, 0, or 1). */
+        /**
+         * @brief Returns an integer indicating the sign of a single-precision float (-1, 0, or 1).
+         * @throws ArithmeticException if @p value is NaN.
+         */
         [[nodiscard]] static intcs Sign(float value);
 
         /** @brief Returns the integral part of @p d (discards the fractional part). */
@@ -288,7 +307,10 @@ namespace System
         /** @brief Returns the angle whose hyperbolic tangent is @p d. */
         [[nodiscard]] static double Atanh(double d);
 
-        /** @brief Rounds @p value to @p digits decimal places using banker's rounding. */
+        /**
+         * @brief Rounds @p value to @p digits decimal places using banker's rounding (MidpointRounding::ToEven).
+         * @throws std::out_of_range if @p digits is outside [0, 15].
+         */
         [[nodiscard]] static double Round(double value, intcs digits);
 
         /** @brief Returns a value with the magnitude of @p x and the sign of @p y. */
@@ -307,52 +329,102 @@ namespace System
         // short / sbyte / byte / uint / ulong / ushort overloads
         // ------------------------------------------------------------------
 
-        /** @brief Returns the absolute value of a 16-bit signed integer. */
-        [[nodiscard]] static shortcs Abs(shortcs value) { return value < 0 ? static_cast<shortcs>(-value) : value; }
-        /** @brief Returns the absolute value of a signed byte. */
-        [[nodiscard]] static sbytecs Abs(sbytecs value) { return value < 0 ? static_cast<sbytecs>(-value) : value; }
+        /**
+         * @brief Returns the absolute value of a 16-bit signed integer.
+         * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in a 16-bit signed integer).
+         */
+        [[nodiscard]] static shortcs Abs(shortcs value) {
+            if (value == std::numeric_limits<shortcs>::min())
+                throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+            return value < 0 ? static_cast<shortcs>(-value) : value;
+        }
+        /**
+         * @brief Returns the absolute value of a signed byte.
+         * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in a signed byte).
+         */
+        [[nodiscard]] static sbytecs Abs(sbytecs value) {
+            if (value == std::numeric_limits<sbytecs>::min())
+                throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+            return value < 0 ? static_cast<sbytecs>(-value) : value;
+        }
 
         /** @brief Returns the smaller of two 16-bit signed integers. */
         [[nodiscard]] static shortcs  Min(shortcs a,  shortcs b)  { return a < b ? a : b; }
         /** @brief Returns the larger of two 16-bit signed integers. */
         [[nodiscard]] static shortcs  Max(shortcs a,  shortcs b)  { return a > b ? a : b; }
-        /** @brief Clamps a 16-bit signed integer to [@p min, @p max]. */
-        [[nodiscard]] static shortcs  Clamp(shortcs v, shortcs mn, shortcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps a 16-bit signed integer to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static shortcs  Clamp(shortcs v, shortcs mn, shortcs mx)  {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         /** @brief Returns the smaller of two signed bytes. */
         [[nodiscard]] static sbytecs Min(sbytecs a, sbytecs b)  { return a < b ? a : b; }
         /** @brief Returns the larger of two signed bytes. */
         [[nodiscard]] static sbytecs Max(sbytecs a, sbytecs b)  { return a > b ? a : b; }
-        /** @brief Clamps a signed byte to [@p min, @p max]. */
-        [[nodiscard]] static sbytecs Clamp(sbytecs v, sbytecs mn, sbytecs mx) { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps a signed byte to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static sbytecs Clamp(sbytecs v, sbytecs mn, sbytecs mx) {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         /** @brief Returns the smaller of two unsigned bytes. */
         [[nodiscard]] static bytecs  Min(bytecs a,  bytecs b)   { return a < b ? a : b; }
         /** @brief Returns the larger of two unsigned bytes. */
         [[nodiscard]] static bytecs  Max(bytecs a,  bytecs b)   { return a > b ? a : b; }
-        /** @brief Clamps an unsigned byte to [@p min, @p max]. */
-        [[nodiscard]] static bytecs  Clamp(bytecs v, bytecs mn, bytecs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps an unsigned byte to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static bytecs  Clamp(bytecs v, bytecs mn, bytecs mx)  {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         /** @brief Returns the smaller of two 32-bit unsigned integers. */
         [[nodiscard]] static uintcs  Min(uintcs a,  uintcs b)   { return a < b ? a : b; }
         /** @brief Returns the larger of two 32-bit unsigned integers. */
         [[nodiscard]] static uintcs  Max(uintcs a,  uintcs b)   { return a > b ? a : b; }
-        /** @brief Clamps a 32-bit unsigned integer to [@p min, @p max]. */
-        [[nodiscard]] static uintcs  Clamp(uintcs v, uintcs mn, uintcs mx)  { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps a 32-bit unsigned integer to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static uintcs  Clamp(uintcs v, uintcs mn, uintcs mx)  {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         /** @brief Returns the smaller of two 64-bit unsigned integers. */
         [[nodiscard]] static ulongcs Min(ulongcs a, ulongcs b)  { return a < b ? a : b; }
         /** @brief Returns the larger of two 64-bit unsigned integers. */
         [[nodiscard]] static ulongcs Max(ulongcs a, ulongcs b)  { return a > b ? a : b; }
-        /** @brief Clamps a 64-bit unsigned integer to [@p min, @p max]. */
-        [[nodiscard]] static ulongcs Clamp(ulongcs v, ulongcs mn, ulongcs mx) { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps a 64-bit unsigned integer to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static ulongcs Clamp(ulongcs v, ulongcs mn, ulongcs mx) {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         /** @brief Returns the smaller of two 16-bit unsigned integers. */
         [[nodiscard]] static ushortcs Min(ushortcs a, ushortcs b)  { return a < b ? a : b; }
         /** @brief Returns the larger of two 16-bit unsigned integers. */
         [[nodiscard]] static ushortcs Max(ushortcs a, ushortcs b)  { return a > b ? a : b; }
-        /** @brief Clamps a 16-bit unsigned integer to [@p min, @p max]. */
-        [[nodiscard]] static ushortcs Clamp(ushortcs v, ushortcs mn, ushortcs mx) { return v < mn ? mn : v > mx ? mx : v; }
+        /**
+         * @brief Clamps a 16-bit unsigned integer to [@p min, @p max].
+         * @throws std::invalid_argument if @p mn is greater than @p mx.
+         */
+        [[nodiscard]] static ushortcs Clamp(ushortcs v, ushortcs mn, ushortcs mx) {
+            if (mn > mx) throw std::invalid_argument("min cannot be greater than max.");
+            return v < mn ? mn : v > mx ? mx : v;
+        }
 
         // ------------------------------------------------------------------
         // ILogB / BigMul(long,long,long&) / DivRem pair overloads
@@ -398,10 +470,29 @@ namespace System
             }
         }
 
-        /** @brief Rounds @p value to @p digits decimal places using the specified rounding convention. */
+        /**
+         * @brief Rounds @p value to @p digits decimal places using the specified rounding convention.
+         *
+         * C++ counterpart of .NET Math.Round(double, int, MidpointRounding). Matches .NET: values
+         * whose magnitude is already >= 1e16 have no fractional part representable in a double and
+         * are returned unchanged (also avoids precision loss from multiplying huge values by a
+         * power of ten); the power-of-ten factor comes from a fixed lookup table rather than
+         * std::pow, since digits is bounded and exact powers of ten avoid std::pow's rounding error.
+         * @throws std::out_of_range if @p digits is outside [0, 15].
+         */
         [[nodiscard]] static double Round(double value, intcs digits, MidpointRounding mode) {
-            double factor = std::pow(10.0, static_cast<double>(digits));
-            return Round(value * factor, mode) / factor;
+            static constexpr double kPow10[16] = {
+                1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7,
+                1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+            };
+            if (digits < 0 || digits > 15) {
+                throw std::out_of_range("digits must be between 0 and 15, inclusive.");
+            }
+            if (Abs(value) < 1e16) {
+                double power10 = kPow10[digits];
+                value = Round(value * power10, mode) / power10;
+            }
+            return value;
         }
 
         // ------------------------------------------------------------------

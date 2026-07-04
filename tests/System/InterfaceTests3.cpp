@@ -52,7 +52,7 @@ TEST(ISpanParsableTests2, ParseFromSpan) {
 // ---------------------------------------------------------------------------
 // IUtf8SpanFormattable
 // ---------------------------------------------------------------------------
-struct Utf8FormattableInt : public System::IUtf8SpanFormattable<Utf8FormattableInt> {
+struct Utf8FormattableInt : public System::IUtf8SpanFormattable {
     int value;
     explicit Utf8FormattableInt(int v) : value(v) {}
     bool TryFormatUtf8(System::Span<uint8_t> dest, int& bytesWritten,
@@ -76,16 +76,31 @@ TEST(IUtf8SpanFormattableTests2, TryFormatUtf8_WritesBytes) {
     EXPECT_EQ(buf[1], '9');
 }
 
+TEST(IUtf8SpanFormattableTests2, TryFormatUtf8_WithProvider_IgnoresProviderAndDelegates) {
+    // Default 4-arg TryFormatUtf8(..., provider) forwards to the 3-arg overload without
+    // requiring implementers to override it. Invoked through the base interface, since the
+    // derived class's 3-arg override otherwise hides the base's 4-arg overload from
+    // unqualified name lookup.
+    Utf8FormattableInt fi(7);
+    const System::IUtf8SpanFormattable& base = fi;
+    uint8_t buf[32];
+    System::Span<uint8_t> span(buf, sizeof(buf));
+    int written = 0;
+    EXPECT_TRUE(base.TryFormatUtf8(span, written, "", nullptr));
+    EXPECT_EQ(written, 1);
+    EXPECT_EQ(buf[0], '7');
+}
+
 // ---------------------------------------------------------------------------
 // IUtf8SpanParsable
 // ---------------------------------------------------------------------------
 struct Utf8ParsableInt : public System::IUtf8SpanParsable<Utf8ParsableInt> {
     int value = 0;
-    Utf8ParsableInt ParseUtf8(const System::Span<uint8_t>& s) const override {
+    Utf8ParsableInt ParseUtf8(const System::ReadOnlySpan<uint8_t>& s) const override {
         std::string str(reinterpret_cast<const char*>(s.getPointer()), s.getLengthProperty());
         Utf8ParsableInt r; r.value = std::stoi(str); return r;
     }
-    bool TryParseUtf8(const System::Span<uint8_t>& s, Utf8ParsableInt& result) const noexcept override {
+    bool TryParseUtf8(const System::ReadOnlySpan<uint8_t>& s, Utf8ParsableInt& result) const noexcept override {
         try {
             std::string str(reinterpret_cast<const char*>(s.getPointer()), s.getLengthProperty());
             result.value = std::stoi(str); return true;

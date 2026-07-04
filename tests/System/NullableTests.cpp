@@ -80,6 +80,24 @@ TEST(NullableTest, ToString_WithValue) {
     EXPECT_EQ(n.ToString(), "123");
 }
 
+TEST(NullableTest, ToString_PrefersMemberToStringOverStreamOutput) {
+    struct Widget {
+        [[nodiscard]] std::string ToString() const { return "a-widget"; }
+    };
+    Nullable<Widget> n(Widget{});
+    EXPECT_EQ(n.ToString(), "a-widget");
+}
+
+TEST(NullableTest, ExplicitConversion_ToUnderlyingType) {
+    Nullable<int> n(42);
+    EXPECT_EQ(static_cast<int>(n), 42);
+}
+
+TEST(NullableTest, ExplicitConversion_NoValue_Throws) {
+    Nullable<int> n;
+    EXPECT_THROW((void)static_cast<int>(n), System::InvalidOperationException);
+}
+
 TEST(NullableTest, BoolOperator) {
     Nullable<int> empty;
     Nullable<int> full(1);

@@ -3,8 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
 // Forward declaration to avoid circular include with ModuleHandle.hpp
 struct ModuleHandle;
@@ -51,8 +54,8 @@ struct RuntimeTypeHandle {
     }
 
     /** @brief Returns a hash code derived from the underlying value. */
-    [[nodiscard]] int GetHashCode() const noexcept {
-        return static_cast<int>(value_);
+    [[nodiscard]] intcs GetHashCode() const noexcept {
+        return static_cast<intcs>(value_);
     }
 
     bool operator==(const RuntimeTypeHandle& o) const noexcept { return Equals(o); }

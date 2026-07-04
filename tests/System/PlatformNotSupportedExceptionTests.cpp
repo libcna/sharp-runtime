@@ -33,3 +33,15 @@ TEST(PlatformNotSupportedExceptionTest, Throwable) {
         PlatformNotSupportedException
     );
 }
+
+TEST(PlatformNotSupportedExceptionTest, HResult_MatchesCorEPlatformNotSupported_NotBaseNotSupported) {
+    // PlatformNotSupportedException overrides its base NotSupportedException's HResult
+    // (COR_E_NOTSUPPORTED, 0x80131515) with its own (COR_E_PLATFORMNOTSUPPORTED, 0x80131539).
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x80131539);
+    PlatformNotSupportedException defaultCtor;
+    PlatformNotSupportedException messageCtor("not supported on this OS");
+    PlatformNotSupportedException innerCtor("platform error", std::make_exception_ptr(std::runtime_error("cause")));
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+}

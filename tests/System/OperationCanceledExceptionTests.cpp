@@ -4,8 +4,11 @@
 #include <gtest/gtest.h>
 #include "System/OperationCanceledException.hpp"
 #include "System/SystemException.hpp"
+#include "System/Threading/CancellationTokenSource.hpp"
 
 using System::OperationCanceledException;
+using System::Threading::CancellationToken;
+using System::Threading::CancellationTokenSource;
 
 TEST(OperationCanceledExceptionTests, DefaultCtor_WhatContainsCanceled) {
     OperationCanceledException e;
@@ -62,4 +65,47 @@ TEST(OperationCanceledExceptionTests, InnerCtor_WhatNotEmpty) {
 TEST(OperationCanceledExceptionTests, GetMessage_MatchesWhat) {
     OperationCanceledException e("match me");
     EXPECT_EQ(e.getMessageProperty(), std::string(e.what()));
+}
+
+TEST(OperationCanceledExceptionTests, DefaultCtor_TokenIsNotCancelled) {
+    OperationCanceledException e;
+    EXPECT_FALSE(e.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
+TEST(OperationCanceledExceptionTests, TokenCtor_StoresToken) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    OperationCanceledException e(cts.getTokenProperty());
+    EXPECT_TRUE(e.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+    EXPECT_NE(std::string(e.what()).find("canceled"), std::string::npos);
+}
+
+TEST(OperationCanceledExceptionTests, MessageAndTokenCtor_StoresBoth) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    OperationCanceledException e("custom message", cts.getTokenProperty());
+    EXPECT_EQ(std::string(e.what()), "custom message");
+    EXPECT_TRUE(e.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
+TEST(OperationCanceledExceptionTests, MessageInnerAndTokenCtor_StoresAll) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    auto inner = std::make_exception_ptr(std::runtime_error("root cause"));
+    OperationCanceledException e("custom message", inner, cts.getTokenProperty());
+    EXPECT_EQ(std::string(e.what()), "custom message");
+    EXPECT_TRUE(e.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
+TEST(OperationCanceledExceptionTests, HResult_MatchesCorEOperationCanceled) {
+    constexpr SharpRuntime::intcs corE = static_cast<SharpRuntime::intcs>(0x8013153B);
+    OperationCanceledException defaultCtor;
+    OperationCanceledException messageCtor("msg");
+    OperationCanceledException innerCtor("msg", std::make_exception_ptr(std::runtime_error("cause")));
+    CancellationTokenSource cts;
+    OperationCanceledException tokenCtor(cts.getTokenProperty());
+    EXPECT_EQ(defaultCtor.getHResultProperty(), corE);
+    EXPECT_EQ(messageCtor.getHResultProperty(), corE);
+    EXPECT_EQ(innerCtor.getHResultProperty(), corE);
+    EXPECT_EQ(tokenCtor.getHResultProperty(), corE);
 }

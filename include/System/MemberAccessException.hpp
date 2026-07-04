@@ -15,22 +15,37 @@ namespace System {
      */
     class MemberAccessException : public SystemException {
     public:
-        /** @brief Initializes a new instance with a default message. */
+        /**
+         * @brief Initializes a new instance with a default message.
+         *
+         * C++ counterpart of .NET MemberAccessException().
+         */
         MemberAccessException()
-            : SystemException("Cannot access this member.") {}
+            : SystemException("Cannot access this member.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013151A)); // COR_E_MEMBERACCESS
+        }
 
-        /** @brief Initializes a new instance with the specified error message. */
+        /**
+         * @brief Initializes a new instance with the specified error message.
+         *
+         * C++ counterpart of .NET MemberAccessException(string).
+         */
         explicit MemberAccessException(const std::string& message)
-            : SystemException(message) {}
+            : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013151A)); // COR_E_MEMBERACCESS
+        }
 
         /**
          * @brief Initializes a new instance with the specified message and inner exception.
          *
+         * C++ counterpart of .NET MemberAccessException(string, Exception).
          * @param message A description of the error.
          * @param inner   The exception that caused this exception.
          */
         MemberAccessException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, inner) {}
+            : SystemException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013151A)); // COR_E_MEMBERACCESS
+        }
     };
 
 } // namespace System

@@ -80,15 +80,21 @@ namespace System {
         /**
          * @brief Calculates the start offset and length of the range relative to a collection of the given size.
          *
-         * C++ counterpart of .NET Range.GetOffsetAndLength(int).
+         * C++ counterpart of .NET Range.GetOffsetAndLength(int). Unlike Index.GetOffset, this
+         * method does validate: it throws if the resolved end index exceeds @p length or if the
+         * resolved start index exceeds the resolved end index (matching .NET's unsigned-compare
+         * checks, which also reject negative offsets).
          * @param length Total number of elements in the collection.
          * @return Resolved OffsetAndLength value.
-         * @throws std::out_of_range if the resolved end index precedes the start index.
+         * @throws std::out_of_range if the resolved range falls outside [0, length].
          */
         [[nodiscard]] OffsetAndLength GetOffsetAndLength(int length) const {
             int start = start_.GetOffset(length);
             int end   = end_.GetOffset(length);
-            if (end < start) throw std::out_of_range("Range: end index is before start index.");
+            if (static_cast<unsigned>(end) > static_cast<unsigned>(length) ||
+                static_cast<unsigned>(start) > static_cast<unsigned>(end)) {
+                throw std::out_of_range("Range: resolved range is outside the bounds of the collection.");
+            }
             return { start, end - start };
         }
 

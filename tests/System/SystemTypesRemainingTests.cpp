@@ -354,13 +354,15 @@ TEST(LazyTests, ToString_NotCreated) {
     EXPECT_EQ(lz.ToString(), "Value is not created.");
 }
 TEST(LazyTests, ToString_Created) {
+    // .NET's Lazy<T>.ToString() returns Value.ToString() once created, not a fixed
+    // placeholder - verified against Lazy.cs.
     Lazy<int> lz([]() { return 1; });
     lz.getValueProperty();
-    EXPECT_EQ(lz.ToString(), "Value is created.");
+    EXPECT_EQ(lz.ToString(), "1");
 }
 TEST(LazyTests, ToString_PrecomputedIsCreated) {
     Lazy<int> lz(5);
-    EXPECT_EQ(lz.ToString(), "Value is created.");
+    EXPECT_EQ(lz.ToString(), "5");
 }
 
 // ===========================================================================

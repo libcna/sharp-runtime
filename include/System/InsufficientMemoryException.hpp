@@ -28,7 +28,9 @@ namespace System {
          * C++ counterpart of .NET InsufficientMemoryException().
          */
         InsufficientMemoryException()
-            : OutOfMemoryException("Insufficient memory to continue the execution of the program.") {}
+            : OutOfMemoryException("Insufficient memory to continue the execution of the program.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013153D)); // COR_E_INSUFFICIENTMEMORY
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -37,7 +39,9 @@ namespace System {
          * @param message A string that describes the error.
          */
         explicit InsufficientMemoryException(const std::string& message)
-            : OutOfMemoryException(message) {}
+            : OutOfMemoryException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013153D)); // COR_E_INSUFFICIENTMEMORY
+        }
 
         /**
          * @brief Initializes a new instance with the specified error message.
@@ -45,7 +49,9 @@ namespace System {
          * @param message A string that describes the error.
          */
         explicit InsufficientMemoryException(const char* message)
-            : OutOfMemoryException(message) {}
+            : OutOfMemoryException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013153D)); // COR_E_INSUFFICIENTMEMORY
+        }
 
         /**
          * @brief Initializes a new instance with the specified message and
@@ -56,7 +62,9 @@ namespace System {
          * @param inner   The exception that is the cause of this exception.
          */
         InsufficientMemoryException(const std::string& message, std::exception_ptr inner)
-            : OutOfMemoryException(message, std::move(inner)) {}
+            : OutOfMemoryException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x8013153D)); // COR_E_INSUFFICIENTMEMORY
+        }
     };
 
 } // namespace System

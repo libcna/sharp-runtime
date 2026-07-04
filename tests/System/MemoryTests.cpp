@@ -352,3 +352,27 @@ TEST(MemoryTests, ConvertToReadOnlyMemory_Empty) {
     ReadOnlyMemory<int> rom = m;
     EXPECT_TRUE(rom.getIsEmptyProperty());
 }
+
+// ---------------------------------------------------------------------------
+// Pin
+// ---------------------------------------------------------------------------
+
+TEST(MemoryTests, Pin_PointerMatchesData) {
+    std::vector<int> v = {10, 20, 30};
+    Memory<int> m(v);
+    auto handle = m.Pin();
+    EXPECT_EQ(handle.getPointerProperty(), static_cast<void*>(v.data()));
+}
+
+TEST(MemoryTests, Pin_Subrange_PointerOffsetCorrectly) {
+    std::vector<int> v = {10, 20, 30, 40};
+    Memory<int> m(v, 1, 2);
+    auto handle = m.Pin();
+    EXPECT_EQ(handle.getPointerProperty(), static_cast<void*>(v.data() + 1));
+}
+
+TEST(MemoryTests, Pin_DefaultMemory_NullPointer) {
+    Memory<int> m;
+    auto handle = m.Pin();
+    EXPECT_EQ(handle.getPointerProperty(), nullptr);
+}
