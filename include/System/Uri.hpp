@@ -118,6 +118,12 @@ namespace System {
         /** @brief Returns the original URI string. */
         [[nodiscard]] std::string ToString() const;
 
+        /**
+         * @brief Returns a hash code for this URI, consistent with operator==.
+         * C++ counterpart of .NET Uri.GetHashCode().
+         */
+        [[nodiscard]] intcs GetHashCode() const;
+
         bool operator==(const Uri& other) const;
         bool operator!=(const Uri& other) const;
 

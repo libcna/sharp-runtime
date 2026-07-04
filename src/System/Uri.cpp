@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
 #include <cctype>
+#include <functional>
 #include <stdexcept>
 
 namespace System {
@@ -221,6 +222,10 @@ bool Uri::getIsLoopbackProperty() const {
 }
 
 std::string Uri::ToString() const { return absoluteUri_; }
+
+intcs Uri::GetHashCode() const {
+    return static_cast<intcs>(std::hash<std::string>{}(absoluteUri_));
+}
 
 // ---------------------------------------------------------------------------
 // Operators
