@@ -9,6 +9,7 @@
 #include <string>
 #include "System/StringComparison.hpp"
 #include "System/ArgumentException.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
@@ -32,7 +33,7 @@ namespace System {
          * @param y The second string.
          * @return Negative if x &lt; y, zero if equal, positive if x &gt; y.
          */
-        [[nodiscard]] virtual int Compare(const std::string& x, const std::string& y) const = 0;
+        [[nodiscard]] virtual SharpRuntime::intcs Compare(const std::string& x, const std::string& y) const = 0;
 
         /**
          * @brief Determines whether two strings are equal under this comparer's rules.
@@ -51,7 +52,7 @@ namespace System {
          * @param s The string to hash.
          * @return A hash code for @p s.
          */
-        [[nodiscard]] virtual std::size_t GetHashCode(const std::string& s) const = 0;
+        [[nodiscard]] virtual SharpRuntime::intcs GetHashCode(const std::string& s) const = 0;
 
         /**
          * @brief Gets a StringComparer that performs case-sensitive ordinal (binary) string comparisons.
@@ -143,7 +144,7 @@ namespace System {
          *
          * C++ counterpart of .NET OrdinalComparer.Compare(string, string).
          */
-        [[nodiscard]] int Compare(const std::string& x, const std::string& y) const override {
+        [[nodiscard]] SharpRuntime::intcs Compare(const std::string& x, const std::string& y) const override {
             if (ignoreCase_) {
                 auto lx = toLower(x), ly = toLower(y);
                 return lx < ly ? -1 : (lx > ly ? 1 : 0);
@@ -165,8 +166,9 @@ namespace System {
          *
          * C++ counterpart of .NET OrdinalComparer.GetHashCode(string).
          */
-        [[nodiscard]] std::size_t GetHashCode(const std::string& s) const override {
-            return std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode(const std::string& s) const override {
+            std::size_t h = std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+            return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
         }
     };
 
@@ -208,7 +210,7 @@ namespace System {
          *
          * C++ counterpart of .NET CultureAwareComparer.Compare(string, string).
          */
-        [[nodiscard]] int Compare(const std::string& x, const std::string& y) const override {
+        [[nodiscard]] SharpRuntime::intcs Compare(const std::string& x, const std::string& y) const override {
             if (ignoreCase_) {
                 auto lx = toLower(x), ly = toLower(y);
                 return lx < ly ? -1 : (lx > ly ? 1 : 0);
@@ -230,8 +232,9 @@ namespace System {
          *
          * C++ counterpart of .NET CultureAwareComparer.GetHashCode(string).
          */
-        [[nodiscard]] std::size_t GetHashCode(const std::string& s) const override {
-            return std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode(const std::string& s) const override {
+            std::size_t h = std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+            return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
         }
     };
 
