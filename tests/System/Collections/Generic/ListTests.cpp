@@ -325,6 +325,20 @@ TEST(GenLinkedListTests, CopyTo) {
     EXPECT_EQ(dest[2], 30);
 }
 
+TEST(GenLinkedListTests, CopyTo_TooSmall_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    std::vector<int> dest(1);
+    EXPECT_THROW(ll.CopyTo(dest, 0), System::ArgumentException);
+}
+
+TEST(GenLinkedListTests, CopyTo_NegativeIndex_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    std::vector<int> dest(1);
+    EXPECT_THROW(ll.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(GenLinkedListTests, GetEnumerator) {
     LinkedList<int> ll;
     ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);

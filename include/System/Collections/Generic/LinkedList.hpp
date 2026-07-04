@@ -4,8 +4,11 @@
 #pragma once
 #include <list>
 #include <algorithm>
+#include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
 
 namespace System::Collections::Generic {
@@ -325,8 +328,14 @@ public:
      * C++ counterpart of .NET LinkedList<T>.CopyTo(T[], int).
      * @param dest  The destination vector (must have sufficient capacity).
      * @param index The zero-based index in @p dest at which copying begins.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p dest is not large enough.
      */
     void CopyTo(std::vector<T>& dest, intcs index) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+        if (static_cast<std::size_t>(index) + list_.size() > dest.size())
+            throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
         for (const auto& item : list_) {
             dest[static_cast<std::size_t>(index++)] = item;
         }
