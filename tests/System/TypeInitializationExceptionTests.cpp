@@ -23,10 +23,19 @@ TEST(TypeInitializationExceptionTest, MessageContainsTypeName) {
 }
 
 TEST(TypeInitializationExceptionTest, WithInnerException) {
-    std::runtime_error inner("inner cause");
-    TypeInitializationException e("MyType", &inner);
-    std::string msg = e.what();
-    EXPECT_NE(msg.find("inner cause"), std::string::npos);
+    auto inner = std::make_exception_ptr(std::runtime_error("inner cause"));
+    TypeInitializationException e("MyType", inner);
+    ASSERT_TRUE(e.getInnerExceptionProperty() != nullptr);
+    try {
+        std::rethrow_exception(e.getInnerExceptionProperty());
+    } catch (const std::runtime_error& ex) {
+        EXPECT_STREQ(ex.what(), "inner cause");
+    }
+}
+
+TEST(TypeInitializationExceptionTest, HResult_IsCorTypeInitialization) {
+    TypeInitializationException e("T", nullptr);
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131534));
 }
 
 TEST(TypeInitializationExceptionTest, IsSystemException) {

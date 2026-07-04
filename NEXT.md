@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-03 (branch: feature/work) — 8751 tests passing*
+*Last updated: 2026-07-04 (branch: feature/work) — 8823 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8751 tests passing** across 896 test suites. Zero failures.
+- **8823 tests passing** across 897 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -71,6 +71,19 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `becdf7d` | Port Tuple + TupleExtensions: **added missing CompareTo/operator<** — Tuple1..Tuple7 had operator==/!= but no ordering at all, unlike .NET's IStructuralComparable-based sequential compare; added intcs-returning CompareTo + operator< using the same first-non-zero-wins algorithm; fixed int→intcs on GetHashCode and hash helpers |
+| `32f8bbb` | Port TypeLoadException/TypeAccessException/TypeInitializationException: fixed missing HResults (COR_E_TYPELOAD/TYPEACCESS/TYPEINITIALIZATION); TypeAccessException's default message corrected to match .NET; **TypeInitializationException took a raw `const std::exception*` instead of this codebase's std::exception_ptr convention** and manually embedded inner->what() text into the message instead of exposing it via InnerException like .NET — fixed both |
+| `0af23c9` | Port TimeoutException: fixed missing HResult (COR_E_TIMEOUT) |
+| `4f9d08c` | Port TimeProvider: fixed exception message text to match .NET's actual resource string |
+| `00d55a0` | Port TimeZoneInfo + TransitionTime: **fixed wrong exception type** — FindSystemTimeZoneById threw std::invalid_argument/PlatformNotSupportedException for an unknown zone instead of TimeZoneNotFoundException (which already existed unused); **fixed SupportsDaylightSavingTime** — it read tm_isdst at the current instant ("is DST active right now") instead of .NET's "does this zone's rules include DST at all" (e.g. America/New_York reported false in January); added a Jan/Jul offset-sampling check; int→intcs across TransitionTime/AdjustmentRule |
+| `d351849` | Port TimeSpan: **fixed wrong exception type** — FromDays/FromHours/etc. and operator*//  threw ArgumentOutOfRangeException for NaN instead of .NET's plain ArgumentException; replaced ~7 placeholder exception messages (raw resource-key strings) with real .NET text; added entirely-missing GetHashCode(); int→intcs |
+| `a79999b` | Port TimeOnly: **fixed IsBetween** — treated the end of the range as inclusive and returned true when start==end, but .NET's IsBetween is end-exclusive and always false when start==end; rewrote using .NET's own unsigned-wraparound tick arithmetic; added missing ctor bounds validation (hour/minute/second/millisecond/ticks); AddHours/AddMinutes now take double (was int, so fractional adds were unsupported) |
+| `5629d4b` | Port StringComparer: fixed int→intcs and GetHashCode return type |
+| `a3044d6` | Port String: **added missing bounds validation** to Substring/Remove/IndexOf/LastIndexOf — these silently clamped out-of-range length/count via std::string::substr/erase/find instead of throwing like .NET (e.g. `Substring("abcde", 2, 100)` returned `"cde"` instead of throwing); fixed int→intcs and GetHashCode return type |
+| `56b68a4` | Port SystemException: fixed missing HResult; also fixed ArithmeticException's missing HResult (discovered as a side effect) |
+| `ee28e91` | Port StackOverflowException: fixed missing HResult, marked `final` (sealed in .NET), corrected default message to match .NET's actual resource string |
+| `c389cbd` | Port Double: same bug class as Single (below) — Max/Min NaN propagation, MaxMagnitude/MinMagnitude tie-break, Sign exception type, RootN negative-base bug |
+| `b8f4398` | Port Single: **fixed real bugs** — Max/Min used std::fmax/fmin (returns the non-NaN operand) instead of .NET's NaN-propagating +0>-0 semantics; MaxMagnitude/MinMagnitude picked the tie-break without checking sign; Sign returned 0 for NaN instead of throwing ArithmeticException; Equals used raw == (NaN != NaN) instead of .NET's NaN-equals-NaN contract; GetHashCode didn't collapse NaN/zero bit patterns; RootN was a naive pow(x, 1/n) returning NaN for any negative base instead of the real root for odd n |
 | `710e315` | Port Random: **fixed a real bug** — `GetItems`/`GetString` had no validation for empty `choices`, so `GetItems(emptyChoices, 0)` indexed an empty collection at `Next(0)` (undefined behavior) instead of throwing `ArgumentException` like .NET does (even when `length == 0`); restructured to match .NET's actual delegation chain so validation applies uniformly |
 | `21d42e8` | Port Progress: `Progress<T>(Action<T>)` now throws `ArgumentNullException` for a null/empty handler, matching .NET |
 | `e6a6d4e` | Port PlatformNotSupportedException: fixed missing `HResult` |

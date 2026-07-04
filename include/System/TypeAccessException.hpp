@@ -24,7 +24,9 @@ namespace System {
          * C++ counterpart of .NET TypeAccessException().
          */
         TypeAccessException()
-            : TypeLoadException("Attempt by the method to access the type failed.") {}
+            : TypeLoadException("Attempt to access the type failed.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131543)); // COR_E_TYPEACCESS
+        }
 
         /**
          * @brief Initializes a new instance of the TypeAccessException class with a
@@ -34,7 +36,9 @@ namespace System {
          * @param message The error message that explains the reason for the exception.
          */
         explicit TypeAccessException(const std::string& message)
-            : TypeLoadException(message) {}
+            : TypeLoadException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131543)); // COR_E_TYPEACCESS
+        }
 
         /**
          * @brief Initializes a new instance of the TypeAccessException class with a
@@ -46,7 +50,9 @@ namespace System {
          * @param inner   The exception that is the cause of the current exception.
          */
         TypeAccessException(const std::string& message, std::exception_ptr inner)
-            : TypeLoadException(message, std::move(inner)) {}
+            : TypeLoadException(message, std::move(inner)) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131543)); // COR_E_TYPEACCESS
+        }
     };
 
 } // namespace System

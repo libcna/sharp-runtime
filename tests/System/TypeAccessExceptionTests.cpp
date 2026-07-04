@@ -47,3 +47,8 @@ TEST(TypeAccessExceptionTest, CaughtAsStdException) {
     catch (const std::exception&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+TEST(TypeAccessExceptionTest, HResult_IsCorTypeAccess) {
+    TypeAccessException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131543));
+}

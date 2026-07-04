@@ -84,3 +84,8 @@ TEST(TypeLoadExceptionTests, TypeName_EmptyString_Roundtrip) {
     System::TypeLoadException ex("msg", std::string(""));
     EXPECT_EQ(ex.getTypeNameProperty(), "");
 }
+
+TEST(TypeLoadExceptionTests, HResult_IsCorTypeLoad) {
+    System::TypeLoadException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131522));
+}

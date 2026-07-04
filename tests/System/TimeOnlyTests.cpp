@@ -5,9 +5,11 @@
 #include "System/TimeOnly.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/FormatException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::TimeOnly;
 using System::TimeSpan;
+using System::ArgumentOutOfRangeException;
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -64,6 +66,30 @@ TEST(TimeOnlyTests, TicksCtor_RoundTrip) {
     EXPECT_EQ(rt.getMinuteProperty(),      orig.getMinuteProperty());
     EXPECT_EQ(rt.getSecondProperty(),      orig.getSecondProperty());
     EXPECT_EQ(rt.getMillisecondProperty(), orig.getMillisecondProperty());
+}
+
+TEST(TimeOnlyTests, TicksCtor_Negative_Throws) {
+    EXPECT_THROW(TimeOnly(-1LL), ArgumentOutOfRangeException);
+}
+
+TEST(TimeOnlyTests, TicksCtor_TooLarge_Throws) {
+    EXPECT_THROW(TimeOnly(864000000000LL), ArgumentOutOfRangeException); // == TicksPerDay
+}
+
+TEST(TimeOnlyTests, HourMinuteCtor_HourOutOfRange_Throws) {
+    EXPECT_THROW(TimeOnly(24, 0), ArgumentOutOfRangeException);
+}
+
+TEST(TimeOnlyTests, HourMinuteCtor_MinuteOutOfRange_Throws) {
+    EXPECT_THROW(TimeOnly(0, 60), ArgumentOutOfRangeException);
+}
+
+TEST(TimeOnlyTests, HourMinuteSecondCtor_SecondOutOfRange_Throws) {
+    EXPECT_THROW(TimeOnly(0, 0, 60), ArgumentOutOfRangeException);
+}
+
+TEST(TimeOnlyTests, FullCtor_MillisecondOutOfRange_Throws) {
+    EXPECT_THROW(TimeOnly(0, 0, 0, 1000), ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -221,9 +247,15 @@ TEST(TimeOnlyTests, IsBetween_AtStart_True) {
     EXPECT_TRUE(t.IsBetween(TimeOnly(10, 0), TimeOnly(14, 0)));
 }
 
-TEST(TimeOnlyTests, IsBetween_AtEnd_True) {
+TEST(TimeOnlyTests, IsBetween_AtEnd_False) {
+    // .NET's IsBetween treats the end as exclusive.
     TimeOnly t(14, 0);
-    EXPECT_TRUE(t.IsBetween(TimeOnly(10, 0), TimeOnly(14, 0)));
+    EXPECT_FALSE(t.IsBetween(TimeOnly(10, 0), TimeOnly(14, 0)));
+}
+
+TEST(TimeOnlyTests, IsBetween_EqualStartAndEnd_AlwaysFalse) {
+    EXPECT_FALSE(TimeOnly(10, 0).IsBetween(TimeOnly(10, 0), TimeOnly(10, 0)));
+    EXPECT_FALSE(TimeOnly(12, 0).IsBetween(TimeOnly(10, 0), TimeOnly(10, 0)));
 }
 
 TEST(TimeOnlyTests, IsBetween_MidnightWrapping_Inside) {

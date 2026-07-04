@@ -42,3 +42,8 @@ TEST(SystemExceptionTest, CaughtAsStdException) {
     catch (const std::exception&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+TEST(SystemExceptionTest, HResult_IsCorSystem) {
+    SystemException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131501));
+}

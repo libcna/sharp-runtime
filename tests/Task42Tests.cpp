@@ -410,6 +410,7 @@ TEST(UInt64Tests, IsPow2_True)            { EXPECT_TRUE(System::UInt64::IsPow2(1
 TEST(UInt64Tests, IsPow2_False)           { EXPECT_FALSE(System::UInt64::IsPow2(1000ULL)); }
 TEST(UInt64Tests, IsPow2_Zero)            { EXPECT_FALSE(System::UInt64::IsPow2(0ULL)); }
 TEST(UInt64Tests, Log2)                   { EXPECT_EQ(System::UInt64::Log2(1024ULL), 10ULL); }
+TEST(UInt64Tests, Log2_Zero_IsZero)       { EXPECT_EQ(System::UInt64::Log2(0ULL), 0ULL); } // .NET's Log2(0) contract: returns 0, does not throw/wrap
 TEST(UInt64Tests, LeadingZeroCount)       { EXPECT_EQ(System::UInt64::LeadingZeroCount(1ULL), 63ULL); }
 TEST(UInt64Tests, TrailingZeroCount)      { EXPECT_EQ(System::UInt64::TrailingZeroCount(8ULL), 3ULL); }
 TEST(UInt64Tests, TrailingZeroCount_Zero) { EXPECT_EQ(System::UInt64::TrailingZeroCount(0ULL), 64ULL); }

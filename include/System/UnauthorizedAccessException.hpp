@@ -21,6 +21,8 @@ namespace System {
         explicit UnauthorizedAccessException(const char* str);
         /** @brief Initializes a new instance with the specified error message. */
         explicit UnauthorizedAccessException(const std::string& str);
+        /** @brief Initializes a new instance with the specified message and inner exception. */
+        UnauthorizedAccessException(const std::string& str, std::exception_ptr inner);
     };
 
 } // namespace System

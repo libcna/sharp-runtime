@@ -14,6 +14,7 @@
 namespace System {
 
     using SharpRuntime::uintcs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a 32-bit unsigned integer.
@@ -70,7 +71,7 @@ namespace System {
          * @brief Compares @p a to @p b and returns a signed integer.
          * C++ counterpart of .NET UInt32.CompareTo(uint).
          */
-        [[nodiscard]] static int CompareTo(uintcs a, uintcs b) noexcept {
+        [[nodiscard]] static intcs CompareTo(uintcs a, uintcs b) noexcept {
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -78,7 +79,7 @@ namespace System {
         [[nodiscard]] static bool Equals(uintcs a, uintcs b) noexcept { return a == b; }
 
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET UInt32.GetHashCode(). */
-        [[nodiscard]] static int GetHashCode(uintcs value) noexcept { return static_cast<int>(value); }
+        [[nodiscard]] static intcs GetHashCode(uintcs value) noexcept { return static_cast<intcs>(value); }
 
         /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt32.Clamp(uint,uint,uint). */
         [[nodiscard]] static uintcs Clamp(uintcs value, uintcs min, uintcs max) noexcept {
@@ -92,7 +93,7 @@ namespace System {
         [[nodiscard]] static uintcs Min(uintcs x, uintcs y) noexcept { return x < y ? x : y; }
 
         /** @brief Returns 0 if @p value is zero; otherwise 1. C++ counterpart of .NET UInt32.Sign(uint). */
-        [[nodiscard]] static int Sign(uintcs value) noexcept { return value == 0 ? 0 : 1; }
+        [[nodiscard]] static intcs Sign(uintcs value) noexcept { return value == 0 ? 0 : 1; }
 
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
@@ -130,22 +131,22 @@ namespace System {
         }
 
         /** @brief Rotates @p value left by @p rotateAmount bits. C++ counterpart of .NET UInt32.RotateLeft(uint,int). */
-        [[nodiscard]] static uintcs RotateLeft(uintcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static uintcs RotateLeft(uintcs value, intcs rotateAmount) noexcept {
             return std::rotl(value, rotateAmount);
         }
 
         /** @brief Rotates @p value right by @p rotateAmount bits. C++ counterpart of .NET UInt32.RotateRight(uint,int). */
-        [[nodiscard]] static uintcs RotateRight(uintcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static uintcs RotateRight(uintcs value, intcs rotateAmount) noexcept {
             return std::rotr(value, rotateAmount);
         }
 
         /**
          * @brief Returns the floor of the base-2 logarithm of @p value.
-         * C++ counterpart of .NET UInt32.Log2(uint).
-         * @throws std::domain_error if @p value is 0.
+         * C++ counterpart of .NET UInt32.Log2(uint) (via BitOperations.Log2).
+         * Matches .NET's explicit "0 -> 0" contract: Log2(0) returns 0, it does not throw.
          */
-        [[nodiscard]] static uintcs Log2(uintcs value) {
-            if (value == 0) throw std::domain_error("Log2 of zero is undefined.");
+        [[nodiscard]] static uintcs Log2(uintcs value) noexcept {
+            if (value == 0) return 0;
             return static_cast<uintcs>(std::bit_width(value) - 1);
         }
     };

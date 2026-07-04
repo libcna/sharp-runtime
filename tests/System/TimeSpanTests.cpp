@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 #include "System/TimeSpan.hpp"
 
 using System::TimeSpan;
+using System::ArgumentException;
 using SharpRuntime::longcs;
 
 TEST(TimeSpanTests, ConstructorWithTicks) {
@@ -421,4 +423,30 @@ TEST(TimeSpanTests, Parse_ValidString) {
 
 TEST(TimeSpanTests, Parse_InvalidThrows) {
     EXPECT_THROW(TimeSpan::Parse("bad"), System::FormatException);
+}
+
+// --- GetHashCode ---
+
+TEST(TimeSpanTests, GetHashCode_SameTicks_SameHash) {
+    EXPECT_EQ(TimeSpan(12345LL).GetHashCode(), TimeSpan(12345LL).GetHashCode());
+}
+
+TEST(TimeSpanTests, GetHashCode_DifferentTicks_DifferentHash) {
+    EXPECT_NE(TimeSpan(12345LL).GetHashCode(), TimeSpan(54321LL).GetHashCode());
+}
+
+// --- NaN handling throws ArgumentException, not ArgumentOutOfRangeException ---
+
+TEST(TimeSpanTests, FromDays_NaN_ThrowsArgumentException) {
+    EXPECT_THROW(TimeSpan::FromDays(std::numeric_limits<double>::quiet_NaN()), ArgumentException);
+}
+
+TEST(TimeSpanTests, OperatorMultiply_NaN_ThrowsArgumentException) {
+    TimeSpan ts(1, 0, 0);
+    EXPECT_THROW(ts * std::numeric_limits<double>::quiet_NaN(), ArgumentException);
+}
+
+TEST(TimeSpanTests, OperatorDivide_NaN_ThrowsArgumentException) {
+    TimeSpan ts(1, 0, 0);
+    EXPECT_THROW(ts / std::numeric_limits<double>::quiet_NaN(), ArgumentException);
 }

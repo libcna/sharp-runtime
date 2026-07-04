@@ -42,3 +42,8 @@ TEST(TypeUnloadedExceptionTest, CaughtAsStdException) {
     catch (const std::exception&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+TEST(TypeUnloadedExceptionTest, HResult_IsCorTypeUnloaded) {
+    TypeUnloadedException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131013));
+}

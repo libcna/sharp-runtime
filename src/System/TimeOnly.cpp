@@ -10,20 +10,21 @@
 
 namespace System {
 
-TimeOnly TimeOnly::AddHours(int n) const {
-    int total = toMs() + n * 3600000;
-    total %= MsPerDay;
-    if (total < 0) total += MsPerDay;
-    return TimeOnly(total / 3600000, (total % 3600000) / 60000,
-                    (total % 60000) / 1000, total % 1000);
+static constexpr long long TicksPerHour_ = 36000000000LL;
+static constexpr long long TicksPerMinute_ = 600000000LL;
+static constexpr long long TicksPerDay_ = 864000000000LL;
+
+static TimeOnly AddTicksWrapped(long long baseTicks, long long deltaTicks) {
+    long long t = (baseTicks + TicksPerDay_ + (deltaTicks % TicksPerDay_)) % TicksPerDay_;
+    return TimeOnly(static_cast<SharpRuntime::longcs>(t));
 }
 
-TimeOnly TimeOnly::AddMinutes(int n) const {
-    int total = toMs() + n * 60000;
-    total %= MsPerDay;
-    if (total < 0) total += MsPerDay;
-    return TimeOnly(total / 3600000, (total % 3600000) / 60000,
-                    (total % 60000) / 1000, total % 1000);
+TimeOnly TimeOnly::AddHours(double value) const {
+    return AddTicksWrapped(getTicksProperty(), static_cast<long long>(value * static_cast<double>(TicksPerHour_)));
+}
+
+TimeOnly TimeOnly::AddMinutes(double value) const {
+    return AddTicksWrapped(getTicksProperty(), static_cast<long long>(value * static_cast<double>(TicksPerMinute_)));
 }
 
 TimeOnly TimeOnly::FromTimeSpan(const TimeSpan& ts) {

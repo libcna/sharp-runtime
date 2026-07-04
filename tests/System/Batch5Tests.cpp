@@ -166,10 +166,10 @@ TEST(IAsyncDisposableTests, PolymorphicDispatch_ViaBasePtr) {
 // ---------------------------------------------------------------------------
 // TypeInitializationException (extra)
 // ---------------------------------------------------------------------------
-TEST(TypeInitializationExceptionNewTests, InnerException_InWhat) {
-    std::runtime_error inner("ctor threw");
-    System::TypeInitializationException e("Foo.Bar", &inner);
-    EXPECT_NE(std::string(e.what()).find("ctor threw"), std::string::npos);
+TEST(TypeInitializationExceptionNewTests, InnerException_Accessible) {
+    auto inner = std::make_exception_ptr(std::runtime_error("ctor threw"));
+    System::TypeInitializationException e("Foo.Bar", inner);
+    ASSERT_TRUE(e.getInnerExceptionProperty() != nullptr);
 }
 TEST(TypeInitializationExceptionNewTests, NullInner_NoInnerInWhat) {
     System::TypeInitializationException e("Foo.Bar", nullptr);

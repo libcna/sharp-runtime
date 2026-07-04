@@ -65,7 +65,7 @@ namespace System {
                                    *
                                    1000 + milliseconds) * 1000 + microseconds;
         if (totalMicroseconds > MaxMicroSeconds || totalMicroseconds < MinMicroSeconds)
-            throw ArgumentOutOfRangeException("Time span is too long.");
+            throw ArgumentOutOfRangeException("", "TimeSpan overflowed because the duration is too long.");
         return totalMicroseconds;
     }
 
@@ -89,10 +89,10 @@ namespace System {
     }
 
 
-    [[nodiscard]] int TimeSpan::getDaysProperty() const { return (intcs) (ticks_internal / TicksPerDay); }
+    [[nodiscard]] intcs TimeSpan::getDaysProperty() const { return (intcs) (ticks_internal / TicksPerDay); }
 
 
-    [[nodiscard]] int TimeSpan::getHoursProperty() const { return (intcs) ((ticks_internal / TicksPerHour) % 24); }
+    [[nodiscard]] intcs TimeSpan::getHoursProperty() const { return (intcs) ((ticks_internal / TicksPerHour) % 24); }
 
 
     [[nodiscard]] intcs TimeSpan::getMillisecondsProperty() const {
@@ -164,7 +164,7 @@ namespace System {
     TimeSpan TimeSpan::Add(const TimeSpan &ts) const {
         if ((ts.ticks_internal > 0 && ticks_internal > std::numeric_limits<int64_t>::max() - ts.ticks_internal) ||
             (ts.ticks_internal < 0 && ticks_internal < std::numeric_limits<int64_t>::min() - ts.ticks_internal)) {
-            throw OverflowException("TimeSpanTooLong");
+            throw OverflowException("TimeSpan overflowed because the duration is too long.");
         }
 
         return {ticks_internal + ts.ticks_internal};
@@ -186,7 +186,7 @@ namespace System {
 
     TimeSpan TimeSpan::Duration() const {
         if (getTicksProperty() == MinValue.getTicksProperty())
-            throw OverflowException("Overflow_Duration");
+            throw OverflowException("The duration cannot be returned for TimeSpan.MinValue because the absolute value of TimeSpan.MinValue exceeds the value of TimeSpan.MaxValue.");
         return {ticks_internal >= 0 ? ticks_internal : -ticks_internal};
     }
 
@@ -198,20 +198,24 @@ namespace System {
         return t1.ticks_internal == t2.ticks_internal;
     }
 
+    intcs TimeSpan::GetHashCode() const noexcept {
+        return static_cast<intcs>(ticks_internal) ^ static_cast<intcs>(static_cast<uint64_t>(ticks_internal) >> 32);
+    }
+
     TimeSpan TimeSpan::FromHours(double value) {
         return Interval(value, TicksPerHour);
     }
 
     TimeSpan TimeSpan::Interval(double value, double scale) {
         if (std::isnan(value)) {
-            throw ArgumentOutOfRangeException("value cannot be NaN");
+            throw ArgumentException("TimeSpan does not accept floating point Not-a-Number values.");
         }
         return IntervalFromDoubleTicks(value * scale);
     }
 
     TimeSpan TimeSpan::IntervalFromDoubleTicks(double ticks) {
         if (std::isnan(ticks) || (ticks > static_cast<double>(SharpRuntime::LONGCS_MAX)) || (ticks < static_cast<double>(SharpRuntime::LONGCS_MIN)))
-            throw OverflowException("TimeSpanTooLong");
+            throw OverflowException("TimeSpan overflowed because the duration is too long.");
         if (ticks == static_cast<double>(Int64::MaxValue))
             return MaxValue;
         return {(longcs) ticks};
@@ -231,7 +235,7 @@ namespace System {
 
     TimeSpan TimeSpan::Negate() const {
         if (getTicksProperty() == MinValue.getTicksProperty())
-            throw OverflowException("Overflow_NegateTwosCompNum");
+            throw OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return TimeSpan(-ticks_internal);
     }
 
@@ -248,7 +252,7 @@ namespace System {
                               ((ticks_internal >> signShift) != (result >> signShift));
 
         if (overflow) {
-            throw OverflowException("Overflow_TimeSpanTooLong");
+            throw OverflowException("TimeSpan overflowed because the duration is too long.");
         }
 
         return TimeSpan(result);
@@ -267,7 +271,7 @@ namespace System {
     longcs TimeSpan::TimeToTicks(intcs hour, intcs minute, intcs second) {
         longcs totalSeconds = (longcs) hour * 3600 + (longcs) minute * 60 + (longcs) second;
         if (totalSeconds > MaxSeconds || totalSeconds < MinSeconds)
-            throw ArgumentOutOfRangeException("TimeSpanTooLong");
+            throw ArgumentOutOfRangeException("", "TimeSpan overflowed because the duration is too long.");
         return totalSeconds * TicksPerSecond;
     }
 
@@ -443,7 +447,7 @@ namespace System {
 
     TimeSpan TimeSpan::operator-() const {
         if (ticks_internal == MinValue.ticks_internal)
-            throw OverflowException("Overflow_NegateTwosCompNum");
+            throw OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return TimeSpan(-ticks_internal);
     }
 
@@ -456,7 +460,7 @@ namespace System {
 
     TimeSpan TimeSpan::operator*(double factor) const {
         if (std::isnan(factor)) {
-            throw ArgumentOutOfRangeException("factor cannot be NaN");
+            throw ArgumentException("TimeSpan does not accept floating point Not-a-Number values.", "factor");
         }
         const double ticks = std::round(getTicksProperty() * factor);
         return IntervalFromDoubleTicks(ticks);
@@ -464,7 +468,7 @@ namespace System {
 
     TimeSpan TimeSpan::operator/(double divisor) const {
         if (std::isnan(divisor)) {
-            throw ArgumentOutOfRangeException("divisor cannot be NaN");
+            throw ArgumentException("TimeSpan does not accept floating point Not-a-Number values.", "divisor");
         }
         const double ticks = std::round(getTicksProperty() / divisor);
         return IntervalFromDoubleTicks(ticks);

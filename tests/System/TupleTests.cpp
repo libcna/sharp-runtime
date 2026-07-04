@@ -221,3 +221,34 @@ TEST(TupleExtensionsTests, RoundTrip_Tuple2_ToValueTuple_ToTuple) {
     auto back = System::TupleExtensions::ToTuple(vt);
     EXPECT_EQ(back, original);
 }
+
+// ---------------------------------------------------------------------------
+// CompareTo / operator< (element-by-element, first non-zero wins)
+// ---------------------------------------------------------------------------
+
+TEST(TupleCompareTests, Tuple1_CompareTo) {
+    System::Tuple1<int> a(1), b(2);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_GT(b.CompareTo(a), 0);
+    EXPECT_EQ(a.CompareTo(a), 0);
+    EXPECT_TRUE(a < b);
+}
+
+TEST(TupleCompareTests, Tuple2_FirstItemDecides) {
+    System::Tuple2<int, int> a(1, 100), b(2, 0);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_TRUE(a < b);
+}
+
+TEST(TupleCompareTests, Tuple2_FallsThroughToSecondItem) {
+    System::Tuple2<int, int> a(5, 1), b(5, 2);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_TRUE(a < b);
+    EXPECT_FALSE(b < a);
+}
+
+TEST(TupleCompareTests, Tuple3_LexicographicOrdering) {
+    System::Tuple3<int, int, int> a(1, 2, 3), b(1, 2, 4);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_EQ(a.CompareTo(a), 0);
+}

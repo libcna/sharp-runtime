@@ -685,6 +685,7 @@ TEST(UInt16Tests, IsPow2_True)            { EXPECT_TRUE(UInt16::IsPow2(256)); }
 TEST(UInt16Tests, IsPow2_False)           { EXPECT_FALSE(UInt16::IsPow2(100)); }
 TEST(UInt16Tests, IsPow2_Zero)            { EXPECT_FALSE(UInt16::IsPow2(0)); }
 TEST(UInt16Tests, Log2)                   { EXPECT_EQ(UInt16::Log2(256), 8u); }
+TEST(UInt16Tests, Log2_Zero_IsZero)       { EXPECT_EQ(UInt16::Log2(0), 0u); } // .NET's Log2(0) contract: returns 0, does not throw/wrap
 TEST(UInt16Tests, LeadingZeroCount)       { EXPECT_EQ(UInt16::LeadingZeroCount(1), 15u); }
 TEST(UInt16Tests, LeadingZeroCount_Max)   { EXPECT_EQ(UInt16::LeadingZeroCount(65535), 0u); }
 TEST(UInt16Tests, TrailingZeroCount)      { EXPECT_EQ(UInt16::TrailingZeroCount(8), 3u); }

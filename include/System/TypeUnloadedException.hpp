@@ -13,12 +13,22 @@ namespace System {
     class TypeUnloadedException : public SystemException {
     public:
         /** @brief Initializes a new instance with the default message. */
-        TypeUnloadedException() : SystemException("Type had been unloaded.") {}
+        TypeUnloadedException() : SystemException("Type had been unloaded.") {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131013)); // COR_E_TYPEUNLOADED
+        }
+        /** @brief Initializes a new instance with the specified error message (const char* overload). */
+        explicit TypeUnloadedException(const char* message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131013)); // COR_E_TYPEUNLOADED
+        }
         /** @brief Initializes a new instance with the specified error message. */
-        explicit TypeUnloadedException(const std::string& message) : SystemException(message) {}
+        explicit TypeUnloadedException(const std::string& message) : SystemException(message) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131013)); // COR_E_TYPEUNLOADED
+        }
         /** @brief Initializes a new instance with the specified message and inner exception. */
         TypeUnloadedException(const std::string& message, std::exception_ptr inner)
-            : SystemException(message, inner) {}
+            : SystemException(message, inner) {
+            setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131013)); // COR_E_TYPEUNLOADED
+        }
     };
 
 } // namespace System

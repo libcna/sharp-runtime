@@ -7,6 +7,7 @@
 #include <iomanip>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/TimeSpan.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
@@ -52,7 +53,9 @@ namespace System {
          * @param minute Minute of the hour (0–59).
          */
         TimeOnly(intcs hour, intcs minute)
-            : hour_(hour), minute_(minute) {}
+            : hour_(hour), minute_(minute) {
+            validateHms(hour, minute, 0);
+        }
 
         /**
          * @brief Constructs a TimeOnly from hours, minutes, and seconds.
@@ -63,7 +66,9 @@ namespace System {
          * @param second Second of the minute (0–59).
          */
         TimeOnly(intcs hour, intcs minute, intcs second)
-            : hour_(hour), minute_(minute), second_(second) {}
+            : hour_(hour), minute_(minute), second_(second) {
+            validateHms(hour, minute, second);
+        }
 
         /**
          * @brief Constructs a TimeOnly from hours, minutes, seconds, and milliseconds.
@@ -75,7 +80,11 @@ namespace System {
          * @param millisecond Millisecond of the second (0–999).
          */
         TimeOnly(intcs hour, intcs minute, intcs second, intcs millisecond)
-            : hour_(hour), minute_(minute), second_(second), ms_(millisecond) {}
+            : hour_(hour), minute_(minute), second_(second), ms_(millisecond) {
+            validateHms(hour, minute, second);
+            if (static_cast<SharpRuntime::uintcs>(millisecond) >= 1000)
+                throw ArgumentOutOfRangeException("millisecond", "Valid values are between 0 and 999, inclusive.");
+        }
 
         /**
          * @brief Constructs a TimeOnly from a ticks value (100-nanosecond intervals since midnight).
@@ -84,12 +93,12 @@ namespace System {
          * @param ticks Number of 100-nanosecond ticks since midnight (must be in [0, TicksPerDay)).
          */
         explicit TimeOnly(longcs ticks) {
-            longcs t = ticks % TicksPerDay;
-            if (t < 0) t += TicksPerDay;
-            ms_     = static_cast<intcs>((t / TicksPerMs) % 1000);
-            second_ = static_cast<intcs>((t / TicksPerSecond) % 60);
-            minute_ = static_cast<intcs>((t / TicksPerMinute) % 60);
-            hour_   = static_cast<intcs>(t / TicksPerHour);
+            if (static_cast<SharpRuntime::ulongcs>(ticks) >= static_cast<SharpRuntime::ulongcs>(TicksPerDay))
+                throw ArgumentOutOfRangeException("ticks", "Ticks must be between 0 and and TimeOnly.MaxValue.Ticks.");
+            ms_     = static_cast<intcs>((ticks / TicksPerMs) % 1000);
+            second_ = static_cast<intcs>((ticks / TicksPerSecond) % 60);
+            minute_ = static_cast<intcs>((ticks / TicksPerMinute) % 60);
+            hour_   = static_cast<intcs>(ticks / TicksPerHour);
         }
 
         // -----------------------------------------------------------------------
@@ -185,20 +194,20 @@ namespace System {
         }
 
         /**
-         * @brief Returns a new TimeOnly with @p n hours added (wraps around midnight).
+         * @brief Returns a new TimeOnly with @p value hours added (wraps around midnight).
          *
-         * C++ counterpart of .NET TimeOnly.AddHours(double).
-         * @param n Number of hours to add (may be negative).
+         * C++ counterpart of .NET TimeOnly.AddHours(double). Supports fractional hours.
+         * @param value Number of hours to add (may be fractional or negative).
          */
-        [[nodiscard]] TimeOnly AddHours(int n) const;
+        [[nodiscard]] TimeOnly AddHours(double value) const;
 
         /**
-         * @brief Returns a new TimeOnly with @p n minutes added (wraps around midnight).
+         * @brief Returns a new TimeOnly with @p value minutes added (wraps around midnight).
          *
-         * C++ counterpart of .NET TimeOnly.AddMinutes(double).
-         * @param n Number of minutes to add (may be negative).
+         * C++ counterpart of .NET TimeOnly.AddMinutes(double). Supports fractional minutes.
+         * @param value Number of minutes to add (may be fractional or negative).
          */
-        [[nodiscard]] TimeOnly AddMinutes(int n) const;
+        [[nodiscard]] TimeOnly AddMinutes(double value) const;
 
         // -----------------------------------------------------------------------
         // Comparison / equality
@@ -232,21 +241,27 @@ namespace System {
         [[nodiscard]] intcs GetHashCode() const noexcept { return toMs(); }
 
         /**
-         * @brief Determines whether @p start ≤ this ≤ @p end (handling midnight wrap).
+         * @brief Determines whether this time falls within the range [@p start, @p end)
+         * (handling midnight wrap).
          *
          * C++ counterpart of .NET TimeOnly.IsBetween(TimeOnly, TimeOnly).
-         * When @p start ≤ @p end the check is inclusive on both sides.
-         * When @p start > @p end the range wraps midnight, and the check is
-         * true if this ≥ @p start or this ≤ @p end.
+         * The start is inclusive and the end is exclusive. If @p start equals
+         * @p end, the elapsed time in the range is zero and this always returns
+         * false. When @p start > @p end the range wraps midnight.
          *
          * @param start Inclusive start of the range.
-         * @param end   Inclusive end of the range.
+         * @param end   Exclusive end of the range.
          */
         [[nodiscard]] bool IsBetween(const TimeOnly& start, const TimeOnly& end) const noexcept {
-            if (start.toMs() <= end.toMs())
-                return toMs() >= start.toMs() && toMs() <= end.toMs();
-            // midnight-wrapping range
-            return toMs() >= start.toMs() || toMs() <= end.toMs();
+            // Uses unsigned wraparound arithmetic (matching .NET's ulong-tick implementation)
+            // so that start==end correctly yields false regardless of `this`, and midnight-
+            // wrapping ranges (start > end) work without a separate branch's edge cases.
+            auto t = static_cast<SharpRuntime::uintcs>(toMs());
+            auto s = static_cast<SharpRuntime::uintcs>(start.toMs());
+            auto e = static_cast<SharpRuntime::uintcs>(end.toMs());
+            if (s <= e)
+                return (t - s) < (e - s);
+            return (t - e) >= (s - e);
         }
 
         // -----------------------------------------------------------------------
@@ -378,6 +393,13 @@ namespace System {
 
     private:
         intcs toMs() const noexcept { return ((hour_*60+minute_)*60+second_)*1000+ms_; }
+
+        static void validateHms(intcs hour, intcs minute, intcs second) {
+            if (static_cast<SharpRuntime::uintcs>(hour) >= 24 ||
+                static_cast<SharpRuntime::uintcs>(minute) >= 60 ||
+                static_cast<SharpRuntime::uintcs>(second) >= 60)
+                throw ArgumentOutOfRangeException("", "Hour, Minute, and Second parameters describe an un-representable DateTime.");
+        }
     };
 
 } // namespace System

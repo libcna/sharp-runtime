@@ -15,6 +15,8 @@
 
 namespace System {
 
+    using SharpRuntime::intcs;
+
     /**
      * @brief Provides static helper methods that mirror .NET System.UInt64.
      *
@@ -67,7 +69,7 @@ namespace System {
         }
 
         /** @brief Compares two UInt64 values. Returns negative, zero, or positive. */
-        static int CompareTo(SharpRuntime::ulongcs a, SharpRuntime::ulongcs b) {
+        static intcs CompareTo(SharpRuntime::ulongcs a, SharpRuntime::ulongcs b) {
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -75,8 +77,8 @@ namespace System {
         static bool Equals(SharpRuntime::ulongcs a, SharpRuntime::ulongcs b) { return a == b; }
 
         /** @brief Returns a hash code for the value. */
-        static int GetHashCode(SharpRuntime::ulongcs value) {
-            return static_cast<int>(value ^ (value >> 32));
+        static intcs GetHashCode(SharpRuntime::ulongcs value) {
+            return static_cast<intcs>(value ^ (value >> 32));
         }
 
         /** @brief Returns the larger of two UInt64 values. */
@@ -97,7 +99,7 @@ namespace System {
         }
 
         /** @brief Returns 0 if value is zero; 1 otherwise. */
-        static int Sign(SharpRuntime::ulongcs value) { return value == 0 ? 0 : 1; }
+        static intcs Sign(SharpRuntime::ulongcs value) { return value == 0 ? 0 : 1; }
 
         /** @brief Divides left by right and returns a (quotient, remainder) pair. */
         static std::pair<SharpRuntime::ulongcs, SharpRuntime::ulongcs>
@@ -116,8 +118,13 @@ namespace System {
             return value != 0 && (value & (value - 1)) == 0;
         }
 
-        /** @brief Returns the floor log base 2 of value. */
+        /**
+         * @brief Returns the floor log base 2 of value.
+         * Matches .NET's explicit "0 -> 0" contract: Log2(0) returns 0, it does not throw
+         * or wrap around (bit_width(0) - 1 would otherwise underflow to UINT64_MAX).
+         */
         static SharpRuntime::ulongcs Log2(SharpRuntime::ulongcs value) {
+            if (value == 0) return 0;
             return static_cast<uint64_t>(std::bit_width(value) - 1);
         }
 
@@ -138,12 +145,12 @@ namespace System {
         }
 
         /** @brief Rotates value left by rotateAmount bits. */
-        static SharpRuntime::ulongcs RotateLeft(SharpRuntime::ulongcs value, int rotateAmount) {
+        static SharpRuntime::ulongcs RotateLeft(SharpRuntime::ulongcs value, intcs rotateAmount) {
             return std::rotl(value, rotateAmount);
         }
 
         /** @brief Rotates value right by rotateAmount bits. */
-        static SharpRuntime::ulongcs RotateRight(SharpRuntime::ulongcs value, int rotateAmount) {
+        static SharpRuntime::ulongcs RotateRight(SharpRuntime::ulongcs value, intcs rotateAmount) {
             return std::rotr(value, rotateAmount);
         }
     };

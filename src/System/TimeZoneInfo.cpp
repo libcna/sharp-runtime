@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/TimeZoneInfo.hpp"
 #include "System/PlatformNotSupportedException.hpp"
+#include "System/TimeZoneNotFoundException.hpp"
 #include <cstdlib>
 #include <ctime>
 #include <mutex>
@@ -16,6 +17,31 @@
 #endif
 
 namespace System {
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace {
+// Detects whether the zone currently active via TZ/localtime_r observes DST at
+// all during the year, rather than just whether DST happens to be active right
+// now (SupportsDaylightSavingTime asks "does this zone have DST rules", not
+// "is DST active this instant").
+bool posixZoneObservesDst() {
+    time_t now = time(nullptr);
+    struct tm nowUtc{};
+    gmtime_r(&now, &nowUtc);
+    struct tm jan{};
+    jan.tm_year = nowUtc.tm_year; jan.tm_mon = 0; jan.tm_mday = 15; jan.tm_hour = 12;
+    struct tm jul{};
+    jul.tm_year = nowUtc.tm_year; jul.tm_mon = 6; jul.tm_mday = 15; jul.tm_hour = 12;
+    time_t janT = timegm(&jan);
+    time_t julT = timegm(&jul);
+    struct tm janLocal{};
+    localtime_r(&janT, &janLocal);
+    struct tm julLocal{};
+    localtime_r(&julT, &julLocal);
+    return janLocal.tm_isdst > 0 || julLocal.tm_isdst > 0 || janLocal.tm_gmtoff != julLocal.tm_gmtoff;
+}
+} // namespace
+#endif
 
 // ---------------------------------------------------------------------------
 // Local()
@@ -41,7 +67,7 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
         struct tm local_tm {};
         localtime_r(&t, &local_tm);
         long   offset_secs = local_tm.tm_gmtoff;
-        bool   hasDst      = (local_tm.tm_isdst > 0);
+        bool   hasDst      = posixZoneObservesDst();
         std::string name   = local_tm.tm_zone ? local_tm.tm_zone : "Local";
         TimeSpan offset    = TimeSpan::FromSeconds(static_cast<double>(offset_secs));
         return TimeZoneInfo("Local", offset, name, name, name, hasDst);
@@ -185,8 +211,8 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
 #if defined(_WIN32)
     const char* winName = ianaToWindows(id);
     if (!winName)
-        throw System::PlatformNotSupportedException(
-            "FindSystemTimeZoneById: IANA ID '" + id + "' has no Windows mapping.");
+        throw System::TimeZoneNotFoundException(
+            "The time zone ID '" + id + "' was not found on the local computer.");
 
     DYNAMIC_TIME_ZONE_INFORMATION dtzi{};
     for (DWORD i = 0; EnumDynamicTimeZoneInformation(i, &dtzi) != ERROR_NO_MORE_ITEMS; ++i) {
@@ -206,14 +232,15 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
         return std::shared_ptr<TimeZoneInfo>(
             new TimeZoneInfo(id, offset, id, stdName, stdName, hasDst));
     }
-    throw System::PlatformNotSupportedException(
-        "FindSystemTimeZoneById: Windows timezone '" + std::string(winName) + "' not found in registry.");
+    throw System::TimeZoneNotFoundException(
+        "The time zone ID '" + id + "' was not found on the local computer.");
 #elif defined(__EMSCRIPTEN__)
     throw System::PlatformNotSupportedException(
         "FindSystemTimeZoneById is not supported on Emscripten.");
 #else
     if (!zoneFileExists(id))
-        throw std::invalid_argument("Time zone not found: " + id);
+        throw System::TimeZoneNotFoundException(
+            "The time zone ID '" + id + "' was not found on the local computer.");
 
     long   offset_secs = 0;
     bool   hasDst      = false;
@@ -228,7 +255,7 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
         struct tm tm_buf {};
         localtime_r(&t, &tm_buf);
         offset_secs = tm_buf.tm_gmtoff;
-        hasDst      = (tm_buf.tm_isdst > 0);
+        hasDst      = posixZoneObservesDst();
         abbrev      = tm_buf.tm_zone ? tm_buf.tm_zone : id;
         if (!savedStr.empty()) setenv("TZ", savedStr.c_str(), 1);
         else                   unsetenv("TZ");

@@ -69,7 +69,7 @@ namespace System {
         TimeSpan GetElapsedTime(longcs startingTimestamp, longcs endingTimestamp) const {
             longcs freq = getTimestampFrequencyProperty();
             if (freq <= 0)
-                throw InvalidOperationException("TimestampFrequency must be positive.");
+                throw InvalidOperationException("The operation cannot be performed when TimeProvider.TimestampFrequency is zero or negative.");
             return TimeSpan(static_cast<longcs>(
                 (endingTimestamp - startingTimestamp) *
                 (static_cast<double>(TimeSpan::TicksPerSecond) / static_cast<double>(freq))

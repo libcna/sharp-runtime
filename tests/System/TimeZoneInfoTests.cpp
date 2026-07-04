@@ -5,10 +5,12 @@
 #include <stdexcept>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeZoneInfo.hpp"
+#include "System/TimeZoneNotFoundException.hpp"
 
 using System::TimeZoneInfo;
 using System::TimeSpan;
 using System::DateTime;
+using System::TimeZoneNotFoundException;
 
 // ---------------------------------------------------------------------------
 // Utc() static zone
@@ -103,12 +105,12 @@ TEST(TimeZoneInfoTests, FindSystemTimeZoneById_UTC_HasCorrectId) {
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_Unknown_ThrowsInvalidArgument) {
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("America/Unknown"),
-                 std::invalid_argument);
+                 TimeZoneNotFoundException);
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_PathTraversal_Throws) {
     EXPECT_THROW(TimeZoneInfo::FindSystemTimeZoneById("../../etc/passwd"),
-                 std::invalid_argument);
+                 TimeZoneNotFoundException);
 }
 
 TEST(TimeZoneInfoTests, FindSystemTimeZoneById_EuropePrague_OffsetInRange) {
@@ -164,6 +166,16 @@ TEST(TimeZoneInfoTests, CreateCustomTimeZone_NoSupportsDst) {
     EXPECT_FALSE(tz->getSupportsDaylightSavingTimeProperty());
 }
 
+TEST(TimeZoneInfoTests, SupportsDaylightSavingTime_ReflectsWholeYearNotJustNow) {
+    // America/New_York observes DST every year; this must be true regardless of
+    // which calendar month the test happens to run in.
+    auto ny = TimeZoneInfo::FindSystemTimeZoneById("America/New_York");
+    EXPECT_TRUE(ny->getSupportsDaylightSavingTimeProperty());
+    // America/Phoenix (Arizona) never observes DST, in any month.
+    auto phoenix = TimeZoneInfo::FindSystemTimeZoneById("America/Phoenix");
+    EXPECT_FALSE(phoenix->getSupportsDaylightSavingTimeProperty());
+}
+
 TEST(TimeZoneInfoTests, CreateCustomTimeZone_PositiveOffsetStoredCorrectly) {
     TimeSpan offset = TimeSpan::FromHours(2);
     auto tz = TimeZoneInfo::CreateCustomTimeZone("CET", offset, "Central European Time", "CET");
@@ -188,7 +200,7 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_UTC_DoesNotThrow) {
 TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_Unknown_Throws) {
     DateTime dt;
     EXPECT_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dt, "Mars/Olympus"),
-                 std::invalid_argument);
+                 TimeZoneNotFoundException);
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +405,7 @@ TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_DateTimeOffset_UTC_NoThrow
 TEST(TimeZoneInfoTests, ConvertTimeBySystemTimeZoneId_DateTimeOffset_Unknown_Throws) {
     System::DateTimeOffset dto;
     EXPECT_THROW(TimeZoneInfo::ConvertTimeBySystemTimeZoneId(dto, "Mars/Olympus"),
-                 std::invalid_argument);
+                 TimeZoneNotFoundException);
 }
 
 // ---------------------------------------------------------------------------

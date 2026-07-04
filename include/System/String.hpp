@@ -586,14 +586,14 @@ namespace System
          * @param width Minimum field width.
          * @param fill  Padding character (default '0').
          */
-        static std::string ToString(SharpRuntime::intcs value, int width, char fill = '0');
+        static std::string ToString(SharpRuntime::intcs value, SharpRuntime::intcs width, char fill = '0');
 
         /**
          * @brief Returns a hash code for @p value using std::hash&lt;std::string&gt;.
          *
          * C++ counterpart of .NET String.GetHashCode().
          */
-        static std::size_t GetHashCode(const std::string& value) noexcept;
+        static SharpRuntime::intcs GetHashCode(const std::string& value) noexcept;
 
         // -----------------------------------------------------------------------
         // Formatting

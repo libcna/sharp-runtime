@@ -11,21 +11,19 @@ namespace System {
      * @brief The exception that is thrown when the execution stack overflows
      * because it contains too many nested method calls.
      *
-     * C++ counterpart of .NET System.StackOverflowException.
+     * C++ counterpart of .NET System.StackOverflowException. Sealed in .NET (cannot
+     * be subclassed).
      */
-    class StackOverflowException : public SystemException {
+    class StackOverflowException final : public SystemException {
     public:
         /** @brief Initializes a new instance with the default message. */
-        StackOverflowException()
-            : SystemException("The requested operation caused a stack overflow.") {}
+        StackOverflowException();
 
         /** @brief Initializes a new instance with the specified message. */
-        explicit StackOverflowException(const char* message)
-            : SystemException(message) {}
+        explicit StackOverflowException(const char* message);
 
         /** @brief Initializes a new instance with the specified message. */
-        explicit StackOverflowException(const std::string& message)
-            : SystemException(message) {}
+        explicit StackOverflowException(const std::string& message);
 
         /**
          * @brief Initializes a new instance with a specified message and a
@@ -33,8 +31,7 @@ namespace System {
          *
          * C++ counterpart of .NET StackOverflowException(string, Exception).
          */
-        StackOverflowException(const std::string& message, std::exception_ptr innerException)
-            : SystemException(message, std::move(innerException)) {}
+        StackOverflowException(const std::string& message, std::exception_ptr innerException);
     };
 
 } // namespace System
