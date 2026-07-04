@@ -12,7 +12,12 @@
 #include <stdexcept>
 #include <string>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArithmeticException.hpp"
+
 namespace System {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides constants and static utility methods for the single-precision
@@ -101,6 +106,22 @@ public:
         return IsInteger(value) && std::fmod(std::abs(value), 2.0f) == 1.0f;
     }
 
+    /** @brief Returns true if @p value is not NaN (finite or infinite). C++ counterpart of .NET Single.IsRealNumber(float). */
+    [[nodiscard]] static bool IsRealNumber(float value) noexcept { return !std::isnan(value); }
+
+    /**
+     * @brief Returns true if @p value is a power of two. C++ counterpart of .NET Single.IsPow2(float).
+     * Returns false for zero, negative values, NaN, and infinity.
+     */
+    [[nodiscard]] static bool IsPow2(float value) noexcept {
+        if (value <= 0.0f || !std::isfinite(value)) return false;
+        uint32_t bits;
+        static_assert(sizeof(float) == sizeof(uint32_t));
+        __builtin_memcpy(&bits, &value, sizeof(bits));
+        constexpr uint32_t TrailingMask = 0x007F'FFFFu;
+        return (bits & TrailingMask) == 0;
+    }
+
     // -------------------------------------------------------------------------
     // Arithmetic
     // -------------------------------------------------------------------------
@@ -108,37 +129,80 @@ public:
     /** @brief Returns the absolute value of @p value. C++ counterpart of .NET Single.Abs(float). */
     [[nodiscard]] static float Abs(float value) noexcept { return std::abs(value); }
 
-    /** @brief Returns -1, 0, or 1 depending on the sign of @p value. C++ counterpart of .NET Single.Sign(float). */
-    [[nodiscard]] static int Sign(float value) {
-        if (std::isnan(value)) throw std::invalid_argument("NaN is not a valid argument for Sign.");
-        return (value > 0.0f) - (value < 0.0f);
+    /**
+     * @brief Returns -1, 0, or 1 depending on the sign of @p value.
+     * C++ counterpart of .NET Single.Sign(float).
+     * @throws System::ArithmeticException if @p value is NaN, matching .NET (all
+     *         relational comparisons against NaN are false, so a naive comparison
+     *         chain would silently return 0 instead).
+     */
+    [[nodiscard]] static intcs Sign(float value) {
+        if (value < 0.0f) return -1;
+        if (value > 0.0f) return  1;
+        if (value == 0.0f) return 0;
+        throw ArithmeticException("Function does not accept floating point Not-a-Number values.");
     }
-
-    /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Single.Clamp(float,float,float). */
-    [[nodiscard]] static float Clamp(float value, float min, float max) noexcept {
-        return value < min ? min : (value > max ? max : value);
-    }
-
-    /** @brief Returns the larger of @p x and @p y. C++ counterpart of .NET Single.Max(float,float). */
-    [[nodiscard]] static float Max(float x, float y) noexcept { return std::fmax(x, y); }
-
-    /** @brief Returns the smaller of @p x and @p y. C++ counterpart of .NET Single.Min(float,float). */
-    [[nodiscard]] static float Min(float x, float y) noexcept { return std::fmin(x, y); }
 
     /**
-     * @brief Returns the value with the larger magnitude; prefers @p x on tie.
+     * @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Single.Clamp(float,float,float).
+     * @throws std::invalid_argument if @p min is greater than @p max.
+     */
+    [[nodiscard]] static float Clamp(float value, float min, float max) {
+        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+        return Min(Max(value, min), max);
+    }
+
+    /**
+     * @brief Returns the larger of @p x and @p y.
+     *
+     * C++ counterpart of .NET Single.Max(float,float) (matches IEEE 754-2019
+     * `maximum`). Unlike std::fmax (which returns the non-NaN argument when one
+     * side is NaN), this propagates NaN if either argument is NaN, and treats
+     * +0 as greater than -0, matching .NET's actual semantics exactly.
+     */
+    [[nodiscard]] static float Max(float x, float y) noexcept {
+        if (x != y) {
+            if (!std::isnan(x)) return y < x ? x : y;
+            return x;
+        }
+        return std::signbit(y) ? x : y;
+    }
+
+    /**
+     * @brief Returns the smaller of @p x and @p y.
+     *
+     * C++ counterpart of .NET Single.Min(float,float) (matches IEEE 754-2019
+     * `minimum`). Unlike std::fmin, this propagates NaN if either argument is
+     * NaN, and treats +0 as greater than -0, matching .NET's actual semantics.
+     */
+    [[nodiscard]] static float Min(float x, float y) noexcept {
+        if (x != y) {
+            if (!std::isnan(x)) return x < y ? x : y;
+            return x;
+        }
+        return std::signbit(x) ? x : y;
+    }
+
+    /**
+     * @brief Returns the value with the larger magnitude; if equal magnitude, returns the positive one.
      * C++ counterpart of .NET Single.MaxMagnitude(float,float).
      */
     [[nodiscard]] static float MaxMagnitude(float x, float y) noexcept {
-        return std::abs(x) >= std::abs(y) ? x : y;
+        float ax = std::abs(x), ay = std::abs(y);
+        if (ax > ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? y : x;
+        return y;
     }
 
     /**
-     * @brief Returns the value with the smaller magnitude; prefers @p x on tie.
+     * @brief Returns the value with the smaller magnitude; if equal magnitude, returns the negative one.
      * C++ counterpart of .NET Single.MinMagnitude(float,float).
      */
     [[nodiscard]] static float MinMagnitude(float x, float y) noexcept {
-        return std::abs(x) <= std::abs(y) ? x : y;
+        float ax = std::abs(x), ay = std::abs(y);
+        if (ax < ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? x : y;
+        return y;
     }
 
     /**
@@ -166,7 +230,7 @@ public:
     [[nodiscard]] static float Round(float x) noexcept { return std::nearbyint(x); }
 
     /** @brief Rounds @p x to @p digits decimal places (ties to even). C++ counterpart of .NET Single.Round(float,int). */
-    [[nodiscard]] static float Round(float x, int digits) noexcept {
+    [[nodiscard]] static float Round(float x, intcs digits) noexcept {
         float factor = std::pow(10.0f, static_cast<float>(digits));
         return std::nearbyint(x * factor) / factor;
     }
@@ -209,11 +273,51 @@ public:
     /** @brief Returns the cube root of @p x. C++ counterpart of .NET Single.Cbrt(float). */
     [[nodiscard]] static float Cbrt(float x) noexcept { return std::cbrt(x); }
 
+private:
+    [[nodiscard]] static float RootNPositive(float x, intcs n) noexcept {
+        if (std::isfinite(x)) {
+            if (x != 0.0f) {
+                if (x > 0.0f || (n % 2 != 0)) {
+                    float result = static_cast<float>(std::pow(static_cast<double>(std::abs(x)), 1.0 / n));
+                    return std::copysign(result, x);
+                }
+                return NaN;
+            }
+            return (n % 2 == 0) ? 0.0f : std::copysign(0.0f, x);
+        }
+        if (std::isnan(x)) return NaN;
+        if (x > 0.0f) return PositiveInfinity;
+        return (n % 2 != 0) ? NegativeInfinity : NaN;
+    }
+
+    [[nodiscard]] static float RootNNegative(float x, intcs n) noexcept {
+        if (std::isfinite(x)) {
+            if (x != 0.0f) {
+                if (x > 0.0f || (n % 2 != 0)) {
+                    float result = static_cast<float>(std::pow(static_cast<double>(std::abs(x)), 1.0 / n));
+                    return std::copysign(result, x);
+                }
+                return NaN;
+            }
+            return (n % 2 == 0) ? PositiveInfinity : std::copysign(PositiveInfinity, x);
+        }
+        if (std::isnan(x)) return NaN;
+        if (x > 0.0f) return 0.0f;
+        return (n % 2 != 0) ? NegativeZero : NaN;
+    }
+
+public:
     /**
      * @brief Returns the n-th root of @p x. C++ counterpart of .NET Single.RootN(float,int).
      */
-    [[nodiscard]] static float RootN(float x, int n) noexcept {
-        return std::pow(x, 1.0f / static_cast<float>(n));
+    [[nodiscard]] static float RootN(float x, intcs n) noexcept {
+        if (n > 0) {
+            if (n == 2) return x != 0.0f ? Sqrt(x) : 0.0f;
+            if (n == 3) return Cbrt(x);
+            return RootNPositive(x, n);
+        }
+        if (n < 0) return RootNNegative(x, n);
+        return NaN;
     }
 
     /** @brief Returns an estimate of 1/x. C++ counterpart of .NET Single.ReciprocalEstimate(float). */
@@ -354,12 +458,12 @@ public:
      * @brief Returns the base-2 integer exponent of @p x.
      * C++ counterpart of .NET Single.ILogB(float).
      */
-    [[nodiscard]] static int ILogB(float x) noexcept { return std::ilogb(x); }
+    [[nodiscard]] static intcs ILogB(float x) noexcept { return static_cast<intcs>(std::ilogb(x)); }
 
     /**
      * @brief Returns x * 2^n. C++ counterpart of .NET Single.ScaleB(float,int).
      */
-    [[nodiscard]] static float ScaleB(float x, int n) noexcept { return std::ldexp(x, n); }
+    [[nodiscard]] static float ScaleB(float x, intcs n) noexcept { return std::ldexp(x, n); }
 
     // -------------------------------------------------------------------------
     // Angle conversion
@@ -376,22 +480,35 @@ public:
     // -------------------------------------------------------------------------
 
     /** @brief Returns negative/zero/positive when @p a is less than/equal to/greater than @p b. C++ counterpart of .NET Single.CompareTo(float). */
-    [[nodiscard]] static int CompareTo(float a, float b) noexcept {
+    [[nodiscard]] static intcs CompareTo(float a, float b) noexcept {
         if (std::isnan(a) && std::isnan(b)) return 0;
         if (std::isnan(a)) return -1;
         if (std::isnan(b)) return  1;
-        return (a > b) - (a < b);
+        return static_cast<intcs>((a > b) - (a < b));
     }
 
-    /** @brief Returns true if @p a equals @p b (with NaN != NaN semantics). C++ counterpart of .NET Single.Equals(float). */
-    [[nodiscard]] static bool Equals(float a, float b) noexcept { return a == b; }
+    /**
+     * @brief Returns true if @p a equals @p b. C++ counterpart of .NET Single.Equals(float).
+     * Unlike @c operator==, two NaN values are considered equal to each other here.
+     */
+    [[nodiscard]] static bool Equals(float a, float b) noexcept {
+        return a == b || (std::isnan(a) && std::isnan(b));
+    }
 
-    /** @brief Returns a hash code for @p value. C++ counterpart of .NET Single.GetHashCode(). */
-    [[nodiscard]] static int GetHashCode(float value) noexcept {
-        int bits;
+    /**
+     * @brief Returns a hash code for @p value. C++ counterpart of .NET Single.GetHashCode().
+     * All NaN bit patterns and both signed zeros hash identically, so that values
+     * considered Equals() (see above) always produce the same hash code.
+     */
+    [[nodiscard]] static intcs GetHashCode(float value) noexcept {
+        uint32_t bits;
         static_assert(sizeof(bits) == sizeof(value));
         __builtin_memcpy(&bits, &value, sizeof(bits));
-        return bits;
+        if (std::isnan(value) || value == 0.0f) {
+            constexpr uint32_t PositiveInfinityBits = 0x7F80'0000u;
+            bits &= PositiveInfinityBits;
+        }
+        return static_cast<intcs>(bits);
     }
 
     // -------------------------------------------------------------------------
@@ -440,7 +557,7 @@ public:
         return std::to_string(value);
     }
 
-    /** @brief Converts @p value to a string using a format specifier ("F2", "E3", "G", "R"). C++ counterpart of .NET Single.ToString(string). */
+    /** @brief Converts @p value to a string using a format specifier ("F2", "E3", "G", "R", "N2"). C++ counterpart of .NET Single.ToString(string). */
     [[nodiscard]] static std::string ToString(float value, const std::string& format) {
         if (format.empty()) return ToString(value);
         if (std::isnan(value)) return "NaN";
@@ -461,6 +578,11 @@ public:
         if (type == 'G' || type == 'g') {
             if (prec > 0) oss << std::setprecision(prec);
             oss << value;
+            return oss.str();
+        }
+        if (type == 'R' || type == 'r') return ToString(value);
+        if (type == 'N' || type == 'n') {
+            oss << std::fixed << std::setprecision(prec >= 0 ? prec : 2) << value;
             return oss.str();
         }
         return ToString(value);
