@@ -24,30 +24,30 @@ using System::Collections::Specialized::BitVector32;
 // ===========================================================================
 
 TEST(ReadOnlyObservableCollectionBatch19Test, CountAndIndexer) {
-    ObservableCollection<int> src;
-    src.Add(10); src.Add(20); src.Add(30);
-    ReadOnlyObservableCollection<int> roc(std::move(src));
+    auto src = std::make_shared<ObservableCollection<int>>();
+    src->Add(10); src->Add(20); src->Add(30);
+    ReadOnlyObservableCollection<int> roc(src);
     EXPECT_EQ(roc.getCountProperty(), 3);
     EXPECT_EQ(roc[1], 20);
 }
 
 TEST(ReadOnlyObservableCollectionBatch19Test, IsEmpty_True) {
-    ObservableCollection<int> empty;
+    auto empty = std::make_shared<ObservableCollection<int>>();
     ReadOnlyObservableCollection<int> roc(empty);
     EXPECT_TRUE(roc.getIsEmptyProperty());
 }
 
 TEST(ReadOnlyObservableCollectionBatch19Test, IsEmpty_False) {
-    ObservableCollection<int> src;
-    src.Add(1);
-    ReadOnlyObservableCollection<int> roc(std::move(src));
+    auto src = std::make_shared<ObservableCollection<int>>();
+    src->Add(1);
+    ReadOnlyObservableCollection<int> roc(src);
     EXPECT_FALSE(roc.getIsEmptyProperty());
 }
 
 TEST(ReadOnlyObservableCollectionBatch19Test, ContainsAndIndexOf) {
-    ObservableCollection<std::string> src;
-    src.Add("alpha"); src.Add("beta");
-    ReadOnlyObservableCollection<std::string> roc(std::move(src));
+    auto src = std::make_shared<ObservableCollection<std::string>>();
+    src->Add("alpha"); src->Add("beta");
+    ReadOnlyObservableCollection<std::string> roc(src);
     EXPECT_TRUE(roc.Contains("beta"));
     EXPECT_FALSE(roc.Contains("gamma"));
     EXPECT_EQ(roc.IndexOf("alpha"), 0);
@@ -61,12 +61,33 @@ TEST(ReadOnlyObservableCollectionBatch19Test, Empty_IsEmpty) {
 }
 
 TEST(ReadOnlyObservableCollectionBatch19Test, STLIteration) {
-    ObservableCollection<int> src;
-    src.Add(1); src.Add(2); src.Add(3);
-    ReadOnlyObservableCollection<int> roc(std::move(src));
+    auto src = std::make_shared<ObservableCollection<int>>();
+    src->Add(1); src->Add(2); src->Add(3);
+    ReadOnlyObservableCollection<int> roc(src);
     int sum = 0;
     for (const auto& v : roc) sum += v;
     EXPECT_EQ(sum, 6);
+}
+
+TEST(ReadOnlyObservableCollectionBatch19Test, LiveView_ReflectsSourceMutation) {
+    // The wrapper is a live view, not a snapshot: mutating the shared source afterwards
+    // must be visible through the read-only wrapper.
+    auto src = std::make_shared<ObservableCollection<int>>();
+    src->Add(1);
+    ReadOnlyObservableCollection<int> roc(src);
+    EXPECT_EQ(roc.getCountProperty(), 1);
+    src->Add(2);
+    EXPECT_EQ(roc.getCountProperty(), 2);
+    EXPECT_EQ(roc[1], 2);
+}
+
+TEST(ReadOnlyObservableCollectionBatch19Test, ForwardsCollectionChangedFromSource) {
+    auto src = std::make_shared<ObservableCollection<int>>();
+    ReadOnlyObservableCollection<int> roc(src);
+    bool fired = false;
+    roc.CollectionChanged.push_back([&](void*, const auto&) { fired = true; });
+    src->Add(42);
+    EXPECT_TRUE(fired);
 }
 
 // ===========================================================================
