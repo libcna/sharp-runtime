@@ -14,6 +14,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArithmeticException.hpp"
 
 namespace System {
 
@@ -178,9 +179,8 @@ public:
      */
     static double Clamp(double value, double min, double max)
     {
-        if (value < min) return min;
-        if (value > max) return max;
-        return value;
+        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+        return Min(Max(value, min), max);
     }
 
     /**
@@ -188,41 +188,75 @@ public:
      */
     static double CopySign(double value, double sign)            { return std::copysign(value, sign); }
 
-    /** @brief Returns the larger of two double-precision floating-point numbers. */
-    static double Max(double x, double y)                        { return std::fmax(x, y); }
-
-    /** @brief Returns the smaller of two double-precision floating-point numbers. */
-    static double Min(double x, double y)                        { return std::fmin(x, y); }
+    /**
+     * @brief Returns the larger of two double-precision floating-point numbers.
+     *
+     * C++ counterpart of .NET Double.Max(double,double) (matches IEEE 754-2019
+     * `maximum`). Unlike std::fmax (which returns the non-NaN argument when one
+     * side is NaN), this propagates NaN if either argument is NaN, and treats
+     * +0 as greater than -0, matching .NET's actual semantics exactly.
+     */
+    static double Max(double x, double y) noexcept
+    {
+        if (x != y) {
+            if (!std::isnan(x)) return y < x ? x : y;
+            return x;
+        }
+        return std::signbit(y) ? x : y;
+    }
 
     /**
-     * @brief Returns the value with the larger magnitude; prefers @p x on tie.
+     * @brief Returns the smaller of two double-precision floating-point numbers.
+     *
+     * C++ counterpart of .NET Double.Min(double,double) (matches IEEE 754-2019
+     * `minimum`). Unlike std::fmin, this propagates NaN if either argument is
+     * NaN, and treats +0 as greater than -0, matching .NET's actual semantics.
+     */
+    static double Min(double x, double y) noexcept
+    {
+        if (x != y) {
+            if (!std::isnan(x)) return x < y ? x : y;
+            return x;
+        }
+        return std::signbit(x) ? x : y;
+    }
+
+    /**
+     * @brief Returns the value with the larger magnitude; if equal magnitude, returns the positive one.
      * C++ counterpart of .NET Double.MaxMagnitude(double,double).
      */
     [[nodiscard]] static double MaxMagnitude(double x, double y) noexcept
     {
-        return std::abs(x) >= std::abs(y) ? x : y;
+        double ax = std::abs(x), ay = std::abs(y);
+        if (ax > ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? y : x;
+        return y;
     }
 
     /**
-     * @brief Returns the value with the smaller magnitude; prefers @p x on tie.
+     * @brief Returns the value with the smaller magnitude; if equal magnitude, returns the negative one.
      * C++ counterpart of .NET Double.MinMagnitude(double,double).
      */
     [[nodiscard]] static double MinMagnitude(double x, double y) noexcept
     {
-        return std::abs(x) <= std::abs(y) ? x : y;
+        double ax = std::abs(x), ay = std::abs(y);
+        if (ax < ay || std::isnan(ax)) return x;
+        if (ax == ay) return std::signbit(x) ? x : y;
+        return y;
     }
 
     /**
      * @brief Returns an integer that indicates the sign of a double-precision floating-point number.
      *
-     * Returns -1, 0, or 1. Throws if @p value is NaN.
+     * Returns -1, 0, or 1.
+     * @throws System::ArithmeticException if @p value is NaN, matching .NET.
      */
-    static int Sign(double value)
+    static intcs Sign(double value)
     {
-        if (IsNaN(value)) throw std::invalid_argument("Value is not a number (NaN).");
         if (value < 0.0) return -1;
         if (value > 0.0) return  1;
-        return 0;
+        if (value == 0.0) return 0;
+        throw ArithmeticException("Function does not accept floating point Not-a-Number values.");
     }
 
     // -----------------------------------------------------------------------
@@ -286,10 +320,51 @@ public:
     /** @brief Returns the cube root of @p x. C++ counterpart of .NET Double.Cbrt(double). */
     [[nodiscard]] static double Cbrt(double x) noexcept { return std::cbrt(x); }
 
+private:
+    [[nodiscard]] static double RootNPositive(double x, intcs n) noexcept {
+        if (std::isfinite(x)) {
+            if (x != 0.0) {
+                if (x > 0.0 || (n % 2 != 0)) {
+                    double result = std::pow(std::abs(x), 1.0 / n);
+                    return std::copysign(result, x);
+                }
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            return (n % 2 == 0) ? 0.0 : std::copysign(0.0, x);
+        }
+        if (std::isnan(x)) return std::numeric_limits<double>::quiet_NaN();
+        if (x > 0.0) return std::numeric_limits<double>::infinity();
+        return (n % 2 != 0) ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::quiet_NaN();
+    }
+
+    [[nodiscard]] static double RootNNegative(double x, intcs n) noexcept {
+        if (std::isfinite(x)) {
+            if (x != 0.0) {
+                if (x > 0.0 || (n % 2 != 0)) {
+                    double result = std::pow(std::abs(x), 1.0 / n);
+                    return std::copysign(result, x);
+                }
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            return (n % 2 == 0) ? std::numeric_limits<double>::infinity()
+                                 : std::copysign(std::numeric_limits<double>::infinity(), x);
+        }
+        if (std::isnan(x)) return std::numeric_limits<double>::quiet_NaN();
+        if (x > 0.0) return 0.0;
+        return (n % 2 != 0) ? -0.0 : std::numeric_limits<double>::quiet_NaN();
+    }
+
+public:
     /** @brief Returns the n-th root of @p x. C++ counterpart of .NET Double.RootN(double,int). */
     [[nodiscard]] static double RootN(double x, intcs n) noexcept
     {
-        return std::pow(x, 1.0 / static_cast<double>(n));
+        if (n > 0) {
+            if (n == 2) return x != 0.0 ? Sqrt(x) : 0.0;
+            if (n == 3) return Cbrt(x);
+            return RootNPositive(x, n);
+        }
+        if (n < 0) return RootNNegative(x, n);
+        return std::numeric_limits<double>::quiet_NaN();
     }
 
     /** @brief Returns an estimate of 1/x. C++ counterpart of .NET Double.ReciprocalEstimate(double). */

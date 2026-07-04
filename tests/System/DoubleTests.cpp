@@ -5,8 +5,10 @@
 #include <cmath>
 #include <limits>
 #include "System/Double.hpp"
+#include "System/ArithmeticException.hpp"
 
 using System::Double;
+using System::ArithmeticException;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -260,7 +262,37 @@ TEST(DoubleTests, Sign_Zero) {
 }
 
 TEST(DoubleTests, Sign_NaN_Throws) {
-    EXPECT_THROW(Double::Sign(Double::NaN), std::invalid_argument);
+    EXPECT_THROW(Double::Sign(Double::NaN), ArithmeticException);
+}
+
+TEST(DoubleTests, Clamp_MinGreaterThanMax_Throws) {
+    EXPECT_THROW(Double::Clamp(1.0, 10.0, 0.0), std::invalid_argument);
+}
+
+TEST(DoubleTests, Max_PropagatesNaN) {
+    EXPECT_TRUE(Double::IsNaN(Double::Max(Double::NaN, 1.0)));
+    EXPECT_TRUE(Double::IsNaN(Double::Max(1.0, Double::NaN)));
+}
+
+TEST(DoubleTests, Min_PropagatesNaN) {
+    EXPECT_TRUE(Double::IsNaN(Double::Min(Double::NaN, 1.0)));
+    EXPECT_TRUE(Double::IsNaN(Double::Min(1.0, Double::NaN)));
+}
+
+TEST(DoubleTests, MaxMagnitude_TieBreaksToPositive) {
+    EXPECT_FALSE(Double::IsNegative(Double::MaxMagnitude(-0.0, 0.0)));
+}
+
+TEST(DoubleTests, MinMagnitude_TieBreaksToNegative) {
+    EXPECT_TRUE(Double::IsNegative(Double::MinMagnitude(0.0, -0.0)));
+}
+
+TEST(DoubleTests, RootN_NegativeBase_OddRoot) {
+    EXPECT_NEAR(Double::RootN(-8.0, 3), -2.0, 0.0001);
+}
+
+TEST(DoubleTests, RootN_NegativeBase_EvenRoot_NaN) {
+    EXPECT_TRUE(Double::IsNaN(Double::RootN(-8.0, 4)));
 }
 
 // ---------------------------------------------------------------------------

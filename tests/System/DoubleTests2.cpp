@@ -18,12 +18,12 @@ using System::Double;
 
 TEST(DoubleTests2, MaxMagnitude_PicksLargerAbsoluteValue) {
     EXPECT_EQ(Double::MaxMagnitude(-5.0, 3.0), -5.0);
-    EXPECT_EQ(Double::MaxMagnitude(-5.0, 5.0), -5.0); // tie -> prefers x
+    EXPECT_EQ(Double::MaxMagnitude(-5.0, 5.0), 5.0); // tie -> prefers the positive value
 }
 
 TEST(DoubleTests2, MinMagnitude_PicksSmallerAbsoluteValue) {
     EXPECT_EQ(Double::MinMagnitude(-5.0, 3.0), 3.0);
-    EXPECT_EQ(Double::MinMagnitude(-5.0, 5.0), -5.0); // tie -> prefers x
+    EXPECT_EQ(Double::MinMagnitude(-5.0, 5.0), -5.0); // tie -> prefers the negative value
 }
 
 // ---------------------------------------------------------------------------
