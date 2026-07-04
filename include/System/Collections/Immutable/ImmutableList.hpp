@@ -7,8 +7,13 @@
 #include <initializer_list>
 #include <memory>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Immutable {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents an immutable ordered list of elements.
@@ -23,6 +28,20 @@ class ImmutableList {
     std::shared_ptr<const std::vector<T>> data_;
 
     explicit ImmutableList(std::shared_ptr<const std::vector<T>> data) : data_(std::move(data)) {}
+
+    void requireIndexInRange(intcs index) const {
+        if (index < 0 || index >= static_cast<intcs>(data_->size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+    }
+
+    void requireValidRange(intcs index, intcs count) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (static_cast<intcs>(data_->size()) - index < count)
+            throw System::ArgumentException("Offset and length were out of bounds for the array, or count is greater than the number of elements from index to the end of the source collection.");
+    }
 
 public:
     /** @brief Default-constructs an empty ImmutableList. */
@@ -64,7 +83,7 @@ public:
      * C++ counterpart of .NET ImmutableList<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_->size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the list is empty.
@@ -81,7 +100,8 @@ public:
      * @param index The zero-based index.
      * @return A const reference to the element.
      */
-    const T& operator[](int index) const {
+    const T& operator[](intcs index) const {
+        requireIndexInRange(index);
         return (*data_)[static_cast<size_t>(index)];
     }
 
@@ -119,7 +139,9 @@ public:
      * @param item  The element to insert.
      * @return A new ImmutableList with the element inserted.
      */
-    [[nodiscard]] ImmutableList<T> Insert(int index, const T& item) const {
+    [[nodiscard]] ImmutableList<T> Insert(intcs index, const T& item) const {
+        if (index < 0 || index > static_cast<intcs>(data_->size()))
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->insert(v->begin() + index, item);
         return ImmutableList<T>(std::move(v));
@@ -133,7 +155,9 @@ public:
      * @param items The elements to insert.
      * @return A new ImmutableList with the elements inserted.
      */
-    [[nodiscard]] ImmutableList<T> InsertRange(int index, const std::vector<T>& items) const {
+    [[nodiscard]] ImmutableList<T> InsertRange(intcs index, const std::vector<T>& items) const {
+        if (index < 0 || index > static_cast<intcs>(data_->size()))
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->insert(v->begin() + index, items.begin(), items.end());
         return ImmutableList<T>(std::move(v));
@@ -147,7 +171,8 @@ public:
      * @param item  The new value.
      * @return A new ImmutableList with the replacement applied.
      */
-    [[nodiscard]] ImmutableList<T> SetItem(int index, const T& item) const {
+    [[nodiscard]] ImmutableList<T> SetItem(intcs index, const T& item) const {
+        requireIndexInRange(index);
         auto v = std::make_shared<std::vector<T>>(*data_);
         (*v)[static_cast<size_t>(index)] = item;
         return ImmutableList<T>(std::move(v));
@@ -205,7 +230,8 @@ public:
      * @param index The zero-based index of the element to remove.
      * @return A new ImmutableList with the element removed.
      */
-    [[nodiscard]] ImmutableList<T> RemoveAt(int index) const {
+    [[nodiscard]] ImmutableList<T> RemoveAt(intcs index) const {
+        requireIndexInRange(index);
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index);
         return ImmutableList<T>(std::move(v));
@@ -219,7 +245,8 @@ public:
      * @param count The number of elements to remove.
      * @return A new ImmutableList with the range removed.
      */
-    [[nodiscard]] ImmutableList<T> RemoveRange(int index, int count) const {
+    [[nodiscard]] ImmutableList<T> RemoveRange(intcs index, intcs count) const {
+        requireValidRange(index, count);
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index, v->begin() + index + count);
         return ImmutableList<T>(std::move(v));
@@ -243,9 +270,9 @@ public:
      * @param item The element to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const T& item) const {
+    [[nodiscard]] intcs IndexOf(const T& item) const {
         auto it = std::find(data_->begin(), data_->end(), item);
-        return it == data_->end() ? -1 : static_cast<int>(it - data_->begin());
+        return it == data_->end() ? -1 : static_cast<intcs>(it - data_->begin());
     }
 
     /**
@@ -255,8 +282,8 @@ public:
      * @param item The element to locate.
      * @return The zero-based index of the last occurrence, or -1 if not found.
      */
-    [[nodiscard]] int LastIndexOf(const T& item) const {
-        for (int i = getCountProperty() - 1; i >= 0; --i)
+    [[nodiscard]] intcs LastIndexOf(const T& item) const {
+        for (intcs i = getCountProperty() - 1; i >= 0; --i)
             if ((*data_)[static_cast<size_t>(i)] == item) return i;
         return -1;
     }
@@ -270,10 +297,10 @@ public:
      * @param item The element to search for.
      * @return The zero-based index if found; otherwise ~insertionPoint.
      */
-    [[nodiscard]] int BinarySearch(const T& item) const {
-        int lo = 0, hi = getCountProperty() - 1;
+    [[nodiscard]] intcs BinarySearch(const T& item) const {
+        intcs lo = 0, hi = getCountProperty() - 1;
         while (lo <= hi) {
-            int mid = lo + (hi - lo) / 2;
+            intcs mid = lo + (hi - lo) / 2;
             const T& mid_val = (*data_)[static_cast<size_t>(mid)];
             if (mid_val == item) return mid;
             if (mid_val < item) lo = mid + 1;

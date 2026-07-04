@@ -5,8 +5,12 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Immutable {
+
+    using SharpRuntime::intcs;
 
     /** An immutable last-in, first-out (LIFO) stack. */
     template<typename T>
@@ -27,11 +31,14 @@ namespace System::Collections::Immutable {
         /** Returns true if the stack contains no elements. */
         [[nodiscard]] bool getIsEmptyProperty() const { return data_->empty(); }
         /** Gets the number of elements in the stack. */
-        [[nodiscard]] int  getCountProperty()   const { return static_cast<int>(data_->size()); }
+        [[nodiscard]] intcs getCountProperty()   const { return static_cast<intcs>(data_->size()); }
 
-        /** Returns the element at the top of the stack without removing it. */
+        /**
+         * @brief Returns the element at the top of the stack without removing it.
+         * @throws System::InvalidOperationException if the stack is empty.
+         */
         [[nodiscard]] const T& Peek() const {
-            if (data_->empty()) throw std::out_of_range("Stack is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Stack is empty.");
             return data_->back();
         }
 
@@ -42,17 +49,23 @@ namespace System::Collections::Immutable {
             return ImmutableStack<T>(std::move(v));
         }
 
-        /** Returns a new stack with the top element removed. */
+        /**
+         * @brief Returns a new stack with the top element removed.
+         * @throws System::InvalidOperationException if the stack is empty.
+         */
         [[nodiscard]] ImmutableStack<T> Pop() const {
-            if (data_->empty()) throw std::out_of_range("Stack is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Stack is empty.");
             auto v = std::make_shared<VecT>(*data_);
             v->pop_back();
             return ImmutableStack<T>(std::move(v));
         }
 
-        /** Returns a new stack with the top element removed, and outputs that element via value. */
+        /**
+         * @brief Returns a new stack with the top element removed, and outputs that element via value.
+         * @throws System::InvalidOperationException if the stack is empty.
+         */
         [[nodiscard]] ImmutableStack<T> Pop(T& value) const {
-            if (data_->empty()) throw std::out_of_range("Stack is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Stack is empty.");
             value = data_->back();
             auto v = std::make_shared<VecT>(*data_);
             v->pop_back();

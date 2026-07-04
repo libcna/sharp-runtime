@@ -7,8 +7,14 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Immutable {
+
+using SharpRuntime::intcs;
+using System::Collections::Generic::KeyNotFoundException;
 
 /**
  * @brief Represents an immutable dictionary whose entries are sorted by key.
@@ -47,7 +53,7 @@ public:
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_->size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the dictionary is empty.
@@ -113,11 +119,11 @@ public:
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.Item[TKey] getter.
      * @param key The key whose value to get.
      * @return A const reference to the associated value.
-     * @throws std::out_of_range if the key is not found.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
      */
     const TValue& operator[](const TKey& key) const {
         auto it = data_->find(key);
-        if (it == data_->end()) throw std::out_of_range("Key not found.");
+        if (it == data_->end()) throw KeyNotFoundException("The given key was not present in the dictionary.");
         return it->second;
     }
 
@@ -128,13 +134,13 @@ public:
      * @param key   The key to add.
      * @param value The value to add.
      * @return A new ImmutableSortedDictionary with the pair added.
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         Add(const TKey& key, const TValue& value) const {
         auto m = std::make_shared<MapT>(*data_);
         if (m->find(key) != m->end())
-            throw std::invalid_argument("An item with the same key has already been added.");
+            throw System::ArgumentException("An item with the same key has already been added.");
         (*m)[key] = value;
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
     }
@@ -145,14 +151,14 @@ public:
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.AddRange(IEnumerable<KeyValuePair<TKey,TValue>>).
      * @param pairs The pairs to add.
      * @return A new ImmutableSortedDictionary with all pairs added.
-     * @throws std::invalid_argument if any key already exists.
+     * @throws System::ArgumentException if any key already exists.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         AddRange(const std::vector<std::pair<TKey, TValue>>& pairs) const {
         auto m = std::make_shared<MapT>(*data_);
         for (const auto& p : pairs) {
             if (m->find(p.first) != m->end())
-                throw std::invalid_argument("An item with the same key has already been added.");
+                throw System::ArgumentException("An item with the same key has already been added.");
             (*m)[p.first] = p.second;
         }
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));

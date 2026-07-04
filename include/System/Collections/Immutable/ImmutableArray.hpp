@@ -8,8 +8,14 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 namespace System::Collections::Immutable {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents an immutable array with value semantics and structural-sharing mutations.
@@ -65,7 +71,7 @@ public:
      * C++ counterpart of .NET ImmutableArray<T>.Length.
      * @return The number of elements.
      */
-    [[nodiscard]] int getLengthProperty() const { return static_cast<int>(data_->size()); }
+    [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the array is empty.
@@ -89,11 +95,12 @@ public:
      * C++ counterpart of .NET ImmutableArray<T>.Item[int].
      * @param index The zero-based index.
      * @return A const reference to the element.
-     * @throws std::out_of_range if index is out of range.
+     * @throws System::IndexOutOfRangeException if index is out of range (matches .NET's real
+     *         ImmutableArray<T> indexer, which is a thin wrapper over the raw backing array).
      */
-    const T& operator[](int index) const {
+    const T& operator[](intcs index) const {
         if (index < 0 || index >= getLengthProperty())
-            throw std::out_of_range("Index out of range.");
+            throw System::IndexOutOfRangeException();
         return (*data_)[static_cast<size_t>(index)];
     }
 
@@ -131,7 +138,9 @@ public:
      * @param item  The element to insert.
      * @return A new ImmutableArray with the element inserted.
      */
-    [[nodiscard]] ImmutableArray<T> Insert(int index, const T& item) const {
+    [[nodiscard]] ImmutableArray<T> Insert(intcs index, const T& item) const {
+        if (index < 0 || index > getLengthProperty())
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->insert(v->begin() + index, item);
         return ImmutableArray<T>(std::move(v));
@@ -145,7 +154,9 @@ public:
      * @param items The elements to insert.
      * @return A new ImmutableArray with the elements inserted.
      */
-    [[nodiscard]] ImmutableArray<T> InsertRange(int index, const std::vector<T>& items) const {
+    [[nodiscard]] ImmutableArray<T> InsertRange(intcs index, const std::vector<T>& items) const {
+        if (index < 0 || index > getLengthProperty())
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->insert(v->begin() + index, items.begin(), items.end());
         return ImmutableArray<T>(std::move(v));
@@ -159,7 +170,9 @@ public:
      * @param item  The new value.
      * @return A new ImmutableArray with the replacement applied.
      */
-    [[nodiscard]] ImmutableArray<T> SetItem(int index, const T& item) const {
+    [[nodiscard]] ImmutableArray<T> SetItem(intcs index, const T& item) const {
+        if (index < 0 || index >= getLengthProperty())
+            throw System::IndexOutOfRangeException();
         auto v = std::make_shared<std::vector<T>>(*data_);
         (*v)[static_cast<size_t>(index)] = item;
         return ImmutableArray<T>(std::move(v));
@@ -204,7 +217,9 @@ public:
      * @param index The zero-based index of the element to remove.
      * @return A new ImmutableArray with the element removed.
      */
-    [[nodiscard]] ImmutableArray<T> RemoveAt(int index) const {
+    [[nodiscard]] ImmutableArray<T> RemoveAt(intcs index) const {
+        if (index < 0 || index >= getLengthProperty())
+            throw System::IndexOutOfRangeException();
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index);
         return ImmutableArray<T>(std::move(v));
@@ -253,9 +268,9 @@ public:
      * @param item The element to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const T& item) const {
+    [[nodiscard]] intcs IndexOf(const T& item) const {
         auto it = std::find(data_->begin(), data_->end(), item);
-        return it == data_->end() ? -1 : static_cast<int>(it - data_->begin());
+        return it == data_->end() ? -1 : static_cast<intcs>(it - data_->begin());
     }
 
     /**
@@ -265,8 +280,8 @@ public:
      * @param item The element to locate.
      * @return The zero-based index of the last occurrence, or -1 if not found.
      */
-    [[nodiscard]] int LastIndexOf(const T& item) const {
-        for (int i = getLengthProperty() - 1; i >= 0; --i)
+    [[nodiscard]] intcs LastIndexOf(const T& item) const {
+        for (intcs i = getLengthProperty() - 1; i >= 0; --i)
             if ((*data_)[static_cast<size_t>(i)] == item) return i;
         return -1;
     }
