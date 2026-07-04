@@ -8,6 +8,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -719,7 +720,10 @@ namespace System
 
     SharpRuntime::intcs String::GetHashCode(const std::string& value) noexcept
     {
-        std::size_t h = std::hash<std::string>{}(value);
+        // Widen to a fixed 64-bit type before shifting by 32 - std::size_t is only 32 bits
+        // on some targets (e.g. Emscripten's wasm32), where "h >> 32" would shift by the
+        // full width of the type.
+        const auto h = static_cast<std::uint64_t>(std::hash<std::string>{}(value));
         return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
     }
 
