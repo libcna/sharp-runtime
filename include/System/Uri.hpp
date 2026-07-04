@@ -5,7 +5,11 @@
 #include <memory>
 #include <string>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Enumerates the kinds of URI a System::Uri may represent.
@@ -21,7 +25,9 @@ namespace System {
     /**
      * @brief Provides an object representation of a uniform resource identifier (URI).
      *
-     * Handles http, https, ftp, file, urn, and generic absolute URIs.
+     * Handles http, https, ftp, file, and generic hierarchical absolute URIs
+     * (scheme "://" authority path), as well as opaque absolute URIs with no
+     * authority (e.g. "mailto:user@example.com", "urn:isbn:0-395-36341-1").
      * Parses scheme, user-info, host, port, path, query, and fragment components.
      *
      * Partial C++ counterpart of .NET System.Uri.
@@ -34,14 +40,14 @@ namespace System {
         std::string scheme_;
         std::string userInfo_;
         std::string host_;
-        int         port_          = -1;
+        intcs       port_          = -1;
         std::string path_;
         std::string query_;    ///< includes leading '?'
         std::string fragment_; ///< includes leading '#'
         bool        isAbsoluteUri_ = true;
 
         /** Returns the well-known default port for the given scheme, or -1. */
-        static int defaultPortForScheme(const std::string& scheme);
+        static intcs defaultPortForScheme(const std::string& scheme);
 
         /** Parses @p uriString into component fields. Called by all constructors. */
         void parse(const std::string& uriString);
@@ -80,7 +86,7 @@ namespace System {
         [[nodiscard]] const std::string& getHostProperty()          const;
 
         /** @brief Returns the port number, or the scheme default, or -1 if none. */
-        [[nodiscard]] int                getPortProperty()           const;
+        [[nodiscard]] intcs               getPortProperty()           const;
 
         /** @brief Returns the absolute path component (starting with '/'). */
         [[nodiscard]] const std::string& getAbsolutePathProperty()  const;

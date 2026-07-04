@@ -228,3 +228,42 @@ TEST(UriTests, Ftp_Scheme) {
     Uri u("ftp://ftp.example.com/pub/file.txt");
     EXPECT_EQ(u.getSchemeProperty(), "ftp");
 }
+
+// ---------------------------------------------------------------------------
+// Opaque (non-hierarchical) absolute URIs — no "//" authority
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Mailto_IsAbsolute) {
+    Uri u("mailto:user@example.com");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+}
+
+TEST(UriTests, Mailto_Scheme) {
+    Uri u("mailto:user@example.com");
+    EXPECT_EQ(u.getSchemeProperty(), "mailto");
+}
+
+TEST(UriTests, Mailto_OpaquePartInPath) {
+    Uri u("mailto:user@example.com");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "user@example.com");
+}
+
+TEST(UriTests, Mailto_HostIsEmpty) {
+    Uri u("mailto:user@example.com");
+    EXPECT_TRUE(u.getHostProperty().empty());
+}
+
+TEST(UriTests, Urn_IsAbsolute) {
+    Uri u("urn:isbn:0-395-36341-1");
+    EXPECT_TRUE(u.getIsAbsoluteUriProperty());
+    EXPECT_EQ(u.getSchemeProperty(), "urn");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "isbn:0-395-36341-1");
+}
+
+TEST(UriTests, Opaque_WithQueryAndFragment) {
+    Uri u("tel:+1-555-0100?ext=42#note");
+    EXPECT_EQ(u.getSchemeProperty(), "tel");
+    EXPECT_EQ(u.getAbsolutePathProperty(), "+1-555-0100");
+    EXPECT_EQ(u.getQueryProperty(), "?ext=42");
+    EXPECT_EQ(u.getFragmentProperty(), "#note");
+}
