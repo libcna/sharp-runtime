@@ -123,14 +123,14 @@ TEST(ConcurrentDictionaryTests, Keys_ReturnsAllKeys) {
     ConcurrentDictionary<std::string, int> d;
     d.TryAdd("a", 1);
     d.TryAdd("b", 2);
-    auto keys = d.Keys();
+    auto keys = d.getKeysProperty();
     EXPECT_EQ(keys.size(), 2u);
 }
 
 TEST(ConcurrentDictionaryTests, Values_ReturnsAllValues) {
     ConcurrentDictionary<std::string, int> d;
     d.TryAdd("x", 10);
-    auto vals = d.Values();
+    auto vals = d.getValuesProperty();
     EXPECT_EQ(vals.size(), 1u);
     EXPECT_EQ(vals[0], 10);
 }

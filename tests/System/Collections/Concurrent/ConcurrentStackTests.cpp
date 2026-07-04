@@ -94,3 +94,52 @@ TEST(ConcurrentStackTest, ConstructFromCollection) {
     EXPECT_EQ(v, 30);
     EXPECT_EQ(s.getCountProperty(), 2);
 }
+
+TEST(ConcurrentStackTest, TryAdd_PushesOnTop) {
+    ConcurrentStack<int> s;
+    s.Push(1);
+    EXPECT_TRUE(s.TryAdd(2));
+    int v = 0;
+    s.TryPop(v);
+    EXPECT_EQ(v, 2);
+}
+
+TEST(ConcurrentStackTest, TryTake_EquivalentToTryPop) {
+    ConcurrentStack<int> s;
+    s.Push(9);
+    int v = 0;
+    EXPECT_TRUE(s.TryTake(v));
+    EXPECT_EQ(v, 9);
+    EXPECT_TRUE(s.getIsEmptyProperty());
+}
+
+TEST(ConcurrentStackTest, CopyTo_TooSmall_Throws) {
+    ConcurrentStack<int> s;
+    s.Push(1);
+    s.Push(2);
+    std::vector<int> dest(1);
+    EXPECT_THROW(s.CopyTo(dest, 0), std::out_of_range);
+}
+
+TEST(ConcurrentStackTest, CopyTo_ExactSize_Succeeds) {
+    ConcurrentStack<int> s;
+    s.Push(1);
+    s.Push(2);
+    std::vector<int> dest(2);
+    s.CopyTo(dest, 0);
+    EXPECT_EQ(dest[0], 2);
+    EXPECT_EQ(dest[1], 1);
+}
+
+TEST(ConcurrentStackTest, GetEnumerator_IteratesTopToBottom) {
+    ConcurrentStack<int> s;
+    s.Push(1);
+    s.Push(2);
+    auto* e = s.GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->Current(), 2);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->Current(), 1);
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
