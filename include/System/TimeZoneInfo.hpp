@@ -44,20 +44,20 @@ namespace System {
          */
         struct TransitionTime {
             DateTime   timeOfDay_;
-            int        month_          = 0;
-            int        week_           = 0;
-            int        day_            = 0;
+            intcs      month_          = 0;
+            intcs      week_           = 0;
+            intcs      day_            = 0;
             DayOfWeek  dayOfWeek_      = DayOfWeek::Sunday;
             bool       isFixedDateRule_ = false;
 
             /** @brief Gets the time of day at which the transition occurs. */
             [[nodiscard]] DateTime   getTimeOfDayProperty()     const { return timeOfDay_; }
             /** @brief Gets the month in which the transition occurs (1-12). */
-            [[nodiscard]] int        getMonthProperty()         const { return month_; }
+            [[nodiscard]] intcs      getMonthProperty()         const { return month_; }
             /** @brief Gets the week of the month (1-5) in which the transition occurs. */
-            [[nodiscard]] int        getWeekProperty()          const { return week_; }
+            [[nodiscard]] intcs      getWeekProperty()          const { return week_; }
             /** @brief Gets the day on which the transition occurs for a fixed-date rule. */
-            [[nodiscard]] int        getDayProperty()           const { return day_; }
+            [[nodiscard]] intcs      getDayProperty()           const { return day_; }
             /** @brief Gets the day of the week on which the transition occurs for a floating rule. */
             [[nodiscard]] DayOfWeek  getDayOfWeekProperty()     const { return dayOfWeek_; }
             /** @brief Gets a value indicating whether the transition is fixed-date or floating. */
@@ -72,7 +72,7 @@ namespace System {
              * @param day       Day of the month (1-31).
              * @throws ArgumentOutOfRangeException if month or day is out of range.
              */
-            static TransitionTime CreateFixedDateRule(DateTime timeOfDay, int month, int day) {
+            static TransitionTime CreateFixedDateRule(DateTime timeOfDay, intcs month, intcs day) {
                 if (month < 1 || month > 12)
                     throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
                 if (day < 1 || day > 31)
@@ -96,8 +96,8 @@ namespace System {
              * @param dayOfWeek  Day of the week (Sunday=0 … Saturday=6).
              * @throws ArgumentOutOfRangeException if month, week, or dayOfWeek is out of range.
              */
-            static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, int month,
-                                                         int week, DayOfWeek dayOfWeek) {
+            static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, intcs month,
+                                                         intcs week, DayOfWeek dayOfWeek) {
                 if (month < 1 || month > 12)
                     throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
                 if (week < 1 || week > 5)
@@ -135,7 +135,7 @@ namespace System {
              *
              * C++ counterpart of .NET TransitionTime.GetHashCode().
              */
-            [[nodiscard]] int GetHashCode() const noexcept {
+            [[nodiscard]] intcs GetHashCode() const noexcept {
                 return month_ ^ (week_ << 8);
             }
 
@@ -218,9 +218,9 @@ namespace System {
              *
              * C++ counterpart of .NET AdjustmentRule.GetHashCode().
              */
-            [[nodiscard]] int GetHashCode() const noexcept {
+            [[nodiscard]] intcs GetHashCode() const noexcept {
                 auto ticks = dateStart_.getTicksProperty();
-                return static_cast<int>(ticks ^ (ticks >> 32));
+                return static_cast<intcs>(ticks ^ (ticks >> 32));
             }
 
             /**
@@ -472,10 +472,10 @@ namespace System {
          *
          * C++ counterpart of .NET TimeZoneInfo.GetHashCode().
          */
-        [[nodiscard]] int GetHashCode() const {
+        [[nodiscard]] intcs GetHashCode() const {
             std::string lower = id_;
             for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            return static_cast<int>(std::hash<std::string>{}(lower));
+            return static_cast<intcs>(std::hash<std::string>{}(lower));
         }
 
         /**
