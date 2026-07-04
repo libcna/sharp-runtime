@@ -7,8 +7,12 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a min-heap priority queue where lower priority values are dequeued first.
@@ -29,7 +33,7 @@ class PriorityQueue {
     };
 
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> heap_;
-    int count_ = 0;
+    intcs count_ = 0;
 
 public:
     /** @brief Initializes a new empty PriorityQueue. */
@@ -41,7 +45,7 @@ public:
      * C++ counterpart of .NET PriorityQueue<TElement,TPriority>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return count_; }
+    [[nodiscard]] intcs getCountProperty() const { return count_; }
 
     /**
      * @brief Adds the specified element with the given priority to the PriorityQueue.
@@ -60,10 +64,10 @@ public:
      *
      * C++ counterpart of .NET PriorityQueue<TElement,TPriority>.Dequeue().
      * @return The element with the lowest priority.
-     * @throws std::invalid_argument if the queue is empty.
+     * @throws System::InvalidOperationException if the queue is empty.
      */
     [[nodiscard]] TElement Dequeue() {
-        if (heap_.empty()) throw std::invalid_argument("Queue is empty.");
+        if (heap_.empty()) throw System::InvalidOperationException("Queue empty.");
         TElement el = heap_.top().element;
         heap_.pop();
         --count_;
@@ -75,10 +79,10 @@ public:
      *
      * C++ counterpart of .NET PriorityQueue<TElement,TPriority>.Peek().
      * @return The element with the lowest priority.
-     * @throws std::invalid_argument if the queue is empty.
+     * @throws System::InvalidOperationException if the queue is empty.
      */
     [[nodiscard]] TElement Peek() const {
-        if (heap_.empty()) throw std::invalid_argument("Queue is empty.");
+        if (heap_.empty()) throw System::InvalidOperationException("Queue empty.");
         return heap_.top().element;
     }
 

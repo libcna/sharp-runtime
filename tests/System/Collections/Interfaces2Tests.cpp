@@ -40,8 +40,8 @@ public:
         if (!x || !y) return x == y;
         return *static_cast<const int*>(x) == *static_cast<const int*>(y);
     }
-    std::size_t GetHashCode(const void* obj) const override {
-        return static_cast<std::size_t>(*static_cast<const int*>(obj));
+    int GetHashCode(const void* obj) const override {
+        return *static_cast<const int*>(obj);
     }
 };
 

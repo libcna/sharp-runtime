@@ -3,10 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <utility>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/ICollection.hpp"
 #include "System/Collections/Generic/IEnumerable.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a generic collection of key/value pairs.
@@ -29,7 +32,7 @@ public:
      *
      * C++ counterpart of .NET IDictionary<TKey,TValue>.Count.
      */
-    [[nodiscard]] virtual int getCountProperty() const = 0;
+    [[nodiscard]] virtual intcs getCountProperty() const = 0;
 
     /**
      * @brief Gets or sets the element with the specified key (mutable).

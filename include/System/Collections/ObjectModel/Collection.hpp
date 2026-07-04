@@ -5,9 +5,14 @@
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 
 namespace System::Collections::ObjectModel {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides the base class for a generic collection.
@@ -23,13 +28,18 @@ class Collection : public Generic::IList<T> {
 private:
     class Enumerator : public Generic::IEnumerator<T> {
         const std::vector<T>& items_;
-        int index_ = -1;
+        intcs index_ = -1;
     public:
         explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-        bool MoveNext() override { return ++index_ < static_cast<int>(items_.size()); }
+        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
         void Reset() override { index_ = -1; }
         [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
     };
+
+    void requireIndexInRange(intcs index) const {
+        if (index < 0 || index >= static_cast<intcs>(items_.size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+    }
 
 protected:
     /** @brief The underlying storage for collection items. */
@@ -41,8 +51,11 @@ protected:
      * C++ counterpart of .NET Collection<T>.InsertItem(int, T).
      * @param index The zero-based index at which to insert.
      * @param item  The element to insert.
+     * @throws System::ArgumentOutOfRangeException if @p index is not within [0, Count].
      */
-    virtual void InsertItem(int index, const T& item) {
+    virtual void InsertItem(intcs index, const T& item) {
+        if (index < 0 || index > static_cast<intcs>(items_.size()))
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
         items_.insert(items_.begin() + index, item);
     }
 
@@ -51,8 +64,10 @@ protected:
      *
      * C++ counterpart of .NET Collection<T>.RemoveItem(int).
      * @param index The zero-based index of the element to remove.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    virtual void RemoveItem(int index) {
+    virtual void RemoveItem(intcs index) {
+        requireIndexInRange(index);
         items_.erase(items_.begin() + index);
     }
 
@@ -71,8 +86,10 @@ protected:
      * C++ counterpart of .NET Collection<T>.SetItem(int, T).
      * @param index The zero-based index of the element to replace.
      * @param item  The new value.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    virtual void SetItem(int index, const T& item) {
+    virtual void SetItem(intcs index, const T& item) {
+        requireIndexInRange(index);
         items_[static_cast<size_t>(index)] = item;
     }
 
@@ -88,8 +105,8 @@ public:
      * C++ counterpart of .NET Collection<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const override {
-        return static_cast<int>(items_.size());
+    [[nodiscard]] intcs getCountProperty() const override {
+        return static_cast<intcs>(items_.size());
     }
 
     /**
@@ -107,7 +124,7 @@ public:
      * @param item The element to add.
      */
     void Add(const T& item) override {
-        InsertItem(static_cast<int>(items_.size()), item);
+        InsertItem(static_cast<intcs>(items_.size()), item);
     }
 
     /**
@@ -135,10 +152,12 @@ public:
      * @param destination The target vector to copy elements into.
      * @param index       The zero-based starting index in @p destination.
      */
-    void CopyTo(std::vector<T>& destination, int index) const {
-        if (index < 0 || index + getCountProperty() > static_cast<int>(destination.size()))
-            throw std::out_of_range("Destination too small or index out of range.");
-        for (int i = 0; i < getCountProperty(); ++i)
+    void CopyTo(std::vector<T>& destination, intcs index) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+        if (index + getCountProperty() > static_cast<intcs>(destination.size()))
+            throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
+        for (intcs i = 0; i < getCountProperty(); ++i)
             destination[static_cast<size_t>(index + i)] = items_[static_cast<size_t>(i)];
     }
 
@@ -152,7 +171,7 @@ public:
     bool Remove(const T& item) override {
         auto it = std::find(items_.begin(), items_.end(), item);
         if (it == items_.end()) return false;
-        RemoveItem(static_cast<int>(it - items_.begin()));
+        RemoveItem(static_cast<intcs>(it - items_.begin()));
         return true;
     }
 
@@ -162,9 +181,12 @@ public:
      * C++ counterpart of .NET Collection<T>.Item[int] getter.
      * @param index The zero-based index.
      * @return A const reference to the element.
-     * @throws std::out_of_range if index is out of range.
+     * @throws System::ArgumentOutOfRangeException if index is out of range.
      */
-    [[nodiscard]] const T& operator[](int index) const override { return items_.at(static_cast<size_t>(index)); }
+    [[nodiscard]] const T& operator[](intcs index) const override {
+        requireIndexInRange(index);
+        return items_[static_cast<size_t>(index)];
+    }
 
     /**
      * @brief Returns a reference to the element at the specified index.
@@ -172,9 +194,12 @@ public:
      * C++ counterpart of .NET Collection<T>.Item[int] setter.
      * @param index The zero-based index.
      * @return A reference to the element.
-     * @throws std::out_of_range if index is out of range.
+     * @throws System::ArgumentOutOfRangeException if index is out of range.
      */
-    T& operator[](int index) override { return items_.at(static_cast<size_t>(index)); }
+    T& operator[](intcs index) override {
+        requireIndexInRange(index);
+        return items_[static_cast<size_t>(index)];
+    }
 
     /**
      * @brief Returns the zero-based index of the first occurrence of @p item, or -1 if not found.
@@ -183,10 +208,10 @@ public:
      * @param item The element to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const T& item) const override {
+    [[nodiscard]] intcs IndexOf(const T& item) const override {
         auto it = std::find(items_.begin(), items_.end(), item);
         if (it == items_.end()) return -1;
-        return static_cast<int>(it - items_.begin());
+        return static_cast<intcs>(it - items_.begin());
     }
 
     /**
@@ -196,7 +221,7 @@ public:
      * @param index The zero-based index at which to insert.
      * @param item  The element to insert.
      */
-    void Insert(int index, const T& item) override { InsertItem(index, item); }
+    void Insert(intcs index, const T& item) override { InsertItem(index, item); }
 
     /**
      * @brief Removes the element at the specified index.
@@ -204,7 +229,7 @@ public:
      * C++ counterpart of .NET Collection<T>.RemoveAt(int).
      * @param index The zero-based index of the element to remove.
      */
-    void RemoveAt(int index) override { RemoveItem(index); }
+    void RemoveAt(intcs index) override { RemoveItem(index); }
 
     /**
      * @brief Returns a new enumerator that iterates through the collection.

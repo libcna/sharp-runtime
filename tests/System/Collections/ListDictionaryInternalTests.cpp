@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Collections/ListDictionaryInternal.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using namespace System::Collections;
 
@@ -22,7 +24,7 @@ TEST(ListDictionaryInternalTest, AddDuplicateThrows) {
     ListDictionaryInternal d;
     int k = 1, v = 2;
     d.Add(&k, &v);
-    EXPECT_THROW(d.Add(&k, &v), std::invalid_argument);
+    EXPECT_THROW(d.Add(&k, &v), System::ArgumentException);
 }
 
 TEST(ListDictionaryInternalTest, GetItemFound) {
@@ -79,4 +81,65 @@ TEST(ListDictionaryInternalTest, Clear) {
     d.Add(&k2, &v);
     d.Clear();
     EXPECT_EQ(d.getCountProperty(), 0);
+}
+
+TEST(ListDictionaryInternalTest, GetEnumerator_IteratesAllEntries) {
+    ListDictionaryInternal d;
+    int k1 = 1, k2 = 2, v1 = 10, v2 = 20;
+    d.Add(&k1, &v1);
+    d.Add(&k2, &v2);
+
+    IDictionaryEnumerator* e = d.GetEnumerator();
+    int count = 0;
+    while (e->MoveNext()) {
+        ++count;
+        EXPECT_NE(e->getKeyProperty(), nullptr);
+    }
+    EXPECT_EQ(count, 2);
+    delete e;
+}
+
+TEST(ListDictionaryInternalTest, GetEnumerator_CurrentBeforeMoveNext_Throws) {
+    ListDictionaryInternal d;
+    int k = 1, v = 2;
+    d.Add(&k, &v);
+    IDictionaryEnumerator* e = d.GetEnumerator();
+    EXPECT_THROW(e->getKeyProperty(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(ListDictionaryInternalTest, Keys_ReflectsCountAndContents) {
+    ListDictionaryInternal d;
+    int k1 = 1, k2 = 2, v = 0;
+    d.Add(&k1, &v);
+    d.Add(&k2, &v);
+
+    ICollection* keys = d.getKeysProperty();
+    EXPECT_EQ(keys->getCountProperty(), 2);
+
+    IEnumerator* e = keys->GetEnumerator();
+    int count = 0;
+    while (e->MoveNext()) {
+        void* k = e->getCurrent();
+        EXPECT_TRUE(k == &k1 || k == &k2);
+        ++count;
+    }
+    EXPECT_EQ(count, 2);
+    delete e;
+    delete keys;
+}
+
+TEST(ListDictionaryInternalTest, Values_ReflectsContents) {
+    ListDictionaryInternal d;
+    int k = 1, v = 99;
+    d.Add(&k, &v);
+
+    ICollection* values = d.getValuesProperty();
+    EXPECT_EQ(values->getCountProperty(), 1);
+
+    IEnumerator* e = values->GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &v);
+    delete e;
+    delete values;
 }

@@ -6,8 +6,11 @@
 #include "System/ArgumentException.hpp"
 #include "System/DBNull.hpp"
 #include "System/NotSupportedException.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Holds the Null singleton, guaranteeing only one instance exists.
@@ -34,7 +37,7 @@ namespace System {
          *
          * C++ counterpart of .NET UnitySerializationHolder.NullUnity.
          */
-        static constexpr int NullUnity = 0x0002;
+        static constexpr intcs NullUnity = 0x0002;
 
         /**
          * @brief Constructs a holder with the given unity type and optional data string.
@@ -44,7 +47,7 @@ namespace System {
          * @param unityType The unity type code (use NullUnity for DBNull).
          * @param data      Optional diagnostic string (used in error messages).
          */
-        explicit UnitySerializationHolder(int unityType, const std::string& data = {})
+        explicit UnitySerializationHolder(intcs unityType, const std::string& data = {})
             : unityType_(unityType), data_(data) {}
 
         /**
@@ -81,7 +84,7 @@ namespace System {
          *
          * C++ counterpart of the private _unityType field exposed for testing.
          */
-        [[nodiscard]] int getUnityTypeProperty() const noexcept { return unityType_; }
+        [[nodiscard]] intcs getUnityTypeProperty() const noexcept { return unityType_; }
 
         /**
          * @brief Gets the optional diagnostic data string stored in this holder.
@@ -91,7 +94,7 @@ namespace System {
         [[nodiscard]] const std::string& getDataProperty() const noexcept { return data_; }
 
     private:
-        int         unityType_;
+        intcs       unityType_;
         std::string data_;
     };
 

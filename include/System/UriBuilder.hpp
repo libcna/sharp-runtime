@@ -4,9 +4,15 @@
 #pragma once
 #include <memory>
 #include <string>
+
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Uri.hpp"
+#include "System/UriFormatException.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides a custom constructor for uniform resource identifiers (URIs)
@@ -18,13 +24,23 @@ namespace System {
      */
     class UriBuilder {
         std::string scheme_   = "http";
-        std::string host_;
-        int         port_     = -1;
+        std::string host_     = "localhost";
+        intcs       port_     = -1;
         std::string path_     = "/";
         std::string query_;
         std::string fragment_;
         std::string userName_;
         std::string password_;
+
+        void setFieldsFromUri(const Uri& u) {
+            scheme_   = u.getSchemeProperty();
+            host_     = u.getHostProperty();
+            port_     = u.getPortProperty();
+            path_     = u.getAbsolutePathProperty();
+            query_    = u.getQueryProperty();
+            fragment_ = u.getFragmentProperty();
+            userName_ = u.getUserInfoProperty();
+        }
 
     public:
         /** @brief Initializes a new empty UriBuilder instance. */
@@ -35,14 +51,7 @@ namespace System {
          * @param uri URI string to parse into components.
          */
         explicit UriBuilder(const std::string& uri) {
-            Uri u(uri);
-            scheme_   = u.getSchemeProperty();
-            host_     = u.getHostProperty();
-            port_     = u.getPortProperty();
-            path_     = u.getAbsolutePathProperty();
-            query_    = u.getQueryProperty();
-            fragment_ = u.getFragmentProperty();
-            userName_ = u.getUserInfoProperty();
+            setFieldsFromUri(Uri(uri));
         }
 
         /**
@@ -50,13 +59,67 @@ namespace System {
          * @param uri Source Uri to copy components from.
          */
         explicit UriBuilder(const Uri& u) {
-            scheme_   = u.getSchemeProperty();
-            host_     = u.getHostProperty();
-            port_     = u.getPortProperty();
-            path_     = u.getAbsolutePathProperty();
-            query_    = u.getQueryProperty();
-            fragment_ = u.getFragmentProperty();
-            userName_ = u.getUserInfoProperty();
+            setFieldsFromUri(u);
+        }
+
+        /**
+         * @brief Initializes a new UriBuilder with the specified scheme and host.
+         * C++ counterpart of .NET UriBuilder(string, string).
+         */
+        UriBuilder(const std::string& schemeName, const std::string& hostName)
+            : scheme_(schemeName), host_(hostName) {}
+
+        /**
+         * @brief Initializes a new UriBuilder with the specified scheme, host, and port.
+         * C++ counterpart of .NET UriBuilder(string, string, int).
+         */
+        UriBuilder(const std::string& schemeName, const std::string& hostName, intcs portNumber)
+            : scheme_(schemeName), host_(hostName) {
+            setPortProperty(portNumber);
+        }
+
+        /**
+         * @brief Initializes a new UriBuilder with the specified scheme, host, port, and path.
+         * C++ counterpart of .NET UriBuilder(string, string, int, string).
+         */
+        UriBuilder(const std::string& schemeName, const std::string& hostName, intcs portNumber,
+                   const std::string& pathValue)
+            : scheme_(schemeName), host_(hostName) {
+            setPortProperty(portNumber);
+            setPathProperty(pathValue);
+        }
+
+        /**
+         * @brief Initializes a new UriBuilder with the specified scheme, host, port, path,
+         * and an extra query-or-fragment value.
+         *
+         * C++ counterpart of .NET UriBuilder(string, string, int, string, string).
+         * @param extraValue A string starting with '?' (query) or '#' (fragment).
+         * @throws std::invalid_argument if @p extraValue is non-empty and starts with
+         *         neither '?' nor '#'.
+         */
+        UriBuilder(const std::string& schemeName, const std::string& hostName, intcs portNumber,
+                   const std::string& pathValue, const std::string& extraValue)
+            : scheme_(schemeName), host_(hostName) {
+            setPortProperty(portNumber);
+            setPathProperty(pathValue);
+            if (!extraValue.empty()) {
+                if (extraValue[0] == '#') {
+                    fragment_ = extraValue.size() > 1 ? extraValue : std::string();
+                } else if (extraValue[0] == '?') {
+                    auto fragPos = extraValue.find('#');
+                    if (fragPos == std::string::npos) {
+                        query_ = extraValue.size() > 1 ? extraValue : std::string();
+                    } else {
+                        std::string q = extraValue.substr(0, fragPos);
+                        std::string f = extraValue.substr(fragPos);
+                        query_    = q.size() > 1 ? q : std::string();
+                        fragment_ = f.size() > 1 ? f : std::string();
+                    }
+                } else {
+                    throw std::invalid_argument("extraValue must start with '?' or '#'.");
+                }
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -74,14 +137,22 @@ namespace System {
         void setHostProperty(const std::string& v)                            { host_ = v; }
 
         /** @brief Returns the port number, or -1 if not set. */
-        [[nodiscard]] int getPortProperty()                     const noexcept { return port_; }
-        /** @brief Sets the port number. */
-        void setPortProperty(int v)                                            { port_ = v; }
+        [[nodiscard]] intcs getPortProperty()                   const noexcept { return port_; }
+        /**
+         * @brief Sets the port number.
+         * C++ counterpart of .NET UriBuilder.Port.
+         * @throws ArgumentOutOfRangeException if @p v is less than -1 or greater than 65535.
+         */
+        void setPortProperty(intcs v) {
+            if (v < -1 || v > 0xFFFF)
+                throw ArgumentOutOfRangeException("value");
+            port_ = v;
+        }
 
         /** @brief Returns the path component. */
         [[nodiscard]] const std::string& getPathProperty()     const noexcept { return path_; }
-        /** @brief Sets the path component. */
-        void setPathProperty(const std::string& v)                            { path_ = v; }
+        /** @brief Sets the path component. Empty/null values normalize to "/". */
+        void setPathProperty(const std::string& v)                            { path_ = v.empty() ? "/" : v; }
 
         /** @brief Returns the query string (includes leading '?' if non-empty). */
         [[nodiscard]] const std::string& getQueryProperty()    const noexcept { return query_; }
@@ -109,8 +180,12 @@ namespace System {
 
         /**
          * @brief Builds and returns the URI string from current components.
+         * @throws UriFormatException if UserName is empty but Password is not,
+         *         matching .NET's UriBuilder.ToString().
          */
         [[nodiscard]] std::string ToString() const {
+            if (userName_.empty() && !password_.empty())
+                throw UriFormatException("The format of the UserInfo is invalid, username can't be empty when password is not empty.");
             std::string result = scheme_ + "://";
             if (!userName_.empty()) {
                 result += userName_;
@@ -137,6 +212,19 @@ namespace System {
          * @throws std::invalid_argument if the resulting string is not a valid URI.
          */
         [[nodiscard]] Uri getUriProperty() const { return Uri(ToString()); }
+
+        /**
+         * @brief Returns true if @p other builds an equal URI string.
+         * C++ counterpart of .NET UriBuilder.Equals(object).
+         */
+        [[nodiscard]] bool Equals(const UriBuilder& other) const {
+            return ToString() == other.ToString();
+        }
+
+        /** @brief Returns a hash code based on the built URI string. C++ counterpart of .NET UriBuilder.GetHashCode(). */
+        [[nodiscard]] intcs GetHashCode() const {
+            return getUriProperty().GetHashCode();
+        }
     };
 
 } // namespace System

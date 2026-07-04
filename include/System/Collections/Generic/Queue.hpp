@@ -5,8 +5,12 @@
 #include <queue>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a first-in, first-out (FIFO) collection of objects.
@@ -30,7 +34,7 @@ public:
      * C++ counterpart of .NET Queue<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(queue_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(queue_.size()); }
 
     /**
      * @brief Adds an object to the end of the Queue (copy).
@@ -53,10 +57,10 @@ public:
      *
      * C++ counterpart of .NET Queue<T>.Dequeue().
      * @return The object that was removed from the beginning of the Queue.
-     * @throws std::runtime_error if the Queue is empty.
+     * @throws System::InvalidOperationException if the Queue is empty.
      */
     T Dequeue() {
-        if (queue_.empty()) throw std::runtime_error("Queue is empty.");
+        if (queue_.empty()) throw System::InvalidOperationException("Queue empty.");
         T val = std::move(queue_.front());
         queue_.pop();
         return val;
@@ -67,10 +71,10 @@ public:
      *
      * C++ counterpart of .NET Queue<T>.Peek().
      * @return A const reference to the object at the front.
-     * @throws std::runtime_error if the Queue is empty.
+     * @throws System::InvalidOperationException if the Queue is empty.
      */
     [[nodiscard]] const T& Peek() const {
-        if (queue_.empty()) throw std::runtime_error("Queue is empty.");
+        if (queue_.empty()) throw System::InvalidOperationException("Queue empty.");
         return queue_.front();
     }
 

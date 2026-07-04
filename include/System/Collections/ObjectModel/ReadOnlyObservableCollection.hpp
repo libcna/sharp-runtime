@@ -3,23 +3,38 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include <memory>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/Collections/ObjectModel/ObservableCollection.hpp"
 
 namespace System::Collections::ObjectModel {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides a read-only wrapper around an ObservableCollection that still
  *        propagates CollectionChanged notifications to subscribers.
  *
  * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlyObservableCollection<T>.
- * Takes ownership of the wrapped ObservableCollection and forwards its CollectionChanged
- * events to any handlers registered on this instance. Mutation is not permitted.
+ * Shares ownership of the wrapped ObservableCollection via shared_ptr, matching .NET's
+ * live-wrapper semantics: this is a read-only *view* onto the same underlying collection,
+ * not a snapshot copy. The wrapped collection is still expected to be mutated by whoever
+ * holds the shared_ptr (or another copy of it); those changes, and their CollectionChanged/
+ * PropertyChanged notifications, are visible/forwarded through this wrapper.
+ *
+ * Deviation from the previous version of this header: it took the source ObservableCollection
+ * by const-ref (copying it) or by rvalue-ref (moving it), either of which produced a private,
+ * disconnected copy — mutating the original source afterwards had no effect on the wrapper and
+ * fired no events through it, defeating the entire purpose of an *observable* read-only view.
  *
  * @tparam T The type of elements in the collection.
  */
 template<typename T>
 class ReadOnlyObservableCollection {
+    std::shared_ptr<ObservableCollection<T>> source_;
+
 public:
     /** @brief Handler type for CollectionChanged subscribers. */
     using ChangedHandler = std::function<void(void*, const NotifyCollectionChangedEventArgs<T>&)>;
@@ -27,40 +42,22 @@ public:
     /** @brief List of CollectionChanged event subscribers. */
     std::vector<ChangedHandler> CollectionChanged;
 
-private:
-    ObservableCollection<T> owned_;
-    const ObservableCollection<T>* source_;
-
-    void subscribeToSource() {
-        owned_.CollectionChanged.push_back(
+    /**
+     * @brief Constructs a ReadOnlyObservableCollection wrapping the given ObservableCollection.
+     *
+     * C++ counterpart of .NET ReadOnlyObservableCollection<T>(ObservableCollection<T>).
+     * @param source A shared pointer to the ObservableCollection to wrap.
+     * @throws System::ArgumentNullException if @p source is null.
+     */
+    explicit ReadOnlyObservableCollection(std::shared_ptr<ObservableCollection<T>> source)
+        : source_(std::move(source)) {
+        if (!source_)
+            throw System::ArgumentNullException("list");
+        source_->CollectionChanged.push_back(
             [this](void* s, const NotifyCollectionChangedEventArgs<T>& args) {
-                for (auto& h : CollectionChanged) h(s, args);
+                (void)s;
+                OnCollectionChanged(args);
             });
-    }
-
-    ReadOnlyObservableCollection() : source_(&owned_) { subscribeToSource(); }
-
-public:
-    /**
-     * @brief Constructs a ReadOnlyObservableCollection by copying @p source.
-     *
-     * C++ counterpart of .NET ReadOnlyObservableCollection<T>(ObservableCollection<T>).
-     * @param source The ObservableCollection to copy into this instance.
-     */
-    explicit ReadOnlyObservableCollection(const ObservableCollection<T>& source)
-        : owned_(source), source_(&owned_) {
-        subscribeToSource();
-    }
-
-    /**
-     * @brief Constructs a ReadOnlyObservableCollection that takes ownership of @p source.
-     *
-     * C++ counterpart of .NET ReadOnlyObservableCollection<T>(ObservableCollection<T>).
-     * @param source The ObservableCollection to move into this instance.
-     */
-    explicit ReadOnlyObservableCollection(ObservableCollection<T>&& source)
-        : owned_(std::move(source)), source_(&owned_) {
-        subscribeToSource();
     }
 
     /**
@@ -70,7 +67,7 @@ public:
      * @return A reference to a shared, permanently-empty instance.
      */
     static ReadOnlyObservableCollection<T>& Empty() {
-        static ReadOnlyObservableCollection<T> empty;
+        static ReadOnlyObservableCollection<T> empty(std::make_shared<ObservableCollection<T>>());
         return empty;
     }
 
@@ -80,7 +77,7 @@ public:
      * C++ counterpart of .NET ReadOnlyObservableCollection<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return source_->getCountProperty(); }
+    [[nodiscard]] intcs getCountProperty() const { return source_->getCountProperty(); }
 
     /**
      * @brief Gets a value indicating whether the collection contains no elements.
@@ -97,7 +94,7 @@ public:
      * @param index The zero-based index.
      * @return A const reference to the element.
      */
-    [[nodiscard]] const T& operator[](int index) const { return (*source_)[index]; }
+    [[nodiscard]] const T& operator[](intcs index) const { return (*source_)[index]; }
 
     /**
      * @brief Determines whether the collection contains the specified element.
@@ -115,12 +112,23 @@ public:
      * @param item The element to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const T& item) const { return source_->IndexOf(item); }
+    [[nodiscard]] intcs IndexOf(const T& item) const { return source_->IndexOf(item); }
 
     /** @brief Returns a const iterator to the beginning of the collection (STL interop). */
     auto begin() const { return source_->begin(); }
     /** @brief Returns a const iterator past the end of the collection (STL interop). */
     auto end()   const { return source_->end(); }
+
+protected:
+    /**
+     * @brief Raises the CollectionChanged event, forwarding notifications from the wrapped source.
+     *
+     * C++ counterpart of .NET ReadOnlyObservableCollection<T>.OnCollectionChanged(NotifyCollectionChangedEventArgs).
+     * @param args The event data describing the change.
+     */
+    virtual void OnCollectionChanged(const NotifyCollectionChangedEventArgs<T>& args) {
+        for (auto& h : CollectionChanged) h(this, args);
+    }
 };
 
 } // namespace System::Collections::ObjectModel

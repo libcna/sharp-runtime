@@ -2,13 +2,17 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <optional>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Buffers/ReadOnlySequence.hpp"
 #include "System/Buffers/IBufferWriter.hpp"
 #include "System/Span.hpp"
 
 namespace System::Buffers {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Extension methods for ReadOnlySequence&lt;T&gt; and IBufferWriter&lt;T&gt;.
@@ -55,20 +59,45 @@ void CopyTo(const ReadOnlySequence<T>& source, System::Span<T> destination) {
 }
 
 /**
+ * @brief Writes the contents of @p value to @p writer.
+ *
+ * C++ counterpart of .NET BuffersExtensions.Write&lt;T&gt;(IBufferWriter&lt;T&gt;, ReadOnlySpan&lt;T&gt;).
+ * Copies via as many GetSpan()/Advance() round-trips as the writer's buffer requires.
+ * @param writer The IBufferWriter to write into.
+ * @param value  The data to copy.
+ */
+template<typename T>
+void Write(IBufferWriter<T>& writer, System::ReadOnlySpan<T> value) {
+    System::Span<T> destination = writer.GetSpan();
+    if (value.getLengthProperty() <= destination.getLengthProperty()) {
+        value.CopyTo(destination);
+        writer.Advance(value.getLengthProperty());
+        return;
+    }
+    System::ReadOnlySpan<T> input = value;
+    while (true) {
+        intcs writeSize = std::min(destination.getLengthProperty(), input.getLengthProperty());
+        input.Slice(0, writeSize).CopyTo(destination);
+        writer.Advance(writeSize);
+        input = input.Slice(writeSize);
+        if (input.getLengthProperty() == 0) break;
+        destination = writer.GetSpan(input.getLengthProperty());
+    }
+}
+
+/**
  * @brief Copies all data from @p source into @p writer.
  *
- * C++ counterpart of .NET BuffersExtensions.Write(IBufferWriter, ReadOnlySequence).
+ * C++ convenience overload (no direct .NET equivalent — .NET's Write only takes
+ * a ReadOnlySpan&lt;T&gt;) for writing an entire ReadOnlySequence&lt;T&gt; at once.
  * @param writer The IBufferWriter to write into.
  * @param source The sequence to copy.
  */
 template<typename T>
 void Write(IBufferWriter<T>& writer, const ReadOnlySequence<T>& source) {
     auto data = source.ToArray();
-    int count = static_cast<int>(data.size());
-    if (count == 0) return;
-    auto span = writer.GetSpan(count);
-    std::copy(data.begin(), data.end(), span.getPointer());
-    writer.Advance(count);
+    if (data.empty()) return;
+    Write(writer, System::ReadOnlySpan<T>(data.data(), static_cast<intcs>(data.size())));
 }
 
 /**

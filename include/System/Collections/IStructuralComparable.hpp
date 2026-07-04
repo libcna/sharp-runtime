@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/IComparer.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Supports structural comparison of objects within a collection.
@@ -24,7 +27,7 @@ public:
      * @param comparer The comparer to use.
      * @return Negative, zero, or positive depending on relative order.
      */
-    [[nodiscard]] virtual int CompareTo(const void* other, const IComparer& comparer) const = 0;
+    [[nodiscard]] virtual intcs CompareTo(const void* other, const IComparer& comparer) const = 0;
 };
 
 } // namespace System::Collections

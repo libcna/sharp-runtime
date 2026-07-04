@@ -6,10 +6,15 @@
 #include "System/Collections/Immutable/ImmutableArray.hpp"
 #include "System/Collections/Immutable/ImmutableDictionary.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 using System::Collections::Immutable::ImmutableArray;
 using System::Collections::Immutable::ImmutableDictionary;
 using System::Collections::Immutable::ImmutableList;
+using System::Collections::Generic::KeyNotFoundException;
 
 // ---------------------------------------------------------------------------
 // ImmutableArray<int>
@@ -121,7 +126,7 @@ TEST(ImmutableCollectionTests, ArrayRangeFor) {
 
 TEST(ImmutableCollectionTests, ArrayOutOfRangeThrows) {
     auto arr = ImmutableArray<int>::Create({1, 2});
-    EXPECT_THROW(arr[5], std::out_of_range);
+    EXPECT_THROW(arr[5], System::IndexOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +206,28 @@ TEST(ImmutableCollectionTests, ListRangeFor) {
     EXPECT_EQ(sum, 10);
 }
 
+TEST(ImmutableCollectionTests, ListIndexerOutOfRangeThrows) {
+    auto lst = ImmutableList<int>::Create({1, 2});
+    EXPECT_THROW(lst[5], System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst[-1], System::ArgumentOutOfRangeException);
+}
+
+TEST(ImmutableCollectionTests, ListInsertOutOfRangeThrows) {
+    auto lst = ImmutableList<int>::Create({1, 2});
+    EXPECT_THROW(lst.Insert(5, 99), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(lst.Insert(2, 99)); // append at Count is valid
+}
+
+TEST(ImmutableCollectionTests, ListRemoveAtOutOfRangeThrows) {
+    auto lst = ImmutableList<int>::Create({1, 2});
+    EXPECT_THROW(lst.RemoveAt(5), System::ArgumentOutOfRangeException);
+}
+
+TEST(ImmutableCollectionTests, ListRemoveRangeInvalidThrows) {
+    auto lst = ImmutableList<int>::Create({1, 2, 3});
+    EXPECT_THROW(lst.RemoveRange(2, 5), System::ArgumentException);
+}
+
 // ---------------------------------------------------------------------------
 // ImmutableDictionary<string, int>
 // ---------------------------------------------------------------------------
@@ -223,7 +250,7 @@ TEST(ImmutableCollectionTests, DictAddReturnsNewInstance) {
 
 TEST(ImmutableCollectionTests, DictAddDuplicateKeyThrows) {
     auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
-    EXPECT_THROW(d.Add("k", 2), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", 2), System::ArgumentException);
 }
 
 TEST(ImmutableCollectionTests, DictSetItemReturnsNewInstance) {
@@ -273,7 +300,7 @@ TEST(ImmutableCollectionTests, DictTryGetValue) {
 
 TEST(ImmutableCollectionTests, DictMissingKeyThrows) {
     auto d = ImmutableDictionary<std::string, int>::Empty();
-    EXPECT_THROW(d["nope"], std::out_of_range);
+    EXPECT_THROW(d["nope"], KeyNotFoundException);
 }
 
 TEST(ImmutableCollectionTests, DictClearReturnsEmpty) {

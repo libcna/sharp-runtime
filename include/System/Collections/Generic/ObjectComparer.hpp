@@ -29,7 +29,7 @@ public:
      * @param y The second object to compare.
      * @return Negative if x < y, zero if x == y, positive if x > y.
      */
-    [[nodiscard]] int Compare(const T& x, const T& y) const override {
+    [[nodiscard]] intcs Compare(const T& x, const T& y) const override {
         if (x < y) return -1;
         if (y < x) return  1;
         return 0;

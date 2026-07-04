@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IReadOnlyCollection.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a read-only collection of elements that can be accessed by index.
@@ -28,7 +31,7 @@ public:
      * @param index The zero-based index of the element to get.
      * @return A const reference to the element at the specified index.
      */
-    [[nodiscard]] virtual const T& operator[](int index) const = 0;
+    [[nodiscard]] virtual const T& operator[](intcs index) const = 0;
 };
 
 } // namespace System::Collections::Generic

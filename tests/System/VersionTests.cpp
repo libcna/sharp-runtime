@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include "System/Version.hpp"
 
 using System::Version;
@@ -84,6 +85,23 @@ TEST(VersionTests, ParseString_RoundTrip) {
     EXPECT_EQ(Version(s).ToString(), s);
 }
 
+TEST(VersionTests, ParseString_SingleComponent_Throws) {
+    // .NET requires at least "major.minor" - a bare "5" is invalid.
+    EXPECT_THROW(Version("5"), std::invalid_argument);
+}
+
+TEST(VersionTests, ParseString_Empty_Throws) {
+    EXPECT_THROW(Version(""), std::invalid_argument);
+}
+
+TEST(VersionTests, ParseString_FiveComponents_Throws) {
+    EXPECT_THROW(Version("1.2.3.4.5"), std::invalid_argument);
+}
+
+TEST(VersionTests, ParseString_NegativeComponent_Throws) {
+    EXPECT_THROW(Version("1.-2"), std::invalid_argument);
+}
+
 // ---------------------------------------------------------------------------
 // Equality operators
 // ---------------------------------------------------------------------------
@@ -164,6 +182,35 @@ TEST(VersionTests, CompareTo_Less_ReturnsNegative) {
 TEST(VersionTests, CompareTo_Greater_ReturnsPositive) {
     Version a(3, 0), b(1, 5);
     EXPECT_GT(a.CompareTo(b), 0);
+}
+
+TEST(VersionTests, CompareTo_ExtremeValues_NoOverflow) {
+    // Subtraction-based comparison of two large, far-apart non-negative components
+    // (e.g. INT_MAX vs 0) would risk overflow in some formulations; this must use
+    // direct comparison instead (matching .NET's actual CompareTo).
+    Version a(std::numeric_limits<SharpRuntime::intcs>::max(), 0);
+    Version b(0, 0);
+    EXPECT_GT(a.CompareTo(b), 0);
+    EXPECT_LT(b.CompareTo(a), 0);
+}
+
+TEST(VersionTests, Ctor_NegativeMajor_Throws) {
+    EXPECT_THROW(Version(-1, 0), std::invalid_argument);
+}
+
+TEST(VersionTests, Ctor_NegativeMinor_Throws) {
+    EXPECT_THROW(Version(0, -1), std::invalid_argument);
+}
+
+TEST(VersionTests, Ctor_NegativeBuild_Throws) {
+    EXPECT_THROW(Version(1, 2, -1), std::invalid_argument);
+}
+
+TEST(VersionTests, Ctor_FourArg_NegativeRevision_Throws) {
+    // Unlike the 2-/3-arg overloads (where Build/Revision default to -1
+    // internally), the 4-arg overload validates revision too, since it's
+    // explicitly user-supplied here.
+    EXPECT_THROW(Version(1, 2, 3, -1), std::invalid_argument);
 }
 
 TEST(VersionTests, Equals_Same_True) {

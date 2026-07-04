@@ -7,7 +7,11 @@
 #include <string>
 #include <tuple>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+
 namespace System {
+
+    using SharpRuntime::intcs;
 
 namespace detail {
 
@@ -59,15 +63,15 @@ struct ValueTuple1 {
      *
      * C++ counterpart of .NET ValueTuple<T1>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const noexcept {
-        return static_cast<int>(detail::vtHash(Item1));
+    [[nodiscard]] intcs GetHashCode() const noexcept {
+        return static_cast<intcs>(detail::vtHash(Item1));
     }
 
     /**
      * @brief Compares this instance to another ValueTuple1.
      * @return -1 if less, 0 if equal, 1 if greater.
      */
-    [[nodiscard]] int CompareTo(const ValueTuple1& other) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple1& other) const {
         if (Item1 < other.Item1) return -1;
         if (other.Item1 < Item1) return  1;
         return 0;
@@ -122,17 +126,17 @@ struct ValueTuple2 {
      *
      * C++ counterpart of .NET ValueTuple<T1,T2>.GetHashCode().
      */
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
 
     /**
      * @brief Compares this instance to another ValueTuple2 lexicographically.
      * @return -1 if less, 0 if equal, 1 if greater.
      */
-    [[nodiscard]] int CompareTo(const ValueTuple2& other) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple2& other) const {
         if (Item1 < other.Item1) return -1;
         if (other.Item1 < Item1) return  1;
         if (Item2 < other.Item2) return -1;
@@ -188,18 +192,18 @@ struct ValueTuple3 {
     }
 
     /** @brief Returns a hash code for this instance. */
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
 
     /**
      * @brief Compares this instance to another ValueTuple3 lexicographically.
      * @return -1 if less, 0 if equal, 1 if greater.
      */
-    [[nodiscard]] int CompareTo(const ValueTuple3& other) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple3& other) const {
         if (Item1 < other.Item1) return -1;
         if (other.Item1 < Item1) return  1;
         if (Item2 < other.Item2) return -1;
@@ -261,19 +265,19 @@ struct ValueTuple4 {
     }
 
     /** @brief Returns a hash code for this instance. */
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
         h = detail::vtHashCombine(h, detail::vtHash(Item4));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
 
     /**
      * @brief Compares this instance to another ValueTuple4 lexicographically.
      * @return -1 if less, 0 if equal, 1 if greater.
      */
-    [[nodiscard]] int CompareTo(const ValueTuple4& other) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple4& other) const {
         if (Item1 < other.Item1) return -1; if (other.Item1 < Item1) return 1;
         if (Item2 < other.Item2) return -1; if (other.Item2 < Item2) return 1;
         if (Item3 < other.Item3) return -1; if (other.Item3 < Item3) return 1;
@@ -321,15 +325,15 @@ struct ValueTuple5 {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
                Item4==o.Item4 && Item5==o.Item5;
     }
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
         h = detail::vtHashCombine(h, detail::vtHash(Item4));
         h = detail::vtHashCombine(h, detail::vtHash(Item5));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
-    [[nodiscard]] int CompareTo(const ValueTuple5& o) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple5& o) const {
         if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
         if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
         if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
@@ -372,16 +376,16 @@ struct ValueTuple6 {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
                Item4==o.Item4 && Item5==o.Item5 && Item6==o.Item6;
     }
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
         h = detail::vtHashCombine(h, detail::vtHash(Item4));
         h = detail::vtHashCombine(h, detail::vtHash(Item5));
         h = detail::vtHashCombine(h, detail::vtHash(Item6));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
-    [[nodiscard]] int CompareTo(const ValueTuple6& o) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple6& o) const {
         if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
         if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
         if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
@@ -427,7 +431,7 @@ struct ValueTuple7 {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4 &&
                Item5==o.Item5 && Item6==o.Item6 && Item7==o.Item7;
     }
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
@@ -435,9 +439,9 @@ struct ValueTuple7 {
         h = detail::vtHashCombine(h, detail::vtHash(Item5));
         h = detail::vtHashCombine(h, detail::vtHash(Item6));
         h = detail::vtHashCombine(h, detail::vtHash(Item7));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
-    [[nodiscard]] int CompareTo(const ValueTuple7& o) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple7& o) const {
         if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
         if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
         if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
@@ -555,7 +559,7 @@ struct ValueTuple8 {
     }
 
     /** @brief Returns a hash code for this instance. */
-    [[nodiscard]] int GetHashCode() const noexcept {
+    [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
         h = detail::vtHashCombine(h, detail::vtHash(Item3));
@@ -564,14 +568,14 @@ struct ValueTuple8 {
         h = detail::vtHashCombine(h, detail::vtHash(Item6));
         h = detail::vtHashCombine(h, detail::vtHash(Item7));
         h = detail::vtHashCombine(h, static_cast<size_t>(Rest.GetHashCode()));
-        return static_cast<int>(h);
+        return static_cast<intcs>(h);
     }
 
     /**
      * @brief Compares this instance to another ValueTuple8 lexicographically.
      * @return -1 if less, 0 if equal, 1 if greater.
      */
-    [[nodiscard]] int CompareTo(const ValueTuple8& o) const {
+    [[nodiscard]] intcs CompareTo(const ValueTuple8& o) const {
         if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
         if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
         if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
@@ -646,14 +650,14 @@ struct ValueTuple {
      *
      * C++ counterpart of .NET ValueTuple.GetHashCode() — always 0.
      */
-    [[nodiscard]] int GetHashCode() const noexcept { return 0; }
+    [[nodiscard]] intcs GetHashCode() const noexcept { return 0; }
 
     /**
      * @brief Compares this instance to another ValueTuple — always 0.
      *
      * C++ counterpart of .NET ValueTuple.CompareTo(ValueTuple).
      */
-    [[nodiscard]] int CompareTo(const ValueTuple&) const noexcept { return 0; }
+    [[nodiscard]] intcs CompareTo(const ValueTuple&) const noexcept { return 0; }
 
     /**
      * @brief Returns a string that represents this instance.

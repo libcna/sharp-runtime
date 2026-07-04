@@ -2,9 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cstddef>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Defines methods to support the comparison of objects for equality.
@@ -39,7 +41,7 @@ public:
      * @param obj The object for which to get a hash code.
      * @return A hash code for the specified object.
      */
-    [[nodiscard]] virtual std::size_t GetHashCode(const T& obj) const = 0;
+    [[nodiscard]] virtual intcs GetHashCode(const T& obj) const = 0;
 };
 
 } // namespace System::Collections::Generic

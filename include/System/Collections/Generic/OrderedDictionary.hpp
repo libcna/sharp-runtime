@@ -6,9 +6,15 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <functional>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/Generic/KeyValuePair.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a collection of key/value pairs that are accessible by key or index,
@@ -42,7 +48,7 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>(int capacity).
      * @param capacity The initial number of elements the dictionary can hold without resizing.
      */
-    explicit OrderedDictionary(int capacity) {
+    explicit OrderedDictionary(intcs capacity) {
         entries_.reserve(static_cast<std::size_t>(capacity));
         keyIndex_.reserve(static_cast<std::size_t>(capacity));
     }
@@ -53,8 +59,8 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const {
-        return static_cast<int>(entries_.size());
+    [[nodiscard]] intcs getCountProperty() const {
+        return static_cast<intcs>(entries_.size());
     }
 
     /**
@@ -63,11 +69,11 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.this[TKey] getter.
      * @param key The key whose value to get.
      * @return A const reference to the associated value.
-     * @throws std::out_of_range if the key is not found.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
      */
     [[nodiscard]] const TValue& operator[](const TKey& key) const {
         auto it = keyIndex_.find(key);
-        if (it == keyIndex_.end()) throw std::out_of_range("Key not found.");
+        if (it == keyIndex_.end()) throw KeyNotFoundException("The given key was not present in the dictionary.");
         return entries_[it->second].second;
     }
 
@@ -93,11 +99,12 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.GetAt(int).
      * @param index The zero-based index of the element.
      * @return The KeyValuePair at the specified index.
-     * @throws std::out_of_range if the index is out of range.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
      */
-    [[nodiscard]] KeyValuePair<TKey, TValue> GetAt(int index) const {
+    [[nodiscard]] KeyValuePair<TKey, TValue> GetAt(intcs index) const {
+        if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
+            throw System::ArgumentOutOfRangeException("index");
         auto i = static_cast<std::size_t>(index);
-        if (i >= entries_.size()) throw std::out_of_range("Index out of range.");
         return {entries_[i].first, entries_[i].second};
     }
 
@@ -107,10 +114,10 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.Add(TKey, TValue).
      * @param key   The key of the element to add.
      * @param value The value of the element to add.
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     void Add(const TKey& key, const TValue& value) {
-        if (keyIndex_.count(key)) throw std::invalid_argument("Duplicate key.");
+        if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         keyIndex_[key] = entries_.size();
         entries_.emplace_back(key, value);
     }
@@ -176,10 +183,10 @@ public:
      * @param key The key to locate.
      * @return The insertion-order index, or -1 if not present.
      */
-    [[nodiscard]] int IndexOf(const TKey& key) const {
+    [[nodiscard]] intcs IndexOf(const TKey& key) const {
         auto it = keyIndex_.find(key);
         if (it == keyIndex_.end()) return -1;
-        return static_cast<int>(it->second);
+        return static_cast<intcs>(it->second);
     }
 
     /**
@@ -189,13 +196,13 @@ public:
      * @param index The zero-based index at which to insert.
      * @param key   The key of the element to insert.
      * @param value The value of the element to insert.
-     * @throws std::invalid_argument if the key already exists.
-     * @throws std::out_of_range if the index is out of range.
+     * @throws System::ArgumentException if the key already exists.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
      */
-    void Insert(int index, const TKey& key, const TValue& value) {
-        if (keyIndex_.count(key)) throw std::invalid_argument("Duplicate key.");
-        auto i = static_cast<std::size_t>(index);
-        if (i > entries_.size()) throw std::out_of_range("Index out of range.");
+    void Insert(intcs index, const TKey& key, const TValue& value) {
+        if (index < 0 || static_cast<std::size_t>(index) > entries_.size())
+            throw System::ArgumentOutOfRangeException("index");
+        if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         entries_.insert(entries_.begin() + index, {key, value});
         rebuildIndex();
     }
@@ -206,12 +213,12 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.SetAt(int, TValue).
      * @param index The zero-based index of the element to update.
      * @param value The new value.
-     * @throws std::out_of_range if the index is out of range.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
      */
-    void SetAt(int index, const TValue& value) {
-        auto i = static_cast<std::size_t>(index);
-        if (i >= entries_.size()) throw std::out_of_range("Index out of range.");
-        entries_[i].second = value;
+    void SetAt(intcs index, const TValue& value) {
+        if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
+            throw System::ArgumentOutOfRangeException("index");
+        entries_[static_cast<std::size_t>(index)].second = value;
     }
 
     /**
@@ -234,11 +241,11 @@ public:
      *
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.RemoveAt(int).
      * @param index The zero-based index of the element to remove.
-     * @throws std::out_of_range if the index is out of range.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
      */
-    void RemoveAt(int index) {
-        auto i = static_cast<std::size_t>(index);
-        if (i >= entries_.size()) throw std::out_of_range("Index out of range.");
+    void RemoveAt(intcs index) {
+        if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
+            throw System::ArgumentOutOfRangeException("index");
         entries_.erase(entries_.begin() + index);
         rebuildIndex();
     }
@@ -260,10 +267,10 @@ public:
      * @param capacity The minimum capacity to ensure.
      * @return The new capacity.
      */
-    int EnsureCapacity(int capacity) {
+    intcs EnsureCapacity(intcs capacity) {
         auto cap = static_cast<std::size_t>(capacity);
         if (entries_.capacity() < cap) entries_.reserve(cap);
-        return static_cast<int>(entries_.capacity());
+        return static_cast<intcs>(entries_.capacity());
     }
 
     /**

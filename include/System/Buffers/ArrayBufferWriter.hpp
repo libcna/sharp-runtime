@@ -2,12 +2,19 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Buffers/IBufferWriter.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Memory.hpp"
 #include "System/ReadOnlyMemory.hpp"
+#include "System/Span.hpp"
 
 namespace System::Buffers {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a heap-based, array-backed output sink into which T data can be written.
@@ -20,21 +27,39 @@ namespace System::Buffers {
     template<typename T>
     class ArrayBufferWriter : public IBufferWriter<T> {
         std::vector<T> buffer_;
-        int writtenCount_ = 0;
+        intcs writtenCount_ = 0;
+
+        void checkAndResizeBuffer(intcs sizeHint) {
+            if (sizeHint < 0)
+                throw std::invalid_argument("sizeHint must be non-negative");
+            if (sizeHint == 0) sizeHint = 1;
+            if (sizeHint > getFreeCapacityProperty()) {
+                intcs currentLength = static_cast<intcs>(buffer_.size());
+                // Matches .NET: grow by the larger of sizeHint and the current length,
+                // special-casing an empty buffer to jump straight to DefaultInitialBufferSize.
+                intcs growBy = std::max(sizeHint, currentLength);
+                if (currentLength == 0) growBy = std::max(growBy, DefaultInitialBufferSize);
+                buffer_.resize(static_cast<std::size_t>(currentLength + growBy));
+            }
+        }
 
     public:
-        /** @brief Default initial capacity used when none is specified. */
-        static constexpr int DefaultInitialBufferSize = 256;
+        /** @brief Default initial capacity used when growing an empty buffer. */
+        static constexpr intcs DefaultInitialBufferSize = 256;
 
-        /** @brief Constructs an ArrayBufferWriter with the default initial capacity. */
-        ArrayBufferWriter() : buffer_(DefaultInitialBufferSize) {}
+        /**
+         * @brief Constructs an ArrayBufferWriter with zero initial capacity.
+         * C++ counterpart of .NET ArrayBufferWriter() — the backing buffer starts
+         * empty; DefaultInitialBufferSize is only applied on the first growth.
+         */
+        ArrayBufferWriter() = default;
 
         /**
          * @brief Constructs an ArrayBufferWriter with the specified initial capacity.
          * @param initialCapacity The minimum initial capacity of the backing buffer.
          * @throws std::invalid_argument if initialCapacity is zero or negative.
          */
-        explicit ArrayBufferWriter(int initialCapacity) {
+        explicit ArrayBufferWriter(intcs initialCapacity) {
             if (initialCapacity <= 0)
                 throw std::invalid_argument("initialCapacity must be positive");
             buffer_.resize(static_cast<std::size_t>(initialCapacity));
@@ -49,39 +74,76 @@ namespace System::Buffers {
         }
 
         /**
+         * @brief Returns a ReadOnlySpan view over the data written so far.
+         * @return Read-only view of the written portion of the buffer.
+         */
+        [[nodiscard]] System::ReadOnlySpan<T> getWrittenSpanProperty() const noexcept {
+            return System::ReadOnlySpan<T>(buffer_.data(), writtenCount_);
+        }
+
+        /**
          * @brief Returns the total number of elements written to the buffer.
          * @return Number of elements written.
          */
-        [[nodiscard]] int getWrittenCountProperty() const noexcept { return writtenCount_; }
+        [[nodiscard]] intcs getWrittenCountProperty() const noexcept { return writtenCount_; }
 
         /**
          * @brief Returns the total capacity of the backing buffer.
          * @return Total buffer capacity.
          */
-        [[nodiscard]] int getCapacityProperty() const noexcept {
-            return static_cast<int>(buffer_.size());
+        [[nodiscard]] intcs getCapacityProperty() const noexcept {
+            return static_cast<intcs>(buffer_.size());
         }
 
         /**
          * @brief Returns the remaining space in the buffer (capacity minus written count).
          * @return Number of elements that can still be written without reallocation.
          */
-        [[nodiscard]] int getFreeCapacityProperty() const noexcept {
+        [[nodiscard]] intcs getFreeCapacityProperty() const noexcept {
             return getCapacityProperty() - writtenCount_;
         }
 
-        /** @brief Resets the written count to zero, making the full buffer available again. */
-        void Clear() noexcept { writtenCount_ = 0; }
+        /**
+         * @brief Clears the written data, zeroing the buffer's content, and resets
+         * the written count to zero.
+         *
+         * C++ counterpart of .NET ArrayBufferWriter&lt;T&gt;.Clear(). Slower than
+         * ResetWrittenCount() since it also zeroes the buffer; use ResetWrittenCount()
+         * if the contents don't need to be cleared.
+         */
+        void Clear() {
+            std::fill(buffer_.begin(), buffer_.begin() + writtenCount_, T{});
+            writtenCount_ = 0;
+        }
+
+        /**
+         * @brief Resets the written count to zero without zeroing the buffer's content.
+         * C++ counterpart of .NET ArrayBufferWriter&lt;T&gt;.ResetWrittenCount().
+         */
+        void ResetWrittenCount() noexcept { writtenCount_ = 0; }
 
         /**
          * @brief Notifies the writer that @p count elements have been written.
          * @param count Number of elements written to the span returned by GetSpan().
-         * @throws std::invalid_argument if count is negative or exceeds free capacity.
+         * @throws std::invalid_argument if count is negative.
+         * @throws InvalidOperationException if count would advance past the end of the buffer.
          */
-        void Advance(int count) override {
-            if (count < 0 || count > getFreeCapacityProperty())
-                throw std::invalid_argument("count out of range");
+        void Advance(intcs count) override {
+            if (count < 0)
+                throw std::invalid_argument("count must be non-negative");
+            if (writtenCount_ > getCapacityProperty() - count)
+                throw InvalidOperationException("Cannot advance past the end of the buffer.");
             writtenCount_ += count;
+        }
+
+        /**
+         * @brief Returns a writable Memory with at least @p sizeHint free elements.
+         * @param sizeHint Minimum elements requested (0 means at least 1).
+         * @return Writable Memory over the free portion of the buffer.
+         */
+        System::Memory<T> GetMemory(intcs sizeHint = 0) override {
+            checkAndResizeBuffer(sizeHint);
+            return System::Memory<T>(buffer_, writtenCount_, getFreeCapacityProperty());
         }
 
         /**
@@ -89,15 +151,8 @@ namespace System::Buffers {
          * @param sizeHint Minimum elements requested (0 means at least 1).
          * @return Writable Span over the free portion of the buffer.
          */
-        System::Span<T> GetSpan(int sizeHint = 0) override {
-            if (sizeHint < 0) throw std::invalid_argument("sizeHint must be non-negative");
-            int needed = sizeHint == 0 ? 1 : sizeHint;
-            if (getFreeCapacityProperty() < needed) {
-                int newSize = static_cast<int>(buffer_.size()) * 2;
-                if (newSize - writtenCount_ < needed)
-                    newSize = writtenCount_ + needed;
-                buffer_.resize(static_cast<std::size_t>(newSize));
-            }
+        System::Span<T> GetSpan(intcs sizeHint = 0) override {
+            checkAndResizeBuffer(sizeHint);
             return System::Span<T>(buffer_.data() + writtenCount_, getFreeCapacityProperty());
         }
     };

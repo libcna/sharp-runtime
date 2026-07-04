@@ -6,6 +6,9 @@
 #include "System/Collections/Generic/PriorityQueue.hpp"
 #include "System/Collections/Generic/OrderedDictionary.hpp"
 #include "System/Collections/Generic/ReferenceEqualityComparer.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <string>
 #include <vector>
 
@@ -71,7 +74,7 @@ TEST(GenQueueTest, ToArray) {
 
 TEST(GenQueueTest, DequeueEmptyThrows) {
     Queue<int> q;
-    EXPECT_THROW(q.Dequeue(), std::runtime_error);
+    EXPECT_THROW(q.Dequeue(), System::InvalidOperationException);
 }
 
 // ---- PriorityQueue<string,int> ----
@@ -199,6 +202,37 @@ TEST(OrderedDictionaryTest, Insert) {
     d.Insert(1, "b", 2);
     EXPECT_EQ(d.GetAt(1).Key, "b");
     EXPECT_EQ(d.getCountProperty(), 3);
+}
+
+TEST(OrderedDictionaryTest, AddDuplicateThrows) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_THROW(d.Add("a", 2), System::ArgumentException);
+}
+
+TEST(OrderedDictionaryTest, IndexerConstMissingKeyThrows) {
+    OrderedDictionary<std::string, int> d;
+    const auto& cd = d;
+    EXPECT_THROW((void)cd["missing"], KeyNotFoundException);
+}
+
+TEST(OrderedDictionaryTest, GetAtOutOfRangeThrows) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_THROW(d.GetAt(1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(d.GetAt(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(OrderedDictionaryTest, RemoveAtOutOfRangeThrows) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_THROW(d.RemoveAt(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(OrderedDictionaryTest, InsertOutOfRangeThrows) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_THROW(d.Insert(5, "b", 2), System::ArgumentOutOfRangeException);
 }
 
 TEST(OrderedDictionaryTest, ContainsValue) {

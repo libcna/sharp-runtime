@@ -65,9 +65,13 @@ TEST(SequencePositionTests, Inequality_EqualValues_ReturnsFalse) {
 // ===========================================================================
 
 TEST(ArrayBufferWriterTests, DefaultConstructor_HasDefaultCapacity) {
+    // .NET's ArrayBufferWriter() starts empty (Capacity == 0); DefaultInitialBufferSize
+    // only kicks in lazily once the buffer needs to grow from empty.
     ArrayBufferWriter<uint8_t> writer;
-    EXPECT_EQ(writer.getCapacityProperty(), ArrayBufferWriter<uint8_t>::DefaultInitialBufferSize);
+    EXPECT_EQ(writer.getCapacityProperty(), 0);
     EXPECT_EQ(writer.getWrittenCountProperty(), 0);
+    writer.GetSpan(1);
+    EXPECT_GE(writer.getCapacityProperty(), ArrayBufferWriter<uint8_t>::DefaultInitialBufferSize);
 }
 
 TEST(ArrayBufferWriterTests, CustomCapacity_SetCorrectly) {
@@ -155,18 +159,18 @@ TEST(MemoryPoolTests, Rent_ReturnsNonNull) {
 
 TEST(MemoryPoolTests, Rent_BufferHasAtLeastRequestedSize) {
     auto owner = MemoryPool<int>::Shared().Rent(32);
-    EXPECT_GE(static_cast<int>(owner->getMemoryProperty().size()), 32);
+    EXPECT_GE(owner->getMemoryProperty().getLengthProperty(), 32);
 }
 
 TEST(MemoryPoolTests, Rent_DefaultSize_ReturnsUsableBuffer) {
     auto owner = MemoryPool<uint8_t>::Shared().Rent();
-    EXPECT_FALSE(owner->getMemoryProperty().empty());
+    EXPECT_GT(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
 TEST(MemoryPoolTests, Dispose_ClearsBuffer) {
     auto owner = MemoryPool<uint8_t>::Shared().Rent(8);
     owner->Dispose();
-    EXPECT_TRUE(owner->getMemoryProperty().empty());
+    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
 // ===========================================================================

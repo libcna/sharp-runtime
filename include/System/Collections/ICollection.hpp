@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/IEnumerable.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Defines size, enumerators, and synchronization methods for all non-generic collections.
@@ -22,7 +25,7 @@ public:
      *
      * C++ counterpart of .NET ICollection.Count.
      */
-    [[nodiscard]] virtual int getCountProperty() const = 0;
+    [[nodiscard]] virtual intcs getCountProperty() const = 0;
 
     /**
      * @brief Copies the elements of the collection into an array starting at the given index.
@@ -31,7 +34,7 @@ public:
      * @param array Pointer to the destination array buffer.
      * @param index Zero-based index at which copying begins.
      */
-    virtual void CopyTo(void* array, int index) = 0;
+    virtual void CopyTo(void* array, intcs index) = 0;
 
     /**
      * @brief Gets an object that can be used to synchronize access to the collection.

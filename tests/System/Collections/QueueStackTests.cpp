@@ -6,8 +6,10 @@
 #include "System/Collections/Stack.hpp"
 #include "System/Collections/IStructuralEquatable.hpp"
 #include "System/Collections/IEqualityComparer.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using namespace System::Collections;
+using System::InvalidOperationException;
 
 // -----------------------------------------------------------------------
 // Queue tests
@@ -76,7 +78,44 @@ TEST(QueueTest, Clone) {
 
 TEST(QueueTest, DequeueEmptyThrows) {
     Queue q;
-    EXPECT_THROW(q.Dequeue(), std::invalid_argument);
+    EXPECT_THROW(q.Dequeue(), InvalidOperationException);
+}
+
+TEST(QueueTest, GetEnumerator_IteratesInFIFOOrder) {
+    Queue q;
+    int a = 1, b = 2, c = 3;
+    q.Enqueue(&a);
+    q.Enqueue(&b);
+    q.Enqueue(&c);
+
+    IEnumerator* e = q.GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &a);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &b);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &c);
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
+
+TEST(QueueTest, GetEnumerator_CurrentBeforeMoveNext_Throws) {
+    Queue q;
+    int a = 1;
+    q.Enqueue(&a);
+    IEnumerator* e = q.GetEnumerator();
+    EXPECT_THROW(e->getCurrent(), InvalidOperationException);
+    delete e;
+}
+
+TEST(QueueTest, GetEnumerator_ModifiedDuringEnumeration_Throws) {
+    Queue q;
+    int a = 1, b = 2;
+    q.Enqueue(&a);
+    IEnumerator* e = q.GetEnumerator();
+    q.Enqueue(&b);
+    EXPECT_THROW(e->MoveNext(), InvalidOperationException);
+    delete e;
 }
 
 TEST(QueueTest, CopyTo) {
@@ -155,9 +194,37 @@ TEST(StackTest, Clone) {
     EXPECT_EQ(copy.Peek(), &a);
 }
 
+TEST(StackTest, GetEnumerator_IteratesTopToBottom) {
+    Stack s;
+    int a = 1, b = 2, c = 3;
+    s.Push(&a);
+    s.Push(&b);
+    s.Push(&c);
+
+    IEnumerator* e = s.GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &c);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &b);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->getCurrent(), &a);
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
+
+TEST(StackTest, GetEnumerator_ModifiedDuringEnumeration_Throws) {
+    Stack s;
+    int a = 1, b = 2;
+    s.Push(&a);
+    IEnumerator* e = s.GetEnumerator();
+    s.Push(&b);
+    EXPECT_THROW(e->MoveNext(), InvalidOperationException);
+    delete e;
+}
+
 TEST(StackTest, PopEmptyThrows) {
     Stack s;
-    EXPECT_THROW(s.Pop(), std::invalid_argument);
+    EXPECT_THROW(s.Pop(), InvalidOperationException);
 }
 
 // -----------------------------------------------------------------------
@@ -171,8 +238,8 @@ public:
     bool Equals(const void* x, const void* y) const override {
         return *static_cast<const int*>(x) == *static_cast<const int*>(y);
     }
-    std::size_t GetHashCode(const void* obj) const override {
-        return static_cast<std::size_t>(*static_cast<const int*>(obj));
+    int GetHashCode(const void* obj) const override {
+        return *static_cast<const int*>(obj);
     }
 };
 
@@ -183,7 +250,7 @@ public:
     bool Equals(const void* other, const IEqualityComparer& cmp) const override {
         return cmp.Equals(&val_, other);
     }
-    std::size_t GetHashCode(const IEqualityComparer& cmp) const override {
+    int GetHashCode(const IEqualityComparer& cmp) const override {
         return cmp.GetHashCode(&val_);
     }
 };

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
 #include <cctype>
+#include <functional>
 #include <stdexcept>
 
 namespace System {
@@ -11,7 +12,7 @@ namespace System {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-int Uri::defaultPortForScheme(const std::string& scheme) {
+intcs Uri::defaultPortForScheme(const std::string& scheme) {
     if (scheme == "http")  return 80;
     if (scheme == "https") return 443;
     if (scheme == "ftp")   return 21;
@@ -20,16 +21,68 @@ int Uri::defaultPortForScheme(const std::string& scheme) {
     return -1;
 }
 
+namespace {
+    /**
+     * Detects a leading RFC 3986 scheme "ALPHA *(ALPHA/DIGIT/"+"/"-"/".") \":\""
+     * and returns the index of the ':', or npos if the string has no valid scheme prefix.
+     */
+    std::size_t findSchemeColon(const std::string& s) {
+        if (s.empty() || !std::isalpha(static_cast<unsigned char>(s[0])))
+            return std::string::npos;
+        std::size_t i = 1;
+        while (i < s.size()) {
+            char c = s[i];
+            if (c == ':') return i;
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '-' || c == '.') {
+                ++i;
+                continue;
+            }
+            return std::string::npos;
+        }
+        return std::string::npos;
+    }
+}
+
 void Uri::parse(const std::string& uriString) {
     if (uriString.empty())
         throw std::invalid_argument("URI string must not be empty");
 
     auto schemeSep = uriString.find("://");
-    if (schemeSep == std::string::npos) {
+    std::size_t opaqueColon = std::string::npos;
+    if (schemeSep == std::string::npos)
+        opaqueColon = findSchemeColon(uriString);
+
+    if (schemeSep == std::string::npos && opaqueColon == std::string::npos) {
         // treat as relative
         isAbsoluteUri_ = false;
         absoluteUri_   = uriString;
         path_          = uriString;
+        return;
+    }
+
+    if (schemeSep == std::string::npos) {
+        // Opaque (non-hierarchical) absolute URI, e.g. "mailto:user@example.com" or
+        // "urn:isbn:0-395-36341-1" — a scheme followed by ':' with no "//" authority.
+        scheme_ = uriString.substr(0, opaqueColon);
+        std::string rest = uriString.substr(opaqueColon + 1);
+
+        auto fragPos = rest.find('#');
+        if (fragPos != std::string::npos) {
+            fragment_ = rest.substr(fragPos);
+            rest      = rest.substr(0, fragPos);
+        }
+        auto queryPos = rest.find('?');
+        if (queryPos != std::string::npos) {
+            query_ = rest.substr(queryPos);
+            rest   = rest.substr(0, queryPos);
+        }
+
+        path_          = rest;
+        host_.clear();
+        userInfo_.clear();
+        port_          = -1;
+        absoluteUri_   = uriString;
+        isAbsoluteUri_ = true;
         return;
     }
 
@@ -149,7 +202,7 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
 const std::string& Uri::getAbsoluteUriProperty()  const { return absoluteUri_; }
 const std::string& Uri::getSchemeProperty()        const { return scheme_; }
 const std::string& Uri::getHostProperty()          const { return host_; }
-int                Uri::getPortProperty()           const { return port_; }
+intcs              Uri::getPortProperty()           const { return port_; }
 const std::string& Uri::getAbsolutePathProperty()  const { return path_; }
 const std::string& Uri::getQueryProperty()         const { return query_; }
 const std::string& Uri::getFragmentProperty()      const { return fragment_; }
@@ -169,6 +222,10 @@ bool Uri::getIsLoopbackProperty() const {
 }
 
 std::string Uri::ToString() const { return absoluteUri_; }
+
+intcs Uri::GetHashCode() const {
+    return static_cast<intcs>(std::hash<std::string>{}(absoluteUri_));
+}
 
 // ---------------------------------------------------------------------------
 // Operators

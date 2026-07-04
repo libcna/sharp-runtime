@@ -12,6 +12,8 @@
 #include "System/Collections/ObjectModel/ObservableCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -141,7 +143,7 @@ TEST(ReadOnlyCollectionBatch18Test, CopyTo_OutOfRange_Throws) {
     ReadOnlyCollection<int>(std::vector<int>{1, 2, 3});
     ReadOnlyCollection<int> col(std::vector<int>{1, 2, 3});
     std::vector<int> dest(2, 0); // too small
-    EXPECT_THROW(col.CopyTo(dest, 0), std::out_of_range);
+    EXPECT_THROW(col.CopyTo(dest, 0), System::ArgumentException);
 }
 
 TEST(ReadOnlyCollectionBatch18Test, CountAndIndexer) {
@@ -161,9 +163,9 @@ TEST(ReadOnlyCollectionBatch18Test, Contains_IndexOf) {
 
 TEST(ReadOnlyCollectionBatch18Test, MutationThrows) {
     ReadOnlyCollection<int> col(std::vector<int>{1});
-    EXPECT_THROW(col.Add(2), std::runtime_error);
-    EXPECT_THROW(col.Clear(), std::runtime_error);
-    EXPECT_THROW(col.Remove(1), std::runtime_error);
+    EXPECT_THROW(col.Add(2), System::NotSupportedException);
+    EXPECT_THROW(col.Clear(), System::NotSupportedException);
+    EXPECT_THROW(col.Remove(1), System::NotSupportedException);
 }
 
 // ===========================================================================

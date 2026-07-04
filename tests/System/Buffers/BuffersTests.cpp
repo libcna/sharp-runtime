@@ -2,10 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/Buffers/ArrayPool.hpp"
 #include "System/Buffers/OperationStatus.hpp"
 #include "System/Buffers/StandardFormat.hpp"
 
+using System::ArgumentOutOfRangeException;
+using System::FormatException;
 using System::Buffers::ArrayPool;
 using System::Buffers::OperationStatus;
 using System::Buffers::StandardFormat;
@@ -89,10 +93,14 @@ TEST(OperationStatusTests, Inequality_DifferentValues) {
 // StandardFormat
 // ===========================================================================
 
-TEST(StandardFormatTests, DefaultConstructor_NoPrecision) {
+TEST(StandardFormatTests, DefaultConstructor_MatchesNetZeroInit) {
+    // .NET's default(StandardFormat) is the struct's true zero-initialized value
+    // (Symbol='\0', Precision==0), NOT NoPrecision - so HasPrecision is actually
+    // true and Precision==0, and IsDefault reports true for exactly this state.
     StandardFormat sf;
-    EXPECT_EQ(sf.getPrecisionProperty(), StandardFormat::NoPrecision);
-    EXPECT_FALSE(sf.getHasPrecisionProperty());
+    EXPECT_EQ(sf.getPrecisionProperty(), 0);
+    EXPECT_TRUE(sf.getHasPrecisionProperty());
+    EXPECT_TRUE(sf.getIsDefaultProperty());
 }
 
 TEST(StandardFormatTests, Constructor_SymbolOnly) {
@@ -168,12 +176,59 @@ TEST(StandardFormatTests, Parse_SymbolAndPrecision) {
 }
 
 TEST(StandardFormatTests, Parse_Empty_DefaultFormat) {
+    // Matches .NET's ParseHelper: an empty format string yields the true
+    // zero-initialized default(StandardFormat), not NoPrecision.
     StandardFormat sf = StandardFormat::Parse("");
-    EXPECT_FALSE(sf.getHasPrecisionProperty());
+    EXPECT_TRUE(sf.getIsDefaultProperty());
 }
 
 TEST(StandardFormatTests, Parse_ToString_RoundTrip) {
     StandardFormat original('X', 8);
     StandardFormat parsed = StandardFormat::Parse(original.ToString());
     EXPECT_EQ(parsed, original);
+}
+
+TEST(StandardFormatTests, Ctor_PrecisionTooLarge_Throws) {
+    EXPECT_THROW(StandardFormat('D', 100), ArgumentOutOfRangeException);
+}
+
+TEST(StandardFormatTests, Ctor_MaxPrecision_Allowed) {
+    EXPECT_NO_THROW(StandardFormat('D', StandardFormat::MaxPrecision));
+}
+
+TEST(StandardFormatTests, Parse_PrecisionTooLarge_Throws) {
+    EXPECT_THROW(StandardFormat::Parse("D100"), FormatException);
+}
+
+TEST(StandardFormatTests, Parse_NonDigitPrecision_Throws) {
+    EXPECT_THROW(StandardFormat::Parse("Dx"), FormatException);
+}
+
+TEST(StandardFormatTests, TryParse_Invalid_ReturnsFalse) {
+    StandardFormat result;
+    EXPECT_FALSE(StandardFormat::TryParse("D100", result));
+}
+
+TEST(StandardFormatTests, TryParse_Valid_ReturnsTrue) {
+    StandardFormat result;
+    EXPECT_TRUE(StandardFormat::TryParse("F2", result));
+    EXPECT_EQ(result.getSymbolProperty(), 'F');
+    EXPECT_EQ(result.getPrecisionProperty(), 2);
+}
+
+TEST(StandardFormatTests, GetHashCode_SameValues_SameHash) {
+    StandardFormat a('G', 5);
+    StandardFormat b('G', 5);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(StandardFormatTests, Equals_SameValues_True) {
+    StandardFormat a('G', 5);
+    StandardFormat b('G', 5);
+    EXPECT_TRUE(a.Equals(b));
+}
+
+TEST(StandardFormatTests, IsDefault_NonDefault_False) {
+    StandardFormat sf('G');
+    EXPECT_FALSE(sf.getIsDefaultProperty());
 }

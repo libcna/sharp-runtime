@@ -1371,3 +1371,85 @@ TEST(KeyedCollectionTests, Count_AfterAddRemove) {
     nc.Remove("q");
     EXPECT_EQ(nc.getCountProperty(), 2);
 }
+
+TEST(KeyedCollectionTests, Add_DuplicateKey_Throws) {
+    NamedCollection nc;
+    nc.Add({"a", 1});
+    EXPECT_THROW(nc.Add({"a", 2}), System::ArgumentException);
+    EXPECT_EQ(nc.getCountProperty(), 1);
+}
+
+TEST(KeyedCollectionTests, Insert_DuplicateKey_Throws) {
+    NamedCollection nc;
+    nc.Add({"a", 1});
+    nc.Add({"b", 2});
+    EXPECT_THROW(nc.Insert(0, {"b", 3}), System::ArgumentException);
+    EXPECT_EQ(nc.getCountProperty(), 2);
+}
+
+TEST(KeyedCollectionTests, IndexByKey_Missing_ThrowsKeyNotFoundException) {
+    NamedCollection nc;
+    nc.Add({"a", 1});
+    EXPECT_THROW(nc["missing"], System::Collections::Generic::KeyNotFoundException);
+    const NamedCollection& constNc = nc;
+    EXPECT_THROW(constNc["missing"], System::Collections::Generic::KeyNotFoundException);
+}
+
+namespace {
+    // Re-exposes protected members for direct testing.
+    class ExposedNamedCollection : public NamedCollection {
+    public:
+        using NamedCollection::SetItem;
+        using NamedCollection::ChangeItemKey;
+    };
+}
+
+TEST(KeyedCollectionTests, SetItem_UpdatesIndex) {
+    ExposedNamedCollection nc;
+    nc.Add({"a", 1});
+    nc.Add({"b", 2});
+    nc.SetItem(0, {"c", 99});
+    EXPECT_FALSE(nc.Contains("a"));
+    EXPECT_TRUE(nc.Contains("c"));
+    EXPECT_EQ(nc["c"].value, 99);
+}
+
+TEST(KeyedCollectionTests, SetItem_DuplicateKey_Throws) {
+    ExposedNamedCollection nc;
+    nc.Add({"a", 1});
+    nc.Add({"b", 2});
+    EXPECT_THROW(nc.SetItem(0, {"b", 99}), System::ArgumentException);
+    EXPECT_EQ(nc["a"].value, 1);
+}
+
+TEST(KeyedCollectionTests, SetItem_SameKey_UpdatesValueWithoutError) {
+    ExposedNamedCollection nc;
+    nc.Add({"a", 1});
+    nc.SetItem(0, {"a", 42});
+    EXPECT_EQ(nc["a"].value, 42);
+}
+
+TEST(KeyedCollectionTests, ChangeItemKey_UpdatesIndex) {
+    ExposedNamedCollection nc;
+    nc.Add({"a", 1});
+    // Per .NET convention: hold a reference, notify with the item still under its old key,
+    // then mutate the field the reference points at.
+    NamedItem& item = nc["a"];
+    nc.ChangeItemKey(item, "z");
+    item.name = "z";
+    EXPECT_FALSE(nc.Contains("a"));
+    EXPECT_TRUE(nc.Contains("z"));
+    EXPECT_EQ(nc["z"].value, 1);
+}
+
+TEST(KeyedCollectionTests, ChangeItemKey_MissingItem_Throws) {
+    ExposedNamedCollection nc;
+    EXPECT_THROW(nc.ChangeItemKey({"ghost", 1}, "z"), System::ArgumentException);
+}
+
+TEST(KeyedCollectionTests, ChangeItemKey_DuplicateNewKey_Throws) {
+    ExposedNamedCollection nc;
+    nc.Add({"a", 1});
+    nc.Add({"b", 2});
+    EXPECT_THROW(nc.ChangeItemKey(nc["a"], "b"), System::ArgumentException);
+}

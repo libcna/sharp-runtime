@@ -29,6 +29,9 @@ public:
      * @brief Gets the key of the current dictionary entry.
      *
      * C++ counterpart of .NET IDictionaryEnumerator.Key.
+     * @throws System::InvalidOperationException if the enumerator is positioned before the
+     *         first element or after the last element (matches .NET's real contract; concrete
+     *         implementations are responsible for enforcing this).
      */
     [[nodiscard]] virtual const void* getKeyProperty() const = 0;
 

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/ICollection.hpp"
 #include "System/Collections/IEnumerator.hpp"
 
@@ -64,9 +65,9 @@ public:
      * @param array Pointer to a void*[] buffer.
      * @param index Zero-based index at which copying begins.
      */
-    void CopyTo(void* array, int index) override {
+    void CopyTo(void* array, intcs index) override {
         auto** dest = static_cast<void**>(array);
-        int i = index;
+        intcs i = index;
         for (void* p : q_) dest[i++] = p;
     }
 
@@ -76,8 +77,14 @@ public:
     /** @brief Returns a synchronization root for this Queue. */
     [[nodiscard]] const void* getSyncRootProperty() const override { return this; }
 
-    /** @brief Returns a heap-allocated enumerator; stub returns nullptr. */
-    IEnumerator* GetEnumerator() override { return nullptr; }
+    /**
+     * @brief Returns a heap-allocated enumerator over the Queue; caller takes ownership.
+     *
+     * C++ counterpart of .NET Queue.GetEnumerator().
+     * The enumerator throws InvalidOperationException if the Queue is modified
+     * (Enqueue/Dequeue/Clear) while enumeration is in progress, matching .NET.
+     */
+    IEnumerator* GetEnumerator() override { return new Enumerator(this); }
 
     // -----------------------------------------------------------------------
     // Queue operations
@@ -89,27 +96,27 @@ public:
      * C++ counterpart of .NET Queue.Enqueue(object?).
      * @param item The object to add.
      */
-    void Enqueue(void* item) { q_.push_back(item); }
+    void Enqueue(void* item) { q_.push_back(item); ++version_; }
 
     /**
      * @brief Removes and returns the object at the beginning of the Queue.
      *
      * C++ counterpart of .NET Queue.Dequeue().
-     * @throws std::invalid_argument if the Queue is empty.
+     * @throws System::InvalidOperationException if the Queue is empty.
      */
     void* Dequeue() {
-        if (q_.empty()) throw std::invalid_argument("Queue is empty.");
-        void* v = q_.front(); q_.pop_front(); return v;
+        if (q_.empty()) throw System::InvalidOperationException("Queue empty.");
+        void* v = q_.front(); q_.pop_front(); ++version_; return v;
     }
 
     /**
      * @brief Returns the object at the beginning of the Queue without removing it.
      *
      * C++ counterpart of .NET Queue.Peek().
-     * @throws std::invalid_argument if the Queue is empty.
+     * @throws System::InvalidOperationException if the Queue is empty.
      */
     [[nodiscard]] void* Peek() const {
-        if (q_.empty()) throw std::invalid_argument("Queue is empty.");
+        if (q_.empty()) throw System::InvalidOperationException("Queue empty.");
         return q_.front();
     }
 
@@ -130,7 +137,7 @@ public:
      *
      * C++ counterpart of .NET Queue.Clear().
      */
-    void Clear() { q_.clear(); }
+    void Clear() { q_.clear(); ++version_; }
 
     /**
      * @brief Copies the Queue elements to a new void*[] array.
@@ -167,6 +174,43 @@ public:
 
 private:
     std::deque<void*> q_;
+    intcs version_ = 0;
+
+    /**
+     * @brief Enumerates the elements of a Queue in FIFO order.
+     *
+     * C++ counterpart of .NET Queue's private QueueEnumerator. Detects concurrent
+     * modification via a version counter, matching .NET's fail-fast enumeration contract.
+     */
+    class Enumerator : public IEnumerator {
+        const Queue* q_;
+        intcs version_;
+        intcs index_;   // -1 before start / after end; otherwise index of current element
+        bool started_ = false;
+
+    public:
+        explicit Enumerator(const Queue* q) : q_(q), version_(q->version_), index_(-1) {}
+
+        bool MoveNext() override {
+            if (version_ != q_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            if (index_ + 1 >= static_cast<intcs>(q_->q_.size())) { started_ = true; index_ = -1; return false; }
+            ++index_;
+            started_ = true;
+            return true;
+        }
+
+        void Reset() override {
+            if (version_ != q_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            index_ = -1;
+            started_ = false;
+        }
+
+        [[nodiscard]] void* getCurrent() const override {
+            if (!started_ || index_ < 0)
+                throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+            return q_->q_[static_cast<size_t>(index_)];
+        }
+    };
 };
 
 } // namespace System::Collections

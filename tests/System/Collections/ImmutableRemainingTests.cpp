@@ -13,6 +13,9 @@
 #include "System/Collections/Immutable/ImmutableSortedDictionary.hpp"
 #include "System/Collections/Immutable/ImmutableSortedSet.hpp"
 #include "System/Collections/Immutable/ImmutableStack.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 using System::Collections::Immutable::ImmutableHashSet;
 using System::Collections::Immutable::ImmutableQueue;
@@ -149,7 +152,7 @@ TEST(ImmutableQueueTests, Peek_ReturnsFront) {
 
 TEST(ImmutableQueueTests, Peek_EmptyQueue_Throws) {
     auto q = ImmutableQueue<int>::Empty();
-    EXPECT_THROW(q.Peek(), std::out_of_range);
+    EXPECT_THROW(q.Peek(), System::InvalidOperationException);
 }
 
 TEST(ImmutableQueueTests, Dequeue_ReturnsNewQueueWithoutFront) {
@@ -162,7 +165,7 @@ TEST(ImmutableQueueTests, Dequeue_ReturnsNewQueueWithoutFront) {
 
 TEST(ImmutableQueueTests, Dequeue_EmptyQueue_Throws) {
     auto q = ImmutableQueue<int>::Empty();
-    EXPECT_THROW(q.Dequeue(), std::out_of_range);
+    EXPECT_THROW(q.Dequeue(), System::InvalidOperationException);
 }
 
 TEST(ImmutableQueueTests, DequeueWithValue_FillsValue) {
@@ -197,7 +200,7 @@ TEST(ImmutableSortedDictionaryTests, Add_IncreasesCount) {
 
 TEST(ImmutableSortedDictionaryTests, Add_DuplicateKey_Throws) {
     auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
-    EXPECT_THROW(d.Add("x", 20), std::invalid_argument);
+    EXPECT_THROW(d.Add("x", 20), System::ArgumentException);
 }
 
 TEST(ImmutableSortedDictionaryTests, ContainsKey_True_False) {
@@ -213,7 +216,7 @@ TEST(ImmutableSortedDictionaryTests, OperatorBracket_ReturnsValue) {
 
 TEST(ImmutableSortedDictionaryTests, OperatorBracket_MissingKey_Throws) {
     auto d = ImmutableSortedDictionary<std::string, int>::Empty();
-    EXPECT_THROW((void)d["nope"], std::out_of_range);
+    EXPECT_THROW((void)d["nope"], System::Collections::Generic::KeyNotFoundException);
 }
 
 TEST(ImmutableSortedDictionaryTests, TryGetValue_Found) {
@@ -325,6 +328,12 @@ TEST(ImmutableSortedSetTests, Min_Max) {
     EXPECT_EQ(s.getMaxProperty(), 9);
 }
 
+TEST(ImmutableSortedSetTests, Min_Max_Empty_ReturnsDefault) {
+    auto s = ImmutableSortedSet<int>::Empty();
+    EXPECT_EQ(s.getMinProperty(), 0);
+    EXPECT_EQ(s.getMaxProperty(), 0);
+}
+
 TEST(ImmutableSortedSetTests, Union_CombinesBothSets) {
     auto a = ImmutableSortedSet<int>::Create({1, 2});
     auto b = ImmutableSortedSet<int>::Create({2, 3});
@@ -393,7 +402,7 @@ TEST(ImmutableStackTests, Peek_ReturnsTop) {
 
 TEST(ImmutableStackTests, Peek_EmptyStack_Throws) {
     auto st = ImmutableStack<int>::Empty();
-    EXPECT_THROW(st.Peek(), std::out_of_range);
+    EXPECT_THROW(st.Peek(), System::InvalidOperationException);
 }
 
 TEST(ImmutableStackTests, Pop_ReturnsNewStackWithoutTop) {
@@ -406,7 +415,7 @@ TEST(ImmutableStackTests, Pop_ReturnsNewStackWithoutTop) {
 
 TEST(ImmutableStackTests, Pop_EmptyStack_Throws) {
     auto st = ImmutableStack<int>::Empty();
-    EXPECT_THROW(st.Pop(), std::out_of_range);
+    EXPECT_THROW(st.Pop(), System::InvalidOperationException);
 }
 
 TEST(ImmutableStackTests, PopWithValue_FillsValue) {
@@ -421,7 +430,7 @@ TEST(ImmutableStackTests, PopWithValue_FillsValue) {
 TEST(ImmutableStackTests, PopWithValue_EmptyStack_Throws) {
     auto st = ImmutableStack<int>::Empty();
     int val = 0;
-    EXPECT_THROW(st.Pop(val), std::out_of_range);
+    EXPECT_THROW(st.Pop(val), System::InvalidOperationException);
 }
 
 TEST(ImmutableStackTests, Clear_ReturnsEmpty) {

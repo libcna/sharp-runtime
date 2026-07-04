@@ -3,9 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Collections/Generic/Dictionary.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include <string>
 
 using System::Collections::Generic::Dictionary;
+using System::Collections::Generic::KeyNotFoundException;
 
 TEST(DictionaryTest, DefaultEmpty) {
     Dictionary<std::string, int> d;
@@ -22,7 +25,7 @@ TEST(DictionaryTest, AddAndContainsKey) {
 TEST(DictionaryTest, AddDuplicateThrows) {
     Dictionary<std::string, int> d;
     d.Add("k", 1);
-    EXPECT_THROW(d.Add("k", 2), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", 2), System::ArgumentException);
 }
 
 TEST(DictionaryTest, TryGetValueFound) {
@@ -71,7 +74,7 @@ TEST(DictionaryTest, OperatorBracketReadWrite) {
 
 TEST(DictionaryTest, OperatorBracketConstThrowsIfMissing) {
     const Dictionary<std::string, int> d;
-    EXPECT_THROW(d["missing"], std::out_of_range);
+    EXPECT_THROW(d["missing"], KeyNotFoundException);
 }
 
 TEST(DictionaryTest, TryAdd) {

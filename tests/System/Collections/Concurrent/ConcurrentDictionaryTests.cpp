@@ -86,6 +86,21 @@ TEST(ConcurrentDictionaryTest, Keys) {
     ConcurrentDictionary<std::string, int> d;
     d.TryAdd("a", 1);
     d.TryAdd("b", 2);
-    auto keys = d.Keys();
+    auto keys = d.getKeysProperty();
     EXPECT_EQ(static_cast<int>(keys.size()), 2);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_WithAddFactory_NewKey_Adds) {
+    ConcurrentDictionary<std::string, int> d;
+    int result = d.AddOrUpdate("a", [](const std::string&) { return 5; },
+                                [](const std::string&, int v) { return v + 1; });
+    EXPECT_EQ(result, 5);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_WithAddFactory_ExistingKey_Updates) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("a", 5);
+    int result = d.AddOrUpdate("a", [](const std::string&) { return 100; },
+                                [](const std::string&, int v) { return v + 1; });
+    EXPECT_EQ(result, 6);
 }

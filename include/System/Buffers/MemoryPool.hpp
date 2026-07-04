@@ -59,7 +59,7 @@ namespace System::Buffers {
     public:
         explicit MemoryPoolHeapOwner_(int size)
             : buf_(static_cast<std::size_t>(size > 0 ? size : 4096)) {}
-        std::vector<T>& getMemoryProperty() override { return buf_; }
+        System::Memory<T> getMemoryProperty() override { return System::Memory<T>(buf_); }
         void Dispose() override { buf_.clear(); buf_.shrink_to_fit(); }
     };
 

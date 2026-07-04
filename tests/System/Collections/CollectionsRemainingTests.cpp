@@ -13,6 +13,9 @@
 #include "System/Collections/BitArray.hpp"
 #include "System/Collections/Queue.hpp"
 #include "System/Collections/Stack.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Collections::Generic::KeyValuePair;
 using System::Collections::Generic::SortedDictionary;
@@ -58,7 +61,7 @@ TEST(SortedDictionaryTests, Add_IncreasesCount) {
 TEST(SortedDictionaryTests, Add_DuplicateKey_Throws) {
     SortedDictionary<std::string, int> sd;
     sd.Add("x", 1);
-    EXPECT_THROW(sd.Add("x", 2), std::invalid_argument);
+    EXPECT_THROW(sd.Add("x", 2), System::ArgumentException);
 }
 TEST(SortedDictionaryTests, ContainsKey_True_False) {
     SortedDictionary<std::string, int> sd;
@@ -136,7 +139,7 @@ TEST(SortedListTests, Add_IncreasesCount) {
 TEST(SortedListTests, Add_DuplicateKey_Throws) {
     SortedList<int, std::string> sl;
     sl.Add(1, "a");
-    EXPECT_THROW(sl.Add(1, "b"), std::invalid_argument);
+    EXPECT_THROW(sl.Add(1, "b"), System::ArgumentException);
 }
 TEST(SortedListTests, ContainsKey_True_False) {
     SortedList<int, std::string> sl;
@@ -165,7 +168,7 @@ TEST(SortedListTests, RemoveAt_RemovesByIndex) {
 }
 TEST(SortedListTests, RemoveAt_OutOfRange_Throws) {
     SortedList<int, std::string> sl;
-    EXPECT_THROW(sl.RemoveAt(0), std::out_of_range);
+    EXPECT_THROW(sl.RemoveAt(0), System::ArgumentOutOfRangeException);
 }
 TEST(SortedListTests, TryGetValue_Found) {
     SortedList<int, std::string> sl;
@@ -320,11 +323,11 @@ TEST(CollectionsQueueTests, Peek_ReturnsFront_DoesNotRemove) {
 }
 TEST(CollectionsQueueTests, Dequeue_Empty_Throws) {
     Queue q;
-    EXPECT_THROW(q.Dequeue(), std::invalid_argument);
+    EXPECT_THROW(q.Dequeue(), System::InvalidOperationException);
 }
 TEST(CollectionsQueueTests, Peek_Empty_Throws) {
     Queue q;
-    EXPECT_THROW(q.Peek(), std::invalid_argument);
+    EXPECT_THROW(q.Peek(), System::InvalidOperationException);
 }
 TEST(CollectionsQueueTests, Contains_True_False) {
     Queue q;
@@ -373,11 +376,11 @@ TEST(CollectionsStackTests, Peek_ReturnsTop_DoesNotRemove) {
 }
 TEST(CollectionsStackTests, Pop_Empty_Throws) {
     Stack s;
-    EXPECT_THROW(s.Pop(), std::invalid_argument);
+    EXPECT_THROW(s.Pop(), System::InvalidOperationException);
 }
 TEST(CollectionsStackTests, Peek_Empty_Throws) {
     Stack s;
-    EXPECT_THROW(s.Peek(), std::invalid_argument);
+    EXPECT_THROW(s.Peek(), System::InvalidOperationException);
 }
 TEST(CollectionsStackTests, Contains_True_False) {
     Stack s;

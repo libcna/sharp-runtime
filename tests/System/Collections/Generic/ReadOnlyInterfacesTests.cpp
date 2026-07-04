@@ -19,7 +19,7 @@ namespace {
 class IntEqCmp : public IEqualityComparer<int> {
 public:
     bool Equals(const int& x, const int& y) const override { return x == y; }
-    std::size_t GetHashCode(const int& obj) const override { return std::hash<int>{}(obj); }
+    int GetHashCode(const int& obj) const override { return static_cast<int>(std::hash<int>{}(obj)); }
 };
 
 // ---- IList<int> concrete ----

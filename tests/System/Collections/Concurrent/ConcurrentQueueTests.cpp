@@ -53,3 +53,56 @@ TEST(ConcurrentQueueTest, Clear) {
     q.Clear();
     EXPECT_TRUE(q.getIsEmptyProperty());
 }
+
+TEST(ConcurrentQueueTest, TryAdd_AddsAtBack) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(1);
+    EXPECT_TRUE(q.TryAdd(2));
+    int v = 0;
+    q.TryDequeue(v);
+    EXPECT_EQ(v, 1);
+    q.TryDequeue(v);
+    EXPECT_EQ(v, 2);
+}
+
+TEST(ConcurrentQueueTest, TryTake_EquivalentToTryDequeue) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(7);
+    int v = 0;
+    EXPECT_TRUE(q.TryTake(v));
+    EXPECT_EQ(v, 7);
+    EXPECT_TRUE(q.getIsEmptyProperty());
+}
+
+TEST(ConcurrentQueueTest, ToArray_FrontToBackOrder) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(1);
+    q.Enqueue(2);
+    q.Enqueue(3);
+    auto arr = q.ToArray();
+    ASSERT_EQ(arr.size(), 3u);
+    EXPECT_EQ(arr[0], 1);
+    EXPECT_EQ(arr[1], 2);
+    EXPECT_EQ(arr[2], 3);
+}
+
+TEST(ConcurrentQueueTest, CopyTo_TooSmall_Throws) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(1);
+    q.Enqueue(2);
+    std::vector<int> dest(1);
+    EXPECT_THROW(q.CopyTo(dest, 0), std::out_of_range);
+}
+
+TEST(ConcurrentQueueTest, GetEnumerator_IteratesFrontToBack) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(1);
+    q.Enqueue(2);
+    auto* e = q.GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->Current(), 1);
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(e->Current(), 2);
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}

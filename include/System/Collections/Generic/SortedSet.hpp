@@ -4,8 +4,11 @@
 #pragma once
 #include <set>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a collection of objects maintained in sorted order with no duplicate elements.
@@ -35,7 +38,7 @@ public:
      * C++ counterpart of .NET SortedSet<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_.size()); }
 
     /**
      * @brief Gets a value indicating whether the SortedSet contains no elements.
@@ -44,20 +47,20 @@ public:
     [[nodiscard]] bool getIsEmptyProperty() const { return data_.empty(); }
 
     /**
-     * @brief Gets the minimum value in the SortedSet.
+     * @brief Gets the minimum value in the SortedSet, or a default-constructed T if empty.
      *
-     * C++ counterpart of .NET SortedSet<T>.Min.
-     * @return A const reference to the smallest element.
+     * C++ counterpart of .NET SortedSet<T>.Min, which returns default(T) (.NET's nullable
+     * T?) rather than throwing when the set is empty.
      */
-    [[nodiscard]] const T& getMinProperty() const { return *data_.begin(); }
+    [[nodiscard]] T getMinProperty() const { return data_.empty() ? T{} : *data_.begin(); }
 
     /**
-     * @brief Gets the maximum value in the SortedSet.
+     * @brief Gets the maximum value in the SortedSet, or a default-constructed T if empty.
      *
-     * C++ counterpart of .NET SortedSet<T>.Max.
-     * @return A const reference to the largest element.
+     * C++ counterpart of .NET SortedSet<T>.Max, which returns default(T) (.NET's nullable
+     * T?) rather than throwing when the set is empty.
      */
-    [[nodiscard]] const T& getMaxProperty() const { return *data_.rbegin(); }
+    [[nodiscard]] T getMaxProperty() const { return data_.empty() ? T{} : *data_.rbegin(); }
 
     /**
      * @brief Adds the specified element to the set.

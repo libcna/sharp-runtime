@@ -6,6 +6,9 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/Concurrent/IProducerConsumerCollection.hpp"
+#include "System/Collections/Generic/IEnumerable.hpp"
+#include "System/Collections/Generic/IEnumerator.hpp"
 
 namespace System::Collections::Concurrent {
 
@@ -21,9 +24,19 @@ using SharpRuntime::intcs;
  * @tparam T Specifies the type of elements in the stack.
  */
 template<typename T>
-class ConcurrentStack {
+class ConcurrentStack : public IProducerConsumerCollection<T> {
     mutable std::mutex mutex_;
     std::vector<T>    data_;
+
+    class SnapshotEnumerator : public System::Collections::Generic::IEnumerator<T> {
+        std::vector<T> items_; // top-to-bottom order
+        intcs index_ = -1;
+    public:
+        explicit SnapshotEnumerator(std::vector<T> items) : items_(std::move(items)) {}
+        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
+        void Reset() override { index_ = -1; }
+        [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
+    };
 
 public:
     /**
@@ -43,11 +56,23 @@ public:
     explicit ConcurrentStack(const std::vector<T>& collection) : data_(collection) {}
 
     /**
+     * @brief Initializes a new instance with elements copied from the specified collection.
+     *
+     * C++ counterpart of .NET ConcurrentStack<T>(IEnumerable<T>).
+     * Elements are pushed in iteration order so the last element ends up on top.
+     * @param collection The collection whose elements are copied to the stack.
+     */
+    explicit ConcurrentStack(System::Collections::Generic::IEnumerable<T>& collection) {
+        auto* e = collection.GetEnumerator();
+        if (e) { while (e->MoveNext()) data_.push_back(e->Current()); delete e; }
+    }
+
+    /**
      * @brief Gets a value indicating whether the stack is empty.
      *
      * C++ counterpart of .NET ConcurrentStack<T>.IsEmpty.
      */
-    [[nodiscard]] bool getIsEmptyProperty() const {
+    [[nodiscard]] bool getIsEmptyProperty() const override {
         std::lock_guard<std::mutex> lk(mutex_);
         return data_.empty();
     }
@@ -57,7 +82,7 @@ public:
      *
      * C++ counterpart of .NET ConcurrentStack<T>.Count.
      */
-    [[nodiscard]] intcs getCountProperty() const {
+    [[nodiscard]] intcs getCountProperty() const override {
         std::lock_guard<std::mutex> lk(mutex_);
         return static_cast<intcs>(data_.size());
     }
@@ -147,6 +172,18 @@ public:
     }
 
     /**
+     * @brief Attempts to add an object to the collection (equivalent to Push).
+     * C++ counterpart of .NET IProducerConsumerCollection&lt;T&gt;.TryAdd(T) — always succeeds for a stack.
+     */
+    bool TryAdd(const T& item) override { Push(item); return true; }
+
+    /**
+     * @brief Attempts to remove and return an object from the collection (equivalent to TryPop).
+     * C++ counterpart of .NET IProducerConsumerCollection&lt;T&gt;.TryTake(out T).
+     */
+    bool TryTake(T& item) override { return TryPop(item); }
+
+    /**
      * @brief Attempts to pop and return multiple objects from the top of the stack.
      *
      * C++ counterpart of .NET ConcurrentStack<T>.TryPopRange(T[]).
@@ -193,28 +230,36 @@ public:
      * C++ counterpart of .NET ConcurrentStack<T>.ToArray().
      * @return A new vector with the top element at index 0.
      */
-    [[nodiscard]] std::vector<T> ToArray() const {
+    [[nodiscard]] std::vector<T> ToArray() const override {
         std::lock_guard<std::mutex> lk(mutex_);
         std::vector<T> result(data_.rbegin(), data_.rend());
         return result;
     }
 
     /**
+     * @brief Returns an enumerator over a point-in-time snapshot of the stack (top-to-bottom).
+     * C++ counterpart of .NET ConcurrentStack<T>.GetEnumerator().
+     * @return Heap-allocated enumerator; caller takes ownership.
+     */
+    [[nodiscard]] System::Collections::Generic::IEnumerator<T>* GetEnumerator() override {
+        return new SnapshotEnumerator(ToArray());
+    }
+
+    /**
      * @brief Copies elements to the destination vector starting at index, in top-to-bottom order.
      *
      * C++ counterpart of .NET ConcurrentStack<T>.CopyTo(T[], int).
-     * @param array Destination vector (must have capacity for index + Count elements).
+     * @param array Destination vector; must already have room for index + Count elements.
      * @param index Zero-based starting index in array.
+     * @throws std::out_of_range if @p index is negative or @p array is not large enough.
      */
-    void CopyTo(std::vector<T>& array, intcs index) const {
+    void CopyTo(std::vector<T>& array, intcs index) override {
         std::lock_guard<std::mutex> lk(mutex_);
+        if (index < 0 || static_cast<size_t>(index) + data_.size() > array.size())
+            throw std::out_of_range("CopyTo destination is too small.");
         intcs i = index;
         for (auto it = data_.rbegin(); it != data_.rend(); ++it, ++i) {
-            if (static_cast<std::size_t>(i) < array.size()) {
-                array[static_cast<std::size_t>(i)] = *it;
-            } else {
-                array.push_back(*it);
-            }
+            array[static_cast<std::size_t>(i)] = *it;
         }
     }
 };

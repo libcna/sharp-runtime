@@ -67,11 +67,17 @@ TEST(FrozenDictionaryTest, GetKeysAndValues) {
 
 TEST(FrozenDictionaryTest, CopyTo) {
     auto d = FrozenDictionary<std::string, int>::Create({{"a", 1}});
-    std::vector<std::pair<std::string, int>> buf;
+    std::vector<std::pair<std::string, int>> buf(1);
     d.CopyTo(buf, 0);
     ASSERT_EQ(static_cast<int>(buf.size()), 1);
     EXPECT_EQ(buf[0].first, "a");
     EXPECT_EQ(buf[0].second, 1);
+}
+
+TEST(FrozenDictionaryTest, CopyTo_TooSmall_Throws) {
+    auto d = FrozenDictionary<std::string, int>::Create({{"a", 1}, {"b", 2}});
+    std::vector<std::pair<std::string, int>> buf(1);
+    EXPECT_THROW(d.CopyTo(buf, 0), std::out_of_range);
 }
 
 TEST(FrozenDictionaryTest, RangeBasedFor) {

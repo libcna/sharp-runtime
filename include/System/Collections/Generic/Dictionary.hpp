@@ -7,8 +7,13 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a generic collection of key/value pairs.
@@ -36,8 +41,8 @@ public:
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Count.
      */
-    [[nodiscard]] int getCountProperty() const {
-        return static_cast<int>(map_.size());
+    [[nodiscard]] intcs getCountProperty() const {
+        return static_cast<intcs>(map_.size());
     }
 
     /**
@@ -46,11 +51,11 @@ public:
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Add(TKey, TValue).
      * @param key   The key of the element to add.
      * @param value The value of the element to add.
-     * @throws std::invalid_argument if a key with the same value already exists.
+     * @throws System::ArgumentException if a key with the same value already exists.
      */
     void Add(const TKey& key, const TValue& value) {
         if (map_.count(key))
-            throw std::invalid_argument("An element with the same key already exists.");
+            throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
     }
 
@@ -185,7 +190,7 @@ public:
      * C++ counterpart of .NET Dictionary<TKey,TValue>.EnsureCapacity(int).
      * @param capacity The minimum number of entries the dictionary should be able to hold.
      */
-    void EnsureCapacity(int capacity) {
+    void EnsureCapacity(intcs capacity) {
         map_.reserve(static_cast<std::size_t>(capacity));
     }
 
@@ -211,12 +216,12 @@ public:
      * @brief Gets the value associated with the specified key (const).
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue> indexer getter.
-     * @throws std::out_of_range if the key is not found.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
      */
     [[nodiscard]] const TValue& operator[](const TKey& key) const {
         auto it = map_.find(key);
         if (it == map_.end())
-            throw std::out_of_range("Key not found in Dictionary.");
+            throw KeyNotFoundException("The given key was not present in the dictionary.");
         return it->second;
     }
 

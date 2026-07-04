@@ -47,9 +47,9 @@ public:
      * @param obj The nullable value for which to compute the hash code.
      * @return A hash code, or 0 if @p obj is null.
      */
-    [[nodiscard]] std::size_t GetHashCode(const std::optional<T>& obj) const override {
+    [[nodiscard]] intcs GetHashCode(const std::optional<T>& obj) const override {
         if (!obj.has_value()) return 0;
-        return std::hash<T>{}(*obj);
+        return static_cast<intcs>(std::hash<T>{}(*obj));
     }
 };
 

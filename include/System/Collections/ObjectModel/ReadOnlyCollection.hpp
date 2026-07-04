@@ -4,15 +4,21 @@
 #pragma once
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 
 namespace System::Collections::ObjectModel {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides a read-only wrapper around a generic list.
  *
  * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlyCollection<T>.
- * Backed by std::vector<T>; mutation methods throw std::runtime_error.
+ * Backed by std::vector<T>; mutation methods throw NotSupportedException, matching .NET.
  *
  * @tparam T The type of elements in the collection.
  */
@@ -23,10 +29,10 @@ private:
 
     class Enumerator : public Generic::IEnumerator<T> {
         const std::vector<T>& items_;
-        int index_ = -1;
+        intcs index_ = -1;
     public:
         explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-        bool MoveNext() override { return ++index_ < static_cast<int>(items_.size()); }
+        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
         void Reset() override { index_ = -1; }
         [[nodiscard]] const T& Current() const override {
             return items_[static_cast<size_t>(index_)];
@@ -58,8 +64,8 @@ public:
      * C++ counterpart of .NET ReadOnlyCollection<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const override {
-        return static_cast<int>(items_.size());
+    [[nodiscard]] intcs getCountProperty() const override {
+        return static_cast<intcs>(items_.size());
     }
 
     /**
@@ -78,17 +84,19 @@ public:
      * @return A const reference to the element.
      * @throws std::out_of_range if index is out of range.
      */
-    [[nodiscard]] const T& operator[](int index) const override {
-        return items_.at(static_cast<size_t>(index));
+    [[nodiscard]] const T& operator[](intcs index) const override {
+        if (index < 0 || index >= static_cast<intcs>(items_.size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        return items_[static_cast<size_t>(index)];
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
-    T& operator[](int index) override {
+    T& operator[](intcs index) override {
         (void)index;
-        throw std::runtime_error("Collection is read-only.");
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**
@@ -98,8 +106,8 @@ public:
      * @param item The element to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const T& item) const override {
-        for (int i = 0; i < static_cast<int>(items_.size()); ++i)
+    [[nodiscard]] intcs IndexOf(const T& item) const override {
+        for (intcs i = 0; i < static_cast<intcs>(items_.size()); ++i)
             if (items_[static_cast<size_t>(i)] == item) return i;
         return -1;
     }
@@ -123,51 +131,53 @@ public:
      * @param index       The zero-based starting index in @p destination.
      * @throws std::out_of_range if destination is too small.
      */
-    void CopyTo(std::vector<T>& destination, int index) const {
-        if (index < 0 || index + getCountProperty() > static_cast<int>(destination.size()))
-            throw std::out_of_range("Destination too small or index out of range.");
-        for (int i = 0; i < getCountProperty(); ++i)
+    void CopyTo(std::vector<T>& destination, intcs index) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+        if (index + getCountProperty() > static_cast<intcs>(destination.size()))
+            throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
+        for (intcs i = 0; i < getCountProperty(); ++i)
             destination[static_cast<size_t>(index + i)] = items_[static_cast<size_t>(i)];
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
     void Add(const T&) override {
-        throw std::runtime_error("Collection is read-only.");
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
     void Clear() override {
-        throw std::runtime_error("Collection is read-only.");
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
     bool Remove(const T&) override {
-        throw std::runtime_error("Collection is read-only.");
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
-    void Insert(int, const T&) override {
-        throw std::runtime_error("Collection is read-only.");
+    void Insert(intcs, const T&) override {
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**
      * @brief Throws because the collection is read-only.
-     * @throws std::runtime_error always.
+     * @throws System::NotSupportedException always.
      */
-    void RemoveAt(int) override {
-        throw std::runtime_error("Collection is read-only.");
+    void RemoveAt(intcs) override {
+        throw System::NotSupportedException("Collection is read-only.");
     }
 
     /**

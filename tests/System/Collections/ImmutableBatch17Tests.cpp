@@ -11,6 +11,7 @@
 #include "System/Collections/Immutable/ImmutableSortedDictionary.hpp"
 #include "System/Collections/Immutable/ImmutableSortedSet.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
+#include "System/ArgumentException.hpp"
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,7 +37,7 @@ TEST(ImmSortedDictBatch17Test, AddRange_AddsMultiple) {
 TEST(ImmSortedDictBatch17Test, AddRange_DuplicateKeyThrows) {
     auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("k", 1);
     std::vector<std::pair<std::string, int>> pairs = {{"k", 2}};
-    EXPECT_THROW(d.AddRange(pairs), std::invalid_argument);
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
 }
 
 TEST(ImmSortedDictBatch17Test, SetItems_InsertsAndOverwrites) {
@@ -179,7 +180,7 @@ TEST(CollectionBatch17Test, CopyTo_OutOfRangeThrows) {
     Collection<int> col;
     col.Add(1); col.Add(2);
     std::vector<int> dest(1, 0); // too small
-    EXPECT_THROW(col.CopyTo(dest, 0), std::out_of_range);
+    EXPECT_THROW(col.CopyTo(dest, 0), System::ArgumentException);
 }
 
 TEST(CollectionBatch17Test, AddAndIndexer) {

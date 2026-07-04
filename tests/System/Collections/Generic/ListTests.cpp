@@ -5,6 +5,8 @@
 #include "System/Collections/Generic/List.hpp"
 #include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <string>
 #include <vector>
 
@@ -216,6 +218,69 @@ TEST(GenListTests, ConvertAll) {
     EXPECT_EQ(strs[2], "3");
 }
 
+// ---- Bounds validation (real .NET List<T> throws ArgumentOutOfRangeException/ArgumentException) ----
+
+TEST(GenListTests, IndexerOutOfRange_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    EXPECT_THROW((void)lst[1], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)lst[-1], System::ArgumentOutOfRangeException);
+}
+
+TEST(GenListTests, ConstIndexerOutOfRange_Throws) {
+    const List<int> lst;
+    EXPECT_THROW((void)lst[0], System::ArgumentOutOfRangeException);
+}
+
+TEST(GenListTests, InsertOutOfRange_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    EXPECT_THROW(lst.Insert(-1, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst.Insert(2, 5), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(lst.Insert(1, 5)); // inserting at Count (append) is valid
+}
+
+TEST(GenListTests, RemoveAtOutOfRange_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    EXPECT_THROW(lst.RemoveAt(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst.RemoveAt(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(GenListTests, GetRangeInvalid_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_THROW(lst.GetRange(-1, 2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst.GetRange(0, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst.GetRange(2, 5), System::ArgumentException);
+}
+
+TEST(GenListTests, RemoveRangeInvalid_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_THROW(lst.RemoveRange(2, 5), System::ArgumentException);
+    lst.RemoveRange(1, 2);
+    EXPECT_EQ(lst.getCountProperty(), 1);
+}
+
+TEST(GenListTests, ReverseRangeInvalid_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_THROW(lst.Reverse(2, 5), System::ArgumentException);
+    lst.Reverse(0, 2);
+    EXPECT_EQ(lst[0], 2);
+    EXPECT_EQ(lst[1], 1);
+    EXPECT_EQ(lst[2], 3);
+}
+
+TEST(GenListTests, InsertRangeOutOfRange_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    std::vector<int> v{2, 3};
+    EXPECT_THROW(lst.InsertRange(-1, v), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lst.InsertRange(2, v), System::ArgumentOutOfRangeException);
+}
+
 // ---- LinkedListNode Next/Previous ----
 TEST(GenLinkedListNodeTests, NextProperty) {
     LinkedList<int> ll;
@@ -258,6 +323,20 @@ TEST(GenLinkedListTests, CopyTo) {
     ll.CopyTo(dest, 0);
     EXPECT_EQ(dest[0], 10);
     EXPECT_EQ(dest[2], 30);
+}
+
+TEST(GenLinkedListTests, CopyTo_TooSmall_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    std::vector<int> dest(1);
+    EXPECT_THROW(ll.CopyTo(dest, 0), System::ArgumentException);
+}
+
+TEST(GenLinkedListTests, CopyTo_NegativeIndex_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    std::vector<int> dest(1);
+    EXPECT_THROW(ll.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(GenLinkedListTests, GetEnumerator) {
