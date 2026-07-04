@@ -6,6 +6,7 @@
 #include "System/Collections/Generic/PriorityQueue.hpp"
 #include "System/Collections/Generic/OrderedDictionary.hpp"
 #include "System/Collections/Generic/ReferenceEqualityComparer.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <string>
 #include <vector>
 
@@ -71,7 +72,7 @@ TEST(GenQueueTest, ToArray) {
 
 TEST(GenQueueTest, DequeueEmptyThrows) {
     Queue<int> q;
-    EXPECT_THROW(q.Dequeue(), std::runtime_error);
+    EXPECT_THROW(q.Dequeue(), System::InvalidOperationException);
 }
 
 // ---- PriorityQueue<string,int> ----

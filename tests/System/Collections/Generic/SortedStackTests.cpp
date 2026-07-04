@@ -6,6 +6,7 @@
 #include "System/Collections/Generic/SortedDictionary.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/Stack.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <string>
 #include <vector>
 
@@ -218,5 +219,5 @@ TEST(GenStackTest, Clear) {
 
 TEST(GenStackTest, PopEmptyThrows) {
     Stack<int> s;
-    EXPECT_THROW(s.Pop(), std::runtime_error);
+    EXPECT_THROW(s.Pop(), System::InvalidOperationException);
 }
