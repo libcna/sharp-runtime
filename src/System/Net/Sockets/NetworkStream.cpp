@@ -7,7 +7,9 @@
 
 #if defined(_WIN32)
 #  include <winsock2.h>
-#  pragma comment(lib, "ws2_32.lib")
+#  if defined(_MSC_VER)
+#    pragma comment(lib, "ws2_32.lib")
+#  endif
 namespace {
     using SockFd = SOCKET;
     inline SockFd toSk(int fd)    { return static_cast<SockFd>(fd); }

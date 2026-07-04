@@ -361,7 +361,7 @@ namespace System {
          *
          * C++ counterpart of .NET DateTime.GetHashCode().
          */
-        [[nodiscard]] intcs GetHashCode() const {
+        [[nodiscard]] intcs GetHashCode() const override {
             return static_cast<intcs>(ticks_) ^ static_cast<intcs>(ticks_ >> 32);
         }
 

@@ -221,7 +221,7 @@ namespace System {
          *
          * C++ counterpart of .NET DateTimeOffset.GetHashCode().
          */
-        [[nodiscard]] intcs GetHashCode() const;
+        [[nodiscard]] intcs GetHashCode() const override;
 
         bool operator==(const DateTimeOffset& other) const;
         bool operator!=(const DateTimeOffset& other) const;

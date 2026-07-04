@@ -12,7 +12,10 @@
 #  endif
 #  include <windows.h>
 #  include <psapi.h>
+#  include <shlobj.h>
 #  undef GetCurrentDirectory   // windows.h macro collides with our method name
+#  undef SetCurrentDirectory   // windows.h macro collides with our method name
+#  undef SetEnvironmentVariable // windows.h macro collides with our method name
 #elif defined(__EMSCRIPTEN__)
 #  include <unistd.h>
 #  include <climits>
@@ -56,7 +59,9 @@ System::OperatingSystem Environment::getOSVersionProperty() {
 #if defined(_WIN32)
     OSVERSIONINFOEXW osvi{};
     osvi.dwOSVersionInfoSize = sizeof(osvi);
+#if defined(_MSC_VER)
 #pragma warning(suppress: 4996)
+#endif
     GetVersionExW(reinterpret_cast<OSVERSIONINFOW*>(&osvi));
     Version v(static_cast<int>(osvi.dwMajorVersion),
                static_cast<int>(osvi.dwMinorVersion),

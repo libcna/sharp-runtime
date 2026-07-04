@@ -10,7 +10,6 @@
 
 namespace System {
 
-static constexpr int MsPerDay = 86400000;
 static constexpr long long TicksPerHour_ = 36000000000LL;
 static constexpr long long TicksPerMinute_ = 600000000LL;
 static constexpr long long TicksPerDay_ = 864000000000LL;
