@@ -5,6 +5,7 @@
 #include "System/Collections/Generic/HashSet.hpp"
 
 using System::Collections::Generic::HashSet;
+using SharpRuntime::intcs;
 
 TEST(HashSetTest, DefaultEmpty) {
     HashSet<int> s;
@@ -125,4 +126,43 @@ TEST(HashSetTest, RangeBasedFor) {
     int sum = 0;
     for (const auto& v : s) sum += v;
     EXPECT_EQ(sum, 60);
+}
+
+TEST(HashSetTest, TryGetValue_Found) {
+    HashSet<int> s;
+    s.Add(5);
+    int actual = 0;
+    EXPECT_TRUE(s.TryGetValue(5, actual));
+    EXPECT_EQ(actual, 5);
+}
+
+TEST(HashSetTest, TryGetValue_NotFound) {
+    HashSet<int> s;
+    int actual = 0;
+    EXPECT_FALSE(s.TryGetValue(5, actual));
+}
+
+TEST(HashSetTest, RemoveWhere_RemovesMatching) {
+    HashSet<int> s;
+    s.Add(1); s.Add(2); s.Add(3); s.Add(4);
+    intcs removed = s.RemoveWhere([](const int& v) { return v % 2 == 0; });
+    EXPECT_EQ(removed, 2);
+    EXPECT_TRUE(s.Contains(1));
+    EXPECT_FALSE(s.Contains(2));
+    EXPECT_TRUE(s.Contains(3));
+    EXPECT_FALSE(s.Contains(4));
+}
+
+TEST(HashSetTest, Overlaps_True) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(2); b.Add(3);
+    EXPECT_TRUE(a.Overlaps(b));
+}
+
+TEST(HashSetTest, Overlaps_False) {
+    HashSet<int> a, b;
+    a.Add(1); a.Add(2);
+    b.Add(3); b.Add(4);
+    EXPECT_FALSE(a.Overlaps(b));
 }
