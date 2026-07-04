@@ -53,3 +53,8 @@ TEST(TimeoutExceptionTest, CaughtAsStdException) {
     catch (const std::exception&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+TEST(TimeoutExceptionTest, HResult_IsCorTimeout) {
+    TimeoutException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131505));
+}
