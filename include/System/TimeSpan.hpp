@@ -175,11 +175,11 @@ namespace System {
 
     public:
         /** Returns the days component of this TimeSpan. */
-        [[nodiscard]] int getDaysProperty() const;
+        [[nodiscard]] intcs getDaysProperty() const;
 
     public:
         /** Returns the hours component of this TimeSpan. */
-        [[nodiscard]] int getHoursProperty() const;
+        [[nodiscard]] intcs getHoursProperty() const;
 
     public:
         /** Returns the milliseconds component of this TimeSpan. */
@@ -347,6 +347,10 @@ namespace System {
     public:
         /** Returns true if @p t1 and @p t2 have the same tick count. */
         static bool Equals(const TimeSpan &t1, const TimeSpan &t2);
+
+    public:
+        /** Returns a hash code for this TimeSpan, based on its tick count. */
+        [[nodiscard]] intcs GetHashCode() const noexcept;
 
     public:
         /** Returns a TimeSpan that represents the specified number of hours. */
