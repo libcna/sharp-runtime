@@ -6,12 +6,16 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
 #include "System/Collections/ObjectModel/ObservableCollection.hpp"
 #include "System/NotSupportedException.hpp"
 
+using SharpRuntime::intcs;
 using System::Collections::ObjectModel::Collection;
 using System::Collections::ObjectModel::ReadOnlyCollection;
 using System::Collections::ObjectModel::ReadOnlyDictionary;
@@ -284,4 +288,118 @@ TEST(ObservableCollectionTests, Clear_TriggersResetEvent) {
 TEST(ObservableCollectionTests, NoHandlers_AddDoesNotThrow) {
     ObservableCollection<int> oc;
     EXPECT_NO_THROW(oc.Add(1));
+}
+
+TEST(ObservableCollectionTests, VectorCtor_DoesNotFireEvents) {
+    // .NET's collection-copying constructors populate the base list directly with no
+    // CollectionChanged/PropertyChanged notifications.
+    bool collectionFired = false, propertyFired = false;
+    ObservableCollection<int> oc(std::vector<int>{1, 2, 3});
+    oc.CollectionChanged.push_back([&](void*, const auto&) { collectionFired = true; });
+    oc.PropertyChanged.push_back([&](void*, const auto&) { propertyFired = true; });
+    EXPECT_EQ(oc.getCountProperty(), 3);
+    EXPECT_FALSE(collectionFired);
+    EXPECT_FALSE(propertyFired);
+}
+
+TEST(ObservableCollectionTests, Insert_TriggersCollectionChanged) {
+    // Previously Insert()/RemoveAt() silently bypassed CollectionChanged because only the
+    // public Add/Remove/Clear were overridden instead of the protected InsertItem/RemoveItem hooks.
+    ObservableCollection<int> oc(std::vector<int>{1, 3});
+    NotifyCollectionChangedAction lastAction = NotifyCollectionChangedAction::Reset;
+    intcs lastIndex = -1;
+    oc.CollectionChanged.push_back([&](void*, const NotifyCollectionChangedEventArgs<int>& args) {
+        lastAction = args.Action;
+        lastIndex = args.NewStartingIndex;
+    });
+    oc.Insert(1, 2);
+    EXPECT_EQ(lastAction, NotifyCollectionChangedAction::Add);
+    EXPECT_EQ(lastIndex, 1);
+    EXPECT_EQ(oc[0], 1);
+    EXPECT_EQ(oc[1], 2);
+    EXPECT_EQ(oc[2], 3);
+}
+
+TEST(ObservableCollectionTests, RemoveAt_TriggersCollectionChanged) {
+    ObservableCollection<int> oc(std::vector<int>{1, 2, 3});
+    NotifyCollectionChangedAction lastAction = NotifyCollectionChangedAction::Add;
+    oc.CollectionChanged.push_back([&](void*, const NotifyCollectionChangedEventArgs<int>& args) {
+        lastAction = args.Action;
+    });
+    oc.RemoveAt(1);
+    EXPECT_EQ(lastAction, NotifyCollectionChangedAction::Remove);
+    EXPECT_EQ(oc.getCountProperty(), 2);
+    EXPECT_EQ(oc[1], 3);
+}
+
+TEST(ObservableCollectionTests, Add_And_Remove_FirePropertyChanged) {
+    ObservableCollection<int> oc;
+    std::vector<std::string> names;
+    oc.PropertyChanged.push_back([&](void*, const auto& args) { names.push_back(args.PropertyName); });
+    oc.Add(1);
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_EQ(names[0], "Count");
+    EXPECT_EQ(names[1], "Item[]");
+    names.clear();
+    oc.Remove(1);
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_EQ(names[0], "Count");
+    EXPECT_EQ(names[1], "Item[]");
+}
+
+TEST(ObservableCollectionTests, Move_OutOfRange_Throws) {
+    ObservableCollection<int> oc(std::vector<int>{1, 2, 3});
+    EXPECT_THROW(oc.Move(0, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(oc.Move(5, 0), System::ArgumentOutOfRangeException);
+}
+
+namespace {
+    // Re-exposes the protected SetItem hook for direct testing.
+    template<typename T>
+    class ExposedObservableCollection : public ObservableCollection<T> {
+    public:
+        using ObservableCollection<T>::ObservableCollection;
+        using ObservableCollection<T>::SetItem;
+    };
+}
+
+TEST(ObservableCollectionTests, SetItem_TriggersReplaceEvent) {
+    ExposedObservableCollection<int> oc(std::vector<int>{1, 2, 3});
+    NotifyCollectionChangedAction lastAction = NotifyCollectionChangedAction::Add;
+    int oldItem = -1, newItem = -1;
+    oc.CollectionChanged.push_back([&](void*, const NotifyCollectionChangedEventArgs<int>& args) {
+        lastAction = args.Action;
+        oldItem = args.OldItems.at(0);
+        newItem = args.NewItems.at(0);
+    });
+    oc.SetItem(1, 99);
+    EXPECT_EQ(lastAction, NotifyCollectionChangedAction::Replace);
+    EXPECT_EQ(oldItem, 2);
+    EXPECT_EQ(newItem, 99);
+    EXPECT_EQ(oc[1], 99);
+}
+
+TEST(ObservableCollectionTests, Reentrancy_MultipleSubscribers_Throws) {
+    ObservableCollection<int> oc(std::vector<int>{1, 2});
+    oc.CollectionChanged.push_back([&](void*, const auto&) {
+        EXPECT_THROW(oc.Add(99), System::InvalidOperationException);
+    });
+    oc.CollectionChanged.push_back([](void*, const auto&) {});
+    oc.Add(3);
+}
+
+TEST(ObservableCollectionTests, Reentrancy_SingleSubscriber_Allowed) {
+    // .NET's documented compatibility carve-out: a single CollectionChanged subscriber may
+    // reentrantly mutate the collection from within its own handler.
+    ObservableCollection<int> oc(std::vector<int>{1});
+    bool reentrantAddSucceeded = false;
+    oc.CollectionChanged.push_back([&](void*, const NotifyCollectionChangedEventArgs<int>& args) {
+        if (args.Action == NotifyCollectionChangedAction::Add && args.NewItems.at(0) == 2) {
+            oc.Add(3);
+            reentrantAddSucceeded = true;
+        }
+    });
+    oc.Add(2);
+    EXPECT_TRUE(reentrantAddSucceeded);
+    EXPECT_EQ(oc.getCountProperty(), 3);
 }
