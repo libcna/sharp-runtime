@@ -4,8 +4,10 @@
 #include <gtest/gtest.h>
 
 #include "System/Collections/Generic/PriorityQueue.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::PriorityQueue;
+using System::InvalidOperationException;
 
 // ---------------------------------------------------------------------------
 // Empty queue
@@ -18,12 +20,12 @@ TEST(PriorityQueueTests, EmptyQueueCount) {
 
 TEST(PriorityQueueTests, DequeueOnEmptyThrows) {
     PriorityQueue<int, int> pq;
-    EXPECT_THROW(pq.Dequeue(), std::invalid_argument);
+    EXPECT_THROW(pq.Dequeue(), InvalidOperationException);
 }
 
 TEST(PriorityQueueTests, PeekOnEmptyThrows) {
     PriorityQueue<int, int> pq;
-    EXPECT_THROW(pq.Peek(), std::invalid_argument);
+    EXPECT_THROW(pq.Peek(), InvalidOperationException);
 }
 
 TEST(PriorityQueueTests, TryDequeueOnEmptyReturnsFalse) {
@@ -178,7 +180,7 @@ TEST(PriorityQueueTests, ClearEmptiesQueue) {
     pq.Clear();
 
     EXPECT_EQ(pq.getCountProperty(), 0);
-    EXPECT_THROW(pq.Dequeue(), std::invalid_argument);
+    EXPECT_THROW(pq.Dequeue(), InvalidOperationException);
 }
 
 TEST(PriorityQueueTests, ClearThenReuse) {
