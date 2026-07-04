@@ -4,13 +4,18 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <string>
+
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 #if defined(_MSC_VER)
 #  error "UInt128 requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
 #endif
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief 128-bit unsigned integer, mirroring .NET System.UInt128 (GCC/Clang only).
@@ -103,6 +108,53 @@ namespace System {
             while (v > 0) { s += char('0' + (int)(v % 10)); v /= 10; }
             std::reverse(s.begin(), s.end());
             return s;
+        }
+
+        /**
+         * @brief Compares this value to @p other.
+         * C++ counterpart of .NET UInt128.CompareTo(UInt128).
+         */
+        [[nodiscard]] intcs CompareTo(const UInt128& other) const {
+            return (value_ < other.value_) ? -1 : (value_ > other.value_) ? 1 : 0;
+        }
+
+        /** @brief Returns true if this value equals @p other. C++ counterpart of .NET UInt128.Equals(UInt128). */
+        [[nodiscard]] bool Equals(const UInt128& other) const { return value_ == other.value_; }
+
+        /**
+         * @brief Returns a hash code for this value.
+         * C++ counterpart of .NET UInt128.GetHashCode() (HashCode.Combine(lower, upper)).
+         */
+        [[nodiscard]] intcs GetHashCode() const {
+            std::size_t seed = std::hash<uint64_t>{}(getLowerProperty());
+            seed ^= std::hash<uint64_t>{}(getUpperProperty())
+                  + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+            return static_cast<intcs>(seed);
+        }
+
+        /** @brief Returns the larger of @p x and @p y. C++ counterpart of .NET UInt128.Max(UInt128,UInt128). */
+        [[nodiscard]] static UInt128 Max(const UInt128& x, const UInt128& y) { return (x >= y) ? x : y; }
+
+        /** @brief Returns the smaller of @p x and @p y. C++ counterpart of .NET UInt128.Min(UInt128,UInt128). */
+        [[nodiscard]] static UInt128 Min(const UInt128& x, const UInt128& y) { return (x <= y) ? x : y; }
+
+        /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET UInt128.Clamp(UInt128,UInt128,UInt128). */
+        [[nodiscard]] static UInt128 Clamp(const UInt128& value, const UInt128& min, const UInt128& max) {
+            return value < min ? min : (value > max ? max : value);
+        }
+
+        /** @brief Returns 0 if @p value is zero; otherwise 1. C++ counterpart of .NET UInt128.Sign(UInt128). */
+        [[nodiscard]] static intcs Sign(const UInt128& value) { return value.value_ == 0 ? 0 : 1; }
+
+        /** @brief Returns true if @p value is an even integer. C++ counterpart of .NET UInt128.IsEvenInteger(UInt128). */
+        [[nodiscard]] static bool IsEvenInteger(const UInt128& value) { return (value.getLowerProperty() & 1) == 0; }
+
+        /** @brief Returns true if @p value is an odd integer. C++ counterpart of .NET UInt128.IsOddInteger(UInt128). */
+        [[nodiscard]] static bool IsOddInteger(const UInt128& value) { return (value.getLowerProperty() & 1) != 0; }
+
+        /** @brief Returns true if @p value is a power of two. C++ counterpart of .NET UInt128.IsPow2(UInt128). */
+        [[nodiscard]] static bool IsPow2(const UInt128& value) {
+            return value.value_ != 0 && (value.value_ & (value.value_ - 1)) == 0;
         }
     };
 

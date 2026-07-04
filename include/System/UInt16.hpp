@@ -15,6 +15,8 @@
 
 namespace System {
 
+    using SharpRuntime::intcs;
+
     /**
      * @brief Provides static helper methods that mirror .NET System.UInt16.
      *
@@ -73,7 +75,7 @@ namespace System {
         }
 
         /** @brief Compares this value to another UInt16. Returns negative, zero, or positive. */
-        static int CompareTo(SharpRuntime::ushortcs a, SharpRuntime::ushortcs b) {
+        static intcs CompareTo(SharpRuntime::ushortcs a, SharpRuntime::ushortcs b) {
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -81,7 +83,7 @@ namespace System {
         static bool Equals(SharpRuntime::ushortcs a, SharpRuntime::ushortcs b) { return a == b; }
 
         /** @brief Returns a hash code for the value. */
-        static int GetHashCode(SharpRuntime::ushortcs value) { return static_cast<int>(value); }
+        static intcs GetHashCode(SharpRuntime::ushortcs value) { return static_cast<intcs>(value); }
 
         /** @brief Returns the larger of two UInt16 values. */
         static SharpRuntime::ushortcs Max(SharpRuntime::ushortcs x, SharpRuntime::ushortcs y) {
@@ -101,7 +103,7 @@ namespace System {
         }
 
         /** @brief Returns 0 if value is zero; 1 otherwise. */
-        static int Sign(SharpRuntime::ushortcs value) { return value == 0 ? 0 : 1; }
+        static intcs Sign(SharpRuntime::ushortcs value) { return value == 0 ? 0 : 1; }
 
         /** @brief Divides left by right and returns a (quotient, remainder) pair. */
         static std::pair<SharpRuntime::ushortcs, SharpRuntime::ushortcs>
@@ -120,8 +122,13 @@ namespace System {
             return value != 0 && (value & (value - 1)) == 0;
         }
 
-        /** @brief Returns the floor log base 2 of value. */
+        /**
+         * @brief Returns the floor log base 2 of value.
+         * Matches .NET's explicit "0 -> 0" contract: Log2(0) returns 0, it does not throw
+         * or wrap around (bit_width(0) - 1 would otherwise underflow to 65535).
+         */
         static SharpRuntime::ushortcs Log2(SharpRuntime::ushortcs value) {
+            if (value == 0) return 0;
             return static_cast<uint16_t>(std::bit_width(static_cast<unsigned>(value)) - 1);
         }
 
@@ -142,13 +149,13 @@ namespace System {
         }
 
         /** @brief Rotates value left by rotateAmount bits within a 16-bit field. */
-        static SharpRuntime::ushortcs RotateLeft(SharpRuntime::ushortcs value, int rotateAmount) {
+        static SharpRuntime::ushortcs RotateLeft(SharpRuntime::ushortcs value, intcs rotateAmount) {
             rotateAmount &= 15;
             return static_cast<uint16_t>((value << rotateAmount) | (value >> (16 - rotateAmount)));
         }
 
         /** @brief Rotates value right by rotateAmount bits within a 16-bit field. */
-        static SharpRuntime::ushortcs RotateRight(SharpRuntime::ushortcs value, int rotateAmount) {
+        static SharpRuntime::ushortcs RotateRight(SharpRuntime::ushortcs value, intcs rotateAmount) {
             rotateAmount &= 15;
             return static_cast<uint16_t>((value >> rotateAmount) | (value << (16 - rotateAmount)));
         }

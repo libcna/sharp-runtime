@@ -66,4 +66,4 @@ TEST(UInt32NewTests, RotateRight_2_By1_Is1) { EXPECT_EQ(UInt32::RotateRight(2u, 
 
 TEST(UInt32NewTests, Log2_One_IsZero) { EXPECT_EQ(UInt32::Log2(1u), 0u); }
 TEST(UInt32NewTests, Log2_Two_IsOne)  { EXPECT_EQ(UInt32::Log2(2u), 1u); }
-TEST(UInt32NewTests, Log2_Zero_Throws) { EXPECT_THROW(UInt32::Log2(0u), std::domain_error); }
+TEST(UInt32NewTests, Log2_Zero_IsZero) { EXPECT_EQ(UInt32::Log2(0u), 0u); } // .NET's Log2(0) contract: returns 0, does not throw
