@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Collections/BitArray.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Collections::BitArray;
 
@@ -91,4 +93,49 @@ TEST(BitArrayTest, RightShift) {
     ba.RightShift(1);
     EXPECT_TRUE(ba.Get(2));
     EXPECT_FALSE(ba.Get(3));
+}
+
+TEST(BitArrayTest, LeftShift_NegativeCount_Throws) {
+    BitArray ba(4);
+    EXPECT_THROW(ba.LeftShift(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitArrayTest, RightShift_NegativeCount_Throws) {
+    BitArray ba(4);
+    EXPECT_THROW(ba.RightShift(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitArrayTest, SetLength_Grows_NewBitsAreFalse) {
+    BitArray ba(4, true);
+    ba.setLengthProperty(8);
+    EXPECT_EQ(ba.getLengthProperty(), 8);
+    EXPECT_TRUE(ba.Get(3));
+    EXPECT_FALSE(ba.Get(4));
+    EXPECT_FALSE(ba.Get(7));
+}
+
+TEST(BitArrayTest, SetLength_Shrinks) {
+    BitArray ba(8, true);
+    ba.setLengthProperty(3);
+    EXPECT_EQ(ba.getLengthProperty(), 3);
+}
+
+TEST(BitArrayTest, SetLength_Negative_Throws) {
+    BitArray ba(4);
+    EXPECT_THROW(ba.setLengthProperty(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitArrayTest, And_DifferentLengths_Throws) {
+    BitArray a(4), b(5);
+    EXPECT_THROW(a.And(b), System::ArgumentException);
+}
+
+TEST(BitArrayTest, Or_DifferentLengths_Throws) {
+    BitArray a(4), b(5);
+    EXPECT_THROW(a.Or(b), System::ArgumentException);
+}
+
+TEST(BitArrayTest, Xor_DifferentLengths_Throws) {
+    BitArray a(4), b(5);
+    EXPECT_THROW(a.Xor(b), System::ArgumentException);
 }

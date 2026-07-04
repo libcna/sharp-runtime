@@ -5,8 +5,12 @@
 #include <stack>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a last-in, first-out (LIFO) collection of objects.
@@ -30,7 +34,7 @@ public:
      * C++ counterpart of .NET Stack<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(stack_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(stack_.size()); }
 
     /**
      * @brief Inserts an object at the top of the Stack (copy).
@@ -53,10 +57,10 @@ public:
      *
      * C++ counterpart of .NET Stack<T>.Pop().
      * @return The object removed from the top of the Stack.
-     * @throws std::runtime_error if the Stack is empty.
+     * @throws System::InvalidOperationException if the Stack is empty.
      */
     T Pop() {
-        if (stack_.empty()) throw std::runtime_error("Stack is empty.");
+        if (stack_.empty()) throw System::InvalidOperationException("Stack empty.");
         T val = std::move(stack_.top());
         stack_.pop();
         return val;
@@ -67,10 +71,10 @@ public:
      *
      * C++ counterpart of .NET Stack<T>.Peek().
      * @return A const reference to the object at the top.
-     * @throws std::runtime_error if the Stack is empty.
+     * @throws System::InvalidOperationException if the Stack is empty.
      */
     [[nodiscard]] const T& Peek() const {
-        if (stack_.empty()) throw std::runtime_error("Stack is empty.");
+        if (stack_.empty()) throw System::InvalidOperationException("Stack empty.");
         return stack_.top();
     }
 

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/ICollection.hpp"
 #include "System/Collections/IEnumerator.hpp"
 
@@ -64,9 +65,9 @@ public:
      * @param array Pointer to a void*[] buffer.
      * @param index Zero-based index at which copying begins.
      */
-    void CopyTo(void* array, int index) override {
+    void CopyTo(void* array, intcs index) override {
         auto** dest = static_cast<void**>(array);
-        int i = index;
+        intcs i = index;
         for (auto it = s_.rbegin(); it != s_.rend(); ++it) dest[i++] = *it;
     }
 
@@ -76,8 +77,14 @@ public:
     /** @brief Returns a synchronization root for this Stack. */
     [[nodiscard]] const void* getSyncRootProperty() const override { return this; }
 
-    /** @brief Returns a heap-allocated enumerator; stub returns nullptr. */
-    IEnumerator* GetEnumerator() override { return nullptr; }
+    /**
+     * @brief Returns a heap-allocated enumerator over the Stack (top-to-bottom); caller takes ownership.
+     *
+     * C++ counterpart of .NET Stack.GetEnumerator().
+     * The enumerator throws InvalidOperationException if the Stack is modified
+     * (Push/Pop/Clear) while enumeration is in progress, matching .NET.
+     */
+    IEnumerator* GetEnumerator() override { return new Enumerator(this); }
 
     // -----------------------------------------------------------------------
     // Stack operations
@@ -89,27 +96,27 @@ public:
      * C++ counterpart of .NET Stack.Push(object?).
      * @param item The object to push.
      */
-    void Push(void* item) { s_.push_back(item); }
+    void Push(void* item) { s_.push_back(item); ++version_; }
 
     /**
      * @brief Removes and returns the object at the top of the Stack.
      *
      * C++ counterpart of .NET Stack.Pop().
-     * @throws std::invalid_argument if the Stack is empty.
+     * @throws System::InvalidOperationException if the Stack is empty.
      */
     void* Pop() {
-        if (s_.empty()) throw std::invalid_argument("Stack is empty.");
-        void* v = s_.back(); s_.pop_back(); return v;
+        if (s_.empty()) throw System::InvalidOperationException("Stack empty.");
+        void* v = s_.back(); s_.pop_back(); ++version_; return v;
     }
 
     /**
      * @brief Returns the object at the top of the Stack without removing it.
      *
      * C++ counterpart of .NET Stack.Peek().
-     * @throws std::invalid_argument if the Stack is empty.
+     * @throws System::InvalidOperationException if the Stack is empty.
      */
     [[nodiscard]] void* Peek() const {
-        if (s_.empty()) throw std::invalid_argument("Stack is empty.");
+        if (s_.empty()) throw System::InvalidOperationException("Stack empty.");
         return s_.back();
     }
 
@@ -130,7 +137,7 @@ public:
      *
      * C++ counterpart of .NET Stack.Clear().
      */
-    void Clear() { s_.clear(); }
+    void Clear() { s_.clear(); ++version_; }
 
     /**
      * @brief Copies the Stack elements to a new void*[] array (top element first).
@@ -155,6 +162,43 @@ public:
 
 private:
     std::deque<void*> s_;
+    intcs version_ = 0;
+
+    /**
+     * @brief Enumerates the elements of a Stack from top to bottom.
+     *
+     * C++ counterpart of .NET Stack's private StackEnumerator. Detects concurrent
+     * modification via a version counter, matching .NET's fail-fast enumeration contract.
+     */
+    class Enumerator : public IEnumerator {
+        const Stack* s_;
+        intcs version_;
+        intcs index_;   // index from the top (0 == top element); -1 before start / after end
+        bool started_ = false;
+
+    public:
+        explicit Enumerator(const Stack* s) : s_(s), version_(s->version_), index_(-1) {}
+
+        bool MoveNext() override {
+            if (version_ != s_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            if (index_ + 1 >= static_cast<intcs>(s_->s_.size())) { started_ = true; index_ = -1; return false; }
+            ++index_;
+            started_ = true;
+            return true;
+        }
+
+        void Reset() override {
+            if (version_ != s_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            index_ = -1;
+            started_ = false;
+        }
+
+        [[nodiscard]] void* getCurrent() const override {
+            if (!started_ || index_ < 0)
+                throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+            return s_->s_[s_->s_.size() - 1 - static_cast<size_t>(index_)];
+        }
+    };
 };
 
 } // namespace System::Collections

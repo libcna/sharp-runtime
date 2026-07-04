@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Buffers/ArrayPool.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Buffers::ArrayPool;
+using System::ArgumentOutOfRangeException;
 
 TEST(ArrayPoolTest, SharedNotNull) {
     auto& pool = ArrayPool<int>::Shared();
@@ -35,4 +37,15 @@ TEST(ArrayPoolTest, CreateReturnsPool) {
 TEST(ArrayPoolTest, CreateWithCapacity) {
     auto pool = ArrayPool<int>::Create(1024, 10);
     EXPECT_NE(pool, nullptr);
+}
+
+TEST(ArrayPoolTest, Rent_ZeroLength_ReturnsEmpty) {
+    auto& pool = ArrayPool<int>::Shared();
+    auto buf = pool.Rent(0);
+    EXPECT_EQ(buf.size(), 0u);
+}
+
+TEST(ArrayPoolTest, Rent_NegativeLength_Throws) {
+    auto& pool = ArrayPool<int>::Shared();
+    EXPECT_THROW(pool.Rent(-1), ArgumentOutOfRangeException);
 }

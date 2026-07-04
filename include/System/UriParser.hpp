@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cctype>
 #include <string>
+#include "System/NotImplementedException.hpp"
 #include "System/UriComponents.hpp"
 #include "System/UriFormat.hpp"
 #include "System/UriFormatException.hpp"
@@ -36,7 +39,7 @@ namespace System {
         virtual std::string GetComponents(const Uri& /*uri*/,
                                           UriComponents /*components*/,
                                           UriFormat /*format*/) {
-            throw std::runtime_error("UriParser.GetComponents: not implemented.");
+            throw NotImplementedException("UriParser.GetComponents: not implemented.");
         }
 
         /**
@@ -70,8 +73,11 @@ namespace System {
                 "gopher", "news", "nntp", "telnet", "wais",
                 "ldap", "net.pipe", "net.tcp"
             };
+            std::string lower = schemeName;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             for (const auto* s : known) {
-                if (schemeName == s) return true;
+                if (lower == s) return true;
             }
             return false;
         }

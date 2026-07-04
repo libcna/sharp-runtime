@@ -5,6 +5,8 @@
 #include <map>
 #include <vector>
 #include <stdexcept>
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/Generic/KeyValuePair.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -53,9 +55,13 @@ public:
      * C++ counterpart of .NET SortedDictionary<TKey,TValue>.Item[TKey] getter.
      * @param key The key whose value to get.
      * @return A const reference to the associated value.
-     * @throws std::out_of_range if the key is not found.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
      */
-    [[nodiscard]] const TValue& operator[](const TKey& key) const { return map_.at(key); }
+    [[nodiscard]] const TValue& operator[](const TKey& key) const {
+        auto it = map_.find(key);
+        if (it == map_.end()) throw KeyNotFoundException("The given key was not present in the dictionary.");
+        return it->second;
+    }
 
     /**
      * @brief Adds the specified key and value to the dictionary.
@@ -63,10 +69,10 @@ public:
      * C++ counterpart of .NET SortedDictionary<TKey,TValue>.Add(TKey, TValue).
      * @param key   The key of the element to add.
      * @param value The value of the element to add.
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     void Add(const TKey& key, const TValue& value) {
-        if (map_.count(key)) throw std::invalid_argument("Key already exists.");
+        if (map_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
     }
 

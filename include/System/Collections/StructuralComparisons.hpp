@@ -2,12 +2,15 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/IComparer.hpp"
 #include "System/Collections/IEqualityComparer.hpp"
 #include "System/Collections/IStructuralComparable.hpp"
 #include "System/Collections/IStructuralEquatable.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides objects for performing a structural comparison of two collection objects.
@@ -56,7 +59,7 @@ public:
      * @param y Right operand (pointer to the object).
      * @return Negative, zero, or positive.
      */
-    [[nodiscard]] int Compare(const void* x, const void* y) const override {
+    [[nodiscard]] intcs Compare(const void* x, const void* y) const override {
         if (x == y) return 0;
         if (!x)     return -1;
         if (!y)     return  1;
@@ -91,7 +94,7 @@ public:
      * @param obj The object to hash.
      * @return Hash code.
      */
-    [[nodiscard]] std::size_t GetHashCode(const void* obj) const override {
+    [[nodiscard]] intcs GetHashCode(const void* obj) const override {
         if (!obj) return 0;
         const auto* se = static_cast<const IStructuralEquatable*>(obj);
         return se->GetHashCode(*this);

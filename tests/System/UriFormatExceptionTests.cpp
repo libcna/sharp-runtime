@@ -11,9 +11,11 @@ TEST(UriFormatExceptionTest, DefaultCtor) {
     EXPECT_FALSE(std::string(e.what()).empty());
 }
 
-TEST(UriFormatExceptionTest, DefaultCtorHasUriMessage) {
+TEST(UriFormatExceptionTest, DefaultCtor_MatchesFormatExceptionDefault) {
+    // .NET's UriFormatException() delegates to base FormatException() with no
+    // Uri-specific text - it does not mention "URI" in the default message.
     UriFormatException e;
-    EXPECT_NE(std::string(e.what()).find("URI"), std::string::npos);
+    EXPECT_EQ(std::string(e.what()), "One of the identified items was in an invalid format.");
 }
 
 TEST(UriFormatExceptionTest, StringCtor) {

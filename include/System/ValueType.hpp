@@ -2,9 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdint>
 #include <string>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+
 namespace System {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides the base class for value types.
@@ -33,8 +38,8 @@ public:
      * C++ counterpart of .NET ValueType.GetHashCode().
      * Default: address-based hash. Override in concrete types.
      */
-    virtual int GetHashCode() const {
-        return static_cast<int>(reinterpret_cast<std::uintptr_t>(this));
+    virtual intcs GetHashCode() const {
+        return static_cast<intcs>(reinterpret_cast<std::uintptr_t>(this));
     }
 
     /**

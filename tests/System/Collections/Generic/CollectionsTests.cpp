@@ -11,12 +11,15 @@
 #include "System/Collections/Generic/HashSet.hpp"
 #include "System/Collections/Generic/SortedDictionary.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 using System::Collections::Generic::List;
 using System::Collections::Generic::Dictionary;
 using System::Collections::Generic::HashSet;
 using System::Collections::Generic::SortedDictionary;
 using System::Collections::Generic::SortedList;
+using System::Collections::Generic::KeyNotFoundException;
 
 // ---------------------------------------------------------------------------
 // List<T>
@@ -194,7 +197,7 @@ TEST(DictionaryTests, ContainsKeyReturnsFalseIfAbsent) {
 TEST(DictionaryTests, AddDuplicateThrows) {
     Dictionary<std::string, int> d;
     d.Add(std::string("k"), 1);
-    EXPECT_THROW(d.Add(std::string("k"), 2), std::invalid_argument);
+    EXPECT_THROW(d.Add(std::string("k"), 2), System::ArgumentException);
 }
 
 TEST(DictionaryTests, TryGetValueFound) {
@@ -230,7 +233,7 @@ TEST(DictionaryTests, OperatorBracketOverwrite) {
 
 TEST(DictionaryTests, ConstOperatorBracketThrowsOnMissing) {
     const Dictionary<std::string, int> d;
-    EXPECT_THROW((void)d[std::string("missing")], std::out_of_range);
+    EXPECT_THROW((void)d[std::string("missing")], KeyNotFoundException);
 }
 
 TEST(DictionaryTests, RemoveReturnsTrueIfFound) {

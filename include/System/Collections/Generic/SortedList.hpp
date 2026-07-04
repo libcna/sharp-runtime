@@ -6,6 +6,9 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -47,15 +50,29 @@ public:
     TValue& operator[](const TKey& key) { return map_[key]; }
 
     /**
+     * @brief Gets the value associated with the specified key (const).
+     *
+     * C++ counterpart of .NET SortedList<TKey,TValue>.Item[TKey] getter.
+     * @param key The key whose value to get.
+     * @return A const reference to the associated value.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
+     */
+    [[nodiscard]] const TValue& operator[](const TKey& key) const {
+        auto it = map_.find(key);
+        if (it == map_.end()) throw KeyNotFoundException("The given key was not present in the dictionary.");
+        return it->second;
+    }
+
+    /**
      * @brief Adds the specified key and value to the list.
      *
      * C++ counterpart of .NET SortedList<TKey,TValue>.Add(TKey, TValue).
      * @param key   The key of the element to add.
      * @param value The value of the element to add.
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     void Add(const TKey& key, const TValue& value) {
-        if (map_.count(key)) throw std::invalid_argument("Key already exists.");
+        if (map_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
     }
 
@@ -86,10 +103,10 @@ public:
      *
      * C++ counterpart of .NET SortedList<TKey,TValue>.RemoveAt(int).
      * @param index The index of the element to remove.
-     * @throws std::out_of_range if the index is out of range.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
      */
     void RemoveAt(intcs index) {
-        if (index < 0 || index >= getCountProperty()) throw std::out_of_range("index out of range.");
+        if (index < 0 || index >= getCountProperty()) throw System::ArgumentOutOfRangeException("index");
         auto it = map_.begin();
         std::advance(it, index);
         map_.erase(it);

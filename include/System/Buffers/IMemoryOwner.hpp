@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include "System/IDisposable.hpp"
+#include "System/Memory.hpp"
 
 namespace System::Buffers {
 
@@ -14,8 +15,11 @@ namespace System::Buffers {
     public:
         /** Destroys the memory owner and releases associated resources. */
         virtual ~IMemoryOwner() = default;
-        /** Returns the memory buffer owned by this instance. */
-        virtual std::vector<T>& getMemoryProperty() = 0;
+        /**
+         * @brief Returns the memory buffer owned by this instance.
+         * C++ counterpart of .NET IMemoryOwner&lt;T&gt;.Memory.
+         */
+        virtual System::Memory<T> getMemoryProperty() = 0;
     };
 
 } // namespace System::Buffers

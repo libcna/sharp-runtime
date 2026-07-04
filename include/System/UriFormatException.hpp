@@ -14,8 +14,14 @@ namespace System {
      */
     class UriFormatException : public FormatException {
     public:
-        /** @brief Initializes a new instance with the default URI-format message. */
-        UriFormatException() : FormatException("Invalid URI: The URI format could not be determined.") {}
+        /**
+         * @brief Initializes a new instance with the default message.
+         *
+         * C++ counterpart of .NET UriFormatException(), which delegates to the base
+         * FormatException() with no Uri-specific text ("One of the identified items
+         * was in an invalid format.").
+         */
+        UriFormatException() : FormatException() {}
         /** @brief Initializes a new instance with the specified error message. */
         explicit UriFormatException(const std::string& message) : FormatException(message) {}
         /** @brief Initializes a new instance with the specified message and inner exception. */

@@ -5,8 +5,12 @@
 #include <deque>
 #include <memory>
 #include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Immutable {
+
+    using SharpRuntime::intcs;
 
     /** An immutable first-in, first-out (FIFO) queue. */
     template<typename T>
@@ -26,11 +30,14 @@ namespace System::Collections::Immutable {
         /** Returns true if the queue contains no elements. */
         [[nodiscard]] bool getIsEmptyProperty() const { return data_->empty(); }
         /** Gets the number of elements in the queue. */
-        [[nodiscard]] int  getCountProperty()   const { return static_cast<int>(data_->size()); }
+        [[nodiscard]] intcs getCountProperty()   const { return static_cast<intcs>(data_->size()); }
 
-        /** Returns the element at the front of the queue without removing it. */
+        /**
+         * @brief Returns the element at the front of the queue without removing it.
+         * @throws System::InvalidOperationException if the queue is empty.
+         */
         [[nodiscard]] const T& Peek() const {
-            if (data_->empty()) throw std::out_of_range("Queue is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Queue is empty.");
             return data_->front();
         }
 
@@ -41,17 +48,23 @@ namespace System::Collections::Immutable {
             return ImmutableQueue<T>(std::move(d));
         }
 
-        /** Returns a new queue with the front element removed. */
+        /**
+         * @brief Returns a new queue with the front element removed.
+         * @throws System::InvalidOperationException if the queue is empty.
+         */
         [[nodiscard]] ImmutableQueue<T> Dequeue() const {
-            if (data_->empty()) throw std::out_of_range("Queue is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Queue is empty.");
             auto d = std::make_shared<DequeT>(*data_);
             d->pop_front();
             return ImmutableQueue<T>(std::move(d));
         }
 
-        /** Returns a new queue with the front element removed, and outputs that element via value. */
+        /**
+         * @brief Returns a new queue with the front element removed, and outputs that element via value.
+         * @throws System::InvalidOperationException if the queue is empty.
+         */
         [[nodiscard]] ImmutableQueue<T> Dequeue(T& value) const {
-            if (data_->empty()) throw std::out_of_range("Queue is empty.");
+            if (data_->empty()) throw System::InvalidOperationException("Queue is empty.");
             value = data_->front();
             auto d = std::make_shared<DequeT>(*data_);
             d->pop_front();

@@ -107,6 +107,20 @@ namespace System::Collections::Concurrent {
             return it->second;
         }
 
+        /**
+         * @brief Thread-safely adds a value produced by addFactory if key is absent, or replaces
+         * the existing value using updateFactory.
+         * C++ counterpart of .NET ConcurrentDictionary.AddOrUpdate(TKey, Func&lt;TKey,TValue&gt;, Func&lt;TKey,TValue,TValue&gt;).
+         */
+        TValue AddOrUpdate(const TKey& key, std::function<TValue(const TKey&)> addFactory,
+                           std::function<TValue(const TKey&, const TValue&)> updateFactory) {
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = map_.find(key);
+            if (it == map_.end()) { TValue v = addFactory(key); map_[key] = v; return v; }
+            it->second = updateFactory(key, it->second);
+            return it->second;
+        }
+
         /** Returns true if the dictionary contains the specified key (thread-safe). */
         [[nodiscard]] bool ContainsKey(const TKey& key) const {
             std::lock_guard<std::mutex> lk(mutex_);
@@ -119,16 +133,22 @@ namespace System::Collections::Concurrent {
             map_.clear();
         }
 
-        /** Returns a snapshot vector of all keys (thread-safe). */
-        [[nodiscard]] std::vector<TKey> Keys() const {
+        /**
+         * @brief Returns a snapshot vector of all keys (thread-safe).
+         * C++ counterpart of .NET ConcurrentDictionary&lt;TKey,TValue&gt;.Keys.
+         */
+        [[nodiscard]] std::vector<TKey> getKeysProperty() const {
             std::lock_guard<std::mutex> lk(mutex_);
             std::vector<TKey> k;
             for (auto& p : map_) k.push_back(p.first);
             return k;
         }
 
-        /** Returns a snapshot vector of all values (thread-safe). */
-        [[nodiscard]] std::vector<TValue> Values() const {
+        /**
+         * @brief Returns a snapshot vector of all values (thread-safe).
+         * C++ counterpart of .NET ConcurrentDictionary&lt;TKey,TValue&gt;.Values.
+         */
+        [[nodiscard]] std::vector<TValue> getValuesProperty() const {
             std::lock_guard<std::mutex> lk(mutex_);
             std::vector<TValue> v;
             for (auto& p : map_) v.push_back(p.second);

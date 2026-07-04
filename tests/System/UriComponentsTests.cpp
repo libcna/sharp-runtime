@@ -48,3 +48,26 @@ TEST(UriComponentsTest, PathAndQueryCombo) {
     EXPECT_TRUE((pq & static_cast<unsigned int>(UriComponents::Path)) != 0u);
     EXPECT_TRUE((pq & static_cast<unsigned int>(UriComponents::Query)) != 0u);
 }
+
+TEST(UriComponentsTest, AbsoluteUri_UsesPlainPortNotStrongPort) {
+    // .NET: AbsoluteUri = Scheme | UserInfo | Host | Port | Path | Query | Fragment (plain Port, not StrongPort)
+    auto v = static_cast<unsigned int>(UriComponents::AbsoluteUri);
+    EXPECT_TRUE((v & static_cast<unsigned int>(UriComponents::Port)) != 0u);
+    EXPECT_FALSE((v & static_cast<unsigned int>(UriComponents::StrongPort)) != 0u);
+}
+
+TEST(UriComponentsTest, SchemeAndServerCombo) {
+    auto v = static_cast<unsigned int>(UriComponents::SchemeAndServer);
+    EXPECT_EQ(v, static_cast<unsigned int>(UriComponents::Scheme) |
+                 static_cast<unsigned int>(UriComponents::Host) |
+                 static_cast<unsigned int>(UriComponents::Port));
+}
+
+TEST(UriComponentsTest, HttpRequestUrlCombo) {
+    auto v = static_cast<unsigned int>(UriComponents::HttpRequestUrl);
+    EXPECT_EQ(v, static_cast<unsigned int>(UriComponents::Scheme) |
+                 static_cast<unsigned int>(UriComponents::Host) |
+                 static_cast<unsigned int>(UriComponents::Port) |
+                 static_cast<unsigned int>(UriComponents::Path) |
+                 static_cast<unsigned int>(UriComponents::Query));
+}

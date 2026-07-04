@@ -3,9 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstring>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/IComparer.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Compares two objects for equivalence using pointer ordering.
@@ -25,7 +28,7 @@ public:
      * @param y The second object to compare.
      * @return -1, 0, or 1.
      */
-    [[nodiscard]] int Compare(const void* x, const void* y) const override {
+    [[nodiscard]] intcs Compare(const void* x, const void* y) const override {
         if (x == y) return 0;
         if (!x) return -1;
         if (!y) return  1;

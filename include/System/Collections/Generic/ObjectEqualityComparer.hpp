@@ -42,8 +42,8 @@ public:
      * @param obj The object for which to compute the hash code.
      * @return A hash code for @p obj.
      */
-    [[nodiscard]] std::size_t GetHashCode(const T& obj) const override {
-        return std::hash<T>{}(obj);
+    [[nodiscard]] intcs GetHashCode(const T& obj) const override {
+        return static_cast<intcs>(std::hash<T>{}(obj));
     }
 };
 

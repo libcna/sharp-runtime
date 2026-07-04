@@ -4,8 +4,11 @@
 #pragma once
 #include <unordered_map>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides extension-style utility methods for generic collections.
@@ -112,7 +115,7 @@ public:
      * @param source Elements to insert.
      */
     template<typename T>
-    static void InsertRange(std::vector<T>& list, int index, const std::vector<T>& source) {
+    static void InsertRange(std::vector<T>& list, intcs index, const std::vector<T>& source) {
         list.insert(list.begin() + index, source.begin(), source.end());
     }
 };

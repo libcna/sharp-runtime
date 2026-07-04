@@ -4,8 +4,10 @@
 #include <gtest/gtest.h>
 #include "System/UriParser.hpp"
 #include "System/Uri.hpp"
+#include "System/NotImplementedException.hpp"
 
 using System::UriParser;
+using System::NotImplementedException;
 
 TEST(UriParserTest, IsKnownSchemeHttp) {
     EXPECT_TRUE(UriParser::IsKnownScheme("http"));
@@ -27,8 +29,10 @@ TEST(UriParserTest, IsKnownSchemeUnknown) {
     EXPECT_FALSE(UriParser::IsKnownScheme("custom-scheme"));
 }
 
-TEST(UriParserTest, IsKnownSchemeCaseSensitive) {
-    EXPECT_FALSE(UriParser::IsKnownScheme("HTTP"));
+TEST(UriParserTest, IsKnownSchemeIsCaseInsensitive) {
+    // URI schemes are case-insensitive per RFC 3986; matches this class's own doc comment.
+    EXPECT_TRUE(UriParser::IsKnownScheme("HTTP"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("Https"));
 }
 
 namespace {
@@ -43,4 +47,11 @@ TEST(UriParserTest, SubclassIsBaseOf) {
     System::Uri base("http://example.com");
     System::Uri rel("http://example.com/path");
     EXPECT_TRUE(p.IsBaseOf(base, rel));
+}
+
+TEST(UriParserTest, GetComponents_DefaultThrowsNotImplementedException) {
+    TestParser p;
+    System::Uri u("http://example.com");
+    EXPECT_THROW(p.GetComponents(u, System::UriComponents::Scheme, System::UriFormat::Unescaped),
+                 NotImplementedException);
 }

@@ -26,8 +26,8 @@ public:
     bool Equals(const void* other, const IEqualityComparer&) const override {
         return val_ == static_cast<const IntEquatable*>(other)->val_;
     }
-    std::size_t GetHashCode(const IEqualityComparer&) const override {
-        return static_cast<std::size_t>(val_);
+    int GetHashCode(const IEqualityComparer&) const override {
+        return val_;
     }
 };
 
@@ -68,5 +68,5 @@ TEST(StructuralComparisonsTest, EqualityComparerDelegatesEquals) {
 TEST(StructuralComparisonsTest, EqualityComparerDelegatesHashCode) {
     IntEquatable a(42);
     const auto& cmp = StructuralComparisons::getStructuralEqualityComparerProperty();
-    EXPECT_EQ(cmp.GetHashCode(&a), static_cast<std::size_t>(42));
+    EXPECT_EQ(cmp.GetHashCode(&a), 42);
 }

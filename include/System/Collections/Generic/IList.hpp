@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/ICollection.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a generic collection of objects that can be individually
@@ -28,7 +31,7 @@ public:
      * @param index The zero-based index of the element to get.
      * @return A const reference to the element at the specified index.
      */
-    [[nodiscard]] virtual const T& operator[](int index) const = 0;
+    [[nodiscard]] virtual const T& operator[](intcs index) const = 0;
 
     /**
      * @brief Gets or sets the element at the specified index (mutable).
@@ -37,7 +40,7 @@ public:
      * @param index The zero-based index of the element to get or set.
      * @return A reference to the element at the specified index.
      */
-    virtual T& operator[](int index) = 0;
+    virtual T& operator[](intcs index) = 0;
 
     /**
      * @brief Determines the index of a specific item in the list.
@@ -46,7 +49,7 @@ public:
      * @param item The object to locate in the list.
      * @return The index of the item if found; otherwise -1.
      */
-    [[nodiscard]] virtual int IndexOf(const T& item) const = 0;
+    [[nodiscard]] virtual intcs IndexOf(const T& item) const = 0;
 
     /**
      * @brief Inserts an item at the specified index.
@@ -55,7 +58,7 @@ public:
      * @param index The zero-based index at which to insert the item.
      * @param item  The object to insert.
      */
-    virtual void Insert(int index, const T& item) = 0;
+    virtual void Insert(intcs index, const T& item) = 0;
 
     /**
      * @brief Removes the element at the specified index.
@@ -63,7 +66,7 @@ public:
      * C++ counterpart of .NET IList<T>.RemoveAt(int).
      * @param index The zero-based index of the element to remove.
      */
-    virtual void RemoveAt(int index) = 0;
+    virtual void RemoveAt(intcs index) = 0;
 };
 
 } // namespace System::Collections::Generic

@@ -224,37 +224,37 @@ using System::Collections::ObjectModel::ObservableCollection;
 using System::Collections::ObjectModel::ReadOnlyObservableCollection;
 
 TEST(ReadOnlyObservableCollectionTests, Count_MatchesSource) {
-    ObservableCollection<int> oc;
-    oc.Add(1); oc.Add(2); oc.Add(3);
+    auto oc = std::make_shared<ObservableCollection<int>>();
+    oc->Add(1); oc->Add(2); oc->Add(3);
     ReadOnlyObservableCollection<int> roc(oc);
     EXPECT_EQ(roc.getCountProperty(), 3);
 }
 
 TEST(ReadOnlyObservableCollectionTests, IndexOperator_ReturnsElement) {
-    ObservableCollection<int> oc;
-    oc.Add(10); oc.Add(20);
+    auto oc = std::make_shared<ObservableCollection<int>>();
+    oc->Add(10); oc->Add(20);
     ReadOnlyObservableCollection<int> roc(oc);
     EXPECT_EQ(roc[0], 10);
     EXPECT_EQ(roc[1], 20);
 }
 
 TEST(ReadOnlyObservableCollectionTests, Contains_Found) {
-    ObservableCollection<int> oc;
-    oc.Add(5);
+    auto oc = std::make_shared<ObservableCollection<int>>();
+    oc->Add(5);
     ReadOnlyObservableCollection<int> roc(oc);
     EXPECT_TRUE(roc.Contains(5));
     EXPECT_FALSE(roc.Contains(99));
 }
 
 TEST(ReadOnlyObservableCollectionTests, IsEmpty_TrueWhenEmpty) {
-    ObservableCollection<int> oc;
+    auto oc = std::make_shared<ObservableCollection<int>>();
     ReadOnlyObservableCollection<int> roc(oc);
     EXPECT_TRUE(roc.getIsEmptyProperty());
 }
 
 TEST(ReadOnlyObservableCollectionTests, RangeFor_IteratesAll) {
-    ObservableCollection<int> oc;
-    oc.Add(1); oc.Add(2); oc.Add(3);
+    auto oc = std::make_shared<ObservableCollection<int>>();
+    oc->Add(1); oc->Add(2); oc->Add(3);
     ReadOnlyObservableCollection<int> roc(oc);
     int sum = 0;
     for (const auto& v : roc) sum += v;

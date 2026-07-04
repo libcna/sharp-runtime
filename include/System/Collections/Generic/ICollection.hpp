@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IEnumerable.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Defines methods to manipulate generic collections.
@@ -26,7 +29,7 @@ public:
      *
      * C++ counterpart of .NET ICollection<T>.Count.
      */
-    [[nodiscard]] virtual int getCountProperty() const = 0;
+    [[nodiscard]] virtual intcs getCountProperty() const = 0;
 
     /**
      * @brief Gets a value indicating whether the collection is read-only.

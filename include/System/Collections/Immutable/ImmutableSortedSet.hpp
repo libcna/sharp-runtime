@@ -5,8 +5,11 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Immutable {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents an immutable sorted set with no duplicate elements.
@@ -64,7 +67,7 @@ public:
      * C++ counterpart of .NET ImmutableSortedSet<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_->size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the set is empty.
@@ -75,20 +78,20 @@ public:
     [[nodiscard]] bool getIsEmptyProperty() const { return data_->empty(); }
 
     /**
-     * @brief Gets the smallest element in the set.
+     * @brief Gets the smallest element in the set, or a default-constructed T if empty.
      *
-     * C++ counterpart of .NET ImmutableSortedSet<T>.Min.
-     * @return A const reference to the minimum element.
+     * C++ counterpart of .NET ImmutableSortedSet<T>.Min, which returns default(T) rather
+     * than throwing when the set is empty.
      */
-    [[nodiscard]] const T& getMinProperty() const { return *data_->begin(); }
+    [[nodiscard]] T getMinProperty() const { return data_->empty() ? T{} : *data_->begin(); }
 
     /**
-     * @brief Gets the largest element in the set.
+     * @brief Gets the largest element in the set, or a default-constructed T if empty.
      *
-     * C++ counterpart of .NET ImmutableSortedSet<T>.Max.
-     * @return A const reference to the maximum element.
+     * C++ counterpart of .NET ImmutableSortedSet<T>.Max, which returns default(T) rather
+     * than throwing when the set is empty.
      */
-    [[nodiscard]] const T& getMaxProperty() const { return *data_->rbegin(); }
+    [[nodiscard]] T getMaxProperty() const { return data_->empty() ? T{} : *data_->rbegin(); }
 
     /**
      * @brief Determines whether the set contains the specified element.

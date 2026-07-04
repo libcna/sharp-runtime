@@ -5,11 +5,16 @@
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/SequencePosition.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/Span.hpp"
 
 namespace System::Buffers {
+
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /**
      * @brief Represents a sequence of memory regions that may be non-contiguous in memory.
@@ -23,8 +28,8 @@ namespace System::Buffers {
     template<typename T>
     class ReadOnlySequence {
         std::vector<T> data_;
-        int start_ = 0;
-        int end_   = 0;
+        intcs start_ = 0;
+        intcs end_   = 0;
 
     public:
         /** @brief Constructs an empty ReadOnlySequence. */
@@ -35,15 +40,21 @@ namespace System::Buffers {
          * @param data Source data vector.
          */
         explicit ReadOnlySequence(std::vector<T> data)
-            : data_(std::move(data)), start_(0), end_(static_cast<int>(data_.size())) {}
+            : data_(std::move(data)), start_(0), end_(static_cast<intcs>(data_.size())) {}
 
         /**
          * @brief Constructs a ReadOnlySequence from a pointer and length.
          * @param ptr    Pointer to the first element.
          * @param length Number of elements.
          */
-        ReadOnlySequence(const T* ptr, int length)
+        ReadOnlySequence(const T* ptr, intcs length)
             : data_(ptr, ptr + length), start_(0), end_(length) {}
+
+        /**
+         * @brief Returns a shared empty ReadOnlySequence.
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Empty.
+         */
+        [[nodiscard]] static ReadOnlySequence<T> getEmpty() { return ReadOnlySequence<T>(); }
 
         /**
          * @brief Returns the SequencePosition representing the start of the sequence.
@@ -94,8 +105,8 @@ namespace System::Buffers {
          */
         [[nodiscard]] ReadOnlySequence<T> Slice(System::SequencePosition start,
                                                  System::SequencePosition end) const {
-            int s = start.GetInteger();
-            int e = end.GetInteger();
+            intcs s = start.GetInteger();
+            intcs e = end.GetInteger();
             if (s < start_ || e > end_ || s > e)
                 throw std::out_of_range("ReadOnlySequence::Slice out of range");
             ReadOnlySequence<T> result;
@@ -115,15 +126,88 @@ namespace System::Buffers {
         }
 
         /**
-         * @brief Returns the SequencePosition at the given offset from the start.
-         * @param offset Byte offset from the beginning of the sequence.
-         * @return SequencePosition at that offset.
+         * @brief Returns a sub-sequence of @p length elements starting at @p start.
+         *
+         * C++ counterpart of both .NET ReadOnlySequence&lt;T&gt;.Slice(long, long) and
+         * Slice(int, int) — merged into a single longcs-based overload, since intcs
+         * arguments widen to longcs unambiguously (unlike .NET, C++ overload
+         * resolution has no inherent preference between narrowing int64->int32 and
+         * same-rank long long->long conversions, so keeping both would make calls
+         * with e.g. a `long long` literal ambiguous).
          */
-        [[nodiscard]] System::SequencePosition GetPosition(long long offset) const {
-            int pos = start_ + static_cast<int>(offset);
+        [[nodiscard]] ReadOnlySequence<T> Slice(longcs start, longcs length) const {
+            return Slice(GetPosition(start), GetPosition(start + length));
+        }
+
+        /**
+         * @brief Returns a sub-sequence starting at @p start to the sequence end.
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Slice(long).
+         */
+        [[nodiscard]] ReadOnlySequence<T> Slice(longcs start) const {
+            return Slice(GetPosition(start), getEndProperty());
+        }
+
+        /**
+         * @brief Returns a sub-sequence from @p start to @p end.
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Slice(long, SequencePosition).
+         */
+        [[nodiscard]] ReadOnlySequence<T> Slice(longcs start, System::SequencePosition end) const {
+            return Slice(GetPosition(start), end);
+        }
+
+        /**
+         * @brief Returns a sub-sequence of @p length elements starting at @p start.
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Slice(SequencePosition, long).
+         */
+        [[nodiscard]] ReadOnlySequence<T> Slice(System::SequencePosition start, longcs length) const {
+            return Slice(start, GetPosition(length, start));
+        }
+
+        /**
+         * @brief Returns the SequencePosition at the given offset from the start.
+         * @param offset Offset from the beginning of the sequence.
+         * @return SequencePosition at that offset.
+         * @throws ArgumentOutOfRangeException if offset is negative.
+         */
+        [[nodiscard]] System::SequencePosition GetPosition(longcs offset) const {
+            return GetPosition(offset, getStartProperty());
+        }
+
+        /**
+         * @brief Returns a new SequencePosition at @p offset from @p origin.
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.GetPosition(long, SequencePosition).
+         * @throws ArgumentOutOfRangeException if offset is negative.
+         */
+        [[nodiscard]] System::SequencePosition GetPosition(longcs offset, System::SequencePosition origin) const {
+            if (offset < 0)
+                throw ArgumentOutOfRangeException("offset");
+            intcs pos = origin.GetInteger() + static_cast<intcs>(offset);
             if (pos < start_ || pos > end_)
                 throw std::out_of_range("ReadOnlySequence::GetPosition out of range");
             return System::SequencePosition(nullptr, pos);
+        }
+
+        /**
+         * @brief Tries to retrieve the segment at/after @p position.
+         *
+         * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.TryGet(ref SequencePosition, out ReadOnlyMemory&lt;T&gt;, bool).
+         * Because this implementation is always a single contiguous segment, this
+         * returns the remaining data once (from @p position to the end) and then false.
+         * @param position Position to start from; advanced to the end if @p advance is true.
+         * @param memory   Receives the segment's data, or an empty view if there is none.
+         * @param advance  If true, advances @p position past the returned segment.
+         * @return true if data was returned; false if @p position was already at the end.
+         */
+        [[nodiscard]] bool TryGet(System::SequencePosition& position, System::ReadOnlyMemory<T>& memory,
+                                  bool advance = true) const {
+            intcs pos = position.GetInteger();
+            if (pos >= end_) {
+                memory = System::ReadOnlyMemory<T>();
+                return false;
+            }
+            memory = System::ReadOnlyMemory<T>(data_.data() + pos, end_ - pos);
+            if (advance) position = getEndProperty();
+            return true;
         }
 
         /**
@@ -151,7 +235,7 @@ namespace System::Buffers {
          * @throws std::out_of_range if destination is too small.
          */
         void CopyTo(System::Span<T> destination) const {
-            int len = end_ - start_;
+            intcs len = end_ - start_;
             if (destination.getLengthProperty() < len)
                 throw std::out_of_range("ReadOnlySequence::CopyTo destination too small");
             std::copy(data_.begin() + start_, data_.begin() + end_,

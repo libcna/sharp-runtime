@@ -3,10 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IComparer.hpp"
 #include "System/Collections/Generic/EqualityComparer.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides a base class for implementations of IComparer<T>.
@@ -30,7 +33,7 @@ public:
      * @param y The second object to compare.
      * @return Negative if x < y, zero if x == y, positive if x > y.
      */
-    [[nodiscard]] virtual int Compare(const T& x, const T& y) const override = 0;
+    [[nodiscard]] virtual intcs Compare(const T& x, const T& y) const override = 0;
 
     /**
      * @brief Gets the default comparer for type T, using operator<.
@@ -40,7 +43,7 @@ public:
      */
     static const Comparer<T>& Default() {
         static struct DefaultComparer : Comparer<T> {
-            [[nodiscard]] int Compare(const T& x, const T& y) const override {
+            [[nodiscard]] intcs Compare(const T& x, const T& y) const override {
                 if (x < y) return -1;
                 if (y < x) return  1;
                 return 0;
@@ -56,11 +59,11 @@ public:
      * @param comparison A function that compares two T values and returns an ordering integer.
      * @return A new heap-allocated Comparer wrapping the function (caller owns the pointer).
      */
-    static Comparer<T>* Create(std::function<int(const T&, const T&)> comparison) {
+    static Comparer<T>* Create(std::function<intcs(const T&, const T&)> comparison) {
         struct LambdaComparer : Comparer<T> {
-            std::function<int(const T&, const T&)> fn_;
-            explicit LambdaComparer(std::function<int(const T&, const T&)> f) : fn_(std::move(f)) {}
-            [[nodiscard]] int Compare(const T& x, const T& y) const override { return fn_(x, y); }
+            std::function<intcs(const T&, const T&)> fn_;
+            explicit LambdaComparer(std::function<intcs(const T&, const T&)> f) : fn_(std::move(f)) {}
+            [[nodiscard]] intcs Compare(const T& x, const T& y) const override { return fn_(x, y); }
         };
         return new LambdaComparer(std::move(comparison));
     }

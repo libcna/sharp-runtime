@@ -2,10 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <unordered_set>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a set of values with no duplicate elements.
@@ -64,11 +68,56 @@ public:
     [[nodiscard]] bool Contains(const T& item) const { return set_.count(item) > 0; }
 
     /**
+     * @brief Attempts to get the actual stored value equal to the given value.
+     *
+     * C++ counterpart of .NET HashSet<T>.TryGetValue(T, out T).
+     * Useful when the equality comparer distinguishes objects that compare equal.
+     * @param equalValue  The value to search for.
+     * @param actualValue Receives the stored element if found.
+     * @return true if an equal element was found; otherwise false.
+     */
+    bool TryGetValue(const T& equalValue, T& actualValue) const {
+        auto it = set_.find(equalValue);
+        if (it == set_.end()) return false;
+        actualValue = *it;
+        return true;
+    }
+
+    /**
+     * @brief Removes all elements matching the specified predicate.
+     *
+     * C++ counterpart of .NET HashSet<T>.RemoveWhere(Predicate<T>).
+     * @param match Predicate that returns true for elements to remove.
+     * @return The number of elements removed.
+     */
+    intcs RemoveWhere(const std::function<bool(const T&)>& match) {
+        intcs removed = 0;
+        for (auto it = set_.begin(); it != set_.end(); ) {
+            if (match(*it)) { it = set_.erase(it); ++removed; }
+            else ++it;
+        }
+        return removed;
+    }
+
+    /**
+     * @brief Determines whether this set and the specified collection share any common elements.
+     *
+     * C++ counterpart of .NET HashSet<T>.Overlaps(IEnumerable<T>).
+     * @param other The collection to compare to.
+     * @return true if at least one element is common to both; otherwise false.
+     */
+    [[nodiscard]] bool Overlaps(const HashSet<T>& other) const {
+        for (const auto& item : other.set_)
+            if (Contains(item)) return true;
+        return false;
+    }
+
+    /**
      * @brief Gets the number of elements contained in the set.
      *
      * C++ counterpart of .NET HashSet<T>.Count.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(set_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(set_.size()); }
 
     /**
      * @brief Removes all elements from the set.
@@ -200,7 +249,7 @@ public:
      * C++ counterpart of .NET HashSet<T>.EnsureCapacity(int).
      * @param capacity The minimum number of elements the set should support.
      */
-    void EnsureCapacity(int capacity) { set_.reserve(static_cast<std::size_t>(capacity)); }
+    void EnsureCapacity(intcs capacity) { set_.reserve(static_cast<std::size_t>(capacity)); }
 
     /**
      * @brief Reduces memory usage by shrinking the bucket array to fit the current element count.

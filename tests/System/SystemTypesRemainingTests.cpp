@@ -422,7 +422,7 @@ TEST(HashCodeTests, Combine8_Works) {
 TEST(HashCodeTests, AddWithComparer_UsesComparerHash) {
     struct ConstComparer : System::Collections::Generic::IEqualityComparer<int> {
         bool Equals(const int&, const int&) const override { return true; }
-        std::size_t GetHashCode(const int&) const override { return 99u; }
+        int GetHashCode(const int&) const override { return 99; }
     };
     ConstComparer cmp;
     HashCode hc1, hc2;

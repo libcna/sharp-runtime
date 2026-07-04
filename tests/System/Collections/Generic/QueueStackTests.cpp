@@ -8,9 +8,11 @@
 
 #include "System/Collections/Generic/Queue.hpp"
 #include "System/Collections/Generic/Stack.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::Queue;
 using System::Collections::Generic::Stack;
+using System::InvalidOperationException;
 
 // ---------------------------------------------------------------------------
 // Queue<T>
@@ -47,7 +49,7 @@ TEST(QueueTests, DequeueDecreasesCount) {
 
 TEST(QueueTests, DequeueEmptyThrows) {
     Queue<int> q;
-    EXPECT_THROW(q.Dequeue(), std::runtime_error);
+    EXPECT_THROW(q.Dequeue(), InvalidOperationException);
 }
 
 TEST(QueueTests, PeekReturnsFrontWithoutRemoving) {
@@ -61,7 +63,7 @@ TEST(QueueTests, PeekReturnsFrontWithoutRemoving) {
 
 TEST(QueueTests, PeekEmptyThrows) {
     Queue<int> q;
-    EXPECT_THROW((void)q.Peek(), std::runtime_error);
+    EXPECT_THROW((void)q.Peek(), InvalidOperationException);
 }
 
 TEST(QueueTests, FifoOrder) {
@@ -95,7 +97,7 @@ TEST(QueueTests, ClearResetsCount) {
     q.Enqueue(1); q.Enqueue(2); q.Enqueue(3);
     q.Clear();
     EXPECT_EQ(q.getCountProperty(), 0);
-    EXPECT_THROW((void)q.Peek(), std::runtime_error);
+    EXPECT_THROW((void)q.Peek(), InvalidOperationException);
 }
 
 TEST(QueueTests, ToArrayFifoOrder) {
@@ -175,7 +177,7 @@ TEST(StackTests, PopDecreasesCount) {
 
 TEST(StackTests, PopEmptyThrows) {
     Stack<int> s;
-    EXPECT_THROW(s.Pop(), std::runtime_error);
+    EXPECT_THROW(s.Pop(), InvalidOperationException);
 }
 
 TEST(StackTests, PeekReturnsTopWithoutRemoving) {
@@ -188,7 +190,7 @@ TEST(StackTests, PeekReturnsTopWithoutRemoving) {
 
 TEST(StackTests, PeekEmptyThrows) {
     Stack<int> s;
-    EXPECT_THROW((void)s.Peek(), std::runtime_error);
+    EXPECT_THROW((void)s.Peek(), InvalidOperationException);
 }
 
 TEST(StackTests, LifoOrder) {
@@ -222,7 +224,7 @@ TEST(StackTests, ClearResetsCount) {
     s.Push(1); s.Push(2); s.Push(3);
     s.Clear();
     EXPECT_EQ(s.getCountProperty(), 0);
-    EXPECT_THROW((void)s.Peek(), std::runtime_error);
+    EXPECT_THROW((void)s.Peek(), InvalidOperationException);
 }
 
 TEST(StackTests, ToArrayTopFirst) {

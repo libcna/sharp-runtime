@@ -8,6 +8,7 @@
 #include "System/Buffers/MemoryHandle.hpp"
 #include "System/Buffers/IPinnable.hpp"
 #include "System/Buffers/MemoryManager.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Buffers/SearchValues.hpp"
 #include "System/Buffers/SequenceReaderExtensions.hpp"
 
@@ -190,8 +191,12 @@ TEST(MemoryManagerTests, Dispose_NoThrow) {
 }
 
 TEST(MemoryManagerTests, GetMemoryProperty_Throws) {
+    // This port's Memory<T> doesn't support manager-backed storage, so the
+    // default .Memory implementation throws NotSupportedException (matching
+    // this codebase's established exception hierarchy) rather than a bare
+    // std::runtime_error.
     StubMemoryManager mgr;
-    EXPECT_THROW(mgr.getMemoryProperty(), std::runtime_error);
+    EXPECT_THROW(mgr.getMemoryProperty(), System::NotSupportedException);
 }
 
 // ===========================================================================

@@ -13,6 +13,7 @@
 #include "System/Collections/Immutable/ImmutableDictionary.hpp"
 #include "System/Collections/Immutable/ImmutableHashSet.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
+#include "System/ArgumentException.hpp"
 #include <string>
 #include <utility>
 #include <vector>
@@ -153,7 +154,7 @@ TEST(ImmDictBatch16Test, AddRange_AddsMultiple) {
 TEST(ImmDictBatch16Test, AddRange_DuplicateKeyThrows) {
     auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
     std::vector<std::pair<std::string, int>> pairs = {{"k", 2}};
-    EXPECT_THROW(d.AddRange(pairs), std::invalid_argument);
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
 }
 
 TEST(ImmDictBatch16Test, SetItems_InsertsAndOverwrites) {

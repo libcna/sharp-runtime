@@ -5,8 +5,11 @@
 #include <memory>
 #include <unordered_set>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Immutable {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents an immutable unordered set with no duplicate elements.
@@ -63,7 +66,7 @@ public:
      * C++ counterpart of .NET ImmutableHashSet<T>.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_->size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the set is empty.

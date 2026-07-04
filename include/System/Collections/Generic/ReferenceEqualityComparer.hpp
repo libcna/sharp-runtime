@@ -43,8 +43,8 @@ public:
      * @param obj The pointer whose address is used as the hash input.
      * @return A hash code derived from the pointer value.
      */
-    [[nodiscard]] std::size_t GetHashCode(T* const& obj) const override {
-        return std::hash<T*>{}(obj);
+    [[nodiscard]] intcs GetHashCode(T* const& obj) const override {
+        return static_cast<intcs>(std::hash<T*>{}(obj));
     }
 
     /**
