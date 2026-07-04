@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-04 (branch: feature/work) — 9046 tests passing*
+*Last updated: 2026-07-04 (branch: feature/work) — 9051 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **9046 tests passing** across 897 test suites. Zero failures.
+- **9051 tests passing** across 897 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -35,7 +35,8 @@
 - Collections (non-generic): full namespace done — `ArrayList`, `BitArray` (+Length setter, And/Or/Xor length validation), `Hashtable`, `Queue`/`Stack` (real GetEnumerator, InvalidOperationException on empty), `Comparer`, `DictionaryEntry`, `ListDictionaryInternal` (real Keys/Values/GetEnumerator), `IList`, `ICollection`, `IComparer`, `IDictionary`, `IEnumerable`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`, `StructuralComparisons`
 - Collections.Concurrent: full namespace done — `ConcurrentDictionary<K,V>`, `ConcurrentQueue<T>`/`ConcurrentStack<T>` (now implement `IProducerConsumerCollection<T>`), `IProducerConsumerCollection<T>`, `EnumerablePartitionerOptions`
 - Collections.Frozen: `FrozenDictionary<K,V>`, `FrozenSet<T>` (public API surface; internal SIMD-optimized implementation types out of scope)
-- Collections (generic): full namespace done (37 types) — `List<T>` (real bounds validation, was silent UB), `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`/`LinkedListNode<T>`, `SortedList<K,V>`, `SortedDictionary<K,V>`, `HashSet<T>` (+TryGetValue/RemoveWhere/Overlaps), `SortedSet<T>`, `OrderedDictionary<K,V>`, `PriorityQueue<T,P>`, `ReadOnlyCollection<T>`, `ArraySegment<T>`, `CollectionExtensions`, `Comparer<T>`/`EqualityComparer<T>` (now implements `IEqualityComparer<T>`)/`NullableComparer<T>`/`NullableEqualityComparer<T>`/`ObjectComparer<T>`/`ObjectEqualityComparer<T>`/`ReferenceEqualityComparer<T>`/`NonRandomizedStringEqualityComparer`, `KeyValuePair<K,V>`, `KeyNotFoundException`, all `I*` interfaces (`ICollection<T>`, `IComparer<T>`, `IDictionary<K,V>`, `IEnumerable<T>`, `IEnumerator<T>`, `IEqualityComparer<T>`, `IList<T>`, `IReadOnlyCollection<T>`, `IReadOnlyDictionary<K,V>`, `IReadOnlyList<T>`, `IReadOnlySet<T>`, `ISet<T>`, `IAsyncEnumerable<T>`, `IAsyncEnumerator<T>`), `ImmutableArray/List/Dictionary/HashSet/Queue/Stack/SortedDictionary/SortedSet<T>`
+- Collections (generic): full namespace done (37 types) — `List<T>` (real bounds validation, was silent UB), `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`/`LinkedListNode<T>`, `SortedList<K,V>`, `SortedDictionary<K,V>`, `HashSet<T>` (+TryGetValue/RemoveWhere/Overlaps), `SortedSet<T>`, `OrderedDictionary<K,V>`, `PriorityQueue<T,P>`, `ReadOnlyCollection<T>`, `ArraySegment<T>`, `CollectionExtensions`, `Comparer<T>`/`EqualityComparer<T>` (now implements `IEqualityComparer<T>`)/`NullableComparer<T>`/`NullableEqualityComparer<T>`/`ObjectComparer<T>`/`ObjectEqualityComparer<T>`/`ReferenceEqualityComparer<T>`/`NonRandomizedStringEqualityComparer`, `KeyValuePair<K,V>`, `KeyNotFoundException`, all `I*` interfaces (`ICollection<T>`, `IComparer<T>`, `IDictionary<K,V>`, `IEnumerable<T>`, `IEnumerator<T>`, `IEqualityComparer<T>`, `IList<T>`, `IReadOnlyCollection<T>`, `IReadOnlyDictionary<K,V>`, `IReadOnlyList<T>`, `IReadOnlySet<T>`, `ISet<T>`, `IAsyncEnumerable<T>`, `IAsyncEnumerator<T>`)
+- Collections.Immutable: full namespace done (13 types) — `ImmutableArray/List<T>` (real bounds validation, was silent UB), `ImmutableDictionary/SortedDictionary<K,V>`, `ImmutableHashSet/SortedSet<T>` (Min/Max no longer UB on empty), `ImmutableQueue/Stack<T>` (InvalidOperationException on empty, was std::out_of_range), `IImmutableDictionary/List/Queue/Set/Stack<T>`
 - Span/Memory: `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`, `ReadOnlyMemory<T>`, `MemoryExtensions` (full), `SpanSplitEnumerator`
 - Buffers: `ArrayPool<T>`, `MemoryPool<T>`, `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `IBufferWriter<T>`, `ArrayBufferWriter<T>`, `SearchValues<T>`, `SequencePosition`, `ReadOnlySequence<T>`, `ReadOnlySequenceSegment<T>`, `SequenceReader<T>`, `SequenceReaderExtensions`, `BinaryPrimitives` (full, incl. Single/Double + TryRead*/TryWrite* family), `BuffersExtensions`, `StandardFormat`
 - Buffers.Text: `Base64` (full modern API incl. InPlace/Chars/whitespace-aware decode), `Base64Url` (same), `Utf8Formatter`/`Utf8Parser` (bool + integers only — see §5 for the documented Guid/DateTime/TimeSpan/Decimal/float gap)
@@ -73,6 +74,7 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| `f1e7559` | Port System.Collections.Immutable (13 items): same bug classes as Generic — Immutable Queue/Stack threw std::out_of_range instead of InvalidOperationException; Dictionary/SortedDictionary const indexer/Add wrong exception types; **ImmutableList/ImmutableArray Insert/InsertRange/SetItem/RemoveAt/RemoveRange had zero bounds validation (silent UB)**; ImmutableSortedSet.Min/Max UB on empty. Completes System.Collections.Immutable |
 | `6c8e4c6` | Port SortedDictionary/SortedList/SortedSet (Generic): wrong exception types (KeyNotFoundException/ArgumentException/ArgumentOutOfRangeException), SortedList missing const indexer, **SortedSet.Min/Max dereferenced begin()/rbegin() unconditionally — UB on an empty set** — now returns default(T) matching .NET; int→intcs. Completes System.Collections.Generic (37 items) |
 | `e6e8e89` | Port PriorityQueue (Generic): wrong exception type on empty Dequeue/Peek (std::invalid_argument → InvalidOperationException) |
 | `4c071e3` | Port OrderedDictionary (Generic): wrong exception types throughout (KeyNotFoundException/ArgumentException/ArgumentOutOfRangeException), int→intcs |
