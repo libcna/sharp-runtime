@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/Binary/BinaryPrimitives.hpp"
 #include "System/Buffers/SequenceReader.hpp"
 #include "System/Buffers/ReadOnlySequenceSegment.hpp"
@@ -200,6 +201,66 @@ TEST(ReadOnlySequenceNewTests, CopyTo_CopiesData) {
     seq.CopyTo(span);
     EXPECT_EQ(dst[0], 1u);
     EXPECT_EQ(dst[3], 4u);
+}
+
+TEST(ReadOnlySequenceNewTests, Empty_IsEmpty) {
+    auto seq = System::Buffers::ReadOnlySequence<int>::getEmpty();
+    EXPECT_TRUE(seq.getIsEmptyProperty());
+    EXPECT_EQ(seq.getLengthProperty(), 0LL);
+}
+
+TEST(ReadOnlySequenceNewTests, Slice_LongLong_ReturnsSubrange) {
+    std::vector<int> data{10, 20, 30, 40, 50};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    auto sliced = seq.Slice(1LL, 3LL);
+    EXPECT_EQ(sliced.getLengthProperty(), 3LL);
+    auto arr = sliced.ToArray();
+    EXPECT_EQ(arr[0], 20);
+    EXPECT_EQ(arr[2], 40);
+}
+
+TEST(ReadOnlySequenceNewTests, Slice_IntInt_ReturnsSubrange) {
+    std::vector<int> data{10, 20, 30, 40};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    auto sliced = seq.Slice(1, 2);
+    auto arr = sliced.ToArray();
+    EXPECT_EQ(arr.size(), 2u);
+    EXPECT_EQ(arr[0], 20);
+    EXPECT_EQ(arr[1], 30);
+}
+
+TEST(ReadOnlySequenceNewTests, Slice_LongOnly_ToEnd) {
+    std::vector<int> data{1, 2, 3, 4};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    auto sliced = seq.Slice(2LL);
+    EXPECT_EQ(sliced.getLengthProperty(), 2LL);
+}
+
+TEST(ReadOnlySequenceNewTests, GetPosition_WithOrigin) {
+    std::vector<int> data{1, 2, 3, 4, 5};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    auto mid = seq.GetPosition(2);
+    auto fromMid = seq.GetPosition(1, mid);
+    auto sliced = seq.Slice(fromMid);
+    EXPECT_EQ(sliced.getLengthProperty(), 2LL); // elements at index 3,4
+}
+
+TEST(ReadOnlySequenceNewTests, GetPosition_NegativeOffset_Throws) {
+    std::vector<int> data{1, 2, 3};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    EXPECT_THROW(seq.GetPosition(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlySequenceNewTests, TryGet_ReturnsDataThenFalse) {
+    std::vector<int> data{7, 8, 9};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    System::SequencePosition pos = seq.getStartProperty();
+    System::ReadOnlyMemory<int> mem;
+    bool first = seq.TryGet(pos, mem, true);
+    EXPECT_TRUE(first);
+    EXPECT_EQ(mem.getLengthProperty(), 3);
+    bool second = seq.TryGet(pos, mem, true);
+    EXPECT_FALSE(second);
 }
 
 // ===========================================================================
