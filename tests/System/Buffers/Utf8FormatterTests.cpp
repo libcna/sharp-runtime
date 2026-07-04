@@ -3,9 +3,14 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Buffers/Text/Utf8Formatter.hpp"
+#include "System/FormatException.hpp"
+#include "System/NotSupportedException.hpp"
 
 using System::Buffers::Text::Utf8Formatter;
+using System::Buffers::StandardFormat;
 using System::Span;
+using System::FormatException;
+using System::NotSupportedException;
 
 static std::string spanToString(const uint8_t* p, int len) {
     return std::string(reinterpret_cast<const char*>(p), static_cast<size_t>(len));
@@ -90,4 +95,93 @@ TEST(Utf8FormatterTest, FormatDestinationTooSmallInt) {
     int written = 0;
     EXPECT_FALSE(Utf8Formatter::TryFormat(int32_t(12345), span, written));
     EXPECT_EQ(written, 0);
+}
+
+// ===========================================================================
+// Format specifiers: D (precision), X (hex), N (grouping), bad format
+// ===========================================================================
+
+TEST(Utf8FormatterTest, FormatBool_BadSpecifier_Throws) {
+    uint8_t buf[10] = {};
+    Span<uint8_t> span(buf, 10);
+    int written = 0;
+    EXPECT_THROW(Utf8Formatter::TryFormat(true, span, written, StandardFormat('X')), FormatException);
+}
+
+TEST(Utf8FormatterTest, FormatInt32_D_WithPrecision_ZeroPads) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int32_t(42), span, written, StandardFormat('D', 6)));
+    EXPECT_EQ(spanToString(buf, written), "000042");
+}
+
+TEST(Utf8FormatterTest, FormatInt32Negative_D_WithPrecision_PadsAfterSign) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int32_t(-42), span, written, StandardFormat('D', 6)));
+    EXPECT_EQ(spanToString(buf, written), "-000042");
+}
+
+TEST(Utf8FormatterTest, FormatUInt32_X_Lowercase) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(uint32_t(0xABCD), span, written, StandardFormat('x')));
+    EXPECT_EQ(spanToString(buf, written), "abcd");
+}
+
+TEST(Utf8FormatterTest, FormatUInt32_X_UppercaseWithPrecision) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(uint32_t(0xAB), span, written, StandardFormat('X', 8)));
+    EXPECT_EQ(spanToString(buf, written), "000000AB");
+}
+
+TEST(Utf8FormatterTest, FormatInt8Negative_X_ShowsWidthBitPattern) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int8_t(-1), span, written, StandardFormat('X')));
+    EXPECT_EQ(spanToString(buf, written), "FF");
+}
+
+TEST(Utf8FormatterTest, FormatInt32_N_DefaultTwoDecimals) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int32_t(32767), span, written, StandardFormat('N')));
+    EXPECT_EQ(spanToString(buf, written), "32,767.00");
+}
+
+TEST(Utf8FormatterTest, FormatInt32_N0_NoDecimals) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int32_t(32767), span, written, StandardFormat('N', 0)));
+    EXPECT_EQ(spanToString(buf, written), "32,767");
+}
+
+TEST(Utf8FormatterTest, FormatInt32Negative_N_GroupsAfterSign) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_TRUE(Utf8Formatter::TryFormat(int32_t(-1234567), span, written, StandardFormat('N', 0)));
+    EXPECT_EQ(spanToString(buf, written), "-1,234,567");
+}
+
+TEST(Utf8FormatterTest, FormatInt32_G_WithPrecision_Throws) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_THROW(Utf8Formatter::TryFormat(int32_t(42), span, written, StandardFormat('G', 3)), NotSupportedException);
+}
+
+TEST(Utf8FormatterTest, FormatInt32_BadSpecifier_Throws) {
+    uint8_t buf[20] = {};
+    Span<uint8_t> span(buf, 20);
+    int written = 0;
+    EXPECT_THROW(Utf8Formatter::TryFormat(int32_t(42), span, written, StandardFormat('Q')), FormatException);
 }

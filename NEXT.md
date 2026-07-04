@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-04 (branch: feature/work) — 8823 tests passing*
+*Last updated: 2026-07-04 (branch: feature/work) — 8988 tests passing*
 
 ---
 
@@ -21,7 +21,7 @@
 - **Clean.** `cmake --build build --parallel 4` produces zero errors, zero warnings.
 
 ### Tests
-- **8823 tests passing** across 897 test suites. Zero failures.
+- **8988 tests passing** across 897 test suites. Zero failures.
 
 ### What works
 - Core types: `String`, `Object`, `Boolean`, `Byte`, `Char`, `Int16`, `Int32`, `Int64`, `Int128`, `IntPtr`, `UInt16`, `UInt64`, `UInt128`, `Half` (full checklist port — correct round-to-nearest-even `FromSingle`/subnormal `ToSingle`, `NaN`/`E`/`Pi`/`Tau`/`One`/`NegativeOne`/`NegativeZero` constants, `IsNormal`/`IsSubnormal`, full arithmetic operators, `Parse`/`TryParse`, `ToString(format)`, `TryFormat`), `Single`, `Double`, `Decimal` (+ OACurrency), `Guid` (full checklist port — fixed `ToByteArray()`/byte-array-ctor endianness bug, added `X` format, `ParseExact`/`TryParseExact`, `Variant`/`Version`, `CreateVersion7`, span-based Parse/TryParse/TryFormat/TryWriteBytes), `BitConverter` (full API including Half/BFloat16/Int128/UInt128), `Math` (full overloads + BigMul/DivRem/ILogB), `MathF`, `Random`, `HashCode` (full checklist port — per-process random seed like .NET, `AddBytes(ReadOnlySpan<byte>)`), `Void`, `Index`, `Lazy<T>`
@@ -35,8 +35,8 @@
 - Collections (non-generic): `ArrayList` (full API), `BitArray` (full API), `Hashtable`, `Queue`, `Stack`, `Comparer`, `IList`, `ICollection`, `IComparer`, `IEnumerator`, `IDictionaryEnumerator`, `IEqualityComparer`, `IStructuralComparable`, `IStructuralEquatable`
 - Collections (generic): `List<T>`, `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `LinkedList<T>`, `SortedList<K,V>`, `SortedDictionary<K,V>`, `HashSet<T>`, `SortedSet<T>`, `ReadOnlyCollection<T>`, `ArraySegment<T>`, `PriorityQueue<T,P>`, `ImmutableArray/List/Dictionary/HashSet/Queue/Stack/SortedDictionary/SortedSet<T>`
 - Span/Memory: `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`, `ReadOnlyMemory<T>`, `MemoryExtensions` (full), `SpanSplitEnumerator`
-- Buffers: `ArrayPool<T>`, `MemoryPool<T>`, `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `IBufferWriter<T>`, `ArrayBufferWriter<T>`, `SearchValues<T>`, `SequencePosition`, `ReadOnlySequence<T>`, `ReadOnlySequenceSegment<T>`, `SequenceReader<T>`, `SequenceReaderExtensions`, `BinaryPrimitives` (full), `BuffersExtensions`
-- Buffers.Text: `Base64`, `Base64Url`
+- Buffers: `ArrayPool<T>`, `MemoryPool<T>`, `MemoryHandle`, `IPinnable`, `MemoryManager<T>`, `IBufferWriter<T>`, `ArrayBufferWriter<T>`, `SearchValues<T>`, `SequencePosition`, `ReadOnlySequence<T>`, `ReadOnlySequenceSegment<T>`, `SequenceReader<T>`, `SequenceReaderExtensions`, `BinaryPrimitives` (full, incl. Single/Double + TryRead*/TryWrite* family), `BuffersExtensions`, `StandardFormat`
+- Buffers.Text: `Base64` (full modern API incl. InPlace/Chars/whitespace-aware decode), `Base64Url` (same), `Utf8Formatter`/`Utf8Parser` (bool + integers only — see §5 for the documented Guid/DateTime/TimeSpan/Decimal/float gap)
 - IO: `Stream`, `FileStream`, `MemoryStream`, `BinaryReader`, `BinaryWriter`, `StreamReader`, `StreamWriter`, `TextReader`, `TextWriter`, `File`, `Directory`, `Path`, `FileInfo`, `DirectoryInfo`, `RandomAccess`
 - IO.Compression: `ZipArchive`, `ZipArchiveEntry`, `ZipFile`, `DeflateStream`, `GZipStream`
 - IO.Hashing: `Crc32`, `Crc64`, `XxHash32`, `XxHash64`, `XxHash3`, `XxHash128`
@@ -71,6 +71,10 @@ All on branch `feature/work` (not yet pushed), most recent first:
 
 | Commit | Change |
 |--------|--------|
+| (pending) | Port Utf8Formatter/Utf8Parser: **format specifier was silently ignored for all integer types** on both format and parse sides (e.g. requesting hex 'X' produced plain decimal instead of throwing or formatting hex) — added real G/D/N/X dispatch with correct precision/zero-padding (D/X) and thousands-grouping (N, 2 decimals by default matching .NET's NumberFormatInfo default) semantics; bool now validates its format symbol and throws FormatException like .NET; all TryParse overloads now correctly set bytesConsumed=0 on failure (previously left stale); Guid/DateTime/DateTimeOffset/TimeSpan/Decimal/float TryFormat/TryParse intentionally deferred — documented gap, see §5 |
+| `f3bce47` | Port Base64Url: mirrors the Base64 whitespace-decode fix; **GetMaxDecodedLength used a loose `(len*3+3)/4` upper-bound approximation** instead of .NET's exact `whole*3+(remainder-1)` formula (fixed a pre-existing test that had locked in the wrong value); added the full modern API surface (InPlace, Chars, byte[]/vector-returning, Try* variants) |
+| `9e0bd35` | Port Base64: **DecodeFromUtf8/IsValid rejected any embedded whitespace** and **an incomplete trailing group with isFinalBlock=true silently returned Done instead of InvalidData** (silently dropping the unconsumed tail) — rewrote decode/validate as a whitespace-skipping state machine; added the full modern API surface (InPlace, Chars, byte[]/vector-returning, Try* variants) |
+| `4a46b24` | Port BinaryPrimitives: added the entire missing TryRead*/TryWrite* bool-returning family (previously only throwing Read*/Write* existed) plus Single/Double support; int→intcs on checkSize |
 | `becdf7d` | Port Tuple + TupleExtensions: **added missing CompareTo/operator<** — Tuple1..Tuple7 had operator==/!= but no ordering at all, unlike .NET's IStructuralComparable-based sequential compare; added intcs-returning CompareTo + operator< using the same first-non-zero-wins algorithm; fixed int→intcs on GetHashCode and hash helpers |
 | `32f8bbb` | Port TypeLoadException/TypeAccessException/TypeInitializationException: fixed missing HResults (COR_E_TYPELOAD/TYPEACCESS/TYPEINITIALIZATION); TypeAccessException's default message corrected to match .NET; **TypeInitializationException took a raw `const std::exception*` instead of this codebase's std::exception_ptr convention** and manually embedded inner->what() text into the message instead of exposing it via InnerException like .NET — fixed both |
 | `0af23c9` | Port TimeoutException: fixed missing HResult (COR_E_TIMEOUT) |
@@ -217,6 +221,7 @@ be running concurrently, and only `git add` the exact files you intend for that 
 | needs verification | Emscripten build — never CI-tested; POSIX guards exist but not validated |
 | design note | `ArrayList` compares `std::any` elements by `type_info` only; meaningful value comparison requires a typed `IComparer` |
 | workflow risk | Duplicate test suite names cause linker errors — always check `--gtest_filter` output and use `Tests2` suffix when collisions exist |
+| ⚠️ PARTIAL | `System::Buffers::Text::Utf8Formatter`/`Utf8Parser` — bool + all 8 integer types fully support G/D/N/X format specifiers (fixed: format was previously silently ignored); `Guid`/`DateTime`/`DateTimeOffset`/`TimeSpan`/`Decimal`/`Single`/`Double` TryFormat/TryParse overloads are not yet implemented |
 
 ---
 
