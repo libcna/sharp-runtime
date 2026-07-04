@@ -312,6 +312,12 @@ TEST(SortedSetTests, MaxProperty) {
     EXPECT_EQ(ss.getMaxProperty(), 9);
 }
 
+TEST(SortedSetTests, MinMaxProperty_Empty_ReturnsDefault) {
+    SortedSet<int> ss;
+    EXPECT_EQ(ss.getMinProperty(), 0);
+    EXPECT_EQ(ss.getMaxProperty(), 0);
+}
+
 TEST(SortedSetTests, IterationIsSorted) {
     SortedSet<int> ss;
     ss.Add(30); ss.Add(10); ss.Add(20);

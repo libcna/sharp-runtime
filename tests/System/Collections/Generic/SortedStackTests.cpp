@@ -7,6 +7,8 @@
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/Collections/Generic/Stack.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <string>
 #include <vector>
 
@@ -106,6 +108,18 @@ TEST(GenSortedDictionaryTest, Clear) {
     EXPECT_EQ(d.getCountProperty(), 0);
 }
 
+TEST(GenSortedDictionaryTest, AddDuplicateThrows) {
+    SortedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    EXPECT_THROW(d.Add("a", 2), System::ArgumentException);
+}
+
+TEST(GenSortedDictionaryTest, ConstIndexerMissingKeyThrows) {
+    SortedDictionary<std::string, int> d;
+    const auto& cd = d;
+    EXPECT_THROW((void)cd["missing"], KeyNotFoundException);
+}
+
 // ---- SortedList<string,int> ----
 TEST(GenSortedListTest, AddAndContainsKey) {
     SortedList<std::string, int> sl;
@@ -136,6 +150,30 @@ TEST(GenSortedListTest, RemoveAt) {
     sl.RemoveAt(0);
     EXPECT_EQ(sl.getCountProperty(), 1);
     EXPECT_FALSE(sl.ContainsKey("a"));
+}
+
+TEST(GenSortedListTest, RemoveAtOutOfRangeThrows) {
+    SortedList<std::string, int> sl;
+    EXPECT_THROW(sl.RemoveAt(0), System::ArgumentOutOfRangeException);
+}
+
+TEST(GenSortedListTest, AddDuplicateThrows) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1);
+    EXPECT_THROW(sl.Add("a", 2), System::ArgumentException);
+}
+
+TEST(GenSortedListTest, ConstIndexerMissingKeyThrows) {
+    SortedList<std::string, int> sl;
+    const auto& csl = sl;
+    EXPECT_THROW((void)csl["missing"], KeyNotFoundException);
+}
+
+TEST(GenSortedListTest, ConstIndexerFoundReturnsValue) {
+    SortedList<std::string, int> sl;
+    sl.Add("k", 5);
+    const auto& csl = sl;
+    EXPECT_EQ(csl["k"], 5);
 }
 
 TEST(GenSortedListTest, TryGetValue) {
