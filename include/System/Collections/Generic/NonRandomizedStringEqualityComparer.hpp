@@ -45,8 +45,8 @@ public:
      * @param obj The string for which to compute the hash code.
      * @return A deterministic hash code.
      */
-    [[nodiscard]] std::size_t GetHashCode(const std::string& obj) const override {
-        return fnv1a(obj);
+    [[nodiscard]] intcs GetHashCode(const std::string& obj) const override {
+        return static_cast<intcs>(fnv1a(obj));
     }
 
     /**
@@ -75,12 +75,12 @@ public:
                         std::tolower(static_cast<unsigned char>(y[i]))) return false;
                 return true;
             }
-            [[nodiscard]] std::size_t GetHashCode(const std::string& obj) const override {
+            [[nodiscard]] intcs GetHashCode(const std::string& obj) const override {
                 std::string lower;
                 lower.reserve(obj.size());
                 for (unsigned char c : obj)
                     lower.push_back(static_cast<char>(std::tolower(c)));
-                return fnv1a(lower);
+                return static_cast<intcs>(fnv1a(lower));
             }
         } instance;
         return instance;

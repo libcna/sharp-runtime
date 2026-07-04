@@ -5,8 +5,12 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/Generic/IEqualityComparer.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides a base class for equality comparison implementations.
@@ -18,10 +22,10 @@ namespace System::Collections::Generic {
  * @tparam T The type of objects to compare.
  */
 template<typename T>
-class EqualityComparer {
+class EqualityComparer : public IEqualityComparer<T> {
 public:
     /** @brief Virtual destructor for safe polymorphic destruction. */
-    virtual ~EqualityComparer() = default;
+    ~EqualityComparer() override = default;
 
     /**
      * @brief Determines whether two objects of type T are equal.
@@ -31,7 +35,7 @@ public:
      * @param y The second object to compare.
      * @return true if the specified objects are equal; otherwise false.
      */
-    [[nodiscard]] virtual bool Equals(const T& x, const T& y) const = 0;
+    [[nodiscard]] bool Equals(const T& x, const T& y) const override = 0;
 
     /**
      * @brief Returns a hash code for the specified object.
@@ -40,7 +44,7 @@ public:
      * @param obj The object for which a hash code is to be returned.
      * @return A hash code for obj.
      */
-    [[nodiscard]] virtual std::size_t GetHashCode(const T& obj) const = 0;
+    [[nodiscard]] intcs GetHashCode(const T& obj) const override = 0;
 
     /**
      * @brief Gets the default equality comparer for type T.
@@ -51,9 +55,9 @@ public:
      */
     static const EqualityComparer<T>& Default() {
         static struct DefaultImpl : EqualityComparer<T> {
-            [[nodiscard]] bool   Equals(const T& x, const T& y) const override { return x == y; }
-            [[nodiscard]] std::size_t GetHashCode(const T& obj) const override {
-                return std::hash<T>{}(obj);
+            [[nodiscard]] bool Equals(const T& x, const T& y) const override { return x == y; }
+            [[nodiscard]] intcs GetHashCode(const T& obj) const override {
+                return static_cast<intcs>(std::hash<T>{}(obj));
             }
         } instance;
         return instance;
@@ -70,18 +74,18 @@ public:
      */
     static std::shared_ptr<EqualityComparer<T>> Create(
         std::function<bool(const T&, const T&)> equals,
-        std::function<std::size_t(const T&)> getHashCode = nullptr)
+        std::function<intcs(const T&)> getHashCode = nullptr)
     {
         struct DelegateImpl : EqualityComparer<T> {
             std::function<bool(const T&, const T&)> equals_;
-            std::function<std::size_t(const T&)>    getHashCode_;
+            std::function<intcs(const T&)>          getHashCode_;
             DelegateImpl(std::function<bool(const T&, const T&)> eq,
-                         std::function<std::size_t(const T&)> hc)
+                         std::function<intcs(const T&)> hc)
                 : equals_(std::move(eq)), getHashCode_(std::move(hc)) {}
             [[nodiscard]] bool Equals(const T& x, const T& y) const override {
                 return equals_(x, y);
             }
-            [[nodiscard]] std::size_t GetHashCode(const T& obj) const override {
+            [[nodiscard]] intcs GetHashCode(const T& obj) const override {
                 if (!getHashCode_) throw std::runtime_error("GetHashCode not provided.");
                 return getHashCode_(obj);
             }

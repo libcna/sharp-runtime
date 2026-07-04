@@ -31,7 +31,7 @@ public:
      * @param y The second nullable value.
      * @return Negative if x < y, zero if x == y, positive if x > y.
      */
-    [[nodiscard]] int Compare(const std::optional<T>& x, const std::optional<T>& y) const override {
+    [[nodiscard]] intcs Compare(const std::optional<T>& x, const std::optional<T>& y) const override {
         if (!x.has_value() && !y.has_value()) return 0;
         if (!x.has_value()) return -1;
         if (!y.has_value()) return  1;
