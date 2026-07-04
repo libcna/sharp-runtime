@@ -2,8 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Exposes a method that compares two non-generic objects.
@@ -24,7 +27,7 @@ public:
      * @param y The second object to compare.
      * @return A negative integer if x < y, zero if x == y, or a positive integer if x > y.
      */
-    [[nodiscard]] virtual int Compare(const void* x, const void* y) const = 0;
+    [[nodiscard]] virtual intcs Compare(const void* x, const void* y) const = 0;
 };
 
 } // namespace System::Collections

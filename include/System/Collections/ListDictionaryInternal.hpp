@@ -4,10 +4,15 @@
 #pragma once
 #include <list>
 #include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Implements IDictionary using a singly linked list.
@@ -22,6 +27,98 @@ class ListDictionaryInternal : public IDictionary {
         void*       value;
     };
     std::list<Node> list_;
+    intcs version_ = 0;
+
+    // Shared forward enumerator over list_'s Nodes; getEntryProperty()/getKeyProperty()/
+    // getValueProperty() expose the current entry, matching IDictionaryEnumerator.
+    class NodeEnumerator : public IDictionaryEnumerator {
+        const ListDictionaryInternal* d_;
+        intcs version_;
+        std::list<Node>::const_iterator it_;
+        bool started_ = false;
+        bool valid_   = false;
+
+    public:
+        explicit NodeEnumerator(const ListDictionaryInternal* d)
+            : d_(d), version_(d->version_), it_(d->list_.begin()) {}
+
+        bool MoveNext() override {
+            if (version_ != d_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            if (!started_) { it_ = d_->list_.begin(); started_ = true; }
+            else if (valid_) { ++it_; }
+            valid_ = (it_ != d_->list_.end());
+            return valid_;
+        }
+
+        void Reset() override {
+            if (version_ != d_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            started_ = false;
+            valid_ = false;
+            it_ = d_->list_.begin();
+        }
+
+        [[nodiscard]] void* getCurrent() const override {
+            return const_cast<void*>(getKeyProperty());
+        }
+
+        [[nodiscard]] DictionaryEntry getEntryProperty() const override {
+            requireValid();
+            return DictionaryEntry(it_->key, it_->value);
+        }
+
+        [[nodiscard]] const void* getKeyProperty() const override {
+            requireValid();
+            return it_->key;
+        }
+
+        [[nodiscard]] const void* getValueProperty() const override {
+            requireValid();
+            return it_->value;
+        }
+
+    private:
+        void requireValid() const {
+            if (!started_ || !valid_)
+                throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+        }
+    };
+
+    // Read-only ICollection view over either the keys or the values of the dictionary.
+    class MemberCollection : public ICollection {
+        const ListDictionaryInternal* d_;
+        bool keys_; // true: enumerate keys; false: enumerate values
+
+        class Enumerator : public IEnumerator {
+            IDictionaryEnumerator* inner_;
+            bool keys_;
+        public:
+            Enumerator(IDictionaryEnumerator* inner, bool keys) : inner_(inner), keys_(keys) {}
+            ~Enumerator() override { delete inner_; }
+            bool MoveNext() override { return inner_->MoveNext(); }
+            void Reset() override { inner_->Reset(); }
+            [[nodiscard]] void* getCurrent() const override {
+                return const_cast<void*>(keys_ ? inner_->getKeyProperty() : inner_->getValueProperty());
+            }
+        };
+
+    public:
+        MemberCollection(const ListDictionaryInternal* d, bool keys) : d_(d), keys_(keys) {}
+
+        [[nodiscard]] intcs getCountProperty() const override { return d_->getCountProperty(); }
+
+        void CopyTo(void* array, intcs index) override {
+            auto** dest = static_cast<void**>(array);
+            intcs i = index;
+            for (const auto& n : d_->list_) dest[i++] = keys_ ? const_cast<void*>(n.key) : n.value;
+        }
+
+        [[nodiscard]] bool getIsSynchronizedProperty() const override { return false; }
+        [[nodiscard]] const void* getSyncRootProperty() const override { return d_; }
+
+        [[nodiscard]] IEnumerator* GetEnumerator() override {
+            return new Enumerator(new NodeEnumerator(d_), keys_);
+        }
+    };
 
 public:
     /** @brief Initializes a new empty ListDictionaryInternal. */
@@ -32,16 +129,22 @@ public:
      *
      * C++ counterpart of .NET ListDictionaryInternal.Count.
      */
-    [[nodiscard]] int getCountProperty() const override {
-        return static_cast<int>(list_.size());
+    [[nodiscard]] intcs getCountProperty() const override {
+        return static_cast<intcs>(list_.size());
     }
 
     /**
-     * @brief Copies dictionary entries to a buffer starting at the given index (stub).
+     * @brief Copies dictionary entries (as DictionaryEntry) to a buffer starting at the given index.
      *
      * C++ counterpart of .NET ICollection.CopyTo(Array, int).
+     * @param array Pointer to a DictionaryEntry[] buffer.
+     * @param index Zero-based index at which copying begins.
      */
-    void CopyTo(void* /*array*/, int /*index*/) override {}
+    void CopyTo(void* array, intcs index) override {
+        auto* dest = static_cast<DictionaryEntry*>(array);
+        intcs i = index;
+        for (const auto& n : list_) dest[i++] = DictionaryEntry(n.key, n.value);
+    }
 
     /**
      * @brief Gets the value associated with the specified key, or nullptr if not found.
@@ -68,21 +171,24 @@ public:
             if (n.key == key) { n.value = value; return; }
         }
         list_.push_back({key, value});
+        ++version_;
     }
 
     /**
-     * @brief Gets the collection of keys (returns nullptr — stub).
+     * @brief Gets an ICollection view over the dictionary's keys.
      *
      * C++ counterpart of .NET IDictionary.Keys.
+     * @return Heap-allocated ICollection; caller takes ownership.
      */
-    [[nodiscard]] ICollection* getKeysProperty() const override { return nullptr; }
+    [[nodiscard]] ICollection* getKeysProperty() const override { return new MemberCollection(this, true); }
 
     /**
-     * @brief Gets the collection of values (returns nullptr — stub).
+     * @brief Gets an ICollection view over the dictionary's values.
      *
      * C++ counterpart of .NET IDictionary.Values.
+     * @return Heap-allocated ICollection; caller takes ownership.
      */
-    [[nodiscard]] ICollection* getValuesProperty() const override { return nullptr; }
+    [[nodiscard]] ICollection* getValuesProperty() const override { return new MemberCollection(this, false); }
 
     /**
      * @brief Determines whether the dictionary contains an element with the specified key.
@@ -101,13 +207,14 @@ public:
      * @brief Adds an element with the specified key and value to the dictionary.
      *
      * C++ counterpart of .NET IDictionary.Add(object, object?).
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists, matching .NET.
      */
     void Add(const void* key, void* value) override {
         for (const auto& n : list_) {
-            if (n.key == key) throw std::invalid_argument("Duplicate key");
+            if (n.key == key) throw System::ArgumentException("Item has already been added.");
         }
         list_.push_back({key, value});
+        ++version_;
     }
 
     /**
@@ -115,7 +222,7 @@ public:
      *
      * C++ counterpart of .NET IDictionary.Clear().
      */
-    void Clear() override { list_.clear(); }
+    void Clear() override { list_.clear(); ++version_; }
 
     /**
      * @brief Removes the element with the specified key from the dictionary.
@@ -124,15 +231,18 @@ public:
      * @param key Pointer used as the key (compared by address).
      */
     void Remove(const void* key) override {
+        size_t before = list_.size();
         list_.remove_if([key](const Node& n){ return n.key == key; });
+        if (list_.size() != before) ++version_;
     }
 
     /**
-     * @brief Returns an IDictionaryEnumerator for the dictionary (returns nullptr — stub).
+     * @brief Returns an IDictionaryEnumerator for the dictionary.
      *
      * C++ counterpart of .NET IDictionary.GetEnumerator().
+     * @return Heap-allocated IDictionaryEnumerator; caller takes ownership.
      */
-    [[nodiscard]] IDictionaryEnumerator* GetEnumerator() override { return nullptr; }
+    [[nodiscard]] IDictionaryEnumerator* GetEnumerator() override { return new NodeEnumerator(this); }
 };
 
 } // namespace System::Collections

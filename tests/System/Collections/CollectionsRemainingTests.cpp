@@ -13,6 +13,7 @@
 #include "System/Collections/BitArray.hpp"
 #include "System/Collections/Queue.hpp"
 #include "System/Collections/Stack.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::KeyValuePair;
 using System::Collections::Generic::SortedDictionary;
@@ -320,11 +321,11 @@ TEST(CollectionsQueueTests, Peek_ReturnsFront_DoesNotRemove) {
 }
 TEST(CollectionsQueueTests, Dequeue_Empty_Throws) {
     Queue q;
-    EXPECT_THROW(q.Dequeue(), std::invalid_argument);
+    EXPECT_THROW(q.Dequeue(), System::InvalidOperationException);
 }
 TEST(CollectionsQueueTests, Peek_Empty_Throws) {
     Queue q;
-    EXPECT_THROW(q.Peek(), std::invalid_argument);
+    EXPECT_THROW(q.Peek(), System::InvalidOperationException);
 }
 TEST(CollectionsQueueTests, Contains_True_False) {
     Queue q;
@@ -373,11 +374,11 @@ TEST(CollectionsStackTests, Peek_ReturnsTop_DoesNotRemove) {
 }
 TEST(CollectionsStackTests, Pop_Empty_Throws) {
     Stack s;
-    EXPECT_THROW(s.Pop(), std::invalid_argument);
+    EXPECT_THROW(s.Pop(), System::InvalidOperationException);
 }
 TEST(CollectionsStackTests, Peek_Empty_Throws) {
     Stack s;
-    EXPECT_THROW(s.Peek(), std::invalid_argument);
+    EXPECT_THROW(s.Peek(), System::InvalidOperationException);
 }
 TEST(CollectionsStackTests, Contains_True_False) {
     Stack s;

@@ -2,10 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cstddef>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/IEqualityComparer.hpp"
 
 namespace System::Collections {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Defines methods to support structural equality comparison of objects within a collection.
@@ -34,7 +36,7 @@ public:
      * @param comparer The comparer to use.
      * @return A hash code for the current instance.
      */
-    [[nodiscard]] virtual std::size_t GetHashCode(const IEqualityComparer& comparer) const = 0;
+    [[nodiscard]] virtual intcs GetHashCode(const IEqualityComparer& comparer) const = 0;
 };
 
 } // namespace System::Collections

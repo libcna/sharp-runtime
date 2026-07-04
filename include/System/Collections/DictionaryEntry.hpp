@@ -7,6 +7,35 @@
 
 namespace System::Collections {
 
+namespace detail {
+
+/**
+ * @brief Best-effort std::any -> std::string conversion for DictionaryEntry::ToString().
+ *
+ * C++ has no runtime-polymorphic ToString() the way .NET's object does, so std::any
+ * can't generically stringify its held value. Recognizes the common primitive types
+ * used as dictionary keys/values in this codebase; anything else falls back to a
+ * bracketed type name — a disclosed C++ limitation, not a silent bug.
+ */
+inline std::string dictionaryEntryValueToString(const std::any& value) {
+    if (!value.has_value()) return "";
+    if (const auto* p = std::any_cast<std::string>(&value))    return *p;
+    if (const auto* p = std::any_cast<const char*>(&value))    return *p;
+    if (const auto* p = std::any_cast<bool>(&value))           return *p ? "True" : "False";
+    if (const auto* p = std::any_cast<int>(&value))            return std::to_string(*p);
+    if (const auto* p = std::any_cast<long>(&value))           return std::to_string(*p);
+    if (const auto* p = std::any_cast<long long>(&value))      return std::to_string(*p);
+    if (const auto* p = std::any_cast<unsigned int>(&value))   return std::to_string(*p);
+    if (const auto* p = std::any_cast<unsigned long>(&value))  return std::to_string(*p);
+    if (const auto* p = std::any_cast<unsigned long long>(&value)) return std::to_string(*p);
+    if (const auto* p = std::any_cast<double>(&value))         return std::to_string(*p);
+    if (const auto* p = std::any_cast<float>(&value))          return std::to_string(*p);
+    if (const auto* p = std::any_cast<char>(&value))           return std::string(1, *p);
+    return "{" + std::string(value.type().name()) + "}";
+}
+
+} // namespace detail
+
 /**
  * @brief Defines a dictionary key/value pair that can be set or retrieved.
  *
@@ -83,13 +112,14 @@ public:
     /**
      * @brief Returns a string representation of the key/value pair.
      *
-     * C++ counterpart of .NET DictionaryEntry.ToString().
+     * C++ counterpart of .NET DictionaryEntry.ToString(), which delegates to
+     * KeyValuePair.PairToString and formats as "[key, value]" using each value's
+     * own string representation (not its type name).
      * @return String in the form "[key, value]".
      */
     [[nodiscard]] std::string ToString() const {
-        std::string k = key_.has_value()   ? key_.type().name()   : "(null)";
-        std::string v = value_.has_value() ? value_.type().name() : "(null)";
-        return "[" + k + ", " + v + "]";
+        return "[" + detail::dictionaryEntryValueToString(key_) + ", "
+                    + detail::dictionaryEntryValueToString(value_) + "]";
     }
 };
 

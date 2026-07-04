@@ -5,6 +5,8 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/IEnumerator.hpp"
 
 namespace System::Collections {
@@ -19,6 +21,11 @@ namespace System::Collections {
  */
 class BitArray {
     std::vector<bool> bits_;
+
+    void requireSameLength(const BitArray& other) const {
+        if (bits_.size() != other.bits_.size())
+            throw System::ArgumentException("Array lengths must be the same.");
+    }
 
 public:
     // -----------------------------------------------------------------------
@@ -74,6 +81,17 @@ public:
      * C++ counterpart of .NET BitArray.Length.
      */
     [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(bits_.size()); }
+
+    /**
+     * @brief Sets the number of bits in the BitArray, growing or truncating as needed.
+     *
+     * C++ counterpart of .NET BitArray.Length setter. New bits introduced by growth are false.
+     * @throws System::ArgumentOutOfRangeException if @p length is negative.
+     */
+    void setLengthProperty(intcs length) {
+        if (length < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        bits_.resize(static_cast<size_t>(length), false);
+    }
 
     /**
      * @brief Gets the number of elements (bits) in the BitArray.
@@ -143,8 +161,10 @@ public:
      * @brief Performs a bitwise AND of this BitArray with @p other in place.
      *
      * C++ counterpart of .NET BitArray.And(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
      */
     BitArray& And(const BitArray& other) {
+        requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] && other.bits_[i];
         return *this;
     }
@@ -153,8 +173,10 @@ public:
      * @brief Performs a bitwise OR of this BitArray with @p other in place.
      *
      * C++ counterpart of .NET BitArray.Or(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
      */
     BitArray& Or(const BitArray& other) {
+        requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] || other.bits_[i];
         return *this;
     }
@@ -163,8 +185,10 @@ public:
      * @brief Performs a bitwise XOR of this BitArray with @p other in place.
      *
      * C++ counterpart of .NET BitArray.Xor(BitArray).
+     * @throws System::ArgumentException if @p other's length differs from this BitArray's length.
      */
     BitArray& Xor(const BitArray& other) {
+        requireSameLength(other);
         for (size_t i = 0; i < bits_.size(); ++i) bits_[i] = bits_[i] != other.bits_[i];
         return *this;
     }
@@ -184,11 +208,12 @@ public:
      *
      * C++ counterpart of .NET BitArray.LeftShift(int).
      * Vacated low positions are set to false.
+     * @throws System::ArgumentOutOfRangeException if @p count is negative.
      */
-    BitArray& LeftShift(int count) {
-        if (count < 0) throw std::out_of_range("count");
-        int len = static_cast<int>(bits_.size());
-        for (int i = len - 1; i >= 0; --i)
+    BitArray& LeftShift(intcs count) {
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        intcs len = static_cast<intcs>(bits_.size());
+        for (intcs i = len - 1; i >= 0; --i)
             bits_[static_cast<size_t>(i)] = (i >= count) ? static_cast<bool>(bits_[static_cast<size_t>(i - count)]) : false;
         return *this;
     }
@@ -198,11 +223,12 @@ public:
      *
      * C++ counterpart of .NET BitArray.RightShift(int).
      * Vacated high positions are set to false.
+     * @throws System::ArgumentOutOfRangeException if @p count is negative.
      */
-    BitArray& RightShift(int count) {
-        if (count < 0) throw std::out_of_range("count");
-        int len = static_cast<int>(bits_.size());
-        for (int i = 0; i < len; ++i)
+    BitArray& RightShift(intcs count) {
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        intcs len = static_cast<intcs>(bits_.size());
+        for (intcs i = 0; i < len; ++i)
             bits_[static_cast<size_t>(i)] = (i + count < len) ? static_cast<bool>(bits_[static_cast<size_t>(i + count)]) : false;
         return *this;
     }
@@ -216,8 +242,8 @@ public:
      *
      * C++ counterpart of .NET BitArray.PopCount().
      */
-    [[nodiscard]] int PopCount() const {
-        int count = 0;
+    [[nodiscard]] intcs PopCount() const {
+        intcs count = 0;
         for (bool b : bits_) if (b) ++count;
         return count;
     }
