@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Buffers/MemoryHandle.hpp"
 
 namespace System::Buffers {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides a mechanism for pinning and unpinning objects.
@@ -24,7 +27,7 @@ struct IPinnable {
      * @param elementIndex Offset to the element at which the handle points.
      * @return A MemoryHandle pointing to the pinned memory.
      */
-    virtual MemoryHandle Pin(int elementIndex) = 0;
+    virtual MemoryHandle Pin(intcs elementIndex) = 0;
 
     /**
      * @brief Indicates that the object no longer needs to be pinned.

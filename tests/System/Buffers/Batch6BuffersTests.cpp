@@ -159,18 +159,18 @@ TEST(MemoryPoolTests, Rent_ReturnsNonNull) {
 
 TEST(MemoryPoolTests, Rent_BufferHasAtLeastRequestedSize) {
     auto owner = MemoryPool<int>::Shared().Rent(32);
-    EXPECT_GE(static_cast<int>(owner->getMemoryProperty().size()), 32);
+    EXPECT_GE(owner->getMemoryProperty().getLengthProperty(), 32);
 }
 
 TEST(MemoryPoolTests, Rent_DefaultSize_ReturnsUsableBuffer) {
     auto owner = MemoryPool<uint8_t>::Shared().Rent();
-    EXPECT_FALSE(owner->getMemoryProperty().empty());
+    EXPECT_GT(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
 TEST(MemoryPoolTests, Dispose_ClearsBuffer) {
     auto owner = MemoryPool<uint8_t>::Shared().Rent(8);
     owner->Dispose();
-    EXPECT_TRUE(owner->getMemoryProperty().empty());
+    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
 // ===========================================================================
