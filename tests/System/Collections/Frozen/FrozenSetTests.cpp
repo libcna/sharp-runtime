@@ -54,10 +54,16 @@ TEST(FrozenSetTest, GetItems) {
 
 TEST(FrozenSetTest, CopyTo) {
     auto s = FrozenSet<int>::Create({7});
-    std::vector<int> buf;
+    std::vector<int> buf(1);
     s.CopyTo(buf, 0);
     ASSERT_EQ(static_cast<int>(buf.size()), 1);
     EXPECT_EQ(buf[0], 7);
+}
+
+TEST(FrozenSetTest, CopyTo_TooSmall_Throws) {
+    auto s = FrozenSet<int>::Create({1, 2});
+    std::vector<int> buf(1);
+    EXPECT_THROW(s.CopyTo(buf, 0), std::out_of_range);
 }
 
 TEST(FrozenSetTest, RangeBasedFor) {

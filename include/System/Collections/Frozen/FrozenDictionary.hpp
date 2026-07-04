@@ -145,18 +145,16 @@ public:
      * @brief Copies all key/value pairs to the destination vector starting at the given index.
      *
      * C++ counterpart of .NET FrozenDictionary<TKey,TValue>.CopyTo(KeyValuePair<TKey,TValue>[], int).
-     * @param destination Destination vector.
+     * @param destination Destination vector; must already have room for index + Count elements.
      * @param index       Zero-based index at which copying begins.
+     * @throws std::out_of_range if @p index is negative or @p destination is not large enough.
      */
     void CopyTo(std::vector<std::pair<TKey, TValue>>& destination, SharpRuntime::intcs index) const {
+        if (index < 0 || static_cast<std::size_t>(index) + map_.size() > destination.size())
+            throw std::out_of_range("CopyTo destination is too small.");
+        std::size_t i = static_cast<std::size_t>(index);
         for (const auto& kv : map_) {
-            auto i = static_cast<std::size_t>(index);
-            if (i < destination.size()) {
-                destination[i] = {kv.first, kv.second};
-            } else {
-                destination.emplace_back(kv.first, kv.second);
-            }
-            ++index;
+            destination[i++] = {kv.first, kv.second};
         }
     }
 
