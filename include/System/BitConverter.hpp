@@ -19,7 +19,6 @@ namespace System {
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
     using SharpRuntime::shortcs;
-    using SharpRuntime::Single;
     using SharpRuntime::ushortcs;
     using SharpRuntime::uintcs;
     using SharpRuntime::ulongcs;
@@ -82,7 +81,11 @@ namespace System {
             std::array<bytecs,8> b; std::memcpy(b.data(), &value, 8); return b;
         }
         /** @brief Returns the specified single-precision floating-point value as an array of bytes. */
-        [[nodiscard]] static std::array<bytecs,4> GetBytes(Single value) {
+        // SharpRuntime::Single (the float alias) is spelled out here, not brought in via a
+        // namespace-scope using-declaration, because Half.hpp (included above) also makes
+        // System::Single (the static-utility class) visible in this namespace - an unqualified
+        // "Single" would be ambiguous between the two.
+        [[nodiscard]] static std::array<bytecs,4> GetBytes(SharpRuntime::Single value) {
             std::array<bytecs,4> b; std::memcpy(b.data(), &value, 4); return b;
         }
         /** @brief Returns the specified double-precision floating-point value as an array of bytes. */
@@ -128,7 +131,7 @@ namespace System {
         /** @brief Returns a 64-bit unsigned integer converted from eight bytes at a specified position. */
         [[nodiscard]] static ulongcs  ToUInt64 (const bytecs* v, intcs i) { ulongcs  r; std::memcpy(&r, v+i, 8); return r; }
         /** @brief Returns a single-precision floating-point number converted from four bytes at a specified position. */
-        [[nodiscard]] static Single   ToSingle (const bytecs* v, intcs i) { Single   r; std::memcpy(&r, v+i, 4); return r; }
+        [[nodiscard]] static SharpRuntime::Single ToSingle (const bytecs* v, intcs i) { SharpRuntime::Single r; std::memcpy(&r, v+i, 4); return r; }
         /** @brief Returns a double-precision floating-point number converted from eight bytes at a specified position. */
         [[nodiscard]] static double   ToDouble (const bytecs* v, intcs i) { double   r; std::memcpy(&r, v+i, 8); return r; }
         /** @brief Returns a half-precision floating-point number converted from two bytes at a specified position. */
@@ -161,7 +164,7 @@ namespace System {
         /** @brief Returns a 64-bit unsigned integer converted from eight bytes in a byte vector. */
         [[nodiscard]] static ulongcs  ToUInt64 (const std::vector<bytecs>& v, intcs i) { return ToUInt64 (v.data(), i); }
         /** @brief Returns a single-precision float converted from four bytes in a byte vector. */
-        [[nodiscard]] static Single   ToSingle (const std::vector<bytecs>& v, intcs i) { return ToSingle (v.data(), i); }
+        [[nodiscard]] static SharpRuntime::Single ToSingle (const std::vector<bytecs>& v, intcs i) { return ToSingle (v.data(), i); }
         /** @brief Returns a double-precision float converted from eight bytes in a byte vector. */
         [[nodiscard]] static double   ToDouble (const std::vector<bytecs>& v, intcs i) { return ToDouble (v.data(), i); }
         /** @brief Returns a half-precision float converted from two bytes in a byte vector. */
@@ -186,13 +189,13 @@ namespace System {
         /** @brief Reinterprets a 64-bit unsigned integer as a double. */
         [[nodiscard]] static double  UInt64BitsToDouble(ulongcs value) { double  r; std::memcpy(&r, &value, 8); return r; }
         /** @brief Reinterprets a single-precision float as its IEEE 754 bit pattern (32-bit signed integer). */
-        [[nodiscard]] static intcs   SingleToInt32Bits (Single value) { intcs   r; std::memcpy(&r, &value, 4); return r; }
+        [[nodiscard]] static intcs   SingleToInt32Bits (SharpRuntime::Single value) { intcs   r; std::memcpy(&r, &value, 4); return r; }
         /** @brief Reinterprets a 32-bit signed integer as a single-precision float. */
-        [[nodiscard]] static Single  Int32BitsToSingle (intcs   value) { Single  r; std::memcpy(&r, &value, 4); return r; }
+        [[nodiscard]] static SharpRuntime::Single Int32BitsToSingle (intcs   value) { SharpRuntime::Single r; std::memcpy(&r, &value, 4); return r; }
         /** @brief Reinterprets a single-precision float as its IEEE 754 bit pattern (32-bit unsigned integer). */
-        [[nodiscard]] static uintcs  SingleToUInt32Bits(Single value) { uintcs  r; std::memcpy(&r, &value, 4); return r; }
+        [[nodiscard]] static uintcs  SingleToUInt32Bits(SharpRuntime::Single value) { uintcs  r; std::memcpy(&r, &value, 4); return r; }
         /** @brief Reinterprets a 32-bit unsigned integer as a single-precision float. */
-        [[nodiscard]] static Single  UInt32BitsToSingle(uintcs  value) { Single  r; std::memcpy(&r, &value, 4); return r; }
+        [[nodiscard]] static SharpRuntime::Single UInt32BitsToSingle(uintcs  value) { SharpRuntime::Single r; std::memcpy(&r, &value, 4); return r; }
         /** @brief Returns the specified half-precision float value as a 16-bit signed integer bit pattern. */
         [[nodiscard]] static shortcs HalfToInt16Bits  (Half value)   { return static_cast<shortcs>(value.bits); }
         /** @brief Returns a half-precision float converted from the specified 16-bit signed integer bit pattern. */
