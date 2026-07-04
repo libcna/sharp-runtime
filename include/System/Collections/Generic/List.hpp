@@ -8,10 +8,15 @@
 #include <stdexcept>
 #include <vector>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 
 namespace System::Collections::Generic {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents a strongly typed list of objects that can be accessed by index.
@@ -30,22 +35,39 @@ class List : public IList<T> {
         class Enumerator : public IEnumerator<T>
         {
             const std::vector<T>& items_;
-            int index_ = -1;
+            intcs index_ = -1;
         public:
             explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-            bool MoveNext() override { return ++index_ < static_cast<int>(items_.size()); }
+            bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
             void Reset() override { index_ = -1; }
-            [[nodiscard]] const T& Current() const override { return items_[index_]; }
+            [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
         };
+
+        void requireIndexInRange(intcs index) const {
+            if (index < 0 || index >= static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        }
+
+        // Matches .NET's List<T> range-validation contract (used by GetRange/RemoveRange/
+        // Reverse(index,count)): negative index/count -> ArgumentOutOfRangeException;
+        // range extending past the end -> ArgumentException.
+        void requireValidRange(intcs index, intcs count) const {
+            if (index < 0)
+                throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+            if (count < 0)
+                throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+            if (static_cast<intcs>(items_.size()) - index < count)
+                throw System::ArgumentException("Offset and length were out of bounds for the array, or count is greater than the number of elements from index to the end of the source collection.");
+        }
 
     public:
         List() = default;
 
         explicit List(const std::vector<T>& source) : items_(source) {}
 
-        [[nodiscard]] int getCountProperty() const override
+        [[nodiscard]] intcs getCountProperty() const override
         {
-            return static_cast<int>(items_.size());
+            return static_cast<intcs>(items_.size());
         }
 
         [[nodiscard]] bool getIsReadOnlyProperty() const override { return false; }
@@ -67,30 +89,35 @@ class List : public IList<T> {
             return true;
         }
 
-        [[nodiscard]] const T& operator[](int index) const override
+        [[nodiscard]] const T& operator[](intcs index) const override
         {
-            return items_.at(static_cast<std::size_t>(index));
+            requireIndexInRange(index);
+            return items_[static_cast<std::size_t>(index)];
         }
 
-        T& operator[](int index) override
+        T& operator[](intcs index) override
         {
-            return items_.at(static_cast<std::size_t>(index));
+            requireIndexInRange(index);
+            return items_[static_cast<std::size_t>(index)];
         }
 
-        [[nodiscard]] int IndexOf(const T& item) const override
+        [[nodiscard]] intcs IndexOf(const T& item) const override
         {
             auto it = std::find(items_.begin(), items_.end(), item);
             if (it == items_.end()) return -1;
-            return static_cast<int>(it - items_.begin());
+            return static_cast<intcs>(it - items_.begin());
         }
 
-        void Insert(int index, const T& item) override
+        void Insert(intcs index, const T& item) override
         {
+            if (index < 0 || index > static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
             items_.insert(items_.begin() + index, item);
         }
 
-        void RemoveAt(int index) override
+        void RemoveAt(intcs index) override
         {
+            requireIndexInRange(index);
             items_.erase(items_.begin() + index);
         }
 
@@ -137,7 +164,9 @@ class List : public IList<T> {
          * @param index      The zero-based index at which insertion begins.
          * @param collection The elements to insert.
          */
-        void InsertRange(int index, const std::vector<T>& collection) {
+        void InsertRange(intcs index, const std::vector<T>& collection) {
+            if (index < 0 || index > static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
             items_.insert(items_.begin() + index, collection.begin(), collection.end());
         }
 
@@ -149,9 +178,8 @@ class List : public IList<T> {
          * @param count The number of elements in the range.
          * @return A new List<T> containing the specified range.
          */
-        [[nodiscard]] List<T> GetRange(int index, int count) const {
-            if (index < 0 || count < 0 || index + count > static_cast<int>(items_.size()))
-                throw std::out_of_range("GetRange: index or count out of range.");
+        [[nodiscard]] List<T> GetRange(intcs index, intcs count) const {
+            requireValidRange(index, count);
             return List<T>(std::vector<T>(items_.begin() + index, items_.begin() + index + count));
         }
 
@@ -178,7 +206,7 @@ class List : public IList<T> {
          * C++ counterpart of .NET List<T>.Sort(Comparison<T>).
          * @param comparison A function returning negative/zero/positive.
          */
-        void Sort(std::function<int(const T&, const T&)> comparison) {
+        void Sort(std::function<intcs(const T&, const T&)> comparison) {
             std::sort(items_.begin(), items_.end(),
                       [&](const T& a, const T& b) { return comparison(a, b) < 0; });
         }
@@ -227,9 +255,9 @@ class List : public IList<T> {
          * @param predicate The condition to test each element against.
          * @return The index of the first matching element, or -1.
          */
-        [[nodiscard]] int FindIndex(std::function<bool(const T&)> predicate) const {
-            for (int i = 0; i < static_cast<int>(items_.size()); ++i)
-                if (predicate(items_[i])) return i;
+        [[nodiscard]] intcs FindIndex(std::function<bool(const T&)> predicate) const {
+            for (intcs i = 0; i < static_cast<intcs>(items_.size()); ++i)
+                if (predicate(items_[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
@@ -241,9 +269,9 @@ class List : public IList<T> {
          * @param predicate The condition to test each element against.
          * @return The index of the last matching element, or -1.
          */
-        [[nodiscard]] int FindLastIndex(std::function<bool(const T&)> predicate) const {
-            for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
-                if (predicate(items_[i])) return i;
+        [[nodiscard]] intcs FindLastIndex(std::function<bool(const T&)> predicate) const {
+            for (intcs i = static_cast<intcs>(items_.size()) - 1; i >= 0; --i)
+                if (predicate(items_[static_cast<size_t>(i)])) return i;
             return -1;
         }
 
@@ -254,9 +282,9 @@ class List : public IList<T> {
          * @param predicate The condition to test each element against.
          * @return The number of elements removed.
          */
-        int RemoveAll(std::function<bool(const T&)> predicate) {
+        intcs RemoveAll(std::function<bool(const T&)> predicate) {
             auto it = std::remove_if(items_.begin(), items_.end(), predicate);
-            int count = static_cast<int>(items_.end() - it);
+            intcs count = static_cast<intcs>(items_.end() - it);
             items_.erase(it, items_.end());
             return count;
         }
@@ -305,11 +333,11 @@ class List : public IList<T> {
          * @return The zero-based index if found; the bitwise complement of the
          *         insertion point if not found.
          */
-        [[nodiscard]] int BinarySearch(const T& item) const {
+        [[nodiscard]] intcs BinarySearch(const T& item) const {
             auto it = std::lower_bound(items_.begin(), items_.end(), item);
             if (it != items_.end() && *it == item)
-                return static_cast<int>(it - items_.begin());
-            return ~static_cast<int>(it - items_.begin());
+                return static_cast<intcs>(it - items_.begin());
+            return ~static_cast<intcs>(it - items_.begin());
         }
 
         /**
@@ -320,8 +348,8 @@ class List : public IList<T> {
          * @param startIndex The zero-based index to start searching at.
          * @return The index of the first occurrence, or -1 if not found.
          */
-        [[nodiscard]] int IndexOf(const T& item, int startIndex) const {
-            for (int i = startIndex; i < static_cast<int>(items_.size()); ++i)
+        [[nodiscard]] intcs IndexOf(const T& item, intcs startIndex) const {
+            for (intcs i = startIndex; i < static_cast<intcs>(items_.size()); ++i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
@@ -333,8 +361,8 @@ class List : public IList<T> {
          * @param item The value to locate.
          * @return The index of the last occurrence, or -1 if not found.
          */
-        [[nodiscard]] int LastIndexOf(const T& item) const {
-            for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
+        [[nodiscard]] intcs LastIndexOf(const T& item) const {
+            for (intcs i = static_cast<intcs>(items_.size()) - 1; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
@@ -347,8 +375,8 @@ class List : public IList<T> {
          * @param startIndex The zero-based index to start searching backward from.
          * @return The index of the last occurrence, or -1 if not found.
          */
-        [[nodiscard]] int LastIndexOf(const T& item, int startIndex) const {
-            for (int i = startIndex; i >= 0; --i)
+        [[nodiscard]] intcs LastIndexOf(const T& item, intcs startIndex) const {
+            for (intcs i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }
@@ -359,8 +387,8 @@ class List : public IList<T> {
          * C++ counterpart of .NET List<T>.Capacity.
          * @return The current capacity.
          */
-        [[nodiscard]] int getCapacityProperty() const {
-            return static_cast<int>(items_.capacity());
+        [[nodiscard]] intcs getCapacityProperty() const {
+            return static_cast<intcs>(items_.capacity());
         }
 
         /**
@@ -369,8 +397,8 @@ class List : public IList<T> {
          * C++ counterpart of .NET List<T>.EnsureCapacity(int).
          * @param capacity The minimum capacity to ensure.
          */
-        void EnsureCapacity(int capacity) {
-            if (capacity > static_cast<int>(items_.capacity()))
+        void EnsureCapacity(intcs capacity) {
+            if (capacity > static_cast<intcs>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
         }
 
@@ -392,7 +420,7 @@ class List : public IList<T> {
         template<typename TOutput>
         [[nodiscard]] List<TOutput> ConvertAll(std::function<TOutput(const T&)> converter) const {
             List<TOutput> result;
-            result.EnsureCapacity(static_cast<int>(items_.size()));
+            result.EnsureCapacity(static_cast<intcs>(items_.size()));
             for (const auto& item : items_) result.Add(converter(item));
             return result;
         }
@@ -415,7 +443,7 @@ class List : public IList<T> {
          * @return The last matching element, or default T{} if none found.
          */
         [[nodiscard]] T FindLast(std::function<bool(const T&)> predicate) const {
-            for (int i = static_cast<int>(items_.size()) - 1; i >= 0; --i)
+            for (intcs i = static_cast<intcs>(items_.size()) - 1; i >= 0; --i)
                 if (predicate(items_[static_cast<size_t>(i)])) return items_[static_cast<size_t>(i)];
             return T{};
         }
@@ -427,7 +455,8 @@ class List : public IList<T> {
          * @param index The zero-based starting index of the range to remove.
          * @param count The number of elements to remove.
          */
-        void RemoveRange(int index, int count) {
+        void RemoveRange(intcs index, intcs count) {
+            requireValidRange(index, count);
             items_.erase(items_.begin() + index, items_.begin() + index + count);
         }
 
@@ -438,7 +467,8 @@ class List : public IList<T> {
          * @param index The zero-based starting index of the range to reverse.
          * @param count The number of elements in the range to reverse.
          */
-        void Reverse(int index, int count) {
+        void Reverse(intcs index, intcs count) {
+            requireValidRange(index, count);
             std::reverse(items_.begin() + index, items_.begin() + index + count);
         }
 };
