@@ -7,6 +7,7 @@
 #include "System/Buffers/ReadOnlySequenceSegment.hpp"
 #include "System/Buffers/ReadOnlySequence.hpp"
 #include "System/Buffers/BuffersExtensions.hpp"
+#include "System/Buffers/ArrayBufferWriter.hpp"
 #include "System/Buffers/Text/Base64.hpp"
 #include "System/Buffers/Text/Base64Url.hpp"
 
@@ -235,6 +236,40 @@ TEST(BuffersExtensionsTests, CopyTo_Extension) {
     System::Buffers::BuffersExtensions::CopyTo(seq, span);
     EXPECT_EQ(dst[0], 100u);
     EXPECT_EQ(dst[1], 200u);
+}
+
+TEST(BuffersExtensionsTests, Write_ReadOnlySpan_FastPath) {
+    // Matches .NET's real BuffersExtensions.Write<T>(IBufferWriter<T>, ReadOnlySpan<T>).
+    System::Buffers::ArrayBufferWriter<uint8_t> writer;
+    std::vector<uint8_t> data{1, 2, 3};
+    System::Buffers::BuffersExtensions::Write(
+        writer, System::ReadOnlySpan<uint8_t>(data.data(), static_cast<int>(data.size())));
+    EXPECT_EQ(writer.getWrittenCountProperty(), 3);
+    auto written = writer.getWrittenSpanProperty();
+    EXPECT_EQ(written[0], 1u);
+    EXPECT_EQ(written[2], 3u);
+}
+
+TEST(BuffersExtensionsTests, Write_ReadOnlySpan_MultiSegment) {
+    // Force the writer's buffer to be smaller than the input so Write must loop.
+    System::Buffers::ArrayBufferWriter<uint8_t> writer(2);
+    std::vector<uint8_t> data{1, 2, 3, 4, 5};
+    System::Buffers::BuffersExtensions::Write(
+        writer, System::ReadOnlySpan<uint8_t>(data.data(), static_cast<int>(data.size())));
+    EXPECT_EQ(writer.getWrittenCountProperty(), 5);
+    auto written = writer.getWrittenSpanProperty();
+    for (int i = 0; i < 5; ++i) EXPECT_EQ(written[i], data[static_cast<size_t>(i)]);
+}
+
+TEST(BuffersExtensionsTests, Write_ReadOnlySequence_Convenience) {
+    System::Buffers::ArrayBufferWriter<uint8_t> writer;
+    std::vector<uint8_t> data{9, 8, 7};
+    System::Buffers::ReadOnlySequence<uint8_t> seq(data);
+    System::Buffers::BuffersExtensions::Write(writer, seq);
+    EXPECT_EQ(writer.getWrittenCountProperty(), 3);
+    auto written = writer.getWrittenSpanProperty();
+    EXPECT_EQ(written[0], 9u);
+    EXPECT_EQ(written[2], 7u);
 }
 
 // ===========================================================================
