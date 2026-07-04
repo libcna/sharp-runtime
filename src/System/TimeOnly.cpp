@@ -10,8 +10,6 @@
 
 namespace System {
 
-static constexpr int MsPerDay = 86400000;
-
 TimeOnly TimeOnly::AddHours(int n) const {
     int total = toMs() + n * 3600000;
     total %= MsPerDay;

@@ -3,11 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <atomic>
+#include <chrono>
 #include <exception>
 #include <functional>
 #include <future>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include "System/Threading/CancellationToken.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
