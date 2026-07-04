@@ -65,9 +65,13 @@ TEST(SequencePositionTests, Inequality_EqualValues_ReturnsFalse) {
 // ===========================================================================
 
 TEST(ArrayBufferWriterTests, DefaultConstructor_HasDefaultCapacity) {
+    // .NET's ArrayBufferWriter() starts empty (Capacity == 0); DefaultInitialBufferSize
+    // only kicks in lazily once the buffer needs to grow from empty.
     ArrayBufferWriter<uint8_t> writer;
-    EXPECT_EQ(writer.getCapacityProperty(), ArrayBufferWriter<uint8_t>::DefaultInitialBufferSize);
+    EXPECT_EQ(writer.getCapacityProperty(), 0);
     EXPECT_EQ(writer.getWrittenCountProperty(), 0);
+    writer.GetSpan(1);
+    EXPECT_GE(writer.getCapacityProperty(), ArrayBufferWriter<uint8_t>::DefaultInitialBufferSize);
 }
 
 TEST(ArrayBufferWriterTests, CustomCapacity_SetCorrectly) {
