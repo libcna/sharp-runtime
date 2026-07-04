@@ -88,3 +88,12 @@ TEST(StackOverflowExceptionTests, CaughtAsStackOverflowException) {
     catch (const StackOverflowException&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+// ---------------------------------------------------------------------------
+// HResult
+// ---------------------------------------------------------------------------
+
+TEST(StackOverflowExceptionTests, HResult_IsCorStackOverflow) {
+    StackOverflowException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x800703E9));
+}
