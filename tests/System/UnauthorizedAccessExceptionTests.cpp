@@ -41,3 +41,15 @@ TEST(UnauthorizedAccessExceptionTest, CaughtAsStdException) {
     catch (const std::exception&) { caught = true; }
     EXPECT_TRUE(caught);
 }
+
+TEST(UnauthorizedAccessExceptionTest, InnerExceptionCtor) {
+    auto inner = std::make_exception_ptr(std::runtime_error("cause"));
+    UnauthorizedAccessException e("denied", inner);
+    EXPECT_NE(std::string(e.what()).find("denied"), std::string::npos);
+    ASSERT_TRUE(e.getInnerExceptionProperty() != nullptr);
+}
+
+TEST(UnauthorizedAccessExceptionTest, HResult_IsCorUnauthorizedAccess) {
+    UnauthorizedAccessException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070005));
+}
