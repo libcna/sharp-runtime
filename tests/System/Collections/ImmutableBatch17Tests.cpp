@@ -180,7 +180,7 @@ TEST(CollectionBatch17Test, CopyTo_OutOfRangeThrows) {
     Collection<int> col;
     col.Add(1); col.Add(2);
     std::vector<int> dest(1, 0); // too small
-    EXPECT_THROW(col.CopyTo(dest, 0), std::out_of_range);
+    EXPECT_THROW(col.CopyTo(dest, 0), System::ArgumentException);
 }
 
 TEST(CollectionBatch17Test, AddAndIndexer) {

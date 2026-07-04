@@ -10,6 +10,7 @@
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
 #include "System/Collections/ObjectModel/ObservableCollection.hpp"
+#include "System/NotSupportedException.hpp"
 
 using System::Collections::ObjectModel::Collection;
 using System::Collections::ObjectModel::ReadOnlyCollection;
@@ -136,17 +137,17 @@ TEST(ReadOnlyCollectionTests, IndexOf_Found) {
 
 TEST(ReadOnlyCollectionTests, Add_Throws) {
     ReadOnlyCollection<int> rc(std::vector<int>{1});
-    EXPECT_THROW(rc.Add(2), std::runtime_error);
+    EXPECT_THROW(rc.Add(2), System::NotSupportedException);
 }
 
 TEST(ReadOnlyCollectionTests, Clear_Throws) {
     ReadOnlyCollection<int> rc(std::vector<int>{1});
-    EXPECT_THROW(rc.Clear(), std::runtime_error);
+    EXPECT_THROW(rc.Clear(), System::NotSupportedException);
 }
 
 TEST(ReadOnlyCollectionTests, Remove_Throws) {
     ReadOnlyCollection<int> rc(std::vector<int>{1});
-    EXPECT_THROW(rc.Remove(1), std::runtime_error);
+    EXPECT_THROW(rc.Remove(1), System::NotSupportedException);
 }
 
 TEST(ReadOnlyCollectionTests, DefaultCtor_CountZero) {
