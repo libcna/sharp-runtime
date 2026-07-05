@@ -24,6 +24,7 @@
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/DriveNotFoundException.hpp"
 #include "System/IO/ErrorEventArgs.hpp"
+#include "System/IO/ErrorEventHandler.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -51,6 +52,7 @@ using System::IO::FileNotFoundException;
 using System::IO::DirectoryNotFoundException;
 using System::IO::DriveNotFoundException;
 using System::IO::ErrorEventArgs;
+using System::IO::ErrorEventHandler;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -372,6 +374,25 @@ TEST(ErrorEventArgsTests, IsA_EventArgs) {
     System::EventArgs& base = args;
     (void)base;
     SUCCEED();
+}
+
+// ===========================================================================
+// ErrorEventHandler
+// ===========================================================================
+
+TEST(ErrorEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    void* seenSender = nullptr;
+    ErrorEventHandler handler = [&](void* sender, const ErrorEventArgs& e) {
+        called = true;
+        seenSender = sender;
+        (void)e;
+    };
+    int fakeSender = 0;
+    ErrorEventArgs args(std::exception_ptr{});
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+    EXPECT_EQ(seenSender, &fakeSender);
 }
 
 // ===========================================================================
