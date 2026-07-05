@@ -9,6 +9,7 @@
 //   CalendarWeekRule:      enum values
 //   CharUnicodeInfo:       all methods
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 #include "System/Globalization/CalendarAlgorithmType.hpp"
 #include "System/Globalization/CalendarWeekRule.hpp"
@@ -181,6 +182,28 @@ TEST(CharUnicodeInfoBatch26Test, GetDecimalDigitValue_StringOverload) {
 TEST(CharUnicodeInfoBatch26Test, GetDigitValue) {
     EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'7'), 7);
     EXPECT_EQ(CharUnicodeInfo::GetDigitValue(u'z'), -1);
+}
+
+TEST(CharUnicodeInfoBatch26Test, GetDigitValue_SuperscriptsHaveDigitValueButNotDecimal) {
+    // .NET distinguishes GetDigitValue (Numeric_Type Decimal or Digit) from
+    // GetDecimalDigitValue (Numeric_Type Decimal only) — superscript digits are Digit, not Decimal.
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(static_cast<char16_t>(0x00B9)), 1);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(static_cast<char16_t>(0x00B2)), 2);
+    EXPECT_EQ(CharUnicodeInfo::GetDigitValue(static_cast<char16_t>(0x00B3)), 3);
+    EXPECT_EQ(CharUnicodeInfo::GetDecimalDigitValue(static_cast<char16_t>(0x00B2)), -1);
+}
+
+TEST(CharUnicodeInfoBatch26Test, StringOverloads_IndexOutOfRange_Throws) {
+    std::u16string s = u"abc";
+    EXPECT_THROW(CharUnicodeInfo::GetDecimalDigitValue(s, 3), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(CharUnicodeInfo::GetDigitValue(s, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(CharUnicodeInfo::GetNumericValue(s, 3), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(CharUnicodeInfo::GetUnicodeCategory(s, 3), System::ArgumentOutOfRangeException);
+}
+
+TEST(CharUnicodeInfoBatch26Test, GetUnicodeCategory_InvalidCodePoint_Throws) {
+    EXPECT_THROW(CharUnicodeInfo::GetUnicodeCategory(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(CharUnicodeInfo::GetUnicodeCategory(0x110000), System::ArgumentOutOfRangeException);
 }
 
 TEST(CharUnicodeInfoBatch26Test, GetNumericValue_Ascii) {
