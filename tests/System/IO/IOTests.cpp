@@ -22,6 +22,7 @@
 #include "System/IO/IOException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/IO/DriveNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -47,6 +48,7 @@ using System::IO::UnixFileMode;
 using System::IO::IOException;
 using System::IO::FileNotFoundException;
 using System::IO::DirectoryNotFoundException;
+using System::IO::DriveNotFoundException;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -328,6 +330,28 @@ TEST(DirectoryNotFoundExceptionTests, MessageAndPathCtor_StoresDirectoryPath) {
 
 TEST(DirectoryNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(DirectoryNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+// ===========================================================================
+// DriveNotFoundException
+// ===========================================================================
+
+TEST(DriveNotFoundExceptionTests, DefaultCtor_WhatContainsDriveNotFound) {
+    DriveNotFoundException ex;
+    EXPECT_NE(std::string(ex.what()).find("drive"), std::string::npos);
+}
+
+TEST(DriveNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
+    DriveNotFoundException ex("no such drive");
+    EXPECT_NE(std::string(ex.what()).find("no such drive"), std::string::npos);
+}
+
+TEST(DriveNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(DriveNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+TEST(DriveNotFoundExceptionTests, IsA_IOException) {
+    EXPECT_THROW(throw DriveNotFoundException(), System::IO::IOException);
 }
 
 // ===========================================================================
