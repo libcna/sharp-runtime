@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `8e85f91`) — 9179 tests passing*
+*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `3c16818`) — 9219 tests passing*
 
 ---
 
@@ -8,8 +8,8 @@
 **sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
 - **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. `System.Collections.Specialized`, `System.Diagnostics`, `System.Diagnostics.CodeAnalysis`, and **`System.Globalization` (all ~40 items)** are now **fully complete**. Next namespace: `System.IO` (large — BinaryReader, BinaryWriter, Directory, DriveInfo, File, FileAccess, ... see `plan.sqlite3`).
-- **Header count:** ~610 `.hpp` files under `include/System/` (+ `SharpRuntime/`).
+- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. `System.Collections.Specialized`, `System.Diagnostics`, `System.Diagnostics.CodeAnalysis`, and **`System.Globalization`** are now **fully complete**. Currently working through `System.IO` (large namespace): `BinaryReader`, `BinaryWriter`, `BufferedStream`, `Directory`, `DirectoryInfo`, `DirectoryNotFoundException`, `DriveInfo`, `DriveNotFoundException`, `DriveType`, `EndOfStreamException`, `EnumerationOptions`, `ErrorEventArgs`, `ErrorEventHandler` done this session (13 items) — **46 items remain**, next is `File` (id=6576).
+- **Header count:** ~610+ `.hpp` files under `include/System/` (+ `SharpRuntime/`).
 - **Key architectural decisions:** no runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (`int32_t`), `bytecs` (`uint8_t`), etc. Inner exceptions use `std::exception_ptr`, never `const std::exception&`.
 
 ---
@@ -20,10 +20,10 @@
 **Clean.** `cmake --build build --parallel 4` — zero errors, zero warnings.
 
 ### Tests
-**9179 tests passing** across 905 test suites. Zero failures.
+**9219 tests passing** across 908 test suites. Zero failures.
 
 ### Branch / remote state
-- `feature/work` — local working branch, HEAD `8e85f91`. **Not yet pushed this session** — push to `origin/feature/work` when the user asks (routine push target, safe anytime work is committed).
+- `feature/work` — local working branch, HEAD `3c16818`. **Not yet pushed this session** — push to `origin/feature/work` when the user asks (routine push target, safe anytime work is committed).
 - `develop` — last known state: fast-forwarded to `origin/develop` and merged with an earlier `feature/work` HEAD (`7056dcb`), pushed. **Not merged with this session's commits** — only merge/push to `develop` when the user explicitly asks in that turn.
 - `master` — untouched. Do not touch without explicit instruction.
 - `plan.sqlite3` is gitignored — local workflow state only, not part of what gets pushed.
@@ -57,6 +57,21 @@ This environment has **two separate git clones** of the same repo:
 - **Clean, no changes needed:** `CalendarAlgorithmType`, `CalendarWeekRule`, `CompareOptions`, `CultureTypes`, `DateTimeStyles`, `DaylightTime`, `DigitShapes`, `GregorianCalendarTypes` (values only — constructor validation was the actual bug), `NumberStyles`, `SortKey`, `SortVersion`, `UnicodeCategory` (values correct, only doc-comments were missing).
 
 Also this session (before the Globalization sweep): `System.Diagnostics.DebugProvider`, `DebuggerGuidedStepThroughAttribute`, `System.Diagnostics.CodeAnalysis` (28/28 complete) — see prior session notes in git log if needed, superseded by this file.
+
+**`System.IO` — in progress, 13/59 items done, same "every reviewed item had a real bug" pattern continuing:**
+
+- **`BinaryReader`** — constructor didn't null-check the stream (`std::invalid_argument` instead of `ArgumentNullException`, and no `CanRead` check); fixed-read helper threw `std::runtime_error` on premature EOF instead of `EndOfStreamException`; **no disposed-state tracking at all** (`Read*` after `Close()` just touched a closed/null stream instead of throwing `ObjectDisposedException`); missing the public `ReadBytes(int) -> vector<byte>` method entirely (trim-on-EOF semantics, distinct from the exact-fill `Read(buffer,offset,count)`); `Read7BitEncodedInt()` was inlined into `ReadString()` without .NET's real 5-byte overflow check (a malformed length prefix wouldn't have been rejected).
+- **`BinaryWriter`** — same null-stream gap (crash risk, not just wrong exception — no check at all); `Close()` unconditionally closed the stream **ignoring `leaveOpen_`**, inconsistent with its own destructor which checked it correctly; no disposed tracking, same as `BinaryReader`. Extracted `Write7BitEncodedInt()` as a public method to mirror the `BinaryReader` fix.
+- **`BufferedStream`** — null-stream crash risk (no check); `Position` getter/setter weren't delegated to the inner stream even though every other operation was — fell through to the `NotSupportedException` base default.
+- **`Directory`** (static class) — `Exists()` called throwing `std::filesystem` overloads, violating .NET's never-throws contract; `Delete()`/`Move()`/`GetFiles()`/`GetDirectories()` on a nonexistent path silently no-op'd or threw the wrong exception type instead of `DirectoryNotFoundException` (`std::filesystem::remove`/`rename` don't set `error_code` when the source simply doesn't exist — that's not treated as an error by the standard library, but .NET wants it treated as one here).
+- **`DirectoryInfo`** — identical bug class to `Directory` (same throwing-overload / missing-existence-check issues), fixed the same way.
+- **`DirectoryNotFoundException`** — missing the `(message, Exception)` and `(message, directoryPath)` constructors (the latter also exposing a `DirectoryPath` property) — added both.
+- **`DriveInfo`** — `AvailableFreeSpace`/`TotalFreeSpace`/`TotalSize` were hardcoded to `0` and documented as a "stub," but unlike genuine OS-data gaps elsewhere, real values are trivially available cross-platform via `std::filesystem::space()` — implemented properly. `getVolumeLabel()` violated the `getXxxProperty()` convention — renamed.
+- **`DriveNotFoundException`** — genuine new port (no header existed).
+- **`DriveType`** — already correct, just embedded in `DriveInfo.hpp` rather than its own file; left as-is (functionally fine, not a bug).
+- **`EndOfStreamException`** — wrong default message text (real logic-parity mismatch, not just cosmetic) and missing `(message, Exception)` constructor.
+- **`EnumerationOptions`** — default `AttributesToSkip` was `0x022`, not `Hidden|System` (`0x06`) as its own adjacent comment claimed and as .NET's real default is — doesn't correspond to any meaningful attribute combination, a clear typo-class bug. Missing the real `BufferSize` property.
+- **`ErrorEventArgs`**, **`ErrorEventHandler`** — genuine new ports (no headers existed); `FileSystemWatcher.Error` event plumbing.
 
 ### Recurring bug patterns worth knowing (confirmed again and again this session)
 1. **`Eras`/similar "list" properties inherited unoverridden from a base class default** — when a subclass overrides `GetEra()` to return a real value but doesn't override the corresponding "list all eras" property, the two go out of sync. Check every override for a sibling property that also needs overriding.
@@ -97,13 +112,13 @@ Earlier history (prior sessions): `System.Collections.Specialized` full pass, `S
 
 ## 4. Current blocker / main problem
 
-**No active blocker.** Build is clean, 9179 tests pass. **Not pushed to `origin/feature/work` this session** — push when the user asks. Not merged into `develop` — only do that when the user explicitly asks.
+**No active blocker.** Build is clean, 9219 tests pass. **Not pushed to `origin/feature/work` this session** — push when the user asks. Not merged into `develop` — only do that when the user explicitly asks.
 
 `System.Globalization` is now **100% complete** (verified: `SELECT COUNT(*) FROM task WHERE namespace='System.Globalization' AND (status='' OR status='todo')` returns 0).
 
-Next queued namespace per `plan.sqlite3` (`System`-prefix-first ordering): **`System.IO`** — a large namespace. First item:
+`System.IO` is in progress: 13 items done this session (`BinaryReader`, `BinaryWriter`, `BufferedStream`, `Directory`, `DirectoryInfo`, `DirectoryNotFoundException`, `DriveInfo`, `DriveNotFoundException`, `DriveType`, `EndOfStreamException`, `EnumerationOptions`, `ErrorEventArgs`, `ErrorEventHandler`), **46 remain**. Next item:
 ```
-id=6551  System.IO  BinaryReader  (status='todo')
+id=6576  System.IO  File  (status='todo')
 ```
 
 ---
@@ -218,13 +233,13 @@ git -c commit.gpgsign=false commit -m "message"
 
 ## 8. Next smallest tasks
 
-### Task 1 — System.IO.BinaryReader (id=6551)
-- **Goal:** First item in the newly-entered `System.IO` namespace. Check whether a header already exists in `include/System/IO/` before assuming a fresh port — this session's Globalization sweep found that files marked `todo` often already existed and just needed a real bug-fix review, not a from-scratch implementation.
-- **Files:** `include/System/IO/BinaryReader.hpp` (+ `.cpp` if it exists), tests under `tests/System/IO/`.
-- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*BinaryReader*"`
+### Task 1 — System.IO.File (id=6576)
+- **Goal:** Next item in `System.IO`. Check whether a header already exists in `include/System/IO/` before assuming a fresh port — 12 of the 13 `System.IO` items done this session already had a file with a real bug, not a from-scratch gap. `File` is a big static class (ReadAllText/WriteAllText/Copy/Move/Delete/Exists/etc.) — expect the same missing-path / wrong-exception-type patterns just fixed on `Directory`/`DirectoryInfo`.
+- **Files:** `include/System/IO/File.hpp` (+ `.cpp` if it exists), tests under `tests/System/IO/`.
+- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*FileTests*"`
 
 ### Task 2 — Continue plan.sqlite3 in order through System.IO
-- `System.IO` is a large namespace (BinaryReader/Writer, BufferedStream, Directory, DirectoryInfo, DriveInfo, File, FileAccess, FileStream, Path, Stream, StreamReader/Writer, and more). Given this session found a real bug in **every single** "already ported" Globalization type reviewed, **do not rubber-stamp** existing files — apply the full `CLAUDE.md` checklist every time. Watch specifically for the 6 recurring bug patterns in §2 (Eras-shaped inconsistencies won't recur, but wrong-exception-type, missing bounds validation, and read-only-not-enforced patterns are very likely to reappear in `IO` stream/reader/writer types that have `Seek`/position/length semantics).
+- 46 items remain: FileAccess, FileAttributes, FileFormatException, FileHandleType, FileInfo, FileLoadException, FileMode, FileNotFoundException, FileOptions, FileShare, FileStream, FileStreamOptions, FileSystemEventArgs/Handler/Watcher family, FileSystemInfo, HandleInode, MatchCasing/MatchType, Path, PathTooLongException, RandomAccess, SearchOption/Target, SeekOrigin, Stream(+async variants), StreamReader/Writer, TextReader/Writer, UnixFileMode, and more — check `plan.sqlite3` for the exact live list. Given this session found a real bug in **every single** "already ported" item reviewed across both Globalization and the first 13 `System.IO` items, **do not rubber-stamp** existing files — apply the full `CLAUDE.md` checklist every time. Watch specifically for: missing null/existence checks before an operation, wrong exception types (`std::out_of_range`/`invalid_argument`/`runtime_error` instead of the matching `System.*` exception), missing disposed-state tracking on anything with `Close()`/`Dispose()`, and properties not delegated through wrapper streams (`Position`, `Length`, `CanSeek`, etc.) — all four patterns recurred across every `System.IO` item touched so far.
 
 ---
 
@@ -254,8 +269,8 @@ IMPORTANT: work only in /rv/.../sharp-runtime_work (branch feature/work). A seco
 /rv/.../sharp-runtime exists on develop — do not edit files there.
 
 System.Globalization is now 100% complete (verified via plan.sqlite3 query — see §4). The queue
-has moved into System.IO. Start with Task 1 in NEXT.md §8: System.IO.BinaryReader, plan.sqlite3
-id=6551.
+is partway through System.IO (13/59 done this session). Start with Task 1 in NEXT.md §8:
+System.IO.File, plan.sqlite3 id=6576.
 
 For that task and every task after it:
   1. Look up the .NET reference in /rv/tmp/runtime/src/libraries/ and read the existing C++ header
