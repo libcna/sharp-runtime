@@ -4,6 +4,7 @@
 //
 // Tests for System::Diagnostics::CodeAnalysis attribute types.
 #include <gtest/gtest.h>
+#include <any>
 #include <string>
 #include "System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp"
 
@@ -176,4 +177,97 @@ TEST(StringSyntaxAttributeTests, StaticConstants_Correct) {
     EXPECT_EQ(std::string(StringSyntaxAttribute::Regex), "Regex");
     EXPECT_EQ(std::string(StringSyntaxAttribute::Json), "Json");
     EXPECT_EQ(std::string(StringSyntaxAttribute::Uri), "Uri");
+}
+
+// ===========================================================================
+// ConstantExpectedAttribute
+// ===========================================================================
+
+TEST(ConstantExpectedAttributeTests, DefaultCtor_MinMaxEmpty) {
+    ConstantExpectedAttribute attr;
+    EXPECT_FALSE(attr.getMinProperty().has_value());
+    EXPECT_FALSE(attr.getMaxProperty().has_value());
+}
+
+TEST(ConstantExpectedAttributeTests, SetMinMax_Stored) {
+    ConstantExpectedAttribute attr;
+    attr.setMinProperty(1);
+    attr.setMaxProperty(10);
+    EXPECT_EQ(std::any_cast<int>(attr.getMinProperty()), 1);
+    EXPECT_EQ(std::any_cast<int>(attr.getMaxProperty()), 10);
+}
+
+// ===========================================================================
+// ExperimentalAttribute
+// ===========================================================================
+
+TEST(ExperimentalAttributeTests, DiagnosticId_Stored) {
+    ExperimentalAttribute attr("SYSLIB5001");
+    EXPECT_EQ(attr.getDiagnosticIdProperty(), "SYSLIB5001");
+    EXPECT_TRUE(attr.getMessageProperty().empty());
+    EXPECT_TRUE(attr.getUrlFormatProperty().empty());
+}
+
+TEST(ExperimentalAttributeTests, SetMessageAndUrlFormat_Stored) {
+    ExperimentalAttribute attr("SYSLIB5001");
+    attr.setMessageProperty("Preview feature");
+    attr.setUrlFormatProperty("https://example.com/{0}");
+    EXPECT_EQ(attr.getMessageProperty(), "Preview feature");
+    EXPECT_EQ(attr.getUrlFormatProperty(), "https://example.com/{0}");
+}
+
+// ===========================================================================
+// RequiresAssemblyFilesAttribute
+// ===========================================================================
+
+TEST(RequiresAssemblyFilesAttributeTests, DefaultCtor_MessageEmpty) {
+    RequiresAssemblyFilesAttribute attr;
+    EXPECT_TRUE(attr.getMessageProperty().empty());
+}
+
+TEST(RequiresAssemblyFilesAttributeTests, Message_Stored) {
+    RequiresAssemblyFilesAttribute attr("Needs file on disk");
+    EXPECT_EQ(attr.getMessageProperty(), "Needs file on disk");
+}
+
+TEST(RequiresAssemblyFilesAttributeTests, SetUrl_Stored) {
+    RequiresAssemblyFilesAttribute attr("msg");
+    attr.setUrlProperty("https://example.com");
+    EXPECT_EQ(attr.getUrlProperty(), "https://example.com");
+}
+
+// ===========================================================================
+// Marker-only attributes: RequiresUnsafeAttribute, SetsRequiredMembersAttribute, UnscopedRefAttribute
+// ===========================================================================
+
+TEST(CodeAnalysisMarkerTests, RequiresUnsafeAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(RequiresUnsafeAttribute{});
+}
+
+TEST(CodeAnalysisMarkerTests, SetsRequiredMembersAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(SetsRequiredMembersAttribute{});
+}
+
+TEST(CodeAnalysisMarkerTests, UnscopedRefAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(UnscopedRefAttribute{});
+}
+
+// ===========================================================================
+// UnconditionalSuppressMessageAttribute
+// ===========================================================================
+
+TEST(UnconditionalSuppressMessageAttributeTests, CategoryAndCheckId_Stored) {
+    UnconditionalSuppressMessageAttribute attr("Performance", "CA1815");
+    EXPECT_EQ(attr.getCategoryProperty(), "Performance");
+    EXPECT_EQ(attr.getCheckIdProperty(), "CA1815");
+}
+
+TEST(UnconditionalSuppressMessageAttributeTests, SetJustificationScopeTarget_Stored) {
+    UnconditionalSuppressMessageAttribute attr("C", "ID");
+    attr.setJustificationProperty("intentional");
+    attr.setScopeProperty("member");
+    attr.setTargetProperty("System.IO.Stream.ctor():System.Void");
+    EXPECT_EQ(attr.getJustificationProperty(), "intentional");
+    EXPECT_EQ(attr.getScopeProperty(), "member");
+    EXPECT_EQ(attr.getTargetProperty(), "System.IO.Stream.ctor():System.Void");
 }
