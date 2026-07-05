@@ -7,17 +7,10 @@
 #include <vector>
 #include <utility>
 
+#include "System/Xml/ReadState.hpp"
+#include "System/Xml/XmlNodeType.hpp"
+
 namespace System::Xml {
-
-    /** @brief Specifies the state of the XmlReader. */
-    enum class ReadState { Initial = 0, Interactive = 1, Error = 2, EndOfFile = 3, Closed = 4 };
-
-    /** @brief Specifies the type of the current XML node. */
-    enum class XmlNodeType {
-        None = 0, Element = 1, Attribute = 2, Text = 3, CDATA = 4,
-        Comment = 8, Document = 9, EndElement = 15, EndEntity = 16,
-        XmlDeclaration = 17
-    };
 
     struct XmlReaderState; ///< Opaque tinyxml2 state; defined in XmlReader.cpp.
 
@@ -95,14 +88,14 @@ namespace System::Xml {
         /**
          * @brief Verifies that the current node is an element and advances the reader.
          *
-         * @throws std::runtime_error if the current node is not an element.
+         * @throws XmlException if the current node is not an element.
          */
         void ReadStartElement();
 
         /**
          * @brief Verifies that the current node is an end-element and advances the reader.
          *
-         * @throws std::runtime_error if the current node is not an end-element.
+         * @throws XmlException if the current node is not an end-element.
          */
         void ReadEndElement();
 
@@ -117,7 +110,7 @@ namespace System::Xml {
          *
          * @param inputUri  File path or raw XML text.
          * @return Heap-allocated XmlReader; caller owns the pointer.
-         * @throws std::runtime_error on parse error.
+         * @throws XmlException on parse error.
          */
         static XmlReader* Create(const std::string& inputUri);
 
@@ -126,7 +119,7 @@ namespace System::Xml {
          *
          * @param xmlContent  Well-formed XML text.
          * @return Heap-allocated XmlReader; caller owns the pointer.
-         * @throws std::runtime_error on parse error.
+         * @throws XmlException on parse error.
          */
         static XmlReader* CreateFromString(const std::string& xmlContent);
     };

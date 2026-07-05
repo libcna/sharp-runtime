@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlReader.hpp"
 #include <tinyxml2/tinyxml2.h>
-#include <stdexcept>
+#include "System/Xml/XmlException.hpp"
 #include <stack>
 
 namespace System::Xml {
@@ -191,14 +191,14 @@ std::string XmlReader::ReadElementContentAsString() {
 void XmlReader::ReadStartElement() {
     if (!state_ || state_->pos < 0 ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::Element)
-        throw std::runtime_error("XmlReader::ReadStartElement: not on an element node");
+        throw XmlException("ReadStartElement: not on an element node");
     Read();
 }
 
 void XmlReader::ReadEndElement() {
     if (!state_ || state_->pos < 0 ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::EndElement)
-        throw std::runtime_error("XmlReader::ReadEndElement: not on an end-element node");
+        throw XmlException("ReadEndElement: not on an end-element node");
     Read();
 }
 
@@ -212,7 +212,7 @@ void XmlReader::Close() {
 
 static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st) {
     if (st->doc.Error())
-        throw std::runtime_error(std::string("XmlReader: parse error: ") +
+        throw XmlException(std::string("XmlReader: parse error: ") +
                                  (st->doc.ErrorStr() ? st->doc.ErrorStr() : ""));
     // Walk all top-level nodes (declaration + root element)
     for (tinyxml2::XMLNode* n = st->doc.FirstChild(); n; n = n->NextSibling())

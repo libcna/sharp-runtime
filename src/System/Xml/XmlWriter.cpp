@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlWriter.hpp"
 #include <tinyxml2/tinyxml2.h>
-#include <stdexcept>
+#include "System/Xml/XmlException.hpp"
 #include <stack>
 
 namespace System::Xml {
@@ -90,7 +90,7 @@ std::string XmlWriter::ToString() const {
 void XmlWriter::Flush() {
     if (!state_ || state_->filePath.empty()) return;
     if (state_->doc.SaveFile(state_->filePath.c_str()) != tinyxml2::XML_SUCCESS)
-        throw std::runtime_error("XmlWriter: failed to save file: " + state_->filePath);
+        throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
 }
 
 void XmlWriter::Close() {
