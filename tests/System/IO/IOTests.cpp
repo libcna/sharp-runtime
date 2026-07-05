@@ -26,6 +26,7 @@
 #include "System/IO/ErrorEventArgs.hpp"
 #include "System/IO/ErrorEventHandler.hpp"
 #include "System/IO/FileFormatException.hpp"
+#include "System/IO/FileHandleType.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -55,6 +56,7 @@ using System::IO::DriveNotFoundException;
 using System::IO::ErrorEventArgs;
 using System::IO::ErrorEventHandler;
 using System::IO::FileFormatException;
+using System::IO::FileHandleType;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -435,6 +437,22 @@ TEST(FileFormatExceptionTests, DefaultCtor_SourceUriIsNull) {
 
 TEST(FileFormatExceptionTests, IsA_FormatException) {
     EXPECT_THROW(throw FileFormatException(), System::FormatException);
+}
+
+// ===========================================================================
+// FileHandleType
+// ===========================================================================
+
+TEST(FileHandleTypeTests, Unknown_IsZero) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::Unknown), 0);
+}
+
+TEST(FileHandleTypeTests, RegularFile_IsOne) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::RegularFile), 1);
+}
+
+TEST(FileHandleTypeTests, BlockDevice_IsSeven) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::BlockDevice), 7);
 }
 
 // ===========================================================================
