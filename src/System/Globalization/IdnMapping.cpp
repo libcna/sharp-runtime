@@ -34,7 +34,7 @@ std::u32string IdnMapping::utf8ToCodePoints(const std::string& s) {
                | ((s[i+2] & 0x3F) << 6) | (s[i+3] & 0x3F);
             i += 4;
         } else {
-            throw std::invalid_argument("IdnMapping: invalid UTF-8 sequence.");
+            throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
         }
         out.push_back(cp);
     }
@@ -87,7 +87,7 @@ int IdnMapping::decodeDigit(char c) {
     if (c >= '0' && c <= '9') return c - '0' + 26;
     if (c >= 'a' && c <= 'z') return c - 'a';
     if (c >= 'A' && c <= 'Z') return c - 'A';
-    throw std::invalid_argument("IdnMapping: invalid Punycode digit.");
+    throw System::ArgumentException("IdnMapping: invalid Punycode digit.");
 }
 
 // Encode one label (no dots) to Punycode without the "xn--" prefix.
@@ -161,7 +161,7 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
     if (delimPos > 0) {
         for (int i = 0; i < delimPos; ++i) {
             if (static_cast<unsigned char>(label[i]) > 0x7F)
-                throw std::invalid_argument("IdnMapping: non-ASCII in basic portion.");
+                throw System::ArgumentException("IdnMapping: non-ASCII in basic portion.");
             out += static_cast<char32_t>(std::tolower(static_cast<unsigned char>(label[i])));
         }
         asciiStart = delimPos + 1;
@@ -175,7 +175,7 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
         int oldi = i;
         int w = 1;
         for (int k = Base; ; k += Base) {
-            if (pos >= len) throw std::invalid_argument("IdnMapping: malformed Punycode.");
+            if (pos >= len) throw System::ArgumentException("IdnMapping: malformed Punycode.");
             int digit = decodeDigit(label[pos++]);
             i += digit * w;
             int t = k <= bias ? Tmin : k >= bias + Tmax ? Tmax : k - bias;
@@ -187,7 +187,7 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
         n += i / outLen;
         i %= outLen;
         if (n < 0x80 || (n >= 0xD800 && n <= 0xDFFF) || n > 0x10FFFF)
-            throw std::invalid_argument("IdnMapping: invalid code point in Punycode.");
+            throw System::ArgumentException("IdnMapping: invalid code point in Punycode.");
         out.insert(out.begin() + i, static_cast<char32_t>(n));
         ++i;
     }
@@ -199,7 +199,7 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
 // ---------------------------------------------------------------------------
 
 std::string IdnMapping::GetAscii(const std::string& unicode) const {
-    if (unicode.empty()) throw std::invalid_argument("IdnMapping: empty input.");
+    if (unicode.empty()) throw System::ArgumentException("IdnMapping: empty input.");
 
     std::u32string input = utf8ToCodePoints(unicode);
     std::string result;
@@ -216,7 +216,7 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
         if (end == start) {
             // Trailing dot → keep it and stop
             if (end == input.size()) break;
-            throw std::invalid_argument("IdnMapping: empty label.");
+            throw System::ArgumentException("IdnMapping: empty label.");
         }
 
         std::u32string label(input.begin() + static_cast<long>(start),
@@ -243,13 +243,13 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
     }
 
     if (result.size() > static_cast<size_t>(NameMax))
-        throw std::invalid_argument("IdnMapping: encoded name exceeds 255 characters.");
+        throw System::ArgumentException("IdnMapping: encoded name exceeds 255 characters.");
 
     return result;
 }
 
 std::string IdnMapping::GetUnicode(const std::string& ascii) const {
-    if (ascii.empty()) throw std::invalid_argument("IdnMapping: empty input.");
+    if (ascii.empty()) throw System::ArgumentException("IdnMapping: empty input.");
 
     std::string result;
     result.reserve(ascii.size());
@@ -261,7 +261,7 @@ std::string IdnMapping::GetUnicode(const std::string& ascii) const {
 
         if (end == start) {
             if (end == ascii.size()) break;
-            throw std::invalid_argument("IdnMapping: empty label.");
+            throw System::ArgumentException("IdnMapping: empty label.");
         }
 
         std::string label = ascii.substr(start, end - start);

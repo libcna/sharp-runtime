@@ -4,6 +4,7 @@
 #pragma once
 #include <string>
 #include <stdexcept>
+#include "System/ArgumentException.hpp"
 
 namespace System::Globalization {
 
@@ -85,6 +86,16 @@ public:
      */
     bool operator==(const IdnMapping& o) const {
         return allowUnassigned_ == o.allowUnassigned_ && useStd3_ == o.useStd3_;
+    }
+
+    /**
+     * @brief Returns a hash code for this instance.
+     *
+     * C++ counterpart of .NET IdnMapping.GetHashCode().
+     * @return A hash code derived from AllowUnassigned and UseStd3AsciiRules.
+     */
+    [[nodiscard]] int GetHashCode() const {
+        return (allowUnassigned_ ? 1 : 0) | (useStd3_ ? 2 : 0);
     }
 
 private:
