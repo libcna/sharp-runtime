@@ -9,6 +9,7 @@
 //   TextInfo:              ToLower/ToUpper/ToTitleCase, Clone, ReadOnly, operator==
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/StringInfo.hpp"
 #include "System/Globalization/TaiwanCalendar.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
@@ -144,7 +145,15 @@ TEST(TextElementEnumeratorBatch33Test, EmptyString) {
 
 TEST(TextElementEnumeratorBatch33Test, BeforeFirstMoveNext_Throws) {
     TextElementEnumerator e("x");
-    EXPECT_THROW(e.GetTextElement(), std::runtime_error);
+    EXPECT_THROW(e.GetTextElement(), System::InvalidOperationException);
+}
+
+TEST(TextElementEnumeratorBatch33Test, AfterExhausted_Throws) {
+    TextElementEnumerator e("x");
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_FALSE(e.MoveNext());
+    EXPECT_THROW(e.GetTextElement(), System::InvalidOperationException);
+    EXPECT_THROW(e.getElementIndexProperty(), System::InvalidOperationException);
 }
 
 TEST(TextElementEnumeratorBatch33Test, Reset) {
@@ -226,6 +235,11 @@ TEST(TextInfoBatch33Test, ReadOnly_MakesReadOnly) {
     TextInfo ti;
     auto ro = TextInfo::ReadOnly(ti);
     EXPECT_TRUE(ro.getIsReadOnlyProperty());
+}
+
+TEST(TextInfoBatch33Test, SetListSeparator_OnReadOnly_Throws) {
+    auto ro = TextInfo::ReadOnly(TextInfo());
+    EXPECT_THROW(ro.setListSeparatorProperty(";"), System::InvalidOperationException);
 }
 
 TEST(TextInfoBatch33Test, EqualityOperator) {
