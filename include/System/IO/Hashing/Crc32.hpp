@@ -2,67 +2,80 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cstdint>
+#include <memory>
 #include <vector>
+#include "System/IO/Hashing/Crc32ParameterSet.hpp"
 #include "System/IO/Hashing/NonCryptographicHashAlgorithm.hpp"
 
 namespace System::IO::Hashing {
 
-    /** Computes a CRC-32 checksum of a data stream. */
-    class Crc32 : public NonCryptographicHashAlgorithm {
-        uint32_t crc_ = 0xFFFFFFFFu;
+    /**
+     * @brief Provides an implementation of the CRC-32 algorithm.
+     *
+     * By default, this implementation uses the ITU-T V.42 / IEEE 802.3 parameter set, but other
+     * parameter sets can also be specified. For methods that return byte arrays or that write
+     * into destination buffers, this implementation emits the answer in the byte order that
+     * maintains the CRC residue relationship (CRC(message concat CRC(message)) is a fixed
+     * value); for the default parameters this stable output is the little-endian representation
+     * of the CRC.
+     *
+     * C++ counterpart of .NET System.IO.Hashing.Crc32.
+     */
+    class Crc32 final : public NonCryptographicHashAlgorithm {
+    private:
+        static constexpr intcs Size = 4;
 
-        static uint32_t table_[256];
-        static bool tableInitialized_;
+        uintcs crc_;
+        std::shared_ptr<Crc32ParameterSet> parameterSet_;
 
-        static void initTable() {
-            if (tableInitialized_) return;
-            for (uint32_t i = 0; i < 256; ++i) {
-                uint32_t c = i;
-                for (int j = 0; j < 8; ++j)
-                    c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-                table_[i] = c;
-            }
-            tableInitialized_ = true;
-        }
+        Crc32(uintcs crc, std::shared_ptr<Crc32ParameterSet> parameterSet);
+
+    protected:
+        void GetCurrentHashCore(bytecs* destination) const override;
+        void GetHashAndResetCore(bytecs* destination) override;
 
     public:
-        /** Initializes a new Crc32 instance. */
-        Crc32() : NonCryptographicHashAlgorithm(4) { initTable(); }
+        /** Initializes a new Crc32 instance using the ITU-T V.42 / IEEE 802.3 parameters. */
+        Crc32();
+        /**
+         * @brief Initializes a new Crc32 instance using the specified parameters.
+         * @throws System::ArgumentNullException if @p parameterSet is null.
+         */
+        explicit Crc32(std::shared_ptr<Crc32ParameterSet> parameterSet);
+
+        /** Gets the parameter set used by this instance. */
+        [[nodiscard]] const std::shared_ptr<Crc32ParameterSet>& getParameterSetProperty() const { return parameterSet_; }
+
+        /** Returns a clone of the current instance, with a copy of the current instance's internal state. */
+        [[nodiscard]] Crc32 Clone() const { return Crc32(crc_, parameterSet_); }
 
         using NonCryptographicHashAlgorithm::Append;
-        /** Appends the specified bytes to the running CRC-32 computation. */
-        void Append(const uint8_t* source, size_t length) override {
-            for (size_t i = 0; i < length; ++i)
-                crc_ = table_[(crc_ ^ source[i]) & 0xFF] ^ (crc_ >> 8);
-        }
+        void Append(const bytecs* source, intcs length) override;
+        void Reset() override;
 
-        /** Resets the hash to its initial state. */
-        void Reset() override { crc_ = 0xFFFFFFFFu; }
+        /** Gets the current computed hash value without modifying accumulated state. */
+        [[nodiscard]] uintcs GetCurrentHashAsUInt32() const;
 
-        /** Writes the current CRC-32 checksum (little-endian) to dest. */
-        void GetCurrentHash(uint8_t* dest, size_t /*len*/) override {
-            uint32_t result = crc_ ^ 0xFFFFFFFFu;
-            dest[0] = static_cast<uint8_t>(result & 0xFF);
-            dest[1] = static_cast<uint8_t>((result >> 8) & 0xFF);
-            dest[2] = static_cast<uint8_t>((result >> 16) & 0xFF);
-            dest[3] = static_cast<uint8_t>((result >> 24) & 0xFF);
-        }
-
-        /** Returns the current CRC-32 checksum as a 32-bit unsigned integer. */
-        [[nodiscard]] uint32_t GetCurrentHashAsUInt32() const {
-            return crc_ ^ 0xFFFFFFFFu;
-        }
-
-        /** Computes the CRC-32 of a byte vector and returns it as a 32-bit integer. */
-        static uint32_t HashToUInt32(const std::vector<uint8_t>& source) {
-            Crc32 h;
-            h.Append(source);
-            return h.GetCurrentHashAsUInt32();
-        }
+        /** Computes the CRC-32 hash of the provided data, using the ITU-T V.42 / IEEE 802.3 parameters. */
+        [[nodiscard]] static std::vector<bytecs> Hash(const bytecs* source, intcs length);
+        /** Computes the CRC-32 hash value for the provided data using the specified parameter set. */
+        [[nodiscard]] static std::vector<bytecs> Hash(const std::shared_ptr<Crc32ParameterSet>& parameterSet,
+                                                       const bytecs* source, intcs length);
+        /** Computes the CRC-32 hash of the provided data into @p destination, using the ITU-T V.42 / IEEE 802.3 parameters. */
+        static intcs Hash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength);
+        /** Computes the CRC-32 hash of the provided data into @p destination, using the specified parameters. */
+        static intcs Hash(const std::shared_ptr<Crc32ParameterSet>& parameterSet,
+                           const bytecs* source, intcs length, bytecs* destination, intcs destinationLength);
+        /** Attempts to compute the CRC-32 hash, using the ITU-T V.42 / IEEE 802.3 parameters, into @p destination. */
+        static bool TryHash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, intcs& bytesWritten);
+        /** Attempts to compute the CRC-32 hash, using the specified parameter set, into @p destination. */
+        static bool TryHash(const std::shared_ptr<Crc32ParameterSet>& parameterSet,
+                             const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, intcs& bytesWritten);
+        /** Computes the CRC-32 hash of the provided data, using the ITU-T V.42 / IEEE 802.3 parameters. */
+        [[nodiscard]] static uintcs HashToUInt32(const bytecs* source, intcs length);
+        /** Computes the CRC-32 hash of the provided data, using the specified parameters. */
+        [[nodiscard]] static uintcs HashToUInt32(const std::shared_ptr<Crc32ParameterSet>& parameterSet,
+                                                  const bytecs* source, intcs length);
     };
-
-    inline uint32_t Crc32::table_[256] = {};
-    inline bool Crc32::tableInitialized_ = false;
 
 } // namespace System::IO::Hashing

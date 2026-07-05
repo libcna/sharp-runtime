@@ -2,52 +2,67 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cstdint>
 #include <vector>
 #include "System/IO/Hashing/NonCryptographicHashAlgorithm.hpp"
 
 namespace System::IO::Hashing {
 
+    using SharpRuntime::uintcs;
+
     /**
      * @brief xxHash32 — fast 32-bit non-cryptographic hash (xxHash by Yann Collet).
      *
-     * Partial C++ counterpart of .NET System.IO.Hashing.XxHash32.
-     *
-     * @note Status: Implemented
+     * C++ counterpart of .NET System.IO.Hashing.XxHash32.
      */
-    class XxHash32 : public NonCryptographicHashAlgorithm {
-        static constexpr uint32_t Prime1 = 0x9E3779B1u;
-        static constexpr uint32_t Prime2 = 0x85EBCA77u;
-        static constexpr uint32_t Prime3 = 0xC2B2AE3Du;
-        static constexpr uint32_t Prime4 = 0x27D4EB2Fu;
-        static constexpr uint32_t Prime5 = 0x165667B1u;
+    class XxHash32 final : public NonCryptographicHashAlgorithm {
+    private:
+        static constexpr intcs Size = 4;
+        static constexpr uintcs Prime1 = 0x9E3779B1u;
+        static constexpr uintcs Prime2 = 0x85EBCA77u;
+        static constexpr uintcs Prime3 = 0xC2B2AE3Du;
+        static constexpr uintcs Prime4 = 0x27D4EB2Fu;
+        static constexpr uintcs Prime5 = 0x165667B1u;
 
-        uint32_t seed_;
-        uint32_t v1_, v2_, v3_, v4_;
-        uint64_t totalLength_ = 0;
-        uint8_t  buf_[16] = {};
-        int      bufLen_  = 0;
+        uintcs seed_;
+        uintcs v1_, v2_, v3_, v4_;
+        SharpRuntime::ulongcs totalLength_ = 0;
+        bytecs buf_[16] = {};
+        intcs  bufLen_  = 0;
 
         void initState();
-        static uint32_t rotl32(uint32_t v, int n);
-        static uint32_t round(uint32_t acc, uint32_t input);
-        void processBlock(const uint8_t* block);
+        static uintcs rotl32(uintcs v, int n);
+        static uintcs round(uintcs acc, uintcs input);
+        void processBlock(const bytecs* block);
+
+        XxHash32(uintcs seed, uintcs v1, uintcs v2, uintcs v3, uintcs v4,
+                 SharpRuntime::ulongcs totalLength, const bytecs* buf, intcs bufLen);
+
+    protected:
+        void GetCurrentHashCore(bytecs* destination) const override;
 
     public:
-        /** @brief Constructs the hasher with an optional seed value. */
-        explicit XxHash32(uint32_t seed = 0);
+        /** Constructs the hasher with an optional seed value. */
+        explicit XxHash32(intcs seed = 0);
+
+        /** Returns a clone of the current instance, with a copy of the current instance's internal state. */
+        [[nodiscard]] XxHash32 Clone() const;
 
         void Reset() override;
-
         using NonCryptographicHashAlgorithm::Append;
-        void Append(const uint8_t* source, size_t length) override;
-        void GetCurrentHash(uint8_t* dest, size_t len) override;
+        void Append(const bytecs* source, intcs length) override;
 
-        /** @brief Returns the current hash as a native 32-bit integer. */
-        [[nodiscard]] uint32_t GetCurrentHashAsUInt32();
+        /** Returns the current hash as a native 32-bit integer, without modifying accumulated state. */
+        [[nodiscard]] uintcs GetCurrentHashAsUInt32() const;
 
-        /** @brief One-shot hash of the given byte vector. */
-        static uint32_t HashToUInt32(const std::vector<uint8_t>& source, uint32_t seed = 0);
+        /** Computes the xxHash32 hash of the provided data. */
+        [[nodiscard]] static std::vector<bytecs> Hash(const bytecs* source, intcs length, intcs seed = 0);
+        /** Computes the xxHash32 hash of the provided data into @p destination. */
+        static intcs Hash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength, intcs seed = 0);
+        /** Attempts to compute the xxHash32 hash of the provided data into @p destination. */
+        static bool TryHash(const bytecs* source, intcs length, bytecs* destination, intcs destinationLength,
+                             intcs& bytesWritten, intcs seed = 0);
+        /** Computes the xxHash32 hash of the provided data. */
+        [[nodiscard]] static uintcs HashToUInt32(const bytecs* source, intcs length, intcs seed = 0);
     };
 
 } // namespace System::IO::Hashing
