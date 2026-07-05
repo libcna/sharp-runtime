@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/IO/FileNotFoundException.hpp"
+#include "System/IO/IOException.hpp"
 
 namespace System::IO {
 
@@ -32,8 +35,12 @@ namespace System::IO {
         /** Returns the directory portion of the full path. */
         [[nodiscard]] std::string getDirectoryNameProperty() const { return path_.parent_path().string(); }
 
-        /** Returns true if the file exists. */
-        [[nodiscard]] bool getExistsProperty() const { return std::filesystem::is_regular_file(path_); }
+        /** Returns true if the file exists. Never throws, matching .NET. */
+        [[nodiscard]] bool getExistsProperty() const {
+            std::error_code ec;
+            bool isFile = std::filesystem::is_regular_file(path_, ec);
+            return !ec && isFile;
+        }
 
         /** Returns the file size in bytes, or -1 if an error occurs. */
         [[nodiscard]] longcs getLengthProperty() const {
@@ -42,26 +49,64 @@ namespace System::IO {
             return ec ? -1LL : static_cast<longcs>(sz);
         }
 
-        /** Returns true if the file does not have write permission for its owner. */
+        /**
+         * @brief Returns true if the file does not have write permission for its owner.
+         * Returns false (rather than throwing) if the file does not exist or its status
+         * cannot be determined.
+         */
         [[nodiscard]] bool getIsReadOnlyProperty() const {
-            auto perms = std::filesystem::status(path_).permissions();
+            std::error_code ec;
+            auto status = std::filesystem::status(path_, ec);
+            if (ec) return false;
+            auto perms = status.permissions();
             return (perms & std::filesystem::perms::owner_write) == std::filesystem::perms::none;
         }
 
-        /** Permanently deletes the file. */
-        void Delete() { std::filesystem::remove(path_); }
+        /**
+         * @brief Permanently deletes the file.
+         *
+         * Matches .NET: deleting a file that does not exist is not an error.
+         * @throws System::IO::IOException on a genuine deletion failure.
+         */
+        void Delete() {
+            std::error_code ec;
+            std::filesystem::remove(path_, ec);
+            if (ec) throw IOException("Failed to delete file '" + path_.string() + "': " + ec.message());
+        }
 
-        /** Copies the file to destFileName; overwrites if overwrite is true. */
+        /**
+         * @brief Copies the file to destFileName; overwrites if overwrite is true.
+         * @throws System::ArgumentException if @p destFileName is empty.
+         * @throws System::IO::FileNotFoundException if this file does not exist.
+         * @throws System::IO::IOException on a genuine copy failure.
+         */
         void CopyTo(const std::string& destFileName, bool overwrite = false) {
+            if (destFileName.empty())
+                throw System::ArgumentException("Path cannot be the empty string.", "destFileName");
+            if (!getExistsProperty())
+                throw FileNotFoundException("Could not find file '" + path_.string() + "'.", path_.string());
             auto opts = overwrite
                 ? std::filesystem::copy_options::overwrite_existing
                 : std::filesystem::copy_options::none;
-            std::filesystem::copy_file(path_, destFileName, opts);
+            std::error_code ec;
+            std::filesystem::copy_file(path_, destFileName, opts, ec);
+            if (ec) throw IOException("Failed to copy file '" + path_.string() + "' to '" + destFileName + "': " + ec.message());
         }
 
-        /** Moves the file to destFileName, updating the internal path. */
+        /**
+         * @brief Moves the file to destFileName, updating the internal path.
+         * @throws System::ArgumentException if @p destFileName is empty.
+         * @throws System::IO::FileNotFoundException if this file does not exist.
+         * @throws System::IO::IOException on a genuine move failure.
+         */
         void MoveTo(const std::string& destFileName) {
-            std::filesystem::rename(path_, destFileName);
+            if (destFileName.empty())
+                throw System::ArgumentException("Path cannot be the empty string.", "destFileName");
+            if (!getExistsProperty())
+                throw FileNotFoundException("Could not find file '" + path_.string() + "'.", path_.string());
+            std::error_code ec;
+            std::filesystem::rename(path_, destFileName, ec);
+            if (ec) throw IOException("Failed to move file '" + path_.string() + "' to '" + destFileName + "': " + ec.message());
             path_ = destFileName;
         }
 

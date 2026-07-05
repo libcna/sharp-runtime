@@ -284,6 +284,45 @@ TEST(FileInfoTests, getFullNameProperty_IsAbsolute) {
     EXPECT_EQ(full[0], '/');
 }
 
+TEST(FileInfoTests, getIsReadOnlyProperty_NonExistent_ReturnsFalse) {
+    FileInfo fi(tf("fi_no_such_readonly_xyz.txt"));
+    EXPECT_FALSE(fi.getIsReadOnlyProperty());
+}
+
+TEST(FileInfoTests, Delete_NonExistentFile_DoesNotThrow) {
+    FileInfo fi(tf("fi_no_such_delete_xyz.txt"));
+    EXPECT_NO_THROW(fi.Delete());
+}
+
+TEST(FileInfoTests, CopyTo_NonExistentSource_ThrowsFileNotFoundException) {
+    FileInfo fi(tf("fi_no_such_copy_src_xyz.txt"));
+    EXPECT_THROW(fi.CopyTo(tf("fi_copy_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, CopyTo_EmptyDest_ThrowsArgumentException) {
+    std::string p = tf("fi_copy_src_for_empty_dest.txt");
+    File::WriteAllText(p, "x");
+    FileInfo fi(p);
+    EXPECT_THROW(fi.CopyTo(""), System::ArgumentException);
+    File::Delete(p);
+}
+
+TEST(FileInfoTests, MoveTo_NonExistentSource_ThrowsFileNotFoundException) {
+    FileInfo fi(tf("fi_no_such_move_src_xyz.txt"));
+    EXPECT_THROW(fi.MoveTo(tf("fi_move_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, CopyTo_Succeeds_DestinationExists) {
+    std::string src = tf("fi_copyto_src.txt");
+    std::string dst = tf("fi_copyto_dst.txt");
+    File::WriteAllText(src, "copy me");
+    FileInfo fi(src);
+    fi.CopyTo(dst, true);
+    EXPECT_TRUE(File::Exists(dst));
+    File::Delete(src);
+    File::Delete(dst);
+}
+
 // ===========================================================================
 // Directory + DirectoryInfo
 // ===========================================================================
