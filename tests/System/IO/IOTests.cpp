@@ -28,6 +28,7 @@
 #include "System/IO/FileFormatException.hpp"
 #include "System/IO/FileHandleType.hpp"
 #include "System/IO/FileSystemEventArgs.hpp"
+#include "System/IO/FileSystemEventHandler.hpp"
 #include "System/IO/WatcherChangeTypes.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
@@ -60,6 +61,7 @@ using System::IO::ErrorEventHandler;
 using System::IO::FileFormatException;
 using System::IO::FileHandleType;
 using System::IO::FileSystemEventArgs;
+using System::IO::FileSystemEventHandler;
 using System::IO::WatcherChangeTypes;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
@@ -520,6 +522,25 @@ TEST(FileSystemEventArgsTests, IsA_EventArgs) {
     System::EventArgs& base = args;
     (void)base;
     SUCCEED();
+}
+
+// ===========================================================================
+// FileSystemEventHandler
+// ===========================================================================
+
+TEST(FileSystemEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    void* seenSender = nullptr;
+    FileSystemEventHandler handler = [&](void* sender, const FileSystemEventArgs& e) {
+        called = true;
+        seenSender = sender;
+        (void)e;
+    };
+    int fakeSender = 0;
+    FileSystemEventArgs args(WatcherChangeTypes::Created, "/tmp", "x");
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+    EXPECT_EQ(seenSender, &fakeSender);
 }
 
 // ===========================================================================
