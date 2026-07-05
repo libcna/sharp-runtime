@@ -168,6 +168,14 @@ TEST(FileOptionsTests, Operator_OR) {
     EXPECT_EQ(static_cast<int>(r), 0x10000000 | 0x04000000);
 }
 
+TEST(FileOptionsTests, Asynchronous_Value) {
+    EXPECT_EQ(static_cast<unsigned int>(FileOptions::Asynchronous), 0x40000000u);
+}
+
+TEST(FileOptionsTests, Encrypted_Value) {
+    EXPECT_EQ(static_cast<int>(FileOptions::Encrypted), 0x00004000);
+}
+
 // ===========================================================================
 // SeekOrigin
 // ===========================================================================
