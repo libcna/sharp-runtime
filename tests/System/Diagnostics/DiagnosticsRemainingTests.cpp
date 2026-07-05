@@ -11,6 +11,7 @@
 #include "System/Diagnostics/DebuggerDisplayAttribute.hpp"
 #include "System/Diagnostics/DebuggerBrowsableAttribute.hpp"
 #include "System/Diagnostics/StackFrame.hpp"
+#include "System/Diagnostics/StackFrameExtensions.hpp"
 #include "System/Diagnostics/StackTrace.hpp"
 #include "System/Diagnostics/UnreachableException.hpp"
 #include "System/Diagnostics/DebuggerHiddenAttribute.hpp"
@@ -29,6 +30,7 @@ using System::Diagnostics::DebuggerDisplayAttribute;
 using System::Diagnostics::DebuggerBrowsableAttribute;
 using System::Diagnostics::DebuggerBrowsableState;
 using System::Diagnostics::StackFrame;
+using System::Diagnostics::StackFrameExtensions;
 using System::Diagnostics::StackTrace;
 using System::Diagnostics::UnreachableException;
 using System::Diagnostics::DebuggerHiddenAttribute;
@@ -135,6 +137,45 @@ TEST(StackFrameTests, ToString_ContainsLineNumber) {
     StackFrame sf("app.cpp", 100);
     std::string s = sf.ToString();
     EXPECT_NE(s.find("100"), std::string::npos);
+}
+
+// ===========================================================================
+// StackFrameExtensions
+// ===========================================================================
+
+TEST(StackFrameExtensionsTests, HasSource_EmptyFileName_ReturnsFalse) {
+    StackFrame sf;
+    EXPECT_FALSE(StackFrameExtensions::HasSource(sf));
+}
+
+TEST(StackFrameExtensionsTests, HasSource_WithFileName_ReturnsTrue) {
+    StackFrame sf("app.cpp", 10);
+    EXPECT_TRUE(StackFrameExtensions::HasSource(sf));
+}
+
+TEST(StackFrameExtensionsTests, HasILOffset_Default_ReturnsFalse) {
+    StackFrame sf;
+    EXPECT_FALSE(StackFrameExtensions::HasILOffset(sf));
+}
+
+TEST(StackFrameExtensionsTests, HasMethod_EmptyMethodName_ReturnsFalse) {
+    StackFrame sf;
+    EXPECT_FALSE(StackFrameExtensions::HasMethod(sf));
+}
+
+TEST(StackFrameExtensionsTests, GetNativeIP_AlwaysZero) {
+    StackFrame sf("app.cpp", 10);
+    EXPECT_TRUE(StackFrameExtensions::GetNativeIP(sf).IsZero());
+}
+
+TEST(StackFrameExtensionsTests, GetNativeImageBase_AlwaysZero) {
+    StackFrame sf("app.cpp", 10);
+    EXPECT_TRUE(StackFrameExtensions::GetNativeImageBase(sf).IsZero());
+}
+
+TEST(StackFrameExtensionsTests, HasNativeImage_AlwaysFalse) {
+    StackFrame sf("app.cpp", 10);
+    EXPECT_FALSE(StackFrameExtensions::HasNativeImage(sf));
 }
 
 // ===========================================================================
