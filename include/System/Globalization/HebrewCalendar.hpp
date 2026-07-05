@@ -49,6 +49,14 @@ public:
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
     /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET HebrewCalendar.Eras.
+     * @return A vector containing {HebrewEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {HebrewEra}; }
+
+    /**
      * @brief Returns the Hebrew year corresponding to the given DateTime.
      *
      * C++ counterpart of .NET HebrewCalendar.GetYear(DateTime).

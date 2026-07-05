@@ -142,6 +142,23 @@ TEST(HebrewCalendarBatch29Test, GetEra) {
     EXPECT_EQ(hc.GetEra(System::DateTime(2024, 1, 1)), HebrewCalendar::HebrewEra);
 }
 
+TEST(HebrewCalendarBatch29Test, Eras_ContainsHebrewEra) {
+    HebrewCalendar hc;
+    auto eras = hc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], HebrewCalendar::HebrewEra);
+}
+
+TEST(HebrewCalendarBatch29Test, IsLeapYear_InvalidEra_ThrowsArgumentOutOfRange) {
+    HebrewCalendar hc;
+    EXPECT_THROW(hc.IsLeapYear(5784, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(HebrewCalendarBatch29Test, IsLeapYear_YearOutOfRange_ThrowsArgumentOutOfRange) {
+    HebrewCalendar hc;
+    EXPECT_THROW(hc.IsLeapYear(1), System::ArgumentOutOfRangeException);
+}
+
 TEST(HebrewCalendarBatch29Test, IsLeapYear_Known) {
     HebrewCalendar hc;
     // Hebrew year 5784 (2023-2024) is a leap year
