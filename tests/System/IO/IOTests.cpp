@@ -96,6 +96,15 @@ TEST(FileAccessTests, ReadWrite_IsThree) {
     EXPECT_EQ(static_cast<int>(FileAccess::ReadWrite), 3);
 }
 
+TEST(FileAccessTests, OperatorOr_ReadAndWrite_EqualsReadWrite) {
+    EXPECT_EQ(FileAccess::Read | FileAccess::Write, FileAccess::ReadWrite);
+}
+
+TEST(FileAccessTests, OperatorAnd_MasksToRead) {
+    auto masked = FileAccess::ReadWrite & FileAccess::Read;
+    EXPECT_EQ(masked, FileAccess::Read);
+}
+
 // ===========================================================================
 // FileShare
 // ===========================================================================
