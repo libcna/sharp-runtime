@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `df32df9`) — 9439 tests passing*
+*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `017b01b`) — 9508 tests passing*
 
 ---
 
@@ -8,7 +8,7 @@
 **sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
 - **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. Fully complete: `System.Collections.Specialized`, `System.Diagnostics`(+`.CodeAnalysis`), `System.Globalization`, `System.IO`, `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq`, `System.Numerics` (except `Vector<T>`, left `tobedecided` — generic hardware-SIMD type needs an architecture decision). **`System.Threading`** (60 items) is currently being ported by a background agent. Current DB-wide counts (active workflow only, excludes 15055 legacy `'ignored'` rows predating this workflow): 549 `ported`, 549 `todo`, 44 `ignore`, 2 `tobedecided`. Largest remaining `System.*` namespaces by todo count: `System.Xml` (62), `System.Threading` (60, in flight), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26).
+- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. Fully complete: `System.Collections.Specialized`, `System.Diagnostics`(+`.CodeAnalysis`), `System.Globalization`, `System.IO`, `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq`, `System.Numerics` (except `Vector<T>`, left `tobedecided`), `System.Threading` (59/60; `WaitHandleExtensions` ignored — needs a native `SafeWaitHandle` this port doesn't expose), `System.Threading.Tasks` (16/17; `ConcurrentExclusiveSchedulerPair` ignored — needs a real pluggable-scheduler queuing engine). **`System.Xml`** (62 items — fresh DOM implementation on top of vendored tinyxml2) is currently being ported by a background agent. Largest remaining `System.*` namespaces by todo count: `System.Xml` (62, in flight), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26).
 - **Header count:** ~610+ `.hpp` files under `include/System/` (+ `SharpRuntime/`).
 - **Key architectural decisions:** no runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (`int32_t`), `bytecs` (`uint8_t`), etc. Inner exceptions use `std::exception_ptr`, never `const std::exception&`.
 
@@ -20,10 +20,10 @@
 **Clean.** `cmake --build build --parallel 4` — zero errors, zero warnings.
 
 ### Tests
-**9439 tests passing** across 934 test suites. Zero failures. (A background agent is currently adding more for `System.Threading` — expect this number to grow before the next handoff.)
+**9508 tests passing** across 954 test suites. Zero failures, stable across repeated runs. (A background agent is currently adding more for `System.Xml` — expect this number to grow before the next handoff.)
 
 ### Branch / remote state
-- `feature/work` — local working branch, HEAD `df32df9`, pushed to `origin/feature/work`. Routine pushes here are pre-authorized per project convention.
+- `feature/work` — local working branch, HEAD `017b01b`, pushed to `origin/feature/work`. Routine pushes here are pre-authorized per project convention.
 - `develop` — not touched this session. Only merge/push to `develop` when the user explicitly asks in that turn.
 - `master` — untouched. Do not touch without explicit instruction.
 - `plan.sqlite3` is gitignored — local workflow state only, not part of what gets pushed.
@@ -89,6 +89,10 @@ Full history: `git log --oneline`. Most recent first, this session's commits:
 
 | Commit | Change |
 |--------|--------|
+| `017b01b` | Fixed a flaky `IsolatedStorageFileTests` test (compared live disk free-space across two calls for exact equality — legitimately racy under concurrent disk activity). |
+| `170142b` | Ported `System.Threading.Tasks` (16/17 items — `Task`, `TaskCompletionSource`, `ValueTask`, `Parallel`+`ParallelOptions`/`ParallelLoopResult`/`ParallelLoopState` (added real `Stop()`/`Break()` support), `TaskStatus`, `TaskCreationOptions`, `TaskContinuationOptions`, `ConfigureAwaitOptions`, `TaskCanceledException`, `TaskSchedulerException`, `TaskScheduler`, `TaskFactory`, `UnobservedTaskExceptionEventArgs`; `ConcurrentExclusiveSchedulerPair` ignored). Fixed `Task::FromCanceled(CancellationToken)` silently discarding its argument and `Parallel.hpp`'s `int`-instead-of-`intcs` convention violation. 80 new tests. |
+| `62bfef5` | Ported `System.Threading` (59/60 items). Fixed `Monitor` being a complete no-op stub (Enter/Exit/Wait/Pulse did nothing) — replaced with a real pointer-identity-keyed registry of `recursive_timed_mutex`+`condition_variable_any`. Fixed `Mutex` (didn't derive from `WaitHandle`, `WaitOne(ms)` didn't actually block up to timeout), `Semaphore`/`SemaphoreSlim` (no validation), `ReaderWriterLockSlim` (`IsReadLockHeld` etc. always returned `false`), `Barrier` (post-phase exceptions silently swallowed instead of wrapped in `BarrierPostPhaseException`). Added `AsyncLocalValueChangedArgs`, `ExecutionContext`, `IThreadPoolWorkItem`, `LockCookie`, `ReaderWriterLock` (legacy), `RegisteredWaitHandle`, `WaitCallback`, `WaitOrTimerCallback`, `WaitHandle::WaitAll`/`WaitAny`. 33 new tests. |
+| `6562275` | Updated `NEXT.md` handoff doc. |
 | `df32df9` | Ported remaining `System.Numerics` generic-math stubs (`ITrigonometricFunctions`, `IHyperbolicFunctions`, `ILogarithmicFunctions`, `IExponentialFunctions`, `IPowerFunctions`, `IRootFunctions`, `IEqualityOperators`, `IFloatingPointConstants`, `IBinaryFloatingPointIeee754`); fixed `DivisionRounding` (was missing `AwayFromZero`/`Euclidean`); added `TotalOrderIeee754Comparer<T>` (float/double/Half specializations). Classified `System.Linq` (LINQ/`IQueryable`/PLINQ/async-LINQ out of scope; `Enumerable` marked ported via existing practical-subset `System::Linq.hpp`) and closed out `System.Numerics` (`Vector2/3/4`, `Matrix3x2/4x4`, `Plane`, `Quaternion`, `BFloat16`, `BitOperations`, `Complex`, `BigInteger` already existed/tested, just unmarked; `Vector<T>` left `tobedecided`). |
 | `6d03a2a` | Ported `System.IO.Hashing.XxHash3`/`XxHash128` (streaming + one-shot, official .NET test vectors, portable 64×64→128 multiply avoiding `__uint128_t`/`UInt128` dependency). Completes `System.IO.Hashing`. |
 | `587b173` | Ported `System.IO.IsolatedStorage`: fixed `IsolatedStorageFile` to actually inherit `IsolatedStorage`; added missing `IsolatedStorageException` constructors; rewrote `IsolatedStorageFileStream` as a thin `FileStream` subclass (fixed a real bug — `FileMode::Open` was incorrectly read-only). Completes `System.IO.IsolatedStorage`. |
@@ -120,15 +124,13 @@ Earlier history (prior sessions): `System.Collections.Specialized` full pass, `S
 
 ## 4. Current blocker / main problem
 
-**No active blocker.** Build is clean, 9439 tests pass, pushed to `origin/feature/work` (HEAD `df32df9`). Not merged into `develop` — only do that when the user explicitly asks.
+**No active blocker.** Build is clean, 9508 tests pass (stable across 3 consecutive runs), pushed to `origin/feature/work` (HEAD `017b01b`). Not merged into `develop` — only do that when the user explicitly asks.
 
-A background agent is **currently porting `System.Threading`** (60 items — `Monitor`, `Mutex`, `Semaphore(Slim)`, `ReaderWriterLock(Slim)`, `ThreadPool`, `CancellationToken(Source)`, `Thread`, `Timer`/`PeriodicTimer`, `SpinLock`/`SpinWait`, `Barrier`, `CountdownEvent`, wait handles, plus ~14 missing small types like `LockCookie`/`RegisteredWaitHandle`/delegate aliases). Most headers already existed but were unmarked/unreviewed in the DB; the agent is applying the full porting checklist to each, adding the missing pieces, and will commit+push its own work. **Do not start System.Threading work again until that lands** — check `git log --oneline -5` for a new commit before touching `include/System/Threading/`.
+A background agent is **currently porting `System.Xml`** (62 items — the classic `XmlDocument` DOM API, `XmlReader`/`XmlWriter`, ~18 enums, `XmlConvert`/`XmlNamespaceManager`/`XmlQualifiedName`/resolvers). Only `XmlReader.hpp`/`XmlWriter.hpp` existed before (unmarked in the DB); everything else is a fresh port built on the vendored `tinyxml2` library. **Do not start System.Xml work again until that lands** — check `git log --oneline -5` for a new commit before touching `include/System/Xml/` (not `include/System/Xml/Linq/`, which is untouched/separate).
 
-`System.Threading.Tasks` (17 items) is a **separate namespace**, not covered by the Threading agent — still open for the next pass.
+Fully complete this session: `System.IO` (56), `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq` (LINQ operator machinery correctly out-of-scope per the "No LINQ" rule — only `Enumerable`'s existing practical-subset `System::Linq.hpp` counts as ported), `System.Numerics` (except `Vector<T>`, `tobedecided`), `System.Threading` (59/60), `System.Threading.Tasks` (16/17).
 
-Fully complete this session: `System.IO` (56), `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq` (LINQ operator machinery correctly out-of-scope per the "No LINQ" rule — only `Enumerable`'s existing practical-subset `System::Linq.hpp` counts as ported), `System.Numerics` (except `Vector<T>`, `tobedecided`).
-
-Next largest unclaimed namespaces (`System.*`, todo count): `System.Xml` (62), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25), `System.Xml.Linq` (24).
+Next largest unclaimed namespaces (`System.*`, todo count): `System.Xml` (62, in flight), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25), `System.Xml.Linq` (24).
 
 ---
 
