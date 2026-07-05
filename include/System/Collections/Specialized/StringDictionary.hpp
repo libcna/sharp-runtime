@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "System/ArgumentException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -95,9 +96,14 @@ public:
      * Keys are stored and looked up in lowercase.
      * @param key   The key to add (case-insensitive).
      * @param value The value to associate with @p key.
+     * @throws System::ArgumentException if an entry with the same key (case-insensitively)
+     *         already exists.
      */
     void Add(const std::string& key, const std::string& value) {
-        data_[lower(key)] = value;
+        std::string lowered = lower(key);
+        if (data_.count(lowered))
+            throw System::ArgumentException("An item with the same key has already been added.");
+        data_[lowered] = value;
     }
 
     /**

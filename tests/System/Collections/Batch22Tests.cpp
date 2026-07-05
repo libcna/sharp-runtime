@@ -290,6 +290,16 @@ TEST(StringDictionaryBatch22Test, AddAndCount) {
     EXPECT_TRUE(sd.ContainsKey("key")); // case-insensitive
 }
 
+TEST(StringDictionaryBatch22Test, Add_DuplicateKey_CaseInsensitive_Throws) {
+    StringDictionary sd;
+    sd.Add("Key", "Value");
+    EXPECT_THROW(sd.Add("Key", "value"), System::ArgumentException);
+    EXPECT_THROW(sd.Add("KEY", "value"), System::ArgumentException);
+    EXPECT_THROW(sd.Add("key", "value"), System::ArgumentException);
+    EXPECT_EQ(sd.getCountProperty(), 1);
+    EXPECT_EQ(sd.GetValue("key"), "Value");
+}
+
 TEST(StringDictionaryBatch22Test, GetKeysProperty) {
     StringDictionary sd;
     sd.Add("Alpha", "1");
