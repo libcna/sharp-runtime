@@ -25,6 +25,7 @@
 #include "System/IO/DriveNotFoundException.hpp"
 #include "System/IO/ErrorEventArgs.hpp"
 #include "System/IO/ErrorEventHandler.hpp"
+#include "System/IO/FileFormatException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -53,6 +54,7 @@ using System::IO::DirectoryNotFoundException;
 using System::IO::DriveNotFoundException;
 using System::IO::ErrorEventArgs;
 using System::IO::ErrorEventHandler;
+using System::IO::FileFormatException;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -402,6 +404,37 @@ TEST(ErrorEventHandlerTests, InvokesWithSenderAndArgs) {
     handler(&fakeSender, args);
     EXPECT_TRUE(called);
     EXPECT_EQ(seenSender, &fakeSender);
+}
+
+// ===========================================================================
+// FileFormatException
+// ===========================================================================
+
+TEST(FileFormatExceptionTests, DefaultCtor_WhatContainsMessage) {
+    FileFormatException ex;
+    EXPECT_NE(std::string(ex.what()).find("Invalid file format"), std::string::npos);
+}
+
+TEST(FileFormatExceptionTests, MessageCtor_WhatContainsMessage) {
+    FileFormatException ex("bad format");
+    EXPECT_NE(std::string(ex.what()).find("bad format"), std::string::npos);
+}
+
+TEST(FileFormatExceptionTests, SourceUriCtor_MessageContainsUri_AndSourceUriIsSet) {
+    System::Uri uri("file:///tmp/bad.docx");
+    FileFormatException ex(uri);
+    EXPECT_NE(std::string(ex.what()).find("bad.docx"), std::string::npos);
+    ASSERT_NE(ex.getSourceUriProperty(), nullptr);
+    EXPECT_EQ(ex.getSourceUriProperty()->ToString(), uri.ToString());
+}
+
+TEST(FileFormatExceptionTests, DefaultCtor_SourceUriIsNull) {
+    FileFormatException ex;
+    EXPECT_EQ(ex.getSourceUriProperty(), nullptr);
+}
+
+TEST(FileFormatExceptionTests, IsA_FormatException) {
+    EXPECT_THROW(throw FileFormatException(), System::FormatException);
 }
 
 // ===========================================================================
