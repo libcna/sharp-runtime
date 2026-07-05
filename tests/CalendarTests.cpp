@@ -5,6 +5,7 @@
 // Tests for Calendar, GregorianCalendar, ISOWeek and the new DateTime
 // Add* convenience methods (AddDays, AddHours, AddMinutes, AddSeconds, AddMilliseconds).
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
 #include "System/Globalization/Calendar.hpp"
@@ -282,6 +283,80 @@ TEST(CalendarTests, GetWeekOfYear_Approximate) {
     int w = cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Monday);
     EXPECT_GE(w, 1);
     EXPECT_LE(w, 53);
+}
+
+// ===========================================================================
+// Calendar::GetWeekOfYear — rule and firstDayOfWeek must actually be honored
+// (previously this always returned dayOfYear/7+1 regardless of parameters).
+// Jan 1, 2021 is a Friday.
+// ===========================================================================
+
+TEST(CalendarTests, GetWeekOfYear_FirstDay_SundayStart) {
+    Calendar cal;
+    DateTime d(2021, 1, 4); // Monday
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Sunday), 2);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstDay_RespectsFirstDayOfWeek) {
+    // Same date, different firstDayOfWeek must change the result.
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Wednesday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstFullWeek_DiffersFromFirstDay) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFullWeek, DayOfWeek::Sunday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstFourDayWeek) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFourDayWeek, DayOfWeek::Sunday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_InvalidFirstDayOfWeek_Throws) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_THROW(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, static_cast<DayOfWeek>(7)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// ===========================================================================
+// Calendar::ToFourDigitYear / TwoDigitYearMax
+// ===========================================================================
+
+TEST(CalendarTests, TwoDigitYearMax_DefaultsTo2049) {
+    Calendar cal;
+    EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2049);
+}
+
+TEST(CalendarTests, ToFourDigitYear_BelowMaxCentury_UsesCurrentCentury) {
+    Calendar cal; // TwoDigitYearMax defaults to 2049
+    EXPECT_EQ(cal.ToFourDigitYear(30), 2030);
+}
+
+TEST(CalendarTests, ToFourDigitYear_AboveMaxCentury_UsesPreviousCentury) {
+    Calendar cal; // TwoDigitYearMax defaults to 2049
+    EXPECT_EQ(cal.ToFourDigitYear(50), 1950);
+}
+
+TEST(CalendarTests, ToFourDigitYear_YearAtOrAbove100_ReturnedAsIs) {
+    Calendar cal;
+    EXPECT_EQ(cal.ToFourDigitYear(2024), 2024);
+}
+
+TEST(CalendarTests, ToFourDigitYear_NegativeYear_Throws) {
+    Calendar cal;
+    EXPECT_THROW(cal.ToFourDigitYear(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(CalendarTests, ToFourDigitYear_RespectsCustomTwoDigitYearMax) {
+    Calendar cal;
+    cal.setTwoDigitYearMaxProperty(2099);
+    EXPECT_EQ(cal.ToFourDigitYear(99), 2099);
+    EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2099);
 }
 
 // ===========================================================================

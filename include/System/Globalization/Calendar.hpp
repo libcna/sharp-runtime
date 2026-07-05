@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CalendarAlgorithmType.hpp"
 #include "System/Globalization/CalendarWeekRule.hpp"
 
@@ -21,6 +23,21 @@ namespace System::Globalization {
  * as needed for other calendar systems.
  */
 class Calendar {
+    mutable int twoDigitYearMax_ = -1;
+
+protected:
+    /**
+     * @brief Throws InvalidOperationException if this calendar instance is read-only.
+     *
+     * C++ counterpart of .NET Calendar.VerifyWritable(). Called before mutating any
+     * writable calendar state (currently just TwoDigitYearMax).
+     */
+    void VerifyWritable() const {
+        if (getIsReadOnlyProperty()) {
+            throw System::InvalidOperationException("Instance is read-only.");
+        }
+    }
+
 public:
     /** @brief Constant representing the current era. */
     static constexpr int CurrentEra = 0;
@@ -45,6 +62,30 @@ public:
      * @return Always false in the base implementation.
      */
     [[nodiscard]] virtual bool getIsReadOnlyProperty() const { return false; }
+
+    /**
+     * @brief Gets the maximum year that can be represented by a two-digit year value.
+     *
+     * C++ counterpart of .NET Calendar.TwoDigitYearMax. Lazily defaults to 2049 (the
+     * Gregorian calendar's default) on first access, matching this base class's Gregorian
+     * fallback behaviour elsewhere (IsLeapYear, GetDaysInMonth). Calendar-specific
+     * subclasses override this default to match their own .NET defaults.
+     */
+    [[nodiscard]] virtual int getTwoDigitYearMaxProperty() const {
+        if (twoDigitYearMax_ == -1) twoDigitYearMax_ = 2049;
+        return twoDigitYearMax_;
+    }
+
+    /**
+     * @brief Sets the maximum year that can be represented by a two-digit year value.
+     *
+     * C++ counterpart of .NET Calendar.TwoDigitYearMax (setter).
+     * @throws System::InvalidOperationException if this calendar instance is read-only.
+     */
+    virtual void setTwoDigitYearMaxProperty(int value) {
+        VerifyWritable();
+        twoDigitYearMax_ = value;
+    }
 
     /**
      * @brief Gets the list of era identifiers supported by this calendar.
@@ -280,6 +321,71 @@ public:
         return IsLeapYear(year, era) ? 366 : 365;
     }
 
+private:
+    /** @brief C++ counterpart of .NET Calendar.GetFirstDayWeekOfYear(DateTime, int) (internal helper for CalendarWeekRule::FirstDay). */
+    [[nodiscard]] int GetFirstDayWeekOfYear(const System::DateTime& time, int firstDayOfWeek) const {
+        int dayOfYear = GetDayOfYear(time) - 1;
+        int dayForJan1 = static_cast<int>(GetDayOfWeek(time)) - (dayOfYear % 7);
+        int offset = (dayForJan1 - firstDayOfWeek + 14) % 7;
+        return (dayOfYear + offset) / 7 + 1;
+    }
+
+    /** @brief C++ counterpart of .NET Calendar.GetWeekOfYearOfMinSupportedDateTime(int, int). */
+    [[nodiscard]] int GetWeekOfYearOfMinSupportedDateTime(int firstDayOfWeek, int minimumDaysInFirstWeek) const {
+        const System::DateTime minSupported = getMinSupportedDateTimeProperty();
+        int dayOfYear = GetDayOfYear(minSupported) - 1;
+        int dayOfWeekOfFirstOfYear = static_cast<int>(GetDayOfWeek(minSupported)) - dayOfYear % 7;
+
+        int offset = (firstDayOfWeek + 7 - dayOfWeekOfFirstOfYear) % 7;
+        if (offset == 0 || offset >= minimumDaysInFirstWeek) {
+            return 1;
+        }
+
+        int daysInYearBeforeMinSupportedYear = getDaysInYearBeforeMinSupportedYearProperty() - 1;
+        int dayOfWeekOfFirstOfPreviousYear = dayOfWeekOfFirstOfYear - 1 - (daysInYearBeforeMinSupportedYear % 7);
+
+        int daysInInitialPartialWeek = (firstDayOfWeek - dayOfWeekOfFirstOfPreviousYear + 14) % 7;
+        int day = daysInYearBeforeMinSupportedYear - daysInInitialPartialWeek;
+        if (daysInInitialPartialWeek >= minimumDaysInFirstWeek) {
+            day += 7;
+        }
+
+        return day / 7 + 1;
+    }
+
+    /** @brief C++ counterpart of .NET Calendar.GetWeekOfYearFullDays(DateTime, int, int) (internal helper for FirstFullWeek/FirstFourDayWeek). */
+    [[nodiscard]] int GetWeekOfYearFullDays(const System::DateTime& time, int firstDayOfWeek, int fullDays) const {
+        int dayOfYear = GetDayOfYear(time) - 1;
+        int dayForJan1 = static_cast<int>(GetDayOfWeek(time)) - (dayOfYear % 7);
+
+        int offset = (firstDayOfWeek - dayForJan1 + 14) % 7;
+        if (offset != 0 && offset >= fullDays) {
+            offset -= 7;
+        }
+
+        int day = dayOfYear - offset;
+        if (day >= 0) {
+            return day / 7 + 1;
+        }
+
+        if (time <= AddDays(getMinSupportedDateTimeProperty(), dayOfYear)) {
+            return GetWeekOfYearOfMinSupportedDateTime(firstDayOfWeek, fullDays);
+        }
+
+        return GetWeekOfYearFullDays(AddDays(time, -(dayOfYear + 1)), firstDayOfWeek, fullDays);
+    }
+
+protected:
+    /**
+     * @brief Number of days in the year immediately preceding MinSupportedDateTime's year.
+     *
+     * C++ counterpart of .NET Calendar.DaysInYearBeforeMinSupportedYear.
+     * @return 365 by default; overridden by calendars whose minimum year is a leap year
+     *         or otherwise irregular.
+     */
+    [[nodiscard]] virtual int getDaysInYearBeforeMinSupportedYearProperty() const { return 365; }
+
+public:
     /**
      * @brief Returns the week-of-year for the given DateTime using the specified rule.
      *
@@ -288,11 +394,29 @@ public:
      * @param rule           The rule that defines the first week of the year.
      * @param firstDayOfWeek The first day of the week.
      * @return The week number (1-based).
+     * @throws System::ArgumentOutOfRangeException if @p firstDayOfWeek or @p rule is out of range.
      */
     [[nodiscard]] virtual int GetWeekOfYear(const System::DateTime& time,
-                                             CalendarWeekRule /*rule*/,
-                                             System::DayOfWeek /*firstDayOfWeek*/) const {
-        return time.getDayOfYearProperty() / 7 + 1;
+                                             CalendarWeekRule rule,
+                                             System::DayOfWeek firstDayOfWeek) const {
+        if (firstDayOfWeek < System::DayOfWeek::Sunday || firstDayOfWeek > System::DayOfWeek::Saturday) {
+            throw System::ArgumentOutOfRangeException("firstDayOfWeek",
+                std::to_string(static_cast<int>(firstDayOfWeek)),
+                "Value must be within the range for the DayOfWeek enumeration.");
+        }
+
+        switch (rule) {
+            case CalendarWeekRule::FirstDay:
+                return GetFirstDayWeekOfYear(time, static_cast<int>(firstDayOfWeek));
+            case CalendarWeekRule::FirstFullWeek:
+                return GetWeekOfYearFullDays(time, static_cast<int>(firstDayOfWeek), 7);
+            case CalendarWeekRule::FirstFourDayWeek:
+                return GetWeekOfYearFullDays(time, static_cast<int>(firstDayOfWeek), 4);
+            default:
+                throw System::ArgumentOutOfRangeException("rule",
+                    std::to_string(static_cast<int>(rule)),
+                    "Value must be within the range for the CalendarWeekRule enumeration.");
+        }
     }
 
     /**
@@ -423,15 +547,20 @@ public:
      * @brief Converts a two-digit year to a four-digit year.
      *
      * C++ counterpart of .NET Calendar.ToFourDigitYear(int).
-     * Years 0–99 are mapped to the current century; years >= 100 are returned as-is.
+     * Converts the year value to the appropriate century by using the TwoDigitYearMax
+     * property. For example, if TwoDigitYearMax is 2049, a two-digit value of 50 maps
+     * to 1950, while a two-digit value of 49 maps to 2049. Years >= 100 are returned as-is.
      * @param year The year to convert.
      * @return A four-digit year.
+     * @throws System::ArgumentOutOfRangeException if @p year is negative.
      */
     virtual int ToFourDigitYear(int year) const {
-        if (year >= 100) return year;
-        int currentYear = getMaxSupportedDateTimeProperty().getYearProperty();
-        int century = (currentYear / 100) * 100;
-        return century + year;
+        System::ArgumentOutOfRangeException::ThrowIfNegative(year, "year");
+        if (year < 100) {
+            int max = getTwoDigitYearMaxProperty();
+            return (max / 100 - (year > max % 100 ? 1 : 0)) * 100 + year;
+        }
+        return year;
     }
 };
 
