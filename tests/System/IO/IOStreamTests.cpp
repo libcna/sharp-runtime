@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
@@ -280,6 +282,37 @@ TEST(DirectoryTests, CreateDirectory_Delete_Roundtrip) {
 
 TEST(DirectoryTests, GetCurrentDirectory_NotEmpty) {
     EXPECT_FALSE(Directory::GetCurrentDirectory().empty());
+}
+
+TEST(DirectoryTests, Delete_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(Directory::Delete(tf("no_such_dir_for_delete_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, GetFiles_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW((void)Directory::GetFiles(tf("no_such_dir_for_getfiles_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, GetDirectories_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW((void)Directory::GetDirectories(tf("no_such_dir_for_getdirs_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, CreateDirectory_EmptyPath_ThrowsArgumentException) {
+    EXPECT_THROW(Directory::CreateDirectory(""), System::ArgumentException);
+}
+
+TEST(DirectoryTests, Move_NonExistentSource_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(Directory::Move(tf("no_such_src_xyz"), tf("move_dst_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, Exists_ExistingFileNotDirectory_False) {
+    std::string p = tf("exists_file_not_dir.txt");
+    File::WriteAllText(p, "x");
+    EXPECT_FALSE(Directory::Exists(p));
+    File::Delete(p);
 }
 
 TEST(DirectoryInfoTests, Constructor_NoThrow) {
