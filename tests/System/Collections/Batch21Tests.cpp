@@ -6,6 +6,7 @@
 //   ListDictionary:    all new properties, set(), Keys, Values
 //   NameValueCollection: copy ctors, capacity ctors, all methods
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Specialized/ListDictionary.hpp"
 #include "System/Collections/Specialized/NameValueCollection.hpp"
 #include <any>
@@ -48,7 +49,7 @@ TEST(ListDictionaryBatch21Test, AddAndCount) {
 TEST(ListDictionaryBatch21Test, Add_DuplicateThrows) {
     ListDictionary d;
     d.Add("k", std::any(1));
-    EXPECT_THROW(d.Add("k", std::any(2)), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", std::any(2)), System::ArgumentException);
 }
 
 TEST(ListDictionaryBatch21Test, Contains_TrueAndFalse) {
@@ -65,10 +66,10 @@ TEST(ListDictionaryBatch21Test, Indexer_Const_Found) {
     EXPECT_EQ(std::any_cast<int>(cd["val"]), 99);
 }
 
-TEST(ListDictionaryBatch21Test, Indexer_Const_NotFoundThrows) {
+TEST(ListDictionaryBatch21Test, Indexer_Const_NotFound_ReturnsEmpty) {
     ListDictionary d;
     const ListDictionary& cd = d;
-    EXPECT_THROW((void)cd["missing"], std::out_of_range);
+    EXPECT_FALSE(cd["missing"].has_value());
 }
 
 TEST(ListDictionaryBatch21Test, Indexer_Mutable_Inserts) {

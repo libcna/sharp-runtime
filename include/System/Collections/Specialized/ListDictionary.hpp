@@ -3,9 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <any>
-#include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -121,10 +121,11 @@ public:
      * C++ counterpart of .NET ListDictionary.Add(object, object).
      * @param key   The key to add.
      * @param value The value to associate with @p key.
-     * @throws std::invalid_argument if @p key already exists.
+     * @throws System::ArgumentException if @p key already exists.
      */
     void Add(const std::string& key, const std::any& value) {
-        if (findIndex(key) >= 0) throw std::invalid_argument("Duplicate key: " + key);
+        if (findIndex(key) >= 0)
+            throw System::ArgumentException("An item with the same key has already been added.");
         data_.emplace_back(key, value);
     }
 
@@ -170,17 +171,15 @@ public:
     [[nodiscard]] bool Contains(const std::string& key) const { return findIndex(key) >= 0; }
 
     /**
-     * @brief Returns a const reference to the value for the given key.
+     * @brief Returns the value for the given key, or an empty std::any if not found.
      *
      * C++ counterpart of .NET ListDictionary.Item[object] getter.
      * @param key The key whose value to retrieve.
-     * @return A const reference to the associated value.
-     * @throws std::out_of_range if @p key is not found.
+     * @return The associated value, or an empty std::any if @p key is not present.
      */
-    [[nodiscard]] const std::any& operator[](const std::string& key) const {
+    [[nodiscard]] std::any operator[](const std::string& key) const {
         int idx = findIndex(key);
-        if (idx < 0) throw std::out_of_range("Key not found: " + key);
-        return data_[static_cast<size_t>(idx)].second;
+        return (idx >= 0) ? data_[static_cast<size_t>(idx)].second : std::any{};
     }
 
     /**
