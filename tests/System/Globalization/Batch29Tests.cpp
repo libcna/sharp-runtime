@@ -7,6 +7,7 @@
 //   GregorianCalendar:      constructors, CalendarType, GetEra, IsLeapYear, AddMonths, AddYears
 //   HebrewCalendar:         IsLeapYear, GetMonthsInYear, GetDaysInYear, GetYear/Month/Day
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/GregorianCalendarTypes.hpp"
 #include "System/Globalization/GregorianCalendar.hpp"
 #include "System/Globalization/HebrewCalendar.hpp"
@@ -47,6 +48,20 @@ TEST(GregorianCalendarBatch29Test, SetCalendarType) {
     GregorianCalendar gc;
     gc.setCalendarTypeProperty(GregorianCalendarTypes::USEnglish);
     EXPECT_EQ(gc.getCalendarTypeProperty(), GregorianCalendarTypes::USEnglish);
+}
+
+TEST(GregorianCalendarBatch29Test, Ctor_InvalidType_Throws) {
+    EXPECT_THROW(GregorianCalendar(static_cast<GregorianCalendarTypes>(0)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(GregorianCalendar(static_cast<GregorianCalendarTypes>(13)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(GregorianCalendarBatch29Test, Eras_ContainsADEra) {
+    GregorianCalendar gc;
+    auto eras = gc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], GregorianCalendar::ADEra);
 }
 
 TEST(GregorianCalendarBatch29Test, GetEra) {
