@@ -20,6 +20,7 @@
 #include "System/IO/HandleInheritability.hpp"
 #include "System/IO/UnixFileMode.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/InternalBufferOverflowException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/DriveNotFoundException.hpp"
@@ -65,6 +66,7 @@ using System::IO::MatchType;
 using System::IO::HandleInheritability;
 using System::IO::UnixFileMode;
 using System::IO::IOException;
+using System::IO::InternalBufferOverflowException;
 using System::IO::FileNotFoundException;
 using System::IO::DirectoryNotFoundException;
 using System::IO::DriveNotFoundException;
@@ -747,6 +749,27 @@ TEST(InvalidDataExceptionTests, DefaultCtor_NoThrow) {
 TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
     InvalidDataException ex("corrupt data");
     EXPECT_NE(std::string(ex.what()).find("corrupt data"), std::string::npos);
+}
+
+// ===========================================================================
+// InternalBufferOverflowException
+// ===========================================================================
+
+TEST(InternalBufferOverflowExceptionTests, DefaultCtor_WhatNotEmpty) {
+    InternalBufferOverflowException ex;
+    EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(InternalBufferOverflowExceptionTests, MessageCtor_WhatContainsMessage) {
+    InternalBufferOverflowException ex("buffer overflowed");
+    EXPECT_NE(std::string(ex.what()).find("buffer overflowed"), std::string::npos);
+}
+
+TEST(InternalBufferOverflowExceptionTests, IsA_SystemException) {
+    EXPECT_THROW({
+        try { throw InternalBufferOverflowException("x"); }
+        catch (const System::SystemException&) { throw; }
+    }, InternalBufferOverflowException);
 }
 
 // ===========================================================================
