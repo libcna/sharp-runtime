@@ -65,6 +65,11 @@ namespace System::IO {
         [[nodiscard]] SharpRuntime::intcs getPositionProperty() const override { return inner_->getPositionProperty(); }
         /** Delegates to the inner stream's Position setter. */
         void setPositionProperty(SharpRuntime::intcs value) override { inner_->setPositionProperty(value); }
+
+        /** Returns true if the inner stream supports seeking. */
+        [[nodiscard]] bool getCanSeekProperty() const override { return inner_->getCanSeekProperty(); }
+        /** Delegates to the inner stream's SetLength. */
+        void SetLength(SharpRuntime::intcs value) override { inner_->SetLength(value); }
     };
 
 } // namespace System::IO

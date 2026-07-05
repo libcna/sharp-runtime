@@ -12,6 +12,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/Path.hpp"
@@ -28,6 +29,7 @@
 #include "System/IO/MemoryStream.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
+#include "System/IO/SeekOrigin.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
@@ -46,6 +48,8 @@ using System::IO::FileStream;
 using System::IO::MemoryStream;
 using System::IO::FileMode;
 using System::IO::FileAccess;
+using System::IO::SeekOrigin;
+using System::IO::intcs;
 using System::IO::IsolatedStorage::IsolatedStorageFile;
 
 static std::string tf(const char* name) {
@@ -895,6 +899,111 @@ TEST(FileStreamTests, Append_WithReadAccess_ThrowsArgumentException) {
 TEST(FileStreamTests, Create_WithReadOnlyAccess_ThrowsArgumentException) {
     std::string p = tf("fstream_create_readonly.bin");
     EXPECT_THROW(FileStream(p, FileMode::Create, FileAccess::Read), System::ArgumentException);
+}
+
+TEST(FileStreamTests, CanSeek_TrueWhileOpen) {
+    std::string p = tf("fstream_canseek.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::ReadWrite);
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Position_ReflectsReadProgress) {
+    std::string p = tf("fstream_position_read.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_EQ(fs.getPositionProperty(), 0);
+    uint8_t buf[3] = {};
+    fs.Read(buf, 0, 3);
+    EXPECT_EQ(fs.getPositionProperty(), 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetPosition_SeeksForRead) {
+    std::string p = tf("fstream_setposition.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.setPositionProperty(2);
+    uint8_t buf[3] = {};
+    intcs n = fs.Read(buf, 0, 3);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 'c');
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromBegin_MatchesSetPosition) {
+    std::string p = tf("fstream_seek_begin.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    intcs newPos = fs.Seek(2, SeekOrigin::Begin);
+    EXPECT_EQ(newPos, 2);
+    EXPECT_EQ(fs.getPositionProperty(), 2);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromCurrent_AdvancesRelatively) {
+    std::string p = tf("fstream_seek_current.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.setPositionProperty(1);
+    intcs newPos = fs.Seek(2, SeekOrigin::Current);
+    EXPECT_EQ(newPos, 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromEnd_ComputesFromLength) {
+    std::string p = tf("fstream_seek_end.bin");
+    File::WriteAllText(p, "abcde"); // length 5
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    intcs newPos = fs.Seek(-2, SeekOrigin::End);
+    EXPECT_EQ(newPos, 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_Truncates) {
+    std::string p = tf("fstream_setlength_truncate.bin");
+    File::WriteAllText(p, "abcdefgh");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.SetLength(3);
+    EXPECT_EQ(fs.getLengthProperty(), 3);
+    fs.Close();
+    EXPECT_EQ(File::ReadAllText(p), "abc");
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_Extends) {
+    std::string p = tf("fstream_setlength_extend.bin");
+    File::WriteAllText(p, "ab");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.SetLength(5);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_WhenReadOnly_ThrowsNotSupportedException) {
+    std::string p = tf("fstream_setlength_readonly.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_THROW(fs.SetLength(1), System::NotSupportedException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, ReadByte_ReturnsBytesThenMinusOne) {
+    std::string p = tf("fstream_readbyte.bin");
+    File::WriteAllText(p, "A");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_EQ(fs.ReadByte(), static_cast<intcs>('A'));
+    EXPECT_EQ(fs.ReadByte(), -1);
+    fs.Close();
+    File::Delete(p);
 }
 
 // ===========================================================================

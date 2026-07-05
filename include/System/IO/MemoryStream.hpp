@@ -56,6 +56,12 @@ namespace System::IO
         /** Sets the current read/write position within the buffer. Throws ArgumentOutOfRangeException if negative. */
         void setPositionProperty(intcs value) override;
 
+        /** MemoryStream always supports seeking. */
+        [[nodiscard]] bool getCanSeekProperty() const override { return true; }
+
+        /** Resizes the underlying buffer to the given length, truncating or zero-extending it. */
+        void SetLength(intcs value) override;
+
         /** @brief Returns the underlying buffer as a vector. */
         [[nodiscard]] const std::vector<bytecs>& ToArray() const { return data_; }
 

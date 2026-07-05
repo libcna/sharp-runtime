@@ -7,12 +7,14 @@
 #include <vector>
 
 #include "System/IO/MemoryStream.hpp"
+#include "System/IO/SeekOrigin.hpp"
 #include "System/IO/StringReader.hpp"
 #include "System/IO/StringWriter.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 
 using System::IO::MemoryStream;
+using System::IO::SeekOrigin;
 using System::IO::StringReader;
 using System::IO::StringWriter;
 
@@ -177,6 +179,73 @@ TEST(MemoryStreamTests, SetPositionNegativeThrows) {
     EXPECT_THROW(ms.setPositionProperty(-1), System::ArgumentOutOfRangeException);
 }
 
+TEST(MemoryStreamTests, CanSeekIsTrue) {
+    MemoryStream ms;
+    EXPECT_TRUE(ms.getCanSeekProperty());
+}
+
+TEST(MemoryStreamTests, SeekFromBeginMatchesSetPosition) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    auto newPos = ms.Seek(2, SeekOrigin::Begin);
+    EXPECT_EQ(newPos, 2);
+    EXPECT_EQ(ms.getPositionProperty(), 2);
+}
+
+TEST(MemoryStreamTests, SeekFromCurrentAdvancesRelatively) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    ms.setPositionProperty(1);
+    auto newPos = ms.Seek(2, SeekOrigin::Current);
+    EXPECT_EQ(newPos, 3);
+}
+
+TEST(MemoryStreamTests, SeekFromEndComputesFromLength) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5}; // length 5
+    ms.Write(payload, 0, 5);
+    auto newPos = ms.Seek(-2, SeekOrigin::End);
+    EXPECT_EQ(newPos, 3);
+}
+
+TEST(MemoryStreamTests, SetLengthTruncates) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    ms.SetLength(2);
+    EXPECT_EQ(ms.getLengthProperty(), 2);
+}
+
+TEST(MemoryStreamTests, SetLengthExtendsWithZeros) {
+    MemoryStream ms;
+    ms.WriteByte(1);
+    ms.SetLength(3);
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+    EXPECT_EQ(ms.ToArray()[1], 0u);
+    EXPECT_EQ(ms.ToArray()[2], 0u);
+}
+
+TEST(MemoryStreamTests, SetLengthNegativeThrows) {
+    MemoryStream ms;
+    EXPECT_THROW(ms.SetLength(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, SetLengthOnReadOnlyThrowsNotSupportedException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.SetLength(1), System::NotSupportedException);
+}
+
+TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
+    uint8_t src[] = {0x41, 0x42};
+    MemoryStream ms(src, 2);
+    EXPECT_EQ(ms.ReadByte(), 0x41);
+    EXPECT_EQ(ms.ReadByte(), 0x42);
+    EXPECT_EQ(ms.ReadByte(), -1);
+}
+
 // ---------------------------------------------------------------------------
 // Stream — default Position behavior for non-seekable streams
 // ---------------------------------------------------------------------------
@@ -198,6 +267,26 @@ TEST(StreamTests, DefaultGetPositionThrowsNotSupported) {
 TEST(StreamTests, DefaultSetPositionThrowsNotSupported) {
     NonSeekableTestStream s;
     EXPECT_THROW(s.setPositionProperty(0), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultCanSeekIsFalse) {
+    NonSeekableTestStream s;
+    EXPECT_FALSE(s.getCanSeekProperty());
+}
+
+TEST(StreamTests, DefaultSeekThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.Seek(0, System::IO::SeekOrigin::Begin), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultSetLengthThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.SetLength(0), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultReadByteReturnsMinusOneAtEnd) {
+    NonSeekableTestStream s;
+    EXPECT_EQ(s.ReadByte(), -1);
 }
 
 // ---------------------------------------------------------------------------

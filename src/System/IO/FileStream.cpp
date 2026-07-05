@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileStream.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 
@@ -42,7 +44,7 @@ namespace System::IO
         : FileStream(path, mode, DefaultAccessFor(mode)) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
-        : mode_(mode), length_(0), canRead_(false), canWrite_(false)
+        : path_(path), mode_(mode), length_(0), canRead_(false), canWrite_(false)
     {
         ValidateModeAndAccess(mode, access);
 
@@ -132,4 +134,38 @@ namespace System::IO
     intcs FileStream::getLengthProperty() const { return length_; }
 
     bool FileStream::IsOpen() const { return file_.is_open(); }
+
+    intcs FileStream::getPositionProperty() const
+    {
+        auto& f = const_cast<std::fstream&>(file_);
+        std::streampos pos = canRead_ ? f.tellg() : f.tellp();
+        return static_cast<intcs>(pos);
+    }
+
+    void FileStream::setPositionProperty(intcs value)
+    {
+        if (value < 0)
+            throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        file_.clear();
+        if (canRead_)  file_.seekg(static_cast<std::streamoff>(value));
+        if (canWrite_) file_.seekp(static_cast<std::streamoff>(value));
+    }
+
+    void FileStream::SetLength(intcs value)
+    {
+        if (value < 0)
+            throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        if (!canWrite_)
+            throw System::NotSupportedException("Stream does not support writing.");
+
+        file_.flush();
+        std::error_code ec;
+        std::filesystem::resize_file(path_, static_cast<std::uintmax_t>(value), ec);
+        if (ec) {
+            throw IOException("Unable to set the length of file '" + path_ + "'.");
+        }
+
+        length_ = value;
+        if (getPositionProperty() > value) setPositionProperty(value);
+    }
 }

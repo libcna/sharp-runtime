@@ -21,6 +21,7 @@ namespace System::IO
     {
     private:
         std::fstream file_;
+        std::string  path_;
         FileMode     mode_;
         intcs        length_;
         bool         canRead_;
@@ -71,5 +72,14 @@ namespace System::IO
         [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_; }
         /** Returns true if the underlying file is open. */
         [[nodiscard]] bool  IsOpen() const;
+
+        /** Returns true if the underlying file is open (FileStream always supports seeking while open). */
+        [[nodiscard]] bool  getCanSeekProperty() const override { return file_.is_open(); }
+        /** Returns the current read/write position within the file. */
+        [[nodiscard]] intcs getPositionProperty() const override;
+        /** Sets the current read/write position within the file. Throws ArgumentOutOfRangeException if negative. */
+        void setPositionProperty(intcs value) override;
+        /** Truncates or extends the file to the given length. */
+        void SetLength(intcs value) override;
     };
 }
