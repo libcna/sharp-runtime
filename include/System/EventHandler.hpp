@@ -187,12 +187,21 @@ namespace System
          *
          * All handlers are invoked in the order in which they were added.
          *
+         * Invokes a snapshot of the handler list taken at the start of this call, matching
+         * C# multicast delegate invocation semantics: a handler that calls Add()/Remove()/Clear()
+         * on this same EventHandler while it is being raised only affects the *next* Raise() call,
+         * not the one currently in progress. Without this, a handler removing itself (or another
+         * handler) mid-raise mutates the live handler list out from under this loop, which can
+         * dereference an already-destroyed std::function (undefined behavior; observed in
+         * practice as an escaping std::bad_function_call).
+         *
          * @param sender Object that raised the event.
          * @param e Event arguments.
          */
         void Raise(Object* sender, const TEventArgs& e)
         {
-            for (auto& entry : handlers_)
+            auto snapshot = handlers_;
+            for (auto& entry : snapshot)
             {
                 entry.second(sender, e);
             }

@@ -103,3 +103,45 @@ TEST(EventHandlerTests, Raise_Empty_DoesNotThrow) {
     EventHandler<EventArgs> h;
     EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
 }
+
+// Raise() must invoke a snapshot of the handler list, matching C# multicast delegate semantics:
+// a handler that removes itself (or another handler) mid-raise must not corrupt the current
+// invocation. Without a snapshot, this used to dereference an already-destroyed std::function
+// (undefined behavior, observed as an escaping std::bad_function_call).
+TEST(EventHandlerTests, Raise_HandlerRemovesItselfDuringRaise_DoesNotThrowAndStillFiresOthers) {
+    EventHandler<EventArgs> h;
+    int firedA = 0, firedB = 0;
+    EventHandler<EventArgs>::Token tokenA = 0;
+    tokenA = h.Add([&](System::Object*, const EventArgs&) {
+        ++firedA;
+        h.Remove(tokenA);
+    });
+    h += [&firedB](System::Object*, const EventArgs&) { ++firedB; };
+
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_EQ(firedA, 1);
+    EXPECT_EQ(firedB, 1); // still fires in this same Raise() -- the snapshot already included it
+
+    // The removal takes effect for the *next* Raise(), matching C# semantics.
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(firedA, 1); // not called again -- it removed itself before the first Raise() finished
+    EXPECT_EQ(firedB, 2);
+}
+
+// A handler removing a *different*, not-yet-invoked handler mid-raise must not skip or crash on
+// that handler either -- the snapshot already captured it before the removal happened.
+TEST(EventHandlerTests, Raise_HandlerRemovesAnotherHandlerDuringRaise_StillFiresBoth) {
+    EventHandler<EventArgs> h;
+    int firedA = 0, firedB = 0;
+    EventHandler<EventArgs>::Token tokenB = 0;
+    h += [&](System::Object*, const EventArgs&) {
+        ++firedA;
+        h.Remove(tokenB);
+    };
+    tokenB = h.Add([&firedB](System::Object*, const EventArgs&) { ++firedB; });
+
+    EXPECT_NO_THROW(h.Raise(nullptr, EventArgs::Empty));
+    EXPECT_EQ(firedA, 1);
+    EXPECT_EQ(firedB, 1);
+    EXPECT_EQ(h.Size(), 1u); // A is still subscribed; only B was removed
+}
