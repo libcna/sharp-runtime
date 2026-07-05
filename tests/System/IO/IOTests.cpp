@@ -478,6 +478,23 @@ TEST(EnumerationOptionsTests, ReturnSpecialDirectories_DefaultFalse) {
     EXPECT_FALSE(opts.ReturnSpecialDirectories);
 }
 
+TEST(EnumerationOptionsTests, AttributesToSkip_DefaultIsHiddenOrSystem) {
+    EnumerationOptions opts;
+    FileAttributes expected = static_cast<FileAttributes>(
+        static_cast<int>(FileAttributes::Hidden) | static_cast<int>(FileAttributes::System));
+    EXPECT_EQ(opts.AttributesToSkip, expected);
+}
+
+TEST(EnumerationOptionsTests, MaxRecursionDepth_DefaultIsIntMax) {
+    EnumerationOptions opts;
+    EXPECT_EQ(opts.MaxRecursionDepth, INT_MAX);
+}
+
+TEST(EnumerationOptionsTests, BufferSize_DefaultZero) {
+    EnumerationOptions opts;
+    EXPECT_EQ(opts.BufferSize, 0);
+}
+
 // ===========================================================================
 // FileStreamOptions
 // ===========================================================================

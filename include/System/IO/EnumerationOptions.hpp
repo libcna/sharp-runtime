@@ -19,14 +19,16 @@ namespace System::IO {
         bool ReturnSpecialDirectories   = false;
         /** Maximum recursion depth; INT_MAX means unlimited. */
         int  MaxRecursionDepth          = INT_MAX;
+        /** Suggested buffer size in bytes; 0 means no suggestion (platform default). */
+        int  BufferSize                 = 0;
         /** Controls case sensitivity when matching names. */
         MatchCasing  MatchCasingValue   = MatchCasing::PlatformDefault;
         /** Controls how search patterns are interpreted. */
         MatchType    MatchTypeValue      = MatchType::Simple;
         /** Specifies whether to return files, directories, or both. */
         SearchTarget SearchTargetValue  = SearchTarget::Files;
-        /** File attributes that cause an entry to be skipped. */
-        FileAttributes AttributesToSkip = static_cast<FileAttributes>(0x022); // Hidden | System
+        /** File attributes that cause an entry to be skipped. Default is Hidden | System (0x6). */
+        FileAttributes AttributesToSkip = static_cast<FileAttributes>(0x006); // Hidden (0x02) | System (0x04)
         /** File attributes that an entry must have to be returned. */
         FileAttributes AttributesToMatch = FileAttributes::Normal;
 
