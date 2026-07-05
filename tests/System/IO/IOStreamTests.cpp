@@ -338,6 +338,21 @@ TEST(DirectoryInfoTests, Create_Delete_Roundtrip) {
     EXPECT_FALSE(di.getExistsProperty());
 }
 
+TEST(DirectoryInfoTests, Delete_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_delete_xyz"));
+    EXPECT_THROW(di.Delete(), System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryInfoTests, MoveTo_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_move_xyz"));
+    EXPECT_THROW(di.MoveTo(tf("di_move_dst_xyz")), System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_getfiles_xyz"));
+    EXPECT_THROW((void)di.GetFiles(), System::IO::DirectoryNotFoundException);
+}
+
 // ===========================================================================
 // BinaryWriter + BinaryReader
 // ===========================================================================
