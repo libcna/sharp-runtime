@@ -517,3 +517,28 @@ TEST(DriveInfoTests, GetDrives_NotEmpty) {
     auto drives = DriveInfo::GetDrives();
     EXPECT_FALSE(drives.empty());
 }
+
+TEST(DriveInfoTests, VolumeLabel_ReturnsName) {
+    DriveInfo d("/");
+    EXPECT_EQ(d.getVolumeLabelProperty(), "/");
+}
+
+TEST(DriveInfoTests, TotalSize_IsPositiveForRealDrive) {
+    DriveInfo d("/");
+    EXPECT_GT(d.getTotalSizeProperty(), 0);
+}
+
+TEST(DriveInfoTests, TotalFreeSpace_DoesNotExceedTotalSize) {
+    DriveInfo d("/");
+    EXPECT_LE(d.getTotalFreeSpaceProperty(), d.getTotalSizeProperty());
+}
+
+TEST(DriveInfoTests, AvailableFreeSpace_DoesNotExceedTotalFreeSpace) {
+    DriveInfo d("/");
+    EXPECT_LE(d.getAvailableFreeSpaceProperty(), d.getTotalFreeSpaceProperty());
+}
+
+TEST(DriveInfoTests, TotalSize_NonExistentPath_ReturnsZero) {
+    DriveInfo d("/no/such/path/xyz_abc_123");
+    EXPECT_EQ(d.getTotalSizeProperty(), 0);
+}

@@ -40,14 +40,14 @@ namespace System::IO {
         [[nodiscard]] bool               getIsReadyProperty()    const { return Directory::Exists(name_); }
         /** Returns the drive type (always Fixed in this implementation). */
         [[nodiscard]] DriveType          getDriveTypeProperty()  const { return DriveType::Fixed; }
-        /** Returns the amount of available free space in bytes (stub returns 0). */
-        [[nodiscard]] long long          getAvailableFreeSpaceProperty()  const { return 0LL; }
-        /** Returns the total amount of free space in bytes (stub returns 0). */
-        [[nodiscard]] long long          getTotalFreeSpaceProperty()      const { return 0LL; }
-        /** Returns the total size of the drive in bytes (stub returns 0). */
-        [[nodiscard]] long long          getTotalSizeProperty()           const { return 0LL; }
+        /** Returns the amount of available free space in bytes (0 if the drive is not ready or space info is unavailable). */
+        [[nodiscard]] long long          getAvailableFreeSpaceProperty()  const;
+        /** Returns the total amount of free space in bytes (0 if the drive is not ready or space info is unavailable). */
+        [[nodiscard]] long long          getTotalFreeSpaceProperty()      const;
+        /** Returns the total size of the drive in bytes (0 if the drive is not ready or space info is unavailable). */
+        [[nodiscard]] long long          getTotalSizeProperty()           const;
         /** Returns the volume label of the drive. */
-        [[nodiscard]] std::string        getVolumeLabel()                 const { return name_; }
+        [[nodiscard]] std::string        getVolumeLabelProperty()         const { return name_; }
         /** Returns the name of the file system, such as NTFS or FAT32 (stub returns "Unknown"). */
         [[nodiscard]] std::string        getDriveFormatProperty()         const { return "Unknown"; }
 
