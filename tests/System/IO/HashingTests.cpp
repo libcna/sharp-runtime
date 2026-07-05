@@ -10,6 +10,8 @@
 #include "System/IO/Hashing/Crc64ParameterSet.hpp"
 #include "System/IO/Hashing/XxHash32.hpp"
 #include "System/IO/Hashing/XxHash64.hpp"
+#include "System/IO/Hashing/XxHash3.hpp"
+#include "System/IO/Hashing/XxHash128.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArgumentException.hpp"
@@ -21,6 +23,8 @@ using System::IO::Hashing::Crc64;
 using System::IO::Hashing::Crc64ParameterSet;
 using System::IO::Hashing::XxHash32;
 using System::IO::Hashing::XxHash64;
+using System::IO::Hashing::XxHash3;
+using System::IO::Hashing::XxHash128;
 
 static std::vector<uint8_t> bytes(const char* s) {
     return std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(s),
@@ -434,4 +438,265 @@ TEST(HashingTests, Crc64_Clone_IndependentState) {
 
 TEST(HashingTests, Crc64_NullParameterSet_Throws) {
     EXPECT_THROW(Crc64{std::shared_ptr<Crc64ParameterSet>(nullptr)}, System::ArgumentNullException);
+}
+
+// ---------------------------------------------------------------------------
+// XxHash3 — official .NET test vectors (github.com/dotnet/runtime XxHash3Tests.cs)
+// ---------------------------------------------------------------------------
+
+static uint64_t xxHash3Hash(const std::vector<uint8_t>& v, int64_t seed = 0) {
+    return XxHash3::HashToUInt64(v.data(), static_cast<int32_t>(v.size()), seed);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_EmptySeed0) {
+    EXPECT_EQ(xxHash3Hash(bytes("")), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_EmptySeeded) {
+    EXPECT_EQ(xxHash3Hash(bytes(""), 0x13f0), 0x0f99783e68de7322ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length1) {
+    EXPECT_EQ(xxHash3Hash(bytes("Z")), 0x2753d05a8f320003ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length4Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("KdjE"), 0x499), 0x17ac41dfec94111fULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length9Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("EGM4yxHgk"), 0x6d1), 0x04661f74a752afb2ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length17Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("4pgR1N0LgL2QpoaNc"), 0x19c9), 0x34722478aff47051ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length129Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("uqMPHc9Ks7bAPG6zdpkbSjcqkVXzOGBSyBXTvbzQlpdQ6Zv362rdkRlzBIbV7nPyLOGutx6Q4YD2wksGcsC6GapRBMT5QOQq3Vt6NkobpxENMG3anX1cChirvogNtnej8"),
+                            0x1b1d), 0xe822ad7ac402f592ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length512Seeded) {
+    // Two concatenated segments totaling 512 bytes (well over the 240-byte streaming threshold).
+    std::string s =
+        "a2WBB5GKMkHnAySB7uXFtoT8z1GgX0MPgzX4Zu4QWjZ5sfUPXZq3UXFUbG74Fw8Jk55geWbT9PB35YSVEbtIizEgLcpOll09vmDXlLcR6MxmGl6apvXEAodsve1dgw4eq9Lsx8LLdd5kJY1HlJL7Sd4fckloMiVNR1n8UdOzUdyZa0T0iKRc9wYvpG6py0QWwevVqXlZjwEyYmSQsHoXEtwzjUaRL5Fx15E21ANuyugJVKk7S"
+        "gmi8CVrQYFQZbeF6e2POv5ZFzf1OgjLnYHp0xpfWDD8uOKH4zE882uBMshXjVSjFRY9Yv5rKdymxkR4VMTZTNPNgiuPJSKQlt0XU2NdzVdH7iTNZ3Hxt1vIyFEtqCqHjFGxXPNaPGJbioubL3hGCs5lqEOVPHHNQNxjhmzmyS3O2DsZrvXkFbD1HpLisgz6T4S3mEJ3tDhzWpAkC3UnitHpgaoJnyBa0EchtNbtekxnSBQ6yShQN3CktaPjfTfGWMmUzkYOZFoG2dYZ";
+    ASSERT_EQ(s.size(), 512u);
+    EXPECT_EQ(xxHash3Hash(bytes(s.c_str()), 0x21f), 0x2f37d7c5257055c5ULL);
+}
+
+TEST(HashingTests, XxHash3_EmptyInput_MatchesDefaultCtor) {
+    XxHash3 h;
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_Reset) {
+    XxHash3 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_Clone_IndependentState) {
+    XxHash3 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    XxHash3 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsUInt64(), clone.GetCurrentHashAsUInt64());
+}
+
+TEST(HashingTests, XxHash3_GetHashLengthInBytes) {
+    XxHash3 h;
+    EXPECT_EQ(h.getHashLengthInBytesProperty(), 8);
+}
+
+TEST(HashingTests, XxHash3_GetCurrentHash_IsBigEndianBytesOfHashValue) {
+    XxHash3 h;
+    auto hello = bytes("hello world, this is a somewhat longer test string for hashing");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 8u);
+    uint64_t expected = h.GetCurrentHashAsUInt64();
+    uint64_t fromBytes = 0;
+    for (int i = 0; i < 8; ++i) fromBytes = (fromBytes << 8) | bytesOut[static_cast<size_t>(i)];
+    EXPECT_EQ(fromBytes, expected);
+}
+
+TEST(HashingTests, XxHash3_StreamingMatchesOneShot_Length512) {
+    std::string s(512, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    uint64_t oneShot = xxHash3Hash(data, 0x123);
+
+    XxHash3 h(0x123);
+    h.Append(data.data(), 37);
+    h.Append(data.data() + 37, 200);
+    h.Append(data.data() + 237, static_cast<int32_t>(data.size() - 237));
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), oneShot);
+}
+
+TEST(HashingTests, XxHash3_StreamingMatchesOneShot_ManySmallChunks) {
+    std::string s(600, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    uint64_t oneShot = xxHash3Hash(data);
+
+    XxHash3 h;
+    for (size_t i = 0; i < data.size(); ++i) h.Append(&data[i], 1);
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), oneShot);
+}
+
+TEST(HashingTests, XxHash3_DifferentInputsDifferentHashes) {
+    EXPECT_NE(xxHash3Hash(bytes("abc")), xxHash3Hash(bytes("abd")));
+}
+
+TEST(HashingTests, XxHash3_TryHash_DestinationTooShort_ReturnsFalse) {
+    auto data = bytes("abc");
+    uint8_t dest[7];
+    int32_t written = -1;
+    EXPECT_FALSE(XxHash3::TryHash(data.data(), 3, dest, 7, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(HashingTests, XxHash3_Hash_DestinationTooShort_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[7];
+    EXPECT_THROW(XxHash3::Hash(data.data(), 3, dest, 7), System::ArgumentException);
+}
+
+// ---------------------------------------------------------------------------
+// XxHash128 — official .NET test vectors (github.com/dotnet/runtime XxHash128Tests.cs)
+// ---------------------------------------------------------------------------
+
+static System::IO::Hashing::Hash128 xxHash128Hash(const std::vector<uint8_t>& v, int64_t seed = 0) {
+    return XxHash128::HashToHash128(v.data(), static_cast<int32_t>(v.size()), seed);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_EmptySeed0) {
+    auto h = xxHash128Hash(bytes(""));
+    EXPECT_EQ(h.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(h.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_EmptySeeded) {
+    auto h = xxHash128Hash(bytes(""), 0x13f0);
+    EXPECT_EQ(h.High64, 0x4a807558806f6b31ULL);
+    EXPECT_EQ(h.Low64, 0xeca8475b2cc08feeULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length1) {
+    auto h = xxHash128Hash(bytes("Z"));
+    EXPECT_EQ(h.High64, 0xa26f5ff5290b016cULL);
+    EXPECT_EQ(h.Low64, 0x2753d05a8f320003ULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length4Seeded) {
+    auto h = xxHash128Hash(bytes("KdjE"), 0x499);
+    EXPECT_EQ(h.High64, 0xf29da7d603a9409fULL);
+    EXPECT_EQ(h.Low64, 0x90373b3f6da10e37ULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length9Seeded) {
+    auto h = xxHash128Hash(bytes("EGM4yxHgk"), 0x6d1);
+    EXPECT_EQ(h.High64, 0xa98564b5fb852a84ULL);
+    EXPECT_EQ(h.Low64, 0xdef8b6b70a62024cULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length17Seeded) {
+    auto h = xxHash128Hash(bytes("4pgR1N0LgL2QpoaNc"), 0x19c9);
+    EXPECT_EQ(h.High64, 0x1f3ba7ee629b72e0ULL);
+    EXPECT_EQ(h.Low64, 0x8e26be7440f5fc90ULL);
+}
+
+TEST(HashingTests, XxHash128_EmptyInput_MatchesDefaultCtor) {
+    XxHash128 h;
+    auto current = h.GetCurrentHashAsHash128();
+    EXPECT_EQ(current.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(current.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_Reset) {
+    XxHash128 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    auto current = h.GetCurrentHashAsHash128();
+    EXPECT_EQ(current.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(current.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_Clone_IndependentState) {
+    XxHash128 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    XxHash128 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsHash128(), clone.GetCurrentHashAsHash128());
+}
+
+TEST(HashingTests, XxHash128_GetHashLengthInBytes) {
+    XxHash128 h;
+    EXPECT_EQ(h.getHashLengthInBytesProperty(), 16);
+}
+
+TEST(HashingTests, XxHash128_GetCurrentHash_IsBigEndianHighThenLow) {
+    XxHash128 h;
+    auto hello = bytes("hello world, this is a somewhat longer test string for hashing");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 16u);
+
+    auto current = h.GetCurrentHashAsHash128();
+    uint64_t highFromBytes = 0, lowFromBytes = 0;
+    for (int i = 0; i < 8; ++i) highFromBytes = (highFromBytes << 8) | bytesOut[static_cast<size_t>(i)];
+    for (int i = 0; i < 8; ++i) lowFromBytes = (lowFromBytes << 8) | bytesOut[static_cast<size_t>(8 + i)];
+    EXPECT_EQ(highFromBytes, current.High64);
+    EXPECT_EQ(lowFromBytes, current.Low64);
+}
+
+TEST(HashingTests, XxHash128_StreamingMatchesOneShot_Length512) {
+    std::string s(512, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    auto oneShot = xxHash128Hash(data, 0x123);
+
+    XxHash128 h(0x123);
+    h.Append(data.data(), 37);
+    h.Append(data.data() + 37, 200);
+    h.Append(data.data() + 237, static_cast<int32_t>(data.size() - 237));
+    EXPECT_EQ(h.GetCurrentHashAsHash128(), oneShot);
+}
+
+TEST(HashingTests, XxHash128_StreamingMatchesOneShot_ManySmallChunks) {
+    std::string s(600, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    auto oneShot = xxHash128Hash(data);
+
+    XxHash128 h;
+    for (size_t i = 0; i < data.size(); ++i) h.Append(&data[i], 1);
+    EXPECT_EQ(h.GetCurrentHashAsHash128(), oneShot);
+}
+
+TEST(HashingTests, XxHash128_DifferentInputsDifferentHashes) {
+    EXPECT_NE(xxHash128Hash(bytes("abc")), xxHash128Hash(bytes("abd")));
+}
+
+TEST(HashingTests, XxHash128_TryHash_DestinationTooShort_ReturnsFalse) {
+    auto data = bytes("abc");
+    uint8_t dest[15];
+    int32_t written = -1;
+    EXPECT_FALSE(XxHash128::TryHash(data.data(), 3, dest, 15, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(HashingTests, XxHash128_Hash_DestinationTooShort_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[15];
+    EXPECT_THROW(XxHash128::Hash(data.data(), 3, dest, 15), System::ArgumentException);
 }
