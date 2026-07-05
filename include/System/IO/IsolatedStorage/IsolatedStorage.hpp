@@ -38,6 +38,9 @@ namespace System::IO::IsolatedStorage {
         virtual void Remove() = 0;
         /** Closes the isolated storage. */
         virtual void Close()  {}
+
+        /** Attempts to increase the quota, returning true on success. Default implementation always returns false. */
+        [[nodiscard]] virtual bool IncreaseQuotaTo(longcs newQuotaSize) { (void)newQuotaSize; return false; }
     };
 
 } // namespace System::IO::IsolatedStorage

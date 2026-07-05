@@ -1086,6 +1086,40 @@ TEST(IsolatedStorageFileTests, OpenFile_WriteAndDelete_Roundtrip) {
     EXPECT_FALSE(store.FileExists(fname));
 }
 
+TEST(IsolatedStorageFileTests, OpenFile_OpenMode_SupportsReadAndWrite) {
+    // Regression: IsolatedStorageFileStream previously opened FileMode::Open as read-only
+    // (std::ios::in only), unlike .NET's IsolatedStorageFileStream(path, mode) which defaults
+    // access to ReadWrite for every mode except Append.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_openmode_rw.dat";
+    { auto s = store.CreateFile(fname); s.Close(); }
+
+    auto stream = store.OpenFile(fname, FileMode::Open);
+    EXPECT_TRUE(stream.getCanReadProperty());
+    EXPECT_TRUE(stream.getCanWriteProperty());
+    stream.Close();
+    store.DeleteFile(fname);
+}
+
+TEST(IsolatedStorageFileTests, OpenFile_SupportsSeek) {
+    // Regression: IsolatedStorageFileStream previously duplicated a thin std::fstream wrapper
+    // with no Position/Seek support at all; it now derives from the real FileStream.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_seek.dat";
+    auto stream = store.CreateFile(fname);
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    stream.Write(data, 0, 5);
+
+    stream.setPositionProperty(1);
+    uint8_t buf[3] = {};
+    intcs n = stream.Read(buf, 0, 3);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 2u);
+
+    stream.Close();
+    store.DeleteFile(fname);
+}
+
 TEST(IsolatedStorageFileTests, CreateFile_Creates) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     const std::string fname = "sharp_rt_iso_create.dat";
@@ -1180,6 +1214,28 @@ TEST(IsolatedStorageFileTests, UsedSize_AfterWrite_Positive) {
 TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     EXPECT_NO_THROW(store.Dispose());
+}
+
+TEST(IsolatedStorageFileTests, GetUserStoreForApplication_HasApplicationAndUserScope) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_EQ(store.getScopeProperty(),
+              System::IO::IsolatedStorage::IsolatedStorageScope::Application |
+              System::IO::IsolatedStorage::IsolatedStorageScope::User);
+}
+
+TEST(IsolatedStorageFileTests, GetUserStoreForAssembly_HasAssemblyAndUserScope) {
+    auto store = IsolatedStorageFile::GetUserStoreForAssembly();
+    EXPECT_EQ(store.getScopeProperty(),
+              System::IO::IsolatedStorage::IsolatedStorageScope::Assembly |
+              System::IO::IsolatedStorage::IsolatedStorageScope::User);
+}
+
+TEST(IsolatedStorageFileTests, IsAnIsolatedStorageBase_ViaVirtualDispatch) {
+    // Regression: IsolatedStorageFile previously did not derive from IsolatedStorage at all.
+    IsolatedStorageFile store = IsolatedStorageFile::GetUserStoreForApplication();
+    System::IO::IsolatedStorage::IsolatedStorage& base = store;
+    EXPECT_EQ(base.getAvailableFreeSpaceProperty(), store.getAvailableFreeSpaceProperty());
+    EXPECT_FALSE(base.IncreaseQuotaTo(1024));
 }
 
 // ===========================================================================

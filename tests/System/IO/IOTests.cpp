@@ -810,6 +810,16 @@ TEST(IsolatedStorageExceptionTests, IsA_Exception) {
     EXPECT_THROW(throw IsolatedStorageException("err"), System::Exception);
 }
 
+TEST(IsolatedStorageExceptionTests, DefaultCtor_WhatNotEmpty) {
+    IsolatedStorageException ex;
+    EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(IsolatedStorageExceptionTests, MessageAndInnerCtor_WhatContainsMessage) {
+    IsolatedStorageException ex("wrapped failure", std::exception_ptr{});
+    EXPECT_NE(std::string(ex.what()).find("wrapped failure"), std::string::npos);
+}
+
 // ===========================================================================
 // EnumerationOptions
 // ===========================================================================

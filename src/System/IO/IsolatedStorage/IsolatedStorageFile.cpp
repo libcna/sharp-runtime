@@ -35,9 +35,10 @@ namespace System::IO::IsolatedStorage
         return p == pattern.size();
     }
 
-    IsolatedStorageFile::IsolatedStorageFile(const std::filesystem::path& rootDirectory)
+    IsolatedStorageFile::IsolatedStorageFile(const std::filesystem::path& rootDirectory, IsolatedStorageScope scope)
         : rootDirectory_(rootDirectory)
     {
+        scope_ = scope;
         std::filesystem::create_directories(rootDirectory_);
     }
 
@@ -48,12 +49,14 @@ namespace System::IO::IsolatedStorage
 
     IsolatedStorageFile IsolatedStorageFile::GetUserStoreForApplication()
     {
-        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
+        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot(),
+                                    IsolatedStorageScope::Application | IsolatedStorageScope::User);
     }
 
     IsolatedStorageFile IsolatedStorageFile::GetUserStoreForAssembly()
     {
-        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot());
+        return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot(),
+                                    IsolatedStorageScope::Assembly | IsolatedStorageScope::User);
     }
 
     // --- File operations ---
