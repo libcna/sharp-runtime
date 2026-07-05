@@ -9,6 +9,7 @@
 //   SortKey:         constructors, getters, Compare, operator==, ToString
 //   SortVersion:     constructors, getters, operator==/!=
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
 #include "System/Globalization/PersianCalendar.hpp"
 #include "System/Globalization/RegionInfo.hpp"
@@ -81,6 +82,13 @@ TEST(PersianCalendarBatch32Test, GetEra) {
     EXPECT_EQ(pc.GetEra(System::DateTime(2024, 1, 1)), PersianCalendar::PersianEra);
 }
 
+TEST(PersianCalendarBatch32Test, Eras_ContainsPersianEra) {
+    PersianCalendar pc;
+    auto eras = pc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], PersianCalendar::PersianEra);
+}
+
 TEST(PersianCalendarBatch32Test, GetYear_KnownDate) {
     PersianCalendar pc;
     // 2024-01-01 Gregorian = 1402 or 1403 Persian (Nowruz is ~March 20)
@@ -137,8 +145,8 @@ TEST(PersianCalendarBatch32Test, GetDaysInYear) {
 
 TEST(PersianCalendarBatch32Test, GetDaysInMonth_OutOfRange) {
     PersianCalendar pc;
-    EXPECT_THROW(pc.GetDaysInMonth(1403, 0),  std::out_of_range);
-    EXPECT_THROW(pc.GetDaysInMonth(1403, 13), std::out_of_range);
+    EXPECT_THROW(pc.GetDaysInMonth(1403, 0),  System::ArgumentOutOfRangeException);
+    EXPECT_THROW(pc.GetDaysInMonth(1403, 13), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

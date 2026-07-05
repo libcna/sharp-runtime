@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <stdexcept>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 
 namespace System::Globalization {
@@ -57,15 +58,19 @@ public:
      * C++ counterpart of .NET PersianCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 1410).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
      *
      * C++ counterpart of .NET PersianCalendar.TwoDigitYearMax setter.
      * @param value The new maximum two-digit year.
+     * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
+    void setTwoDigitYearMaxProperty(int value) override {
+        VerifyWritable();
+        twoDigitYearMax_ = value;
+    }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -81,6 +86,14 @@ public:
      * @return Always 1; the Persian calendar has a single era.
      */
     [[nodiscard]] int GetErasCount() const override { return 1; }
+
+    /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET PersianCalendar.Eras.
+     * @return A vector containing {PersianEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {PersianEra}; }
 
     /**
      * @brief Returns the Persian year corresponding to the given DateTime.
@@ -139,7 +152,7 @@ public:
      * @return The number of days in the specified month.
      */
     [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
-        if (month < 1 || month > 12) throw std::out_of_range("month");
+        if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
         if (month <= 6)  return 31;
         if (month <= 11) return 30;
         return IsLeapYear(year) ? 30 : 29;

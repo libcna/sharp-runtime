@@ -175,6 +175,12 @@ TEST(UmAlQuraCalendarTests, Era) {
     UmAlQuraCalendar cal;
     EXPECT_EQ(cal.GetEra(DateTime(2000, 4, 6)), UmAlQuraCalendar::UmAlQuraEra);
 }
+TEST(UmAlQuraCalendarTests, Eras_ContainsUmAlQuraEra) {
+    UmAlQuraCalendar cal;
+    auto eras = cal.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], UmAlQuraCalendar::UmAlQuraEra);
+}
 TEST(UmAlQuraCalendarTests, GetYear1421) {
     UmAlQuraCalendar cal;
     // Gregorian 2000-04-06 = start of Hijri 1421 per table
@@ -203,6 +209,6 @@ TEST(UmAlQuraCalendarTests, IsLeapYear) {
 }
 TEST(UmAlQuraCalendarTests, OutOfRangeThrows) {
     UmAlQuraCalendar cal;
-    EXPECT_THROW(cal.IsLeapYear(1317), std::out_of_range);
-    EXPECT_THROW(cal.IsLeapYear(1501), std::out_of_range);
+    EXPECT_THROW(cal.IsLeapYear(1317), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.IsLeapYear(1501), System::ArgumentOutOfRangeException);
 }

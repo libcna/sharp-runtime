@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Globalization/UmAlQuraCalendar.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include <stdexcept>
 
@@ -67,14 +68,14 @@ const UmAlQuraCalendar::DateMapping UmAlQuraCalendar::s_yearInfo[184] = {
 // ---------------------------------------------------------------------------
 
 void UmAlQuraCalendar::checkYear(int year, int era) {
-    if (era != CurrentEra && era != UmAlQuraEra) throw std::out_of_range("invalid era");
+    if (era != CurrentEra && era != UmAlQuraEra) throw System::ArgumentOutOfRangeException("era");
     if (year < MinCalendarYear || year > MaxCalendarYear)
-        throw std::out_of_range("UmAlQuraCalendar: year out of supported range (1318–1500).");
+        throw System::ArgumentOutOfRangeException("year");
 }
 
 void UmAlQuraCalendar::checkYearMonth(int year, int month, int era) {
     checkYear(year, era);
-    if (month < 1 || month > 12) throw std::out_of_range("month");
+    if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
 }
 
 // Absolute Gregorian date (day 1 = 0001-01-01)
@@ -214,7 +215,7 @@ int UmAlQuraCalendar::GetDaysInYear(int year, int era) const {
 }
 
 System::DateTime UmAlQuraCalendar::AddMonths(const System::DateTime& time, int months) const {
-    if (months < -120000 || months > 120000) throw std::out_of_range("months out of range");
+    if (months < -120000 || months > 120000) throw System::ArgumentOutOfRangeException("months");
     int y = GetYear(time), m = GetMonth(time), d = GetDayOfMonth(time);
     int i = m - 1 + months;
     if (i >= 0) { m = i % 12 + 1; y += i / 12; }

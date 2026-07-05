@@ -88,6 +88,13 @@ TEST(TaiwanCalendarBatch33Test, GetErasCount) {
     EXPECT_EQ(tc.GetErasCount(), 1);
 }
 
+TEST(TaiwanCalendarBatch33Test, Eras_ContainsTaiwanEra) {
+    TaiwanCalendar tc;
+    auto eras = tc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], TaiwanCalendar::TaiwanEra);
+}
+
 TEST(TaiwanCalendarBatch33Test, GetYear_2024_Is113) {
     TaiwanCalendar tc;
     EXPECT_EQ(tc.GetYear(System::DateTime(2024, 6, 1)), 113);

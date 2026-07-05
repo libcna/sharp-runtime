@@ -35,6 +35,13 @@ TEST(JulianCalendarBatch31Test, GetErasCount) {
     EXPECT_EQ(jc.GetErasCount(), 1);
 }
 
+TEST(JulianCalendarBatch31Test, Eras_ContainsJulianEra) {
+    JulianCalendar jc;
+    auto eras = jc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], JulianCalendar::JulianEra);
+}
+
 TEST(JulianCalendarBatch31Test, IsLeapYear_DivisibleBy4) {
     JulianCalendar jc;
     EXPECT_TRUE(jc.IsLeapYear(100));  // leap in Julian (not in Gregorian)
@@ -79,6 +86,13 @@ TEST(KoreanCalendarBatch31Test, GetEra) {
 TEST(KoreanCalendarBatch31Test, GetErasCount) {
     KoreanCalendar kc;
     EXPECT_EQ(kc.GetErasCount(), 1);
+}
+
+TEST(KoreanCalendarBatch31Test, Eras_ContainsKoreanEra) {
+    KoreanCalendar kc;
+    auto eras = kc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], KoreanCalendar::KoreanEra);
 }
 
 TEST(KoreanCalendarBatch31Test, GetYear_Offset2333) {

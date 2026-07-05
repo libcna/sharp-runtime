@@ -55,15 +55,19 @@ public:
      * C++ counterpart of .NET ThaiBuddhistCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 2572 = Gregorian 2029 + 543).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
      *
      * C++ counterpart of .NET ThaiBuddhistCalendar.TwoDigitYearMax setter.
      * @param value The new maximum two-digit year.
+     * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
+    void setTwoDigitYearMaxProperty(int value) override {
+        VerifyWritable();
+        twoDigitYearMax_ = value;
+    }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -79,6 +83,14 @@ public:
      * @return Always 1; the Thai Buddhist calendar has a single era.
      */
     [[nodiscard]] int GetErasCount() const override { return 1; }
+
+    /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET ThaiBuddhistCalendar.Eras.
+     * @return A vector containing {ThaiBuddhistEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {ThaiBuddhistEra}; }
 
     /**
      * @brief Returns the Buddhist Era year for the given DateTime.

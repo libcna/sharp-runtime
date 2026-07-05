@@ -24,6 +24,8 @@ public:
     [[nodiscard]] int GetEra(const System::DateTime& time) const override;
     /** @return Always 1 — the Um Al Qura calendar has a single era. */
     [[nodiscard]] int GetErasCount() const override { return 1; }
+    /** @return A vector containing {UmAlQuraEra}. C++ counterpart of .NET UmAlQuraCalendar.Eras. */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {UmAlQuraEra}; }
 
     /** @return Always CalendarAlgorithmType::LunarCalendar. C++ counterpart of .NET UmAlQuraCalendar.AlgorithmType. */
     [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
