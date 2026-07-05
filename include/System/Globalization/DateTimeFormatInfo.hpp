@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DayOfWeek.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CalendarWeekRule.hpp"
 
 namespace System::Globalization {
@@ -89,18 +91,60 @@ public:
      */
     [[nodiscard]] std::string getNativeCalendarNameProperty() const { return ""; }
 
-    // --- Format patterns ---
-    std::string FullDateTimePattern{"dddd, dd MMMM yyyy HH:mm:ss"}; ///< Full date and time pattern.
-    std::string LongDatePattern{"dddd, dd MMMM yyyy"};              ///< Long date pattern.
-    std::string LongTimePattern{"HH:mm:ss"};                        ///< Long time pattern.
-    std::string ShortDatePattern{"MM/dd/yyyy"};                     ///< Short date pattern.
-    std::string ShortTimePattern{"HH:mm"};                          ///< Short time pattern.
-    std::string MonthDayPattern{"MMMM dd"};                         ///< Month and day pattern.
-    std::string YearMonthPattern{"yyyy MMMM"};                      ///< Year and month pattern.
-    std::string DateSeparator{"/"};                                  ///< Separator between date components.
-    std::string TimeSeparator{":"};                                  ///< Separator between time components.
-    std::string AMDesignator{"AM"};                                  ///< Designator for ante meridiem.
-    std::string PMDesignator{"PM"};                                  ///< Designator for post meridiem.
+    /** @brief Gets the custom format string for a long date and time value. C++ counterpart of .NET DateTimeFormatInfo.FullDateTimePattern. */
+    [[nodiscard]] const std::string& getFullDateTimePatternProperty() const { return fullDateTimePattern_; }
+    /** @brief Sets the custom format string for a long date and time value. */
+    void setFullDateTimePatternProperty(const std::string& value) { VerifyWritable(); fullDateTimePattern_ = value; }
+
+    /** @brief Gets the custom format string for a long date value. C++ counterpart of .NET DateTimeFormatInfo.LongDatePattern. */
+    [[nodiscard]] const std::string& getLongDatePatternProperty() const { return longDatePattern_; }
+    /** @brief Sets the custom format string for a long date value. */
+    void setLongDatePatternProperty(const std::string& value) { VerifyWritable(); longDatePattern_ = value; }
+
+    /** @brief Gets the custom format string for a long time value. C++ counterpart of .NET DateTimeFormatInfo.LongTimePattern. */
+    [[nodiscard]] const std::string& getLongTimePatternProperty() const { return longTimePattern_; }
+    /** @brief Sets the custom format string for a long time value. */
+    void setLongTimePatternProperty(const std::string& value) { VerifyWritable(); longTimePattern_ = value; }
+
+    /** @brief Gets the custom format string for a short date value. C++ counterpart of .NET DateTimeFormatInfo.ShortDatePattern. */
+    [[nodiscard]] const std::string& getShortDatePatternProperty() const { return shortDatePattern_; }
+    /** @brief Sets the custom format string for a short date value. */
+    void setShortDatePatternProperty(const std::string& value) { VerifyWritable(); shortDatePattern_ = value; }
+
+    /** @brief Gets the custom format string for a short time value. C++ counterpart of .NET DateTimeFormatInfo.ShortTimePattern. */
+    [[nodiscard]] const std::string& getShortTimePatternProperty() const { return shortTimePattern_; }
+    /** @brief Sets the custom format string for a short time value. */
+    void setShortTimePatternProperty(const std::string& value) { VerifyWritable(); shortTimePattern_ = value; }
+
+    /** @brief Gets the custom format string for a month and day value. C++ counterpart of .NET DateTimeFormatInfo.MonthDayPattern. */
+    [[nodiscard]] const std::string& getMonthDayPatternProperty() const { return monthDayPattern_; }
+    /** @brief Sets the custom format string for a month and day value. */
+    void setMonthDayPatternProperty(const std::string& value) { VerifyWritable(); monthDayPattern_ = value; }
+
+    /** @brief Gets the custom format string for a year and month value. C++ counterpart of .NET DateTimeFormatInfo.YearMonthPattern. */
+    [[nodiscard]] const std::string& getYearMonthPatternProperty() const { return yearMonthPattern_; }
+    /** @brief Sets the custom format string for a year and month value. */
+    void setYearMonthPatternProperty(const std::string& value) { VerifyWritable(); yearMonthPattern_ = value; }
+
+    /** @brief Gets the string that separates date components. C++ counterpart of .NET DateTimeFormatInfo.DateSeparator. */
+    [[nodiscard]] const std::string& getDateSeparatorProperty() const { return dateSeparator_; }
+    /** @brief Sets the string that separates date components. */
+    void setDateSeparatorProperty(const std::string& value) { VerifyWritable(); dateSeparator_ = value; }
+
+    /** @brief Gets the string that separates time components. C++ counterpart of .NET DateTimeFormatInfo.TimeSeparator. */
+    [[nodiscard]] const std::string& getTimeSeparatorProperty() const { return timeSeparator_; }
+    /** @brief Sets the string that separates time components. */
+    void setTimeSeparatorProperty(const std::string& value) { VerifyWritable(); timeSeparator_ = value; }
+
+    /** @brief Gets the string designator for hours before noon. C++ counterpart of .NET DateTimeFormatInfo.AMDesignator. */
+    [[nodiscard]] const std::string& getAMDesignatorProperty() const { return amDesignator_; }
+    /** @brief Sets the string designator for hours before noon. */
+    void setAMDesignatorProperty(const std::string& value) { VerifyWritable(); amDesignator_ = value; }
+
+    /** @brief Gets the string designator for hours after noon. C++ counterpart of .NET DateTimeFormatInfo.PMDesignator. */
+    [[nodiscard]] const std::string& getPMDesignatorProperty() const { return pmDesignator_; }
+    /** @brief Sets the string designator for hours after noon. */
+    void setPMDesignatorProperty(const std::string& value) { VerifyWritable(); pmDesignator_ = value; }
 
     /**
      * @brief Gets the RFC 1123 date/time format pattern (read-only).
@@ -132,29 +176,68 @@ public:
         return "yyyy'-'MM'-'dd HH':'mm':'ss'Z'";
     }
 
-    System::DayOfWeek FirstDayOfWeek{System::DayOfWeek::Sunday};           ///< First day of the week.
-    CalendarWeekRule CalendarWeekRuleValue{CalendarWeekRule::FirstDay};     ///< Rule for determining the first week of the year.
+    /** @brief Gets the first day of the week. C++ counterpart of .NET DateTimeFormatInfo.FirstDayOfWeek. */
+    [[nodiscard]] System::DayOfWeek getFirstDayOfWeekProperty() const { return firstDayOfWeek_; }
+    /**
+     * @brief Sets the first day of the week.
+     * @throws System::ArgumentOutOfRangeException if @p value is outside Sunday..Saturday.
+     */
+    void setFirstDayOfWeekProperty(System::DayOfWeek value) {
+        VerifyWritable();
+        if (value < System::DayOfWeek::Sunday || value > System::DayOfWeek::Saturday) {
+            throw System::ArgumentOutOfRangeException("value");
+        }
+        firstDayOfWeek_ = value;
+    }
 
-    // --- Day names ---
-    std::array<std::string, 7> AbbreviatedDayNames{
-        "Sun","Mon","Tue","Wed","Thu","Fri","Sat"};                          ///< Abbreviated day names (Sun–Sat).
-    std::array<std::string, 7> DayNames{
-        "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"}; ///< Full day names.
-    std::array<std::string, 7> ShortestDayNames{
-        "Su","Mo","Tu","We","Th","Fr","Sa"};                                 ///< Shortest day name abbreviations.
+    /** @brief Gets the rule used to determine the first week of the year. C++ counterpart of .NET DateTimeFormatInfo.CalendarWeekRule. */
+    [[nodiscard]] CalendarWeekRule getCalendarWeekRuleProperty() const { return calendarWeekRule_; }
+    /**
+     * @brief Sets the rule used to determine the first week of the year.
+     * @throws System::ArgumentOutOfRangeException if @p value is outside FirstDay..FirstFourDayWeek.
+     */
+    void setCalendarWeekRuleProperty(CalendarWeekRule value) {
+        VerifyWritable();
+        if (value < CalendarWeekRule::FirstDay || value > CalendarWeekRule::FirstFourDayWeek) {
+            throw System::ArgumentOutOfRangeException("value");
+        }
+        calendarWeekRule_ = value;
+    }
 
-    // --- Month names ---
-    std::array<std::string, 13> AbbreviatedMonthNames{
-        "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec",""}; ///< Abbreviated month names (index 12 empty for non-leap 13th month).
-    std::array<std::string, 13> MonthNames{
-        "January","February","March","April","May","June",
-        "July","August","September","October","November","December",""};     ///< Full month names.
+    /** @brief Gets the abbreviated day names (Sun-Sat). C++ counterpart of .NET DateTimeFormatInfo.AbbreviatedDayNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 7> getAbbreviatedDayNamesProperty() const { return abbreviatedDayNames_; }
+    /** @brief Sets the abbreviated day names. */
+    void setAbbreviatedDayNamesProperty(const std::array<std::string, 7>& value) { VerifyWritable(); abbreviatedDayNames_ = value; }
 
-    std::array<std::string, 13> AbbreviatedMonthGenitiveNames{
-        "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec",""}; ///< Abbreviated genitive month names (same as abbreviated names in invariant culture).
-    std::array<std::string, 13> MonthGenitiveNames{
-        "January","February","March","April","May","June",
-        "July","August","September","October","November","December",""};     ///< Genitive month names (same as month names in invariant culture).
+    /** @brief Gets the full day names. C++ counterpart of .NET DateTimeFormatInfo.DayNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 7> getDayNamesProperty() const { return dayNames_; }
+    /** @brief Sets the full day names. */
+    void setDayNamesProperty(const std::array<std::string, 7>& value) { VerifyWritable(); dayNames_ = value; }
+
+    /** @brief Gets the shortest unique day name abbreviations. C++ counterpart of .NET DateTimeFormatInfo.ShortestDayNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 7> getShortestDayNamesProperty() const { return shortestDayNames_; }
+    /** @brief Sets the shortest unique day name abbreviations. */
+    void setShortestDayNamesProperty(const std::array<std::string, 7>& value) { VerifyWritable(); shortestDayNames_ = value; }
+
+    /** @brief Gets the abbreviated month names. C++ counterpart of .NET DateTimeFormatInfo.AbbreviatedMonthNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 13> getAbbreviatedMonthNamesProperty() const { return abbreviatedMonthNames_; }
+    /** @brief Sets the abbreviated month names. */
+    void setAbbreviatedMonthNamesProperty(const std::array<std::string, 13>& value) { VerifyWritable(); abbreviatedMonthNames_ = value; }
+
+    /** @brief Gets the full month names. C++ counterpart of .NET DateTimeFormatInfo.MonthNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 13> getMonthNamesProperty() const { return monthNames_; }
+    /** @brief Sets the full month names. */
+    void setMonthNamesProperty(const std::array<std::string, 13>& value) { VerifyWritable(); monthNames_ = value; }
+
+    /** @brief Gets the genitive-form abbreviated month names. C++ counterpart of .NET DateTimeFormatInfo.AbbreviatedMonthGenitiveNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 13> getAbbreviatedMonthGenitiveNamesProperty() const { return abbreviatedMonthGenitiveNames_; }
+    /** @brief Sets the genitive-form abbreviated month names. */
+    void setAbbreviatedMonthGenitiveNamesProperty(const std::array<std::string, 13>& value) { VerifyWritable(); abbreviatedMonthGenitiveNames_ = value; }
+
+    /** @brief Gets the genitive-form full month names. C++ counterpart of .NET DateTimeFormatInfo.MonthGenitiveNames. Returns a copy, matching .NET. */
+    [[nodiscard]] std::array<std::string, 13> getMonthGenitiveNamesProperty() const { return monthGenitiveNames_; }
+    /** @brief Sets the genitive-form full month names. */
+    void setMonthGenitiveNamesProperty(const std::array<std::string, 13>& value) { VerifyWritable(); monthGenitiveNames_ = value; }
 
     /**
      * @brief Gets the full name of the specified day of the week.
@@ -164,7 +247,7 @@ public:
      * @return The full name of the day.
      */
     [[nodiscard]] std::string GetDayName(System::DayOfWeek dayofweek) const {
-        return DayNames[static_cast<size_t>(dayofweek)];
+        return dayNames_[static_cast<size_t>(dayofweek)];
     }
 
     /**
@@ -175,7 +258,7 @@ public:
      * @return The abbreviated name of the day.
      */
     [[nodiscard]] std::string GetAbbreviatedDayName(System::DayOfWeek dayofweek) const {
-        return AbbreviatedDayNames[static_cast<size_t>(dayofweek)];
+        return abbreviatedDayNames_[static_cast<size_t>(dayofweek)];
     }
 
     /**
@@ -186,7 +269,7 @@ public:
      * @return The shortest day name abbreviation.
      */
     [[nodiscard]] std::string GetShortestDayName(System::DayOfWeek dayOfWeek) const {
-        return ShortestDayNames[static_cast<size_t>(dayOfWeek)];
+        return shortestDayNames_[static_cast<size_t>(dayOfWeek)];
     }
 
     /**
@@ -197,8 +280,8 @@ public:
      * @return The full name of the month.
      */
     [[nodiscard]] std::string GetMonthName(intcs month) const {
-        if (month < 1 || month > 13) throw std::out_of_range("month");
-        return MonthNames[static_cast<size_t>(month - 1)];
+        if (month < 1 || month > 13) throw System::ArgumentOutOfRangeException("month");
+        return monthNames_[static_cast<size_t>(month - 1)];
     }
 
     /**
@@ -209,8 +292,8 @@ public:
      * @return The abbreviated name of the month.
      */
     [[nodiscard]] std::string GetAbbreviatedMonthName(intcs month) const {
-        if (month < 1 || month > 13) throw std::out_of_range("month");
-        return AbbreviatedMonthNames[static_cast<size_t>(month - 1)];
+        if (month < 1 || month > 13) throw System::ArgumentOutOfRangeException("month");
+        return abbreviatedMonthNames_[static_cast<size_t>(month - 1)];
     }
 
     /**
@@ -258,8 +341,8 @@ public:
      * @return A vector of format pattern strings.
      */
     [[nodiscard]] std::vector<std::string> GetAllDateTimePatterns() const {
-        return {FullDateTimePattern, LongDatePattern, ShortDatePattern,
-                LongTimePattern, ShortTimePattern, MonthDayPattern, YearMonthPattern};
+        return {fullDateTimePattern_, longDatePattern_, shortDatePattern_,
+                longTimePattern_, shortTimePattern_, monthDayPattern_, yearMonthPattern_};
     }
 
     /**
@@ -272,25 +355,64 @@ public:
      */
     [[nodiscard]] std::vector<std::string> GetAllDateTimePatterns(char format) const {
         switch (format) {
-            case 'd': return {ShortDatePattern};
-            case 'D': return {LongDatePattern};
-            case 'f': return {LongDatePattern + " " + ShortTimePattern};
-            case 'F': return {FullDateTimePattern};
-            case 'g': return {ShortDatePattern + " " + ShortTimePattern};
-            case 'G': return {ShortDatePattern + " " + LongTimePattern};
-            case 'm': case 'M': return {MonthDayPattern};
+            case 'd': return {shortDatePattern_};
+            case 'D': return {longDatePattern_};
+            case 'f': return {longDatePattern_ + " " + shortTimePattern_};
+            case 'F': return {fullDateTimePattern_};
+            case 'g': return {shortDatePattern_ + " " + shortTimePattern_};
+            case 'G': return {shortDatePattern_ + " " + longTimePattern_};
+            case 'm': case 'M': return {monthDayPattern_};
             case 'r': case 'R': return {getRFC1123PatternProperty()};
             case 's': return {getSortableDateTimePatternProperty()};
-            case 't': return {ShortTimePattern};
-            case 'T': return {LongTimePattern};
+            case 't': return {shortTimePattern_};
+            case 'T': return {longTimePattern_};
             case 'u': return {getUniversalSortableDateTimePatternProperty()};
-            case 'y': case 'Y': return {YearMonthPattern};
+            case 'y': case 'Y': return {yearMonthPattern_};
             default: return {};
         }
     }
 
 private:
     bool isReadOnly_{false};
+
+    std::string fullDateTimePattern_{"dddd, dd MMMM yyyy HH:mm:ss"};
+    std::string longDatePattern_{"dddd, dd MMMM yyyy"};
+    std::string longTimePattern_{"HH:mm:ss"};
+    std::string shortDatePattern_{"MM/dd/yyyy"};
+    std::string shortTimePattern_{"HH:mm"};
+    std::string monthDayPattern_{"MMMM dd"};
+    std::string yearMonthPattern_{"yyyy MMMM"};
+    std::string dateSeparator_{"/"};
+    std::string timeSeparator_{":"};
+    std::string amDesignator_{"AM"};
+    std::string pmDesignator_{"PM"};
+
+    System::DayOfWeek firstDayOfWeek_{System::DayOfWeek::Sunday};
+    CalendarWeekRule calendarWeekRule_{CalendarWeekRule::FirstDay};
+
+    std::array<std::string, 7> abbreviatedDayNames_{
+        "Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+    std::array<std::string, 7> dayNames_{
+        "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+    std::array<std::string, 7> shortestDayNames_{
+        "Su","Mo","Tu","We","Th","Fr","Sa"};
+
+    std::array<std::string, 13> abbreviatedMonthNames_{
+        "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec",""};
+    std::array<std::string, 13> monthNames_{
+        "January","February","March","April","May","June",
+        "July","August","September","October","November","December",""};
+
+    std::array<std::string, 13> abbreviatedMonthGenitiveNames_{
+        "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec",""};
+    std::array<std::string, 13> monthGenitiveNames_{
+        "January","February","March","April","May","June",
+        "July","August","September","October","November","December",""};
+
+    /** @brief Throws InvalidOperationException if this instance is read-only. C++ counterpart of the internal check .NET applies before every mutating setter. */
+    void VerifyWritable() const {
+        if (isReadOnly_) throw System::InvalidOperationException("Instance is read-only.");
+    }
 
     static DateTimeFormatInfo makeReadOnly() {
         DateTimeFormatInfo info;

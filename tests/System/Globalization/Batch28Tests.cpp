@@ -9,6 +9,8 @@
 //   DaylightTime:        constructor, getStartProperty/getEndProperty/getDeltaProperty
 //   DigitShapes:         enum values
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CultureTypes.hpp"
 #include "System/Globalization/DateTimeFormatInfo.hpp"
 #include "System/Globalization/DateTimeStyles.hpp"
@@ -149,11 +151,28 @@ TEST(DateTimeFormatInfoBatch28Test, Clone_IsMutable) {
 
 TEST(DateTimeFormatInfoBatch28Test, FormatPatterns) {
     DateTimeFormatInfo dtfi;
-    EXPECT_FALSE(dtfi.FullDateTimePattern.empty());
-    EXPECT_FALSE(dtfi.ShortDatePattern.empty());
-    EXPECT_FALSE(dtfi.LongTimePattern.empty());
-    EXPECT_FALSE(dtfi.AMDesignator.empty());
-    EXPECT_FALSE(dtfi.PMDesignator.empty());
+    EXPECT_FALSE(dtfi.getFullDateTimePatternProperty().empty());
+    EXPECT_FALSE(dtfi.getShortDatePatternProperty().empty());
+    EXPECT_FALSE(dtfi.getLongTimePatternProperty().empty());
+    EXPECT_FALSE(dtfi.getAMDesignatorProperty().empty());
+    EXPECT_FALSE(dtfi.getPMDesignatorProperty().empty());
+}
+
+TEST(DateTimeFormatInfoBatch28Test, SetFormatPattern_ReadOnly_Throws) {
+    auto ro = DateTimeFormatInfo::ReadOnly(DateTimeFormatInfo());
+    EXPECT_THROW(ro.setFullDateTimePatternProperty("x"), System::InvalidOperationException);
+}
+
+TEST(DateTimeFormatInfoBatch28Test, SetFirstDayOfWeek_OutOfRange_Throws) {
+    DateTimeFormatInfo dtfi;
+    EXPECT_THROW(dtfi.setFirstDayOfWeekProperty(static_cast<System::DayOfWeek>(7)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeFormatInfoBatch28Test, SetFullDateTimePattern_MutatesValue) {
+    DateTimeFormatInfo dtfi;
+    dtfi.setFullDateTimePatternProperty("custom");
+    EXPECT_EQ(dtfi.getFullDateTimePatternProperty(), "custom");
 }
 
 TEST(DateTimeFormatInfoBatch28Test, ReadOnlyPatterns) {
@@ -192,14 +211,14 @@ TEST(DateTimeFormatInfoBatch28Test, GetAbbreviatedMonthName) {
 
 TEST(DateTimeFormatInfoBatch28Test, GetMonthName_OutOfRange) {
     DateTimeFormatInfo dtfi;
-    EXPECT_THROW(dtfi.GetMonthName(0),  std::out_of_range);
-    EXPECT_THROW(dtfi.GetMonthName(14), std::out_of_range);
+    EXPECT_THROW(dtfi.GetMonthName(0),  System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dtfi.GetMonthName(14), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeFormatInfoBatch28Test, GenitiveNames) {
     DateTimeFormatInfo dtfi;
-    EXPECT_EQ(dtfi.AbbreviatedMonthGenitiveNames[0], "Jan");
-    EXPECT_EQ(dtfi.MonthGenitiveNames[0],            "January");
+    EXPECT_EQ(dtfi.getAbbreviatedMonthGenitiveNamesProperty()[0], "Jan");
+    EXPECT_EQ(dtfi.getMonthGenitiveNamesProperty()[0],            "January");
 }
 
 TEST(DateTimeFormatInfoBatch28Test, GetEraName) {
