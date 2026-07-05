@@ -80,6 +80,13 @@ void XmlWriter::WriteComment(const std::string& text) {
     state_->nodeStack.top()->InsertEndChild(cmt);
 }
 
+void XmlWriter::WriteCData(const std::string& text) {
+    if (!state_ || state_->nodeStack.empty()) return;
+    tinyxml2::XMLText* tn = state_->doc.NewText(text.c_str());
+    tn->SetCData(true);
+    state_->nodeStack.top()->InsertEndChild(tn);
+}
+
 std::string XmlWriter::ToString() const {
     if (!state_) return {};
     tinyxml2::XMLPrinter printer;

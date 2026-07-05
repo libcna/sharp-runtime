@@ -85,6 +85,13 @@ namespace System::Xml {
         void WriteComment(const std::string& text);
 
         /**
+         * @brief Writes a CDATA section as child of the current element: @c <![CDATA[text]]>.
+         *
+         * @param text  Content; not XML-escaped (that is the point of a CDATA section).
+         */
+        void WriteCData(const std::string& text);
+
+        /**
          * @brief Returns the serialized XML as a string.
          *
          * Includes the XML declaration if @c WriteStartDocument() was called.
