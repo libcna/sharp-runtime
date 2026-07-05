@@ -35,15 +35,14 @@ public:
         : ArgumentException(message) {}
 
     /**
-     * @brief Constructs a CultureNotFoundException with a message and invalid culture name.
+     * @brief Constructs a CultureNotFoundException with a parameter name and message.
      *
-     * C++ counterpart of .NET CultureNotFoundException(string, string).
-     * @param message             The error message.
-     * @param invalidCultureName  The culture name that could not be found.
+     * C++ counterpart of .NET CultureNotFoundException(string paramName, string message).
+     * @param paramName The name of the parameter that caused the exception.
+     * @param message   The error message.
      */
-    CultureNotFoundException(const std::string& message, const std::string& invalidCultureName)
-        : ArgumentException(message, invalidCultureName),
-          invalidCultureName_(invalidCultureName) {}
+    CultureNotFoundException(const std::string& paramName, const std::string& message)
+        : ArgumentException(message, paramName) {}
 
     /**
      * @brief Constructs a CultureNotFoundException with a message and inner exception.
@@ -54,6 +53,32 @@ public:
      */
     CultureNotFoundException(const std::string& message, std::exception_ptr inner)
         : ArgumentException(message, std::move(inner)) {}
+
+    /**
+     * @brief Constructs a CultureNotFoundException with a parameter name, invalid culture name, and message.
+     *
+     * C++ counterpart of .NET CultureNotFoundException(string paramName, string invalidCultureName, string message).
+     * @param paramName          The name of the parameter that caused the exception.
+     * @param invalidCultureName The culture name that could not be found.
+     * @param message            The error message.
+     */
+    CultureNotFoundException(const std::string& paramName, const std::string& invalidCultureName,
+                             const std::string& message)
+        : ArgumentException(message, paramName),
+          invalidCultureName_(invalidCultureName) {}
+
+    /**
+     * @brief Constructs a CultureNotFoundException with a message, invalid culture name, and inner exception.
+     *
+     * C++ counterpart of .NET CultureNotFoundException(string message, string invalidCultureName, Exception innerException).
+     * @param message            The error message.
+     * @param invalidCultureName The culture name that could not be found.
+     * @param inner              The inner exception.
+     */
+    CultureNotFoundException(const std::string& message, const std::string& invalidCultureName,
+                             std::exception_ptr inner)
+        : ArgumentException(message, std::move(inner)),
+          invalidCultureName_(invalidCultureName) {}
 
     /**
      * @brief Constructs a CultureNotFoundException with a message and invalid LCID.

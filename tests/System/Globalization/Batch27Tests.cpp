@@ -173,20 +173,34 @@ TEST(CultureInfoBatch27Test, IntCtor) {
 }
 
 TEST(CultureInfoBatch27Test, InvariantCulture) {
-    const auto& inv = CultureInfo::InvariantCulture();
+    const auto& inv = CultureInfo::getInvariantCultureProperty();
     EXPECT_EQ(inv.getNameProperty(), "");
     EXPECT_TRUE(inv.getIsNeutralCultureProperty());
     EXPECT_TRUE(inv.getIsReadOnlyProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentCulture_ReturnsInvariant) {
-    const auto& cur = CultureInfo::CurrentCulture();
+    const auto& cur = CultureInfo::getCurrentCultureProperty();
     EXPECT_TRUE(cur.getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentUICulture_ReturnsInvariant) {
-    const auto& ui = CultureInfo::CurrentUICulture();
+    const auto& ui = CultureInfo::getCurrentUICultureProperty();
     EXPECT_TRUE(ui.getIsNeutralCultureProperty());
+}
+
+TEST(CultureInfoBatch27Test, SetCurrentCulture_ChangesGetter) {
+    CultureInfo previous = CultureInfo::getCurrentCultureProperty();
+    CultureInfo::setCurrentCultureProperty(CultureInfo("de-DE"));
+    EXPECT_EQ(CultureInfo::getCurrentCultureProperty().getNameProperty(), "de-DE");
+    CultureInfo::setCurrentCultureProperty(previous); // restore for other tests
+}
+
+TEST(CultureInfoBatch27Test, SetCurrentUICulture_ChangesGetter) {
+    CultureInfo previous = CultureInfo::getCurrentUICultureProperty();
+    CultureInfo::setCurrentUICultureProperty(CultureInfo("ja-JP"));
+    EXPECT_EQ(CultureInfo::getCurrentUICultureProperty().getNameProperty(), "ja-JP");
+    CultureInfo::setCurrentUICultureProperty(previous); // restore for other tests
 }
 
 // ===========================================================================
@@ -205,8 +219,18 @@ TEST(CultureNotFoundExceptionBatch27Test, MessageCtor) {
     EXPECT_NE(std::string(ex.what()).find("bad culture"), std::string::npos);
 }
 
-TEST(CultureNotFoundExceptionBatch27Test, MessageAndNameCtor) {
-    CultureNotFoundException ex("not found", "xx-XX");
+TEST(CultureNotFoundExceptionBatch27Test, ParamNameAndMessageCtor) {
+    CultureNotFoundException ex("cultureName", "not found");
+    EXPECT_EQ(ex.getInvalidCultureNameProperty(), "");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, ParamNameAndInvalidCultureNameAndMessageCtor) {
+    CultureNotFoundException ex("cultureName", "xx-XX", "not found");
+    EXPECT_EQ(ex.getInvalidCultureNameProperty(), "xx-XX");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageAndInvalidCultureNameAndInnerCtor) {
+    CultureNotFoundException ex("not found", "xx-XX", std::exception_ptr{});
     EXPECT_EQ(ex.getInvalidCultureNameProperty(), "xx-XX");
 }
 

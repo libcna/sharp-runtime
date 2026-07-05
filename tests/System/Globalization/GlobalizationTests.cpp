@@ -21,19 +21,25 @@ using System::Globalization::UnicodeCategory;
 // ===========================================================================
 
 TEST(CultureInfoTests, InvariantCulture_NameIsEmpty) {
-    EXPECT_EQ(CultureInfo::InvariantCulture().getNameProperty(), "");
+    EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getNameProperty(), "");
 }
 
 TEST(CultureInfoTests, InvariantCulture_IsNeutral) {
-    EXPECT_TRUE(CultureInfo::InvariantCulture().getIsNeutralCultureProperty());
+    EXPECT_TRUE(CultureInfo::getInvariantCultureProperty().getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoTests, InvariantCulture_IsReadOnly) {
-    EXPECT_TRUE(CultureInfo::InvariantCulture().getIsReadOnlyProperty());
+    EXPECT_TRUE(CultureInfo::getInvariantCultureProperty().getIsReadOnlyProperty());
 }
 
-TEST(CultureInfoTests, CurrentCulture_SameInstanceAsInvariant) {
-    EXPECT_EQ(&CultureInfo::CurrentCulture(), &CultureInfo::InvariantCulture());
+TEST(CultureInfoTests, CurrentCulture_DefaultsToInvariantByValue) {
+    // CurrentCulture is independently settable (matching .NET's mutable CurrentCulture
+    // property), so it is a distinct object from InvariantCulture, not the same instance —
+    // but its default value matches InvariantCulture until overridden.
+    const auto& current = CultureInfo::getCurrentCultureProperty();
+    const auto& invariant = CultureInfo::getInvariantCultureProperty();
+    EXPECT_EQ(current.getNameProperty(), invariant.getNameProperty());
+    EXPECT_EQ(current.getIsNeutralCultureProperty(), invariant.getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoTests, DefaultConstructor_NameIsEmpty) {
@@ -57,8 +63,8 @@ TEST(CultureInfoTests, NamedConstructor_IsNotReadOnly) {
 }
 
 TEST(CultureInfoTests, InvariantCulture_ReturnsSameInstanceEveryCall) {
-    const CultureInfo& a = CultureInfo::InvariantCulture();
-    const CultureInfo& b = CultureInfo::InvariantCulture();
+    const CultureInfo& a = CultureInfo::getInvariantCultureProperty();
+    const CultureInfo& b = CultureInfo::getInvariantCultureProperty();
     EXPECT_EQ(&a, &b);
 }
 
