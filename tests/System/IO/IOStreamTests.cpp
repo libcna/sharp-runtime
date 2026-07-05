@@ -215,6 +215,30 @@ TEST(FileTests, ReadAllText_ThrowsForNonExistentFile) {
                  System::IO::FileNotFoundException);
 }
 
+TEST(FileTests, Exists_ExistingDirectory_False) {
+    // File.Exists must return false for a directory, matching .NET.
+    EXPECT_FALSE(File::Exists("/tmp"));
+}
+
+TEST(FileTests, Delete_NonExistentFile_DoesNotThrow) {
+    // .NET: deleting a nonexistent file is not an error.
+    EXPECT_NO_THROW(File::Delete(tf("no_such_file_for_delete_xyz.txt")));
+}
+
+TEST(FileTests, Copy_NonExistentSource_ThrowsFileNotFoundException) {
+    EXPECT_THROW(File::Copy(tf("no_such_src_xyz.txt"), tf("copy_dst_xyz.txt")),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileTests, Move_NonExistentSource_ThrowsFileNotFoundException) {
+    EXPECT_THROW(File::Move(tf("no_such_move_src_xyz.txt"), tf("move_dst_xyz.txt")),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileTests, Copy_EmptySourcePath_ThrowsArgumentException) {
+    EXPECT_THROW(File::Copy("", tf("dst_xyz.txt")), System::ArgumentException);
+}
+
 // ===========================================================================
 // FileInfo
 // ===========================================================================

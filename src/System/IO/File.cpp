@@ -4,6 +4,7 @@
 #include "System/IO/File.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/ArgumentException.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -11,29 +12,46 @@
 
 namespace System::IO {
 
+    namespace {
+        void ThrowIfNullOrEmpty(const std::string& path, const std::string& paramName) {
+            if (path.empty()) throw System::ArgumentException("Path cannot be the empty string.", paramName);
+        }
+    }
+
     bool File::Exists(const std::string& path) {
-        return std::filesystem::exists(path) && std::filesystem::is_regular_file(path);
+        if (path.empty()) return false;
+        std::error_code ec;
+        bool isFile = std::filesystem::is_regular_file(path, ec);
+        return !ec && isFile;
     }
 
     void File::Delete(const std::string& path) {
+        ThrowIfNullOrEmpty(path, "path");
+        // .NET: deleting a file that doesn't exist is not an error.
         std::error_code ec;
         std::filesystem::remove(path, ec);
-        if (ec) throw IOException("Failed to delete file: " + path);
+        if (ec) throw IOException("Failed to delete file '" + path + "': " + ec.message());
     }
 
     void File::Copy(const std::string& src, const std::string& dst, bool overwrite) {
+        ThrowIfNullOrEmpty(src, "sourceFileName");
+        ThrowIfNullOrEmpty(dst, "destFileName");
+        if (!Exists(src)) throw FileNotFoundException("Could not find file '" + src + "'.", src);
         auto opts = overwrite
             ? std::filesystem::copy_options::overwrite_existing
             : std::filesystem::copy_options::none;
         std::error_code ec;
         std::filesystem::copy_file(src, dst, opts, ec);
-        if (ec) throw IOException("Failed to copy file: " + ec.message());
+        if (ec) throw IOException("Failed to copy file '" + src + "' to '" + dst + "': " + ec.message());
     }
 
     void File::Move(const std::string& src, const std::string& dst) {
+        ThrowIfNullOrEmpty(src, "sourceFileName");
+        ThrowIfNullOrEmpty(dst, "destFileName");
+        if (!Exists(src)) throw FileNotFoundException("Could not find file '" + src + "'.", src);
         std::error_code ec;
         std::filesystem::rename(src, dst, ec);
-        if (ec) throw IOException("Failed to move file: " + ec.message());
+        if (ec) throw IOException("Failed to move file '" + src + "' to '" + dst + "': " + ec.message());
     }
 
     std::string File::ReadAllText(const std::string& path) {
