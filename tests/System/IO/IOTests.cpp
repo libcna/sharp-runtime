@@ -321,6 +321,15 @@ TEST(DirectoryNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
     EXPECT_NE(std::string(ex.what()).find("no such dir"), std::string::npos);
 }
 
+TEST(DirectoryNotFoundExceptionTests, MessageAndPathCtor_StoresDirectoryPath) {
+    DirectoryNotFoundException ex("no such dir", "/tmp/missing");
+    EXPECT_EQ(ex.getDirectoryPathProperty(), "/tmp/missing");
+}
+
+TEST(DirectoryNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(DirectoryNotFoundException("wrapped", std::exception_ptr{}));
+}
+
 // ===========================================================================
 // EndOfStreamException
 // ===========================================================================
