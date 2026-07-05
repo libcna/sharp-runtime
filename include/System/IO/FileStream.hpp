@@ -23,6 +23,7 @@ namespace System::IO
         std::fstream file_;
         FileMode     mode_;
         intcs        length_;
+        bool         canRead_;
         bool         canWrite_;
 
     public:
@@ -38,6 +39,13 @@ namespace System::IO
 
         /**
          * @brief Opens or creates a file with the specified FileMode and FileAccess.
+         * @throws System::ArgumentException if @p access includes Read with FileMode::Append, or
+         *         if @p access excludes Write with a mode that requires write access
+         *         (Truncate, CreateNew, Create, Append).
+         * @throws System::IO::FileNotFoundException if @p mode is Open or Truncate and the file
+         *         does not exist.
+         * @throws System::IO::IOException if @p mode is CreateNew and the file already exists,
+         *         or on another genuine I/O failure.
          */
         FileStream(const std::string& path, FileMode mode, FileAccess access);
 
@@ -57,10 +65,10 @@ namespace System::IO
 
         /** Returns the length of the file in bytes. */
         [[nodiscard]] intcs getLengthProperty() const override;
-        /** Returns true if the stream supports writing. */
+        /** Returns true if the stream was opened with write access. */
         [[nodiscard]] bool  getCanWriteProperty() const override { return canWrite_; }
-        /** Returns true if the stream supports reading. */
-        [[nodiscard]] bool  getCanReadProperty()  const override { return !canWrite_ || mode_ != FileMode::Append; }
+        /** Returns true if the stream was opened with read access. */
+        [[nodiscard]] bool  getCanReadProperty()  const override { return canRead_; }
         /** Returns true if the underlying file is open. */
         [[nodiscard]] bool  IsOpen() const;
     };

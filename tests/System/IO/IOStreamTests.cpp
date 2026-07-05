@@ -830,6 +830,73 @@ TEST(FileStreamTests, WriteByte_Flush_NoThrow) {
     File::Delete(p);
 }
 
+TEST(FileStreamTests, CreateMode_WriteOnly_CanReadIsFalse) {
+    // Regression: getCanReadProperty() previously ignored the actual opened access
+    // and returned true here even though the file wasn't opened with std::ios::in.
+    std::string p = tf("fstream_create_writeonly.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, CreateNew_ExistingFile_ThrowsIOException) {
+    std::string p = tf("fstream_createnew_exists.bin");
+    File::WriteAllText(p, "x");
+    EXPECT_THROW(FileStream(p, FileMode::CreateNew, FileAccess::ReadWrite), System::IO::IOException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, CreateNew_NonExistentFile_Succeeds) {
+    std::string p = tf("fstream_createnew_new.bin");
+    File::Delete(p); // ensure absent
+    EXPECT_NO_THROW({
+        FileStream fs(p, FileMode::CreateNew, FileAccess::ReadWrite);
+        fs.Close();
+    });
+    EXPECT_TRUE(File::Exists(p));
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Open_NonExistentFile_ThrowsFileNotFoundException) {
+    EXPECT_THROW(FileStream(tf("fstream_open_missing.bin"), FileMode::Open, FileAccess::Read),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileStreamTests, Truncate_NonExistentFile_ThrowsFileNotFoundException) {
+    EXPECT_THROW(FileStream(tf("fstream_truncate_missing.bin"), FileMode::Truncate, FileAccess::ReadWrite),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileStreamTests, OpenOrCreate_NonExistentFile_CreatesEmpty) {
+    std::string p = tf("fstream_openorcreate_new.bin");
+    File::Delete(p);
+    FileStream fs(p, FileMode::OpenOrCreate, FileAccess::ReadWrite);
+    EXPECT_EQ(fs.getLengthProperty(), 0);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, OpenOrCreate_ExistingFile_PreservesContent) {
+    std::string p = tf("fstream_openorcreate_existing.bin");
+    File::WriteAllText(p, "hello");
+    FileStream fs(p, FileMode::OpenOrCreate, FileAccess::ReadWrite);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Append_WithReadAccess_ThrowsArgumentException) {
+    std::string p = tf("fstream_append_read.bin");
+    EXPECT_THROW(FileStream(p, FileMode::Append, FileAccess::ReadWrite), System::ArgumentException);
+}
+
+TEST(FileStreamTests, Create_WithReadOnlyAccess_ThrowsArgumentException) {
+    std::string p = tf("fstream_create_readonly.bin");
+    EXPECT_THROW(FileStream(p, FileMode::Create, FileAccess::Read), System::ArgumentException);
+}
+
 // ===========================================================================
 // IsolatedStorageFile
 // ===========================================================================

@@ -2,93 +2,100 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileStream.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
+#include "System/IO/IOException.hpp"
 
-#include <stdexcept>
 #include <filesystem>
 
 namespace System::IO
 {
-    static std::ios::openmode toIosMode(FileMode mode) {
-        switch (mode) {
-            case FileMode::CreateNew:
-                return std::ios::binary | std::ios::in | std::ios::out;
-            case FileMode::Create:
-                return std::ios::binary | std::ios::out | std::ios::trunc;
-            case FileMode::Open:
-                return std::ios::binary | std::ios::in;
-            case FileMode::OpenOrCreate:
-                return std::ios::binary | std::ios::in | std::ios::out;
-            case FileMode::Truncate:
-                return std::ios::binary | std::ios::out | std::ios::trunc;
-            case FileMode::Append:
-                return std::ios::binary | std::ios::out | std::ios::app;
-            default:
-                return std::ios::binary | std::ios::in;
+    namespace {
+        bool HasFlag(FileAccess access, FileAccess flag) {
+            return (access & flag) == flag;
         }
-    }
 
-    static bool isWriteMode(FileMode mode) {
-        return mode != FileMode::Open;
-    }
-
-    static std::ios::openmode toIosModeWithAccess(FileMode mode, FileAccess access)
-    {
-        std::ios::openmode m = std::ios::binary;
-        // Apply FileMode base flags
-        switch (mode) {
-            case FileMode::CreateNew:   m |= std::ios::out; break;
-            case FileMode::Create:      m |= std::ios::out | std::ios::trunc; break;
-            case FileMode::Open:        break;
-            case FileMode::OpenOrCreate:break;
-            case FileMode::Truncate:    m |= std::ios::out | std::ios::trunc; break;
-            case FileMode::Append:      m |= std::ios::out | std::ios::app; break;
-            default: break;
+        // .NET: FileStream(path, mode) defaults access to Write for Append, ReadWrite otherwise.
+        FileAccess DefaultAccessFor(FileMode mode) {
+            return mode == FileMode::Append ? FileAccess::Write : FileAccess::ReadWrite;
         }
-        // Layer FileAccess on top
-        if (access == FileAccess::Read || access == FileAccess::ReadWrite)
-            m |= std::ios::in;
-        if (access == FileAccess::Write || access == FileAccess::ReadWrite)
-            m |= std::ios::out;
-        return m;
+
+        void ValidateModeAndAccess(FileMode mode, FileAccess access) {
+            if (HasFlag(access, FileAccess::Read) && mode == FileMode::Append) {
+                throw System::ArgumentException("FileMode.Append is invalid with FileAccess.Read.", "access");
+            }
+            if (!HasFlag(access, FileAccess::Write)) {
+                if (mode == FileMode::Truncate || mode == FileMode::CreateNew ||
+                    mode == FileMode::Create   || mode == FileMode::Append) {
+                    throw System::ArgumentException(
+                        "Combining FileMode and FileAccess values is invalid: this FileMode requires FileAccess.Write.",
+                        "access");
+                }
+            }
+        }
     }
 
     FileStream::FileStream(const std::string& path)
         : FileStream(path, FileMode::Open) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode)
-        : mode_(mode), length_(0), canWrite_(isWriteMode(mode))
-    {
-        auto iosMode = toIosMode(mode);
-        file_.open(path, iosMode);
-        if (!file_.is_open()) {
-            if (mode == FileMode::Open)
-                throw FileNotFoundException("Unable to find the specified file.", path);
-            throw std::runtime_error("Failed to open file: " + path);
-        }
-        if (!canWrite_) {
-            file_.seekg(0, std::ios::end);
-            length_ = static_cast<intcs>(file_.tellg());
-            file_.seekg(0, std::ios::beg);
-        }
-    }
+        : FileStream(path, mode, DefaultAccessFor(mode)) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
-        : mode_(mode), length_(0),
-          canWrite_(access == FileAccess::Write || access == FileAccess::ReadWrite)
+        : mode_(mode), length_(0), canRead_(false), canWrite_(false)
     {
-        auto iosMode = toIosModeWithAccess(mode, access);
+        ValidateModeAndAccess(mode, access);
+
+        std::error_code ec;
+        bool exists = std::filesystem::is_regular_file(path, ec) && !ec;
+
+        // Existence preconditions that std::fstream's open-mode flags can't express directly.
+        if (mode == FileMode::CreateNew && exists) {
+            throw IOException("Cannot create '" + path + "' because a file or directory with the same name already exists.");
+        }
+        if ((mode == FileMode::Open || mode == FileMode::Truncate) && !exists) {
+            throw FileNotFoundException("Unable to find the specified file.", path);
+        }
+
+        bool wantRead  = HasFlag(access, FileAccess::Read);
+        bool wantWrite = HasFlag(access, FileAccess::Write);
+
+        std::ios::openmode iosMode = std::ios::binary;
+        if (wantRead)  iosMode |= std::ios::in;
+        if (wantWrite) iosMode |= std::ios::out;
+
+        switch (mode) {
+            case FileMode::CreateNew:
+            case FileMode::Create:
+                iosMode |= std::ios::out | std::ios::trunc;
+                break;
+            case FileMode::Truncate:
+                iosMode |= std::ios::out | std::ios::trunc;
+                break;
+            case FileMode::Append:
+                iosMode |= std::ios::out | std::ios::app;
+                break;
+            case FileMode::OpenOrCreate:
+                if (!exists) iosMode |= std::ios::out | std::ios::trunc; // create empty; nothing to preserve
+                break;
+            case FileMode::Open:
+            default:
+                break; // existence already verified above
+        }
+
         file_.open(path, iosMode);
         if (!file_.is_open()) {
-            if (mode == FileMode::Open)
-                throw FileNotFoundException("Unable to find the specified file.", path);
-            throw std::runtime_error("Failed to open file: " + path);
+            throw IOException("Failed to open file '" + path + "'.");
         }
-        if (access == FileAccess::Read) {
-            file_.seekg(0, std::ios::end);
-            length_ = static_cast<intcs>(file_.tellg());
-            file_.seekg(0, std::ios::beg);
-        }
+
+        canRead_  = wantRead;
+        canWrite_ = wantWrite;
+
+        // Query length independently of the stream's own read position/access, matching
+        // .NET's FileStream.Length (available regardless of CanRead).
+        std::error_code sizeEc;
+        auto size = std::filesystem::file_size(path, sizeEc);
+        length_ = sizeEc ? 0 : static_cast<intcs>(size);
     }
 
     FileStream::~FileStream() { Close(); }
