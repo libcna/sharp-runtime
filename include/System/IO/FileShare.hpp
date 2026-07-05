@@ -26,4 +26,24 @@ namespace System::IO {
         Inheritable = 16
     };
 
+    /**
+     * @brief Combines two FileShare values with bitwise OR.
+     * @param a First value.
+     * @param b Second value.
+     * @return The combined value.
+     */
+    inline FileShare operator|(FileShare a, FileShare b) {
+        return static_cast<FileShare>(static_cast<int>(a) | static_cast<int>(b));
+    }
+
+    /**
+     * @brief Masks two FileShare values with bitwise AND.
+     * @param a First value.
+     * @param b Second value.
+     * @return The masked value.
+     */
+    inline FileShare operator&(FileShare a, FileShare b) {
+        return static_cast<FileShare>(static_cast<int>(a) & static_cast<int>(b));
+    }
+
 } // namespace System::IO

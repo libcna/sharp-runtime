@@ -125,6 +125,15 @@ TEST(FileShareTests, Inheritable_Is16) {
     EXPECT_EQ(static_cast<int>(FileShare::Inheritable), 16);
 }
 
+TEST(FileShareTests, OperatorOr_ReadAndWrite_EqualsReadWrite) {
+    EXPECT_EQ(FileShare::Read | FileShare::Write, FileShare::ReadWrite);
+}
+
+TEST(FileShareTests, OperatorAnd_MasksToRead) {
+    auto masked = FileShare::ReadWrite & FileShare::Read;
+    EXPECT_EQ(masked, FileShare::Read);
+}
+
 // ===========================================================================
 // FileAttributes
 // ===========================================================================
