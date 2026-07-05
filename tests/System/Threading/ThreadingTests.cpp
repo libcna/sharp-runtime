@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
 #include "System/Threading/Monitor.hpp"
@@ -173,16 +176,19 @@ TEST(ThreadingTests, Interlocked_Add_Long_ReturnsSum) {
 TEST(ThreadingTests, Monitor_Enter_DoesNotThrow) {
     int obj = 0;
     EXPECT_NO_THROW(Monitor::Enter(&obj));
+    Monitor::Exit(&obj);
 }
 
-TEST(ThreadingTests, Monitor_Exit_DoesNotThrow) {
+TEST(ThreadingTests, Monitor_Exit_AfterEnter_DoesNotThrow) {
     int obj = 0;
+    Monitor::Enter(&obj);
     EXPECT_NO_THROW(Monitor::Exit(&obj));
 }
 
 TEST(ThreadingTests, Monitor_TryEnter_ReturnsTrue) {
     int obj = 0;
     EXPECT_TRUE(Monitor::TryEnter(&obj));
+    Monitor::Exit(&obj);
 }
 
 TEST(ThreadingTests, Monitor_Enter_SetsLockTaken) {
@@ -190,6 +196,57 @@ TEST(ThreadingTests, Monitor_Enter_SetsLockTaken) {
     bool taken = false;
     Monitor::Enter(&obj, taken);
     EXPECT_TRUE(taken);
+    Monitor::Exit(&obj);
+}
+
+TEST(ThreadingTests, Monitor_EnterExit_ProvidesRealMutualExclusion) {
+    int obj = 0;
+    int counter = 0;
+    constexpr int kIterations = 2000;
+    auto worker = [&] {
+        for (int i = 0; i < kIterations; ++i) {
+            Monitor::Enter(&obj);
+            ++counter;
+            Monitor::Exit(&obj);
+        }
+    };
+    std::thread t1(worker);
+    std::thread t2(worker);
+    t1.join();
+    t2.join();
+    EXPECT_EQ(counter, 2 * kIterations);
+}
+
+TEST(ThreadingTests, Monitor_TryEnter_WhileHeldByAnotherThread_ReturnsFalse) {
+    int obj = 0;
+    Monitor::Enter(&obj);
+    std::atomic<bool> acquired{true};
+    std::thread t([&] { acquired = Monitor::TryEnter(&obj); });
+    t.join();
+    EXPECT_FALSE(acquired.load());
+    Monitor::Exit(&obj);
+}
+
+TEST(ThreadingTests, Monitor_PulseAll_WakesWaitingThread) {
+    // Classic monitor predicate-loop pattern: `signaled` is only ever read/written while
+    // holding the monitor lock, so there is no lost-wakeup window regardless of whether the
+    // waiter reaches Wait() before or after the signaling thread sets the predicate.
+    int obj = 0;
+    bool signaled = false;
+    std::atomic<bool> woke{false};
+    std::thread waiter([&] {
+        Monitor::Enter(&obj);
+        while (!signaled) Monitor::Wait(&obj);
+        woke = true;
+        Monitor::Exit(&obj);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    Monitor::Enter(&obj);
+    signaled = true;
+    Monitor::PulseAll(&obj);
+    Monitor::Exit(&obj);
+    waiter.join();
+    EXPECT_TRUE(woke.load());
 }
 
 // ---------------------------------------------------------------------------

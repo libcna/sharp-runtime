@@ -5,7 +5,11 @@
 #include <mutex>
 #include <condition_variable>
 
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+
 namespace System::Threading {
+
+    using SharpRuntime::intcs;
 
     /**
      * Represents a thread synchronization event that resets automatically after releasing a single waiting thread.
@@ -46,7 +50,7 @@ namespace System::Threading {
          * @param milliseconds Maximum time to wait.
          * @return True if the event was signaled (then auto-resets); false on timeout.
          */
-        bool WaitOne(int milliseconds) {
+        bool WaitOne(intcs milliseconds) {
             std::unique_lock<std::mutex> lk(mutex_);
             bool ok = cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return signaled_; });
             if (ok) signaled_ = false;

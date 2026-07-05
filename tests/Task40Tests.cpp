@@ -1266,9 +1266,10 @@ TEST(UnicodeRangesTests, None_LengthZero) {
 
 using System::Threading::CancellationTokenRegistration;
 
-TEST(CancellationTokenRegistrationTests, DefaultCtor_IsActive) {
+TEST(CancellationTokenRegistrationTests, DefaultCtor_IsNotActive) {
+    // A default-constructed registration has no associated callback to unregister.
     CancellationTokenRegistration reg;
-    EXPECT_TRUE(reg.getIsActiveProperty());
+    EXPECT_FALSE(reg.getIsActiveProperty());
 }
 
 TEST(CancellationTokenRegistrationTests, Dispose_BecomesInactive) {

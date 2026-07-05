@@ -3,9 +3,28 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
+
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Threading {
+
+    using SharpRuntime::intcs;
+
+    /** @brief Internal shared cancellation state; not part of the public API. */
+    namespace Detail {
+        struct CancellationState {
+            std::atomic<bool> cancelled{false};
+            std::mutex mutex;
+            std::unordered_map<intcs, std::function<void()>> callbacks;
+            intcs nextId = 0;
+        };
+    }
+
+    class CancellationTokenRegistration;
 
     /**
      * @brief Propagates notification that operations should be cancelled.
@@ -15,24 +34,35 @@ namespace System::Threading {
      * @note Status: Partial
      */
     class CancellationToken {
-        std::shared_ptr<std::atomic<bool>> cancelled_;
+        std::shared_ptr<Detail::CancellationState> state_;
     public:
         /** Constructs a non-cancelled CancellationToken. */
-        CancellationToken() : cancelled_(std::make_shared<std::atomic<bool>>(false)) {}
-        /** Constructs a CancellationToken backed by the given shared flag. */
-        explicit CancellationToken(std::shared_ptr<std::atomic<bool>> flag) : cancelled_(std::move(flag)) {}
+        CancellationToken() : state_(std::make_shared<Detail::CancellationState>()) {}
+        /** Constructs a CancellationToken backed by the given shared state. */
+        explicit CancellationToken(std::shared_ptr<Detail::CancellationState> state) : state_(std::move(state)) {}
 
         /** Returns true if cancellation has been requested. */
-        [[nodiscard]] bool getIsCancellationRequestedProperty() const { return cancelled_->load(); }
+        [[nodiscard]] bool getIsCancellationRequestedProperty() const { return state_->cancelled.load(); }
 
         /** Throws OperationCanceledException if cancellation has been requested. */
         void ThrowIfCancellationRequested() const;
+
+        /**
+         * @brief Registers a callback invoked when this token is cancelled.
+         *
+         * If the token is already cancelled, @p callback runs synchronously before this method
+         * returns. Otherwise it runs synchronously on whichever thread calls
+         * CancellationTokenSource::Cancel().
+         */
+        CancellationTokenRegistration Register(std::function<void()> callback);
 
         /** Returns a CancellationToken that is never in the cancelled state. */
         static const CancellationToken& None() {
             static CancellationToken none;
             return none;
         }
+
+        friend class CancellationTokenSource;
     };
 
 } // namespace System::Threading

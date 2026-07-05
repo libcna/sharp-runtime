@@ -5,11 +5,20 @@
 #include <functional>
 #include <future>
 #include <thread>
+
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Threading/IThreadPoolWorkItem.hpp"
+#include "System/Threading/RegisteredWaitHandle.hpp"
+#include "System/Threading/WaitCallback.hpp"
+#include "System/Threading/WaitHandle.hpp"
+#include "System/Threading/WaitOrTimerCallback.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
 namespace System::Threading {
+
+    using SharpRuntime::intcs;
 
     /** Provides a pool of threads that can be used to execute tasks, post work items, and other operations. */
     class ThreadPool {
@@ -60,6 +69,28 @@ namespace System::Threading {
         static bool SetMinThreads(int /*workerThreads*/, int /*completionPortThreads*/) { return true; }
         /** Sets the maximum number of concurrent threads; always returns true in this stub. */
         static bool SetMaxThreads(int /*workerThreads*/, int /*completionPortThreads*/) { return true; }
+
+        /** Queues an IThreadPoolWorkItem's Execute() for execution on a detached thread; returns true on success. */
+        static bool UnsafeQueueUserWorkItem(IThreadPoolWorkItem* callBack, bool /*preferLocal*/) {
+#if defined(__EMSCRIPTEN__)
+            (void)callBack;
+            throw System::PlatformNotSupportedException("ThreadPool::UnsafeQueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
+#else
+            std::thread([callBack]{ if (callBack) callBack->Execute(); }).detach();
+            return true;
+#endif
+        }
+
+        /**
+         * @brief Registers a wait on waitObject; callBack is invoked when it is signalled or the timeout elapses.
+         * @note Deliberate simplification: implemented via a dedicated background thread that polls
+         * waitObject rather than true OS-level thread-pool wait registration.
+         */
+        static RegisteredWaitHandle RegisterWaitForSingleObject(
+            WaitHandle* waitObject, WaitOrTimerCallback callBack, void* state,
+            intcs millisecondsTimeOutInterval, bool executeOnlyOnce) {
+            return RegisteredWaitHandle(waitObject, std::move(callBack), state, millisecondsTimeOutInterval, executeOnlyOnce);
+        }
     };
 
 } // namespace System::Threading
