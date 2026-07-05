@@ -327,6 +327,15 @@ TEST(FileNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw FileNotFoundException("err"), IOException);
 }
 
+TEST(FileNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(FileNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+TEST(FileNotFoundExceptionTests, MessageFileNameAndInnerCtor_StoresFileName) {
+    FileNotFoundException ex("not found", "/tmp/missing.txt", std::exception_ptr{});
+    EXPECT_EQ(ex.getFileNameProperty(), "/tmp/missing.txt");
+}
+
 // ===========================================================================
 // DirectoryNotFoundException
 // ===========================================================================

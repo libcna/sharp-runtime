@@ -21,4 +21,11 @@ namespace System::IO {
     FileNotFoundException::FileNotFoundException(const std::string& message, const std::string& fileName)
         : IOException(message), fileName_(fileName) {}
 
+    FileNotFoundException::FileNotFoundException(const std::string& message, std::exception_ptr inner)
+        : IOException(message, std::move(inner)) {}
+
+    FileNotFoundException::FileNotFoundException(const std::string& message, const std::string& fileName,
+                                                  std::exception_ptr inner)
+        : IOException(message, std::move(inner)), fileName_(fileName) {}
+
 } // namespace System::IO
