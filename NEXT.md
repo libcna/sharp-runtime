@@ -1,138 +1,118 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `0d2a17e`) — 9616 tests passing*
+
+*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `743de40`)*
 
 ---
 
 ## 1. Project summary
 
-**sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
+**sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET
+`System.*` namespace, so that C#/XNA game code ported to C++ can compile against these headers
+with minimal source changes.
 
-- **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. Fully complete: `System.Collections.Specialized`, `System.Diagnostics`(+`.CodeAnalysis`), `System.Globalization`, `System.IO`, `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq`, `System.Numerics` (except `Vector<T>`, left `tobedecided`), `System.Threading` (59/60; `WaitHandleExtensions` ignored), `System.Threading.Tasks` (16/17; `ConcurrentExclusiveSchedulerPair` ignored), **`System.Xml`** (62/62 — classic `XmlDocument` DOM API wrapping vendored tinyxml2, `XmlReader`/`XmlWriter`, `XmlNamespaceManager`, resolvers, settings, `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader` via composition, `XmlParserContext`). Largest remaining `System.*` namespaces by todo count: `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26), `System.Xml.Linq` (24, separate from `System.Xml` — untouched).
-- **Header count:** ~610+ `.hpp` files under `include/System/` (+ `SharpRuntime/`).
-- **Key architectural decisions:** no runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (`int32_t`), `bytecs` (`uint8_t`), etc. Inner exceptions use `std::exception_ptr`, never `const std::exception&`.
+- **Main goal:** provide C++ counterparts of `System.*` types so that **CNA** (a C++ XNA port)
+  and **mobile-eggbert** (a ported Windows Phone game) can build and run without a .NET runtime.
+- **Current phase:** active, incremental porting. Progress is tracked in a local SQLite database,
+  `plan.sqlite3` (gitignored, not part of the repo — local workflow state only), which lists every
+  type from `dotnet/runtime` and its port status. The process is documented in `prompt.md` and
+  `CLAUDE.md` at the repo root; this file is a point-in-time snapshot, not the process definition.
+- **Important architectural decisions:**
+  - No runtime reflection, no GC, no IL — `System::GC`, `System::Type`, `System::Activator` are
+    intentional no-op/stub end states, not gaps.
+  - Properties are exposed as `getXxxProperty()` / `setXxxProperty()` methods, never public fields.
+  - .NET primitive types map to `SharpRuntime::intcs` (`int32_t`), `bytecs` (`uint8_t`), `longcs`,
+    `uintcs`, etc. — public APIs mirroring a .NET `int` parameter must use `intcs`, not `int`.
+  - Inner exceptions use `std::exception_ptr`, never `const std::exception&`.
+  - No LINQ port — `std::ranges` is used instead in new code. `System::Linq` exists as a small,
+    intentionally partial header (~25 of .NET's ~200 `Enumerable` methods), not a full LINQ engine.
+  - Vendored third-party libraries: GoogleTest, nlohmann/json, tinyxml2, miniz. Never commit binaries.
+  - Namespaces are opened with C++17 nested syntax: `namespace System::Collections::Generic {`.
+  - Complex types get a `.hpp` + `.cpp` pair; simple types may be header-only.
 
 ---
 
 ## 2. Current status
 
 ### Build
-**Clean.** `cmake --build build --parallel 4` — zero errors, zero warnings.
+**Clean** as of HEAD `743de40` — `cmake --build build --parallel 4` produced zero errors and zero
+warnings on the last verified run. (Not rebuilt again for this handoff, per instruction not to
+build/develop right now — treat as "last known good," not re-verified this instant.)
 
 ### Tests
-**9616 tests passing** across 975 test suites. Zero failures, stable across repeated runs.
+**9616 / 9616 tests passing** across 975 GoogleTest suites, last verified at HEAD `743de40`,
+stable across 3 consecutive runs (no flakiness observed). `./build/SharpRuntimeTests` is the
+single test binary covering the whole library.
 
-### Branch / remote state
-- `feature/work` — local working branch, HEAD `0d2a17e`, pushed to `origin/feature/work`. Routine pushes here are pre-authorized per project convention.
-- `develop` — not touched this session. Only merge/push to `develop` when the user explicitly asks in that turn.
-- `master` — untouched. Do not touch without explicit instruction.
-- `plan.sqlite3` is gitignored — local workflow state only, not part of what gets pushed.
+### CLI / tools / apps / libraries
+This repository is a **library only** — there is no CLI, app, or standalone tool. The only build
+products are the static library (`SHARP_RUNTIME`) and the test binary (`SharpRuntimeTests`). The
+GoogleTest suite is the primary "demo" of working functionality; there is no separate sample app
+in this repo (CNA and mobile-eggbert, which consume this library, are separate projects).
 
-### IMPORTANT: two local clones exist
-This environment has **two separate git clones** of the same repo:
-- `/rv/.../sharp-runtime_work` — primary working directory, **on `feature/work`**. All active porting must happen here.
-- `/rv/.../sharp-runtime` — a second clone, was left on `develop` in a prior session. **Do not edit files here.** Always double-check `pwd`/absolute paths point at `sharp-runtime_work` before editing.
+### Recently implemented (this session, all fully complete and tested)
+- `System.Numerics` — `Vector2/3/4`, `Matrix3x2/4x4`, `Plane`, `Quaternion`, `BFloat16`,
+  `BitOperations`, `Complex`, `BigInteger`, generic-math interface stubs, `TotalOrderIeee754Comparer`.
+  (`Vector<T>`, the generic hardware-SIMD type, deliberately left undecided — see §4.)
+- `System.Linq` — classified; only `Enumerable` counts as ported (existing practical-subset
+  `System::Linq.hpp`), everything else (LINQ-to-Objects internals, `IQueryable`/PLINQ/async-LINQ)
+  is out of scope per the "no LINQ" architectural rule.
+- `System.IO.IsolatedStorage`, `System.IO.Hashing` (incl. `XxHash3`/`XxHash128`),
+  `System.IO.Compression`, `System.IO` — all fully complete from earlier in this session.
+- `System.Threading` (59/60 — `WaitHandleExtensions` ignored, needs a native `SafeWaitHandle` this
+  port doesn't expose). Fixed a real bug: `Monitor` was a complete no-op stub.
+- `System.Threading.Tasks` (16/17 — `ConcurrentExclusiveSchedulerPair` ignored, needs a real
+  pluggable-scheduler queuing engine this runtime doesn't have).
+- `System.Xml` (62/62). Classic `XmlDocument` DOM API wrapping vendored tinyxml2, `XmlReader`/
+  `XmlWriter`, `XmlNamespaceManager`, resolvers, reader/writer settings, `XmlTextReader`/
+  `XmlTextWriter`/`XmlValidatingReader` (via composition, not inheritance — see §6), `XmlParserContext`.
+  Fixed three real bugs found during review (see §3).
 
-### What works (this session's commits, most recent first)
-
-**`System.Diagnostics.StackFrameExtensions`** — genuine new port (no header existed). Free-function-style static helper class (`HasSource`, `HasILOffset`, `HasMethod`, `HasNativeImage`, `GetNativeIP`, `GetNativeImageBase`) mirroring .NET's extension methods, since C++ has no extension-method syntax. `GetNativeIP`/`GetNativeImageBase` always return `IntPtr::Zero`, matching .NET CoreLib's own base implementation (not a simplification — that's .NET's real behavior too).
-
-**`System.Globalization` — full pass, every single item had at least one real bug**, not just missing status (same pattern as last session's `Collections.Specialized` sweep):
-
-- **`Calendar`** (base class) — `GetWeekOfYear` completely ignored the `rule`/`firstDayOfWeek` parameters (always returned `dayOfYear/7+1`); ported .NET's real `GetFirstDayWeekOfYear`/`GetWeekOfYearFullDays`/`GetWeekOfYearOfMinSupportedDateTime` algorithm. `AlgorithmType` hardcoded `SolarCalendar` instead of .NET's real default `Unknown`. `ToFourDigitYear` used the wrong century-derivation formula (`MaxSupportedDateTime` instead of a real `TwoDigitYearMax` property, which didn't exist) — added `TwoDigitYearMax` get/set and fixed the formula to match .NET exactly.
-- **Every concrete calendar subclass** (`Gregorian`, `Hebrew`, `Hijri`, `Japanese`, `Julian`, `Korean`, `Persian`, `Taiwan`, `ThaiBuddhist`, `UmAlQura`) — `Eras` was inherited unoverridden from the base (`{0}`/`CurrentEra`), inconsistent with `GetEra()` which correctly returns the calendar's real era id; added the override to all ten. `AlgorithmType` was hardcoded `SolarCalendar` on **all** of them (including `Hebrew`, which is Lunisolar, and `Hijri`/`UmAlQura`, which are Lunar) — fixed each to the correct value. `TwoDigitYearMax` getter/setter were plain non-virtual methods that didn't call `VerifyWritable()` — a "read-only" calendar's `TwoDigitYearMax` could still be mutated; added `override` + `VerifyWritable()` to five of them. `GregorianCalendar`'s constructor/`CalendarType` setter had zero range validation. Several calendars threw `std::out_of_range` instead of `ArgumentOutOfRangeException` for era/year/month range checks.
-- **`CharUnicodeInfo`** — `GetDigitValue` was just an alias for `GetDecimalDigitValue`, losing .NET's real distinction (superscript digits ¹²³ have a Digit value but aren't Decimal digits). All `(string, index)` overloads had zero bounds validation.
-- **`CompareInfo`** — `GetHashCode`/`GetSortKey` completely ignored `CompareOptions::IgnoreCase`, so `"Hello"` and `"hello"` hashed differently and produced non-equal sort keys despite comparing equal — a real contract violation. Substring `Compare` overload used unvalidated `substr`, throwing `std::out_of_range` instead of `ArgumentOutOfRangeException`.
-- **`CultureInfo`** — `InvariantCulture()`/`CurrentCulture()`/`CurrentUICulture()` violated this project's own `getXxxProperty()` convention (every other property in the same file already followed it) — renamed. Added real `setCurrentCultureProperty()`/`setCurrentUICultureProperty()` (.NET's are genuinely settable; ported C# startup code commonly does `CultureInfo.CurrentCulture = ...`).
-- **`CultureNotFoundException`** — the 2-arg `(string, string)` constructor claimed to be .NET's `(paramName, message)` overload but actually stored the second arg as `InvalidCultureName`, matching neither real .NET overload. Fixed the mapping and added the two real 3-arg overloads that do carry `InvalidCultureName`.
-- **`DateTimeFormatInfo`** / **`NumberFormatInfo`** — nearly every field (`FullDateTimePattern`, `AMDesignator`, `NumberDecimalSeparator`, `CurrencySymbol`, `NativeDigits`, ~25 more) was a **plain public mutable field** — violating the `getXxxProperty()`/`setXxxProperty()` convention, and worse, making `ReadOnly()`-produced instances not actually read-only (any caller could mutate a "read-only" instance's fields directly). Converted every field to private with accessors enforcing `VerifyWritable()`. Array-typed getters (day/month names, group sizes) now return copies, matching .NET's `Clone()`-on-read behavior.
-- **`GregorianCalendar`** — see calendar bullet above.
-- **`IdnMapping`** — all internal Punycode/UTF-8 validation threw `std::invalid_argument` instead of `ArgumentException`. Missing `GetHashCode()` (had `operator==` but no hash).
-- **`ISOWeek`** — `GetWeeksInYear` used a wrong formula (`P(y)==3 || P(y)==4` instead of .NET's real `P(y)==4 || P(y-1)==3`) — these agree for many years but diverge for others (e.g. **2032**, a real 53-ISO-week year, was computed as 52). Also, `ISOWeek.ToDateTime(year, week, dayOfWeek)` — the primary API for building a date from an ISO week — was **entirely missing**; added it, and reimplemented `GetYearStart`/`GetYearEnd`/`GetWeekOfYear`/`GetYear` in terms of it to match .NET's actual structure.
-- **`RegionInfo`** — `CurrentRegion()` naming violation (same as `CultureInfo`) — renamed to `getCurrentRegionProperty()`.
-- **`StringInfo`** — `SubstringByTextElements(int[, int])` had **zero** bounds validation; negative/out-of-range inputs either silently clamped via `substr`'s forgiving semantics or threw the wrong exception type. Added validation matching .NET's exact unsigned-comparison logic.
-- **`TextElementEnumerator`** — `GetTextElement()`/`ElementIndex` only checked "not started," not "enumeration exhausted" — after `MoveNext()` returned `false`, `GetTextElement()` kept returning the **last element's stale value** instead of throwing. Rewrote the offset/length state machine to mirror .NET's actual signed-int wraparound trick in `Reset()`, so both boundary conditions now throw `InvalidOperationException` correctly (was `std::runtime_error`).
-- **`TextInfo`** — `ListSeparator` setter didn't call `VerifyWritable()` — same read-only-not-enforced bug as `DateTimeFormatInfo`/`NumberFormatInfo`.
-- **`TimeSpanStyles`** — correct values, but missing Doxygen doc-comments and the `operator|`/`operator&` helpers every other `[Flags]`-equivalent enum in this directory defines. Added both.
-- **Clean, no changes needed:** `CalendarAlgorithmType`, `CalendarWeekRule`, `CompareOptions`, `CultureTypes`, `DateTimeStyles`, `DaylightTime`, `DigitShapes`, `GregorianCalendarTypes` (values only — constructor validation was the actual bug), `NumberStyles`, `SortKey`, `SortVersion`, `UnicodeCategory` (values correct, only doc-comments were missing).
-
-Also this session (before the Globalization sweep): `System.Diagnostics.DebugProvider`, `DebuggerGuidedStepThroughAttribute`, `System.Diagnostics.CodeAnalysis` (28/28 complete) — see prior session notes in git log if needed, superseded by this file.
-
-**`System.IO` — in progress, 13/59 items done, same "every reviewed item had a real bug" pattern continuing:**
-
-- **`BinaryReader`** — constructor didn't null-check the stream (`std::invalid_argument` instead of `ArgumentNullException`, and no `CanRead` check); fixed-read helper threw `std::runtime_error` on premature EOF instead of `EndOfStreamException`; **no disposed-state tracking at all** (`Read*` after `Close()` just touched a closed/null stream instead of throwing `ObjectDisposedException`); missing the public `ReadBytes(int) -> vector<byte>` method entirely (trim-on-EOF semantics, distinct from the exact-fill `Read(buffer,offset,count)`); `Read7BitEncodedInt()` was inlined into `ReadString()` without .NET's real 5-byte overflow check (a malformed length prefix wouldn't have been rejected).
-- **`BinaryWriter`** — same null-stream gap (crash risk, not just wrong exception — no check at all); `Close()` unconditionally closed the stream **ignoring `leaveOpen_`**, inconsistent with its own destructor which checked it correctly; no disposed tracking, same as `BinaryReader`. Extracted `Write7BitEncodedInt()` as a public method to mirror the `BinaryReader` fix.
-- **`BufferedStream`** — null-stream crash risk (no check); `Position` getter/setter weren't delegated to the inner stream even though every other operation was — fell through to the `NotSupportedException` base default.
-- **`Directory`** (static class) — `Exists()` called throwing `std::filesystem` overloads, violating .NET's never-throws contract; `Delete()`/`Move()`/`GetFiles()`/`GetDirectories()` on a nonexistent path silently no-op'd or threw the wrong exception type instead of `DirectoryNotFoundException` (`std::filesystem::remove`/`rename` don't set `error_code` when the source simply doesn't exist — that's not treated as an error by the standard library, but .NET wants it treated as one here).
-- **`DirectoryInfo`** — identical bug class to `Directory` (same throwing-overload / missing-existence-check issues), fixed the same way.
-- **`DirectoryNotFoundException`** — missing the `(message, Exception)` and `(message, directoryPath)` constructors (the latter also exposing a `DirectoryPath` property) — added both.
-- **`DriveInfo`** — `AvailableFreeSpace`/`TotalFreeSpace`/`TotalSize` were hardcoded to `0` and documented as a "stub," but unlike genuine OS-data gaps elsewhere, real values are trivially available cross-platform via `std::filesystem::space()` — implemented properly. `getVolumeLabel()` violated the `getXxxProperty()` convention — renamed.
-- **`DriveNotFoundException`** — genuine new port (no header existed).
-- **`DriveType`** — already correct, just embedded in `DriveInfo.hpp` rather than its own file; left as-is (functionally fine, not a bug).
-- **`EndOfStreamException`** — wrong default message text (real logic-parity mismatch, not just cosmetic) and missing `(message, Exception)` constructor.
-- **`EnumerationOptions`** — default `AttributesToSkip` was `0x022`, not `Hidden|System` (`0x06`) as its own adjacent comment claimed and as .NET's real default is — doesn't correspond to any meaningful attribute combination, a clear typo-class bug. Missing the real `BufferSize` property.
-- **`ErrorEventArgs`**, **`ErrorEventHandler`** — genuine new ports (no headers existed); `FileSystemWatcher.Error` event plumbing.
-
-### Recurring bug patterns worth knowing (confirmed again and again this session)
-1. **`Eras`/similar "list" properties inherited unoverridden from a base class default** — when a subclass overrides `GetEra()` to return a real value but doesn't override the corresponding "list all eras" property, the two go out of sync. Check every override for a sibling property that also needs overriding.
-2. **Static factory methods (`InvariantX()`, `CurrentX()`) not following `getXxxProperty()`** — found on `CultureInfo`, `RegionInfo`, later also on `DateTimeFormatInfo`/`NumberFormatInfo` (already correct there, established the pattern others should have followed). Always grep for `static const X&` methods without `get`/`Property` in the name.
-3. **Public mutable fields instead of `getXxxProperty()`/`setXxxProperty()`, with `ReadOnly()` that doesn't actually protect anything** — the single biggest bug class this session (`DateTimeFormatInfo`, `NumberFormatInfo`). Any type with a `ReadOnly(T)` static factory needs its setters (not just a bare `isReadOnly_` flag) to actually call `VerifyWritable()`.
-4. **Wrong exception types** — `std::out_of_range`/`std::invalid_argument`/`std::runtime_error` instead of `ArgumentOutOfRangeException`/`ArgumentException`/`InvalidOperationException`. Endemic across `Globalization`, same as `Specialized` last session. Always check `#include <stdexcept>` + a `throw std::...` pair as a smell.
-5. **Enumerator "exhausted" state not distinguished from "not started"** — `TextElementEnumerator` checked only one boundary condition, allowing stale reads. When porting a `MoveNext()`/`Current` pair, verify **both** boundary conditions throw, not just the pre-start one.
-6. **`AlgorithmType`/similar "characterization" properties hardcoded to one value across an entire type hierarchy** — every `Calendar` subclass hardcoded `SolarCalendar`, silently wrong for the Lunar/Lunisolar ones. When a base class provides a default virtual implementation, check whether *every* subclass actually needs its own override, not just some.
+### What does not work yet
+Large namespaces remain unclassified/unported. By remaining `todo` count in `plan.sqlite3`:
+`System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31),
+`System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25),
+`System.Xml.Linq` (24, separate from `System.Xml` — untouched), `System.Net.Sockets` (21), and
+smaller `System.Net.*`/`System.Text.*`/`System.Xml.XPath` namespaces. `System::Net::Sockets::Socket`
+and `TcpListener` have no header at all (not POSIX-only — simply not started).
 
 ---
 
 ## 3. Recent changes
 
-Full history: `git log --oneline`. Most recent first, this session's commits:
+Most recent first (see `git log --oneline` for full history):
 
 | Commit | Change |
 |--------|--------|
-| `0d2a17e` | Ported remaining `System.Xml` support types (10 items): `XmlNamespaceManager` (real scope-stack impl), `XmlResolver`/`XmlUrlResolver` (local-file-only)/`XmlSecureResolver` (always throws, matching modern .NET's XXE-hardened behavior), `XmlReaderSettings`/`XmlWriterSettings` (property bags), `XmlParserContext`, `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader` (composition-based wrappers around `XmlReader`/`XmlWriter`, since those are concrete non-extensible classes here, not abstract hierarchies like .NET's). Completes `System.Xml` (62/62). |
-| `26a1073` | Ported `System.Xml`'s classic `XmlDocument` DOM API (`XmlNode`/`XmlDocument`/`XmlElement`/`XmlAttribute`/`XmlCharacterData`+subclasses/etc.) wrapping vendored tinyxml2. Fixed two real bugs: `InnerText`/`InnerXml` setters called the virtual `RemoveAll()` (which `XmlElement` overrides to also strip attributes) instead of a children-only path, so setting `InnerText` silently wiped attributes too; and `XmlDocument`'s own `ownerDocument_` is (correctly) always null, but every internal node-wrapping operation assumed it was set, so calling them directly on the document object silently no-op'd — added a `GetDocument()` virtual (mirrors .NET's internal `Document` property) and routed everything through it. Also added missing `WriteTo` overrides for text/comment/CDATA nodes (previously silently dropped from `XmlWriter`-based serialization) and a new `XmlWriter::WriteCData`. This batch had been started by a background agent that stopped mid-task without finishing or fully committing; picked up directly to find/fix the bugs, add the missing pieces, and commit. |
-| `017b01b` | Fixed a flaky `IsolatedStorageFileTests` test (compared live disk free-space across two calls for exact equality — legitimately racy under concurrent disk activity). |
-| `170142b` | Ported `System.Threading.Tasks` (16/17 items — `Task`, `TaskCompletionSource`, `ValueTask`, `Parallel`+`ParallelOptions`/`ParallelLoopResult`/`ParallelLoopState` (added real `Stop()`/`Break()` support), `TaskStatus`, `TaskCreationOptions`, `TaskContinuationOptions`, `ConfigureAwaitOptions`, `TaskCanceledException`, `TaskSchedulerException`, `TaskScheduler`, `TaskFactory`, `UnobservedTaskExceptionEventArgs`; `ConcurrentExclusiveSchedulerPair` ignored). Fixed `Task::FromCanceled(CancellationToken)` silently discarding its argument and `Parallel.hpp`'s `int`-instead-of-`intcs` convention violation. 80 new tests. |
-| `62bfef5` | Ported `System.Threading` (59/60 items). Fixed `Monitor` being a complete no-op stub (Enter/Exit/Wait/Pulse did nothing) — replaced with a real pointer-identity-keyed registry of `recursive_timed_mutex`+`condition_variable_any`. Fixed `Mutex` (didn't derive from `WaitHandle`, `WaitOne(ms)` didn't actually block up to timeout), `Semaphore`/`SemaphoreSlim` (no validation), `ReaderWriterLockSlim` (`IsReadLockHeld` etc. always returned `false`), `Barrier` (post-phase exceptions silently swallowed instead of wrapped in `BarrierPostPhaseException`). Added `AsyncLocalValueChangedArgs`, `ExecutionContext`, `IThreadPoolWorkItem`, `LockCookie`, `ReaderWriterLock` (legacy), `RegisteredWaitHandle`, `WaitCallback`, `WaitOrTimerCallback`, `WaitHandle::WaitAll`/`WaitAny`. 33 new tests. |
-| `6562275` | Updated `NEXT.md` handoff doc. |
-| `df32df9` | Ported remaining `System.Numerics` generic-math stubs (`ITrigonometricFunctions`, `IHyperbolicFunctions`, `ILogarithmicFunctions`, `IExponentialFunctions`, `IPowerFunctions`, `IRootFunctions`, `IEqualityOperators`, `IFloatingPointConstants`, `IBinaryFloatingPointIeee754`); fixed `DivisionRounding` (was missing `AwayFromZero`/`Euclidean`); added `TotalOrderIeee754Comparer<T>` (float/double/Half specializations). Classified `System.Linq` (LINQ/`IQueryable`/PLINQ/async-LINQ out of scope; `Enumerable` marked ported via existing practical-subset `System::Linq.hpp`) and closed out `System.Numerics` (`Vector2/3/4`, `Matrix3x2/4x4`, `Plane`, `Quaternion`, `BFloat16`, `BitOperations`, `Complex`, `BigInteger` already existed/tested, just unmarked; `Vector<T>` left `tobedecided`). |
-| `6d03a2a` | Ported `System.IO.Hashing.XxHash3`/`XxHash128` (streaming + one-shot, official .NET test vectors, portable 64×64→128 multiply avoiding `__uint128_t`/`UInt128` dependency). Completes `System.IO.Hashing`. |
-| `587b173` | Ported `System.IO.IsolatedStorage`: fixed `IsolatedStorageFile` to actually inherit `IsolatedStorage`; added missing `IsolatedStorageException` constructors; rewrote `IsolatedStorageFileStream` as a thin `FileStream` subclass (fixed a real bug — `FileMode::Open` was incorrectly read-only). Completes `System.IO.IsolatedStorage`. |
-| `f59a86b` | Ported `System.IO.Hashing`: `NonCryptographicHashAlgorithm` base, `Adler32`, `Crc32`/`Crc32ParameterSet`, `Crc64`/`Crc64ParameterSet`; fixed `XxHash32`/`XxHash64` gaps (wrong types, big-endian bug, missing `Clone()`). |
-| `f82110e` | Ported `System.IO.Compression.ZipFile` and `ZipFileExtensions`. |
-| `306d5a2` | Ported `System.IO.Compression` streamless codec API (`DeflateDecoder`/`Encoder`, `GZipDecoder`/`Encoder`, `ZLibDecoder`/`Encoder`) and `ZLibStream`. Completes `System.IO.Compression`. |
-| `2c302f2` | Ported `System.IO.UnmanagedMemoryStream` and `UnmanagedMemoryAccessor`. |
-| `672c617` | Ported `System.IO.RandomAccess` and `System.IO.Path`. Completes `System.IO` (56 items). |
-| `8e85f91` | Fixed `TextElementEnumerator` exhausted-state bug (stale reads after `MoveNext()==false`); `TextInfo.ListSeparator` read-only not enforced; added doc-comments to `TimeSpanStyles`/`UnicodeCategory`. |
-| `4af2e31` | Fixed `RegionInfo::CurrentRegion()` naming; `StringInfo.SubstringByTextElements` missing bounds validation. |
-| `dd47f56` | Fixed `NumberFormatInfo` public-fields-violate-convention + read-only-not-enforced (same class of bug as `DateTimeFormatInfo`). |
-| `15ff337` | Fixed `IdnMapping` wrong exception type; added missing `GetHashCode()`. |
-| `a3a207a` | Fixed `ISOWeek.GetWeeksInYear` wrong formula (2032 bug); added missing `ToDateTime` API. |
-| `98456e5` | Fixed Julian/Korean/Persian/Taiwan/ThaiBuddhist/UmAlQura calendars: wrong `Eras`, unenforced `TwoDigitYearMax`, wrong exception types. |
-| `65e60fa` | Fixed Hijri/Japanese calendars: wrong `Eras`, wrong exception types, unenforced `TwoDigitYearMax`. |
-| `2e66329` | Fixed `HebrewCalendar`: wrong `Eras`, wrong exception types. |
-| `60d1332` | Fixed `GregorianCalendar`: wrong `Eras`, unvalidated constructor/setter. |
-| `6a076c9` | Fixed `DateTimeFormatInfo` public-fields-violate-convention + read-only-not-enforced. |
-| `53b4aea` | Fixed `CultureInfo` static property naming; fixed `CultureNotFoundException` ctor overloads. |
-| `c4726fe` | Fixed `CompareInfo`: `IgnoreCase` ignored by `GetHashCode`/`GetSortKey`; wrong exception type. |
-| `cd0a731` | Fixed `CharUnicodeInfo`: `GetDigitValue`/`GetDecimalDigitValue` conflation; missing bounds checks. |
-| `2cba6da` | Fixed `Calendar.AlgorithmType` wrong default; added correct overrides per calendar. |
-| `afa0f8a` | Fixed `Calendar.GetWeekOfYear` ignoring `rule`/`firstDayOfWeek`; added `TwoDigitYearMax`. |
-| `4df9ddc` | Ported `System.Diagnostics.StackFrameExtensions` (new — no header existed). |
-
-Earlier history (prior sessions): `System.Collections.Specialized` full pass, `System.Diagnostics`/`CodeAnalysis`, `System.Collections.ObjectModel` full pass, `System.Collections` (non-generic/.Concurrent/.Frozen/.Generic/.Immutable), core value types, exception hierarchy, `DateTime`/`TimeSpan`/`TimeZoneInfo`, `Span`/`Memory`, `Buffers`, `IO`/`IO.Compression`/`IO.Hashing`, `Text`/`Text.Json`, `Threading`/`Threading.Tasks`, `Numerics`, `Net`/`Net.Http`, `Xml`.
+| `743de40` | `NEXT.md` update only (System.Xml completion note). |
+| `0d2a17e` | Added `XmlNamespaceManager` (real scope-stack), `XmlResolver`/`XmlUrlResolver`/`XmlSecureResolver`, `XmlReaderSettings`/`XmlWriterSettings`, `XmlParserContext`, `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader`. Completes `System.Xml` (62/62). New tests: `XmlNamespaceManagerTests.cpp`, `XmlResolverTests.cpp`, `XmlTextReaderWriterTests.cpp`. |
+| `26a1073` | Added the classic `XmlDocument` DOM class hierarchy (`XmlNode`, `XmlDocument`, `XmlElement`, `XmlAttribute`, `XmlCharacterData` and its subclasses, `XmlLinkedNode` and its subclasses, etc.), wrapping vendored tinyxml2. **Fixed 3 real bugs**: (1) `InnerText`/`InnerXml` setters called the virtual `RemoveAll()`, which `XmlElement` overrides to also strip attributes, so setting `InnerText` silently wiped attributes too — added a non-virtual `RemoveAllChildren()` and rerouted the setters through it; (2) `XmlDocument`'s own `ownerDocument_` is correctly always null, but every internal node operation assumed it was set, so calling them directly on the document object silently no-op'd — added `GetDocument()` (mirrors .NET's internal `Document` property) and rerouted through it; (3) text/comment/CDATA nodes had no `WriteTo` override, so `XmlWriter`-based serialization silently dropped their content — added the overrides and a new `XmlWriter::WriteCData`. New test file: `XmlDomTests.cpp`. |
+| `8b9cdbc` | Added `XmlNameTable`/`NameTable`, `XmlConvert`, `XmlQualifiedName`, `XmlNodeChangedEventArgs`/`XmlNodeChangedEventHandler`, `IHasXmlNode`, `IXmlLineInfo`, `IXmlNamespaceResolver`. |
+| `b92d58a` | Added 18 `System.Xml` enums and `XmlException`; fixed `XmlReader`/`XmlWriter` (pre-existing, from before this session) throwing the wrong exception type. |
+| `017b01b` | Fixed a flaky test (`IsolatedStorageFileTests.IsAnIsolatedStorageBase_ViaVirtualDispatch`) that compared live disk free-space across two separate calls for exact equality — legitimately racy under concurrent disk activity. |
+| `170142b` | Ported `System.Threading.Tasks` (16/17). Fixed `Task::FromCanceled(CancellationToken)` silently discarding its argument; fixed `Parallel.hpp` using `int` instead of `intcs`. Added real `ParallelLoopState.Stop()`/`Break()` support. 80 new tests. |
+| `62bfef5` | Ported `System.Threading` (59/60). Fixed `Monitor` (was a complete no-op stub — Enter/Exit/Wait/Pulse did nothing), `Mutex` (didn't derive from `WaitHandle`; `WaitOne(ms)` didn't actually block up to timeout), `Semaphore`/`SemaphoreSlim` (no argument validation), `ReaderWriterLockSlim` (`IsReadLockHeld` etc. always returned `false`), `Barrier` (post-phase exceptions silently swallowed). 33 new tests. |
+| `df32df9` and earlier | `System.Numerics` completion, `System.Linq` classification, `System.IO.Hashing` (`XxHash3`/`128`), `System.IO.IsolatedStorage`, `System.IO.Compression`, `System.IO` (56 items) — see full `git log --oneline` for detail. |
 
 ---
 
 ## 4. Current blocker / main problem
 
-**No active blocker.** Build is clean, 9616 tests pass (stable across repeated runs), pushed to `origin/feature/work` (HEAD `0d2a17e`). Not merged into `develop` — only do that when the user explicitly asks.
+**No build- or test-breaking blocker exists right now.** The last verified state is clean and
+stable (9616/9616 tests, 3 consecutive runs, zero warnings).
 
-**Note on how `System.Xml` got done:** a background agent was delegated the full 62-item namespace but reported "completed" while actually having stopped mid-task — 28 items committed, but the `XmlDocument` DOM batch (~22 more items) was sitting uncommitted on disk with a known unresolved bug and 3 failing tests. This was caught by verifying the agent's actual git state rather than trusting its self-report, then finished directly: fixed the found bug (and a second, related one — see `26a1073` in §3), added the missing `WriteTo` overrides, and implemented the final 10 items (`XmlNamespaceManager`, resolvers, settings, `XmlTextReader`/`Writer`, `XmlValidatingReader`, `XmlParserContext`) from scratch. **Lesson for next time:** always verify a background agent's actual commits/test results directly — a "completed" status notification is not proof of a finished, correct task.
+Two things are worth flagging as the closest things to an open problem:
 
-Fully complete this session: `System.IO` (56), `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq` (LINQ operator machinery correctly out-of-scope per the "No LINQ" rule — only `Enumerable`'s existing practical-subset `System::Linq.hpp` counts as ported), `System.Numerics` (except `Vector<T>`, `tobedecided`), `System.Threading` (59/60), `System.Threading.Tasks` (16/17), `System.Xml` (62/62).
-
-Next largest unclaimed namespaces (`System.*`, todo count): `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25), `System.Xml.Linq` (24, separate from `System.Xml` — untouched).
+1. **`Vector<T>` (id `9228` in `plan.sqlite3`, namespace `System.Numerics`) is marked
+   `tobedecided`**, not ported. It's .NET's generic, hardware-width SIMD vector type — a real
+   architecture decision is needed before implementing it (fixed-width fallback vs. actual SIMD
+   intrinsics vs. `std::experimental::simd`), since it's structurally unlike the already-ported
+   fixed-size `Vector2/3/4`. This needs a human decision, not a default guess.
+2. **Process risk, not a code bug:** earlier this session, a background porting agent reported
+   task status "completed" while it had actually stopped mid-task — some work was uncommitted,
+   with a known unresolved bug and 3 failing tests. This was only caught by explicitly checking
+   `git log`/`git status`/re-running the test suite rather than trusting the agent's self-report.
+   **Any future delegated/background work must be verified the same way** (actual commits, actual
+   test run) before being treated as done.
 
 ---
 
@@ -140,168 +120,182 @@ Next largest unclaimed namespaces (`System.*`, todo count): `System.Security.Cry
 
 | Status | Issue |
 |--------|-------|
-| missing | `System::Net::Sockets::Socket` / `TcpListener` — no header exists at all (not POSIX-only, just not ported) |
-| POSIX-only | `System::IO::RandomAccess` — `pread`, `pwrite`, `fsync` |
-| Linux-only | `System::AppDomain` / `AppContext` — reads `/proc/self/exe`; not portable to macOS |
-| POSIX-only | `System::TimeZoneInfo` — `localtime_r`, `/usr/share/zoneinfo` |
-| incomplete | `System::Text::RegularExpressions::Regex` — no named groups, no lookbehind |
-| incomplete | `System::Net::Http::HttpClient` — plain HTTP only; no TLS |
-| incomplete | `ArrayList.Sort()` (no-arg) — cannot sort `std::any` without type info; throws |
-| incomplete | `ArrayList.GetEnumerator()` — returns `nullptr`; not yet iterable via `IEnumerator*` |
-| incomplete | `CopyTo(Array, int)` — `System.Array` type does not exist; skipped on all collections |
-| deliberate simplification | `Globalization` types (`CultureInfo`, `CompareInfo`, `TextInfo`, `CharUnicodeInfo`, etc.) only meaningfully support the invariant/en-US locale; no real ICU/OS culture data. Documented in each type's doc-comment, not a silent gap. |
-| deliberate simplification | `Debug`'s output does not auto-indent after newlines |
-| stub | `System::SynchronizationContext` — `Progress<T>` calls handlers synchronously |
-| stub (by design) | `System::GC` — all methods are no-ops; correct end state, not a gap |
-| stub (by design) | `System::Type` / `System::Activator` — no runtime reflection, correct end state |
-| stub | `System::Enum` — `GetNames`/`GetValues`/`Parse` not implemented |
-| needs verification | Emscripten build — never CI-tested; POSIX guards exist but not validated |
-| workflow risk | Duplicate GoogleTest suite names cause linker errors — always check for collisions |
-| legacy DB noise | `plan.sqlite3` has 15055 rows with `status='ignored'` (lowercase-d, different from the workflow's `'ignore'`) — predates the current workflow, inert legacy data |
+| incomplete (needs decision) | `System::Numerics::Vector<T>` — no header exists; `tobedecided` pending an architecture choice (see §4). |
+| missing | `System::Net::Sockets::Socket` / `TcpListener` — no header exists at all (not POSIX-only, simply not started). |
+| documented limitation | `XmlUrlResolver::GetEntity` only reads local files (`file://` or plain paths) — no network stack for http(s) entity resolution. |
+| documented limitation | `XmlResolver`/`XmlUrlResolver`/`XmlSecureResolver`'s `ofObjectToReturn` parameter (a .NET `Type?`) is accepted but ignored — no runtime reflection to act on it; always returns a `std::string` via `std::any`. |
+| documented limitation | `XmlReaderSettings`/`XmlWriterSettings` — most properties are stored for API-name compatibility but not consulted by the concrete `XmlReader`/`XmlWriter` (documented per-property, not silent). |
+| documented limitation | `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader` are implemented via composition (own an `XmlReader`/`XmlWriter`, forward calls) rather than inheritance, since this runtime's `XmlReader`/`XmlWriter` are single concrete classes, not .NET's extensible abstract hierarchy. |
+| documented limitation | `XmlValidatingReader` performs no actual DTD/XSD validation regardless of `ValidationType` — matches this runtime's general no-DTD-validation stance. |
+| documented limitation | `XmlDocument`'s `NodeInserting`/`NodeInserted`/`NodeRemoving`/`NodeRemoved`/`NodeChanging`/`NodeChanged` events exist as fields but are not yet wired into `AppendChild`/`RemoveChild`/etc. |
+| documented limitation | `System::Threading::Tasks::TaskScheduler` doesn't actually route `Task` execution (`Task` always uses `std::async` directly); `TaskFactory` omits APM-pattern `FromAsync` overloads (no `IAsyncResult` port to bridge to). |
+| ignore (outofscope) | `ConcurrentExclusiveSchedulerPair` — needs a real pluggable-`TaskScheduler` queuing engine this runtime doesn't have. |
+| ignore (outofscope) | `WaitHandleExtensions` — wraps `SafeWaitHandle`, a native OS handle this port's `WaitHandle` doesn't expose. |
+| POSIX-only (known, by design) | `System::Net::Sockets`, `System::IO::RandomAccess` — POSIX-only APIs (`<sys/socket.h>`, `pread`/`pwrite`). |
+| POSIX/Linux-only (known, by design) | `System::AppDomain`/`AppContext` (`/proc/self/exe`), `System::TimeZoneInfo` (`localtime_r`, `/usr/share/zoneinfo`). |
+| stub (by design, correct end state) | `System::GC`, `System::Type`, `System::Activator` — no-ops/stubs; this is the intended final state, not a gap. |
+| legacy DB noise | `plan.sqlite3` has 15055 rows with `status='ignored'` (lowercase-d, distinct from the current workflow's `'ignore'`) predating this workflow — inert legacy data, not something to clean up as part of normal porting work. |
+| needs verification | Emscripten/Windows builds have never been CI-tested this session; POSIX guards exist in `.cpp` files but are unverified on those platforms. |
 
 ---
 
 ## 6. Architecture notes
 
 ### Directory layout
-```
-include/
-  SharpRuntime/SharpRuntimeHelper.hpp   ← intcs, bytecs, shortcs, longcs, charcs, ulongcs
-  System/
-    Collections/Specialized/            ← complete
-    Diagnostics/                        ← complete (including StackFrameExtensions, new this session)
-    Diagnostics/CodeAnalysis/           ← complete (28/28)
-    Globalization/                     ← complete this session (~40 items) — every item had ≥1 real bug fixed
-src/System/                             ← .cpp bodies (auto-discovered by CMake GLOB_RECURSE)
-tests/                                  ← GoogleTest .cpp files, "Batch##Tests.cpp" per session
-plan.sqlite3                            ← porting-status tracker (gitignored, local-only)
-prompt.md                               ← canonical plan.sqlite3 workflow instructions
-```
+- `include/System/...` — public headers, mirroring .NET namespace paths (e.g. `include/System/Xml/XmlDocument.hpp` for `System.Xml.XmlDocument`).
+- `src/System/...` — `.cpp` bodies for complex types, same mirrored path.
+- `tests/System/...` — GoogleTest files, same mirrored path; CMake's `GLOB_RECURSE` auto-discovers every `tests/**/*.cpp` and `src/**/*.cpp` — no manual registration needed when adding a file.
+- `vendor/` — GoogleTest, nlohmann/json, tinyxml2, miniz (vendored, never modify in place, never commit binaries).
+- `plan.sqlite3` — gitignored, local-only porting-progress database (table `task`: `id, namespace, name, type, internal, outofscope, status`).
 
-### Invariants that must not be broken
-1. **Zero errors, zero warnings** before every commit.
-2. **9179+ tests passing** — never go below this watermark.
-3. **Property naming:** `getXxxProperty()` / `setXxxProperty()` — used by CNA (449+ files). This includes **static factory methods** like `getInvariantCultureProperty()` — a bare `InvariantCulture()`/`CurrentRegion()` name is a bug, not a stylistic choice (found and fixed repeatedly this session).
-4. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
-5. **`SharpRuntime::intcs`** (`int32_t`) in public APIs mirroring .NET `int` parameters; **`SharpRuntime::shortcs`** (`int16_t`) for .NET `short`.
-6. **SPDX header on every file.**
-7. **Doxygen `/** */`** on all public declarations — never `///`.
-8. **No POSIX includes in public `.hpp`** — platform code belongs in `.cpp`, guarded by `#ifdef`.
-9. **Inner exceptions use `std::exception_ptr`**, never `const std::exception&`.
-10. **No broad header refactor** — property naming touches 449+ files in CNA. (Renames done this session — e.g. `CultureInfo::InvariantCulture()` → `getInvariantCultureProperty()` — were verified via grep to have zero production/CNA-facing callers before renaming; only test files referenced the old names.)
-11. **Push only to `feature/work`** — never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
-12. **GPG signing times out** — always commit with `git -c commit.gpgsign=false commit`.
-13. **plan.sqlite3 processing is fully autonomous** — classify and proceed without asking per item.
+### Key invariants that must not be broken
+- **`getXxxProperty()`/`setXxxProperty()`** naming on every property, including static factory-style accessors — this is checked/enforced repeatedly across the whole codebase; do not introduce plain getters/setters or public fields.
+- **`SharpRuntime::intcs`/`bytecs`/`longcs`/`uintcs`**, not native C++ `int`/`uint8_t`/etc., in any public API mirroring a .NET primitive parameter.
+- **C++17 nested namespace syntax** (`namespace System::Xml {`), not the older nested-brace form.
+- **No LINQ** in new ported code — use `std::ranges`.
+- **POSIX-only includes** (`<unistd.h>`, `<sys/socket.h>`, etc.) must stay inside `.cpp` files behind `#ifdef _WIN32` / `#elif defined(__EMSCRIPTEN__)` / `#else`, never in public `.hpp` headers.
+- **SPDX header required** on every `.hpp`/`.cpp` file:
+  ```cpp
+  // SPDX-License-Identifier: MIT
+  // Copyright (c) Robert Vokac and contributors
+  // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+  ```
+- **Doxygen `/** */` only** — never reintroduce `///` triple-slash comments.
+- A derived class that declares **any** overload of a base-class method name hides *all* other
+  base-class overloads of that name unless a `using BaseClass::MethodName;` is added — this exact
+  bug pattern has recurred repeatedly (`StreamWriter`/`StringWriter`, `Crc32`/`Crc64`/`Adler32`/
+  `XxHash32`/`XxHash64`, and elsewhere). Always check for this when adding an override in a class
+  with inherited overloads of the same name.
 
-### Established local conventions worth following
-- **Exception message text** for key-not-found is the plain `KeyNotFoundException()` default message; duplicate-key `ArgumentException` message is `"An item with the same key has already been added."` — used consistently across containers.
-- **Read-only enforcement pattern**: any type with a `static T ReadOnly(const T&)` factory must have a `VerifyWritable()` (or equivalently-named) private helper that every setter calls, throwing `InvalidOperationException("Instance is read-only.")`. A `ReadOnly()` that only flips a bool with no setter enforcement is a bug, not a partial implementation — found on `DateTimeFormatInfo`, `NumberFormatInfo`, `TextInfo` this session, already correctly done on `Calendar`/`DateTimeFormatInfo` (after fixing) as the reference pattern.
-- **Shared live-view wrappers** (`ReadOnlyDictionary<K,V>`, `ReadOnlyObservableCollection<T>`, `OrderedDictionary::AsReadOnly()`) use `std::shared_ptr<Underlying>`. Plain value-copying wrappers (`ReadOnlyCollection<T>`) are a deliberate, different, already-established choice. Don't conflate the two.
-- **Static members of a class's own type require declare-in-class, define-outside-class** — a self-referential `inline static T member{...};` initializer inside the class body fails with "incomplete type" (confirmed this session on `CultureInfo::currentCulture_`). Pattern: declare `static T member;` in the class, then `inline T ClassName::member{...};` immediately after the closing brace, still in the same header.
-- **Case-insensitive key comparison for `std::unordered_map`-backed Specialized types**: implement via custom hash+equal functor *instances* holding a runtime `bool caseInsensitive` flag. See `HybridDictionary`/`NameValueCollection`.
+### Data flow / notable patterns
+- `System::Xml`'s DOM classes wrap `tinyxml2::XMLNode*`/`XMLDocument` — `XmlDocument` owns the
+  native `tinyxml2::XMLDocument` and caches one C++ wrapper object per native pointer so repeated
+  navigation calls return stable identities. Internal node operations must resolve the owning
+  document via `XmlNode::GetDocument()` (not the raw `ownerDocument_` field), because
+  `XmlDocument`'s own `ownerDocument_` is always null (matching .NET) — see the Bug 2 fix in §3.
+- `System::IO::Compression` wraps zlib/miniz directly; `System::Text::Json` wraps nlohmann/json
+  (check that directory for the established wrapping conventions before adding a new wrapped type).
+- `System::Threading::Tasks::Task` is `std::async`-backed (eager/thread-based), not a lazy
+  continuation/state-machine model — there is no C++ equivalent of compiler-generated async state
+  machines, so `Task` is a deliberately simplified practical-subset design, not a 1:1 port.
 
 ### plan.sqlite3 workflow (see `prompt.md` for the full canonical version)
-- Table `task`, columns: `id, namespace, name, type, internal, outofscope, status`.
-- Valid status values: `''` (unset), `todo`, `ported`, `ignore`, `tobedecided`. **`in_progress` is not valid.**
-- Query next unset/todo item, `System`-namespace-first:
-  ```sql
-  SELECT id,namespace,name,type FROM task
-  WHERE (status='' OR status='todo')
-  ORDER BY (CASE WHEN namespace LIKE 'System%' THEN 0 ELSE 1 END), namespace, name
-  LIMIT 1;
-  ```
+For each `''`/`todo` item, classify without asking the user: port it (apply the full checklist in
+`CLAUDE.md` — API surface, doc-comments, SPDX, logic parity vs. `/rv/tmp/runtime/src/libraries/`,
+clean build, passing tests), mark `ignore` (`outofscope=1` for permanent-deviation categories:
+reflection, GC internals, P/Invoke, serialization infra, etc.), or mark `tobedecided` only when
+genuinely ambiguous. `in_progress` is not a valid status — porting happens directly.
 
 ---
 
 ## 7. Useful commands
 
 ```bash
-# Build
+# Build (zero errors/warnings required)
 cmake --build build --parallel 4
 
-# Build — errors/warnings only
+# Build, showing only errors/warnings
 cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 
-# Run all tests
+# Run the full test suite
 ./build/SharpRuntimeTests
 
-# Run a specific suite
-./build/SharpRuntimeTests --gtest_filter="BinaryReader*"
+# Run a specific suite/test (glob pattern)
+./build/SharpRuntimeTests --gtest_filter="XmlDocumentTests.*"
 
-# Check next unset/todo type (System namespace prioritized)
-sqlite3 plan.sqlite3 "SELECT id,namespace,name,type FROM task WHERE (status='' OR status='todo') ORDER BY (CASE WHEN namespace LIKE 'System%' THEN 0 ELSE 1 END), namespace, name LIMIT 8;"
+# Check next unset/todo items in a namespace
+sqlite3 plan.sqlite3 "SELECT id,name,type,status FROM task WHERE namespace='System.Text' AND (status='' OR status='todo') ORDER BY name;"
 
-# Mark an item ported after review+tests pass
-sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
+# Mark an item ported after review + tests pass
+sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
 
-# Check .NET reference source for a type
+# Find the .NET reference source for a type
 find /rv/tmp/runtime/src/libraries -iname "<TypeName>.cs" | grep -v tests
 
-# Commit (GPG disabled — required in this environment)
+# Commit (GPG signing times out in this sandboxed environment — always disable it explicitly)
 git -c commit.gpgsign=false commit -m "message"
 ```
+
+There is no separate lint/format tool configured in this repository, and no standalone demo/sample
+binary beyond the GoogleTest suite.
 
 ---
 
 ## 8. Next smallest tasks
 
-### Task 1 — Check on the System.Threading background agent
-- **Goal:** Verify it finished, pulled/merged cleanly, build is clean, tests pass. Check `git log --oneline -5` for its commit before touching anything in `include/System/Threading/`.
-- **If it's done:** move to `System.Threading.Tasks` (17 items, separate namespace it did not touch) or the next largest namespace (`System.Xml`, 62 items).
-- **If it's still running:** avoid concurrent `cmake --build`/test runs against the same `build/` directory; do DB classification or research on a different namespace instead (as this session did with `System.Numerics`/`System.Linq` while it ran).
+1. **Decide `System::Numerics::Vector<T>` scope** (id `9228`).
+   - Goal: get a decision on whether to implement a fixed-width fallback, real SIMD intrinsics, or
+     `std::experimental::simd`-backed generic vector — or leave it permanently out of scope.
+   - Files: none yet (`include/System/Numerics/Vector.hpp` does not exist).
+   - Verification: N/A until a decision is made — this is a design decision, not a coding task.
 
-### Task 2 — System.Xml (62 items) or System.Security.Cryptography (50 items)
-- Neither has been scoped yet this session. Query `plan.sqlite3` for the live per-item list before starting; check `include/System/Xml/` and `include/System/Security/Cryptography/` for what already exists (this session found that `System.Numerics` and much of `System.Threading` were already implemented but simply unmarked in the DB — always check the filesystem before assuming a fresh port).
-- `System.Security.Cryptography` in particular touches real crypto primitives (hashing, symmetric/asymmetric encryption) — verify against test vectors, not just API shape, same discipline used for `System.IO.Hashing`'s CRC/xxHash vectors this session.
+2. **Scope and start `System.Security.Cryptography`** (50 `todo` items — the largest remaining namespace).
+   - Goal: query `plan.sqlite3` for the exact item list, check `include/System/Security/Cryptography/`
+     for what (if anything) already exists, and classify/port the first batch (likely hash
+     algorithms and simple enums first, following the same "check the filesystem before assuming a
+     fresh port" lesson learned this session with `System.Numerics`/`System.Threading`).
+   - Files: `include/System/Security/Cryptography/`, `src/System/Security/Cryptography/`,
+     `tests/System/Security/Cryptography/`.
+   - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`.
+
+3. **Port `System.Xml.Linq`** (24 items — `XDocument`/`XElement`/`XAttribute` family).
+   - Goal: this is a separate namespace from `System.Xml` (untouched this session); check
+     `include/System/Xml/Linq/` for existing headers (some may already exist per earlier sessions)
+     before starting fresh.
+   - Files: `include/System/Xml/Linq/`, `src/System/Xml/Linq/`, `tests/System/Xml/Linq/`.
+   - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*XDocument*:*XElement*"`.
+
+4. **Port `System.Text`** (36 items).
+   - Goal: query the exact item list; this namespace includes core string-building/encoding types
+     that other not-yet-ported namespaces (e.g. `System.Text.Json.Serialization`) likely depend on.
+   - Files: `include/System/Text/`, `src/System/Text/`, `tests/System/Text/`.
+   - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`.
 
 ---
 
 ## 9. Do not do yet
 
-- **No broad header refactor** — property naming (`getXxxProperty`) and namespace style touch 449+ files in CNA. (Static-method renames done this session were individually verified zero-production-usage first — that's the bar for "safe," not "small.")
-- **No LINQ port** — use `std::ranges` in all new ported code.
-- **No Windows / Emscripten CI** — POSIX-only subsystems are documented bugs, not open work items.
-- **Push only to `feature/work`** — pushing to `develop` or `master`, or merging `feature/work` → `develop`, requires the user explicitly asking in that turn. Routine pushes to `origin/feature/work` are pre-authorized.
-- **No new vendored libraries** without discussing scope impact.
-- **No speculative API additions** — only add methods present in .NET's published API surface. (The `TimeSpanStyles` operator|/operator& added this session are not speculative — every sibling `[Flags]` enum in the same directory already has them, and .NET's `[Flags]` enums get `|`/`&` for free from the language; C++ needs the explicit operators to be usable at all.)
-- **No work on `System::Type` / `System::Activator`** — stubs are the correct end state.
-- **No duplicate GoogleTest suite names** — check for collisions.
-- **No reintroduction of `///` Doxygen** — all headers use `/** */`.
-- **No mass rewrite or reformatting** in a single commit — incremental changes only.
-- **No editing files in the second clone (`/rv/.../sharp-runtime`, currently on `develop`)** — always verify the absolute path targets `sharp-runtime_work` before writing.
+- **No broad header refactor** — `getXxxProperty()` naming and namespace style already touch
+  449+ files across this project and CNA; do not attempt a sweeping rename/reformat pass.
+- **No LINQ implementation expansion** — `System::Linq.hpp`'s partial subset is an intentional,
+  accepted design point, not a gap to fill in.
+- **No work on `Vector<T>`** until the architecture decision in §4/§8 task 1 is made by the user.
+- **No Windows/Emscripten CI setup** — POSIX-only subsystems are documented, accepted bugs, not
+  open work items to fix opportunistically.
+- **Push only to `feature/work`** — never push to `develop`/`master`, never create tags, without
+  explicit per-action user approval in that turn. Routine pushes to `origin/feature/work` are
+  pre-authorized.
+- **No mass rewrite or reformatting** in a single commit — this session's pattern has been small,
+  reviewable, per-namespace (or per-batch) commits; keep following it.
+- **No blind trust in background/delegated agent "completed" reports** — always verify via
+  `git log`/`git status`/an actual test run before treating delegated work as done (see §4).
+- **No speculative API additions** — only port methods/types that actually exist in .NET's
+  published surface (check `/rv/tmp/runtime/src/libraries/` and the relevant `ref/*.cs` file).
 
 ---
 
 ## 10. Resume prompt
 
 ```
-Read prompt.md first — it is the canonical, up-to-date plan.sqlite3 workflow (fully autonomous,
-no per-item confirmation). NEXT.md is a snapshot for context, not the source of truth for process.
+Read NEXT.md first. It reflects the actual, verified repository state as of HEAD 743de40
+(9616/9616 tests passing, clean build, zero warnings) — do not assume anything beyond what it
+documents.
 
-IMPORTANT: work only in /rv/.../sharp-runtime_work (branch feature/work). A second clone at
-/rv/.../sharp-runtime exists on develop — do not edit files there.
+Inspect only the files needed for the first task in NEXT.md §8. Do not refactor unrelated code,
+and do not expand scope beyond that one task (see NEXT.md §9 for things explicitly out of bounds
+right now).
 
-System.Globalization, System.IO, System.IO.Compression, System.IO.Hashing, System.IO.IsolatedStorage,
-System.Linq, and System.Numerics (except Vector<T>, tobedecided) are now 100% complete (verified via
-plan.sqlite3 queries — see §4). A background agent is (or was) porting System.Threading (60 items) —
-check git log first (see Task 1 in §8) before touching include/System/Threading/. After confirming
-that's landed cleanly, move to Task 2 in §8: System.Xml (62 items) or System.Security.Cryptography
-(50 items), whichever the user has no other preference on.
-
-For that task and every task after it:
-  1. Look up the .NET reference in /rv/tmp/runtime/src/libraries/ and read the existing C++ header
-     for context (check whether it already exists — repeatedly this session, "todo" items turned out
-     to already have a file, either with a real bug or just unmarked in the DB, not missing entirely).
-  2. Review/implement per the full checklist in CLAUDE.md (API surface, doc-comments, SPDX, logic
-     parity, bounds/null validation, getXxxProperty()/setXxxProperty() naming including on static
-     factory methods, VerifyWritable() enforcement on any ReadOnly()-capable type).
-  3. Run: cmake --build build --parallel 4   (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests           (9439+ tests must still pass)
-  5. Mark it ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
-  6. Commit only the files for that change: git -c commit.gpgsign=false commit -m "..."
-  7. Continue to the next todo item per prompt.md's Step 1 — don't stop to ask before each item.
-  8. Update NEXT.md with what changed before ending the session.
-  9. Do NOT push to origin without the user asking in that turn — this session's commits are not
-     yet pushed. Never push to `develop` or `master`, and never merge feature/work → develop,
-     without the user explicitly asking in that turn.
+Make one small, verified improvement:
+  1. Read the relevant .NET reference source under /rv/tmp/runtime/src/libraries/ and any existing
+     C++ header/source for the type(s) involved (check the filesystem first — several "todo" items
+     this session turned out to already have a file, just unmarked in plan.sqlite3).
+  2. Implement/fix per the full checklist in CLAUDE.md (API surface, doc-comments, SPDX header,
+     logic parity, getXxxProperty()/setXxxProperty() naming, intcs/bytecs/etc. usage).
+  3. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
+  4. Run: ./build/SharpRuntimeTests           (must show 9616+ passing, zero failures)
+  5. If it's a plan.sqlite3-tracked item, update its status:
+     sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
+  6. Commit only the files for that one change: git -c commit.gpgsign=false commit -m "..."
+  7. Update NEXT.md to reflect the new state (test count, HEAD commit, what changed) before ending
+     the session.
 ```
