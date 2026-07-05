@@ -37,7 +37,7 @@ class ReadOnlyObservableCollection {
 
 public:
     /** @brief Handler type for CollectionChanged subscribers. */
-    using ChangedHandler = std::function<void(void*, const NotifyCollectionChangedEventArgs<T>&)>;
+    using ChangedHandler = NotifyCollectionChangedEventHandler<T>;
 
     /** @brief List of CollectionChanged event subscribers. */
     std::vector<ChangedHandler> CollectionChanged;
