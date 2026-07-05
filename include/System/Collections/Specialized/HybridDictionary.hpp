@@ -2,12 +2,50 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <any>
+#include <cctype>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "System/ArgumentException.hpp"
 
 namespace System::Collections::Specialized {
+
+namespace detail {
+
+/**
+ * @brief Hash functor for HybridDictionary keys with a runtime case-sensitivity toggle.
+ *
+ * The comparison mode (case-sensitive vs. ordinal-ignore-case) is a per-instance flag rather
+ * than a template parameter, since .NET selects it at construction time via a bool argument.
+ */
+struct HybridDictionaryKeyHash {
+    bool caseInsensitive = false;
+
+    [[nodiscard]] size_t operator()(const std::string& key) const {
+        if (!caseInsensitive) return std::hash<std::string>{}(key);
+        std::string lower = key;
+        std::ranges::transform(lower, lower.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return std::hash<std::string>{}(lower);
+    }
+};
+
+/** @brief Equality functor matching HybridDictionaryKeyHash's case-sensitivity toggle. */
+struct HybridDictionaryKeyEqual {
+    bool caseInsensitive = false;
+
+    [[nodiscard]] bool operator()(const std::string& a, const std::string& b) const {
+        if (!caseInsensitive) return a == b;
+        return a.size() == b.size() &&
+               std::ranges::equal(a, b, [](unsigned char c1, unsigned char c2) {
+                   return std::tolower(c1) == std::tolower(c2);
+               });
+    }
+};
+
+} // namespace detail
 
 /**
  * @brief A dictionary that uses a list for small collections and a hash table for larger ones.
@@ -18,7 +56,12 @@ namespace System::Collections::Specialized {
  * Keys are always strings; values are type-erased via std::any.
  */
 class HybridDictionary {
-    std::unordered_map<std::string, std::any> data_;
+    std::unordered_map<std::string, std::any, detail::HybridDictionaryKeyHash, detail::HybridDictionaryKeyEqual> data_;
+
+    static auto makeBuckets(bool caseInsensitive) {
+        return std::unordered_map<std::string, std::any, detail::HybridDictionaryKeyHash, detail::HybridDictionaryKeyEqual>(
+            0, detail::HybridDictionaryKeyHash{caseInsensitive}, detail::HybridDictionaryKeyEqual{caseInsensitive});
+    }
 
 public:
     /**
@@ -26,16 +69,15 @@ public:
      *
      * C++ counterpart of .NET HybridDictionary().
      */
-    HybridDictionary() = default;
+    HybridDictionary() : data_(makeBuckets(false)) {}
 
     /**
      * @brief Constructs an empty HybridDictionary with optional case-insensitive key comparison.
      *
      * C++ counterpart of .NET HybridDictionary(bool).
-     * The caseInsensitive parameter is accepted for API compatibility but not enforced.
-     * @param caseInsensitive If true, keys are treated case-insensitively (not enforced).
+     * @param caseInsensitive If true, keys are compared using ordinal case-insensitive rules.
      */
-    explicit HybridDictionary(bool /*caseInsensitive*/) {}
+    explicit HybridDictionary(bool caseInsensitive) : data_(makeBuckets(caseInsensitive)) {}
 
     /**
      * @brief Constructs an empty HybridDictionary with an initial size hint.
@@ -43,16 +85,16 @@ public:
      * C++ counterpart of .NET HybridDictionary(int).
      * @param initialSize A hint for the initial capacity; ignored in this implementation.
      */
-    explicit HybridDictionary(int /*initialSize*/) {}
+    explicit HybridDictionary(int /*initialSize*/) : data_(makeBuckets(false)) {}
 
     /**
      * @brief Constructs an empty HybridDictionary with an initial size hint and optional case-insensitivity.
      *
      * C++ counterpart of .NET HybridDictionary(int, bool).
      * @param initialSize     A hint for the initial capacity; ignored in this implementation.
-     * @param caseInsensitive If true, keys are treated case-insensitively (not enforced).
+     * @param caseInsensitive If true, keys are compared using ordinal case-insensitive rules.
      */
-    HybridDictionary(int /*initialSize*/, bool /*caseInsensitive*/) {}
+    HybridDictionary(int /*initialSize*/, bool caseInsensitive) : data_(makeBuckets(caseInsensitive)) {}
 
     /**
      * @brief Gets the number of key/value pairs in the dictionary.
@@ -145,11 +187,15 @@ public:
      * @brief Adds the specified key/value pair to the dictionary.
      *
      * C++ counterpart of .NET HybridDictionary.Add(object, object).
-     * If the key already exists, the value is replaced.
      * @param key   The key to add.
      * @param value The value to associate with @p key.
+     * @throws System::ArgumentException if an entry with the same key already exists.
      */
-    void Add(const std::string& key, const std::any& value) { data_[key] = value; }
+    void Add(const std::string& key, const std::any& value) {
+        if (data_.contains(key))
+            throw System::ArgumentException("An item with the same key has already been added.");
+        data_[key] = value;
+    }
 
     /**
      * @brief Removes the entry with the given key.
