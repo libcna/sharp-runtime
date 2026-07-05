@@ -91,9 +91,16 @@ namespace System {
                                    const TimeSpan& offset)
         : DateTimeOffset(DateTime(year, month, day, hour, minute, second, millisecond), offset) {}
 
-    const DateTimeOffset DateTimeOffset::MinValue{DateTime::MinValue, TimeSpan::Zero};
-    const DateTimeOffset DateTimeOffset::MaxValue{DateTime::MaxValue, TimeSpan::Zero};
-    const DateTimeOffset DateTimeOffset::UnixEpoch{DateTime::UnixEpoch, TimeSpan::Zero};
+    // Build these from self-contained temporaries (constexpr tick constants + freshly-constructed
+    // TimeSpan/DateTime) rather than the cross-TU globals DateTime::MinValue / TimeSpan::Zero. Those
+    // live in other translation units, so referencing them here is a static-initialization-order
+    // fiasco: if this TU's dynamic init runs first, the source globals are still zero-initialized
+    // (null vptr), and copying a polymorphic TimeSpan/DateTime out of them is undefined behavior
+    // (caught by UBSan). The temporaries below run their own constructors in place, so their vptrs are
+    // always valid. The resulting values are identical to the previous definitions.
+    const DateTimeOffset DateTimeOffset::MinValue{DateTime(0LL), TimeSpan(0LL)};
+    const DateTimeOffset DateTimeOffset::MaxValue{DateTime(DateTime::MaxTicks), TimeSpan(0LL)};
+    const DateTimeOffset DateTimeOffset::UnixEpoch{DateTime(DateTime::UnixEpochTicks), TimeSpan(0LL)};
 
     // -------------------------------------------------------------------------
     // Static factory
