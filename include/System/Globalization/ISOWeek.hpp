@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
 
@@ -28,14 +29,10 @@ public:
      * @return The ISO 8601 week number (1–53).
      */
     static int GetWeekOfYear(const System::DateTime& date) {
-        // Thursday-in-the-week rule: subtract ISO day-of-week, add 10, divide by 7.
-        int doy = date.getDayOfYearProperty();
-        int dow = static_cast<int>(date.getDayOfWeekProperty()); // 0=Sun..6=Sat
-        int isoDow = (dow == 0) ? 7 : dow;                       // Mon=1..Sun=7
-        int w = (doy - isoDow + 10) / 7;
-        if (w < 1) return GetWeeksInYear(date.getYearProperty() - 1);
-        if (w > GetWeeksInYear(date.getYearProperty())) return 1;
-        return w;
+        int week = getWeekNumber(date);
+        if (week < MinWeek) return GetWeeksInYear(date.getYearProperty() - 1);
+        if (week > 52 && GetWeeksInYear(date.getYearProperty()) == 52) return MinWeek;
+        return week;
     }
 
     /**
@@ -47,27 +44,53 @@ public:
      * @return The ISO 8601 week-year.
      */
     static int GetYear(const System::DateTime& date) {
-        int w = GetWeekOfYear(date);
-        int month = date.getMonthProperty();
-        if (w == 1 && month == 12) return date.getYearProperty() + 1;
-        if (w >= 52 && month == 1) return date.getYearProperty() - 1;
-        return date.getYearProperty();
+        int week = getWeekNumber(date);
+        int year = date.getYearProperty();
+        if (week < MinWeek) return year - 1;
+        if (week > 52 && GetWeeksInYear(year) == 52) return year + 1;
+        return year;
     }
 
     /**
      * @brief Returns the number of ISO weeks in the given year (52 or 53).
      *
      * C++ counterpart of .NET ISOWeek.GetWeeksInYear(int).
-     * A year has 53 ISO weeks if January 1 or December 31 falls on Thursday.
-     * @param year The Gregorian year.
+     * A year is long (53 weeks) if it starts on Thursday, or if it is a leap year
+     * ending on Thursday (i.e. starting on Wednesday).
+     * @param year The Gregorian year (1–9999).
      * @return 52 or 53.
+     * @throws System::ArgumentOutOfRangeException if @p year is outside 1..9999.
      */
     static int GetWeeksInYear(int year) {
-        auto isLong = [](int y) {
-            int jan1 = (y + y/4 - y/100 + y/400 + 0) % 7;
-            return jan1 == 3 || jan1 == 4; // Thursday or Friday (leap boundary)
+        if (year < MinYear || year > MaxYear) throw System::ArgumentOutOfRangeException("year");
+        auto p = [](long long y) -> int {
+            long long cent = y / 100;
+            return static_cast<int>((y + (y / 4) - cent + cent / 4) % 7);
         };
-        return isLong(year) ? 53 : 52;
+        if (p(year) == 4 || p(year - 1) == 3) return 53;
+        return 52;
+    }
+
+    /**
+     * @brief Maps an ISO week date to the equivalent Gregorian DateTime.
+     *
+     * C++ counterpart of .NET ISOWeek.ToDateTime(int, int, DayOfWeek).
+     * @param year      The ISO week-numbering year (1–9999).
+     * @param week      The ISO week number (1–53).
+     * @param dayOfWeek The day of week within the ISO week (Sunday may be given as 0 or 7).
+     * @return The Gregorian DateTime equivalent to the given ISO week date.
+     * @throws System::ArgumentOutOfRangeException if @p year, @p week, or @p dayOfWeek is out of range.
+     */
+    static System::DateTime ToDateTime(int year, int week, System::DayOfWeek dayOfWeek) {
+        if (year < MinYear || year > MaxYear) throw System::ArgumentOutOfRangeException("year");
+        if (week < MinWeek || week > MaxWeek) throw System::ArgumentOutOfRangeException("week");
+        int dowValue = static_cast<int>(dayOfWeek);
+        if (dowValue < 0 || dowValue > 7) throw System::ArgumentOutOfRangeException("dayOfWeek");
+
+        System::DateTime jan4(year, 1, 4);
+        int correction = isoWeekday(jan4.getDayOfWeekProperty()) + 3;
+        int ordinal = (week * 7) + isoWeekday(dayOfWeek) - correction;
+        return jan4.AddDays(ordinal - 4);
     }
 
     /**
@@ -78,10 +101,7 @@ public:
      * @return The Monday that begins ISO week 1.
      */
     static System::DateTime GetYearStart(int year) {
-        System::DateTime jan4(year, 1, 4);
-        int dow = static_cast<int>(jan4.getDayOfWeekProperty());
-        int isoDow = (dow == 0) ? 7 : dow;
-        return jan4.AddDays(1 - isoDow);
+        return ToDateTime(year, MinWeek, System::DayOfWeek::Monday);
     }
 
     /**
@@ -92,7 +112,28 @@ public:
      * @return The Sunday that ends the last ISO week of @p year.
      */
     static System::DateTime GetYearEnd(int year) {
-        return GetYearStart(year + 1).AddDays(-1);
+        return ToDateTime(year, GetWeeksInYear(year), System::DayOfWeek::Sunday);
+    }
+
+private:
+    static constexpr int MinYear = 1;
+    static constexpr int MaxYear = 9999;
+    static constexpr int MinWeek = 1;
+    static constexpr int MaxWeek = 53;
+
+    /** @brief ISO weekday number (Monday=1..Sunday=7); .NET's DayOfWeek::Sunday (0) maps to 7. */
+    static int isoWeekday(System::DayOfWeek dayOfWeek) {
+        return dayOfWeek == System::DayOfWeek::Sunday ? 7 : static_cast<int>(dayOfWeek);
+    }
+
+    /**
+     * @brief Raw ISO week number for @p date, not yet normalized to the neighboring year.
+     *
+     * May be 0 (belongs to the previous ISO year) or >52 (may belong to the next ISO year);
+     * callers normalize using GetWeeksInYear(). C++ counterpart of .NET ISOWeek.GetWeekNumber.
+     */
+    static int getWeekNumber(const System::DateTime& date) {
+        return (date.getDayOfYearProperty() - isoWeekday(date.getDayOfWeekProperty()) + 10) / 7;
     }
 };
 

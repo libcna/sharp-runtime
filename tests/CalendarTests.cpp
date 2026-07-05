@@ -478,6 +478,31 @@ TEST(ISOWeekTests, GetWeeksInYear_2021_Is52) {
     EXPECT_EQ(ISOWeek::GetWeeksInYear(2021), 52);
 }
 
+TEST(ISOWeekTests, GetWeeksInYear_2032_Is53) {
+    // 2032 is a leap year whose preceding year (2031) ends on Thursday —
+    // a long ISO year per the P(y-1)==3 rule, not captured by checking P(y) alone.
+    EXPECT_EQ(ISOWeek::GetWeeksInYear(2032), 53);
+}
+
+TEST(ISOWeekTests, GetWeeksInYear_OutOfRange_Throws) {
+    EXPECT_THROW(ISOWeek::GetWeeksInYear(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ISOWeek::GetWeeksInYear(10000), System::ArgumentOutOfRangeException);
+}
+
+TEST(ISOWeekTests, ToDateTime_RoundTripsWithGetWeekOfYear) {
+    DateTime d(2021, 1, 4); // Monday, ISO week 1 of 2021
+    DateTime start = ISOWeek::ToDateTime(2021, 1, DayOfWeek::Monday);
+    EXPECT_EQ(start.getYearProperty(),  2021);
+    EXPECT_EQ(start.getMonthProperty(), 1);
+    EXPECT_EQ(start.getDayProperty(),   4);
+    EXPECT_EQ(d, start);
+}
+
+TEST(ISOWeekTests, ToDateTime_InvalidWeek_Throws) {
+    EXPECT_THROW(ISOWeek::ToDateTime(2021, 0, DayOfWeek::Monday), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ISOWeek::ToDateTime(2021, 54, DayOfWeek::Monday), System::ArgumentOutOfRangeException);
+}
+
 TEST(ISOWeekTests, GetYearStart_2021_Is_Jan4) {
     // ISO year 2021 starts on Monday 2021-01-04
     DateTime start = ISOWeek::GetYearStart(2021);
