@@ -5,22 +5,120 @@
 
 #include <cassert>
 #include <iostream>
+#include <memory>
 #include <string>
+#include "System/ArgumentNullException.hpp"
+#include "System/Diagnostics/DebugProvider.hpp"
 
 namespace System::Diagnostics {
 
     /**
      * @brief Provides a set of methods and properties that help debug code.
-     * 
+     *
      * Partial C++ counterpart of .NET System.Diagnostics.Debug.
      * In Release builds the Assert/Write/WriteLine methods are compiled out.
-     * 
-     * @note Status: Partial
+     *
+     * @note Status: Partial. Output is routed through a pluggable DebugProvider
+     * (matching .NET's Debug.SetProvider extensibility), and IndentLevel/IndentSize
+     * are tracked and reported to the provider. Unlike .NET, Write/WriteLine do not
+     * automatically prefix output with the current indent — callers that need indented
+     * output should build the prefix themselves from getIndentLevelProperty()/getIndentSizeProperty().
      */
     class Debug {
+        static std::shared_ptr<DebugProvider>& providerStorage() {
+            static std::shared_ptr<DebugProvider> provider = std::make_shared<DebugProvider>();
+            return provider;
+        }
+
+        static int& indentSizeStorage() {
+            static int size = 4;
+            return size;
+        }
+
+        static int& indentLevelStorage() {
+            static thread_local int level = 0;
+            return level;
+        }
+
     public:
         /** @brief Not instantiable — all members are static. */
         Debug() = delete;
+
+        /**
+         * @brief Gets the provider currently used to route Write/WriteLine/Fail output.
+         *
+         * C++ counterpart of .NET Debug.GetProvider().
+         * @return The active DebugProvider.
+         */
+        static std::shared_ptr<DebugProvider> GetProvider() { return providerStorage(); }
+
+        /**
+         * @brief Installs a new provider to route Write/WriteLine/Fail output, returning the previous one.
+         *
+         * C++ counterpart of .NET Debug.SetProvider(DebugProvider).
+         * @param provider The new provider to install.
+         * @return The previously installed provider.
+         * @throws System::ArgumentNullException if @p provider is null.
+         */
+        static std::shared_ptr<DebugProvider> SetProvider(std::shared_ptr<DebugProvider> provider) {
+            if (!provider)
+                throw System::ArgumentNullException("provider");
+            std::shared_ptr<DebugProvider> previous = providerStorage();
+            providerStorage() = std::move(provider);
+            return previous;
+        }
+
+        /**
+         * @brief Gets the amount by which the indent is increased for each IndentLevel step.
+         *
+         * C++ counterpart of .NET Debug.IndentSize.
+         * @return The current indent size, in characters.
+         */
+        static int getIndentSizeProperty() { return indentSizeStorage(); }
+
+        /**
+         * @brief Sets the amount by which the indent is increased for each IndentLevel step.
+         *
+         * C++ counterpart of .NET Debug.IndentSize.
+         * @param value The new indent size; negative values are clamped to 0.
+         */
+        static void setIndentSizeProperty(int value) {
+            indentSizeStorage() = value < 0 ? 0 : value;
+            providerStorage()->OnIndentSizeChanged(indentSizeStorage());
+        }
+
+        /**
+         * @brief Gets the current indent level (per-thread), matching .NET's ThreadStatic IndentLevel.
+         *
+         * C++ counterpart of .NET Debug.IndentLevel.
+         * @return The current indent level.
+         */
+        static int getIndentLevelProperty() { return indentLevelStorage(); }
+
+        /**
+         * @brief Sets the current indent level (per-thread).
+         *
+         * C++ counterpart of .NET Debug.IndentLevel.
+         * @param value The new indent level; negative values are clamped to 0.
+         */
+        static void setIndentLevelProperty(int value) {
+            indentLevelStorage() = value < 0 ? 0 : value;
+            providerStorage()->OnIndentLevelChanged(indentLevelStorage());
+        }
+
+        /**
+         * @brief Increases the current indent level by one.
+         *
+         * C++ counterpart of .NET Debug.Indent().
+         */
+        static void Indent() { setIndentLevelProperty(getIndentLevelProperty() + 1); }
+
+        /**
+         * @brief Decreases the current indent level by one.
+         *
+         * C++ counterpart of .NET Debug.Unindent().
+         */
+        static void Unindent() { setIndentLevelProperty(getIndentLevelProperty() - 1); }
 
 #ifdef NDEBUG
         /** @brief No-op in release builds. */
@@ -52,18 +150,17 @@ namespace System::Diagnostics {
             assert(condition);
         }
         /**
-         * @brief Checks @p condition; prints @p message to stderr and aborts if false.
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
          * @param condition The expression that is expected to be true.
          * @param message   Diagnostic message emitted on failure.
          */
         static void Assert(bool condition, const char* message) {
             if (!condition) {
-                std::cerr << "Debug::Assert failed: " << message << '\n';
-                assert(false);
+                Fail(message);
             }
         }
         /**
-         * @brief Checks @p condition; prints @p message to stderr and aborts if false.
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
          * @param condition The expression that is expected to be true.
          * @param message   Diagnostic message emitted on failure.
          */
@@ -71,27 +168,26 @@ namespace System::Diagnostics {
             Assert(condition, message.c_str());
         }
 
-        /** @brief Writes @p message to stdout without a trailing newline. */
-        static void Write(const char* message)        { std::cout << message; }
-        /** @brief Writes @p message to stdout without a trailing newline. */
-        static void Write(const std::string& message) { std::cout << message; }
+        /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
+        static void Write(const char* message)        { providerStorage()->Write(message); }
+        /** @brief Writes @p message via the active DebugProvider, without a trailing newline. */
+        static void Write(const std::string& message) { providerStorage()->Write(message); }
 
-        /** @brief Writes a blank line to stdout. */
-        static void WriteLine()                        { std::cout << '\n'; }
-        /** @brief Writes @p message followed by a newline to stdout. */
-        static void WriteLine(const char* message)    { std::cout << message << '\n'; }
-        /** @brief Writes @p msg followed by a newline to stdout. */
-        static void WriteLine(const std::string& msg) { std::cout << msg    << '\n'; }
+        /** @brief Writes a blank line via the active DebugProvider. */
+        static void WriteLine()                        { providerStorage()->WriteLine(""); }
+        /** @brief Writes @p message followed by a newline via the active DebugProvider. */
+        static void WriteLine(const char* message)    { providerStorage()->WriteLine(message); }
+        /** @brief Writes @p msg followed by a newline via the active DebugProvider. */
+        static void WriteLine(const std::string& msg) { providerStorage()->WriteLine(msg); }
 
         /**
-         * @brief Emits @p message to stderr and aborts unconditionally.
+         * @brief Reports an assertion failure via the active DebugProvider (aborts by default).
          * @param message Failure description.
          */
         static void Fail(const char* message) {
-            std::cerr << "Debug::Fail: " << message << '\n';
-            assert(false);
+            providerStorage()->Fail(message, "");
         }
-        /** @brief Emits @p message to stderr and aborts unconditionally. */
+        /** @brief Reports an assertion failure via the active DebugProvider (aborts by default). */
         static void Fail(const std::string& message) { Fail(message.c_str()); }
 #endif
     };
