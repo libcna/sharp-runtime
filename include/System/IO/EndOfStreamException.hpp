@@ -23,6 +23,8 @@ namespace System::IO {
         explicit EndOfStreamException(const char* message);
         /** Initializes an EndOfStreamException with the specified message. */
         explicit EndOfStreamException(const std::string& message);
+        /** Initializes an EndOfStreamException with a message and an inner exception. */
+        EndOfStreamException(const std::string& message, std::exception_ptr inner);
     };
 
 } // namespace System::IO

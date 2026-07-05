@@ -367,6 +367,10 @@ TEST(EndOfStreamExceptionTests, MessageCtor_WhatContainsMessage) {
     EXPECT_NE(std::string(ex.what()).find("end of stream"), std::string::npos);
 }
 
+TEST(EndOfStreamExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(EndOfStreamException("wrapped", std::exception_ptr{}));
+}
+
 // ===========================================================================
 // PathTooLongException
 // ===========================================================================
