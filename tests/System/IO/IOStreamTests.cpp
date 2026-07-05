@@ -502,6 +502,39 @@ TEST(BinaryReaderWriterTests, Read7BitEncodedInt_RoundTripsWithReadString) {
     EXPECT_EQ(br.Read7BitEncodedInt(), 5);
 }
 
+TEST(BinaryReaderWriterTests, BinaryWriter_Ctor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BinaryWriter bw(nullptr), System::ArgumentNullException);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Write_AfterClose_ThrowsObjectDisposedException) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Close();
+    EXPECT_THROW(bw.Write((int32_t)1), System::ObjectDisposedException);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_RespectsLeaveOpen) {
+    MemoryStream ms;
+    {
+        BinaryWriter bw(&ms, true); // leaveOpen = true
+        bw.Write((int32_t)42);
+        bw.Close();
+    }
+    // Stream must still be usable after the writer closed, since leaveOpen was true.
+    EXPECT_NO_THROW(ms.ToArray());
+}
+
+TEST(BinaryReaderWriterTests, Write7BitEncodedInt_RoundTrip) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write7BitEncodedInt(300); // requires 2 encoded bytes
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    EXPECT_EQ(br.Read7BitEncodedInt(), 300);
+}
+
 // ===========================================================================
 // StreamWriter + StreamReader
 // ===========================================================================
