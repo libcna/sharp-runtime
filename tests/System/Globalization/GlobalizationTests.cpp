@@ -202,7 +202,7 @@ TEST(RegionInfoTests, IsMetric_DefaultTrue) {
 }
 
 TEST(RegionInfoTests, CurrentRegion_NameIsUS) {
-    EXPECT_EQ(RegionInfo::CurrentRegion().getNameProperty(), "US");
+    EXPECT_EQ(RegionInfo::getCurrentRegionProperty().getNameProperty(), "US");
 }
 
 TEST(RegionInfoTests, EnglishName_MatchesConstructorArg) {
@@ -216,8 +216,8 @@ TEST(RegionInfoTests, NativeName_MatchesConstructorArg) {
 }
 
 TEST(RegionInfoTests, CurrentRegion_ReturnsSameInstanceEveryCall) {
-    const RegionInfo& a = RegionInfo::CurrentRegion();
-    const RegionInfo& b = RegionInfo::CurrentRegion();
+    const RegionInfo& a = RegionInfo::getCurrentRegionProperty();
+    const RegionInfo& b = RegionInfo::getCurrentRegionProperty();
     EXPECT_EQ(&a, &b);
 }
 

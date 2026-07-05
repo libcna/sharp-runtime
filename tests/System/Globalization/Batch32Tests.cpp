@@ -180,7 +180,7 @@ TEST(RegionInfoBatch32Test, IsMetric) {
 }
 
 TEST(RegionInfoBatch32Test, CurrentRegion) {
-    const auto& cr = RegionInfo::CurrentRegion();
+    const auto& cr = RegionInfo::getCurrentRegionProperty();
     EXPECT_EQ(cr.getNameProperty(), "US");
 }
 

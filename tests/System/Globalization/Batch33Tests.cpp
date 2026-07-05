@@ -8,6 +8,7 @@
 //   TextElementEnumerator: MoveNext/GetTextElement/Reset, ASCII and UTF-8 multi-byte
 //   TextInfo:              ToLower/ToUpper/ToTitleCase, Clone, ReadOnly, operator==
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/StringInfo.hpp"
 #include "System/Globalization/TaiwanCalendar.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
@@ -49,6 +50,23 @@ TEST(StringInfoBatch33Test, SubstringByTextElements_StartOnly) {
 TEST(StringInfoBatch33Test, SubstringByTextElements_StartAndLength) {
     StringInfo si("hello");
     EXPECT_EQ(si.SubstringByTextElements(1, 3), "ell");
+}
+
+TEST(StringInfoBatch33Test, SubstringByTextElements_StartOutOfRange_Throws) {
+    StringInfo si("hello");
+    EXPECT_THROW(si.SubstringByTextElements(5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(si.SubstringByTextElements(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringInfoBatch33Test, SubstringByTextElements_LengthOutOfRange_Throws) {
+    StringInfo si("hello");
+    EXPECT_THROW(si.SubstringByTextElements(0, 6), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(si.SubstringByTextElements(0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringInfoBatch33Test, GetTextElementEnumerator_InvalidIndex_ThrowsArgumentOutOfRange) {
+    EXPECT_THROW(StringInfo::GetTextElementEnumerator("hello", -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetTextElementEnumerator("hello", 6), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoBatch33Test, GetNextTextElement) {
