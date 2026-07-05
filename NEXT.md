@@ -1,5 +1,5 @@
 # NEXT.md — sharp-runtime handoff document
-*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `3c16818`) — 9219 tests passing*
+*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `df32df9`) — 9439 tests passing*
 
 ---
 
@@ -8,7 +8,7 @@
 **sharp-runtime** is a C++23 static library that reimplements a practical subset of the .NET `System.*` namespace so that ported C#/XNA game code compiles against C++ headers with minimal changes.
 
 - **Main goal:** Provide C++ counterparts of `System.*` types so that **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game) can compile without a .NET runtime.
-- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. `System.Collections.Specialized`, `System.Diagnostics`, `System.Diagnostics.CodeAnalysis`, and **`System.Globalization`** are now **fully complete**. Currently working through `System.IO` (large namespace): `BinaryReader`, `BinaryWriter`, `BufferedStream`, `Directory`, `DirectoryInfo`, `DirectoryNotFoundException`, `DriveInfo`, `DriveNotFoundException`, `DriveType`, `EndOfStreamException`, `EnumerationOptions`, `ErrorEventArgs`, `ErrorEventHandler` done this session (13 items) — **46 items remain**, next is `File` (id=6576).
+- **Phase:** Active porting, driven entirely by a `plan.sqlite3` namespace-review workflow (full rules in `prompt.md` — read that, not this file, for the process itself). The workflow is **fully autonomous**: no per-item user confirmation, classify and proceed. Fully complete: `System.Collections.Specialized`, `System.Diagnostics`(+`.CodeAnalysis`), `System.Globalization`, `System.IO`, `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq`, `System.Numerics` (except `Vector<T>`, left `tobedecided` — generic hardware-SIMD type needs an architecture decision). **`System.Threading`** (60 items) is currently being ported by a background agent. Current DB-wide counts (active workflow only, excludes 15055 legacy `'ignored'` rows predating this workflow): 549 `ported`, 549 `todo`, 44 `ignore`, 2 `tobedecided`. Largest remaining `System.*` namespaces by todo count: `System.Xml` (62), `System.Threading` (60, in flight), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26).
 - **Header count:** ~610+ `.hpp` files under `include/System/` (+ `SharpRuntime/`).
 - **Key architectural decisions:** no runtime reflection, no GC, no IL. Properties map to `getXxxProperty()` / `setXxxProperty()`. Types alias to `SharpRuntime::intcs` (`int32_t`), `bytecs` (`uint8_t`), etc. Inner exceptions use `std::exception_ptr`, never `const std::exception&`.
 
@@ -20,11 +20,11 @@
 **Clean.** `cmake --build build --parallel 4` — zero errors, zero warnings.
 
 ### Tests
-**9219 tests passing** across 908 test suites. Zero failures.
+**9439 tests passing** across 934 test suites. Zero failures. (A background agent is currently adding more for `System.Threading` — expect this number to grow before the next handoff.)
 
 ### Branch / remote state
-- `feature/work` — local working branch, HEAD `3c16818`. **Not yet pushed this session** — push to `origin/feature/work` when the user asks (routine push target, safe anytime work is committed).
-- `develop` — last known state: fast-forwarded to `origin/develop` and merged with an earlier `feature/work` HEAD (`7056dcb`), pushed. **Not merged with this session's commits** — only merge/push to `develop` when the user explicitly asks in that turn.
+- `feature/work` — local working branch, HEAD `df32df9`, pushed to `origin/feature/work`. Routine pushes here are pre-authorized per project convention.
+- `develop` — not touched this session. Only merge/push to `develop` when the user explicitly asks in that turn.
 - `master` — untouched. Do not touch without explicit instruction.
 - `plan.sqlite3` is gitignored — local workflow state only, not part of what gets pushed.
 
@@ -89,6 +89,14 @@ Full history: `git log --oneline`. Most recent first, this session's commits:
 
 | Commit | Change |
 |--------|--------|
+| `df32df9` | Ported remaining `System.Numerics` generic-math stubs (`ITrigonometricFunctions`, `IHyperbolicFunctions`, `ILogarithmicFunctions`, `IExponentialFunctions`, `IPowerFunctions`, `IRootFunctions`, `IEqualityOperators`, `IFloatingPointConstants`, `IBinaryFloatingPointIeee754`); fixed `DivisionRounding` (was missing `AwayFromZero`/`Euclidean`); added `TotalOrderIeee754Comparer<T>` (float/double/Half specializations). Classified `System.Linq` (LINQ/`IQueryable`/PLINQ/async-LINQ out of scope; `Enumerable` marked ported via existing practical-subset `System::Linq.hpp`) and closed out `System.Numerics` (`Vector2/3/4`, `Matrix3x2/4x4`, `Plane`, `Quaternion`, `BFloat16`, `BitOperations`, `Complex`, `BigInteger` already existed/tested, just unmarked; `Vector<T>` left `tobedecided`). |
+| `6d03a2a` | Ported `System.IO.Hashing.XxHash3`/`XxHash128` (streaming + one-shot, official .NET test vectors, portable 64×64→128 multiply avoiding `__uint128_t`/`UInt128` dependency). Completes `System.IO.Hashing`. |
+| `587b173` | Ported `System.IO.IsolatedStorage`: fixed `IsolatedStorageFile` to actually inherit `IsolatedStorage`; added missing `IsolatedStorageException` constructors; rewrote `IsolatedStorageFileStream` as a thin `FileStream` subclass (fixed a real bug — `FileMode::Open` was incorrectly read-only). Completes `System.IO.IsolatedStorage`. |
+| `f59a86b` | Ported `System.IO.Hashing`: `NonCryptographicHashAlgorithm` base, `Adler32`, `Crc32`/`Crc32ParameterSet`, `Crc64`/`Crc64ParameterSet`; fixed `XxHash32`/`XxHash64` gaps (wrong types, big-endian bug, missing `Clone()`). |
+| `f82110e` | Ported `System.IO.Compression.ZipFile` and `ZipFileExtensions`. |
+| `306d5a2` | Ported `System.IO.Compression` streamless codec API (`DeflateDecoder`/`Encoder`, `GZipDecoder`/`Encoder`, `ZLibDecoder`/`Encoder`) and `ZLibStream`. Completes `System.IO.Compression`. |
+| `2c302f2` | Ported `System.IO.UnmanagedMemoryStream` and `UnmanagedMemoryAccessor`. |
+| `672c617` | Ported `System.IO.RandomAccess` and `System.IO.Path`. Completes `System.IO` (56 items). |
 | `8e85f91` | Fixed `TextElementEnumerator` exhausted-state bug (stale reads after `MoveNext()==false`); `TextInfo.ListSeparator` read-only not enforced; added doc-comments to `TimeSpanStyles`/`UnicodeCategory`. |
 | `4af2e31` | Fixed `RegionInfo::CurrentRegion()` naming; `StringInfo.SubstringByTextElements` missing bounds validation. |
 | `dd47f56` | Fixed `NumberFormatInfo` public-fields-violate-convention + read-only-not-enforced (same class of bug as `DateTimeFormatInfo`). |
@@ -112,14 +120,15 @@ Earlier history (prior sessions): `System.Collections.Specialized` full pass, `S
 
 ## 4. Current blocker / main problem
 
-**No active blocker.** Build is clean, 9219 tests pass. **Not pushed to `origin/feature/work` this session** — push when the user asks. Not merged into `develop` — only do that when the user explicitly asks.
+**No active blocker.** Build is clean, 9439 tests pass, pushed to `origin/feature/work` (HEAD `df32df9`). Not merged into `develop` — only do that when the user explicitly asks.
 
-`System.Globalization` is now **100% complete** (verified: `SELECT COUNT(*) FROM task WHERE namespace='System.Globalization' AND (status='' OR status='todo')` returns 0).
+A background agent is **currently porting `System.Threading`** (60 items — `Monitor`, `Mutex`, `Semaphore(Slim)`, `ReaderWriterLock(Slim)`, `ThreadPool`, `CancellationToken(Source)`, `Thread`, `Timer`/`PeriodicTimer`, `SpinLock`/`SpinWait`, `Barrier`, `CountdownEvent`, wait handles, plus ~14 missing small types like `LockCookie`/`RegisteredWaitHandle`/delegate aliases). Most headers already existed but were unmarked/unreviewed in the DB; the agent is applying the full porting checklist to each, adding the missing pieces, and will commit+push its own work. **Do not start System.Threading work again until that lands** — check `git log --oneline -5` for a new commit before touching `include/System/Threading/`.
 
-`System.IO` is in progress: 13 items done this session (`BinaryReader`, `BinaryWriter`, `BufferedStream`, `Directory`, `DirectoryInfo`, `DirectoryNotFoundException`, `DriveInfo`, `DriveNotFoundException`, `DriveType`, `EndOfStreamException`, `EnumerationOptions`, `ErrorEventArgs`, `ErrorEventHandler`), **46 remain**. Next item:
-```
-id=6576  System.IO  File  (status='todo')
-```
+`System.Threading.Tasks` (17 items) is a **separate namespace**, not covered by the Threading agent — still open for the next pass.
+
+Fully complete this session: `System.IO` (56), `System.IO.Compression`, `System.IO.Hashing`, `System.IO.IsolatedStorage`, `System.Linq` (LINQ operator machinery correctly out-of-scope per the "No LINQ" rule — only `Enumerable`'s existing practical-subset `System::Linq.hpp` counts as ported), `System.Numerics` (except `Vector<T>`, `tobedecided`).
+
+Next largest unclaimed namespaces (`System.*`, todo count): `System.Xml` (62), `System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25), `System.Xml.Linq` (24).
 
 ---
 
@@ -128,7 +137,6 @@ id=6576  System.IO  File  (status='todo')
 | Status | Issue |
 |--------|-------|
 | missing | `System::Net::Sockets::Socket` / `TcpListener` — no header exists at all (not POSIX-only, just not ported) |
-| missing | `System::IO::Compression::ZipFile` / `ZipFileExtensions` / `CompressionLevel` / `ZipCompressionMethod` — no header exists |
 | POSIX-only | `System::IO::RandomAccess` — `pread`, `pwrite`, `fsync` |
 | Linux-only | `System::AppDomain` / `AppContext` — reads `/proc/self/exe`; not portable to macOS |
 | POSIX-only | `System::TimeZoneInfo` — `localtime_r`, `/usr/share/zoneinfo` |
@@ -233,13 +241,14 @@ git -c commit.gpgsign=false commit -m "message"
 
 ## 8. Next smallest tasks
 
-### Task 1 — System.IO.File (id=6576)
-- **Goal:** Next item in `System.IO`. Check whether a header already exists in `include/System/IO/` before assuming a fresh port — 12 of the 13 `System.IO` items done this session already had a file with a real bug, not a from-scratch gap. `File` is a big static class (ReadAllText/WriteAllText/Copy/Move/Delete/Exists/etc.) — expect the same missing-path / wrong-exception-type patterns just fixed on `Directory`/`DirectoryInfo`.
-- **Files:** `include/System/IO/File.hpp` (+ `.cpp` if it exists), tests under `tests/System/IO/`.
-- **Verify:** `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*FileTests*"`
+### Task 1 — Check on the System.Threading background agent
+- **Goal:** Verify it finished, pulled/merged cleanly, build is clean, tests pass. Check `git log --oneline -5` for its commit before touching anything in `include/System/Threading/`.
+- **If it's done:** move to `System.Threading.Tasks` (17 items, separate namespace it did not touch) or the next largest namespace (`System.Xml`, 62 items).
+- **If it's still running:** avoid concurrent `cmake --build`/test runs against the same `build/` directory; do DB classification or research on a different namespace instead (as this session did with `System.Numerics`/`System.Linq` while it ran).
 
-### Task 2 — Continue plan.sqlite3 in order through System.IO
-- 46 items remain: FileAccess, FileAttributes, FileFormatException, FileHandleType, FileInfo, FileLoadException, FileMode, FileNotFoundException, FileOptions, FileShare, FileStream, FileStreamOptions, FileSystemEventArgs/Handler/Watcher family, FileSystemInfo, HandleInode, MatchCasing/MatchType, Path, PathTooLongException, RandomAccess, SearchOption/Target, SeekOrigin, Stream(+async variants), StreamReader/Writer, TextReader/Writer, UnixFileMode, and more — check `plan.sqlite3` for the exact live list. Given this session found a real bug in **every single** "already ported" item reviewed across both Globalization and the first 13 `System.IO` items, **do not rubber-stamp** existing files — apply the full `CLAUDE.md` checklist every time. Watch specifically for: missing null/existence checks before an operation, wrong exception types (`std::out_of_range`/`invalid_argument`/`runtime_error` instead of the matching `System.*` exception), missing disposed-state tracking on anything with `Close()`/`Dispose()`, and properties not delegated through wrapper streams (`Position`, `Length`, `CanSeek`, etc.) — all four patterns recurred across every `System.IO` item touched so far.
+### Task 2 — System.Xml (62 items) or System.Security.Cryptography (50 items)
+- Neither has been scoped yet this session. Query `plan.sqlite3` for the live per-item list before starting; check `include/System/Xml/` and `include/System/Security/Cryptography/` for what already exists (this session found that `System.Numerics` and much of `System.Threading` were already implemented but simply unmarked in the DB — always check the filesystem before assuming a fresh port).
+- `System.Security.Cryptography` in particular touches real crypto primitives (hashing, symmetric/asymmetric encryption) — verify against test vectors, not just API shape, same discipline used for `System.IO.Hashing`'s CRC/xxHash vectors this session.
 
 ---
 
@@ -248,7 +257,7 @@ git -c commit.gpgsign=false commit -m "message"
 - **No broad header refactor** — property naming (`getXxxProperty`) and namespace style touch 449+ files in CNA. (Static-method renames done this session were individually verified zero-production-usage first — that's the bar for "safe," not "small.")
 - **No LINQ port** — use `std::ranges` in all new ported code.
 - **No Windows / Emscripten CI** — POSIX-only subsystems are documented bugs, not open work items.
-- **Push only to `feature/work`** — pushing to `develop` or `master`, or merging `feature/work` → `develop`, requires the user explicitly asking in that turn. **Also not yet pushed to `origin/feature/work` this session** — ask before pushing, or push only when the user's instructions already cover it.
+- **Push only to `feature/work`** — pushing to `develop` or `master`, or merging `feature/work` → `develop`, requires the user explicitly asking in that turn. Routine pushes to `origin/feature/work` are pre-authorized.
 - **No new vendored libraries** without discussing scope impact.
 - **No speculative API additions** — only add methods present in .NET's published API surface. (The `TimeSpanStyles` operator|/operator& added this session are not speculative — every sibling `[Flags]` enum in the same directory already has them, and .NET's `[Flags]` enums get `|`/`&` for free from the language; C++ needs the explicit operators to be usable at all.)
 - **No work on `System::Type` / `System::Activator`** — stubs are the correct end state.
@@ -268,19 +277,22 @@ no per-item confirmation). NEXT.md is a snapshot for context, not the source of 
 IMPORTANT: work only in /rv/.../sharp-runtime_work (branch feature/work). A second clone at
 /rv/.../sharp-runtime exists on develop — do not edit files there.
 
-System.Globalization is now 100% complete (verified via plan.sqlite3 query — see §4). The queue
-is partway through System.IO (13/59 done this session). Start with Task 1 in NEXT.md §8:
-System.IO.File, plan.sqlite3 id=6576.
+System.Globalization, System.IO, System.IO.Compression, System.IO.Hashing, System.IO.IsolatedStorage,
+System.Linq, and System.Numerics (except Vector<T>, tobedecided) are now 100% complete (verified via
+plan.sqlite3 queries — see §4). A background agent is (or was) porting System.Threading (60 items) —
+check git log first (see Task 1 in §8) before touching include/System/Threading/. After confirming
+that's landed cleanly, move to Task 2 in §8: System.Xml (62 items) or System.Security.Cryptography
+(50 items), whichever the user has no other preference on.
 
 For that task and every task after it:
   1. Look up the .NET reference in /rv/tmp/runtime/src/libraries/ and read the existing C++ header
-     for context (check whether it already exists — most Globalization "todo" items this session
-     turned out to already have a file with a real bug, not be missing entirely).
+     for context (check whether it already exists — repeatedly this session, "todo" items turned out
+     to already have a file, either with a real bug or just unmarked in the DB, not missing entirely).
   2. Review/implement per the full checklist in CLAUDE.md (API surface, doc-comments, SPDX, logic
      parity, bounds/null validation, getXxxProperty()/setXxxProperty() naming including on static
      factory methods, VerifyWritable() enforcement on any ReadOnly()-capable type).
   3. Run: cmake --build build --parallel 4   (zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests           (9179+ tests must still pass)
+  4. Run: ./build/SharpRuntimeTests           (9439+ tests must still pass)
   5. Mark it ported: sqlite3 plan.sqlite3 "UPDATE task SET status='ported', updated_at=datetime('now') WHERE id=<id>;"
   6. Commit only the files for that change: git -c commit.gpgsign=false commit -m "..."
   7. Continue to the next todo item per prompt.md's Step 1 — don't stop to ask before each item.
