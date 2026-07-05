@@ -12,7 +12,15 @@
 #include "System/IO/Compression/DeflateStream.hpp"
 #include "System/IO/Compression/ZLibStream.hpp"
 #include "System/IO/Compression/ZipArchive.hpp"
+#include "System/IO/Compression/ZipFile.hpp"
+#include "System/IO/Compression/ZipFileExtensions.hpp"
 #include "System/IO/Compression/ZipCompressionMethod.hpp"
+#include "System/IO/Directory.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/IO/File.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/IO/Path.hpp"
+#include <filesystem>
 #include "System/IO/Compression/ZLibCompressionStrategy.hpp"
 #include "System/IO/Compression/ZLibCompressionOptions.hpp"
 #include "System/IO/Compression/ZLibException.hpp"
@@ -38,6 +46,11 @@ using System::IO::Compression::ZLibStream;
 using System::IO::Compression::ZipArchive;
 using System::IO::Compression::ZipArchiveEntry;
 using System::IO::Compression::ZipArchiveMode;
+using System::IO::Compression::ZipFile;
+using System::IO::Compression::ZipFileExtensions;
+using System::IO::Directory;
+using System::IO::File;
+using System::IO::Path;
 using System::IO::Compression::ZipCompressionMethod;
 using System::IO::Compression::ZLibCompressionStrategy;
 using System::IO::Compression::ZLibCompressionOptions;
@@ -714,4 +727,123 @@ TEST(ZLibEncoderDecoderTests, WithCompressionOptions) {
                                  static_cast<intcs>(decompressed.size()), dConsumed, dWritten);
     EXPECT_EQ(status, OperationStatus::Done);
     EXPECT_EQ(0, std::memcmp(decompressed.data(), input.data(), input.size()));
+}
+
+// ===========================================================================
+// ZipFile / ZipFileExtensions
+// ===========================================================================
+
+namespace {
+    void RemoveAll(const std::string& path) {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+}
+
+TEST(ZipFileTests, CreateFromDirectory_ExtractToDirectory_Roundtrip) {
+    const std::string srcDir = "/tmp/sharp_rt_zipfile_src";
+    const std::string archivePath = "/tmp/sharp_rt_zipfile_test.zip";
+    const std::string destDir = "/tmp/sharp_rt_zipfile_dest";
+    RemoveAll(srcDir); RemoveAll(archivePath); RemoveAll(destDir);
+
+    Directory::CreateDirectory(srcDir);
+    Directory::CreateDirectory(Path::Combine(srcDir, "sub"));
+    File::WriteAllText(Path::Combine(srcDir, "a.txt"), "hello from a");
+    File::WriteAllText(Path::Combine(srcDir, "sub", "b.txt"), "hello from b");
+
+    ZipFile::CreateFromDirectory(srcDir, archivePath);
+    ASSERT_TRUE(File::Exists(archivePath));
+
+    ZipFile::ExtractToDirectory(archivePath, destDir);
+    EXPECT_EQ(File::ReadAllText(Path::Combine(destDir, "a.txt")), "hello from a");
+    EXPECT_EQ(File::ReadAllText(Path::Combine(destDir, "sub", "b.txt")), "hello from b");
+
+    RemoveAll(srcDir); RemoveAll(archivePath); RemoveAll(destDir);
+}
+
+TEST(ZipFileTests, CreateFromDirectory_IncludeBaseDirectory) {
+    const std::string srcDir = "/tmp/sharp_rt_zipfile_base_src";
+    const std::string archivePath = "/tmp/sharp_rt_zipfile_base_test.zip";
+    RemoveAll(srcDir); RemoveAll(archivePath);
+
+    Directory::CreateDirectory(srcDir);
+    File::WriteAllText(Path::Combine(srcDir, "f.txt"), "data");
+
+    ZipFile::CreateFromDirectory(srcDir, archivePath, CompressionLevel::Fastest, /*includeBaseDirectory=*/true);
+
+    auto archive = ZipFile::OpenRead(archivePath);
+    const std::string baseName = std::filesystem::path(srcDir).filename().string();
+    auto entry = archive.GetEntry(baseName + "/f.txt");
+    EXPECT_TRUE(entry.IsValid());
+
+    RemoveAll(srcDir); RemoveAll(archivePath);
+}
+
+TEST(ZipFileTests, OpenRead_NonExistentDirectory_Throws) {
+    RemoveAll("/tmp/sharp_rt_zipfile_missing_src");
+    EXPECT_THROW(
+        ZipFile::CreateFromDirectory("/tmp/sharp_rt_zipfile_missing_src", "/tmp/sharp_rt_zipfile_missing.zip"),
+        System::IO::DirectoryNotFoundException);
+}
+
+TEST(ZipFileExtensionsTests, CreateEntryFromFile_ExtractToFile_Roundtrip) {
+    const std::string srcFile = "/tmp/sharp_rt_zfe_src.txt";
+    const std::string archivePath = "/tmp/sharp_rt_zfe_test.zip";
+    const std::string destFile = "/tmp/sharp_rt_zfe_dest.txt";
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+
+    File::WriteAllText(srcFile, "extension-method roundtrip");
+    {
+        ZipArchive archive(archivePath, ZipArchiveMode::Create);
+        ZipFileExtensions::CreateEntryFromFile(archive, srcFile, "entry.txt");
+    }
+
+    ZipArchive archive(archivePath, ZipArchiveMode::Read);
+    auto entry = archive.GetEntry("entry.txt");
+    ASSERT_TRUE(entry.IsValid());
+    ZipFileExtensions::ExtractToFile(entry, destFile);
+    EXPECT_EQ(File::ReadAllText(destFile), "extension-method roundtrip");
+
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+}
+
+TEST(ZipFileExtensionsTests, ExtractToFile_WithoutOverwrite_ExistingFile_Throws) {
+    const std::string srcFile = "/tmp/sharp_rt_zfe_ow_src.txt";
+    const std::string archivePath = "/tmp/sharp_rt_zfe_ow_test.zip";
+    const std::string destFile = "/tmp/sharp_rt_zfe_ow_dest.txt";
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+
+    File::WriteAllText(srcFile, "content");
+    File::WriteAllText(destFile, "already here");
+    {
+        ZipArchive archive(archivePath, ZipArchiveMode::Create);
+        ZipFileExtensions::CreateEntryFromFile(archive, srcFile, "entry.txt");
+    }
+
+    ZipArchive archive(archivePath, ZipArchiveMode::Read);
+    auto entry = archive.GetEntry("entry.txt");
+    EXPECT_THROW(ZipFileExtensions::ExtractToFile(entry, destFile, false), System::IO::IOException);
+
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+}
+
+TEST(ZipFileExtensionsTests, ExtractToFile_WithOverwrite_ReplacesExistingFile) {
+    const std::string srcFile = "/tmp/sharp_rt_zfe_ow2_src.txt";
+    const std::string archivePath = "/tmp/sharp_rt_zfe_ow2_test.zip";
+    const std::string destFile = "/tmp/sharp_rt_zfe_ow2_dest.txt";
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
+
+    File::WriteAllText(srcFile, "new content");
+    File::WriteAllText(destFile, "old content");
+    {
+        ZipArchive archive(archivePath, ZipArchiveMode::Create);
+        ZipFileExtensions::CreateEntryFromFile(archive, srcFile, "entry.txt");
+    }
+
+    ZipArchive archive(archivePath, ZipArchiveMode::Read);
+    auto entry = archive.GetEntry("entry.txt");
+    EXPECT_NO_THROW(ZipFileExtensions::ExtractToFile(entry, destFile, true));
+    EXPECT_EQ(File::ReadAllText(destFile), "new content");
+
+    RemoveAll(srcFile); RemoveAll(archivePath); RemoveAll(destFile);
 }
