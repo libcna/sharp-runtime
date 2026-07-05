@@ -7,6 +7,7 @@
 //   ReadOnlySet: Empty, Count, IsEmpty, Contains, set operations
 //   BitVector32: Equals, GetHashCode, ToString(value), Section equality/hash/ToString
 #include <gtest/gtest.h>
+#include "System/ArgumentNullException.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyObservableCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlySet.hpp"
 #include "System/Collections/Specialized/BitVector32.hpp"
@@ -93,6 +94,10 @@ TEST(ReadOnlyObservableCollectionBatch19Test, ForwardsCollectionChangedFromSourc
 // ===========================================================================
 // ReadOnlySet
 // ===========================================================================
+
+TEST(ReadOnlySetBatch19Test, Ctor_NullSet_ThrowsArgumentNullException) {
+    EXPECT_THROW(ReadOnlySet<int>(nullptr), System::ArgumentNullException);
+}
 
 TEST(ReadOnlySetBatch19Test, CountAndContains) {
     auto s = std::make_shared<std::unordered_set<int>>(std::initializer_list<int>{1, 2, 3});
