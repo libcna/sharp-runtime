@@ -23,6 +23,7 @@
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/DriveNotFoundException.hpp"
+#include "System/IO/ErrorEventArgs.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -49,6 +50,7 @@ using System::IO::IOException;
 using System::IO::FileNotFoundException;
 using System::IO::DirectoryNotFoundException;
 using System::IO::DriveNotFoundException;
+using System::IO::ErrorEventArgs;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -352,6 +354,24 @@ TEST(DriveNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
 
 TEST(DriveNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw DriveNotFoundException(), System::IO::IOException);
+}
+
+// ===========================================================================
+// ErrorEventArgs
+// ===========================================================================
+
+TEST(ErrorEventArgsTests, GetException_ReturnsStoredException) {
+    std::exception_ptr ptr;
+    try { throw IOException("boom"); } catch (...) { ptr = std::current_exception(); }
+    ErrorEventArgs args(ptr);
+    EXPECT_EQ(args.GetException(), ptr);
+}
+
+TEST(ErrorEventArgsTests, IsA_EventArgs) {
+    ErrorEventArgs args(std::exception_ptr{});
+    System::EventArgs& base = args;
+    (void)base;
+    SUCCEED();
 }
 
 // ===========================================================================
