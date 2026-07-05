@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/Globalization/KoreanCalendar.hpp"
 #include "System/Globalization/JapaneseCalendar.hpp"
@@ -79,7 +80,7 @@ TEST(JapaneseCalendarTests, Showa64) {
 }
 TEST(JapaneseCalendarTests, BeforeMeijiThrows) {
     JapaneseCalendar cal;
-    EXPECT_THROW(cal.GetEra(DateTime(1867, 12, 31)), std::out_of_range);
+    EXPECT_THROW(cal.GetEra(DateTime(1867, 12, 31)), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
 //   IdnMapping:      default ctor, property getters/setters, GetAscii, operator==
 //   JapaneseCalendar: era constants, GetEra, GetYear, GetErasCount
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/HijriCalendar.hpp"
 #include "System/Globalization/ISOWeek.hpp"
 #include "System/Globalization/IdnMapping.hpp"
@@ -30,6 +31,25 @@ TEST(HijriCalendarBatch30Test, HijriEraConstant) {
 TEST(HijriCalendarBatch30Test, GetErasCount) {
     HijriCalendar hc;
     EXPECT_EQ(hc.GetErasCount(), 1);
+}
+
+TEST(HijriCalendarBatch30Test, Eras_ContainsHijriEra) {
+    HijriCalendar hc;
+    auto eras = hc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], HijriCalendar::HijriEra);
+}
+
+TEST(HijriCalendarBatch30Test, IsLeapYear_OutOfRange_ThrowsArgumentOutOfRange) {
+    HijriCalendar hc;
+    EXPECT_THROW(hc.IsLeapYear(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(hc.IsLeapYear(HijriCalendar::MaxCalendarYear + 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HijriCalendarBatch30Test, GetDaysInMonth_InvalidMonth_ThrowsArgumentOutOfRange) {
+    HijriCalendar hc;
+    EXPECT_THROW(hc.GetDaysInMonth(1, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(hc.GetDaysInMonth(1, 13), System::ArgumentOutOfRangeException);
 }
 
 TEST(HijriCalendarBatch30Test, IsLeapYear_Known) {
@@ -227,7 +247,15 @@ TEST(JapaneseCalendarBatch30Test, GetEra_Meiji) {
 
 TEST(JapaneseCalendarBatch30Test, GetEra_BeforeMeiji_Throws) {
     JapaneseCalendar jc;
-    EXPECT_THROW(jc.GetEra(System::DateTime(1867, 12, 31)), std::out_of_range);
+    EXPECT_THROW(jc.GetEra(System::DateTime(1867, 12, 31)), System::ArgumentOutOfRangeException);
+}
+
+TEST(JapaneseCalendarBatch30Test, Eras_ContainsAllFiveEras) {
+    JapaneseCalendar jc;
+    auto eras = jc.getErasProperty();
+    ASSERT_EQ(eras.size(), 5u);
+    EXPECT_EQ(eras[0], JapaneseCalendar::ReiwaEra);
+    EXPECT_EQ(eras[4], JapaneseCalendar::MeijiEra);
 }
 
 TEST(JapaneseCalendarBatch30Test, GetYear_Reiwa) {

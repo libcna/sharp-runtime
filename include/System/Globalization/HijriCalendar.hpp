@@ -53,6 +53,14 @@ public:
     }
 
     /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET HijriCalendar.Eras.
+     * @return A vector containing {HijriEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {HijriEra}; }
+
+    /**
      * @brief Returns the Hijri year corresponding to the given DateTime.
      *
      * C++ counterpart of .NET HijriCalendar.GetYear(DateTime).
