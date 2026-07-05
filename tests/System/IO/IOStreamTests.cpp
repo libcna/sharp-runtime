@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
@@ -430,6 +434,72 @@ TEST(BinaryReaderWriterTests, BinaryWriter_BaseStreamProperty) {
     MemoryStream ms;
     BinaryWriter bw(&ms, true);
     EXPECT_EQ(bw.getBaseStreamProperty(), &ms);
+}
+
+TEST(BinaryReaderWriterTests, Ctor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BinaryReader br(nullptr), System::ArgumentNullException);
+}
+
+TEST(BinaryReaderWriterTests, ReadInt32_PastEndOfStream_ThrowsEndOfStreamException) {
+    MemoryStream ms; // empty stream
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadInt32(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadByte_AfterClose_ThrowsObjectDisposedException) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((int32_t)123);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    br.Close();
+    EXPECT_THROW(br.ReadByte(), System::ObjectDisposedException);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_ReturnsRequestedCount) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((uint8_t)1); bw.Write((uint8_t)2); bw.Write((uint8_t)3);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    auto bytes = br.ReadBytes(3);
+    ASSERT_EQ(bytes.size(), 3u);
+    EXPECT_EQ(bytes[0], 1);
+    EXPECT_EQ(bytes[1], 2);
+    EXPECT_EQ(bytes[2], 3);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_PastEndOfStream_TrimsInsteadOfThrowing) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((uint8_t)1);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    auto bytes = br.ReadBytes(10);
+    EXPECT_EQ(bytes.size(), 1u);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_NegativeCount_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadBytes(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BinaryReaderWriterTests, Read7BitEncodedInt_RoundTripsWithReadString) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write(std::string("hello"));
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    EXPECT_EQ(br.Read7BitEncodedInt(), 5);
 }
 
 // ===========================================================================

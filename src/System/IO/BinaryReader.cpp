@@ -4,7 +4,14 @@
 #include "System/IO/BinaryReader.hpp"
 
 #include <cstring>
-#include <stdexcept>
+
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/IO/EndOfStreamException.hpp"
+#include "System/IO/IOException.hpp"
 
 namespace System::IO
 {
@@ -12,22 +19,31 @@ namespace System::IO
         : stream_(stream), leaveOpen_(leaveOpen)
     {
         if (!stream_)
-            throw std::invalid_argument("stream must not be null.");
+            throw System::ArgumentNullException("stream");
+        if (!stream_->getCanReadProperty())
+            throw System::ArgumentException("Stream was not readable.");
     }
 
     BinaryReader::~BinaryReader()
     {
-        if (!leaveOpen_ && stream_)
+        if (!disposed_ && !leaveOpen_ && stream_)
             stream_->Close();
     }
 
-    void BinaryReader::ReadBytes(bytecs* buf, intcs count)
+    void BinaryReader::ThrowIfDisposed() const
     {
+        if (disposed_)
+            throw System::ObjectDisposedException("BinaryReader", "Cannot access a closed file.");
+    }
+
+    void BinaryReader::ReadBytesExact(bytecs* buf, intcs count)
+    {
+        ThrowIfDisposed();
         intcs total = 0;
         while (total < count)
         {
             intcs n = stream_->Read(buf, total, count - total);
-            if (n == 0) throw std::runtime_error("Unexpected end of stream.");
+            if (n == 0) throw System::IO::EndOfStreamException();
             total += n;
         }
     }
@@ -35,7 +51,7 @@ namespace System::IO
     bytecs BinaryReader::ReadByte()
     {
         bytecs b;
-        ReadBytes(&b, 1);
+        ReadBytesExact(&b, 1);
         return b;
     }
 
@@ -47,7 +63,7 @@ namespace System::IO
     shortcs BinaryReader::ReadInt16()
     {
         bytecs buf[2];
-        ReadBytes(buf, 2);
+        ReadBytesExact(buf, 2);
         return static_cast<shortcs>(
             static_cast<uint16_t>(buf[0]) |
             (static_cast<uint16_t>(buf[1]) << 8));
@@ -61,7 +77,7 @@ namespace System::IO
     intcs BinaryReader::ReadInt32()
     {
         bytecs buf[4];
-        ReadBytes(buf, 4);
+        ReadBytesExact(buf, 4);
         return static_cast<intcs>(
             static_cast<uint32_t>(buf[0])        |
             (static_cast<uint32_t>(buf[1]) << 8) |
@@ -107,32 +123,78 @@ namespace System::IO
         return ReadByte() != 0;
     }
 
+    intcs BinaryReader::Read7BitEncodedInt()
+    {
+        // Unlike writing, we can't delegate to the 64-bit read: we want to stop
+        // consuming bytes as soon as an overflow is detected, matching .NET exactly.
+        uint32_t result = 0;
+        bytecs byteReadJustNow;
+
+        constexpr int MaxBytesWithoutOverflow = 4;
+        for (int shift = 0; shift < MaxBytesWithoutOverflow * 7; shift += 7)
+        {
+            byteReadJustNow = ReadByte();
+            result |= (static_cast<uint32_t>(byteReadJustNow) & 0x7Fu) << shift;
+
+            if (byteReadJustNow <= 0x7Fu)
+                return static_cast<intcs>(result);
+        }
+
+        // The 5th byte: we've already read 28 bits, so this byte must fit in 4 bits
+        // and must not have the continuation bit set.
+        byteReadJustNow = ReadByte();
+        if (byteReadJustNow > 0b1111u)
+            throw System::FormatException("Too many bytes in what should have been a 7-bit encoded integer.");
+
+        result |= static_cast<uint32_t>(byteReadJustNow) << (MaxBytesWithoutOverflow * 7);
+        return static_cast<intcs>(result);
+    }
+
     std::string BinaryReader::ReadString()
     {
         // .NET BinaryWriter writes strings with a 7-bit-encoded length prefix.
-        int length = 0;
-        int shift = 0;
-        while (true)
-        {
-            bytecs b = ReadByte();
-            length |= (static_cast<int>(b & 0x7F)) << shift;
-            if ((b & 0x80) == 0) break;
-            shift += 7;
-        }
+        intcs length = Read7BitEncodedInt();
+        if (length < 0)
+            throw System::IO::IOException("Invalid string length.");
         if (length == 0) return {};
         std::string result(static_cast<std::size_t>(length), '\0');
-        ReadBytes(reinterpret_cast<bytecs*>(result.data()), length);
+        ReadBytesExact(reinterpret_cast<bytecs*>(result.data()), length);
         return result;
     }
 
     intcs BinaryReader::Read(bytecs buffer[], intcs offset, intcs count)
     {
+        ThrowIfDisposed();
+        System::ArgumentOutOfRangeException::ThrowIfNegative(offset, "offset");
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
         return stream_->Read(buffer, offset, count);
+    }
+
+    std::vector<bytecs> BinaryReader::ReadBytes(intcs count)
+    {
+        ThrowIfDisposed();
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+        if (count == 0) return {};
+
+        std::vector<bytecs> result(static_cast<std::size_t>(count));
+        intcs total = 0;
+        while (total < count)
+        {
+            intcs n = stream_->Read(result.data(), total, count - total);
+            if (n == 0) break; // .NET trims the result instead of throwing here.
+            total += n;
+        }
+        if (total != count) result.resize(static_cast<std::size_t>(total));
+        return result;
     }
 
     void BinaryReader::Close()
     {
-        if (!leaveOpen_ && stream_)
-            stream_->Close();
+        if (!disposed_)
+        {
+            if (!leaveOpen_ && stream_)
+                stream_->Close();
+            disposed_ = true;
+        }
     }
 }
