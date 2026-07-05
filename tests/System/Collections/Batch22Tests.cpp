@@ -8,6 +8,9 @@
 //   StringCollection:   IsSynchronized, SyncRoot
 //   StringDictionary:   getKeysProperty, getValuesProperty, getSyncRootProperty
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Collections/Specialized/OrderedDictionary.hpp"
 #include "System/Collections/Specialized/StringCollection.hpp"
 #include "System/Collections/Specialized/StringDictionary.hpp"
@@ -62,7 +65,7 @@ TEST(OrderedDictionaryBatch22Test, AddAndContains) {
 TEST(OrderedDictionaryBatch22Test, Add_DuplicateThrows) {
     OrderedDictionary d;
     d.Add("k", "v");
-    EXPECT_THROW(d.Add("k", "v2"), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", "v2"), System::ArgumentException);
 }
 
 TEST(OrderedDictionaryBatch22Test, Indexer_ByKey) {
@@ -71,9 +74,17 @@ TEST(OrderedDictionaryBatch22Test, Indexer_ByKey) {
     EXPECT_EQ(d["x"], "hello");
 }
 
-TEST(OrderedDictionaryBatch22Test, Indexer_Missing_Throws) {
+TEST(OrderedDictionaryBatch22Test, Indexer_Missing_ReturnsEmpty) {
+    const OrderedDictionary d;
+    EXPECT_EQ(d["missing"], "");
+}
+
+TEST(OrderedDictionaryBatch22Test, Indexer_Mutable_InsertsNewKey) {
     OrderedDictionary d;
-    EXPECT_THROW((void)d["missing"], std::out_of_range);
+    d["newkey"] = "value";
+    EXPECT_TRUE(d.Contains("newkey"));
+    EXPECT_EQ(d["newkey"], "value");
+    EXPECT_EQ(d.getCountProperty(), 1);
 }
 
 TEST(OrderedDictionaryBatch22Test, GetByIndex) {
@@ -144,14 +155,25 @@ TEST(OrderedDictionaryBatch22Test, ValuesProperty_InsertionOrder) {
     EXPECT_EQ(vals[1], "beta");
 }
 
-TEST(OrderedDictionaryBatch22Test, AsReadOnly_BlocksMutation) {
+TEST(OrderedDictionaryBatch22Test, AsReadOnly_WrapperIsReadOnly_OriginalStaysMutable) {
     OrderedDictionary d;
     d.Add("k", "v");
-    d.AsReadOnly();
-    EXPECT_TRUE(d.getIsReadOnlyProperty());
-    EXPECT_THROW(d.Add("x", "y"), std::runtime_error);
-    EXPECT_THROW(d.Remove("k"), std::runtime_error);
-    EXPECT_THROW(d.Clear(), std::runtime_error);
+    OrderedDictionary view = d.AsReadOnly();
+
+    // The wrapper is read-only...
+    EXPECT_TRUE(view.getIsReadOnlyProperty());
+    EXPECT_THROW(view.Add("x", "y"), System::NotSupportedException);
+    EXPECT_THROW(view.Remove("k"), System::NotSupportedException);
+    EXPECT_THROW(view.Clear(), System::NotSupportedException);
+
+    // ...but the original is NOT: AsReadOnly() must not mutate `d` itself.
+    EXPECT_FALSE(d.getIsReadOnlyProperty());
+    d.Add("x", "y");
+    EXPECT_EQ(d.getCountProperty(), 2);
+
+    // The wrapper shares storage with the original: it's a live view, not a snapshot.
+    EXPECT_EQ(view.getCountProperty(), 2);
+    EXPECT_TRUE(view.Contains("x"));
 }
 
 // ===========================================================================

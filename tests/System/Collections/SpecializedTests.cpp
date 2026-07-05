@@ -427,7 +427,7 @@ TEST(OrderedDictionaryTests, Add_IncreasesCount) {
 TEST(OrderedDictionaryTests, Add_DuplicateKey_Throws) {
     OrderedDictionary od;
     od.Add("k", "v");
-    EXPECT_THROW(od.Add("k", "v2"), std::invalid_argument);
+    EXPECT_THROW(od.Add("k", "v2"), System::ArgumentException);
 }
 
 TEST(OrderedDictionaryTests, Contains_True_False) {
