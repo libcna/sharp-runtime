@@ -29,6 +29,11 @@
 #include "System/IO/FileHandleType.hpp"
 #include "System/IO/FileSystemEventArgs.hpp"
 #include "System/IO/FileSystemEventHandler.hpp"
+#include "System/IO/FileSystemWatcher.hpp"
+#include "System/IO/NotifyFilters.hpp"
+#include "System/IO/RenamedEventArgs.hpp"
+#include "System/IO/RenamedEventHandler.hpp"
+#include "System/IO/WaitForChangedResult.hpp"
 #include "System/IO/WatcherChangeTypes.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
@@ -39,6 +44,13 @@
 #include "System/IO/EnumerationOptions.hpp"
 #include "System/IO/FileStreamOptions.hpp"
 #include "System/IO/DriveInfo.hpp"
+#include "System/ArgumentException.hpp"
+
+namespace {
+    std::string tf(const char* name) {
+        return std::string("/tmp/sharp_rt_io_") + name;
+    }
+}
 
 using System::IO::FileMode;
 using System::IO::FileAccess;
@@ -62,6 +74,11 @@ using System::IO::FileFormatException;
 using System::IO::FileHandleType;
 using System::IO::FileSystemEventArgs;
 using System::IO::FileSystemEventHandler;
+using System::IO::FileSystemWatcher;
+using System::IO::NotifyFilters;
+using System::IO::RenamedEventArgs;
+using System::IO::RenamedEventHandler;
+using System::IO::WaitForChangedResult;
 using System::IO::WatcherChangeTypes;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
@@ -541,6 +558,127 @@ TEST(FileSystemEventHandlerTests, InvokesWithSenderAndArgs) {
     handler(&fakeSender, args);
     EXPECT_TRUE(called);
     EXPECT_EQ(seenSender, &fakeSender);
+}
+
+// ===========================================================================
+// NotifyFilters
+// ===========================================================================
+
+TEST(NotifyFiltersTests, FileName_IsOne) {
+    EXPECT_EQ(static_cast<int>(NotifyFilters::FileName), 1);
+}
+
+TEST(NotifyFiltersTests, OperatorOr_Combines) {
+    auto combined = NotifyFilters::FileName | NotifyFilters::LastWrite;
+    EXPECT_EQ(static_cast<int>(combined), 0x1 | 0x10);
+}
+
+// ===========================================================================
+// RenamedEventArgs
+// ===========================================================================
+
+TEST(RenamedEventArgsTests, PropertiesReturnConstructorValues) {
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "new.txt", "old.txt");
+    EXPECT_EQ(args.getNameProperty(), "new.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/new.txt");
+    EXPECT_EQ(args.getOldNameProperty(), "old.txt");
+    EXPECT_EQ(args.getOldFullPathProperty(), "/tmp/old.txt");
+}
+
+TEST(RenamedEventArgsTests, IsA_FileSystemEventArgs) {
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "a", "b");
+    FileSystemEventArgs& base = args;
+    (void)base;
+    SUCCEED();
+}
+
+// ===========================================================================
+// RenamedEventHandler
+// ===========================================================================
+
+TEST(RenamedEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    RenamedEventHandler handler = [&](void* sender, const RenamedEventArgs& e) {
+        called = true;
+        (void)sender;
+        (void)e;
+    };
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "a", "b");
+    int fakeSender = 0;
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+}
+
+// ===========================================================================
+// WaitForChangedResult
+// ===========================================================================
+
+TEST(WaitForChangedResultTests, DefaultConstructed_NotTimedOut) {
+    WaitForChangedResult r;
+    EXPECT_FALSE(r.TimedOut);
+}
+
+TEST(WaitForChangedResultTests, TimedOutResult_IsTimedOut) {
+    auto r = WaitForChangedResult::TimedOutResult();
+    EXPECT_TRUE(r.TimedOut);
+}
+
+// ===========================================================================
+// FileSystemWatcher
+// ===========================================================================
+
+TEST(FileSystemWatcherTests, DefaultCtor_PathIsEmpty) {
+    FileSystemWatcher fsw;
+    EXPECT_TRUE(fsw.getPathProperty().empty());
+}
+
+TEST(FileSystemWatcherTests, PathCtor_ExistingDirectory_Succeeds) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_EQ(fsw.getPathProperty(), "/tmp");
+}
+
+TEST(FileSystemWatcherTests, PathCtor_NonExistentDirectory_ThrowsArgumentException) {
+    EXPECT_THROW(FileSystemWatcher(tf("no_such_watch_dir_xyz")), System::ArgumentException);
+}
+
+TEST(FileSystemWatcherTests, FilterCtor_SetsFilter) {
+    FileSystemWatcher fsw("/tmp", "*.txt");
+    EXPECT_EQ(fsw.getFilterProperty(), "*.txt");
+}
+
+TEST(FileSystemWatcherTests, DefaultFilter_IsStar) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_EQ(fsw.getFilterProperty(), "*");
+}
+
+TEST(FileSystemWatcherTests, DefaultNotifyFilter_MatchesDotNetDefault) {
+    FileSystemWatcher fsw;
+    auto expected = NotifyFilters::LastWrite | NotifyFilters::FileName | NotifyFilters::DirectoryName;
+    EXPECT_EQ(fsw.getNotifyFilterProperty(), expected);
+}
+
+TEST(FileSystemWatcherTests, SetNotifyFilter_InvalidBits_ThrowsArgumentException) {
+    FileSystemWatcher fsw;
+    EXPECT_THROW(fsw.setNotifyFilterProperty(static_cast<NotifyFilters>(0x40000)), System::ArgumentException);
+}
+
+TEST(FileSystemWatcherTests, InternalBufferSize_ClampedToMinimum) {
+    FileSystemWatcher fsw;
+    fsw.setInternalBufferSizeProperty(100);
+    EXPECT_EQ(fsw.getInternalBufferSizeProperty(), 4096);
+}
+
+TEST(FileSystemWatcherTests, EnableRaisingEvents_RoundTrips) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_FALSE(fsw.getEnableRaisingEventsProperty());
+    fsw.setEnableRaisingEventsProperty(true);
+    EXPECT_TRUE(fsw.getEnableRaisingEventsProperty());
+}
+
+TEST(FileSystemWatcherTests, ChangedHandlerList_CanRegisterHandler) {
+    FileSystemWatcher fsw("/tmp");
+    fsw.Changed.push_back([](void*, const FileSystemEventArgs&) {});
+    EXPECT_EQ(fsw.Changed.size(), 1u);
 }
 
 // ===========================================================================

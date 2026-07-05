@@ -19,12 +19,14 @@ namespace System::IO {
         std::string name_;
         std::string fullPath_;
 
+    protected:
         /**
          * @brief Combines a directory path and a relative file name into a single path.
          *
          * C++ counterpart of .NET FileSystemEventArgs.Combine(string, string).
          * Like Path::Combine, but without argument validation, and a separator is always
-         * used even if @p name is empty.
+         * used even if @p name is empty. Protected so RenamedEventArgs can reuse it for
+         * OldFullPath, matching .NET's internal visibility.
          */
         static std::string Combine(const std::string& directory, const std::string& name) {
             bool hasSeparator = !directory.empty() && directory.back() == Path::DirectorySeparatorChar;
