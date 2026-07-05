@@ -23,6 +23,7 @@
 #include "System/Diagnostics/DebuggerVisualizerAttribute.hpp"
 #include "System/Diagnostics/StackTraceHiddenAttribute.hpp"
 #include "System/Diagnostics/DebuggerDisableUserUnhandledExceptionsAttribute.hpp"
+#include "System/Diagnostics/DebuggerGuidedStepThroughAttribute.hpp"
 
 using System::Diagnostics::DebuggerDisplayAttribute;
 using System::Diagnostics::DebuggerBrowsableAttribute;
@@ -213,6 +214,10 @@ TEST(DebuggerMarkerAttributesTests, DebuggerNonUserCodeAttribute_DefaultCtor) {
 
 TEST(DebuggerMarkerAttributesTests, StackTraceHiddenAttribute_DefaultCtor) {
     EXPECT_NO_THROW(System::Diagnostics::StackTraceHiddenAttribute{});
+}
+
+TEST(DebuggerMarkerAttributesTests, DebuggerGuidedStepThroughAttribute_DefaultCtor) {
+    EXPECT_NO_THROW(System::Diagnostics::DebuggerGuidedStepThroughAttribute{});
 }
 
 TEST(DebuggerMarkerAttributesTests, DebuggerDisableUserUnhandledExceptionsAttribute_DefaultCtor) {
