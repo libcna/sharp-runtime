@@ -505,6 +505,11 @@ TEST(FileLoadExceptionTests, MessageFilenameCtor_getFileNameProperty) {
     EXPECT_EQ(ex.getFileNameProperty(), "bad.dll");
 }
 
+TEST(FileLoadExceptionTests, MessageFileNameAndInnerCtor_StoresFileName) {
+    FileLoadException ex("failed", "bad.dll", std::exception_ptr{});
+    EXPECT_EQ(ex.getFileNameProperty(), "bad.dll");
+}
+
 // ===========================================================================
 // InvalidDataException
 // ===========================================================================

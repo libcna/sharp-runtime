@@ -20,6 +20,9 @@ namespace System::IO {
         /** Initializes a FileLoadException with a message and an inner exception. */
         FileLoadException(const std::string& message, std::exception_ptr inner)
             : IOException(message, std::move(inner)) {}
+        /** Initializes a FileLoadException with a message, the file name, and an inner exception. */
+        FileLoadException(const std::string& message, const std::string& fileName, std::exception_ptr inner)
+            : IOException(message, std::move(inner)), fileName_(fileName) {}
 
         /** Returns the name of the file that could not be loaded. */
         [[nodiscard]] const std::string& getFileNameProperty() const { return fileName_; }
