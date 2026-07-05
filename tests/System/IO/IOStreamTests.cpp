@@ -717,6 +717,57 @@ TEST(StreamWriterReaderTests, StreamWriter_BaseStreamProperty) {
     EXPECT_EQ(sw.getBaseStreamProperty(), &ms);
 }
 
+TEST(StreamWriterReaderTests, WriteStringLiteral_DoesNotResolveToBoolOverload) {
+    // Regression: TextWriter previously had no Write(const char*) overload, so a string
+    // literal bound to Write(bool) via a preferred standard pointer-to-bool conversion
+    // instead of the user-defined conversion to std::string, silently writing "True".
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("hello");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadToEnd(), "hello");
+}
+
+TEST(StreamWriterReaderTests, StreamReader_PeekDoesNotAdvance) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("ab");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.Peek(), int('a'));
+    EXPECT_EQ(sr.Peek(), int('a'));
+    EXPECT_EQ(sr.Read(), int('a'));
+    EXPECT_EQ(sr.Read(), int('b'));
+    EXPECT_EQ(sr.Read(), -1);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_ReadLine) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("line1\nline2\nline3");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+TEST(StreamWriterReaderTests, StreamReader_PathCtor_ReadsFile) {
+    std::string p = tf("sr_file.txt");
+    File::WriteAllText(p, "from file reader");
+    StreamReader sr(p);
+    EXPECT_EQ(sr.ReadToEnd(), "from file reader");
+    sr.Close();
+    File::Delete(p);
+}
+
 // ===========================================================================
 // BufferedStream
 // ===========================================================================

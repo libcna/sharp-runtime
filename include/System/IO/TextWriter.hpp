@@ -27,6 +27,15 @@ namespace System::IO {
 
         /** Writes a string to the output. */
         virtual void Write(const std::string& value) = 0;
+        /**
+         * Writes a null-terminated C-string to the output.
+         *
+         * Without this overload, a string literal passed to a TextWriter& would bind to
+         * Write(bool) instead of Write(const std::string&): a pointer-to-bool standard
+         * conversion is preferred over the user-defined conversion to std::string during
+         * overload resolution, so e.g. Write("hello") would silently write "True".
+         */
+        virtual void Write(const char* value)         { Write(std::string(value)); }
         /** Writes a single character to the output. */
         virtual void Write(char value)                { Write(std::string(1, value)); }
         /** Writes a 32-bit integer to the output. */
@@ -50,6 +59,8 @@ namespace System::IO {
 
         /** Writes a string followed by a line terminator. */
         virtual void WriteLine(const std::string& value) { Write(value); Write(NewLine()); }
+        /** Writes a null-terminated C-string followed by a line terminator. */
+        virtual void WriteLine(const char* value)         { Write(value); Write(NewLine()); }
         /** Writes a line terminator. */
         virtual void WriteLine()                          { Write(NewLine()); }
         /** Writes a character followed by a line terminator. */

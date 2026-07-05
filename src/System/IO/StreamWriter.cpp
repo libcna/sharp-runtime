@@ -26,14 +26,6 @@ namespace System::IO {
 
     void StreamWriter::Write(const std::string& value) { WriteRaw(value.data(), value.size()); }
     void StreamWriter::Write(const char* value)         { WriteRaw(value, std::strlen(value)); }
-    void StreamWriter::Write(char value)                { WriteRaw(&value, 1); }
-    void StreamWriter::Write(SharpRuntime::intcs value) { Write(std::to_string(value)); }
-    void StreamWriter::Write(double value)              { Write(std::to_string(value)); }
-    void StreamWriter::Write(bool value)                { Write(value ? std::string("True") : std::string("False")); }
-
-    void StreamWriter::WriteLine(const std::string& value) { Write(value); Write("\n"); }
-    void StreamWriter::WriteLine(const char* value)        { Write(value); Write("\n"); }
-    void StreamWriter::WriteLine()                         { Write("\n"); }
 
     void StreamWriter::Flush() { stream_->Flush(); }
     void StreamWriter::Close() { stream_->Close(); }
