@@ -20,6 +20,16 @@ public:
     static constexpr int GregorianOffset = 1911;  ///< Offset subtracted from Gregorian year to get ROC year.
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET TaiwanCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by TaiwanCalendar.
      *
      * C++ counterpart of .NET TaiwanCalendar.MinSupportedDateTime.

@@ -43,6 +43,16 @@ public:
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET HijriCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::LunarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::LunarCalendar;
+    }
+
+    /**
      * @brief Returns the Hijri year corresponding to the given DateTime.
      *
      * C++ counterpart of .NET HijriCalendar.GetYear(DateTime).

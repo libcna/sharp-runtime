@@ -32,6 +32,16 @@ public:
     [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return HebrewEra; }
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET HebrewCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::LunisolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::LunisolarCalendar;
+    }
+
+    /**
      * @brief Returns the number of eras in this calendar.
      *
      * @return Always 1; the Hebrew calendar has a single era.

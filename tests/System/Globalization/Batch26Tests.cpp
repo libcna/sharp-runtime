@@ -29,8 +29,10 @@ struct GregorianLikeCalendar : Calendar {};
 // ===========================================================================
 
 TEST(CalendarBatch26Test, AlgorithmType) {
+    // .NET's Calendar base class returns Unknown; concrete calendars (GregorianCalendar, etc.)
+    // override it with their actual algorithm basis.
     GregorianLikeCalendar cal;
-    EXPECT_EQ(cal.getAlgorithmTypeProperty(), CalendarAlgorithmType::SolarCalendar);
+    EXPECT_EQ(cal.getAlgorithmTypeProperty(), CalendarAlgorithmType::Unknown);
 }
 
 TEST(CalendarBatch26Test, IsReadOnly_False) {

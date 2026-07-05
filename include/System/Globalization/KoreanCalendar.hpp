@@ -20,6 +20,16 @@ public:
     static constexpr int GregorianOffset = 2333; ///< Years added to the Gregorian year to obtain the Korean year.
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET KoreanCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by KoreanCalendar.
      *
      * C++ counterpart of .NET KoreanCalendar.MinSupportedDateTime.

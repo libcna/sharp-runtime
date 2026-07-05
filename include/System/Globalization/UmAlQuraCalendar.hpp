@@ -25,6 +25,11 @@ public:
     /** @return Always 1 — the Um Al Qura calendar has a single era. */
     [[nodiscard]] int GetErasCount() const override { return 1; }
 
+    /** @return Always CalendarAlgorithmType::LunarCalendar. C++ counterpart of .NET UmAlQuraCalendar.AlgorithmType. */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::LunarCalendar;
+    }
+
     /** @return The Um Al Qura year corresponding to @p time. */
     [[nodiscard]] int  GetYear      (const System::DateTime& time) const override;
     /** @return The Um Al Qura month (1–12) corresponding to @p time. */

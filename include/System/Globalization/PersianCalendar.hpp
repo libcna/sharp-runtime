@@ -22,6 +22,16 @@ public:
     static constexpr int PersianEra = 1; ///< The only era value for this calendar.
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET PersianCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by PersianCalendar.
      *
      * C++ counterpart of .NET PersianCalendar.MinSupportedDateTime.

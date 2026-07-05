@@ -20,6 +20,16 @@ public:
     static constexpr int GregorianOffset = 543;  ///< Years added to the Gregorian year to get the Buddhist Era year.
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET ThaiBuddhistCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by ThaiBuddhistCalendar.
      *
      * C++ counterpart of .NET ThaiBuddhistCalendar.MinSupportedDateTime.

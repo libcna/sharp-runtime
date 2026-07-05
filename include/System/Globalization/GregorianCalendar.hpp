@@ -48,6 +48,16 @@ public:
     [[nodiscard]] GregorianCalendarTypes getCalendarTypeProperty() const { return type_; }
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET GregorianCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Sets the Gregorian calendar type variant.
      *
      * C++ counterpart of .NET GregorianCalendar.CalendarType setter.

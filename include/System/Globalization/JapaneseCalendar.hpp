@@ -30,6 +30,16 @@ public:
     static constexpr int ReiwaEra  = 5; ///< Reiwa era identifier (from 2019-05-01).
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET JapaneseCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by JapaneseCalendar.
      *
      * C++ counterpart of .NET JapaneseCalendar.MinSupportedDateTime.

@@ -48,11 +48,13 @@ public:
     /**
      * @brief Gets the algorithm type for this calendar.
      *
-     * C++ counterpart of .NET Calendar.AlgorithmType.
-     * @return CalendarAlgorithmType::SolarCalendar by default.
+     * C++ counterpart of .NET Calendar.AlgorithmType. This is the default value returned
+     * by the Calendar base class; concrete calendar subclasses override it with their
+     * actual algorithm basis (solar/lunar/lunisolar).
+     * @return CalendarAlgorithmType::Unknown by default.
      */
     [[nodiscard]] virtual CalendarAlgorithmType getAlgorithmTypeProperty() const {
-        return CalendarAlgorithmType::SolarCalendar;
+        return CalendarAlgorithmType::Unknown;
     }
 
     /**

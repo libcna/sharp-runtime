@@ -373,6 +373,11 @@ TEST(GregorianCalendarTests, ExplicitType) {
     EXPECT_EQ(gc.getCalendarTypeProperty(), GregorianCalendarTypes::USEnglish);
 }
 
+TEST(GregorianCalendarTests, AlgorithmType_IsSolar) {
+    GregorianCalendar gc;
+    EXPECT_EQ(gc.getAlgorithmTypeProperty(), CalendarAlgorithmType::SolarCalendar);
+}
+
 TEST(GregorianCalendarTests, SetCalendarType) {
     GregorianCalendar gc;
     gc.setCalendarTypeProperty(GregorianCalendarTypes::Arabic);
