@@ -27,6 +27,8 @@
 #include "System/IO/ErrorEventHandler.hpp"
 #include "System/IO/FileFormatException.hpp"
 #include "System/IO/FileHandleType.hpp"
+#include "System/IO/FileSystemEventArgs.hpp"
+#include "System/IO/WatcherChangeTypes.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -57,6 +59,8 @@ using System::IO::ErrorEventArgs;
 using System::IO::ErrorEventHandler;
 using System::IO::FileFormatException;
 using System::IO::FileHandleType;
+using System::IO::FileSystemEventArgs;
+using System::IO::WatcherChangeTypes;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -479,6 +483,43 @@ TEST(FileHandleTypeTests, RegularFile_IsOne) {
 
 TEST(FileHandleTypeTests, BlockDevice_IsSeven) {
     EXPECT_EQ(static_cast<int>(FileHandleType::BlockDevice), 7);
+}
+
+// ===========================================================================
+// WatcherChangeTypes
+// ===========================================================================
+
+TEST(WatcherChangeTypesTests, Created_IsOne) {
+    EXPECT_EQ(static_cast<int>(WatcherChangeTypes::Created), 1);
+}
+
+TEST(WatcherChangeTypesTests, All_CombinesEveryValue) {
+    auto all = WatcherChangeTypes::Created | WatcherChangeTypes::Deleted |
+               WatcherChangeTypes::Changed | WatcherChangeTypes::Renamed;
+    EXPECT_EQ(all, WatcherChangeTypes::All);
+}
+
+// ===========================================================================
+// FileSystemEventArgs
+// ===========================================================================
+
+TEST(FileSystemEventArgsTests, PropertiesReturnConstructorValues) {
+    FileSystemEventArgs args(WatcherChangeTypes::Created, "/tmp/dir", "file.txt");
+    EXPECT_EQ(args.getChangeTypeProperty(), WatcherChangeTypes::Created);
+    EXPECT_EQ(args.getNameProperty(), "file.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/dir/file.txt");
+}
+
+TEST(FileSystemEventArgsTests, DirectoryWithTrailingSeparator_NoDoubleSeparator) {
+    FileSystemEventArgs args(WatcherChangeTypes::Changed, "/tmp/dir/", "file.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/dir/file.txt");
+}
+
+TEST(FileSystemEventArgsTests, IsA_EventArgs) {
+    FileSystemEventArgs args(WatcherChangeTypes::Deleted, "/tmp", "x");
+    System::EventArgs& base = args;
+    (void)base;
+    SUCCEED();
 }
 
 // ===========================================================================
