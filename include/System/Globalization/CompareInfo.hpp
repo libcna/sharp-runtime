@@ -6,6 +6,7 @@
 #include <cctype>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/SortKey.hpp"
 
@@ -100,6 +101,8 @@ public:
     intcs Compare(const std::string& s1, intcs off1, intcs len1,
                   const std::string& s2, intcs off2, intcs len2,
                   CompareOptions options = CompareOptions::None) const {
+        CheckRange(s1, off1, len1, "offset1");
+        CheckRange(s2, off2, len2, "offset2");
         return Compare(s1.substr(static_cast<size_t>(off1), static_cast<size_t>(len1)),
                        s2.substr(static_cast<size_t>(off2), static_cast<size_t>(len2)), options);
     }
@@ -197,14 +200,18 @@ public:
      * @brief Gets the SortKey for a string using the specified comparison options.
      *
      * C++ counterpart of .NET CompareInfo.GetSortKey(string, CompareOptions).
-     * This stub returns a byte-level key from the raw string bytes.
+     * This stub returns a byte-level key from the raw string bytes; when @p options
+     * includes IgnoreCase, the key is derived from the case-folded string so that two
+     * strings comparing equal under IgnoreCase also produce equal sort keys, matching
+     * the .NET contract that GetSortKey results are consistent with Compare.
      * @param source  The string to create a sort key for.
-     * @param options Comparison options (default None; not applied in this stub).
+     * @param options Comparison options (default None).
      * @return A SortKey object for @p source.
      */
     [[nodiscard]] SortKey GetSortKey(const std::string& source,
-                                     CompareOptions /*options*/ = CompareOptions::None) const {
-        std::vector<bytecs> key(source.begin(), source.end());
+                                     CompareOptions options = CompareOptions::None) const {
+        const std::string& keySource = hasFlag(options, CompareOptions::IgnoreCase) ? toLower(source) : source;
+        std::vector<bytecs> key(keySource.begin(), keySource.end());
         return SortKey(source, key);
     }
 
@@ -212,12 +219,15 @@ public:
      * @brief Gets a hash code for the given string under the specified comparison options.
      *
      * C++ counterpart of .NET CompareInfo.GetHashCode(string, CompareOptions).
+     * When @p options includes IgnoreCase, the hash is computed from the case-folded
+     * string so that strings equal under IgnoreCase comparison also hash equal.
      * @param source  The source string.
-     * @param options Comparison options (not applied in this stub).
+     * @param options Comparison options.
      * @return A hash code derived from the string value.
      */
-    [[nodiscard]] intcs GetHashCode(const std::string& source, CompareOptions /*options*/) const {
-        return static_cast<intcs>(std::hash<std::string>{}(source));
+    [[nodiscard]] intcs GetHashCode(const std::string& source, CompareOptions options) const {
+        const std::string& hashSource = hasFlag(options, CompareOptions::IgnoreCase) ? toLower(source) : source;
+        return static_cast<intcs>(std::hash<std::string>{}(hashSource));
     }
 
     /**
@@ -239,6 +249,15 @@ public:
 
 private:
     std::string name_;
+
+    static void CheckRange(const std::string& s, intcs offset, intcs length, const char* paramName) {
+        if (offset < 0) throw System::ArgumentOutOfRangeException(paramName);
+        if (length < 0) throw System::ArgumentOutOfRangeException("length");
+        if (static_cast<size_t>(offset) > s.size() ||
+            static_cast<size_t>(length) > s.size() - static_cast<size_t>(offset)) {
+            throw System::ArgumentOutOfRangeException(paramName);
+        }
+    }
 
     static bool hasFlag(CompareOptions options, CompareOptions flag) {
         return (static_cast<int>(options) & static_cast<int>(flag)) != 0;

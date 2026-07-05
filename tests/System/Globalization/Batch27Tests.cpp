@@ -8,6 +8,7 @@
 //   CultureInfo:           int ctor, CurrentUICulture, all properties
 //   CultureNotFoundException: all ctors, getInvalidCultureIdProperty
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/CompareInfo.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/CultureInfo.hpp"
@@ -16,6 +17,7 @@
 
 using System::Globalization::CompareInfo;
 using System::Globalization::CompareOptions;
+using System::Globalization::SortKey;
 using System::Globalization::CultureInfo;
 using System::Globalization::CultureNotFoundException;
 
@@ -78,6 +80,13 @@ TEST(CompareInfoBatch27Test, Compare_SubstringOverload) {
     EXPECT_EQ(ci.Compare("hello world", 6, 5, "world", 0, 5), 0);
 }
 
+TEST(CompareInfoBatch27Test, Compare_SubstringOverload_OutOfRange_Throws) {
+    CompareInfo ci("en-US");
+    EXPECT_THROW(ci.Compare("hello", 3, 10, "world", 0, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ci.Compare("hello", -1, 2, "world", 0, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ci.Compare("hello", 0, 2, "world", 3, 10), System::ArgumentOutOfRangeException);
+}
+
 TEST(CompareInfoBatch27Test, IsPrefix_IsSuffix) {
     CompareInfo ci("en-US");
     EXPECT_TRUE(ci.IsPrefix("hello", "hel"));
@@ -114,10 +123,25 @@ TEST(CompareInfoBatch27Test, GetSortKey) {
     EXPECT_EQ(sk.getOriginalStringProperty(), "test");
 }
 
+TEST(CompareInfoBatch27Test, GetSortKey_IgnoreCase_ProducesEqualKeys) {
+    // Sort keys must be consistent with Compare: strings equal under IgnoreCase
+    // should produce equal sort keys, matching the .NET contract.
+    CompareInfo ci("en-US");
+    auto skLower = ci.GetSortKey("hello", CompareOptions::IgnoreCase);
+    auto skUpper = ci.GetSortKey("HELLO", CompareOptions::IgnoreCase);
+    EXPECT_EQ(SortKey::Compare(skLower, skUpper), 0);
+}
+
 TEST(CompareInfoBatch27Test, GetHashCode) {
     CompareInfo ci("en-US");
     EXPECT_EQ(ci.GetHashCode("same", CompareOptions::None),
               ci.GetHashCode("same", CompareOptions::None));
+}
+
+TEST(CompareInfoBatch27Test, GetHashCode_IgnoreCase_MatchesAcrossCase) {
+    CompareInfo ci("en-US");
+    EXPECT_EQ(ci.GetHashCode("Hello", CompareOptions::IgnoreCase),
+              ci.GetHashCode("hello", CompareOptions::IgnoreCase));
 }
 
 TEST(CompareInfoBatch27Test, EqualityAndToString) {
