@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/RandomAccess.hpp"
-#include <stdexcept>
+#include "System/IO/IOException.hpp"
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -26,7 +26,7 @@ int64_t RandomAccess::GetLength(int fd) {
 #elif defined(_WIN32)
     LARGE_INTEGER sz{};
     if (!GetFileSizeEx(hOf(fd), &sz))
-        throw std::runtime_error("RandomAccess::GetLength failed");
+        throw IOException("RandomAccess::GetLength failed");
     return static_cast<int64_t>(sz.QuadPart);
 #else
     off_t pos = lseek(fd, 0, SEEK_CUR);
@@ -44,10 +44,10 @@ void RandomAccess::SetLength(int fd, int64_t length) {
     LARGE_INTEGER li{};
     li.QuadPart = length;
     if (!SetFilePointerEx(hOf(fd), li, nullptr, FILE_BEGIN) || !SetEndOfFile(hOf(fd)))
-        throw std::runtime_error("RandomAccess::SetLength failed");
+        throw IOException("RandomAccess::SetLength failed");
 #else
     if (ftruncate(fd, static_cast<off_t>(length)) != 0)
-        throw std::runtime_error("RandomAccess::SetLength failed");
+        throw IOException("RandomAccess::SetLength failed");
 #endif
 }
 
@@ -65,11 +65,11 @@ intcs RandomAccess::Read(int fd, bytecs* buffer, intcs count, int64_t fileOffset
     ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
     DWORD nRead = 0;
     if (!ReadFile(hOf(fd), buffer, static_cast<DWORD>(count), &nRead, &ov))
-        throw std::runtime_error("RandomAccess::Read failed");
+        throw IOException("RandomAccess::Read failed");
     return static_cast<intcs>(nRead);
 #else
     ssize_t n = pread(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
-    if (n < 0) throw std::runtime_error("RandomAccess::Read failed");
+    if (n < 0) throw IOException("RandomAccess::Read failed");
     return static_cast<intcs>(n);
 #endif
 }
@@ -88,10 +88,10 @@ void RandomAccess::Write(int fd, const bytecs* buffer, intcs count, int64_t file
     ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
     DWORD nWritten = 0;
     if (!WriteFile(hOf(fd), buffer, static_cast<DWORD>(count), &nWritten, &ov))
-        throw std::runtime_error("RandomAccess::Write failed");
+        throw IOException("RandomAccess::Write failed");
 #else
     ssize_t n = pwrite(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
-    if (n < 0) throw std::runtime_error("RandomAccess::Write failed");
+    if (n < 0) throw IOException("RandomAccess::Write failed");
 #endif
 }
 
@@ -101,9 +101,9 @@ void RandomAccess::FlushToDisk(int fd) {
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
     if (!FlushFileBuffers(hOf(fd)))
-        throw std::runtime_error("RandomAccess::FlushToDisk failed");
+        throw IOException("RandomAccess::FlushToDisk failed");
 #else
-    if (fsync(fd) != 0) throw std::runtime_error("RandomAccess::FlushToDisk failed");
+    if (fsync(fd) != 0) throw IOException("RandomAccess::FlushToDisk failed");
 #endif
 }
 

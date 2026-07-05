@@ -30,6 +30,7 @@
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/SeekOrigin.hpp"
+#include "System/IO/RandomAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
@@ -1180,3 +1181,85 @@ TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     EXPECT_NO_THROW(store.Dispose());
 }
+
+// ===========================================================================
+// RandomAccess
+// ===========================================================================
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+
+TEST(RandomAccessTests, WriteThenRead_AtOffset_Roundtrip) {
+    std::string p = tf("randomaccess_rw.bin");
+    File::Delete(p);
+    int fd = ::open(p.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    ASSERT_GE(fd, 0);
+
+    uint8_t data[] = {10, 20, 30, 40};
+    System::IO::RandomAccess::Write(fd, data, 4, 0);
+
+    uint8_t readback[4] = {};
+    intcs n = System::IO::RandomAccess::Read(fd, readback, 4, 0);
+    EXPECT_EQ(n, 4);
+    EXPECT_EQ(readback[0], 10u);
+    EXPECT_EQ(readback[3], 40u);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, GetLength_ReflectsFileSize) {
+    std::string p = tf("randomaccess_len.bin");
+    File::WriteAllText(p, "abcde");
+    int fd = ::open(p.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), 5);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, SetLength_TruncatesFile) {
+    std::string p = tf("randomaccess_setlen.bin");
+    File::WriteAllText(p, "abcdefgh");
+    int fd = ::open(p.c_str(), O_RDWR);
+    ASSERT_GE(fd, 0);
+
+    System::IO::RandomAccess::SetLength(fd, 3);
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), 3);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, Read_AtNonZeroOffset) {
+    std::string p = tf("randomaccess_offset.bin");
+    File::WriteAllText(p, "abcdef");
+    int fd = ::open(p.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+
+    uint8_t buf[3] = {};
+    intcs n = System::IO::RandomAccess::Read(fd, buf, 3, 2);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 'c');
+    EXPECT_EQ(buf[1], 'd');
+    EXPECT_EQ(buf[2], 'e');
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, FlushToDisk_NoThrow) {
+    std::string p = tf("randomaccess_flush.bin");
+    File::WriteAllText(p, "x");
+    int fd = ::open(p.c_str(), O_RDWR);
+    ASSERT_GE(fd, 0);
+
+    EXPECT_NO_THROW(System::IO::RandomAccess::FlushToDisk(fd));
+
+    ::close(fd);
+    File::Delete(p);
+}
+#endif
