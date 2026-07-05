@@ -290,3 +290,35 @@ TEST(NameValueCollectionBatch21Test, OperatorBracket_ByIndex) {
     c.Add("k", "val");
     EXPECT_EQ(c[0], "val");
 }
+
+TEST(NameValueCollectionBatch21Test, CaseInsensitive_LookupAndAdd) {
+    NameValueCollection c;
+    c.Add("Name_0", "Value_0");
+
+    EXPECT_EQ(c["NAME_0"], "Value_0");
+    EXPECT_EQ(c["name_0"], "Value_0");
+    EXPECT_EQ(c.Get("NAME_0"), "Value_0");
+    std::vector<std::string> expected{"Value_0"};
+    EXPECT_EQ(c.GetValues("NAME_0"), expected);
+
+    // Second Add() under a different casing appends to the SAME key, not a new one.
+    c.Add("NAME_0", "Value_1");
+    EXPECT_EQ(c.getCountProperty(), 1);
+    EXPECT_EQ(c.Get("Name_0"), "Value_0,Value_1");
+
+    const auto& keys = c.AllKeys();
+    ASSERT_EQ(keys.size(), 1u);
+    EXPECT_EQ(keys[0], "Name_0"); // original casing preserved
+}
+
+TEST(NameValueCollectionBatch21Test, CaseInsensitive_SetAndRemove) {
+    NameValueCollection c;
+    c.Add("Key", "value");
+    c.Set("KEY", "new-value");
+    EXPECT_EQ(c.getCountProperty(), 1);
+    EXPECT_EQ(c.Get("key"), "new-value");
+
+    c.Remove("kEy");
+    EXPECT_EQ(c.getCountProperty(), 0);
+    EXPECT_EQ(c.Get("Key"), "");
+}
