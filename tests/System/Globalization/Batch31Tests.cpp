@@ -112,12 +112,12 @@ TEST(NumberFormatInfoBatch31Test, DefaultCtor_IsMutable) {
 }
 
 TEST(NumberFormatInfoBatch31Test, InvariantInfo_IsReadOnly) {
-    const auto& inv = NumberFormatInfo::InvariantInfo();
+    const auto& inv = NumberFormatInfo::getInvariantInfoProperty();
     EXPECT_TRUE(inv.getIsReadOnlyProperty());
 }
 
 TEST(NumberFormatInfoBatch31Test, CurrentInfo_IsInvariant) {
-    const auto& cur = NumberFormatInfo::CurrentInfo();
+    const auto& cur = NumberFormatInfo::getCurrentInfoProperty();
     EXPECT_TRUE(cur.getIsReadOnlyProperty());
 }
 
@@ -128,54 +128,54 @@ TEST(NumberFormatInfoBatch31Test, ReadOnly_MakesReadOnly) {
 }
 
 TEST(NumberFormatInfoBatch31Test, Clone_IsMutable) {
-    auto clone = NumberFormatInfo::InvariantInfo().Clone();
+    auto clone = NumberFormatInfo::getInvariantInfoProperty().Clone();
     EXPECT_FALSE(clone.getIsReadOnlyProperty());
 }
 
 TEST(NumberFormatInfoBatch31Test, DefaultNumberFields) {
     NumberFormatInfo nfi;
-    EXPECT_EQ(nfi.NumberDecimalSeparator, ".");
-    EXPECT_EQ(nfi.NumberGroupSeparator,   ",");
-    EXPECT_EQ(nfi.NumberDecimalDigits,    2);
-    EXPECT_EQ(nfi.NegativeSign,           "-");
-    EXPECT_EQ(nfi.PositiveSign,           "+");
+    EXPECT_EQ(nfi.getNumberDecimalSeparatorProperty(), ".");
+    EXPECT_EQ(nfi.getNumberGroupSeparatorProperty(),   ",");
+    EXPECT_EQ(nfi.getNumberDecimalDigitsProperty(),    2);
+    EXPECT_EQ(nfi.getNegativeSignProperty(),           "-");
+    EXPECT_EQ(nfi.getPositiveSignProperty(),           "+");
 }
 
 TEST(NumberFormatInfoBatch31Test, DefaultCurrencyFields) {
     NumberFormatInfo nfi;
-    EXPECT_EQ(nfi.CurrencyDecimalSeparator, ".");
-    EXPECT_EQ(nfi.CurrencyGroupSeparator,   ",");
-    EXPECT_EQ(nfi.CurrencySymbol,           "$");
-    EXPECT_EQ(nfi.CurrencyDecimalDigits,    2);
+    EXPECT_EQ(nfi.getCurrencyDecimalSeparatorProperty(), ".");
+    EXPECT_EQ(nfi.getCurrencyGroupSeparatorProperty(),   ",");
+    EXPECT_EQ(nfi.getCurrencySymbolProperty(),           "$");
+    EXPECT_EQ(nfi.getCurrencyDecimalDigitsProperty(),    2);
 }
 
 TEST(NumberFormatInfoBatch31Test, DefaultSpecialSymbols) {
     NumberFormatInfo nfi;
-    EXPECT_EQ(nfi.NaNSymbol,              "NaN");
-    EXPECT_EQ(nfi.PositiveInfinitySymbol, "Infinity");
-    EXPECT_EQ(nfi.NegativeInfinitySymbol, "-Infinity");
-    EXPECT_EQ(nfi.PercentSymbol,          "%");
-    EXPECT_FALSE(nfi.PerMilleSymbol.empty());
+    EXPECT_EQ(nfi.getNaNSymbolProperty(),              "NaN");
+    EXPECT_EQ(nfi.getPositiveInfinitySymbolProperty(), "Infinity");
+    EXPECT_EQ(nfi.getNegativeInfinitySymbolProperty(), "-Infinity");
+    EXPECT_EQ(nfi.getPercentSymbolProperty(),          "%");
+    EXPECT_FALSE(nfi.getPerMilleSymbolProperty().empty());
 }
 
 TEST(NumberFormatInfoBatch31Test, GroupSizes) {
     NumberFormatInfo nfi;
-    EXPECT_EQ(nfi.NumberGroupSizes.size(),   1u);
-    EXPECT_EQ(nfi.NumberGroupSizes[0],       3);
-    EXPECT_EQ(nfi.CurrencyGroupSizes.size(), 1u);
-    EXPECT_EQ(nfi.CurrencyGroupSizes[0],     3);
-    EXPECT_EQ(nfi.PercentGroupSizes.size(),  1u);
-    EXPECT_EQ(nfi.PercentGroupSizes[0],      3);
+    EXPECT_EQ(nfi.getNumberGroupSizesProperty().size(),   1u);
+    EXPECT_EQ(nfi.getNumberGroupSizesProperty()[0],       3);
+    EXPECT_EQ(nfi.getCurrencyGroupSizesProperty().size(), 1u);
+    EXPECT_EQ(nfi.getCurrencyGroupSizesProperty()[0],     3);
+    EXPECT_EQ(nfi.getPercentGroupSizesProperty().size(),  1u);
+    EXPECT_EQ(nfi.getPercentGroupSizesProperty()[0],      3);
 }
 
 TEST(NumberFormatInfoBatch31Test, NativeDigits) {
     NumberFormatInfo nfi;
-    ASSERT_EQ(nfi.NativeDigits.size(), 10u);
-    EXPECT_EQ(nfi.NativeDigits[0], "0");
-    EXPECT_EQ(nfi.NativeDigits[9], "9");
+    ASSERT_EQ(nfi.getNativeDigitsProperty().size(), 10u);
+    EXPECT_EQ(nfi.getNativeDigitsProperty()[0], "0");
+    EXPECT_EQ(nfi.getNativeDigitsProperty()[9], "9");
 }
 
 TEST(NumberFormatInfoBatch31Test, DigitSubstitution_Default) {
     NumberFormatInfo nfi;
-    EXPECT_EQ(nfi.DigitSubstitution, System::Globalization::DigitShapes::None);
+    EXPECT_EQ(nfi.getDigitSubstitutionProperty(), System::Globalization::DigitShapes::None);
 }

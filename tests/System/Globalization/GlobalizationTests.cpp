@@ -4,6 +4,7 @@
 //
 // Note: Calendar.hpp, GregorianCalendar.hpp, and ISOWeek.hpp are tested in tests/CalendarTests.cpp.
 #include <gtest/gtest.h>
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
 #include "System/Globalization/RegionInfo.hpp"
@@ -79,64 +80,64 @@ TEST(CultureInfoTests, NamedConstructor_DifferentNames) {
 // ===========================================================================
 
 TEST(NumberFormatInfoTests, InvariantInfo_IsReadOnly) {
-    EXPECT_TRUE(NumberFormatInfo::InvariantInfo().getIsReadOnlyProperty());
+    EXPECT_TRUE(NumberFormatInfo::getInvariantInfoProperty().getIsReadOnlyProperty());
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_DecimalSeparatorIsDot) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NumberDecimalSeparator, ".");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNumberDecimalSeparatorProperty(), ".");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_GroupSeparatorIsComma) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NumberGroupSeparator, ",");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNumberGroupSeparatorProperty(), ",");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_CurrencyDecimalSeparatorIsDot) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().CurrencyDecimalSeparator, ".");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencyDecimalSeparatorProperty(), ".");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_CurrencyGroupSeparatorIsComma) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().CurrencyGroupSeparator, ",");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencyGroupSeparatorProperty(), ",");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_CurrencySymbolIsDollar) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().CurrencySymbol, "$");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencySymbolProperty(), "$");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_NegativeSignIsMinus) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NegativeSign, "-");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNegativeSignProperty(), "-");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_PositiveSignIsPlus) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().PositiveSign, "+");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getPositiveSignProperty(), "+");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_PercentSymbol) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().PercentSymbol, "%");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getPercentSymbolProperty(), "%");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_NaNSymbol) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NaNSymbol, "NaN");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNaNSymbolProperty(), "NaN");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_PositiveInfinitySymbol) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().PositiveInfinitySymbol, "Infinity");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getPositiveInfinitySymbolProperty(), "Infinity");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_NegativeInfinitySymbol) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NegativeInfinitySymbol, "-Infinity");
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNegativeInfinitySymbolProperty(), "-Infinity");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_DecimalDigitsIsTwo) {
-    EXPECT_EQ(NumberFormatInfo::InvariantInfo().NumberDecimalDigits, 2);
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getNumberDecimalDigitsProperty(), 2);
 }
 
 TEST(NumberFormatInfoTests, CurrentInfo_SameInstanceAsInvariant) {
-    EXPECT_EQ(&NumberFormatInfo::CurrentInfo(), &NumberFormatInfo::InvariantInfo());
+    EXPECT_EQ(&NumberFormatInfo::getCurrentInfoProperty(), &NumberFormatInfo::getInvariantInfoProperty());
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_ReturnsSameInstanceEveryCall) {
-    const NumberFormatInfo& a = NumberFormatInfo::InvariantInfo();
-    const NumberFormatInfo& b = NumberFormatInfo::InvariantInfo();
+    const NumberFormatInfo& a = NumberFormatInfo::getInvariantInfoProperty();
+    const NumberFormatInfo& b = NumberFormatInfo::getInvariantInfoProperty();
     EXPECT_EQ(&a, &b);
 }
 
@@ -147,16 +148,21 @@ TEST(NumberFormatInfoTests, DefaultInstance_NotReadOnly) {
 
 TEST(NumberFormatInfoTests, MutableInstance_FieldsModifiable) {
     NumberFormatInfo nfi;
-    nfi.NumberDecimalSeparator = ",";
-    nfi.NumberGroupSeparator   = ".";
-    EXPECT_EQ(nfi.NumberDecimalSeparator, ",");
-    EXPECT_EQ(nfi.NumberGroupSeparator, ".");
+    nfi.setNumberDecimalSeparatorProperty(",");
+    nfi.setNumberGroupSeparatorProperty(".");
+    EXPECT_EQ(nfi.getNumberDecimalSeparatorProperty(), ",");
+    EXPECT_EQ(nfi.getNumberGroupSeparatorProperty(), ".");
 }
 
 TEST(NumberFormatInfoTests, MutableInstance_CurrencySymbolModifiable) {
     NumberFormatInfo nfi;
-    nfi.CurrencySymbol = "€";
-    EXPECT_EQ(nfi.CurrencySymbol, "€");
+    nfi.setCurrencySymbolProperty("€");
+    EXPECT_EQ(nfi.getCurrencySymbolProperty(), "€");
+}
+
+TEST(NumberFormatInfoTests, SetOnReadOnlyInstance_Throws) {
+    NumberFormatInfo ro = NumberFormatInfo::ReadOnly(NumberFormatInfo());
+    EXPECT_THROW(ro.setCurrencySymbolProperty("€"), System::InvalidOperationException);
 }
 
 // ===========================================================================
