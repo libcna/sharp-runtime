@@ -3,9 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
-#include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -60,11 +61,11 @@ public:
      * C++ counterpart of .NET StringCollection.Item[int] getter.
      * @param index The zero-based index.
      * @return A const reference to the string.
-     * @throws std::out_of_range if @p index is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
     [[nodiscard]] const std::string& operator[](int index) const {
         if (index < 0 || index >= static_cast<int>(data_.size()))
-            throw std::out_of_range("Index out of range.");
+            throw System::ArgumentOutOfRangeException("index");
         return data_[static_cast<size_t>(index)];
     }
 
@@ -74,11 +75,11 @@ public:
      * C++ counterpart of .NET StringCollection.Item[int] setter.
      * @param index The zero-based index.
      * @return A reference to the string.
-     * @throws std::out_of_range if @p index is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
     std::string& operator[](int index) {
         if (index < 0 || index >= static_cast<int>(data_.size()))
-            throw std::out_of_range("Index out of range.");
+            throw System::ArgumentOutOfRangeException("index");
         return data_[static_cast<size_t>(index)];
     }
 
@@ -108,10 +109,13 @@ public:
      * @brief Inserts a string at the specified index.
      *
      * C++ counterpart of .NET StringCollection.Insert(int, string).
-     * @param index The zero-based index at which to insert.
+     * @param index The zero-based index at which to insert; may equal Count to append.
      * @param value The string to insert.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than Count.
      */
     void Insert(int index, const std::string& value) {
+        if (index < 0 || index > static_cast<int>(data_.size()))
+            throw System::ArgumentOutOfRangeException("index");
         data_.insert(data_.begin() + index, value);
     }
 
@@ -131,11 +135,11 @@ public:
      *
      * C++ counterpart of .NET StringCollection.RemoveAt(int).
      * @param index The zero-based index of the element to remove.
-     * @throws std::out_of_range if @p index is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
     void RemoveAt(int index) {
         if (index < 0 || index >= static_cast<int>(data_.size()))
-            throw std::out_of_range("Index out of range.");
+            throw System::ArgumentOutOfRangeException("index");
         data_.erase(data_.begin() + index);
     }
 
@@ -175,8 +179,14 @@ public:
      * C++ counterpart of .NET StringCollection.CopyTo(string[], int).
      * @param dest  The destination vector.
      * @param index The zero-based starting index in @p dest.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p dest does not have enough room starting at @p index.
      */
     void CopyTo(std::vector<std::string>& dest, int index) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index");
+        if (static_cast<int>(dest.size()) - index < static_cast<int>(data_.size()))
+            throw System::ArgumentException("Destination array was not long enough.", "dest");
         for (size_t i = 0; i < data_.size(); ++i)
             dest[static_cast<size_t>(index) + i] = data_[i];
     }

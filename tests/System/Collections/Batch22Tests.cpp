@@ -236,6 +236,43 @@ TEST(StringCollectionBatch22Test, CopyTo) {
     EXPECT_EQ(dest[2], "q");
 }
 
+TEST(StringCollectionBatch22Test, CopyTo_NegativeIndex_Throws) {
+    StringCollection sc;
+    sc.Add("p");
+    std::vector<std::string> dest(4, "");
+    EXPECT_THROW(sc.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringCollectionBatch22Test, CopyTo_DestTooSmall_Throws) {
+    StringCollection sc;
+    sc.Add("p"); sc.Add("q");
+    std::vector<std::string> dest(2, "");
+    EXPECT_THROW(sc.CopyTo(dest, 1), System::ArgumentException);
+}
+
+TEST(StringCollectionBatch22Test, Insert_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW(sc.Insert(-1, "x"), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(sc.Insert(2, "x"), System::ArgumentOutOfRangeException);
+    sc.Insert(1, "b"); // index == Count is valid (append)
+    EXPECT_EQ(sc.getCountProperty(), 2);
+}
+
+TEST(StringCollectionBatch22Test, Indexer_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW((void)sc[-1], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)sc[1], System::ArgumentOutOfRangeException);
+}
+
+TEST(StringCollectionBatch22Test, RemoveAt_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW(sc.RemoveAt(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(sc.RemoveAt(1), System::ArgumentOutOfRangeException);
+}
+
 // ===========================================================================
 // StringDictionary
 // ===========================================================================
