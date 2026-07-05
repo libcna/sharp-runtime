@@ -633,6 +633,20 @@ TEST(BufferedStreamTests, DelegatesGetLengthProperty) {
     EXPECT_EQ(bs.getLengthProperty(), 2);
 }
 
+TEST(BufferedStreamTests, Constructor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BufferedStream bs(nullptr), System::ArgumentNullException);
+}
+
+TEST(BufferedStreamTests, DelegatesPosition) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3};
+    ms.Write(data, 0, 3);
+    BufferedStream bs(&ms);
+    bs.setPositionProperty(1);
+    EXPECT_EQ(bs.getPositionProperty(), 1);
+    EXPECT_EQ(ms.getPositionProperty(), 1);
+}
+
 // ===========================================================================
 // FileStream
 // ===========================================================================
