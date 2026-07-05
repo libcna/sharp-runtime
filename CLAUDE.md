@@ -10,7 +10,7 @@
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
 2. **6626+ tests passing.** `./build/SharpRuntimeTests` must show no failures.
-3. **Push only to `develop`.** Never push to `master` or create tags without explicit per-action user approval.
+3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`.
 6. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).

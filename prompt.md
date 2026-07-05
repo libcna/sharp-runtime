@@ -49,8 +49,9 @@ UPDATE task SET status = '...', outofscope = ..., updated_at = datetime('now') W
 
 After porting a type (`status = 'ported'`), create a new git commit containing only the files for
 that port — header, any `.cpp` body, and tests. Use `git -c commit.gpgsign=false commit` (GPG signing
-times out in this environment). **Never push** — push to `develop` only when the user explicitly asks
-in that turn.
+times out in this environment). Pushing to `origin/feature/work` is fine as routine work lands there.
+**Never push to `develop` or `master`**, and never merge `feature/work` into `develop`, without the
+user explicitly asking in that turn.
 
 For `ignore` / `tobedecided` decisions, updating `plan.sqlite3` is enough — no commit needed
 (`plan.sqlite3` is gitignored).

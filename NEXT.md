@@ -23,8 +23,8 @@
 **9121 tests passing** across 904 test suites. Zero failures.
 
 ### Branch / remote state
-- `feature/work` — local working branch, HEAD `1fa6cfd`. This is where active porting happens. **Not yet merged into `develop` this session** — do that only when the user explicitly asks.
-- `develop` — last known state: fast-forwarded to `origin/develop` and merged with an earlier `feature/work` HEAD (`7056dcb`), pushed. It has *not* been updated with this session's commits yet.
+- `feature/work` — local working branch, HEAD `135a423`, **pushed to `origin/feature/work`** (routine push target — safe to push here anytime work is committed). This is where active porting happens.
+- `develop` — last known state: fast-forwarded to `origin/develop` and merged with an earlier `feature/work` HEAD (`7056dcb`), pushed. **Not merged with this session's commits** — only merge/push to `develop` when the user explicitly asks in that turn.
 - `master` — untouched. Do not touch without explicit instruction.
 - `plan.sqlite3` is gitignored — local workflow state only, not part of what gets pushed.
 
@@ -104,7 +104,7 @@ Earlier history (prior sessions): see `git log` — `System.Collections.ObjectMo
 
 ## 4. Current blocker / main problem
 
-**No active blocker.** Build is clean, 9121 tests pass. Not yet merged to `develop` or pushed this session.
+**No active blocker.** Build is clean, 9121 tests pass. Pushed to `origin/feature/work`. Not merged into `develop` this session — only do that when the user explicitly asks.
 
 Next queued item (per `plan.sqlite3`, `System`-namespace-first ordering):
 ```
@@ -171,7 +171,7 @@ prompt.md                               ← canonical plan.sqlite3 workflow inst
 8. **No POSIX includes in public `.hpp`** — platform code belongs in `.cpp`, guarded by `#ifdef`.
 9. **Inner exceptions use `std::exception_ptr`**, never `const std::exception&`.
 10. **No broad header refactor** — property naming touches 449+ files in CNA.
-11. **Push only to `develop`** — never push to `master` or create tags without explicit per-action user approval.
+11. **Push only to `feature/work`** — never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 12. **GPG signing times out** — always commit with `git -c commit.gpgsign=false commit`.
 13. **plan.sqlite3 processing is fully autonomous** — classify and proceed without asking per item.
 
@@ -246,8 +246,7 @@ git -c commit.gpgsign=false commit -m "message"
 - **No broad header refactor** — property naming (`getXxxProperty`) and namespace style touch 449+ files in CNA.
 - **No LINQ port** — use `std::ranges` in all new ported code.
 - **No Windows / Emscripten CI** — POSIX-only subsystems are documented bugs, not open work items.
-- **No merge to `master`** — always push to `develop` only; `master` requires explicit per-action approval.
-- **No merge `feature/work` → `develop` or push, without the user explicitly asking in that turn.**
+- **Push only to `feature/work`** — pushing to `develop` or `master`, or merging `feature/work` → `develop`, requires the user explicitly asking in that turn.
 - **No new vendored libraries** without discussing scope impact.
 - **No speculative API additions** — only add methods present in .NET's published API surface.
 - **No work on `System::Type` / `System::Activator`** — stubs are the correct end state.
@@ -281,5 +280,7 @@ For that task:
   6. Commit only the files for that change: git -c commit.gpgsign=false commit -m "..."
   7. Continue to the next todo item per prompt.md's Step 1 — don't stop to ask before each item.
   8. Update NEXT.md with what changed before ending the session.
-  9. Never push without the user explicitly asking in that turn, and only ever to develop.
+  9. It's fine to push to `feature/work` (origin) as work lands — that's the routine push target.
+     Never push to `develop` or `master`, and never merge feature/work → develop, without the user
+     explicitly asking in that turn.
 ```
