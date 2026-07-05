@@ -10,12 +10,16 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
+#include "System/Threading/Tasks/TaskStatus.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
 namespace System::Threading::Tasks {
+
+    class TaskFactory;
 
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
@@ -29,6 +33,7 @@ namespace System::Threading::Tasks {
 
         std::shared_ptr<std::future<void>> future_;
         std::shared_ptr<State>             state_;
+        System::Threading::CancellationToken cancellationToken_ = System::Threading::CancellationToken::None();
 
     public:
         /** Constructs an already-completed Task (equivalent to Task.CompletedTask). */
@@ -61,6 +66,52 @@ namespace System::Threading::Tasks {
 #endif
         }
 
+        /**
+         * Constructs and immediately starts a Task that executes @p action, cooperatively observing
+         * @p token. If @p token is already canceled, the Task is created directly in the Canceled
+         * state without launching a thread. Otherwise, @p action is expected to check the token
+         * itself (e.g. via CancellationToken::ThrowIfCancellationRequested()); an OperationCanceledException
+         * escaping @p action while @p token reports cancellation requested transitions the Task to
+         * Canceled rather than Faulted, matching .NET's cooperative-cancellation contract.
+         * On Emscripten, throws PlatformNotSupportedException.
+         */
+        Task(std::function<void()> action, System::Threading::CancellationToken token)
+            : cancellationToken_(token)
+        {
+#if defined(__EMSCRIPTEN__)
+            (void)action;
+            throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
+#else
+            state_ = std::make_shared<State>();
+            if (token.getIsCancellationRequestedProperty()) {
+                state_->isCanceled  = true;
+                state_->isCompleted = true;
+                return;
+            }
+            auto s = state_;
+            future_ = std::make_shared<std::future<void>>(
+                std::async(std::launch::async, [action, s, token]() {
+                    try {
+                        action();
+                        s->isCompleted = true;
+                    } catch (const System::OperationCanceledException&) {
+                        if (token.getIsCancellationRequestedProperty()) {
+                            s->isCanceled = true;
+                        } else {
+                            s->exception = std::current_exception();
+                            s->isFaulted = true;
+                        }
+                        s->isCompleted = true;
+                    } catch (...) {
+                        s->exception   = std::current_exception();
+                        s->isFaulted   = true;
+                        s->isCompleted = true;
+                    }
+                })
+            );
+#endif
+        }
+
         /** Returns true when the task has finished (successfully, faulted, or canceled). */
         [[nodiscard]] bool getIsCompletedProperty()            const { return state_->isCompleted; }
         /** Returns true when the task was canceled via a CancellationToken. */
@@ -70,6 +121,17 @@ namespace System::Threading::Tasks {
         /** Returns true when the task completed without faulting or being canceled. */
         [[nodiscard]] bool getIsCompletedSuccessfullyProperty() const {
             return state_->isCompleted && !state_->isFaulted && !state_->isCanceled;
+        }
+        /** Returns the CancellationToken associated with this task (CancellationToken::None() if none was supplied). */
+        [[nodiscard]] const System::Threading::CancellationToken& getCancellationTokenProperty() const {
+            return cancellationToken_;
+        }
+        /** Returns the current lifecycle stage of this task. */
+        [[nodiscard]] TaskStatus getStatusProperty() const {
+            if (!state_->isCompleted) return TaskStatus::Running;
+            if (state_->isCanceled)   return TaskStatus::Canceled;
+            if (state_->isFaulted)    return TaskStatus::Faulted;
+            return TaskStatus::RanToCompletion;
         }
 
         /** Blocks until the task finishes; re-throws any stored exception. */
@@ -85,8 +147,21 @@ namespace System::Threading::Tasks {
          */
         static Task Run(std::function<void()> action) { return Task(std::move(action)); }
 
+        /** Creates and starts a new Task that runs @p action asynchronously, observing @p token. */
+        static Task Run(std::function<void()> action, System::Threading::CancellationToken token) {
+            return Task(std::move(action), std::move(token));
+        }
+
         /** Returns an already-completed Task. */
         static Task CompletedTask() { return Task(); }
+
+        /**
+         * @brief Gets the default TaskFactory for this runtime.
+         *
+         * C++ counterpart of .NET Task.Factory. Declared here and defined out-of-line in
+         * TaskFactory.hpp (forward-declaration pattern, since TaskFactory itself constructs Tasks).
+         */
+        static TaskFactory Factory();
 
         /**
          * Creates a Task that is already in the Faulted state with @p ex as its exception.
@@ -102,10 +177,11 @@ namespace System::Threading::Tasks {
 
         /**
          * Creates a Task that is already in the Canceled state.
-         * @param token CancellationToken (stored for .NET API compatibility; not observed).
+         * @param token The CancellationToken associated with the cancellation; retrievable via getCancellationTokenProperty().
          */
-        static Task FromCanceled(CancellationToken) {
+        static Task FromCanceled(CancellationToken token) {
             Task t;
+            t.cancellationToken_   = token;
             t.state_->isCanceled  = true;
             t.state_->isCompleted = true;
             return t;
