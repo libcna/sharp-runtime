@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/HttpStatusCode.hpp"
 #include <memory>
 #include <stdexcept>
@@ -37,22 +38,31 @@ public:
         return c >= 200 && c < 300;
     }
 
-    /** Throws std::runtime_error if the response indicates failure. */
+    /**
+     * @brief Throws HttpRequestException if the response indicates failure.
+     *
+     * C++ counterpart of .NET HttpResponseMessage.EnsureSuccessStatusCode().
+     */
     void EnsureSuccessStatusCode() const {
         if (!getIsSuccessStatusCodeProperty())
-            throw std::runtime_error(
+            throw HttpRequestException(
+                HttpRequestError::Unknown,
                 "Response status code does not indicate success: " +
-                std::to_string(static_cast<int>(statusCode_)) + " (" + reasonPhrase_ + ")");
+                    std::to_string(static_cast<int>(statusCode_)) + " (" + reasonPhrase_ + ").",
+                nullptr, statusCode_);
     }
 
+    /** Adds or replaces a response header. */
     void setHeader(const std::string& name, const std::string& value) { headers_[name] = value; }
 
+    /** @return The value of the named header, or "" if not present. */
     [[nodiscard]] std::string getHeader(const std::string& name) const {
         auto it = headers_.find(name);
         return it != headers_.end() ? it->second : "";
     }
 
-    [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeaders() const {
+    /** @return The map of all response headers. */
+    [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeadersProperty() const {
         return headers_;
     }
 };

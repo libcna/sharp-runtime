@@ -11,6 +11,9 @@
 #include "System/Net/Http/HttpCompletionOption.hpp"
 #include "System/Net/Http/HttpVersionPolicy.hpp"
 #include "System/Net/Http/HttpRequestError.hpp"
+#include "System/Net/Http/HttpRequestException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/FormatException.hpp"
 
 using namespace System::Net::Http;
 using System::Net::HttpStatusCode;
@@ -40,6 +43,36 @@ TEST(HttpMethodTests, Equality) {
     EXPECT_TRUE(HttpMethod::Get() != HttpMethod::Post());
 }
 
+TEST(HttpMethodTests, Equality_CaseInsensitive) {
+    HttpMethod a("get");
+    EXPECT_TRUE(a == HttpMethod::Get());
+}
+
+TEST(HttpMethodTests, GetHashCode_CaseInsensitive_Equal) {
+    HttpMethod a("get");
+    HttpMethod b("GET");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(HttpMethodTests, Constructor_Empty_Throws) {
+    EXPECT_THROW(HttpMethod(""), System::ArgumentException);
+}
+
+TEST(HttpMethodTests, Constructor_Whitespace_Throws) {
+    EXPECT_THROW(HttpMethod("   "), System::ArgumentException);
+}
+
+TEST(HttpMethodTests, Constructor_InvalidChars_Throws) {
+    EXPECT_THROW(HttpMethod("GET /foo"), System::FormatException);
+    EXPECT_THROW(HttpMethod("GET,POST"), System::FormatException);
+}
+
+TEST(HttpMethodTests, TraceConnectQuery_Methods) {
+    EXPECT_EQ(HttpMethod::Trace().getMethodProperty(), "TRACE");
+    EXPECT_EQ(HttpMethod::Connect().getMethodProperty(), "CONNECT");
+    EXPECT_EQ(HttpMethod::Query().getMethodProperty(), "QUERY");
+}
+
 // ---------------------------------------------------------------------------
 // StringContent
 // ---------------------------------------------------------------------------
@@ -51,13 +84,13 @@ TEST(StringContentTests, ReadAsString) {
 
 TEST(StringContentTests, DefaultContentType) {
     StringContent c("body");
-    EXPECT_EQ(c.getContentType(), "text/plain");
+    EXPECT_EQ(c.getContentTypeProperty(), "text/plain");
 }
 
 TEST(StringContentTests, CustomMediaType) {
     StringContent c("{}", "utf-8", "application/json");
-    EXPECT_EQ(c.getContentType(), "application/json");
-    EXPECT_EQ(c.getCharSet(), "utf-8");
+    EXPECT_EQ(c.getContentTypeProperty(), "application/json");
+    EXPECT_EQ(c.getCharSetProperty(), "utf-8");
 }
 
 TEST(StringContentTests, ReadAsByteArray) {
@@ -81,7 +114,7 @@ TEST(ByteArrayContentTests, RoundTrip) {
 
 TEST(ByteArrayContentTests, DefaultContentType) {
     ByteArrayContent c({});
-    EXPECT_EQ(c.getContentType(), "application/octet-stream");
+    EXPECT_EQ(c.getContentTypeProperty(), "application/octet-stream");
 }
 
 TEST(ByteArrayContentTests, ReadAsString) {
@@ -117,7 +150,18 @@ TEST(HttpResponseMessageTests, IsSuccessFalse_500) {
 TEST(HttpResponseMessageTests, EnsureSuccessThrows) {
     HttpResponseMessage r(HttpStatusCode::NotFound);
     r.setReasonPhraseProperty("Not Found");
-    EXPECT_THROW(r.EnsureSuccessStatusCode(), std::runtime_error);
+    EXPECT_THROW(r.EnsureSuccessStatusCode(), HttpRequestException);
+}
+
+TEST(HttpResponseMessageTests, EnsureSuccessThrows_CarriesStatusCode) {
+    HttpResponseMessage r(HttpStatusCode::NotFound);
+    try {
+        r.EnsureSuccessStatusCode();
+        FAIL() << "expected HttpRequestException";
+    } catch (const HttpRequestException& ex) {
+        ASSERT_TRUE(ex.getStatusCodeProperty().has_value());
+        EXPECT_EQ(*ex.getStatusCodeProperty(), HttpStatusCode::NotFound);
+    }
 }
 
 TEST(HttpResponseMessageTests, EnsureSuccessNoThrow) {
@@ -228,7 +272,7 @@ TEST(HttpClientTests, BaseAddress) {
 
 TEST(FormUrlEncodedContentTests, ContentType) {
     FormUrlEncodedContent c({});
-    EXPECT_EQ(c.getContentType(), "application/x-www-form-urlencoded");
+    EXPECT_EQ(c.getContentTypeProperty(), "application/x-www-form-urlencoded");
 }
 
 TEST(FormUrlEncodedContentTests, EmptyPairs) {

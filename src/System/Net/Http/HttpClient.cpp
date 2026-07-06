@@ -229,8 +229,8 @@ static std::shared_ptr<HttpResponseMessage> performRequest(
     for (const auto& [k, v] : reqHeaders)     req << k << ": " << v << "\r\n";
 
     if (content && !body.empty()) {
-        std::string ct = content->getContentType();
-        std::string cs = content->getCharSet();
+        std::string ct = content->getContentTypeProperty();
+        std::string cs = content->getCharSetProperty();
         if (!ct.empty()) {
             req << "Content-Type: " << ct;
             if (!cs.empty()) req << "; charset=" << cs;
@@ -360,7 +360,7 @@ std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     return performRequest(purl,
                           request->getMethodProperty().getMethodProperty(),
                           defaultHeaders_,
-                          request->getHeaders(),
+                          request->getHeadersProperty(),
                           request->getContentProperty());
 #endif
 }
