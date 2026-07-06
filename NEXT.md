@@ -1,6 +1,6 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `4fe9b9a`)*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `bf33e85`)*
 
 ---
 
@@ -34,11 +34,11 @@ with minimal source changes.
 ## 2. Current status
 
 ### Build
-**Clean** as of HEAD `4fe9b9a` — `cmake --build build --parallel 4` produces zero errors and zero
+**Clean** as of HEAD `bf33e85` — `cmake --build build --parallel 4` produces zero errors and zero
 warnings (verified this session, freshly rebuilt, not stale).
 
 ### Tests
-**9821 / 9821 tests passing** across 1006 GoogleTest suites, verified at HEAD `4fe9b9a`.
+**9852 / 9852 tests passing** across 1008 GoogleTest suites, verified at HEAD `bf33e85`.
 `./build/SharpRuntimeTests` is the single test binary covering the whole library.
 
 ### CLI / tools / apps / libraries
@@ -144,6 +144,9 @@ Most recent first (see `git log --oneline` for full history):
 
 | Commit | Change |
 |--------|--------|
+| `bf33e85` | **Bugfix** (found by an adversarial review agent, requested by the user): `isTokenChar`/`isAllowedBoundaryChar`/`isHttpTokenChar` (5 copies across `HttpMethod`, `MultipartContent`, and 3 `System.Net.Http.Headers` files) used `strchr(allowedChars, c)`, which incorrectly matches `c == 0` (a string's own NUL terminator) — an embedded `'\0'` silently passed HTTP-token/multipart-boundary validation. Fixed with a `c != 0` guard. Also fixed `HttpResponseMessage::EnsureSuccessStatusCode()` always appending `" (reasonPhrase)."` even when ReasonPhrase is empty (should omit the parenthetical, matching .NET's two-resource-string behavior). 7 new regression tests. See the review verdict in this session's chat log for the full report — nothing else in `System.Net.Http` was flagged after adversarial review (NUL-byte handling, RFC 7230 token grammar, RFC 2046 multipart byte layout for 0/1/3-part bodies, and repo-wide rename correctness were all independently verified). |
+| `9d67442` | `System.Net.Http.Headers.NameValueWithParametersHeaderValue` (derives from `NameValueHeaderValue`, adds a Parameters list). Made `NameValueHeaderValue`'s copy ctor public / default ctor protected to support this. 12 new tests. |
+| `6922da1` | `System.Net.Http.Headers.StringWithQualityHeaderValue`. 12 new tests. |
 | `4fe9b9a` | `System.Net.Http.Headers.ProductHeaderValue`. 13 new tests. |
 | `d59d54a` | `System.Net.Http.Headers.EntityTagHeaderValue`. 13 new tests. |
 | `a71618f` | `System.Net.Http.Headers.NameValueHeaderValue`. 18 new tests. |
@@ -396,7 +399,7 @@ binary beyond the GoogleTest suite.
 
 ```
 Read NEXT.md first. It reflects the actual, verified repository state as of HEAD 4fe9b9a
-(9821/9821 tests passing, clean build, zero warnings) — do not assume anything beyond what it
+(9852/9852 tests passing, clean build, zero warnings) — do not assume anything beyond what it
 documents.
 
 NEXT.md §8 task 1 (the HttpHeaders/HttpContentHeaders/HttpRequestHeaders/HttpResponseHeaders
@@ -421,7 +424,7 @@ Make one small, verified improvement:
      logic parity, getXxxProperty()/setXxxProperty() naming, intcs/bytecs/etc. usage).
   3. If you add new files, reconfigure first: cd build && cmake . && cd ..
   4. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
-  5. Run: ./build/SharpRuntimeTests           (must show 9821+ passing, zero failures)
+  5. Run: ./build/SharpRuntimeTests           (must show 9852+ passing, zero failures)
   6. If it's a plan.sqlite3-tracked item, update its status:
      sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
   7. Commit only the files for that one change: git -c commit.gpgsign=false commit -m "..."
