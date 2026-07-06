@@ -16,6 +16,8 @@
 #include "System/Net/Http/HttpProtocolException.hpp"
 #include "System/Net/Http/ReadOnlyMemoryContent.hpp"
 #include "System/Net/Http/StreamContent.hpp"
+#include "System/Net/Http/MultipartContent.hpp"
+#include "System/Net/Http/MultipartFormDataContent.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/MemoryStream.hpp"
 #include "System/ArgumentNullException.hpp"
@@ -421,4 +423,79 @@ TEST(StreamContentTests, DefaultContentType) {
 
 TEST(StreamContentTests, NullStream_Throws) {
     EXPECT_THROW(StreamContent(nullptr), System::ArgumentNullException);
+}
+
+// ---------------------------------------------------------------------------
+// MultipartContent / MultipartFormDataContent
+// ---------------------------------------------------------------------------
+
+TEST(MultipartContentTests, DefaultContentType_IsMixed) {
+    MultipartContent c;
+    EXPECT_NE(c.getContentTypeProperty().find("multipart/mixed"), std::string::npos);
+    EXPECT_NE(c.getContentTypeProperty().find("boundary="), std::string::npos);
+}
+
+TEST(MultipartContentTests, CustomSubtypeAndBoundary) {
+    MultipartContent c("alternative", "myBoundary123");
+    EXPECT_EQ(c.getContentTypeProperty(), "multipart/alternative; boundary=\"myBoundary123\"");
+}
+
+TEST(MultipartContentTests, InvalidBoundary_Throws) {
+    EXPECT_THROW(MultipartContent("mixed", "bad boundary "), System::ArgumentException);
+    EXPECT_THROW(MultipartContent("mixed", "bad;boundary"), System::ArgumentException);
+}
+
+TEST(MultipartContentTests, Add_ThenGetContents) {
+    MultipartContent c("mixed", "B");
+    c.Add(std::make_shared<StringContent>("part1"));
+    c.Add(std::make_shared<StringContent>("part2"));
+    EXPECT_EQ(c.getContentsProperty().size(), 2u);
+}
+
+TEST(MultipartContentTests, ReadAsString_ContainsBoundariesAndContent) {
+    MultipartContent c("mixed", "B");
+    c.Add(std::make_shared<StringContent>("first"));
+    c.Add(std::make_shared<StringContent>("second"));
+    std::string body = c.ReadAsString();
+
+    EXPECT_EQ(body.substr(0, 4), "--B\r");
+    EXPECT_NE(body.find("first"), std::string::npos);
+    EXPECT_NE(body.find("second"), std::string::npos);
+    EXPECT_NE(body.find("--B--\r\n"), std::string::npos);
+    EXPECT_NE(body.find("Content-Type: text/plain"), std::string::npos);
+}
+
+TEST(MultipartContentTests, ReadAsByteArrayMatchesString) {
+    MultipartContent c("mixed", "B");
+    c.Add(std::make_shared<StringContent>("x"));
+    auto bytes = c.ReadAsByteArray();
+    std::string fromBytes(bytes.begin(), bytes.end());
+    EXPECT_EQ(fromBytes, c.ReadAsString());
+}
+
+TEST(MultipartFormDataContentTests, DefaultContentType_IsFormData) {
+    MultipartFormDataContent c("B");
+    EXPECT_EQ(c.getContentTypeProperty(), "multipart/form-data; boundary=\"B\"");
+}
+
+TEST(MultipartFormDataContentTests, AddWithName_IncludesContentDisposition) {
+    MultipartFormDataContent c("B");
+    c.Add(std::make_shared<StringContent>("value1"), "field1");
+    std::string body = c.ReadAsString();
+    EXPECT_NE(body.find("Content-Disposition: form-data; name=\"field1\""), std::string::npos);
+    EXPECT_NE(body.find("value1"), std::string::npos);
+}
+
+TEST(MultipartFormDataContentTests, AddWithFileName_IncludesFileName) {
+    MultipartFormDataContent c("B");
+    c.Add(std::make_shared<StringContent>("filedata"), "file1", "test.txt");
+    std::string body = c.ReadAsString();
+    EXPECT_NE(body.find("name=\"file1\""), std::string::npos);
+    EXPECT_NE(body.find("filename=\"test.txt\""), std::string::npos);
+}
+
+TEST(MultipartFormDataContentTests, IsA_MultipartContent) {
+    MultipartFormDataContent c("B");
+    MultipartContent* base = &c;
+    EXPECT_EQ(base->getContentTypeProperty(), "multipart/form-data; boundary=\"B\"");
 }
