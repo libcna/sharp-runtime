@@ -1,6 +1,89 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `eeece6e`) — 10329 tests passing*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `7751266`) — 10506 tests passing*
+
+**Latest session update (autonomous 24h run, continued):** Since the `dd81e16` commit (System.Text
+core namespace, done by a parallel fork earlier in this run), this session directly completed, in
+commit order:
+1. `6b8d7df` — Fixed two real bugs discovered via a broken build: `Regex::Match` (member function)
+   was hiding the sibling `Match` class within `Regex`'s own scope (`-Wchanges-meaning`/`-Werror`),
+   fixed via the `class Match Match(...)` elaborated-type-specifier idiom on the declaration; and
+   `Match` held a raw `std::smatch` whose sub_matches are iterators into whatever string was
+   searched — since `Regex::matchFrom` always searches a local substring destroyed on return, any
+   later read of a `Match`'s value was UB (caught via an actual failing test, not just review).
+   Fixed by extracting all submatch data into owned strings at `Match` construction time. Completed
+   `System.Text.RegularExpressions` (Capture/CaptureCollection/Group/GroupCollection/Match/
+   MatchCollection/MatchEvaluator/Regex/RegexOptions/RegexParseError/RegexParseException/
+   RegexMatchTimeoutException; `GeneratedRegexAttribute`/`RegexCompilationInfo` marked
+   ignore/out-of-scope, source-generator/Reflection.Emit-only).
+2. `f793df0` — A failed background fork (ran out of context mid-task) had left an uncommitted,
+   broken change to `XName.hpp` (added an implicit `string -> XName` conversion, correct per .NET
+   parity, but made `XElement`/`XAttribute`'s redundant `string`-only overloads ambiguous — a real,
+   confirmed compile break). Fixed by removing those now-redundant overloads (matches .NET, which
+   has no separate string overloads either). Completed the small standalone `System.Xml.Linq`
+   support types (`LoadOptions`/`ReaderOptions`/`SaveOptions`/`XObjectChange`/
+   `XObjectChangeEventArgs`/`XNamespace`) and reclassified `XName`/`XAttribute`/`XElement`/
+   `XDocument`/`XDeclaration` as `ported` (already complete, DB just hadn't caught up). The failed
+   fork's `XObject`/`XNode` sketch (a real `XContainer`/`XNode`/`XObject` inheritance hierarchy with
+   parent/sibling-tracking) was **not** completed — deleted (never committed, and would require
+   migrating `XElement`/`XAttribute`/`XDocument`'s internal storage model, a genuine architecture
+   decision, not a mechanical port) and marked `tobedecided`: `XObject`, `XNode`, `XContainer`,
+   `XCData`, `XComment`, `XDocumentType`, `XProcessingInstruction`, `XStreamingElement`, `XText`,
+   `XNodeDocumentOrderComparer`, `XNodeEqualityComparer`, `Extensions` (the LINQ-style
+   `IEnumerable<XElement>` helper methods — would need `std::ranges` free functions over that same
+   hierarchy). `ExtractKeyDelegate` marked ignore (nested in the already-ignored internal
+   `XHashtable`).
+3. `0e95846` — Completed `System.Text.Unicode`: real `Utf16`/`Utf8` (`IsValid`/
+   `IndexOfInvalidSubsequence` well-formedness checks; `Utf8::FromUtf16`/`ToUtf16` transcoding with
+   `OperationStatus`/replacement/`isFinalBlock` semantics). Fixed pre-existing `UnicodeRange`/
+   `UnicodeRanges` checklist gaps found while reviewing them (raw `int` instead of
+   `SharpRuntime::intcs`, `std::out_of_range`/`std::invalid_argument` instead of
+   `System::ArgumentOutOfRangeException`), and regenerated `UnicodeRanges` from the .NET reference
+   source's full 160-block list (mechanically, like `TlsCipherSuite` elsewhere in this runtime)
+   instead of the ~38-block hand-picked subset it had, renaming its static factory methods to
+   `getXxxProperty()` (they're C# static properties, not methods).
+4. `adba9b8` + `7751266` — Completed `System.Text.Json`. `JsonElement`/`JsonDocument` were a stub
+   (`JsonElement` had no real parser backing — test-only `addPropertyForTesting`/
+   `addArrayItemForTesting` helpers used in the actual production parse path — plus raw
+   `int`/`long long`/`double` and `std::runtime_error` instead of real exception types). Rewrote
+   both to wrap nodes directly in the parsed `nlohmann::json` tree via aliasing `shared_ptr` (keeps
+   the whole document alive; no separate parallel tree), with real `GetInt32`/`GetInt64`
+   range/format checks and proper `System::InvalidOperationException`/`FormatException`/
+   `IndexOutOfRangeException`/`KeyNotFoundException`/`JsonException`. Added `JsonProperty`.
+   `JsonNamingPolicy` was wrongly modeled as a plain enum (also colliding with a duplicate
+   `JsonCommentHandling` defined a second time in `JsonSerializerOptions.hpp`) — .NET's real
+   `JsonNamingPolicy` is an abstract class with `ConvertName()` and static `CamelCase`/`PascalCase`/
+   `SnakeCase*`/`KebabCase*` instances; rewrote as a real class hierarchy implementing .NET's actual
+   word-boundary segmentation algorithm (verified against its documented `XMLReader` ->
+   `xml_reader` / `SHA512Hash` -> `sha512-hash` examples). Added `JsonCommentHandling`,
+   `JsonTokenType`, `JsonSerializerDefaults`, `JsonReaderOptions`, `JsonWriterOptions`,
+   `JsonDocumentOptions`, `JsonException`, `JsonEncodedText`. Moved `JsonNumberHandling` to its
+   correct namespace (`System.Text.Json.Serialization`, was wrongly under `System.Text.Json`) and
+   added its siblings `JsonUnknownTypeHandling`/`JsonUnmappedMemberHandling`. Rewrote
+   `JsonSerializerOptions` with the real property set instead of its 5-field stub. Built a real
+   `Utf8JsonWriter` (own internal `std::string` buffer standing in for .NET's
+   `IBufferWriter<byte>`/`Stream` — no such abstraction in this runtime) with structural validation,
+   indentation, and string escaping; two real bugs found by its own test suite before commit: the
+   "awaiting a property value" flag was a single writer-wide bool that leaked across nesting depths
+   (fixed by moving it per-frame), and the closing-bracket indent computation underflowed `size_t`
+   (fixed by computing depth from the already-popped stack size directly). Made
+   `JsonSerializer::Serialize<T>`/`Deserialize<T>` do real work via `nlohmann::json`'s ADL
+   `to_json`/`from_json` customization points (covers primitives/`std::string`/`std::vector<T>`/
+   `std::map<string,T>`/any user type defining those functions) instead of always throwing — this
+   stands in for .NET's reflection/source-gen member walking, which is out of scope (see CLAUDE.md's
+   parity philosophy). `JsonReaderState` marked `tobedecided` (only meaningful paired with a
+   `Utf8JsonReader`, which isn't tracked in `plan.sqlite3` at all and is a large low-level streaming
+   API — `JsonDocument`/`JsonElement`/`JsonSerializer` cover the practical use cases).
+
+`System.Text.RegularExpressions`, `System.Xml.Linq` (minus the `tobedecided` hierarchy items),
+`System.Text.Unicode`, and `System.Text.Json` are now all fully classified. Remaining `todo` items
+in the **entire** `plan.sqlite3` database (16199 rows total): only `System.Text.Json.Nodes` (5) and
+`System.Text.Json.Serialization` (31) — next up. Everything else across the whole dotnet/runtime
+surface is already `ported`/`ignore(d)`/`tobedecided`.
+
+---
+
+*Prior update (2026-07-06, HEAD `eeece6e`) — 10329 tests passing*
 
 **Latest session update:** Since the `aa23cf0` note below, also completed: `System.Numerics.Colors`
 (`Argb`/`Rgba` — files already existed; fixed real gaps: missing `GetHashCode()`, missing static
