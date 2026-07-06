@@ -14,12 +14,8 @@ namespace System::Xml::Linq {
         XAttribute* next_ = nullptr;
 
     public:
-        /** Constructs an attribute with an XName key and string value. */
+        /** Constructs an attribute with an XName key and string value (plain strings convert implicitly via XName). */
         XAttribute(const XName& name, const std::string& value)
-            : name_(name), value_(value) {}
-
-        /** Constructs an attribute with a plain string name and string value. */
-        XAttribute(const std::string& name, const std::string& value)
             : name_(name), value_(value) {}
 
         /** @return The qualified name of the attribute. */

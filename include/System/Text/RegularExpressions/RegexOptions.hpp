@@ -11,10 +11,11 @@ namespace System::Text::RegularExpressions {
      * C++ counterpart of .NET System.Text.RegularExpressions.RegexOptions.
      *
      * @note This runtime's Regex is backed by `std::regex` (ECMAScript grammar), not .NET's own
-     * regex engine — `ExplicitCapture`, `IgnorePatternWhitespace`, `RightToLeft`, `Compiled`,
-     * `CultureInvariant`, `NonBacktracking`, and `AnyNewLine` are accepted (so ported code
-     * compiles) but have no effect beyond `IgnoreCase`/`Multiline`/`Singleline`, which do map to
-     * real `std::regex` flags.
+     * regex engine — only `IgnoreCase` and `Multiline` map to real `std::regex` flags. The rest
+     * (`ExplicitCapture`, `Singleline`, `IgnorePatternWhitespace`, `RightToLeft`, `Compiled`,
+     * `CultureInvariant`, `NonBacktracking`, `AnyNewLine`) are accepted (so ported code compiles)
+     * but have no effect — `std::regex` has no dotall-equivalent flag to implement `Singleline`
+     * without rewriting the pattern, and no engine hook for the others.
      */
     enum class RegexOptions {
         None = 0x0000,
