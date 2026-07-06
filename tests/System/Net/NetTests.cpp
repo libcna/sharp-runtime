@@ -9,6 +9,7 @@
 #include "System/Net/DecompressionMethods.hpp"
 #include "System/Net/HttpRequestHeader.hpp"
 #include "System/Net/HttpResponseHeader.hpp"
+#include "System/Net/HttpVersion.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
@@ -19,6 +20,7 @@ using System::Net::HttpRequestHeader;
 using System::Net::HttpResponseHeader;
 using System::Net::HttpRequestHeaderGetName;
 using System::Net::HttpResponseHeaderGetName;
+using System::Net::HttpVersion;
 
 // ===========================================================================
 // IPAddress
@@ -378,4 +380,23 @@ TEST(HttpResponseHeaderTests, GetName_KnownValues) {
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::SetCookie), "Set-Cookie");
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::WwwAuthenticate), "WWW-Authenticate");
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::ETag), "ETag");
+}
+
+// ===========================================================================
+// HttpVersion
+// ===========================================================================
+
+TEST(HttpVersionTests, Version11_Is1Dot1) {
+    EXPECT_EQ(HttpVersion::Version11.Major, 1);
+    EXPECT_EQ(HttpVersion::Version11.Minor, 1);
+}
+
+TEST(HttpVersionTests, Unknown_IsZeroZero) {
+    EXPECT_EQ(HttpVersion::Unknown.Major, 0);
+    EXPECT_EQ(HttpVersion::Unknown.Minor, 0);
+}
+
+TEST(HttpVersionTests, Version20_Is2Dot0) {
+    EXPECT_EQ(HttpVersion::Version20.Major, 2);
+    EXPECT_EQ(HttpVersion::Version20.Minor, 0);
 }
