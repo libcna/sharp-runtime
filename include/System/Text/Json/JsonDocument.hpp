@@ -20,10 +20,10 @@ namespace System::Text::Json {
      * C++ counterpart of .NET System.Text.Json.JsonDocument.
      */
     class JsonDocument : public System::IDisposable {
-        std::shared_ptr<const nlohmann::json> root_;
+        std::shared_ptr<const nlohmann::ordered_json> root_;
         bool disposed_ = false;
 
-        explicit JsonDocument(std::shared_ptr<const nlohmann::json> root) : root_(std::move(root)) {}
+        explicit JsonDocument(std::shared_ptr<const nlohmann::ordered_json> root) : root_(std::move(root)) {}
 
     public:
         ~JsonDocument() override = default;
@@ -47,11 +47,11 @@ namespace System::Text::Json {
         static std::shared_ptr<JsonDocument> Parse(const std::string& json, JsonDocumentOptions options = {}) {
             options.Validate();
             try {
-                auto parsed = std::make_shared<const nlohmann::json>(
-                    nlohmann::json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
+                auto parsed = std::make_shared<const nlohmann::ordered_json>(
+                    nlohmann::ordered_json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
                                           /*ignore_comments=*/options.CommentHandling != JsonCommentHandling::Disallow));
                 return std::shared_ptr<JsonDocument>(new JsonDocument(std::move(parsed)));
-            } catch (const nlohmann::json::parse_error& e) {
+            } catch (const nlohmann::ordered_json::parse_error& e) {
                 throw JsonException(std::string("'") + e.what() + "'.");
             }
         }

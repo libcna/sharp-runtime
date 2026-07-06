@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "System/Text/Json/JsonDocument.hpp"
+#include "System/Text/Json/JsonProperty.hpp"
 
 using System::Text::Json::JsonDocument;
 using System::Text::Json::JsonValueKind;
@@ -94,6 +95,16 @@ TEST(JsonTests, ParseObjectMultipleProperties) {
     EXPECT_EQ(root.GetProperty("x").GetInt32(), 1);
     EXPECT_EQ(root.GetProperty("y").GetInt32(), 2);
     EXPECT_EQ(root.GetProperty("z").GetInt32(), 3);
+}
+
+TEST(JsonTests, EnumerateObject_PreservesDocumentOrder) {
+    auto doc = JsonDocument::Parse(R"({"z":1,"a":2,"m":3})");
+    std::vector<std::string> names;
+    for (auto& p : doc->getRootElementProperty().EnumerateObject()) names.push_back(p.getNameProperty());
+    ASSERT_EQ(names.size(), 3u);
+    EXPECT_EQ(names[0], "z");
+    EXPECT_EQ(names[1], "a");
+    EXPECT_EQ(names[2], "m");
 }
 
 TEST(JsonTests, TryGetPropertyFound) {

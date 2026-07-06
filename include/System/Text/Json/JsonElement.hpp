@@ -21,25 +21,25 @@ namespace System::Text::Json {
      *
      * C++ counterpart of .NET System.Text.Json.JsonElement.
      *
-     * @note Backed directly by a node in the owning JsonDocument's parsed `nlohmann::json` tree
+     * @note Backed directly by a node in the owning JsonDocument's parsed `nlohmann::ordered_json` tree
      * (shared ownership via aliasing `shared_ptr`, so a JsonElement keeps the whole document tree
      * alive) rather than reproducing .NET's compact binary token database over a raw UTF-8 buffer
      * — same observable API, simpler implementation.
      */
     class JsonElement {
-        std::shared_ptr<const nlohmann::json> node_;
+        std::shared_ptr<const nlohmann::ordered_json> node_;
         std::string propertyName_; // set only for elements obtained via EnumerateObject(); see JsonProperty
 
         friend class JsonProperty;
         friend class JsonDocument;
 
-        [[nodiscard]] const nlohmann::json& require(JsonValueKind expected, const char* what) const;
+        [[nodiscard]] const nlohmann::ordered_json& require(JsonValueKind expected, const char* what) const;
 
     public:
         /** @brief Constructs an undefined JsonElement. */
         JsonElement() = default;
         /** @brief Wraps a node from a JsonDocument's parsed tree (internal; use JsonDocument::getRootElementProperty()/GetProperty()/etc. instead). */
-        explicit JsonElement(std::shared_ptr<const nlohmann::json> node) : node_(std::move(node)) {}
+        explicit JsonElement(std::shared_ptr<const nlohmann::ordered_json> node) : node_(std::move(node)) {}
 
         /** @return The kind of this JSON value. */
         [[nodiscard]] JsonValueKind getValueKindProperty() const {
@@ -84,7 +84,7 @@ namespace System::Text::Json {
             if (!node_ || !node_->is_object()) return false;
             auto it = node_->find(name);
             if (it == node_->end()) return false;
-            out = JsonElement(std::shared_ptr<const nlohmann::json>(node_, &(*it)));
+            out = JsonElement(std::shared_ptr<const nlohmann::ordered_json>(node_, &(*it)));
             return true;
         }
 
@@ -110,7 +110,7 @@ namespace System::Text::Json {
             const auto& arr = require(JsonValueKind::Array, "Array");
             std::vector<JsonElement> result;
             result.reserve(arr.size());
-            for (const auto& item : arr) result.emplace_back(std::shared_ptr<const nlohmann::json>(node_, &item));
+            for (const auto& item : arr) result.emplace_back(std::shared_ptr<const nlohmann::ordered_json>(node_, &item));
             return result;
         }
 
@@ -120,7 +120,7 @@ namespace System::Text::Json {
         /** @return A deep copy of this element that owns its own storage. */
         [[nodiscard]] JsonElement Clone() const {
             if (!node_) return JsonElement();
-            return JsonElement(std::make_shared<const nlohmann::json>(*node_));
+            return JsonElement(std::make_shared<const nlohmann::ordered_json>(*node_));
         }
 
         /** @return The raw JSON text of this element (same as GetRawText()). */
