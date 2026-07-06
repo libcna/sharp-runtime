@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/ZLibStream.hpp"
 #include "System/IO/IOException.hpp"
-#include "System/NotImplementedException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <zlib.h>
 #include <string>
 
@@ -52,7 +52,7 @@ bool ZLibStream::getCanReadProperty()  const { return mode_ == CompressionMode::
 bool ZLibStream::getCanWriteProperty() const { return mode_ == CompressionMode::Compress;   }
 
 SharpRuntime::intcs ZLibStream::getLengthProperty() const {
-    throw NotImplementedException("ZLibStream does not support seeking.");
+    throw System::NotSupportedException("This operation is not supported.");
 }
 
 // ---------------------------------------------------------------------------

@@ -46,7 +46,7 @@ namespace System::IO::Compression {
         /** @brief Returns @c true when mode is Compress. */
         [[nodiscard]] bool getCanWriteProperty() const override;
 
-        /** @brief Not supported — always throws NotImplementedException. */
+        /** @brief Not supported — always throws NotSupportedException. */
         [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override;
 
         /**
