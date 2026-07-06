@@ -145,3 +145,59 @@ TEST(EventHandlerTests, Raise_HandlerRemovesAnotherHandlerDuringRaise_StillFires
     EXPECT_EQ(firedB, 1);
     EXPECT_EQ(h.Size(), 1u); // A is still subscribed; only B was removed
 }
+
+// SetReplayHook(): models real XNA events like NetworkSession.GamerJoined, which replay already-
+// happened state to a handler the instant it subscribes, not just for future occurrences.
+
+TEST(EventHandlerTests, NoReplayHookSet_AddBehavesExactlyAsBefore) {
+    EventHandler<EventArgs> h;
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    EXPECT_EQ(called, 0); // Add() alone never invokes a handler when no hook is set
+    EXPECT_EQ(h.Size(), 1u);
+}
+
+TEST(EventHandlerTests, ReplayHook_CalledOnceImmediatelyForEachNewSubscriber) {
+    EventHandler<EventArgs> h;
+    int replayCount = 0;
+    h.SetReplayHook([&](const EventHandler<EventArgs>::HandlerType& handler) {
+        ++replayCount;
+        handler(nullptr, EventArgs::Empty);
+    });
+
+    int firedA = 0;
+    h += [&firedA](System::Object*, const EventArgs&) { ++firedA; };
+    EXPECT_EQ(replayCount, 1);
+    EXPECT_EQ(firedA, 1);
+
+    int firedB = 0;
+    h += [&firedB](System::Object*, const EventArgs&) { ++firedB; };
+    EXPECT_EQ(replayCount, 2);
+    EXPECT_EQ(firedB, 1);
+    EXPECT_EQ(firedA, 1); // unaffected by the second subscription's own replay
+}
+
+TEST(EventHandlerTests, ReplayHook_DoesNotAffectSizeOrSubsequentRaise) {
+    EventHandler<EventArgs> h;
+    h.SetReplayHook([](const EventHandler<EventArgs>::HandlerType& handler) {
+        handler(nullptr, EventArgs::Empty);
+    });
+
+    int called = 0;
+    h += [&called](System::Object*, const EventArgs&) { ++called; };
+    EXPECT_EQ(called, 1); // from the replay
+    EXPECT_EQ(h.Size(), 1u); // the hook call itself is not a second subscriber
+
+    h.Raise(nullptr, EventArgs::Empty);
+    EXPECT_EQ(called, 2); // normal Raise() still reaches it exactly once
+}
+
+TEST(EventHandlerTests, ReplayHook_ClearedBySettingEmptyFunction) {
+    EventHandler<EventArgs> h;
+    int replayCount = 0;
+    h.SetReplayHook([&](const EventHandler<EventArgs>::HandlerType&) { ++replayCount; });
+    h.SetReplayHook(nullptr); // clears it
+
+    h += [](System::Object*, const EventArgs&) {};
+    EXPECT_EQ(replayCount, 0);
+}
