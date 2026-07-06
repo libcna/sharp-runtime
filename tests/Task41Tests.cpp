@@ -486,8 +486,33 @@ TEST(JsonPropertyOrderAttributeTests, Order_Stored) {
 
 using System::Text::Json::JsonSerializer;
 
-TEST(JsonSerializerTests, Serialize_ThrowsNotImplemented) {
-    EXPECT_THROW(JsonSerializer::Serialize(nullptr), std::runtime_error);
+TEST(JsonSerializerTests, Serialize_Int) {
+    EXPECT_EQ(JsonSerializer::Serialize(42), "42");
+}
+
+TEST(JsonSerializerTests, Serialize_String) {
+    EXPECT_EQ(JsonSerializer::Serialize(std::string("hello")), "\"hello\"");
+}
+
+TEST(JsonSerializerTests, Serialize_VectorOfInt) {
+    EXPECT_EQ(JsonSerializer::Serialize(std::vector<int>{1, 2, 3}), "[1,2,3]");
+}
+
+TEST(JsonSerializerTests, Serialize_WriteIndented) {
+    JsonSerializerOptions opts;
+    opts.setWriteIndentedProperty(true);
+    EXPECT_EQ(JsonSerializer::Serialize(std::vector<int>{1, 2}, opts), "[\n  1,\n  2\n]");
+}
+
+TEST(JsonSerializerTests, Deserialize_Int) {
+    EXPECT_EQ(JsonSerializer::Deserialize<int>("42"), 42);
+}
+
+TEST(JsonSerializerTests, Deserialize_VectorOfInt) {
+    auto v = JsonSerializer::Deserialize<std::vector<int>>("[1,2,3]");
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[2], 3);
 }
 
 TEST(JsonSerializerTests, Deserialize_ParsesJson) {
