@@ -8,6 +8,9 @@
 #include "System/Net/Http/ByteArrayContent.hpp"
 #include "System/Net/Http/HttpRequestMessage.hpp"
 #include "System/Net/Http/HttpResponseMessage.hpp"
+#include "System/Net/Http/HttpCompletionOption.hpp"
+#include "System/Net/Http/HttpVersionPolicy.hpp"
+#include "System/Net/Http/HttpRequestError.hpp"
 
 using namespace System::Net::Http;
 using System::Net::HttpStatusCode;
@@ -261,4 +264,21 @@ TEST(FormUrlEncodedContentTests, ReadAsByteArrayMatchesString) {
     auto bytes = c.ReadAsByteArray();
     std::string fromBytes(bytes.begin(), bytes.end());
     EXPECT_EQ(s, fromBytes);
+}
+
+// ---------------------------------------------------------------------------
+// HttpCompletionOption / HttpVersionPolicy / HttpRequestError
+// ---------------------------------------------------------------------------
+
+TEST(HttpCompletionOptionTests, ResponseContentRead_IsZero) {
+    EXPECT_EQ(static_cast<int>(HttpCompletionOption::ResponseContentRead), 0);
+}
+
+TEST(HttpVersionPolicyTests, HasThreeDistinctValues) {
+    EXPECT_NE(HttpVersionPolicy::RequestVersionOrLower, HttpVersionPolicy::RequestVersionOrHigher);
+    EXPECT_NE(HttpVersionPolicy::RequestVersionOrHigher, HttpVersionPolicy::RequestVersionExact);
+}
+
+TEST(HttpRequestErrorTests, Unknown_IsZero) {
+    EXPECT_EQ(static_cast<int>(HttpRequestError::Unknown), 0);
 }
