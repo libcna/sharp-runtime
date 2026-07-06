@@ -16,7 +16,7 @@ namespace System::Net::Http {
         bool isAllowedBoundaryChar(unsigned char c) {
             static constexpr const char* allowed =
                 " '()+,-./0123456789:=?ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
-            return std::strchr(allowed, static_cast<char>(c)) != nullptr;
+            return c != 0 && std::strchr(allowed, static_cast<char>(c)) != nullptr;
         }
     }
 

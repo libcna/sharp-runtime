@@ -24,7 +24,7 @@ class HttpMethod {
 
     static bool isTokenChar(unsigned char c) {
         static constexpr const char* extras = "!#$%&'*+-.^_`|~";
-        return std::isalnum(c) || std::strchr(extras, static_cast<char>(c)) != nullptr;
+        return c != 0 && (std::isalnum(c) || std::strchr(extras, static_cast<char>(c)) != nullptr);
     }
 
 public:

@@ -44,12 +44,14 @@ public:
      * C++ counterpart of .NET HttpResponseMessage.EnsureSuccessStatusCode().
      */
     void EnsureSuccessStatusCode() const {
-        if (!getIsSuccessStatusCodeProperty())
-            throw HttpRequestException(
-                HttpRequestError::Unknown,
-                "Response status code does not indicate success: " +
-                    std::to_string(static_cast<int>(statusCode_)) + " (" + reasonPhrase_ + ").",
-                nullptr, statusCode_);
+        if (getIsSuccessStatusCodeProperty()) return;
+
+        size_t firstNonSpace = reasonPhrase_.find_first_not_of(" \t\r\n");
+        std::string message = "Response status code does not indicate success: " +
+            std::to_string(static_cast<int>(statusCode_));
+        message += (firstNonSpace == std::string::npos) ? "." : " (" + reasonPhrase_ + ").";
+
+        throw HttpRequestException(HttpRequestError::Unknown, message, nullptr, statusCode_);
     }
 
     /** Adds or replaces a response header. */

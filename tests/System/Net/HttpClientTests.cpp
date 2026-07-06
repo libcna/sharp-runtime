@@ -77,6 +77,10 @@ TEST(HttpMethodTests, Constructor_InvalidChars_Throws) {
     EXPECT_THROW(HttpMethod("GET,POST"), System::FormatException);
 }
 
+TEST(HttpMethodTests, Constructor_EmbeddedNul_Throws) {
+    EXPECT_THROW(HttpMethod(std::string("GE\0T", 4)), System::FormatException);
+}
+
 TEST(HttpMethodTests, TraceConnectQuery_Methods) {
     EXPECT_EQ(HttpMethod::Trace().getMethodProperty(), "TRACE");
     EXPECT_EQ(HttpMethod::Connect().getMethodProperty(), "CONNECT");
@@ -161,6 +165,27 @@ TEST(HttpResponseMessageTests, EnsureSuccessThrows) {
     HttpResponseMessage r(HttpStatusCode::NotFound);
     r.setReasonPhraseProperty("Not Found");
     EXPECT_THROW(r.EnsureSuccessStatusCode(), HttpRequestException);
+}
+
+TEST(HttpResponseMessageTests, EnsureSuccessThrows_MessageIncludesReasonPhrase) {
+    HttpResponseMessage r(HttpStatusCode::NotFound);
+    r.setReasonPhraseProperty("Not Found");
+    try {
+        r.EnsureSuccessStatusCode();
+        FAIL() << "expected HttpRequestException";
+    } catch (const HttpRequestException& ex) {
+        EXPECT_EQ(ex.getMessageProperty(), "Response status code does not indicate success: 404 (Not Found).");
+    }
+}
+
+TEST(HttpResponseMessageTests, EnsureSuccessThrows_EmptyReasonPhrase_NoParenthetical) {
+    HttpResponseMessage r(HttpStatusCode::NotFound);
+    try {
+        r.EnsureSuccessStatusCode();
+        FAIL() << "expected HttpRequestException";
+    } catch (const HttpRequestException& ex) {
+        EXPECT_EQ(ex.getMessageProperty(), "Response status code does not indicate success: 404.");
+    }
 }
 
 TEST(HttpResponseMessageTests, EnsureSuccessThrows_CarriesStatusCode) {
@@ -445,6 +470,14 @@ TEST(MultipartContentTests, InvalidBoundary_Throws) {
     EXPECT_THROW(MultipartContent("mixed", "bad;boundary"), System::ArgumentException);
 }
 
+TEST(MultipartContentTests, InvalidBoundary_EmbeddedNul_Throws) {
+    EXPECT_THROW(MultipartContent("mixed", std::string("AB\0CD", 5)), System::ArgumentException);
+}
+
+TEST(MultipartContentTests, InvalidBoundary_TooLong_Throws) {
+    EXPECT_THROW(MultipartContent("mixed", std::string(71, 'a')), System::ArgumentException);
+}
+
 TEST(MultipartContentTests, Add_ThenGetContents) {
     MultipartContent c("mixed", "B");
     c.Add(std::make_shared<StringContent>("part1"));
@@ -463,6 +496,31 @@ TEST(MultipartContentTests, ReadAsString_ContainsBoundariesAndContent) {
     EXPECT_NE(body.find("second"), std::string::npos);
     EXPECT_NE(body.find("--B--\r\n"), std::string::npos);
     EXPECT_NE(body.find("Content-Type: text/plain"), std::string::npos);
+}
+
+TEST(MultipartContentTests, ReadAsString_EmptyContent_JustBoundaries) {
+    MultipartContent c("mixed", "B");
+    EXPECT_EQ(c.ReadAsString(), "--B\r\n\r\n--B--\r\n");
+}
+
+TEST(MultipartContentTests, ReadAsString_ThreeParts_ExactByteLayout) {
+    MultipartContent c("mixed", "B");
+    c.Add(std::make_shared<StringContent>("one", "", ""));
+    c.Add(std::make_shared<StringContent>("two", "", ""));
+    c.Add(std::make_shared<StringContent>("three", "", ""));
+    std::string body = c.ReadAsString();
+
+    EXPECT_EQ(body,
+        "--B\r\n"
+        "\r\n"
+        "one"
+        "\r\n--B\r\n"
+        "\r\n"
+        "two"
+        "\r\n--B\r\n"
+        "\r\n"
+        "three"
+        "\r\n--B--\r\n");
 }
 
 TEST(MultipartContentTests, ReadAsByteArrayMatchesString) {
