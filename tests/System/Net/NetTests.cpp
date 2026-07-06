@@ -7,12 +7,18 @@
 #include "System/Net/HttpStatusCode.hpp"
 #include "System/Net/WebUtility.hpp"
 #include "System/Net/DecompressionMethods.hpp"
+#include "System/Net/HttpRequestHeader.hpp"
+#include "System/Net/HttpResponseHeader.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
 using System::Net::HttpStatusCode;
 using System::Net::WebUtility;
 using System::Net::DecompressionMethods;
+using System::Net::HttpRequestHeader;
+using System::Net::HttpResponseHeader;
+using System::Net::HttpRequestHeaderGetName;
+using System::Net::HttpResponseHeaderGetName;
 
 // ===========================================================================
 // IPAddress
@@ -356,4 +362,20 @@ TEST(DecompressionMethodsTests, All_ContainsEveryKnownMethod) {
     EXPECT_NE(static_cast<int>(all & DecompressionMethods::Deflate), 0);
     EXPECT_NE(static_cast<int>(all & DecompressionMethods::Brotli), 0);
     EXPECT_NE(static_cast<int>(all & DecompressionMethods::Zstandard), 0);
+}
+
+// ===========================================================================
+// HttpRequestHeader / HttpResponseHeader
+// ===========================================================================
+
+TEST(HttpRequestHeaderTests, GetName_KnownValues) {
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::CacheControl), "Cache-Control");
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::ContentMd5), "Content-MD5");
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::UserAgent), "User-Agent");
+}
+
+TEST(HttpResponseHeaderTests, GetName_KnownValues) {
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::SetCookie), "Set-Cookie");
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::WwwAuthenticate), "WWW-Authenticate");
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::ETag), "ETag");
 }
