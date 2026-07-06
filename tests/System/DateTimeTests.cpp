@@ -257,6 +257,31 @@ TEST(DateTimeTests, ToString_Format_12Hour) {
     EXPECT_EQ(dt.ToString("hh:mm"), "01:00");
 }
 
+TEST(DateTimeTests, ToString_Format_ddd_AbbreviatedDayName) {
+    DateTime dt(2015, 10, 21); // a Wednesday
+    EXPECT_EQ(dt.ToString("ddd"), "Wed");
+}
+
+TEST(DateTimeTests, ToString_Format_dddd_FullDayName) {
+    DateTime dt(2015, 10, 21); // a Wednesday
+    EXPECT_EQ(dt.ToString("dddd"), "Wednesday");
+}
+
+TEST(DateTimeTests, ToString_Format_MMM_AbbreviatedMonthName) {
+    DateTime dt(2015, 10, 21);
+    EXPECT_EQ(dt.ToString("MMM"), "Oct");
+}
+
+TEST(DateTimeTests, ToString_Format_MMMM_FullMonthName) {
+    DateTime dt(2015, 10, 21);
+    EXPECT_EQ(dt.ToString("MMMM"), "October");
+}
+
+TEST(DateTimeTests, ToString_Format_Rfc1123Style) {
+    DateTime dt(2015, 10, 21, 7, 28, 0);
+    EXPECT_EQ(dt.ToString("ddd, dd MMM yyyy HH:mm:ss"), "Wed, 21 Oct 2015 07:28:00");
+}
+
 // --- Parse ---
 
 TEST(DateTimeTests, Parse_DateOnly) {

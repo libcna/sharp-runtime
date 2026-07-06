@@ -744,6 +744,11 @@ TEST(DateTimeOffsetTests, ToString_WithFormat_O) {
     EXPECT_NE(s.find("+02:00"), std::string::npos);
 }
 
+TEST(DateTimeOffsetTests, ToString_WithFormat_r_ProducesRfc1123) {
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::Zero);
+    EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 07:28:00 GMT");
+}
+
 // ===========================================================================
 // TimeOnly
 // ===========================================================================
