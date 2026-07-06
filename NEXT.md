@@ -1,6 +1,6 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `96cfa0f`) — 10569 tests passing*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `26ab294`) — 10569 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
 ## Milestone: plan.sqlite3 has zero `todo`/`''` rows (16199 total rows)
 
@@ -111,11 +111,46 @@ commit order:
    `Utf8JsonReader`, which isn't tracked in `plan.sqlite3` at all and is a large low-level streaming
    API — `JsonDocument`/`JsonElement`/`JsonSerializer` cover the practical use cases).
 
+5. `5191718` — Completed `System.Text.Json.Nodes`: `JsonNode` (abstract base with `AsArray`/
+   `AsObject`/`AsValue`, `Parent`/`Root`, `ToJsonString`, static `DeepEquals`/`Parse`), `JsonValue`
+   (scalar wrapper), `JsonArray`, `JsonObject`, `JsonNodeOptions`. Found and fixed a real,
+   cross-cutting bug while testing `JsonObject`'s insertion-order guarantee: `nlohmann::json`'s
+   default object container is `std::map` (sorted by key), so **every** `System.Text.Json` type
+   built on it — not just the new `JsonObject`, but also the already-shipped `JsonDocument`/
+   `JsonElement` from commit `adba9b8`/`7751266` above — silently lost .NET's documented
+   insertion/document-order guarantee on any object. Fixed globally via `nlohmann::ordered_json`
+   (a drop-in replacement, verified same nested type aliases) across all 9 affected files; added
+   regression tests on both the `JsonObject` and `JsonDocument::EnumerateObject()` sides (only the
+   former would have been caught by the pre-existing test suite).
+6. `96cfa0f` — Completed `System.Text.Json.Serialization` (the last namespace with `todo` items in
+   the entire 16199-row `plan.sqlite3` database): fixed `JsonSerializationAttributes.hpp` (missing
+   `JsonAttribute` base class, missing `JsonIgnoreCondition` enum values, wrong types on
+   `JsonNumberHandlingAttribute`/`JsonPropertyOrderAttribute`); added `JsonConstructorAttribute`,
+   `JsonObjectCreationHandlingAttribute` (with real enum-range validation), `JsonKnownNamingPolicy`,
+   `JsonObjectCreationHandling`, `JsonUnknownDerivedTypeHandling`, the `IJsonOnSerializing`/
+   `IJsonOnSerialized`/`IJsonOnDeserializing`/`IJsonOnDeserialized` interfaces (documented as not
+   automatically invoked — no reflection-based member walk to call them from), `JsonConverter<T>`/
+   `JsonConverterFactory` (type-name dispatch standing in for .NET's `Type`-based `CanConvert`),
+   `JsonStringEnumConverter<TEnum>` (real working enum↔string conversion via a caller-supplied name
+   table, since C++ enums have no reflection), and `ReferenceHandler`/`ReferenceResolver` (real
+   `PreserveReferenceResolver`/`IgnoreReferenceResolver`, not wired into `JsonSerializer` itself
+   since that dispatches through nlohmann ADL with no `$id`/`$ref` hook — usable directly by
+   hand-written converters). 29 new tests, all passed first try.
+7. `26ab294` — Post-milestone quality-audit fix (see the Milestone section above): `DeflateStream`/
+   `GZipStream`/`ZLibStream`'s `Length` property getter threw `NotImplementedException`, but real
+   .NET throws `NotSupportedException("This operation is not supported.")` — and the `Stream` base
+   class's own default `Seek`/`SetLength`/`Position` implementations already (correctly) throw
+   `NotSupportedException` for the same reason, so the three subclasses were inconsistent with both
+   their own base class and the real .NET behavior they mirror. Found via a sweep of every
+   remaining `NotImplementedException` call site in the codebase, cross-checked against
+   `/rv/tmp/runtime/src/libraries/System.IO.Compression`.
+
 `System.Text.RegularExpressions`, `System.Xml.Linq` (minus the `tobedecided` hierarchy items),
-`System.Text.Unicode`, and `System.Text.Json` are now all fully classified. Remaining `todo` items
-in the **entire** `plan.sqlite3` database (16199 rows total): only `System.Text.Json.Nodes` (5) and
-`System.Text.Json.Serialization` (31) — next up. Everything else across the whole dotnet/runtime
-surface is already `ported`/`ignore(d)`/`tobedecided`.
+`System.Text.Unicode`, `System.Text.Json`, `System.Text.Json.Nodes`, and
+`System.Text.Json.Serialization` are now all fully classified. **Zero `todo`/`''` rows remain
+anywhere in the entire 16199-row `plan.sqlite3` database** — see the Milestone section at the top
+of this file for the full breakdown of the 58 `tobedecided` items that genuinely need a user
+decision rather than a guess.
 
 ---
 
@@ -380,11 +415,11 @@ New this session:
 
 | Status | Issue |
 |--------|-------|
-| documented limitation | `System::Net::Http::Json::HttpClientJsonExtensions`/`HttpContentJsonExtensions` only provide non-generic, `JsonDocument`-returning overloads (`GetFromJsonAsync`, `ReadFromJsonAsync`, etc.) — .NET's generic `GetFromJsonAsync<T>`/`PostAsJsonAsync<T>` need reflection-based `JsonTypeInfo<T>` marshaling this runtime doesn't have. `System::Text::Json::JsonSerializer::Serialize<T>()` remains an intentional stub (pre-existing, not touched this session) — see `JsonSerializerTests.Serialize_ThrowsNotImplemented`. |
+| documented limitation | `System::Net::Http::Json::HttpClientJsonExtensions`/`HttpContentJsonExtensions` only provide non-generic, `JsonDocument`-returning overloads (`GetFromJsonAsync`, `ReadFromJsonAsync`, etc.) — .NET's generic `GetFromJsonAsync<T>`/`PostAsJsonAsync<T>` need reflection-based `JsonTypeInfo<T>` marshaling this runtime doesn't have. (Stale note fixed: `System::Text::Json::JsonSerializer::Serialize<T>()`/`Deserialize<T>()` are no longer stubs — they were given a real ADL-based (`nlohmann::ordered_json` `to_json`/`from_json`) ​implementation later in this same session; see the `JsonSerializerTests.Serialize_Int`/`Serialize_VectorOfInt`/`Deserialize_*` tests in `tests/Task41Tests.cpp`.) |
 | documented limitation | `System::Net::Mime::ContentType` doesn't reproduce .NET's `_isChanged`/`_isPersisted` wire-caching (tied to `System.Net.Mail`'s message-writing pipeline, which isn't ported) — `ToString()` always recomputes fresh. Its RFC 2045 comment/CFWS grammar support is plain-whitespace-only (no nested `(...)` comments). |
 | documented limitation | `System::Net::NetworkInformation::NetworkChange`'s event add/remove accessors are no-ops — there is no real OS network-change notification (Linux netlink, macOS `SCNetworkReachability`, Windows `NotifyAddrChange`), matching the pre-existing `AppDomain.UnhandledException` stub convention in this codebase. |
 | documented limitation | `System::Net::NetworkInformation::NetworkInformationException`'s default constructor uses `errno` in place of .NET's `Marshal.GetLastPInvokeError()` (no P/Invoke layer here); its internal `(message, innerException)` constructor isn't reproduced (`Win32Exception`, the base class, has no inner-exception-carrying constructor to forward to). |
-| DB/reality mismatch (should be fixed) | `plan.sqlite3` id 9100 (`TcpListener`) is still marked `todo`, but `TcpListener` is already fully implemented as a nested class in `include/System/Net/Sockets/TcpClient.hpp` (confirmed working — it backs this session's `HttpClientJsonExtensionsTests` integration tests). Fix the DB status before starting new `System.Net.Sockets` work so the next session doesn't re-investigate something already done. |
+| fixed | `plan.sqlite3` `TcpListener` row (previously `todo`) has been corrected to `ported` — it was already fully implemented as a nested class in `include/System/Net/Sockets/TcpClient.hpp` (confirmed working — it backs `HttpClientJsonExtensionsTests` integration tests). |
 
 Carried over from before (still accurate unless noted):
 
