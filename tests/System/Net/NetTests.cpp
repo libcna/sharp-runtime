@@ -103,6 +103,118 @@ TEST(IPAddressTests, Parse_RoundTrip_PreservesAddress) {
     EXPECT_EQ(IPAddress::Parse(addr).ToString(), addr);
 }
 
+TEST(IPAddressTests, AddressFamily_IPv4) {
+    EXPECT_EQ(IPAddress::Loopback.getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetwork);
+}
+
+TEST(IPAddressTests, TryParse_Invalid_ReturnsFalse) {
+    IPAddress result;
+    EXPECT_FALSE(IPAddress::TryParse("not an ip", result));
+}
+
+TEST(IPAddressTests, TryParse_Valid_ReturnsTrue) {
+    IPAddress result;
+    EXPECT_TRUE(IPAddress::TryParse("8.8.8.8", result));
+    EXPECT_EQ(result.ToString(), "8.8.8.8");
+}
+
+TEST(IPAddressTests, GetAddressBytes_IPv4) {
+    IPAddress ip = IPAddress::Parse("192.168.1.100");
+    auto bytes = ip.GetAddressBytes();
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(bytes[0], 192);
+    EXPECT_EQ(bytes[1], 168);
+    EXPECT_EQ(bytes[2], 1);
+    EXPECT_EQ(bytes[3], 100);
+}
+
+TEST(IPAddressTests, IsLoopback_IPv4) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("127.0.0.1")));
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("127.5.5.5")));
+    EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("10.0.0.1")));
+}
+
+// ===========================================================================
+// IPAddress — IPv6
+// ===========================================================================
+
+TEST(IPAddressIPv6Tests, Parse_FullForm) {
+    IPAddress ip = IPAddress::Parse("2001:0db8:0000:0000:0000:ff00:0042:8329");
+    EXPECT_TRUE(ip.getIsIPv6Property());
+    EXPECT_EQ(ip.getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetworkV6);
+}
+
+TEST(IPAddressIPv6Tests, Parse_CompressedForm_RoundTrips) {
+    IPAddress ip = IPAddress::Parse("2001:db8::ff00:42:8329");
+    EXPECT_EQ(ip.ToString(), "2001:db8::ff00:42:8329");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Loopback) {
+    IPAddress ip = IPAddress::Parse("::1");
+    EXPECT_EQ(ip, IPAddress::IPv6Loopback);
+    EXPECT_EQ(ip.ToString(), "::1");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Any) {
+    IPAddress ip = IPAddress::Parse("::");
+    EXPECT_EQ(ip, IPAddress::IPv6Any);
+    EXPECT_EQ(ip.ToString(), "::");
+}
+
+TEST(IPAddressIPv6Tests, Parse_TrailingDoubleColon) {
+    IPAddress ip = IPAddress::Parse("2001:db8::");
+    auto bytes = ip.GetAddressBytes();
+    ASSERT_EQ(bytes.size(), 16u);
+    EXPECT_EQ(bytes[0], 0x20);
+    EXPECT_EQ(bytes[1], 0x01);
+}
+
+TEST(IPAddressIPv6Tests, Parse_WithScopeId) {
+    IPAddress ip = IPAddress::Parse("fe80::1%3");
+    EXPECT_EQ(ip.getScopeIdProperty(), 3);
+}
+
+TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
+    IPAddress ip = IPAddress::Parse("::ffff:192.168.1.1");
+    EXPECT_TRUE(ip.getIsIPv4MappedToIPv6Property());
+    EXPECT_EQ(ip.ToString(), "::ffff:192.168.1.1");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), std::invalid_argument);
+}
+
+TEST(IPAddressIPv6Tests, GetAddressProperty_Throws) {
+    IPAddress ip = IPAddress::Parse("::1");
+    EXPECT_THROW((void)ip.getAddressProperty(), std::logic_error);
+}
+
+TEST(IPAddressIPv6Tests, GetScopeIdProperty_OnIPv4_Throws) {
+    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), std::logic_error);
+}
+
+TEST(IPAddressIPv6Tests, MapToIPv6_ThenMapToIPv4_RoundTrips) {
+    IPAddress v4 = IPAddress::Parse("192.168.1.1");
+    IPAddress v6 = v4.MapToIPv6();
+    EXPECT_TRUE(v6.getIsIPv4MappedToIPv6Property());
+    IPAddress back = v6.MapToIPv4();
+    EXPECT_EQ(back, v4);
+}
+
+TEST(IPAddressIPv6Tests, IsLoopback_IPv6) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::IPv6Loopback));
+    EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("2001:db8::1")));
+}
+
+TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
+    EXPECT_TRUE(IPAddress::Parse("fe80::1").getIsIPv6LinkLocalProperty());
+    EXPECT_FALSE(IPAddress::Parse("2001:db8::1").getIsIPv6LinkLocalProperty());
+}
+
+TEST(IPAddressIPv6Tests, Equality) {
+    EXPECT_EQ(IPAddress::Parse("2001:db8::1"), IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001"));
+}
+
 // ===========================================================================
 // IPEndPoint
 // ===========================================================================
