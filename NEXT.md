@@ -1,30 +1,51 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `3efb177`) — 10257 tests passing*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `aa23cf0`) — 10276 tests passing*
 
 **Session note:** This session is running autonomously per `prompt.md` (user unavailable ~24h,
-explicitly asked for no pauses). Progress so far this session, in order:
-- Fixed `TcpListener` DB/reality mismatch (id 9100 → `ported`, no code change).
-- Ported `System.Net.NetworkInformation.NetworkInterface` (reduced scope, POSIX `getifaddrs()`,
-  Linux-only) — commit `30b7f21`.
-- Ported `System.Net.NetworkInformation.Ping`/`PingReply` — real ICMP via unprivileged
-  `SOCK_DGRAM`+`IPPROTO_ICMP` "ping socket" (confirmed working in this sandbox before
-  implementing) — commit `86acbe1`. **`System.Net.NetworkInformation` namespace is now fully
-  classified** (every item `ported` or `ignore(d)`).
-- Ported `System.Net.Security` data-only types (`AuthenticationLevel`, `EncryptionPolicy`,
-  `SslPolicyErrors`, `SslApplicationProtocol`, `TlsCipherSuite`) — commit `7b1a836`.
-  `SslStream`/`SslClientAuthenticationOptions`/`SslServerAuthenticationOptions`/
-  `SslStreamCertificateContext` marked `tobedecided` (blocked on
-  `System.Security.Cryptography.X509Certificates`, not started, plus no TLS engine in this
-  runtime — a real scope decision, not guessed).
-- Ported the rest of `System.Net.Sockets` (17 items, including the general-purpose `Socket`
-  class) — commit `3efb177`. **`System.Net.Sockets` namespace is now fully classified.**
+explicitly asked for no pauses — do not stop between items). Progress so far this session, in
+commit order:
+1. Fixed `TcpListener` DB/reality mismatch (id 9100 → `ported`, no code change).
+2. `30b7f21` — Ported `System.Net.NetworkInformation.NetworkInterface` (reduced scope, POSIX
+   `getifaddrs()`, Linux-only; `GetIPProperties`/`GetIPStatistics`/`GetIPv4Statistics` omitted
+   since their return types are out of scope).
+3. `86acbe1` — Ported `System.Net.NetworkInformation.Ping`/`PingReply` — real ICMP via
+   unprivileged `SOCK_DGRAM`+`IPPROTO_ICMP` "ping socket" (confirmed working in this sandbox
+   before implementing, so no raw-socket privilege needed). **`System.Net.NetworkInformation` is
+   now fully classified** (every item `ported` or `ignore(d)`).
+4. `7b1a836` — Ported `System.Net.Security` data-only types (`AuthenticationLevel`,
+   `EncryptionPolicy`, `SslPolicyErrors`, `SslApplicationProtocol`, `TlsCipherSuite` — the last
+   mechanically generated, 337 entries, from the .NET source's own auto-generated enum).
+   `SslStream`/`SslClientAuthenticationOptions`/`SslServerAuthenticationOptions`/
+   `SslStreamCertificateContext` marked `tobedecided` (blocked on
+   `System.Security.Cryptography.X509Certificates`, not started, plus no TLS engine in this
+   runtime — a real scope decision, not guessed).
+5. `3efb177` — Ported the rest of `System.Net.Sockets` (17 items), including a general-purpose
+   `Socket` class (Bind/Connect/Listen/Accept, Send/Receive/SendTo/ReceiveFrom, socket options,
+   Poll, Task-based async) supporting Windows+POSIX, mirroring `TcpClient`'s existing platform
+   split. **`System.Net.Sockets` is now fully classified.**
+6. `aa23cf0` — Ported `System.Net.WebSockets` (12 items). `ClientWebSocket` is a real RFC 6455
+   client over `ws://` (`wss://` throws `PlatformNotSupportedException`, no TLS) built on the new
+   `Socket` class: real HTTP Upgrade handshake (own small SHA-1 for `Sec-WebSocket-Accept`, not
+   the not-yet-ported `System.Security.Cryptography.SHA1`), real masked-frame send/unmasked-frame
+   receive, transparent ping/pong, proper close handshake, fragmented-message support. Verified
+   with a full end-to-end test against a hand-built mock server (not mocked at any layer).
+   **`System.Net.WebSockets` is now fully classified.**
 
-Next up (System-namespace-first order): `System.Net.WebSockets` (12 items, ids 9115-9168) — see
-resume prompt at the bottom of this file. After that: `System.Threading.Channels` (9),
-`System.Runtime.Versioning`/`.CompilerServices`/`.InteropServices` (small, ~17 combined), then the
-two large remaining blocks `System.Security.Cryptography` (50) and `System.Text`/`.Json*` (~89
-combined) and `System.Xml.*` (~69 combined).
+Overall `plan.sqlite3` status this session: `ported` 770→808, `todo` 322→280, `tobedecided` +4
+(the `SslStream`-family deferrals above). Test count 10194→10276, all real (no test was skipped
+or weakened to make something pass).
+
+Next up (System-namespace-first, alphabetical order of remaining `todo`/`''` items — run the §7
+query to get the live list): `System.Numerics.Colors` (2, `Argb`/`Rgba`), `System.Runtime.*`
+(`CompilerServices`/`ExceptionServices`/`InteropServices`/`Serialization`/`Versioning`, ~20
+combined, all small), `System.Security`/`.Authentication`/`.Principal` (~14, small), then the
+large blocks: `System.Security.Cryptography` (50 — the single largest remaining namespace, not
+started, needs a scope decision on symmetric/asymmetric crypto and hashing — likely wants a
+vendored crypto library discussion, see `CLAUDE.md`'s "No new vendored libraries without
+discussing scope impact"), `System.Text`/`.Json*`/`.RegularExpressions`/`.Unicode` (~107
+combined), `System.Xml.Serialization`/`.Linq`/`.XPath` (~69 combined), `System.Threading.Channels`
+(9), `System.Timers` (4).
 
 ---
 
@@ -428,38 +449,37 @@ binary beyond the GoogleTest suite.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the actual, verified repository state as of HEAD fefee64
-(10194/10194 tests passing, clean build, zero warnings) — do not assume anything beyond what it
-documents.
+Read prompt.md first — it is the canonical, up-to-date plan.sqlite3 workflow (fully autonomous,
+no per-item confirmation, don't stop between items). NEXT.md is a snapshot for context, not the
+source of truth for process. This reflects the verified repository state as of HEAD aa23cf0
+(10276/10276 tests passing, clean build, zero warnings) — do not assume anything beyond what it
+documents; re-verify with a fresh build+test run after any context reset.
 
-Start with NEXT.md §8 task 1 (fix the TcpListener plan.sqlite3 status — it's a one-line DB
-correction, not a code change, and clears up a DB/reality mismatch before anything else touches
-System.Net.Sockets). Then move to task 2 (port System::Net::Sockets::Socket plus its small
-supporting enums) as the next substantive piece of work, since AddressFamily/SocketError/
-SocketException/SocketAddress/EndPoint/IPEndPoint/NetworkStream all already exist as building
-blocks for it.
+Query the live next-item list (System-namespace-first):
+  sqlite3 plan.sqlite3 "SELECT id,namespace,name,type FROM task WHERE (status='' OR status='todo')
+  ORDER BY (CASE WHEN namespace LIKE 'System%' THEN 0 ELSE 1 END), namespace, name LIMIT 20;"
 
-Do not start on NetworkInterface/Ping/PingReply (§8 task 3) without first reading §4's detail on
-why they're a design fork, not a mechanical port — in particular, verify whether ICMP sockets are
-even usable in this sandboxed environment before writing any Ping implementation.
+As of this update, that starts with System.Numerics.Colors (2 items), then the small
+System.Runtime.* namespaces (~20 combined), then System.Security/.Authentication/.Principal
+(~14), then the two large not-yet-started blocks: System.Security.Cryptography (50 items — the
+single largest remaining namespace; will likely need a scope decision on whether to vendor a
+crypto library, e.g. for AES/RSA — CLAUDE.md requires discussing that before adding one) and
+System.Text/.Json*/.RegularExpressions/.Unicode (~107 combined) and System.Xml.Serialization/
+.Linq/.XPath (~69 combined).
 
-Inspect only the files needed for whichever task you pick. Do not refactor unrelated code, and do
-not expand scope beyond that one task (see NEXT.md §9 for things explicitly out of bounds right
-now). In particular, do not attempt to unify HttpHeaders/WebHeaderCollection/the plain
-unordered_map header storage — that's a resolved decision, not an open question.
+For each item: classify (port/ignore/tobedecided) per prompt.md Step 2 without asking the user,
+then if porting: check the filesystem first (plan.sqlite3 can drift from reality — this session
+already found and fixed one such case, TcpListener), implement per the full checklist in
+CLAUDE.md (API surface, doc-comments, SPDX header, logic parity, getXxxProperty()/
+setXxxProperty() naming, intcs/bytecs/etc. usage), reconfigure if you added files
+(cd build && cmake . && cd ..), build clean (cmake --build build --parallel 4 — zero
+errors/warnings), run the full suite (./build/SharpRuntimeTests — must show 10276+ passing, zero
+failures), update plan.sqlite3's status, commit (and push to origin/feature/work — routine
+pushes are pre-authorized), then move to the next item without stopping.
 
-Make one small, verified improvement:
-  1. Read the relevant .NET reference source under /rv/tmp/runtime/src/libraries/ and any existing
-     C++ header/source for the type(s) involved (check the filesystem first — plan.sqlite3 can
-     drift from reality, as this session found with TcpListener).
-  2. Implement/fix per the full checklist in CLAUDE.md (API surface, doc-comments, SPDX header,
-     logic parity, getXxxProperty()/setXxxProperty() naming, intcs/bytecs/etc. usage).
-  3. If you add new files, reconfigure first: cd build && cmake . && cd ..
-  4. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
-  5. Run: ./build/SharpRuntimeTests           (must show 10194+ passing, zero failures)
-  6. If it's a plan.sqlite3-tracked item, update its status:
-     sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
-  7. Commit only the files for that one change: git commit -m "..."
-  8. Update NEXT.md to reflect the new state (test count, HEAD commit, what changed) before ending
-     the session.
+Do not expand scope beyond CLAUDE.md's "Known permanent deviations" and this session's own
+documented reduced-scope decisions (see the per-commit notes above) — e.g. do not attempt TLS,
+do not add SendFile/SendPacketsAsync to Socket, do not add permessage-deflate to WebSocket, unless
+explicitly asked. Update NEXT.md's session note (prepend, don't rewrite the whole history) after
+each meaningful batch of work, so this resumes cleanly after any context reset.
 ```
