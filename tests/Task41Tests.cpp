@@ -386,8 +386,8 @@ TEST(RegularExpressionAttributeTests, Pattern_Stored) {
 using System::Text::Json::JsonSerializerOptions;
 using System::Text::Json::JsonNamingPolicy;
 using System::Text::Json::JsonCommentHandling;
-using System::Text::Json::JsonNumberHandling;
 using System::Text::Json::JsonValueKind;
+using System::Text::Json::Serialization::JsonNumberHandling;
 
 TEST(JsonSerializerOptionsTests, DefaultCtor_AllDefaults) {
     JsonSerializerOptions opts;
@@ -409,10 +409,16 @@ TEST(JsonSerializerOptionsTests, AllowTrailingCommas_SetGet) {
     EXPECT_TRUE(opts.getAllowTrailingCommasProperty());
 }
 
-TEST(JsonNamingPolicyTests, Values) {
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::CamelCase),      0);
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::SnakeCaseLower), 1);
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::KebabCaseLower), 3);
+TEST(JsonNamingPolicyTests, CamelCase_ConvertsFirstLetterToLowercase) {
+    EXPECT_EQ(JsonNamingPolicy::CamelCase()->ConvertName("PropertyName"), "propertyName");
+}
+
+TEST(JsonNamingPolicyTests, SnakeCaseLower_InsertsUnderscoresAtWordBoundaries) {
+    EXPECT_EQ(JsonNamingPolicy::SnakeCaseLower()->ConvertName("PropertyName"), "property_name");
+}
+
+TEST(JsonNamingPolicyTests, KebabCaseLower_InsertsHyphensAtWordBoundaries) {
+    EXPECT_EQ(JsonNamingPolicy::KebabCaseLower()->ConvertName("PropertyName"), "property-name");
 }
 
 TEST(JsonCommentHandlingTests, Values) {

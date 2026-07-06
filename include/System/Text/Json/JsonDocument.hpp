@@ -4,68 +4,61 @@
 #pragma once
 #include <memory>
 #include <string>
-#include "System/Text/Json/JsonElement.hpp"
 #include "System/IDisposable.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/Text/Json/JsonDocumentOptions.hpp"
+#include "System/Text/Json/JsonElement.hpp"
+#include "System/Text/Json/JsonException.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
 
-    /** Represents a parsed JSON document providing read-only access via a root JsonElement. */
+    /**
+     * @brief Represents the in-memory tree of a parsed JSON document, providing read-only access
+     * via a root JsonElement.
+     *
+     * C++ counterpart of .NET System.Text.Json.JsonDocument.
+     */
     class JsonDocument : public System::IDisposable {
-        std::shared_ptr<JsonElement> root_;
+        std::shared_ptr<const nlohmann::json> root_;
         bool disposed_ = false;
 
-        explicit JsonDocument(std::shared_ptr<JsonElement> root) : root_(std::move(root)) {}
-
-        static std::shared_ptr<JsonElement> fromNlohmann(const nlohmann::json& j) {
-            if (j.is_null())
-                return std::make_shared<JsonElement>(JsonValueKind::Null, "null");
-            if (j.is_boolean()) {
-                bool b = j.get<bool>();
-                return std::make_shared<JsonElement>(
-                    b ? JsonValueKind::True : JsonValueKind::False,
-                    b ? "true" : "false");
-            }
-            if (j.is_number())
-                return std::make_shared<JsonElement>(JsonValueKind::Number, j.dump());
-            if (j.is_string())
-                return std::make_shared<JsonElement>(JsonValueKind::String, j.get<std::string>());
-            if (j.is_array()) {
-                auto el = std::make_shared<JsonElement>(JsonValueKind::Array, "");
-                for (const auto& item : j)
-                    el->addArrayItemForTesting(fromNlohmann(item));
-                return el;
-            }
-            if (j.is_object()) {
-                auto el = std::make_shared<JsonElement>(JsonValueKind::Object, "");
-                for (const auto& [key, val] : j.items())
-                    el->addPropertyForTesting(key, fromNlohmann(val));
-                return el;
-            }
-            return std::make_shared<JsonElement>(JsonValueKind::Undefined);
-        }
+        explicit JsonDocument(std::shared_ptr<const nlohmann::json> root) : root_(std::move(root)) {}
 
     public:
         ~JsonDocument() override = default;
 
-        /** Releases the root element and marks the document as disposed. */
-        void Dispose() override { disposed_ = true; root_.reset(); }
-
-        /** Gets the root JsonElement of this document. */
-        [[nodiscard]] const JsonElement& getRootElementProperty() const {
-            if (!root_) throw std::runtime_error("Document disposed.");
-            return *root_;
+        /** @brief Releases the root element and marks the document as disposed. */
+        void Dispose() override {
+            disposed_ = true;
+            root_.reset();
         }
 
-        /** Parses a JSON string and returns a JsonDocument; throws on invalid input. */
-        static std::shared_ptr<JsonDocument> Parse(const std::string& json) {
-            auto j = nlohmann::json::parse(json); // throws nlohmann::json::parse_error on bad input
-            return std::shared_ptr<JsonDocument>(new JsonDocument(fromNlohmann(j)));
+        /** @return The root JsonElement of this document. @throws System::ObjectDisposedException if disposed. */
+        [[nodiscard]] JsonElement getRootElementProperty() const {
+            if (disposed_) throw System::ObjectDisposedException("JsonDocument");
+            return JsonElement(root_);
         }
 
-        /** Parses a JSON value (alias for Parse). */
-        static std::shared_ptr<JsonDocument> ParseValue(const std::string& json) {
-            return Parse(json);
+        /**
+         * @brief Parses UTF-8/ASCII JSON text and returns a JsonDocument.
+         * @throws JsonException if the input is not valid JSON.
+         */
+        static std::shared_ptr<JsonDocument> Parse(const std::string& json, JsonDocumentOptions options = {}) {
+            options.Validate();
+            try {
+                auto parsed = std::make_shared<const nlohmann::json>(
+                    nlohmann::json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
+                                          /*ignore_comments=*/options.CommentHandling != JsonCommentHandling::Disallow));
+                return std::shared_ptr<JsonDocument>(new JsonDocument(std::move(parsed)));
+            } catch (const nlohmann::json::parse_error& e) {
+                throw JsonException(std::string("'") + e.what() + "'.");
+            }
+        }
+
+        /** @brief Parses a JSON value (alias for Parse). */
+        static std::shared_ptr<JsonDocument> ParseValue(const std::string& json, JsonDocumentOptions options = {}) {
+            return Parse(json, options);
         }
     };
 

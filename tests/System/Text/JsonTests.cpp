@@ -90,7 +90,7 @@ TEST(JsonTests, ParseObjectNullProperty) {
 
 TEST(JsonTests, ParseObjectMultipleProperties) {
     auto doc = JsonDocument::Parse(R"({"x":1,"y":2,"z":3})");
-    auto& root = doc->getRootElementProperty();
+    auto root = doc->getRootElementProperty();
     EXPECT_EQ(root.GetProperty("x").GetInt32(), 1);
     EXPECT_EQ(root.GetProperty("y").GetInt32(), 2);
     EXPECT_EQ(root.GetProperty("z").GetInt32(), 3);
@@ -111,7 +111,7 @@ TEST(JsonTests, TryGetPropertyNotFound) {
 
 TEST(JsonTests, GetPropertyMissingThrows) {
     auto doc = JsonDocument::Parse(R"({})");
-    EXPECT_THROW(doc->getRootElementProperty().GetProperty("nope"), std::runtime_error);
+    EXPECT_THROW(doc->getRootElementProperty().GetProperty("nope"), std::exception);
 }
 
 TEST(JsonTests, ParseNestedObject) {
@@ -132,37 +132,37 @@ TEST(JsonTests, ParseEmptyArray) {
 
 TEST(JsonTests, ParseIntegerArray) {
     auto doc = JsonDocument::Parse("[1,2,3]");
-    auto& items = doc->getRootElementProperty().EnumerateArray();
+    auto items = doc->getRootElementProperty().EnumerateArray();
     ASSERT_EQ(static_cast<int>(items.size()), 3);
-    EXPECT_EQ(items[0]->GetInt32(), 1);
-    EXPECT_EQ(items[1]->GetInt32(), 2);
-    EXPECT_EQ(items[2]->GetInt32(), 3);
+    EXPECT_EQ(items[0].GetInt32(), 1);
+    EXPECT_EQ(items[1].GetInt32(), 2);
+    EXPECT_EQ(items[2].GetInt32(), 3);
 }
 
 TEST(JsonTests, ParseStringArray) {
     auto doc = JsonDocument::Parse(R"(["a","b","c"])");
-    auto& items = doc->getRootElementProperty().EnumerateArray();
+    auto items = doc->getRootElementProperty().EnumerateArray();
     ASSERT_EQ(static_cast<int>(items.size()), 3);
-    EXPECT_EQ(items[0]->GetString(), "a");
-    EXPECT_EQ(items[2]->GetString(), "c");
+    EXPECT_EQ(items[0].GetString(), "a");
+    EXPECT_EQ(items[2].GetString(), "c");
 }
 
 TEST(JsonTests, ParseMixedArray) {
     auto doc = JsonDocument::Parse(R"([1,true,"x",null])");
-    auto& items = doc->getRootElementProperty().EnumerateArray();
+    auto items = doc->getRootElementProperty().EnumerateArray();
     ASSERT_EQ(static_cast<int>(items.size()), 4);
-    EXPECT_EQ(items[0]->getValueKindProperty(), JsonValueKind::Number);
-    EXPECT_EQ(items[1]->getValueKindProperty(), JsonValueKind::True);
-    EXPECT_EQ(items[2]->getValueKindProperty(), JsonValueKind::String);
-    EXPECT_EQ(items[3]->getValueKindProperty(), JsonValueKind::Null);
+    EXPECT_EQ(items[0].getValueKindProperty(), JsonValueKind::Number);
+    EXPECT_EQ(items[1].getValueKindProperty(), JsonValueKind::True);
+    EXPECT_EQ(items[2].getValueKindProperty(), JsonValueKind::String);
+    EXPECT_EQ(items[3].getValueKindProperty(), JsonValueKind::Null);
 }
 
 TEST(JsonTests, ParseArrayOfObjects) {
     auto doc = JsonDocument::Parse(R"([{"id":1},{"id":2}])");
-    auto& items = doc->getRootElementProperty().EnumerateArray();
+    auto items = doc->getRootElementProperty().EnumerateArray();
     ASSERT_EQ(static_cast<int>(items.size()), 2);
-    EXPECT_EQ(items[0]->GetProperty("id").GetInt32(), 1);
-    EXPECT_EQ(items[1]->GetProperty("id").GetInt32(), 2);
+    EXPECT_EQ(items[0].GetProperty("id").GetInt32(), 1);
+    EXPECT_EQ(items[1].GetProperty("id").GetInt32(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ TEST(JsonTests, ParseRealWorldDocument) {
         "address": null
     })";
     auto doc = JsonDocument::Parse(json);
-    auto& root = doc->getRootElementProperty();
+    auto root = doc->getRootElementProperty();
     EXPECT_EQ(root.GetProperty("name").GetString(), "Bob");
     EXPECT_EQ(root.GetProperty("age").GetInt32(), 25);
     EXPECT_TRUE(root.GetProperty("active").GetBoolean());
@@ -207,7 +207,7 @@ TEST(JsonTests, ParseEmptyStringThrows) {
 TEST(JsonTests, DisposeInvalidatesRoot) {
     auto doc = JsonDocument::Parse("{}");
     doc->Dispose();
-    EXPECT_THROW(doc->getRootElementProperty(), std::runtime_error);
+    EXPECT_THROW(doc->getRootElementProperty(), std::exception);
 }
 
 TEST(JsonTests, ParseValueSameAsParse) {
