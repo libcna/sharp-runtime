@@ -12,6 +12,9 @@
 #include "System/Net/Http/HttpVersionPolicy.hpp"
 #include "System/Net/Http/HttpRequestError.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
+#include "System/Net/Http/HttpIOException.hpp"
+#include "System/Net/Http/HttpProtocolException.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 
@@ -325,4 +328,38 @@ TEST(HttpVersionPolicyTests, HasThreeDistinctValues) {
 
 TEST(HttpRequestErrorTests, Unknown_IsZero) {
     EXPECT_EQ(static_cast<int>(HttpRequestError::Unknown), 0);
+}
+
+// ---------------------------------------------------------------------------
+// HttpIOException / HttpProtocolException
+// ---------------------------------------------------------------------------
+
+TEST(HttpIOExceptionTests, MessageIncludesErrorCategory) {
+    HttpIOException ex(HttpRequestError::NameResolutionError, "DNS failed");
+    std::string msg = ex.getMessageProperty();
+    EXPECT_NE(msg.find("DNS failed"), std::string::npos);
+    EXPECT_NE(msg.find("NameResolutionError"), std::string::npos);
+}
+
+TEST(HttpIOExceptionTests, GetHttpRequestErrorProperty) {
+    HttpIOException ex(HttpRequestError::ConnectionError, "boom");
+    EXPECT_EQ(ex.getHttpRequestErrorProperty(), HttpRequestError::ConnectionError);
+}
+
+TEST(HttpIOExceptionTests, IsA_IOException) {
+    HttpIOException ex(HttpRequestError::Unknown, "x");
+    System::IO::IOException* base = &ex;
+    EXPECT_NE(std::string(base->what()).find("x"), std::string::npos);
+}
+
+TEST(HttpProtocolExceptionTests, StoresErrorCodeAndHttpProtocolErrorCategory) {
+    HttpProtocolException ex(0x1, "stream error", nullptr);
+    EXPECT_EQ(ex.getErrorCodeProperty(), 0x1);
+    EXPECT_EQ(ex.getHttpRequestErrorProperty(), HttpRequestError::HttpProtocolError);
+}
+
+TEST(HttpProtocolExceptionTests, IsA_HttpIOException) {
+    HttpProtocolException ex(2, "y", nullptr);
+    HttpIOException* base = &ex;
+    EXPECT_EQ(base->getHttpRequestErrorProperty(), HttpRequestError::HttpProtocolError);
 }
