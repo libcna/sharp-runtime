@@ -28,10 +28,13 @@ namespace System::Net::Http::Headers {
         static bool isValidQuotedString(const std::string& value);
 
     protected:
-        /** Copy-constructs from another instance (protected, matching .NET's protected internal copy ctor). */
-        NameValueHeaderValue(const NameValueHeaderValue&) = default;
+        /** Default-constructs with empty name/value, bypassing validation (protected: used internally by TryParse and by derived types like NameValueWithParametersHeaderValue). */
+        NameValueHeaderValue() = default;
 
     public:
+        /** Copy-constructs from another instance. Public (unlike .NET's protected internal copy ctor) since this type is stored by value in standard containers (e.g. std::vector) from outside the class hierarchy. */
+        NameValueHeaderValue(const NameValueHeaderValue&) = default;
+
         /**
          * @brief Constructs a name-only value.
          * @throws System::ArgumentException if @p name is empty.
@@ -82,9 +85,6 @@ namespace System::Net::Http::Headers {
 
         /** Attempts to parse @p input as a NameValueHeaderValue; returns false without throwing on failure. */
         [[nodiscard]] static bool TryParse(const std::string& input, NameValueHeaderValue& parsedValue);
-
-    private:
-        NameValueHeaderValue() = default;
     };
 
 } // namespace System::Net::Http::Headers
