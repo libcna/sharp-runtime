@@ -1,6 +1,6 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `e76ae05`)*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `231aabe`)*
 
 ---
 
@@ -34,11 +34,11 @@ with minimal source changes.
 ## 2. Current status
 
 ### Build
-**Clean** as of HEAD `e76ae05` — `cmake --build build --parallel 4` produces zero errors and zero
+**Clean** as of HEAD `231aabe` — `cmake --build build --parallel 4` produces zero errors and zero
 warnings (verified this session, freshly rebuilt, not stale).
 
 ### Tests
-**9748 / 9748 tests passing** across 997 GoogleTest suites, verified at HEAD `e76ae05`.
+**9755 / 9755 tests passing** across 997 GoogleTest suites, verified at HEAD `231aabe`.
 `./build/SharpRuntimeTests` is the single test binary covering the whole library.
 
 ### CLI / tools / apps / libraries
@@ -95,18 +95,23 @@ ignore.** In dependency order:
   superseded by the already-ported `System::Net::Http::HttpClient`.
 
 ### What does not work yet
-`System.Net.Http` has ~40 remaining `todo` items (see §8) — several files already exist
-(`HttpClient`, `HttpContent`, `HttpMethod`, `HttpRequestMessage`, `HttpResponseMessage`,
-`ByteArrayContent`, `StringContent`, `FormUrlEncodedContent`) using an established simplified,
-**synchronous, non-Stream-based** content model (`ReadAsString()`/`ReadAsByteArray()`, no
-`SerializeToStreamAsync`/`Task`), not yet reviewed against the checklist this session. Beyond
-that: `System.Net.Http.Headers` (25), `System.Security.Cryptography` (50), `System.Text` (36),
-`System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Xml.Linq` (24,
-separate from `System.Xml`), `System.Net.Sockets` (21, minus the `AddressFamily`/`SocketAddress`/
-`SocketError`/`SocketException` pieces ported this session), and smaller `System.Text.*`/
-`System.Xml.XPath` namespaces. `System::Net::Sockets::Socket` and `TcpListener` still have no
-header at all (not POSIX-only — simply not started; `AddressFamily`/`SocketError`/
-`SocketException` now exist as of this session, which unblocks starting them).
+`System.Net.Http` has ~32 remaining `todo` items (see §8) — `HttpClient`, `HttpContent`,
+`HttpMethod`, `HttpRequestMessage`, `HttpResponseMessage`, `ByteArrayContent`, `StringContent`,
+`HttpCompletionOption`, `HttpVersionPolicy`, `HttpRequestError`, and the new `HttpRequestException`
+are now reviewed/ported this session (real gaps fixed: `HttpMethod` validation and case-insensitive
+equality, `getHeaders()`/`getContentType()`/`getCharSet()` naming, `EnsureSuccessStatusCode`'s
+exception type — see §3). The established simplified, **synchronous, non-Stream-based** content
+model (`ReadAsString()`/`ReadAsByteArray()`, no `SerializeToStreamAsync`/`Task`-per-content) is
+intentionally kept as-is (see §6) — not something to rewrite. Not yet started in this namespace:
+`MultipartContent`, `MultipartFormDataContent`, `ReadOnlyMemoryContent`, `HttpIOException`,
+`HttpProtocolException`. Beyond `System.Net.Http`: `System.Net.Http.Headers` (25),
+`System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31),
+`System.Xml.Serialization` (30), `System.Xml.Linq` (24, separate from `System.Xml`),
+`System.Net.Sockets` (21, minus the `AddressFamily`/`SocketAddress`/`SocketError`/`SocketException`
+pieces ported this session), and smaller `System.Text.*`/`System.Xml.XPath` namespaces.
+`System::Net::Sockets::Socket` and `TcpListener` still have no header at all (not POSIX-only —
+simply not started; `AddressFamily`/`SocketError`/`SocketException` now exist as of this session,
+which unblocks starting them).
 
 ---
 
@@ -116,6 +121,7 @@ Most recent first (see `git log --oneline` for full history):
 
 | Commit | Change |
 |--------|--------|
+| `231aabe` | Reviewed `HttpMethod`/`HttpContent`/`HttpRequestMessage`/`HttpResponseMessage`; added `HttpRequestException`. Fixed real gaps: `HttpMethod` now validates token chars and rejects empty/whitespace (previously accepted anything), equality/hashing now case-insensitive (was case-sensitive), added `Trace()`/`Connect()`/`Query()`. Renamed `getHeaders()`→`getHeadersProperty()` and `getContentType()`/`getCharSet()`→`...Property()` for naming-convention compliance. `EnsureSuccessStatusCode()` now throws `HttpRequestException` with the real status code, not a bare `std::runtime_error`. 5 new tests. |
 | `e76ae05` | `HttpCompletionOption`, `HttpVersionPolicy`, `HttpRequestError` enums. |
 | `b038c6b` | `WebUtility` review: numeric + more named HTML entity decoding. 6 new tests. |
 | `849e4fe` | `WebHeaderCollection` (composes `NameValueCollection`; real header validation, `IsRestricted`). 20 new tests. |
@@ -136,7 +142,7 @@ Most recent first (see `git log --oneline` for full history):
 ## 4. Current blocker / main problem
 
 **No build- or test-breaking blocker exists right now.** The last verified state is clean and
-stable (9748/9748 tests, zero warnings, freshly rebuilt this session).
+stable (9755/9755 tests, zero warnings, freshly rebuilt this session).
 
 Two things carried over from before, still open:
 
@@ -279,13 +285,14 @@ binary beyond the GoogleTest suite.
 
 ## 8. Next smallest tasks
 
-1. **Review and continue `System.Net.Http`** (~40 `todo` items remain, id range starts at 8394).
+1. **Continue `System.Net.Http`** (~32 `todo` items remain, id range starts at 8394).
    - Goal: `HttpClient`, `HttpContent`, `HttpMethod`, `HttpRequestMessage`, `HttpResponseMessage`,
-     `ByteArrayContent`, `StringContent`, `FormUrlEncodedContent` already have headers (and
-     `HttpClientTests.cpp` already exercises them) but are unmarked in `plan.sqlite3` — review each
-     against the checklist (do NOT rewrite the established synchronous content model — see §6).
-     `MultipartContent`, `MultipartFormDataContent`, `ReadOnlyMemoryContent`,
-     `HttpRequestException`, `HttpIOException`, `HttpProtocolException` have no header yet.
+     `ByteArrayContent`, `StringContent`, `HttpRequestException`, `HttpCompletionOption`,
+     `HttpVersionPolicy`, `HttpRequestError` are done this session (reviewed + real gaps fixed —
+     see §3). Still `todo`/no header: `MultipartContent`, `MultipartFormDataContent`,
+     `ReadOnlyMemoryContent`, `HttpIOException`, `HttpProtocolException`, and others — query
+     `plan.sqlite3` for the exact remaining list. Do NOT rewrite the established synchronous
+     content model (see §6) when adding these.
    - Files: `include/System/Net/Http/`, `src/System/Net/Http/`, `tests/System/Net/HttpClientTests.cpp`.
    - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`.
 
@@ -333,8 +340,8 @@ binary beyond the GoogleTest suite.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the actual, verified repository state as of HEAD e76ae05
-(9748/9748 tests passing, clean build, zero warnings) — do not assume anything beyond what it
+Read NEXT.md first. It reflects the actual, verified repository state as of HEAD 231aabe
+(9755/9755 tests passing, clean build, zero warnings) — do not assume anything beyond what it
 documents.
 
 Inspect only the files needed for the first task in NEXT.md §8. Do not refactor unrelated code,
@@ -350,7 +357,7 @@ Make one small, verified improvement:
      logic parity, getXxxProperty()/setXxxProperty() naming, intcs/bytecs/etc. usage).
   3. If you add new files, reconfigure first: cd build && cmake . && cd ..
   4. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
-  5. Run: ./build/SharpRuntimeTests           (must show 9748+ passing, zero failures)
+  5. Run: ./build/SharpRuntimeTests           (must show 9755+ passing, zero failures)
   6. If it's a plan.sqlite3-tracked item, update its status:
      sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
   7. Commit only the files for that one change: git -c commit.gpgsign=false commit -m "..."
