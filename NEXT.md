@@ -1,6 +1,6 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-05 (branch: `feature/work`, HEAD `743de40`)*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `e76ae05`)*
 
 ---
 
@@ -34,14 +34,12 @@ with minimal source changes.
 ## 2. Current status
 
 ### Build
-**Clean** as of HEAD `743de40` — `cmake --build build --parallel 4` produced zero errors and zero
-warnings on the last verified run. (Not rebuilt again for this handoff, per instruction not to
-build/develop right now — treat as "last known good," not re-verified this instant.)
+**Clean** as of HEAD `e76ae05` — `cmake --build build --parallel 4` produces zero errors and zero
+warnings (verified this session, freshly rebuilt, not stale).
 
 ### Tests
-**9616 / 9616 tests passing** across 975 GoogleTest suites, last verified at HEAD `743de40`,
-stable across 3 consecutive runs (no flakiness observed). `./build/SharpRuntimeTests` is the
-single test binary covering the whole library.
+**9748 / 9748 tests passing** across 997 GoogleTest suites, verified at HEAD `e76ae05`.
+`./build/SharpRuntimeTests` is the single test binary covering the whole library.
 
 ### CLI / tools / apps / libraries
 This repository is a **library only** — there is no CLI, app, or standalone tool. The only build
@@ -50,30 +48,65 @@ GoogleTest suite is the primary "demo" of working functionality; there is no sep
 in this repo (CNA and mobile-eggbert, which consume this library, are separate projects).
 
 ### Recently implemented (this session, all fully complete and tested)
-- `System.Numerics` — `Vector2/3/4`, `Matrix3x2/4x4`, `Plane`, `Quaternion`, `BFloat16`,
-  `BitOperations`, `Complex`, `BigInteger`, generic-math interface stubs, `TotalOrderIeee754Comparer`.
-  (`Vector<T>`, the generic hardware-SIMD type, deliberately left undecided — see §4.)
-- `System.Linq` — classified; only `Enumerable` counts as ported (existing practical-subset
-  `System::Linq.hpp`), everything else (LINQ-to-Objects internals, `IQueryable`/PLINQ/async-LINQ)
-  is out of scope per the "no LINQ" architectural rule.
-- `System.IO.IsolatedStorage`, `System.IO.Hashing` (incl. `XxHash3`/`XxHash128`),
-  `System.IO.Compression`, `System.IO` — all fully complete from earlier in this session.
-- `System.Threading` (59/60 — `WaitHandleExtensions` ignored, needs a native `SafeWaitHandle` this
-  port doesn't expose). Fixed a real bug: `Monitor` was a complete no-op stub.
-- `System.Threading.Tasks` (16/17 — `ConcurrentExclusiveSchedulerPair` ignored, needs a real
-  pluggable-scheduler queuing engine this runtime doesn't have).
-- `System.Xml` (62/62). Classic `XmlDocument` DOM API wrapping vendored tinyxml2, `XmlReader`/
-  `XmlWriter`, `XmlNamespaceManager`, resolvers, reader/writer settings, `XmlTextReader`/
-  `XmlTextWriter`/`XmlValidatingReader` (via composition, not inheritance — see §6), `XmlParserContext`.
-  Fixed three real bugs found during review (see §3).
+**`System.Net` is now fully classified — 22/22 relevant items ported, 4 legacy items marked
+ignore.** In dependency order:
+- `CredentialCache`, `ICredentials`, `ICredentialsByHost`, `NetworkCredential` — Uri-prefix and
+  host/port credential caching with .NET's longest-prefix-match algorithm.
+- `DecompressionMethods` (flags enum).
+- `System.Net.Sockets.AddressFamily`, `SocketAddress` (own simplified buffer encoding — see §5),
+  `EndPoint` (base class; `AddressFamily`/`Serialize`/`Create` throw `NotImplementedException` by
+  design, matching .NET's own non-abstract base), `DnsEndPoint`.
+- `Dns` — **real** `getaddrinfo`/`getnameinfo`/`gethostname`-backed resolution (Winsock2 on
+  Windows, POSIX elsewhere, `PlatformNotSupportedException` on Emscripten), `IPHostEntry`,
+  `System.Net.Sockets.SocketError`, `SocketException`. Scoped to the synchronous surface only
+  (see §5).
+- `HttpRequestHeader`, `HttpResponseHeader` (enums + `GetName()` free functions replacing .NET's
+  extension methods); reviewed pre-existing `HttpStatusCode` (added a missing doc-comment, no
+  logic gaps).
+- `HttpVersion` (well-known `System::Version` constants).
+- **`IPAddress` rewritten to add full IPv6 support** — was IPv4-only before this session. Now has
+  real RFC 5952 parsing/formatting (`::`-compression, embedded IPv4 tail, numeric scope IDs),
+  `AddressFamily`/`ScopeId` properties, `GetAddressBytes`, `MapToIPv4`/`MapToIPv6`, the
+  `IsIPv6Multicast`/`LinkLocal`/`SiteLocal`/`Teredo`/`UniqueLocal`/`IsIPv4MappedToIPv6` predicates,
+  `IsLoopback`, `HostToNetworkOrder`/`NetworkToHostOrder`, `IPv6Any`/`IPv6Loopback`/`IPv6None`.
+  `getAddressProperty()`'s existing IPv4 host-order-uint32 semantics preserved unchanged for
+  existing callers (`IPEndPoint`, `TcpClient`, `UdpClient`, `Dns`, `SocketAddress`).
+- **`IPEndPoint` rewritten to derive from `EndPoint`** (was a standalone class). Adds IPv6 support
+  (bracketed `ToString`, IPv6 in `Parse`/`TryParse`/constructors), port-range validation on
+  construction and `setPortProperty` (previously unvalidated — a real gap fixed), `GetHashCode`.
+  `SocketAddress` gained an `IPAddress`+port constructor and `GetIPEndPoint()` so
+  `Serialize()`/`Create()` genuinely round-trip endpoint data (verified by IPv4 and IPv6
+  round-trip tests), not just family+size.
+- `IPNetwork` — CIDR network type, byte-mask based (not .NET's `UInt128`-shift, since this runtime
+  has no `UInt128`); supports IPv4, IPv6, and cross-family `Contains()` for IPv4-mapped addresses.
+- `ProtocolViolationException`, `WebException`, `WebExceptionStatus`.
+- `WebHeaderCollection` — composes (doesn't inherit) `NameValueCollection`; real
+  `CheckBadHeaderNameChars`/`CheckBadHeaderValueChars` validation ported from .NET's
+  `HttpValidationHelpers` (including the CRLF-folding exception), and `IsRestricted()` reproduces
+  the request/response-restricted flags from .NET's internal `HeaderInfoTable`.
+- Reviewed pre-existing `WebUtility`: added `&#NNN;`/`&#xHH;` numeric HTML entity decoding (emitted
+  as UTF-8) and a few more named entities (`nbsp`/`copy`/`reg`/`apos`/`trade`) — was previously
+  only the 5 basic named entities.
+- `HttpCompletionOption`, `HttpVersionPolicy`, `HttpRequestError` (simple `System.Net.Http` enums —
+  first steps into that namespace, see §8).
+- Classified `HttpWebRequest`, `HttpWebResponse`, `WebRequest`, `WebResponse` as **ignore**
+  (`outofscope=0`): .NET's own source literally comments "effectively obsolete by virtue of
+  `WebRequest.Create` being obsolete"; ~2500 lines of legacy pre-`HttpClient` protocol stack,
+  superseded by the already-ported `System::Net::Http::HttpClient`.
 
 ### What does not work yet
-Large namespaces remain unclassified/unported. By remaining `todo` count in `plan.sqlite3`:
-`System.Security.Cryptography` (50), `System.Text` (36), `System.Text.Json.Serialization` (31),
-`System.Xml.Serialization` (30), `System.Net` (26), `System.Net.Http.Headers` (25),
-`System.Xml.Linq` (24, separate from `System.Xml` — untouched), `System.Net.Sockets` (21), and
-smaller `System.Net.*`/`System.Text.*`/`System.Xml.XPath` namespaces. `System::Net::Sockets::Socket`
-and `TcpListener` have no header at all (not POSIX-only — simply not started).
+`System.Net.Http` has ~40 remaining `todo` items (see §8) — several files already exist
+(`HttpClient`, `HttpContent`, `HttpMethod`, `HttpRequestMessage`, `HttpResponseMessage`,
+`ByteArrayContent`, `StringContent`, `FormUrlEncodedContent`) using an established simplified,
+**synchronous, non-Stream-based** content model (`ReadAsString()`/`ReadAsByteArray()`, no
+`SerializeToStreamAsync`/`Task`), not yet reviewed against the checklist this session. Beyond
+that: `System.Net.Http.Headers` (25), `System.Security.Cryptography` (50), `System.Text` (36),
+`System.Text.Json.Serialization` (31), `System.Xml.Serialization` (30), `System.Xml.Linq` (24,
+separate from `System.Xml`), `System.Net.Sockets` (21, minus the `AddressFamily`/`SocketAddress`/
+`SocketError`/`SocketException` pieces ported this session), and smaller `System.Text.*`/
+`System.Xml.XPath` namespaces. `System::Net::Sockets::Socket` and `TcpListener` still have no
+header at all (not POSIX-only — simply not started; `AddressFamily`/`SocketError`/
+`SocketException` now exist as of this session, which unblocks starting them).
 
 ---
 
@@ -83,116 +116,139 @@ Most recent first (see `git log --oneline` for full history):
 
 | Commit | Change |
 |--------|--------|
-| `743de40` | `NEXT.md` update only (System.Xml completion note). |
-| `0d2a17e` | Added `XmlNamespaceManager` (real scope-stack), `XmlResolver`/`XmlUrlResolver`/`XmlSecureResolver`, `XmlReaderSettings`/`XmlWriterSettings`, `XmlParserContext`, `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader`. Completes `System.Xml` (62/62). New tests: `XmlNamespaceManagerTests.cpp`, `XmlResolverTests.cpp`, `XmlTextReaderWriterTests.cpp`. |
-| `26a1073` | Added the classic `XmlDocument` DOM class hierarchy (`XmlNode`, `XmlDocument`, `XmlElement`, `XmlAttribute`, `XmlCharacterData` and its subclasses, `XmlLinkedNode` and its subclasses, etc.), wrapping vendored tinyxml2. **Fixed 3 real bugs**: (1) `InnerText`/`InnerXml` setters called the virtual `RemoveAll()`, which `XmlElement` overrides to also strip attributes, so setting `InnerText` silently wiped attributes too — added a non-virtual `RemoveAllChildren()` and rerouted the setters through it; (2) `XmlDocument`'s own `ownerDocument_` is correctly always null, but every internal node operation assumed it was set, so calling them directly on the document object silently no-op'd — added `GetDocument()` (mirrors .NET's internal `Document` property) and rerouted through it; (3) text/comment/CDATA nodes had no `WriteTo` override, so `XmlWriter`-based serialization silently dropped their content — added the overrides and a new `XmlWriter::WriteCData`. New test file: `XmlDomTests.cpp`. |
-| `8b9cdbc` | Added `XmlNameTable`/`NameTable`, `XmlConvert`, `XmlQualifiedName`, `XmlNodeChangedEventArgs`/`XmlNodeChangedEventHandler`, `IHasXmlNode`, `IXmlLineInfo`, `IXmlNamespaceResolver`. |
-| `b92d58a` | Added 18 `System.Xml` enums and `XmlException`; fixed `XmlReader`/`XmlWriter` (pre-existing, from before this session) throwing the wrong exception type. |
-| `017b01b` | Fixed a flaky test (`IsolatedStorageFileTests.IsAnIsolatedStorageBase_ViaVirtualDispatch`) that compared live disk free-space across two separate calls for exact equality — legitimately racy under concurrent disk activity. |
-| `170142b` | Ported `System.Threading.Tasks` (16/17). Fixed `Task::FromCanceled(CancellationToken)` silently discarding its argument; fixed `Parallel.hpp` using `int` instead of `intcs`. Added real `ParallelLoopState.Stop()`/`Break()` support. 80 new tests. |
-| `62bfef5` | Ported `System.Threading` (59/60). Fixed `Monitor` (was a complete no-op stub — Enter/Exit/Wait/Pulse did nothing), `Mutex` (didn't derive from `WaitHandle`; `WaitOne(ms)` didn't actually block up to timeout), `Semaphore`/`SemaphoreSlim` (no argument validation), `ReaderWriterLockSlim` (`IsReadLockHeld` etc. always returned `false`), `Barrier` (post-phase exceptions silently swallowed). 33 new tests. |
-| `df32df9` and earlier | `System.Numerics` completion, `System.Linq` classification, `System.IO.Hashing` (`XxHash3`/`128`), `System.IO.IsolatedStorage`, `System.IO.Compression`, `System.IO` (56 items) — see full `git log --oneline` for detail. |
+| `e76ae05` | `HttpCompletionOption`, `HttpVersionPolicy`, `HttpRequestError` enums. |
+| `b038c6b` | `WebUtility` review: numeric + more named HTML entity decoding. 6 new tests. |
+| `849e4fe` | `WebHeaderCollection` (composes `NameValueCollection`; real header validation, `IsRestricted`). 20 new tests. |
+| `8218b22` | `ProtocolViolationException`, `WebException`, `WebExceptionStatus`. 5 new tests. |
+| `2a35c94` | `IPNetwork` (CIDR, byte-mask based). 12 new tests. |
+| `2ff410b` | `IPEndPoint` rewritten to derive from `EndPoint`; `SocketAddress` gained `IPAddress`+port ctor and `GetIPEndPoint()` for real `Serialize()`/`Create()` round-tripping. Fixed unvalidated port range. 24 `IPEndPoint` tests total (14 new). |
+| `8f9cd7f` | **`IPAddress` rewritten with full IPv6 support** (was IPv4-only). 35 new tests. Moved to `.hpp`+`.cpp`. |
+| `4625d1c` | `HttpVersion`. |
+| `558ae50` | `HttpRequestHeader`, `HttpResponseHeader`; reviewed `HttpStatusCode` (doc-comment added). |
+| `aeaad47` | `Dns` (real `getaddrinfo`/`getnameinfo`/`gethostname`), `IPHostEntry`, `SocketError`, `SocketException`. 11 new tests exercising real resolution. |
+| `80403d6` | `AddressFamily`, `SocketAddress`, `EndPoint`, `DnsEndPoint`. 19 new tests. |
+| `2e24d40` | `DecompressionMethods`. |
+| `22cbdbb` | `CredentialCache`, `ICredentials`, `ICredentialsByHost`, `NetworkCredential`. 17 new tests. |
+| `ebf337d` and earlier | Prior session: `System.Numerics`, `System.Linq` classification, `System.IO.*`, `System.Threading`/`Threading.Tasks`, `System.Xml` (62/62) — see full `git log --oneline` for detail. |
 
 ---
 
 ## 4. Current blocker / main problem
 
 **No build- or test-breaking blocker exists right now.** The last verified state is clean and
-stable (9616/9616 tests, 3 consecutive runs, zero warnings).
+stable (9748/9748 tests, zero warnings, freshly rebuilt this session).
 
-Two things are worth flagging as the closest things to an open problem:
+Two things carried over from before, still open:
 
 1. **`Vector<T>` (id `9228` in `plan.sqlite3`, namespace `System.Numerics`) is marked
-   `tobedecided`**, not ported. It's .NET's generic, hardware-width SIMD vector type — a real
-   architecture decision is needed before implementing it (fixed-width fallback vs. actual SIMD
-   intrinsics vs. `std::experimental::simd`), since it's structurally unlike the already-ported
-   fixed-size `Vector2/3/4`. This needs a human decision, not a default guess.
-2. **Process risk, not a code bug:** earlier this session, a background porting agent reported
-   task status "completed" while it had actually stopped mid-task — some work was uncommitted,
-   with a known unresolved bug and 3 failing tests. This was only caught by explicitly checking
-   `git log`/`git status`/re-running the test suite rather than trusting the agent's self-report.
-   **Any future delegated/background work must be verified the same way** (actual commits, actual
-   test run) before being treated as done.
+   `tobedecided`**, not ported. Needs a human architecture decision (fixed-width fallback vs. real
+   SIMD intrinsics vs. `std::experimental::simd`) before implementing — not touched this session.
+2. **Process risk, not a code bug (from a prior session):** a background porting agent once
+   reported "completed" while actually incomplete. **Any future delegated/background work must be
+   verified** (actual commits, actual test run) before being treated as done — this session's work
+   was all done directly, not delegated, so this doesn't currently apply, but the lesson stands.
 
 ---
 
 ## 5. Known bugs and limitations
 
+New this session:
+
+| Status | Issue |
+|--------|-------|
+| documented simplification | `System::Net::SocketAddress`'s buffer layout is this runtime's own simplified encoding (family/port/address at fixed offsets), not guaranteed to match the platform sockaddr ABI — there's no real `Socket`/OS interop yet to need ABI compatibility with. |
+| documented limitation | `System::Net::Dns` only ports the synchronous, non-obsolete surface (`GetHostName`, `GetHostAddresses`, `GetHostEntry`) — no async `Task`-returning overloads, no `Begin`/`End` `IAsyncResult` methods, no obsolete `GetHostByName`/`Resolve`/`GetHostByAddress`. `Dns`'s `getaddrinfo` calls are still hardcoded to `AF_INET` even though `IPAddress` gained IPv6 support this same session — a follow-up pass could request/return IPv6 results too, but `Dns` itself wasn't revisited after the `IPAddress` rewrite. |
+| documented limitation | `System::Net::IPAddress`/`IPEndPoint`/`IPNetwork` don't port .NET's `Span<T>`/UTF8-based `Parse`/`TryParse`/`TryFormat` overloads or `IParsable`/`ISpanParsable` interface implementations — this runtime has no `Span<T>`/UTF8-string idiom. IPv6 scope IDs are numeric-only (no interface-name-to-index resolution). |
+| documented limitation | `System::Net::WebHeaderCollection::GetValues()` returns raw stored values, not re-split through .NET's internal per-header multi-value parser table (e.g. `Set-Cookie`'s quote-aware comma splitting) — that table is large and request/response-plumbing-specific. |
+| documented limitation | `System::Net::WebUtility::HtmlEncode` doesn't numeric-entity-encode the Latin-1 supplement range or non-BMP characters like .NET does (would need UTF-8-to-codepoint decoding this class doesn't otherwise need); `HtmlDecode`'s named-entity table is 9 entries, not .NET's ~250. |
+| ignore (outofscope=0) | `HttpWebRequest`, `HttpWebResponse`, `WebRequest`, `WebResponse` — .NET's own source calls `WebRequest` "effectively obsolete"; ~2500 lines of legacy pre-`HttpClient` protocol stack, superseded by the already-ported `HttpClient`. |
+
+Carried over from before (still accurate):
+
 | Status | Issue |
 |--------|-------|
 | incomplete (needs decision) | `System::Numerics::Vector<T>` — no header exists; `tobedecided` pending an architecture choice (see §4). |
-| missing | `System::Net::Sockets::Socket` / `TcpListener` — no header exists at all (not POSIX-only, simply not started). |
-| documented limitation | `XmlUrlResolver::GetEntity` only reads local files (`file://` or plain paths) — no network stack for http(s) entity resolution. |
-| documented limitation | `XmlResolver`/`XmlUrlResolver`/`XmlSecureResolver`'s `ofObjectToReturn` parameter (a .NET `Type?`) is accepted but ignored — no runtime reflection to act on it; always returns a `std::string` via `std::any`. |
-| documented limitation | `XmlReaderSettings`/`XmlWriterSettings` — most properties are stored for API-name compatibility but not consulted by the concrete `XmlReader`/`XmlWriter` (documented per-property, not silent). |
-| documented limitation | `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader` are implemented via composition (own an `XmlReader`/`XmlWriter`, forward calls) rather than inheritance, since this runtime's `XmlReader`/`XmlWriter` are single concrete classes, not .NET's extensible abstract hierarchy. |
-| documented limitation | `XmlValidatingReader` performs no actual DTD/XSD validation regardless of `ValidationType` — matches this runtime's general no-DTD-validation stance. |
-| documented limitation | `XmlDocument`'s `NodeInserting`/`NodeInserted`/`NodeRemoving`/`NodeRemoved`/`NodeChanging`/`NodeChanged` events exist as fields but are not yet wired into `AppendChild`/`RemoveChild`/etc. |
-| documented limitation | `System::Threading::Tasks::TaskScheduler` doesn't actually route `Task` execution (`Task` always uses `std::async` directly); `TaskFactory` omits APM-pattern `FromAsync` overloads (no `IAsyncResult` port to bridge to). |
-| ignore (outofscope) | `ConcurrentExclusiveSchedulerPair` — needs a real pluggable-`TaskScheduler` queuing engine this runtime doesn't have. |
-| ignore (outofscope) | `WaitHandleExtensions` — wraps `SafeWaitHandle`, a native OS handle this port's `WaitHandle` doesn't expose. |
-| POSIX-only (known, by design) | `System::Net::Sockets`, `System::IO::RandomAccess` — POSIX-only APIs (`<sys/socket.h>`, `pread`/`pwrite`). |
-| POSIX/Linux-only (known, by design) | `System::AppDomain`/`AppContext` (`/proc/self/exe`), `System::TimeZoneInfo` (`localtime_r`, `/usr/share/zoneinfo`). |
-| stub (by design, correct end state) | `System::GC`, `System::Type`, `System::Activator` — no-ops/stubs; this is the intended final state, not a gap. |
-| legacy DB noise | `plan.sqlite3` has 15055 rows with `status='ignored'` (lowercase-d, distinct from the current workflow's `'ignore'`) predating this workflow — inert legacy data, not something to clean up as part of normal porting work. |
-| needs verification | Emscripten/Windows builds have never been CI-tested this session; POSIX guards exist in `.cpp` files but are unverified on those platforms. |
+| missing | `System::Net::Sockets::Socket` / `TcpListener` — no header exists at all. `AddressFamily`/`SocketError`/`SocketException` now exist (this session), so starting these is more tractable than before. |
+| documented limitation | `XmlUrlResolver::GetEntity` only reads local files — no network stack for http(s) entity resolution. |
+| documented limitation | `XmlResolver`/`XmlUrlResolver`/`XmlSecureResolver`'s `ofObjectToReturn` parameter is accepted but ignored (no reflection). |
+| documented limitation | `XmlReaderSettings`/`XmlWriterSettings` — most properties stored but not consulted by the concrete `XmlReader`/`XmlWriter`. |
+| documented limitation | `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader` use composition, not inheritance. |
+| documented limitation | `XmlValidatingReader` performs no actual DTD/XSD validation. |
+| documented limitation | `XmlDocument`'s `NodeInserting`/etc. events exist as fields but aren't wired into mutation methods. |
+| documented limitation | `System::Threading::Tasks::TaskScheduler` doesn't route `Task` execution; `TaskFactory` omits APM `FromAsync`. |
+| ignore (outofscope) | `ConcurrentExclusiveSchedulerPair`, `WaitHandleExtensions`. |
+| POSIX-only (known, by design) | `System::Net::Sockets`, `System::IO::RandomAccess`. |
+| POSIX/Linux-only (known, by design) | `System::AppDomain`/`AppContext`, `System::TimeZoneInfo`. |
+| stub (by design, correct end state) | `System::GC`, `System::Type`, `System::Activator`. |
+| legacy DB noise | `plan.sqlite3` has 15055 rows with `status='ignored'` (lowercase-d) predating this workflow — inert. |
+| needs verification | Emscripten/Windows builds have never been CI-tested; POSIX guards exist but are unverified there. |
 
 ---
 
 ## 6. Architecture notes
 
 ### Directory layout
-- `include/System/...` — public headers, mirroring .NET namespace paths (e.g. `include/System/Xml/XmlDocument.hpp` for `System.Xml.XmlDocument`).
+- `include/System/...` — public headers, mirroring .NET namespace paths.
 - `src/System/...` — `.cpp` bodies for complex types, same mirrored path.
-- `tests/System/...` — GoogleTest files, same mirrored path; CMake's `GLOB_RECURSE` auto-discovers every `tests/**/*.cpp` and `src/**/*.cpp` — no manual registration needed when adding a file.
-- `vendor/` — GoogleTest, nlohmann/json, tinyxml2, miniz (vendored, never modify in place, never commit binaries).
-- `plan.sqlite3` — gitignored, local-only porting-progress database (table `task`: `id, namespace, name, type, internal, outofscope, status`).
+- `tests/System/...` — GoogleTest files, same mirrored path; CMake's `GLOB_RECURSE` auto-discovers
+  every `tests/**/*.cpp` and `src/**/*.cpp` — **but you must re-run `cmake .` (reconfigure) after
+  adding a new file**, or the build silently won't pick it up. (`CONFIGURE_DEPENDS` handles this on
+  the next `cmake --build` invocation in practice, but if in doubt, `cd build && cmake .` explicitly.)
+- `vendor/` — GoogleTest, nlohmann/json, tinyxml2, miniz (vendored, never modify in place).
+- `plan.sqlite3` — gitignored, local-only porting-progress database.
 
 ### Key invariants that must not be broken
-- **`getXxxProperty()`/`setXxxProperty()`** naming on every property, including static factory-style accessors — this is checked/enforced repeatedly across the whole codebase; do not introduce plain getters/setters or public fields.
-- **`SharpRuntime::intcs`/`bytecs`/`longcs`/`uintcs`**, not native C++ `int`/`uint8_t`/etc., in any public API mirroring a .NET primitive parameter.
-- **C++17 nested namespace syntax** (`namespace System::Xml {`), not the older nested-brace form.
+- **`getXxxProperty()`/`setXxxProperty()`** naming on every property.
+- **`SharpRuntime::intcs`/`bytecs`/`longcs`/`uintcs`**, not native C++ types, in public APIs.
+- **C++17 nested namespace syntax** (`namespace System::Net {`).
 - **No LINQ** in new ported code — use `std::ranges`.
-- **POSIX-only includes** (`<unistd.h>`, `<sys/socket.h>`, etc.) must stay inside `.cpp` files behind `#ifdef _WIN32` / `#elif defined(__EMSCRIPTEN__)` / `#else`, never in public `.hpp` headers.
-- **SPDX header required** on every `.hpp`/`.cpp` file:
-  ```cpp
-  // SPDX-License-Identifier: MIT
-  // Copyright (c) Robert Vokac and contributors
-  // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
-  ```
-- **Doxygen `/** */` only** — never reintroduce `///` triple-slash comments.
+- **POSIX-only includes** must stay inside `.cpp` files behind `#ifdef`.
+- **SPDX header required** on every `.hpp`/`.cpp` file.
+- **Doxygen `/** */` only** — and **never write a literal `*/` inside prose inside a `/** */`
+  block** (e.g. `Begin*/End*`) — it silently closes the comment early and produces confusing
+  "X has not been declared" errors far below the real mistake. Learned the hard way this session
+  writing `Dns.hpp`'s doc-comment.
 - A derived class that declares **any** overload of a base-class method name hides *all* other
-  base-class overloads of that name unless a `using BaseClass::MethodName;` is added — this exact
-  bug pattern has recurred repeatedly (`StreamWriter`/`StringWriter`, `Crc32`/`Crc64`/`Adler32`/
-  `XxHash32`/`XxHash64`, and elsewhere). Always check for this when adding an override in a class
-  with inherited overloads of the same name.
+  base-class overloads of that name unless `using BaseClass::MethodName;` is added.
 
 ### Data flow / notable patterns
-- `System::Xml`'s DOM classes wrap `tinyxml2::XMLNode*`/`XMLDocument` — `XmlDocument` owns the
-  native `tinyxml2::XMLDocument` and caches one C++ wrapper object per native pointer so repeated
-  navigation calls return stable identities. Internal node operations must resolve the owning
-  document via `XmlNode::GetDocument()` (not the raw `ownerDocument_` field), because
-  `XmlDocument`'s own `ownerDocument_` is always null (matching .NET) — see the Bug 2 fix in §3.
-- `System::IO::Compression` wraps zlib/miniz directly; `System::Text::Json` wraps nlohmann/json
-  (check that directory for the established wrapping conventions before adding a new wrapped type).
-- `System::Threading::Tasks::Task` is `std::async`-backed (eager/thread-based), not a lazy
-  continuation/state-machine model — there is no C++ equivalent of compiler-generated async state
-  machines, so `Task` is a deliberately simplified practical-subset design, not a 1:1 port.
+- **`System::Net::EndPoint`/`IPEndPoint`/`DnsEndPoint`**: `EndPoint` is a concrete (not abstract)
+  base whose `AddressFamily`/`Serialize`/`Create` throw `NotImplementedException` by design,
+  matching .NET's actual base-class behavior (not a C++ abstraction gap). `IPEndPoint` and
+  `DnsEndPoint` both derive from it. `SocketAddress` is the serialization target — it now has a
+  real `IPAddress`+port constructor and `GetIPEndPoint()` decoder, so `Serialize()`→`Create()`
+  round-trips actual endpoint data.
+- **`System::Net::IPAddress`** stores IPv4 as a host-order `uint32_t` (unchanged from before this
+  session — many call sites depend on this exact representation) and IPv6 as 8×`uint16_t` groups
+  plus a scope-ID `uint32_t`. `GetAddressBytes()` is the common currency other types
+  (`SocketAddress`, `IPNetwork`) use to work generically across both families via byte-level
+  masking/copying rather than family-specific branches everywhere.
+- **`System::Net::WebHeaderCollection`** composes `System::Collections::Specialized::
+  NameValueCollection` rather than inheriting — that type has no virtual override points, matching
+  the established "composition over a non-virtual base" pattern already used for
+  `XmlTextReader`/`XmlTextWriter`/`XmlValidatingReader`.
+- `System::Net::Http`'s existing types (`HttpClient`, `HttpContent`, etc.) use a deliberately
+  simplified **synchronous** content model (`ReadAsString()`/`ReadAsByteArray()`), not .NET's
+  `Stream`/`Task`-based `SerializeToStreamAsync`. This predates this session and should be treated
+  as an established design point to work within, not rewrite, when reviewing/extending that
+  namespace (see §8 task 1).
+- `System::Xml`'s DOM classes wrap `tinyxml2::XMLNode*`/`XMLDocument` (unchanged this session).
+- `System::Threading::Tasks::Task` is `std::async`-backed, not a lazy continuation model
+  (unchanged this session).
 
 ### plan.sqlite3 workflow (see `prompt.md` for the full canonical version)
 For each `''`/`todo` item, classify without asking the user: port it (apply the full checklist in
-`CLAUDE.md` — API surface, doc-comments, SPDX, logic parity vs. `/rv/tmp/runtime/src/libraries/`,
-clean build, passing tests), mark `ignore` (`outofscope=1` for permanent-deviation categories:
-reflection, GC internals, P/Invoke, serialization infra, etc.), or mark `tobedecided` only when
-genuinely ambiguous. `in_progress` is not a valid status — porting happens directly.
+`CLAUDE.md`), mark `ignore` (`outofscope=1` for permanent-deviation categories, `outofscope=0` for
+merely-superseded/irrelevant-but-not-permanent-deviation items like the legacy `WebRequest`
+family), or mark `tobedecided` only when genuinely ambiguous. `in_progress` is not a valid status.
 
 ---
 
 ## 7. Useful commands
 
 ```bash
-# Build (zero errors/warnings required)
-cmake --build build --parallel 4
+# Build (zero errors/warnings required) — reconfigure first if you added new files
+cd build && cmake . && cd .. && cmake --build build --parallel 4
 
 # Build, showing only errors/warnings
 cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
@@ -201,10 +257,10 @@ cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 ./build/SharpRuntimeTests
 
 # Run a specific suite/test (glob pattern)
-./build/SharpRuntimeTests --gtest_filter="XmlDocumentTests.*"
+./build/SharpRuntimeTests --gtest_filter="IPAddressIPv6Tests.*"
 
 # Check next unset/todo items in a namespace
-sqlite3 plan.sqlite3 "SELECT id,name,type,status FROM task WHERE namespace='System.Text' AND (status='' OR status='todo') ORDER BY name;"
+sqlite3 plan.sqlite3 "SELECT id,name,type,status FROM task WHERE namespace='System.Net.Http' AND (status='' OR status='todo') ORDER BY id;"
 
 # Mark an item ported after review + tests pass
 sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
@@ -223,33 +279,32 @@ binary beyond the GoogleTest suite.
 
 ## 8. Next smallest tasks
 
-1. **Decide `System::Numerics::Vector<T>` scope** (id `9228`).
-   - Goal: get a decision on whether to implement a fixed-width fallback, real SIMD intrinsics, or
-     `std::experimental::simd`-backed generic vector — or leave it permanently out of scope.
-   - Files: none yet (`include/System/Numerics/Vector.hpp` does not exist).
-   - Verification: N/A until a decision is made — this is a design decision, not a coding task.
-
-2. **Scope and start `System.Security.Cryptography`** (50 `todo` items — the largest remaining namespace).
-   - Goal: query `plan.sqlite3` for the exact item list, check `include/System/Security/Cryptography/`
-     for what (if anything) already exists, and classify/port the first batch (likely hash
-     algorithms and simple enums first, following the same "check the filesystem before assuming a
-     fresh port" lesson learned this session with `System.Numerics`/`System.Threading`).
-   - Files: `include/System/Security/Cryptography/`, `src/System/Security/Cryptography/`,
-     `tests/System/Security/Cryptography/`.
+1. **Review and continue `System.Net.Http`** (~40 `todo` items remain, id range starts at 8394).
+   - Goal: `HttpClient`, `HttpContent`, `HttpMethod`, `HttpRequestMessage`, `HttpResponseMessage`,
+     `ByteArrayContent`, `StringContent`, `FormUrlEncodedContent` already have headers (and
+     `HttpClientTests.cpp` already exercises them) but are unmarked in `plan.sqlite3` — review each
+     against the checklist (do NOT rewrite the established synchronous content model — see §6).
+     `MultipartContent`, `MultipartFormDataContent`, `ReadOnlyMemoryContent`,
+     `HttpRequestException`, `HttpIOException`, `HttpProtocolException` have no header yet.
+   - Files: `include/System/Net/Http/`, `src/System/Net/Http/`, `tests/System/Net/HttpClientTests.cpp`.
    - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`.
 
-3. **Port `System.Xml.Linq`** (24 items — `XDocument`/`XElement`/`XAttribute` family).
-   - Goal: this is a separate namespace from `System.Xml` (untouched this session); check
-     `include/System/Xml/Linq/` for existing headers (some may already exist per earlier sessions)
-     before starting fresh.
-   - Files: `include/System/Xml/Linq/`, `src/System/Xml/Linq/`, `tests/System/Xml/Linq/`.
-   - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*XDocument*:*XElement*"`.
-
-4. **Port `System.Text`** (36 items).
-   - Goal: query the exact item list; this namespace includes core string-building/encoding types
-     that other not-yet-ported namespaces (e.g. `System.Text.Json.Serialization`) likely depend on.
-   - Files: `include/System/Text/`, `src/System/Text/`, `tests/System/Text/`.
+2. **`System.Net.Sockets.Socket`/`TcpListener`** — still no header at all (not POSIX-only, simply
+   not started). More tractable now: `AddressFamily`, `SocketError`, `SocketException`,
+   `SocketAddress`, `EndPoint`/`IPEndPoint` all exist from this session.
+   - Files: new `include/System/Net/Sockets/Socket.hpp` + `.cpp`, similarly for `TcpListener`
+     (note: `TcpListener` already exists in `TcpClient.hpp`/`.cpp` as a nested class — check there
+     first).
    - Verification: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests`.
+
+3. **Decide `System::Numerics::Vector<T>` scope** (id `9228`) — unchanged from before, still needs
+   a human architecture decision, not touched this session.
+
+4. **`System.Net.Http.Headers`** (25 items) — natural follow-on once `System.Net.Http` proper is
+   reviewed/completed; likely depends on `WebHeaderCollection`/`HttpRequestHeader`/
+   `HttpResponseHeader` patterns already established this session.
+
+5. **`System.Security.Cryptography`** (50 items, largest remaining namespace) — not started.
 
 ---
 
@@ -257,45 +312,48 @@ binary beyond the GoogleTest suite.
 
 - **No broad header refactor** — `getXxxProperty()` naming and namespace style already touch
   449+ files across this project and CNA; do not attempt a sweeping rename/reformat pass.
-- **No LINQ implementation expansion** — `System::Linq.hpp`'s partial subset is an intentional,
-  accepted design point, not a gap to fill in.
-- **No work on `Vector<T>`** until the architecture decision in §4/§8 task 1 is made by the user.
-- **No Windows/Emscripten CI setup** — POSIX-only subsystems are documented, accepted bugs, not
-  open work items to fix opportunistically.
+- **No LINQ implementation expansion.**
+- **No work on `Vector<T>`** until the architecture decision is made by the user.
+- **No Windows/Emscripten CI setup.**
+- **No rewrite of `System.Net.Http`'s synchronous content model** to a `Stream`/`Task`-based one —
+  that's an established design point from a prior session, not a gap (see §6). If it needs to
+  change, that's a decision for the user, not something to do opportunistically while reviewing.
 - **Push only to `feature/work`** — never push to `develop`/`master`, never create tags, without
   explicit per-action user approval in that turn. Routine pushes to `origin/feature/work` are
   pre-authorized.
-- **No mass rewrite or reformatting** in a single commit — this session's pattern has been small,
-  reviewable, per-namespace (or per-batch) commits; keep following it.
+- **No mass rewrite or reformatting** in a single commit — keep following the small,
+  reviewable, per-namespace (or per-batch) commit pattern established across both sessions.
 - **No blind trust in background/delegated agent "completed" reports** — always verify via
-  `git log`/`git status`/an actual test run before treating delegated work as done (see §4).
+  `git log`/`git status`/an actual test run before treating delegated work as done.
 - **No speculative API additions** — only port methods/types that actually exist in .NET's
-  published surface (check `/rv/tmp/runtime/src/libraries/` and the relevant `ref/*.cs` file).
+  published surface.
 
 ---
 
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the actual, verified repository state as of HEAD 743de40
-(9616/9616 tests passing, clean build, zero warnings) — do not assume anything beyond what it
+Read NEXT.md first. It reflects the actual, verified repository state as of HEAD e76ae05
+(9748/9748 tests passing, clean build, zero warnings) — do not assume anything beyond what it
 documents.
 
 Inspect only the files needed for the first task in NEXT.md §8. Do not refactor unrelated code,
 and do not expand scope beyond that one task (see NEXT.md §9 for things explicitly out of bounds
-right now).
+right now). In particular, System.Net.Http's existing types use a deliberately simplified
+synchronous content model — review against it, don't rewrite it to be Stream/Task-based.
 
 Make one small, verified improvement:
   1. Read the relevant .NET reference source under /rv/tmp/runtime/src/libraries/ and any existing
      C++ header/source for the type(s) involved (check the filesystem first — several "todo" items
-     this session turned out to already have a file, just unmarked in plan.sqlite3).
+     across both prior sessions turned out to already have a file, just unmarked in plan.sqlite3).
   2. Implement/fix per the full checklist in CLAUDE.md (API surface, doc-comments, SPDX header,
      logic parity, getXxxProperty()/setXxxProperty() naming, intcs/bytecs/etc. usage).
-  3. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
-  4. Run: ./build/SharpRuntimeTests           (must show 9616+ passing, zero failures)
-  5. If it's a plan.sqlite3-tracked item, update its status:
+  3. If you add new files, reconfigure first: cd build && cmake . && cd ..
+  4. Run: cmake --build build --parallel 4   (must be zero errors, zero warnings)
+  5. Run: ./build/SharpRuntimeTests           (must show 9748+ passing, zero failures)
+  6. If it's a plan.sqlite3-tracked item, update its status:
      sqlite3 plan.sqlite3 "UPDATE task SET status='ported' WHERE id=<id>;"
-  6. Commit only the files for that one change: git -c commit.gpgsign=false commit -m "..."
-  7. Update NEXT.md to reflect the new state (test count, HEAD commit, what changed) before ending
+  7. Commit only the files for that one change: git -c commit.gpgsign=false commit -m "..."
+  8. Update NEXT.md to reflect the new state (test count, HEAD commit, what changed) before ending
      the session.
 ```
