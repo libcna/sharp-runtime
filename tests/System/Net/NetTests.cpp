@@ -285,6 +285,80 @@ TEST(IPEndPointTests, MaxPort_Is65535) {
     EXPECT_EQ(static_cast<int>(IPEndPoint::MaxPort), 65535);
 }
 
+TEST(IPEndPointTests, Constructor_PortOutOfRange_Throws) {
+    EXPECT_THROW(IPEndPoint(IPAddress::Loopback, -1), std::exception);
+    EXPECT_THROW(IPEndPoint(IPAddress::Loopback, 70000), std::exception);
+}
+
+TEST(IPEndPointTests, SetPort_OutOfRange_Throws) {
+    IPEndPoint ep;
+    EXPECT_THROW(ep.setPortProperty(-1), std::exception);
+    EXPECT_THROW(ep.setPortProperty(70000), std::exception);
+}
+
+TEST(IPEndPointTests, IsA_EndPoint) {
+    IPEndPoint ep(IPAddress::Loopback, 80);
+    System::Net::EndPoint* base = &ep;
+    EXPECT_EQ(base->getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetwork);
+}
+
+TEST(IPEndPointTests, ToString_IPv6_HasBrackets) {
+    IPEndPoint ep(IPAddress::IPv6Loopback, 8080);
+    EXPECT_EQ(ep.ToString(), "[::1]:8080");
+}
+
+TEST(IPEndPointTests, GetHashCode_SameEndpoint_Equal) {
+    IPEndPoint a(IPAddress::Loopback, 80);
+    IPEndPoint b(IPAddress::Loopback, 80);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(IPEndPointTests, Serialize_ThenCreate_RoundTrips_IPv4) {
+    IPEndPoint ep(IPAddress::Parse("192.168.1.42"), 12345);
+    auto addr = ep.Serialize();
+    auto recreated = ep.Create(addr);
+    auto* asIPEndPoint = dynamic_cast<IPEndPoint*>(recreated.get());
+    ASSERT_NE(asIPEndPoint, nullptr);
+    EXPECT_EQ(asIPEndPoint->getAddressProperty(), ep.getAddressProperty());
+    EXPECT_EQ(asIPEndPoint->getPortProperty(), ep.getPortProperty());
+}
+
+TEST(IPEndPointTests, Serialize_ThenCreate_RoundTrips_IPv6) {
+    IPEndPoint ep(IPAddress::Parse("2001:db8::1"), 443);
+    auto addr = ep.Serialize();
+    auto recreated = ep.Create(addr);
+    auto* asIPEndPoint = dynamic_cast<IPEndPoint*>(recreated.get());
+    ASSERT_NE(asIPEndPoint, nullptr);
+    EXPECT_EQ(asIPEndPoint->getAddressProperty(), ep.getAddressProperty());
+    EXPECT_EQ(asIPEndPoint->getPortProperty(), ep.getPortProperty());
+}
+
+TEST(IPEndPointTests, Parse_IPv4WithPort) {
+    IPEndPoint ep = IPEndPoint::Parse("10.0.0.5:9000");
+    EXPECT_EQ(ep.getAddressProperty(), IPAddress::Parse("10.0.0.5"));
+    EXPECT_EQ(ep.getPortProperty(), 9000);
+}
+
+TEST(IPEndPointTests, Parse_IPv6WithPort) {
+    IPEndPoint ep = IPEndPoint::Parse("[2001:db8::1]:443");
+    EXPECT_EQ(ep.getAddressProperty(), IPAddress::Parse("2001:db8::1"));
+    EXPECT_EQ(ep.getPortProperty(), 443);
+}
+
+TEST(IPEndPointTests, Parse_AddressOnly_PortDefaultsToZero) {
+    IPEndPoint ep = IPEndPoint::Parse("10.0.0.5");
+    EXPECT_EQ(ep.getPortProperty(), 0);
+}
+
+TEST(IPEndPointTests, TryParse_Invalid_ReturnsFalse) {
+    IPEndPoint result;
+    EXPECT_FALSE(IPEndPoint::TryParse("not an endpoint", result));
+}
+
+TEST(IPEndPointTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPEndPoint::Parse("garbage"), std::invalid_argument);
+}
+
 // ===========================================================================
 // HttpStatusCode
 // ===========================================================================

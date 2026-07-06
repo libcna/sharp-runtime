@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "System/Net/Sockets/AddressFamily.hpp"
+#include "System/Net/IPAddress.hpp"
 #include "System/Memory.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -13,6 +14,8 @@ namespace System::Net {
 
     using SharpRuntime::intcs;
     using SharpRuntime::bytecs;
+
+    class IPEndPoint;
 
     /**
      * @brief Indicates how to format the memory buffer that a platform uses for a network
@@ -22,7 +25,8 @@ namespace System::Net {
      *
      * @note This runtime has no native Socket/OS interop yet (see NEXT.md — Socket/TcpListener
      * are unimplemented), so the buffer layout here is this runtime's own simplified encoding
-     * (2-byte little-endian address family at offset 0), not the platform sockaddr ABI that
+     * (2-byte little-endian address family at offset 0, then port/address for the
+     * IPAddress+port constructor), not guaranteed to match the platform sockaddr ABI that
      * .NET's SocketAddressPal produces. It exists to satisfy the EndPoint::Serialize()/Create()
      * API surface and give ported game code somewhere to store raw address bytes.
      */
@@ -48,6 +52,12 @@ namespace System::Net {
         /** Constructs a SocketAddress of exactly @p size bytes for @p family. */
         SocketAddress(System::Net::Sockets::AddressFamily family, intcs size);
 
+        /** Constructs a SocketAddress encoding the given IP endpoint (address + port). */
+        SocketAddress(const IPAddress& address, intcs port);
+
+        /** Decodes this buffer back into an IPEndPoint (address + port), assuming it was built by the IPAddress+port constructor. */
+        [[nodiscard]] IPEndPoint GetIPEndPoint() const;
+
         /** @return The address family encoded in this buffer. */
         [[nodiscard]] System::Net::Sockets::AddressFamily getFamilyProperty() const;
 
@@ -56,9 +66,9 @@ namespace System::Net {
         /** Sets the number of bytes currently in use in the buffer. */
         void setSizeProperty(intcs value);
 
-        /** Indexer: accesses a byte of the address data (offset 0 is the first byte after the family header). */
+        /** Indexer: accesses a raw byte of the buffer at @p offset (matches .NET, which does not special-case the family header bytes either). */
         [[nodiscard]] bytecs operator[](intcs offset) const;
-        /** Indexer: mutates a byte of the address data. */
+        /** Indexer: mutates a raw byte of the buffer at @p offset. */
         bytecs& operator[](intcs offset);
 
         /** @return The underlying buffer as a Memory view. */
