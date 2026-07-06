@@ -6,11 +6,13 @@
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/HttpStatusCode.hpp"
 #include "System/Net/WebUtility.hpp"
+#include "System/Net/DecompressionMethods.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
 using System::Net::HttpStatusCode;
 using System::Net::WebUtility;
+using System::Net::DecompressionMethods;
 
 // ===========================================================================
 // IPAddress
@@ -331,4 +333,27 @@ TEST(WebUtilityTests, UrlDecode_NoEncoding_Unchanged) {
 TEST(WebUtilityTests, UrlEncode_UrlDecode_RoundTrip) {
     std::string original = "key=hello world&other=1+2";
     EXPECT_EQ(WebUtility::UrlDecode(WebUtility::UrlEncode(original)), original);
+}
+
+// ===========================================================================
+// DecompressionMethods
+// ===========================================================================
+
+TEST(DecompressionMethodsTests, None_IsZero) {
+    EXPECT_EQ(static_cast<int>(DecompressionMethods::None), 0);
+}
+
+TEST(DecompressionMethodsTests, FlagsCombine) {
+    auto v = DecompressionMethods::GZip | DecompressionMethods::Deflate;
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::GZip), static_cast<int>(DecompressionMethods::GZip));
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::Deflate), static_cast<int>(DecompressionMethods::Deflate));
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::Brotli), 0);
+}
+
+TEST(DecompressionMethodsTests, All_ContainsEveryKnownMethod) {
+    auto all = DecompressionMethods::All;
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::GZip), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Deflate), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Brotli), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Zstandard), 0);
 }
