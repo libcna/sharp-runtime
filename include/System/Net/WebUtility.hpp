@@ -2,14 +2,52 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <string>
 
 namespace System::Net {
 
-    /** Provides static methods for encoding and decoding URLs and HTML strings. */
+    /**
+     * Provides static methods for encoding and decoding URLs and HTML strings.
+     *
+     * C++ counterpart of .NET System.Net.WebUtility.
+     *
+     * @note HtmlEncode here only encodes the 5 ASCII special characters
+     * ('&', '<', '>', '"', '\''); .NET additionally numeric-entity-encodes the
+     * Latin-1 supplement range (U+00A0-U+00FF) and non-BMP characters, which would
+     * require decoding UTF-8 into code points — not done here since std::string is
+     * treated as an opaque byte sequence elsewhere in this class (UrlEncode/UrlDecode
+     * already work correctly on UTF-8 bytes without needing to decode code points).
+     * @note HtmlDecode supports the 5 basic named entities plus numeric character
+     * references (&amp;#NNN; and &amp;#xHH;) and a handful of common named entities
+     * (nbsp, copy, reg, apos, trade) — not .NET's full ~250-entry HTML5 named-entity
+     * table.
+     * @note TextWriter-based overloads and the byte[]-based UrlEncodeToBytes/
+     * UrlDecodeToBytes overloads are not ported (no TextWriter/byte[] idiom used
+     * elsewhere in this class).
+     */
     class WebUtility {
+        static void appendUtf8(std::string& out, unsigned int codepoint) {
+            if (codepoint <= 0x7F) {
+                out += static_cast<char>(codepoint);
+            } else if (codepoint <= 0x7FF) {
+                out += static_cast<char>(0xC0 | (codepoint >> 6));
+                out += static_cast<char>(0x80 | (codepoint & 0x3F));
+            } else if (codepoint <= 0xFFFF) {
+                out += static_cast<char>(0xE0 | (codepoint >> 12));
+                out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+                out += static_cast<char>(0x80 | (codepoint & 0x3F));
+            } else {
+                out += static_cast<char>(0xF0 | (codepoint >> 18));
+                out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+                out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+                out += static_cast<char>(0x80 | (codepoint & 0x3F));
+            }
+        }
+
     public:
         WebUtility() = delete;
 
@@ -46,11 +84,34 @@ namespace System::Net {
                 std::size_t semi = value.find(';', i);
                 if (semi == std::string::npos) { out += value[i++]; continue; }
                 std::string entity = value.substr(i + 1, semi - i - 1);
+
+                if (!entity.empty() && entity[0] == '#') {
+                    std::string numPart = entity.substr(1);
+                    bool isHex = !numPart.empty() && (numPart[0] == 'x' || numPart[0] == 'X');
+                    if (isHex) numPart = numPart.substr(1);
+                    bool validDigits = !numPart.empty() && std::all_of(numPart.begin(), numPart.end(), [&](char c) {
+                        return isHex ? static_cast<bool>(std::isxdigit(static_cast<unsigned char>(c)))
+                                     : static_cast<bool>(std::isdigit(static_cast<unsigned char>(c)));
+                    });
+                    if (validDigits) {
+                        appendUtf8(out, static_cast<unsigned int>(std::stoul(numPart, nullptr, isHex ? 16 : 10)));
+                        i = semi + 1;
+                        continue;
+                    }
+                    out += value.substr(i, semi - i + 1);
+                    i = semi + 1;
+                    continue;
+                }
+
                 if      (entity == "amp")  out += '&';
                 else if (entity == "lt")   out += '<';
                 else if (entity == "gt")   out += '>';
                 else if (entity == "quot") out += '"';
-                else if (entity == "#39")  out += '\'';
+                else if (entity == "apos") out += '\'';
+                else if (entity == "nbsp") appendUtf8(out, 0xA0);
+                else if (entity == "copy") appendUtf8(out, 0xA9);
+                else if (entity == "reg")  appendUtf8(out, 0xAE);
+                else if (entity == "trade") appendUtf8(out, 0x2122);
                 else { out += value.substr(i, semi - i + 1); }
                 i = semi + 1;
             }

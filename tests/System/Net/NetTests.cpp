@@ -495,6 +495,30 @@ TEST(WebUtilityTests, HtmlDecode_NoEntities_Unchanged) {
     EXPECT_EQ(WebUtility::HtmlDecode("plain text"), "plain text");
 }
 
+TEST(WebUtilityTests, HtmlDecode_DecimalNumericEntity) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#65;&#66;&#67;"), "ABC");
+}
+
+TEST(WebUtilityTests, HtmlDecode_HexNumericEntity) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#x41;&#x42;"), "AB");
+}
+
+TEST(WebUtilityTests, HtmlDecode_NamedEntity_Nbsp) {
+    EXPECT_EQ(WebUtility::HtmlDecode("a&nbsp;b"), "a\xC2\xA0" "b");
+}
+
+TEST(WebUtilityTests, HtmlDecode_NamedEntity_Apos) {
+    EXPECT_EQ(WebUtility::HtmlDecode("it&apos;s"), "it's");
+}
+
+TEST(WebUtilityTests, HtmlDecode_UnknownEntity_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&unknownentity;"), "&unknownentity;");
+}
+
+TEST(WebUtilityTests, HtmlDecode_InvalidNumericEntity_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#notanumber;"), "&#notanumber;");
+}
+
 TEST(WebUtilityTests, HtmlEncode_HtmlDecode_RoundTrip) {
     std::string original = "<a href=\"url\">link & more</a>";
     EXPECT_EQ(WebUtility::HtmlDecode(WebUtility::HtmlEncode(original)), original);
