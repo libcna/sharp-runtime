@@ -14,7 +14,12 @@
 #include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/HttpIOException.hpp"
 #include "System/Net/Http/HttpProtocolException.hpp"
+#include "System/Net/Http/ReadOnlyMemoryContent.hpp"
+#include "System/Net/Http/StreamContent.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/MemoryStream.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ReadOnlyMemory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 
@@ -362,4 +367,58 @@ TEST(HttpProtocolExceptionTests, IsA_HttpIOException) {
     HttpProtocolException ex(2, "y", nullptr);
     HttpIOException* base = &ex;
     EXPECT_EQ(base->getHttpRequestErrorProperty(), HttpRequestError::HttpProtocolError);
+}
+
+// ---------------------------------------------------------------------------
+// ReadOnlyMemoryContent
+// ---------------------------------------------------------------------------
+
+TEST(ReadOnlyMemoryContentTests, ReadAsString) {
+    std::vector<uint8_t> data = {'h', 'e', 'l', 'l', 'o'};
+    System::ReadOnlyMemory<uint8_t> mem(data);
+    ReadOnlyMemoryContent c(mem);
+    EXPECT_EQ(c.ReadAsString(), "hello");
+}
+
+TEST(ReadOnlyMemoryContentTests, ReadAsByteArray) {
+    std::vector<uint8_t> data = {1, 2, 3};
+    System::ReadOnlyMemory<uint8_t> mem(data);
+    ReadOnlyMemoryContent c(mem);
+    EXPECT_EQ(c.ReadAsByteArray(), data);
+}
+
+TEST(ReadOnlyMemoryContentTests, DefaultContentType) {
+    std::vector<uint8_t> data = {1};
+    System::ReadOnlyMemory<uint8_t> mem(data);
+    ReadOnlyMemoryContent c(mem);
+    EXPECT_EQ(c.getContentTypeProperty(), "application/octet-stream");
+}
+
+// ---------------------------------------------------------------------------
+// StreamContent
+// ---------------------------------------------------------------------------
+
+TEST(StreamContentTests, ReadsEntireStream) {
+    std::string src = "stream body";
+    auto stream = std::make_shared<System::IO::MemoryStream>(
+        reinterpret_cast<const uint8_t*>(src.data()), static_cast<SharpRuntime::intcs>(src.size()));
+    StreamContent c(stream);
+    EXPECT_EQ(c.ReadAsString(), src);
+}
+
+TEST(StreamContentTests, ReadAsByteArrayMatchesSource) {
+    std::vector<uint8_t> src = {10, 20, 30};
+    auto stream = std::make_shared<System::IO::MemoryStream>(src.data(), static_cast<SharpRuntime::intcs>(src.size()));
+    StreamContent c(stream);
+    EXPECT_EQ(c.ReadAsByteArray(), src);
+}
+
+TEST(StreamContentTests, DefaultContentType) {
+    auto stream = std::make_shared<System::IO::MemoryStream>();
+    StreamContent c(stream);
+    EXPECT_EQ(c.getContentTypeProperty(), "application/octet-stream");
+}
+
+TEST(StreamContentTests, NullStream_Throws) {
+    EXPECT_THROW(StreamContent(nullptr), System::ArgumentNullException);
 }
