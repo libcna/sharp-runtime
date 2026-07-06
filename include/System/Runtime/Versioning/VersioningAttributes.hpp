@@ -41,9 +41,50 @@ namespace System::Runtime::Versioning {
     /** Indicates that an API is not supported on the specified OS platform. */
     class UnsupportedOSPlatformAttribute : public System::Attribute {
         std::string platformName_;
+        std::string message_;
     public:
         /** @param platformName Platform identifier (e.g. "windows"). */
         explicit UnsupportedOSPlatformAttribute(const std::string& platformName)
+            : platformName_(platformName) {}
+
+        /**
+         * @param platformName Platform identifier (e.g. "windows").
+         * @param message      Optional message explaining the lack of support.
+         */
+        UnsupportedOSPlatformAttribute(const std::string& platformName, const std::string& message)
+            : platformName_(platformName), message_(message) {}
+
+        /** @return The platform identifier. */
+        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
+
+        /** @return The explanatory message, or empty if not provided. */
+        [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
+    };
+
+    /**
+     * Annotates a custom guard field, property, or method with a supported platform name, for use
+     * in conditionals/asserts that guard calls to platform-specific APIs.
+     */
+    class SupportedOSPlatformGuardAttribute : public System::Attribute {
+        std::string platformName_;
+    public:
+        /** @param platformName Platform identifier the guard indicates support for. */
+        explicit SupportedOSPlatformGuardAttribute(const std::string& platformName)
+            : platformName_(platformName) {}
+
+        /** @return The platform identifier. */
+        [[nodiscard]] const std::string& getPlatformNameProperty() const { return platformName_; }
+    };
+
+    /**
+     * Annotates a custom guard field, property, or method with an unsupported platform name, for
+     * use in conditionals/asserts that guard against calling unsupported platform-specific APIs.
+     */
+    class UnsupportedOSPlatformGuardAttribute : public System::Attribute {
+        std::string platformName_;
+    public:
+        /** @param platformName Platform identifier the guard indicates lack of support for. */
+        explicit UnsupportedOSPlatformGuardAttribute(const std::string& platformName)
             : platformName_(platformName) {}
 
         /** @return The platform identifier. */

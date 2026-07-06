@@ -162,6 +162,23 @@ TEST(SecurityExceptionTests, CaughtAsSystemException) {
         System::SystemException);
 }
 
+TEST(SecurityExceptionTests, HResult_IsCorSecurity) {
+    SecurityException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x8013150A));
+}
+
+TEST(SecurityExceptionTests, MessageAndInnerException) {
+    try {
+        try {
+            throw std::runtime_error("root cause");
+        } catch (...) {
+            throw SecurityException("wrapped", std::current_exception());
+        }
+    } catch (const SecurityException& ex) {
+        EXPECT_STREQ(ex.what(), "wrapped");
+    }
+}
+
 // ===========================================================================
 // CryptographicException
 // ===========================================================================
