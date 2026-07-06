@@ -1,6 +1,42 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `7751266`) — 10506 tests passing*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `96cfa0f`) — 10569 tests passing*
+
+## Milestone: plan.sqlite3 has zero `todo`/`''` rows (16199 total rows)
+
+As of this checkpoint, every tracked type across the **entire** dotnet/runtime surface in
+`plan.sqlite3` is classified `ported`, `ignore`/`ignored`, or `tobedecided` — there is no more
+mechanical porting work queued. This session's autonomous run (see the two log entries below this
+one for the full blow-by-blow) finished the last three namespaces that had `todo` items:
+`System.Text.Json` (17), `System.Text.Json.Nodes` (5), `System.Text.Json.Serialization` (31).
+
+**58 `tobedecided` items remain, grouped by the real decision each needs — these are genuinely
+ambiguous and were deliberately not guessed at (per CLAUDE.md's workflow), not overlooked:**
+
+- **`System.Security.Cryptography` (20) + `.X509Certificates` (5)** — symmetric/asymmetric crypto
+  (AES, RSA, DSA, ECDSA, X.509 certs) needs a real vendoring decision (OpenSSL/mbedTLS/hand-rolled)
+  that's too security-sensitive to pick alone. Hash algorithms (MD5/SHA*/HMAC/PBKDF2) are already
+  `ported` — hand-rolled, verified against NIST/RFC test vectors, no new dependency.
+- **`System.Net.Security` (4)** — `SslStream`/`SslClientAuthenticationOptions`/
+  `SslServerAuthenticationOptions`/`SslStreamCertificateContext`: blocked on the same crypto/TLS
+  decision above (no TLS engine in this runtime yet).
+- **`System.Xml.Linq` (12)** — `XObject`/`XNode`/`XContainer` and everything built on that
+  inheritance hierarchy (`XCData`/`XComment`/`XDocumentType`/`XProcessingInstruction`/
+  `XStreamingElement`/`XText`/`XNodeDocumentOrderComparer`/`XNodeEqualityComparer`/`Extensions`).
+  Needs migrating `XElement`/`XAttribute`/`XDocument`'s internal storage to a parent/sibling-tracking
+  model — a real architecture decision, not a mechanical port (see the `f793df0` log entry below for
+  the full story of how a failed background fork's partial sketch here was found and handled).
+- **`System.Xml.XPath` (15)** — `XPathNavigator`/`XPathDocument`/`XPathExpression`/etc.; marked
+  `tobedecided` in an earlier session (before this handoff's log entries begin) — re-open with fresh
+  eyes on the full XPath data-model question before touching it.
+- **`System.IO.FileSystemInfo` (1)**, **`System.Numerics.Vector` (1)**, **`System.Text.Json.
+  JsonReaderState` (1)** — each individually noted where it was marked; `JsonReaderState` only has
+  meaning paired with a `Utf8JsonReader`, which isn't tracked in `plan.sqlite3` at all (see this
+  session's `7751266` entry).
+
+**No further `todo`-driven autonomous work remains.** The next session should either get the user's
+call on one of the `tobedecided` groups above, or take on non-`plan.sqlite3`-tracked work (broader
+consistency passes, CNA integration testing, etc.) if directed to.
 
 **Latest session update (autonomous 24h run, continued):** Since the `dd81e16` commit (System.Text
 core namespace, done by a parallel fork earlier in this run), this session directly completed, in
