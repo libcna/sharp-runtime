@@ -1,6 +1,43 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `aa23cf0`) — 10276 tests passing*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `eeece6e`) — 10329 tests passing*
+
+**Latest session update:** Since the `aa23cf0` note below, also completed: `System.Numerics.Colors`
+(`Argb`/`Rgba` — files already existed; fixed real gaps: missing `GetHashCode()`, missing static
+`CreateBigEndian`/`CreateLittleEndian`/`ToUInt32*Endian` helpers, `std::invalid_argument` instead
+of `System::ArgumentException`) and a big batch of small `System.Runtime.*`/`System.Security.*`
+namespaces (`CompilerServices`, `ExceptionServices`, `InteropServices`, `Versioning`, `Security`,
+`.Authentication`, `.Principal` — 14 real ports incl. `ExceptionDispatchInfo`, `RuntimeInformation`,
+`AuthenticationException`, `GenericIdentity`/`GenericPrincipal`, plus fixing DB/reality drift where
+`CallerMemberNameAttribute` & co. and `SecurityException` already existed but plan.sqlite3 still
+said `todo`). `ported` 770→830, `todo` 322→244 this session. Commits `ea04adb`, `eeece6e`.
+
+**Next item is a real decision point, not a mechanical port:** `System.Security.Cryptography` (50
+items, ids in that namespace, the single largest remaining namespace, not started at all). This
+codebase has never vendored a crypto library, and `CLAUDE.md`'s architecture invariants require
+discussing scope impact before adding one — so this should NOT be decided autonomously by picking
+a library. Suggested split, but confirm with the user first if there's any doubt:
+- **Hash algorithms** (MD5, SHA1, SHA256/384/512, HMAC-*) are well-defined and moderate-complexity
+  to hand-roll with no new dependency — this session already did exactly that for a private
+  SHA-1 (see the WebSockets `ClientWebSocket.cpp` Sec-WebSocket-Accept digest, verified correct via
+  a real end-to-end handshake test). These could reasonably be ported the same way, as real
+  `System::Security::Cryptography::MD5`/`SHA256`/etc. types (not scoped to one file this time).
+- **Symmetric/asymmetric crypto** (AES, DES, TripleDES, RSA, DSA, ECDSA, ECDiffieHellman, etc.)
+  is much higher-risk to hand-roll (subtle correctness bugs have severe security consequences,
+  unlike a WebSocket framing bug) and depends on a real vendoring decision (e.g. OpenSSL/
+  libsodium/mbedTLS vs. a header-only crypto library vs. hand-rolled). **Do not silently pick one**
+  — mark these `tobedecided` and surface the decision, or ask the user directly if they're
+  reachable, before writing any implementation.
+
+After that: `System.Text`/`.Json*`/`.RegularExpressions`/`.Unicode` (~107 combined),
+`System.Xml.Serialization`/`.Linq`/`.XPath` (~69 combined), `System.Threading.Channels` (9),
+`System.Timers` (4), `System.Security.Cryptography.X509Certificates` (5, likely also blocked on
+the crypto-library decision above, and separately on the `SslStream`-family `tobedecided` items
+from earlier this session).
+
+---
+
+*Prior update (2026-07-06, HEAD `aa23cf0`) — 10276 tests passing*
 
 **Session note:** This session is running autonomously per `prompt.md` (user unavailable ~24h,
 explicitly asked for no pauses — do not stop between items). Progress so far this session, in
