@@ -38,6 +38,43 @@ ambiguous and were deliberately not guessed at (per CLAUDE.md's workflow), not o
 call on one of the `tobedecided` groups above, or take on non-`plan.sqlite3`-tracked work (broader
 consistency passes, CNA integration testing, etc.) if directed to.
 
+## Post-milestone quality audit: a new decision needed, not a bug list
+
+With the `plan.sqlite3` queue empty, this session used the extra time to audit already-`ported`
+code against the CLAUDE.md checklist rather than guess at the `tobedecided` items above. Two real,
+narrowly-scoped bugs were found and fixed (see `26ab294` below: `DeflateStream`/`GZipStream`/
+`ZLibStream::getLengthProperty()` threw the wrong exception type), plus two stale doc entries in
+this file (see `43e99b7`).
+
+A third audit pass — checking rule #7 ("use `SharpRuntime::intcs`, not `int`, in public APIs that
+mirror .NET `int` parameters") — surfaced something bigger than a bug list: **plain `int`/`long`/
+`short` in public API parameters mirroring .NET integer parameters is not a handful of isolated
+slip-ups, it's the pervasive, original convention across roughly 270 call sites in 20+ core files**
+(`DateTime.hpp`, `Decimal.hpp`, `Console.hpp`, `Globalization/NumberFormatInfo.hpp`,
+`Globalization/HebrewCalendar.hpp`, `IntPtr.hpp`, `Range.hpp`, `Buffers/MemoryPool.hpp`,
+`UInt128.hpp`, `ModuleHandle.hpp`, `FormattableString.hpp`, `BinaryData.hpp`,
+`SequencePosition.hpp`, `IdnMapping.hpp`, `NetworkInformationException.hpp`,
+`ComponentModel/DataAnnotations/DataAnnotationAttributes.hpp`, and more), predating rule #7 or
+applied inconsistently across sessions — not something introduced this session.
+
+**Deliberately not touched**, for the same reason the `tobedecided` items above weren't guessed at:
+CLAUDE.md rule #10 says "No broad header refactor — naming conventions touch 449+ files and would
+break CNA." Fixing this scattered, one file at a time, would leave the codebase in a worse,
+inconsistent middle state (e.g. `Byte.hpp` using `intcs` while `DateTime.hpp` still uses `int`)
+without actually resolving anything, and any real fix risks cascading into CNA-facing call sites
+that already pass plain `int` literals/variables today. This needs an explicit decision from the
+user before any code changes:
+- **(a)** Accept plain `int` as the de facto, tolerated convention for scalar numeric value
+  parameters going forward, and narrow rule #7's practical scope in CLAUDE.md to match reality
+  (e.g. limit it to newly-ported types only, or to specific parameter categories); or
+- **(b)** Commission an explicit, planned, whole-codebase pass to convert all ~270 sites — scoped,
+  reviewed, and tested as its own dedicated effort, not done opportunistically alongside unrelated
+  porting work.
+
+No edits were made for this item. Full details of the audit fork's findings are in the session
+transcript; re-run a similar grep sweep (`grep -rn '(int \|, int\|(int,\|int&' include/System
+--include=*.hpp`) if a fresh list is needed.
+
 **Latest session update (autonomous 24h run, continued):** Since the `dd81e16` commit (System.Text
 core namespace, done by a parallel fork earlier in this run), this session directly completed, in
 commit order:
