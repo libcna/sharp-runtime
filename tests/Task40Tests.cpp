@@ -1240,28 +1240,28 @@ TEST(UnicodeRangeTests, Create_AtoZ) {
 }
 
 TEST(UnicodeRangeTests, Create_InvalidOrder_Throws) {
-    EXPECT_THROW(UnicodeRange::Create(u'Z', u'A'), std::invalid_argument);
+    EXPECT_THROW(UnicodeRange::Create(u'Z', u'A'), System::ArgumentOutOfRangeException);
 }
 
 TEST(UnicodeRangesTests, All_Covers_BMP) {
-    auto r = UnicodeRanges::All();
+    auto r = UnicodeRanges::getAllProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0000);
     EXPECT_EQ(r.getLengthProperty(), 0x10000);
 }
 
 TEST(UnicodeRangesTests, BasicLatin_Starts0) {
-    auto r = UnicodeRanges::BasicLatin();
+    auto r = UnicodeRanges::getBasicLatinProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0000);
     EXPECT_EQ(r.getLengthProperty(), 128);
 }
 
 TEST(UnicodeRangesTests, Cyrillic_StartsAt0x0400) {
-    auto r = UnicodeRanges::Cyrillic();
+    auto r = UnicodeRanges::getCyrillicProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0400);
 }
 
 TEST(UnicodeRangesTests, None_LengthZero) {
-    auto r = UnicodeRanges::None();
+    auto r = UnicodeRanges::getNoneProperty();
     EXPECT_EQ(r.getLengthProperty(), 0);
 }
 
