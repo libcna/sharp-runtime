@@ -10,6 +10,8 @@
 #include "System/Net/HttpRequestHeader.hpp"
 #include "System/Net/HttpResponseHeader.hpp"
 #include "System/Net/HttpVersion.hpp"
+#include "System/Net/IPNetwork.hpp"
+#include "System/FormatException.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
@@ -21,6 +23,7 @@ using System::Net::HttpResponseHeader;
 using System::Net::HttpRequestHeaderGetName;
 using System::Net::HttpResponseHeaderGetName;
 using System::Net::HttpVersion;
+using System::Net::IPNetwork;
 
 // ===========================================================================
 // IPAddress
@@ -585,4 +588,75 @@ TEST(HttpVersionTests, Unknown_IsZeroZero) {
 TEST(HttpVersionTests, Version20_Is2Dot0) {
     EXPECT_EQ(HttpVersion::Version20.Major, 2);
     EXPECT_EQ(HttpVersion::Version20.Minor, 0);
+}
+
+// ===========================================================================
+// IPNetwork
+// ===========================================================================
+
+TEST(IPNetworkTests, Constructor_NormalizesBaseAddress) {
+    IPNetwork net(IPAddress::Parse("192.168.1.123"), 24);
+    EXPECT_EQ(net.getBaseAddressProperty(), IPAddress::Parse("192.168.1.0"));
+    EXPECT_EQ(net.getPrefixLengthProperty(), 24);
+}
+
+TEST(IPNetworkTests, Constructor_PrefixOutOfRange_Throws) {
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), std::out_of_range);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), std::out_of_range);
+}
+
+TEST(IPNetworkTests, Contains_AddressInSubnet_True) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("192.168.1.200")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("192.168.2.1")));
+}
+
+TEST(IPNetworkTests, Contains_PrefixZero_ContainsEverything) {
+    IPNetwork net(IPAddress::Any, 0);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("8.8.8.8")));
+    EXPECT_TRUE(net.Contains(IPAddress::Loopback));
+}
+
+TEST(IPNetworkTests, Contains_PrefixFull_OnlyExactAddress) {
+    IPNetwork net(IPAddress::Parse("10.0.0.1"), 32);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("10.0.0.1")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("10.0.0.2")));
+}
+
+TEST(IPNetworkTests, Contains_DifferentFamily_False) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("::1")));
+}
+
+TEST(IPNetworkTests, ToString_CidrNotation) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_EQ(net.ToString(), "192.168.1.0/24");
+}
+
+TEST(IPNetworkTests, Parse_ValidCidr) {
+    IPNetwork net = IPNetwork::Parse("10.0.0.0/8");
+    EXPECT_EQ(net.getBaseAddressProperty(), IPAddress::Parse("10.0.0.0"));
+    EXPECT_EQ(net.getPrefixLengthProperty(), 8);
+}
+
+TEST(IPNetworkTests, Parse_IPv6Cidr) {
+    IPNetwork net = IPNetwork::Parse("2001:db8::/32");
+    EXPECT_EQ(net.getPrefixLengthProperty(), 32);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("2001:db8::1")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("2001:db9::1")));
+}
+
+TEST(IPNetworkTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPNetwork::Parse("not-a-network"), System::FormatException);
+}
+
+TEST(IPNetworkTests, TryParse_Invalid_ReturnsFalse) {
+    IPNetwork result;
+    EXPECT_FALSE(IPNetwork::TryParse("garbage/abc", result));
+}
+
+TEST(IPNetworkTests, Equality) {
+    IPNetwork a(IPAddress::Parse("192.168.1.0"), 24);
+    IPNetwork b(IPAddress::Parse("192.168.1.123"), 24);
+    EXPECT_EQ(a, b);
 }
