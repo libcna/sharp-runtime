@@ -1,6 +1,30 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `fefee64`)*
+*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `3efb177`) — 10257 tests passing*
+
+**Session note:** This session is running autonomously per `prompt.md` (user unavailable ~24h,
+explicitly asked for no pauses). Progress so far this session, in order:
+- Fixed `TcpListener` DB/reality mismatch (id 9100 → `ported`, no code change).
+- Ported `System.Net.NetworkInformation.NetworkInterface` (reduced scope, POSIX `getifaddrs()`,
+  Linux-only) — commit `30b7f21`.
+- Ported `System.Net.NetworkInformation.Ping`/`PingReply` — real ICMP via unprivileged
+  `SOCK_DGRAM`+`IPPROTO_ICMP` "ping socket" (confirmed working in this sandbox before
+  implementing) — commit `86acbe1`. **`System.Net.NetworkInformation` namespace is now fully
+  classified** (every item `ported` or `ignore(d)`).
+- Ported `System.Net.Security` data-only types (`AuthenticationLevel`, `EncryptionPolicy`,
+  `SslPolicyErrors`, `SslApplicationProtocol`, `TlsCipherSuite`) — commit `7b1a836`.
+  `SslStream`/`SslClientAuthenticationOptions`/`SslServerAuthenticationOptions`/
+  `SslStreamCertificateContext` marked `tobedecided` (blocked on
+  `System.Security.Cryptography.X509Certificates`, not started, plus no TLS engine in this
+  runtime — a real scope decision, not guessed).
+- Ported the rest of `System.Net.Sockets` (17 items, including the general-purpose `Socket`
+  class) — commit `3efb177`. **`System.Net.Sockets` namespace is now fully classified.**
+
+Next up (System-namespace-first order): `System.Net.WebSockets` (12 items, ids 9115-9168) — see
+resume prompt at the bottom of this file. After that: `System.Threading.Channels` (9),
+`System.Runtime.Versioning`/`.CompilerServices`/`.InteropServices` (small, ~17 combined), then the
+two large remaining blocks `System.Security.Cryptography` (50) and `System.Text`/`.Json*` (~89
+combined) and `System.Xml.*` (~69 combined).
 
 ---
 
