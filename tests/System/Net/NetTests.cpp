@@ -12,6 +12,9 @@
 #include "System/Net/HttpVersion.hpp"
 #include "System/Net/IPNetwork.hpp"
 #include "System/FormatException.hpp"
+#include "System/Net/ProtocolViolationException.hpp"
+#include "System/Net/WebExceptionStatus.hpp"
+#include "System/Net/WebException.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
@@ -24,6 +27,9 @@ using System::Net::HttpRequestHeaderGetName;
 using System::Net::HttpResponseHeaderGetName;
 using System::Net::HttpVersion;
 using System::Net::IPNetwork;
+using System::Net::ProtocolViolationException;
+using System::Net::WebExceptionStatus;
+using System::Net::WebException;
 
 // ===========================================================================
 // IPAddress
@@ -659,4 +665,34 @@ TEST(IPNetworkTests, Equality) {
     IPNetwork a(IPAddress::Parse("192.168.1.0"), 24);
     IPNetwork b(IPAddress::Parse("192.168.1.123"), 24);
     EXPECT_EQ(a, b);
+}
+
+// ===========================================================================
+// ProtocolViolationException / WebException / WebExceptionStatus
+// ===========================================================================
+
+TEST(ProtocolViolationExceptionTests, Message_IsPreserved) {
+    ProtocolViolationException ex("bad protocol");
+    EXPECT_STREQ(ex.what(), "bad protocol");
+}
+
+TEST(ProtocolViolationExceptionTests, IsA_InvalidOperationException) {
+    ProtocolViolationException ex("x");
+    System::InvalidOperationException* base = &ex;
+    EXPECT_STREQ(base->what(), "x");
+}
+
+TEST(WebExceptionStatusTests, Success_IsZero) {
+    EXPECT_EQ(static_cast<int>(WebExceptionStatus::Success), 0);
+}
+
+TEST(WebExceptionTests, DefaultConstructor_StatusIsUnknownError) {
+    WebException ex;
+    EXPECT_EQ(ex.getStatusProperty(), WebExceptionStatus::UnknownError);
+}
+
+TEST(WebExceptionTests, MessageAndStatus_ArePreserved) {
+    WebException ex("timed out", WebExceptionStatus::Timeout);
+    EXPECT_STREQ(ex.what(), "timed out");
+    EXPECT_EQ(ex.getStatusProperty(), WebExceptionStatus::Timeout);
 }
