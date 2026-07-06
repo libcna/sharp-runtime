@@ -20,6 +20,9 @@ namespace System::Text {
         /** The Unicode replacement character U+FFFD. */
         static const Rune ReplacementChar;
 
+        /** Default-constructs a Rune representing U+0000 NUL (matches .NET's default(Rune)). */
+        Rune() : value_(0) {}
+
         /** Constructs a Rune from a Unicode code point; throws if the value is a surrogate or > U+10FFFF. */
         explicit Rune(uint32_t value) : value_(value) {
             if (!IsValidCodePoint(value))
@@ -46,6 +49,54 @@ namespace System::Text {
 
         /** Returns true if the given code point is a valid Unicode scalar value. */
         static bool IsValid(uint32_t value) { return IsValidCodePoint(value); }
+
+        /**
+         * @brief Decodes the Rune starting at UTF-8 byte offset @p index in @p value.
+         *
+         * C++ counterpart of .NET Rune.TryGetRuneAt(string, int, out Rune) — adapted for this
+         * runtime's UTF-8 `std::string` representation instead of .NET's UTF-16 `string`
+         * (so @p index is a byte offset, not a UTF-16 code-unit offset).
+         * @param value The UTF-8 source string.
+         * @param index Byte offset within @p value at which to start decoding.
+         * @param result Receives the decoded Rune on success.
+         * @param bytesConsumed Receives the number of UTF-8 bytes the Rune occupied.
+         * @return true if a valid Rune was decoded at @p index; false if the byte sequence there is invalid.
+         */
+        static bool TryGetRuneAt(const std::string& value, size_t index, Rune& result, size_t& bytesConsumed) {
+            if (index >= value.size()) {
+                bytesConsumed = 0;
+                return false;
+            }
+            unsigned char c0 = static_cast<unsigned char>(value[index]);
+            uint32_t cp;
+            size_t len;
+            if (c0 < 0x80) {
+                cp = c0;
+                len = 1;
+            } else if ((c0 & 0xE0) == 0xC0 && index + 1 < value.size()) {
+                cp = ((c0 & 0x1F) << 6) | (static_cast<unsigned char>(value[index + 1]) & 0x3F);
+                len = 2;
+            } else if ((c0 & 0xF0) == 0xE0 && index + 2 < value.size()) {
+                cp = ((c0 & 0x0F) << 12) | ((static_cast<unsigned char>(value[index + 1]) & 0x3F) << 6) |
+                     (static_cast<unsigned char>(value[index + 2]) & 0x3F);
+                len = 3;
+            } else if ((c0 & 0xF8) == 0xF0 && index + 3 < value.size()) {
+                cp = ((c0 & 0x07) << 18) | ((static_cast<unsigned char>(value[index + 1]) & 0x3F) << 12) |
+                     ((static_cast<unsigned char>(value[index + 2]) & 0x3F) << 6) |
+                     (static_cast<unsigned char>(value[index + 3]) & 0x3F);
+                len = 4;
+            } else {
+                bytesConsumed = 1;
+                return false;
+            }
+            if (!IsValidCodePoint(cp)) {
+                bytesConsumed = len;
+                return false;
+            }
+            result = Rune(cp);
+            bytesConsumed = len;
+            return true;
+        }
 
         /** Returns true if the Rune is in the ASCII range. */
         static bool IsAscii(Rune r) { return r.value_ < 0x80; }

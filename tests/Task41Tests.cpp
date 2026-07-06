@@ -214,6 +214,7 @@ TEST(SortVersionTests, SortId_DefaultAllZero) {
 using System::Text::DecoderFallback;
 using System::Text::DecoderReplacementFallback;
 using System::Text::DecoderExceptionFallback;
+using System::Text::DecoderFallbackException;
 
 TEST(DecoderFallbackTests, ReplacementFallback_ReturnsQuestionMark) {
     auto fb = DecoderFallback::ReplacementFallback();
@@ -227,7 +228,7 @@ TEST(DecoderFallbackTests, ReplacementFallback_MaxCharCount_One) {
 
 TEST(DecoderFallbackTests, ExceptionFallback_GetFallbackString_Throws) {
     auto fb = DecoderFallback::ExceptionFallback();
-    EXPECT_THROW(fb->GetFallbackString(nullptr, 0), std::runtime_error);
+    EXPECT_THROW(fb->GetFallbackString(nullptr, 0), DecoderFallbackException);
 }
 
 TEST(DecoderFallbackTests, ExceptionFallback_MaxCharCount_Zero) {
@@ -255,6 +256,7 @@ TEST(DecoderReplacementFallbackTests, CustomReplacement) {
 using System::Text::EncoderFallback;
 using System::Text::EncoderReplacementFallback;
 using System::Text::EncoderExceptionFallback;
+using System::Text::EncoderFallbackException;
 
 TEST(EncoderFallbackTests, ReplacementFallback_ReturnsQuestionMarkBytes) {
     auto fb = EncoderFallback::ReplacementFallback();
@@ -270,7 +272,7 @@ TEST(EncoderFallbackTests, ReplacementFallback_MaxByteCount_One) {
 
 TEST(EncoderFallbackTests, ExceptionFallback_GetFallbackBytes_Throws) {
     auto fb = EncoderFallback::ExceptionFallback();
-    EXPECT_THROW(fb->GetFallbackBytes('x'), std::runtime_error);
+    EXPECT_THROW(fb->GetFallbackBytes('x'), EncoderFallbackException);
 }
 
 TEST(EncoderFallbackTests, ExceptionFallback_MaxByteCount_Zero) {

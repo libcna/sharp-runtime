@@ -15,6 +15,8 @@ namespace System::Text {
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "iso-8859-1"; }
         /** Returns the code page 28591 (ISO-8859-1). */
         [[nodiscard]] int getCodePageProperty() const override { return 28591; }
+        /** Latin-1 always uses exactly one byte per character. */
+        [[nodiscard]] bool getIsSingleByteProperty() const override { return true; }
 
         /** Encodes a string to Latin-1 bytes. */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {

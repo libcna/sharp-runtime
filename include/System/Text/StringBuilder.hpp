@@ -13,6 +13,8 @@ namespace System::Text
 {
     using SharpRuntime::intcs;
 
+    class StringBuilderRuneEnumerator;
+
     /**
      * <summary>
      * Provides a mutable string buffer for efficient string construction.
@@ -207,5 +209,57 @@ namespace System::Text
 
         /** @brief Ensures the internal buffer has at least @p capacity characters reserved. */
         void EnsureCapacity(intcs capacity) { buffer.reserve(static_cast<std::size_t>(capacity)); }
+
+        /** @brief Returns the character at @p index (.NET's indexer). */
+        [[nodiscard]] char operator[](intcs index) const { return buffer[static_cast<std::size_t>(index)]; }
+        /** @brief Returns a mutable reference to the character at @p index (.NET's indexer). */
+        char& operator[](intcs index) { return buffer[static_cast<std::size_t>(index)]; }
+
+        /**
+         * @brief Enumerates the chunks of characters that make up this instance's content.
+         *
+         * C++ counterpart of .NET System.Text.StringBuilder.ChunkEnumerator.
+         *
+         * @note Reduced scope: .NET's real `StringBuilder` is a linked list of fixed-size
+         * "chunks", and `ChunkEnumerator` walks that list without copying. This runtime's
+         * `StringBuilder` is backed by a single `std::string`, so this enumerator always yields
+         * exactly one chunk containing the entire current content.
+         */
+        class ChunkEnumerator {
+            struct Sentinel {};
+            const std::string* chunk_;
+            bool consumed_ = false;
+            bool hasCurrent_ = false;
+
+        public:
+            explicit ChunkEnumerator(const std::string& chunk) : chunk_(&chunk) {}
+
+            [[nodiscard]] const std::string& getCurrentProperty() const { return *chunk_; }
+
+            /** @brief Advances to the next chunk. @return false after the single chunk has been yielded once. */
+            bool MoveNext() {
+                if (consumed_) return false;
+                consumed_ = true;
+                return true;
+            }
+
+            [[nodiscard]] ChunkEnumerator& begin() {
+                hasCurrent_ = MoveNext();
+                return *this;
+            }
+            [[nodiscard]] Sentinel end() const { return Sentinel{}; }
+            bool operator!=(Sentinel) const { return hasCurrent_; }
+            [[nodiscard]] const std::string& operator*() const { return *chunk_; }
+            ChunkEnumerator& operator++() {
+                hasCurrent_ = MoveNext();
+                return *this;
+            }
+        };
+
+        /** @brief Returns an enumerator over the chunks of characters in this instance. */
+        [[nodiscard]] ChunkEnumerator GetChunks() const { return ChunkEnumerator(buffer); }
+
+        /** @brief Returns an enumerator over the Rune values in this instance's current contents. */
+        [[nodiscard]] StringBuilderRuneEnumerator EnumerateRunes() const;
     };
 }
