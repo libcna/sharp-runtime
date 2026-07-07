@@ -7,6 +7,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Xml/XPath/IXPathNavigable.hpp"
 #include "System/Xml/XmlNodeList.hpp"
 #include "System/Xml/XmlNodeType.hpp"
 
@@ -34,10 +35,8 @@ namespace System::Xml {
      * - BaseURI always returns "" (no base-URI tracking).
      * - IsReadOnly always returns false (no DTD-driven read-only nodes).
      * - ChildNodes returns a materialized snapshot list, not a live view.
-     * - SelectNodes/SelectSingleNode throw NotImplementedException — XPath support
-     *   (System.Xml.XPath) is a separate, not-yet-ported namespace.
      */
-    class XmlNode {
+    class XmlNode : public XPath::IXPathNavigable {
     protected:
         tinyxml2::XMLNode* native_ = nullptr;
         XmlDocument* ownerDocument_ = nullptr;
@@ -161,9 +160,22 @@ namespace System::Xml {
         /** @brief Writes only this node's children to @p writer. */
         virtual void WriteContentTo(XmlWriter& writer) const;
 
-        // XPath support (System.Xml.XPath) is a separate, not-yet-ported namespace.
-        [[noreturn]] XmlNode* SelectSingleNode(const std::string& xpath) const;
-        [[noreturn]] XmlNodeList* SelectNodes(const std::string& xpath) const;
+        /**
+         * @brief Creates an XPathNavigator (System::Xml::XPath::XmlDocumentNavigator) positioned
+         * on this node. Caller takes ownership.
+         *
+         * C++ counterpart of .NET XmlNode.CreateNavigator() (via IXPathNavigable). Calling this
+         * on an XmlAttribute repositions the navigator onto that attribute (attributes are not
+         * part of the tinyxml2 node tree navigated by plain node pointers); this requires the
+         * attribute to currently be attached to an element (@throws System::InvalidOperationException
+         * if it is detached).
+         */
+        [[nodiscard]] XPath::XPathNavigator* CreateNavigator() const override;
+
+        /** @return The first node matching @p xpath (document order), or nullptr. Caller takes ownership. Equivalent to `CreateNavigator()->SelectSingleNode(xpath)` unwrapped back to the underlying XmlNode. @throws XPath::XPathException on an XPath syntax error. */
+        [[nodiscard]] XmlNode* SelectSingleNode(const std::string& xpath) const;
+        /** @return All nodes matching @p xpath, in document order. Caller takes ownership of the returned list (the list, not the individual nodes, which remain owned by this document). @throws XPath::XPathException on an XPath syntax error. */
+        [[nodiscard]] XmlNodeList* SelectNodes(const std::string& xpath) const;
     };
 
 } // namespace System::Xml
