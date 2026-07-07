@@ -92,6 +92,25 @@ namespace System::Xml {
         void WriteCData(const std::string& text);
 
         /**
+         * @brief Writes a processing instruction: @c <?target data?>.
+         *
+         * @param target  The PI target name.
+         * @param data    The PI content (not XML-escaped, matching real XML PI syntax).
+         */
+        void WriteProcessingInstruction(const std::string& target, const std::string& data);
+
+        /**
+         * @brief Writes a document type declaration: @c <!DOCTYPE name PUBLIC "..." "..." [subset]>.
+         *
+         * @param name           The DOCTYPE root element name.
+         * @param publicId       The public identifier, or "" to omit.
+         * @param systemId       The system identifier, or "" to omit.
+         * @param internalSubset The internal subset, or "" to omit.
+         */
+        void WriteDocType(const std::string& name, const std::string& publicId,
+                           const std::string& systemId, const std::string& internalSubset);
+
+        /**
          * @brief Returns the serialized XML as a string.
          *
          * Includes the XML declaration if @c WriteStartDocument() was called.

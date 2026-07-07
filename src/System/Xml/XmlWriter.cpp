@@ -87,6 +87,27 @@ void XmlWriter::WriteCData(const std::string& text) {
     state_->nodeStack.top()->InsertEndChild(tn);
 }
 
+void XmlWriter::WriteProcessingInstruction(const std::string& target, const std::string& data) {
+    if (!state_ || state_->nodeStack.empty()) return;
+    std::string text = data.empty() ? target : (target + " " + data);
+    tinyxml2::XMLDeclaration* pi = state_->doc.NewDeclaration(text.c_str());
+    state_->nodeStack.top()->InsertEndChild(pi);
+}
+
+void XmlWriter::WriteDocType(const std::string& name, const std::string& publicId,
+                              const std::string& systemId, const std::string& internalSubset) {
+    if (!state_ || state_->nodeStack.empty()) return;
+    std::string text = "DOCTYPE " + name;
+    if (!publicId.empty()) {
+        text += " PUBLIC \"" + publicId + "\" \"" + systemId + "\"";
+    } else if (!systemId.empty()) {
+        text += " SYSTEM \"" + systemId + "\"";
+    }
+    if (!internalSubset.empty()) text += " [" + internalSubset + "]";
+    tinyxml2::XMLUnknown* dt = state_->doc.NewUnknown(text.c_str());
+    state_->nodeStack.top()->InsertEndChild(dt);
+}
+
 std::string XmlWriter::ToString() const {
     if (!state_) return {};
     tinyxml2::XMLPrinter printer;
