@@ -1,8 +1,52 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-07 (branch: `feature/work`, HEAD `11b70b7`) — 10647 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-07 (branch: `feature/work`) — 10711 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
-## Latest session (2026-07-07): System.Xml.Linq node hierarchy — the 12 `tobedecided` items resolved
+## Latest session (2026-07-07): System.Xml.XPath — the last 13 `tobedecided` items resolved
+
+**`System.Xml.XPath`** (⚠️ PARTIAL, 13/15 `plan.sqlite3` rows ported, 2 reclassified `ignore` as
+out-of-scope Linq extensions — `Extensions`/`XDocumentExtensions` are actually
+`System.Xml.Linq`/`XDocument` extension methods, not XPath itself): Implemented `XPathNavigator`/
+`XPathDocument`/`XPathExpression`/`XPathNodeIterator`/`XPathItem`/`IXPathNavigable`/`XPathException`
+plus the `XPathResultType`/`XPathNodeType`/`XPathNamespaceScope`/`XmlSortOrder`/`XmlCaseOrder`/
+`XmlDataType` enums, per user decision (2026-07-07): built over the existing `XmlDocument` DOM only,
+no dual `XDocument` abstraction, no new dependency. New concrete `XmlDocumentNavigator`
+(`include/src/System/Xml/XPath/XmlDocumentNavigator.hpp/.cpp`) tracks position as a DOM node, an
+(element, attribute-identity) pair for attributes, or a synthesized (element, prefix) pair for
+namespace nodes materialized from ancestor `xmlns`/`xmlns:*` attributes. `XmlNode::CreateNavigator()`
+is wired for real; `SelectSingleNode`/`SelectNodes` (previously `NotImplementedException`) now work.
+
+Hand-written recursive-descent parser/evaluator (`src/System/Xml/XPath/XPathAstInternal.{hpp,cpp}`,
+internal) supports child/descendant-or-self(`//`)/attribute/self/parent axes, `*`/`prefix:*`/name/
+kind-test node tests (`text()`/`comment()`/`processing-instruction()`), correct per-context-node
+positional and boolean predicates, all XPath 1.0 operators including `|` union, and 17 core functions
+(`last`, `position`, `count`, `name`, `local-name`, `namespace-uri`, `not`, `boolean`, `string`,
+`number`, `concat`, `starts-with`, `contains`, `string-length`, `normalize-space`, `true`, `false`).
+**Not supported — throws `XPathException` at `Compile()`, never silently wrong** (see
+`XPathNavigator`'s class doc-comment for the exact boundary): explicit `axis::` syntax, variables,
+`substring*`/`translate`/`sum`/`floor`/`ceiling`/`round`/`lang`/`id`/`key`/`document`, and
+`FilterExpr`-then-path composition. Also omitted entirely (not stubbed): the editable-navigator API,
+`MoveTo`/`MoveToId`, `MoveToFollowing`/`SelectChildren`/`SelectAncestors`/`SelectDescendants`/
+`Matches`/schema-typed accessors. Namespace-prefixed name tests compare raw prefix strings, not
+resolved URIs.
+
+**Found and fixed a real pre-existing bug** in `XmlDocument::Load`/`LoadXml`: tinyxml2's `Parse`/
+`LoadFile` free `detachedHolder_` (created in the constructor) without it being recreated afterward,
+leaving it dangling and corrupting `IsDetached()`/`getParentNodeProperty()`/`RemoveChild()` for any
+node in a document loaded from real markup (as opposed to one built programmatically via
+`CreateElement`/`AppendChild`, which never hit this path) — this silently broke navigator
+`MoveToParent()` until fixed. Commit `2fa5c79`.
+
+64 new tests (`tests/System/Xml/XPath/XPathTests.cpp`), mostly against a real parsed bookstore-
+catalog XML fixture. Commits `2fa5c79` (XmlDocument fix), `4a0e36c` (XPath port) — developed in an
+isolated worktree, merged into `feature/work` after independent verification (clean rebuild,
+64/64 new tests + full suite passing, no file overlap with the concurrent Xml.Linq work).
+
+**With this, `plan.sqlite3` has zero `tobedecided` rows remaining** — every one of the four decision
+groups from the Milestone section below (crypto/TLS, Xml.Linq hierarchy, XPath, and the three misc
+singles) has now been resolved and implemented.
+
+## Prior update (2026-07-07): System.Xml.Linq node hierarchy — the 12 `tobedecided` items resolved
 
 The `System.Xml.Linq` `tobedecided` group from the Milestone section below (`XObject`, `XNode`,
 `XContainer`, `XCData`, `XComment`, `XDocumentType`, `XProcessingInstruction`, `XStreamingElement`,
@@ -110,8 +154,10 @@ reviewed all four groups on 2026-07-07 (asked via `AskUserQuestion`, not guessed
   "Latest session (2026-07-07)" section at the very top of this file for the full writeup. See the
   `f793df0` log entry below for the story of how an *earlier* failed background fork's partial
   sketch here was found and handled (deleted, not reused) before this work was done for real.
-- **`System.Xml.XPath` (15) — DECIDED: build `XPathNavigator` over `XmlDocument` only** (not a dual
-  abstraction spanning both `XmlDocument` and `XDocument`/Xml.Linq — smaller, more tractable scope).
+- **`System.Xml.XPath` (15, 13 ported + 2 reclassified `ignore`) — DONE.** Built `XPathNavigator`
+  over `XmlDocument` only (not a dual abstraction spanning both `XmlDocument` and `XDocument`/
+  Xml.Linq — smaller, more tractable scope, as decided). See the "Latest session (2026-07-07):
+  System.Xml.XPath" section at the very top of this file for the full writeup.
 - **`System.IO.FileSystemInfo` (1) — DECIDED: retrofit as a real common base for `FileInfo`/
   `DirectoryInfo`.** Investigation found this wasn't a stale mark needing re-verification: `FileInfo`
   and `DirectoryInfo` already existed as independent classes, each duplicating its own
