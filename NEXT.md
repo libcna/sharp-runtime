@@ -10,33 +10,28 @@ mechanical porting work queued. This session's autonomous run (see the two log e
 one for the full blow-by-blow) finished the last three namespaces that had `todo` items:
 `System.Text.Json` (17), `System.Text.Json.Nodes` (5), `System.Text.Json.Serialization` (31).
 
-**58 `tobedecided` items remain, grouped by the real decision each needs — these are genuinely
-ambiguous and were deliberately not guessed at (per CLAUDE.md's workflow), not overlooked:**
+**58 `tobedecided` items remained, grouped by the real decision each needed — these were genuinely
+ambiguous and deliberately not guessed at (per CLAUDE.md's workflow), not overlooked. The user
+reviewed all four groups on 2026-07-07 (asked via `AskUserQuestion`, not guessed):**
 
-- **`System.Security.Cryptography` (20) + `.X509Certificates` (5)** — symmetric/asymmetric crypto
-  (AES, RSA, DSA, ECDSA, X.509 certs) needs a real vendoring decision (OpenSSL/mbedTLS/hand-rolled)
-  that's too security-sensitive to pick alone. Hash algorithms (MD5/SHA*/HMAC/PBKDF2) are already
-  `ported` — hand-rolled, verified against NIST/RFC test vectors, no new dependency.
-- **`System.Net.Security` (4)** — `SslStream`/`SslClientAuthenticationOptions`/
-  `SslServerAuthenticationOptions`/`SslStreamCertificateContext`: blocked on the same crypto/TLS
-  decision above (no TLS engine in this runtime yet).
-- **`System.Xml.Linq` (12)** — `XObject`/`XNode`/`XContainer` and everything built on that
-  inheritance hierarchy (`XCData`/`XComment`/`XDocumentType`/`XProcessingInstruction`/
-  `XStreamingElement`/`XText`/`XNodeDocumentOrderComparer`/`XNodeEqualityComparer`/`Extensions`).
-  Needs migrating `XElement`/`XAttribute`/`XDocument`'s internal storage to a parent/sibling-tracking
-  model — a real architecture decision, not a mechanical port (see the `f793df0` log entry below for
-  the full story of how a failed background fork's partial sketch here was found and handled).
-- **`System.Xml.XPath` (15)** — `XPathNavigator`/`XPathDocument`/`XPathExpression`/etc.; marked
-  `tobedecided` in an earlier session (before this handoff's log entries begin) — re-open with fresh
-  eyes on the full XPath data-model question before touching it.
+- **`System.Security.Cryptography` (20) + `.X509Certificates` (5) + `System.Net.Security` (4) —
+  DECIDED: permanently out of scope.** Reclassified `ignore`/`outofscope=1` in `plan.sqlite3`; added
+  to CLAUDE.md's "Known permanent deviations" list. Reason: implementing this correctly needs either
+  a large new external dependency (OpenSSL/mbedTLS) or a hand-rolled, security-critical crypto
+  implementation — neither justified for game code. Hash algorithms (MD5/SHA*/HMAC/PBKDF2, no key
+  material/confidentiality guarantees to get wrong) remain `ported` and unaffected.
+- **`System.Xml.Linq` (12) — DECIDED: migrate the full `XObject`/`XNode`/`XContainer` hierarchy
+  now.** (`XCData`/`XComment`/`XDocumentType`/`XProcessingInstruction`/`XStreamingElement`/`XText`/
+  `XNodeDocumentOrderComparer`/`XNodeEqualityComparer`/`Extensions`, plus migrating `XElement`/
+  `XAttribute`/`XDocument`'s internal storage to a real parent/sibling-tracking model.) See the
+  `f793df0` log entry below for the story of how a failed background fork's partial sketch here was
+  found and handled (deleted, not reused) before this decision was made.
+- **`System.Xml.XPath` (15) — DECIDED: build `XPathNavigator` over `XmlDocument` only** (not a dual
+  abstraction spanning both `XmlDocument` and `XDocument`/Xml.Linq — smaller, more tractable scope).
 - **`System.IO.FileSystemInfo` (1)**, **`System.Numerics.Vector` (1)**, **`System.Text.Json.
-  JsonReaderState` (1)** — each individually noted where it was marked; `JsonReaderState` only has
-  meaning paired with a `Utf8JsonReader`, which isn't tracked in `plan.sqlite3` at all (see this
-  session's `7751266` entry).
-
-**No further `todo`-driven autonomous work remains.** The next session should either get the user's
-call on one of the `tobedecided` groups above, or take on non-`plan.sqlite3`-tracked work (broader
-consistency passes, CNA integration testing, etc.) if directed to.
+  JsonReaderState` (1)** — still open; not asked about explicitly (lower impact, 1 item each). Plan:
+  re-investigate `FileSystemInfo`'s reason directly (it may just need re-verification, not a real
+  decision); `Vector<T>`/`JsonReaderState` remain `tobedecided` pending a similar ask.
 
 ## Post-milestone quality audit: a new decision needed, not a bug list
 
