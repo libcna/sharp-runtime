@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -29,8 +30,8 @@ namespace System {
      */
     struct TimeSpan : IEquatable<TimeSpan>, IComparable<TimeSpan> {
     private:
-        static int copy_count;
-        static int move_count;
+        static std::atomic<int> copy_count;
+        static std::atomic<int> move_count;
 
     public:
         /** Returns how many times a TimeSpan has been copy-constructed (diagnostic). */

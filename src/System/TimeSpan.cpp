@@ -16,18 +16,18 @@
 
 namespace System {
 
-    int TimeSpan::copy_count = 0;
-    int TimeSpan::move_count = 0;
+    std::atomic<int> TimeSpan::copy_count{0};
+    std::atomic<int> TimeSpan::move_count{0};
 
-    int TimeSpan::getCopyCount() { return copy_count; }
-    int TimeSpan::getMoveCount() { return move_count; }
+    int TimeSpan::getCopyCount() { return copy_count.load(std::memory_order_relaxed); }
+    int TimeSpan::getMoveCount() { return move_count.load(std::memory_order_relaxed); }
 
     void TimeSpan::resetCopyCount() {
-        copy_count = 0;
+        copy_count.store(0, std::memory_order_relaxed);
     }
 
     void TimeSpan::resetMoveCount() {
-        move_count = 0;
+        move_count.store(0, std::memory_order_relaxed);
     }
 
     const TimeSpan TimeSpan::Zero = TimeSpan(0);
@@ -52,11 +52,11 @@ namespace System {
     }
 
     TimeSpan::TimeSpan(const TimeSpan& other) : ticks_internal(other.ticks_internal) {
-        copy_count++;
+        copy_count.fetch_add(1, std::memory_order_relaxed);
     }
 
     TimeSpan::TimeSpan(TimeSpan&& other) noexcept : ticks_internal(other.ticks_internal) {
-        move_count++;
+        move_count.fetch_add(1, std::memory_order_relaxed);
     }
 
     longcs TimeSpan::TimeToTicks(intcs days, intcs hours, intcs minutes, intcs seconds, intcs milliseconds,
@@ -79,7 +79,7 @@ namespace System {
     TimeSpan& TimeSpan::operator=(TimeSpan&& other) noexcept {
         if (this != &other) {  // Prevent self-assignment
             ticks_internal = other.ticks_internal;  // Transfer ownership
-            move_count++;
+            move_count.fetch_add(1, std::memory_order_relaxed);
         }
         return *this;
     }
