@@ -3,12 +3,17 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
 // XmlReader/XmlWriter are backed by vendored tinyxml2 (see XmlReader.cpp/XmlWriter.cpp).
-// XDocument::Save is declared but not yet defined — not tested here.
-// System::Xml::Linq types (XName, XAttribute, XElement, XDocument) are fully implemented.
-// See XmlDomTests.cpp for the classic XmlDocument DOM API and XmlSupportTests.cpp for
-// XmlException/XmlConvert/XmlQualifiedName/enum coverage.
+// System::Xml::Linq types (XName, XAttribute, XElement, XDocument) are fully implemented,
+// including real Parse()/Load() (tinyxml2-backed) and Save(). See XLinqNodeTests.cpp for the
+// full XObject/XNode/XContainer/XText/XComment/XCData/XProcessingInstruction/XDocumentType/
+// XStreamingElement/comparer/Extensions coverage. See XmlDomTests.cpp for the classic
+// XmlDocument DOM API and XmlSupportTests.cpp for XmlException/XmlConvert/XmlQualifiedName/enum
+// coverage.
+#include <cstdio>
+#include <fstream>
 #include <gtest/gtest.h>
 #include "System/NotImplementedException.hpp"
+#include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlReader.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/Linq/XName.hpp"
@@ -18,6 +23,7 @@
 
 using System::NotImplementedException;
 using System::Xml::ReadState;
+using System::Xml::XmlException;
 using System::Xml::XmlNodeType;
 using System::Xml::XmlReader;
 using System::Xml::XmlWriter;
@@ -547,7 +553,32 @@ TEST(XDocumentTests, Parse_ReturnsNonNull) {
     EXPECT_NE(doc, nullptr);
 }
 
-TEST(XDocumentTests, Load_ReturnsNonNull) {
-    auto doc = XDocument::Load("nonexistent.xml");
-    EXPECT_NE(doc, nullptr);
+TEST(XDocumentTests, Parse_ParsesRealContent) {
+    auto doc = XDocument::Parse("<catalog><item id=\"1\">Widget</item></catalog>");
+    ASSERT_NE(doc->getRootProperty(), nullptr);
+    EXPECT_EQ(doc->getRootProperty()->getNameProperty().getLocalNameProperty(), "catalog");
+    auto item = doc->getRootProperty()->Element("item");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->getAttributeValue("id"), "1");
+    EXPECT_EQ(item->getValueProperty(), "Widget");
+}
+
+TEST(XDocumentTests, Parse_MalformedXml_Throws) {
+    EXPECT_THROW(XDocument::Parse("<unclosed>"), XmlException);
+}
+
+TEST(XDocumentTests, Load_MissingFile_Throws) {
+    EXPECT_THROW(XDocument::Load("nonexistent.xml"), XmlException);
+}
+
+TEST(XDocumentTests, Load_ExistingFile_ReturnsParsedDocument) {
+    const char* path = "xdocument_load_test.xml";
+    {
+        std::ofstream ofs(path);
+        ofs << "<root><child>value</child></root>";
+    }
+    auto doc = XDocument::Load(path);
+    ASSERT_NE(doc->getRootProperty(), nullptr);
+    EXPECT_EQ(doc->getRootProperty()->getNameProperty().getLocalNameProperty(), "root");
+    std::remove(path);
 }

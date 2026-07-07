@@ -4,44 +4,70 @@
 #pragma once
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
-#include "System/Xml/Linq/XName.hpp"
+#include "System/Xml/Linq/LoadOptions.hpp"
+#include "System/Xml/Linq/SaveOptions.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
+#include "System/Xml/Linq/XContainer.hpp"
+#include "System/Xml/Linq/XName.hpp"
+
+namespace System::Xml {
+    class XmlWriter;
+}
 
 namespace System::Xml::Linq {
 
-    /** Represents an XML element with a name, optional text value, attributes, and child elements. */
-    class XElement {
+    /**
+     * @brief Represents an XML element with a name, attributes, and content (a mix of child
+     * elements, text, CDATA, comments, and processing instructions).
+     *
+     * C++ counterpart of .NET System.Xml.Linq.XElement.
+     */
+    class XElement : public XContainer {
         XName name_;
-        std::string value_;
         std::vector<std::shared_ptr<XAttribute>> attributes_;
-        std::vector<std::shared_ptr<XElement>> children_;
+
+        void RelinkAttributes();
 
     public:
         /** Constructs an empty element with the given XName (plain strings convert implicitly via XName). */
         explicit XElement(const XName& name) : name_(name) {}
 
-        /** Constructs an element with an XName and an initial text value. */
-        XElement(const XName& name, const std::string& value) : name_(name), value_(value) {}
+        /** Constructs an element with an XName and an initial text value (a single XText child; empty strings add no child). */
+        XElement(const XName& name, const std::string& value) : name_(name) {
+            if (!value.empty()) setValueProperty(value);
+        }
+
+        using XContainer::Add;
+        using XContainer::AddFirst;
+
+        [[nodiscard]] System::Xml::XmlNodeType getNodeTypeProperty() const override { return System::Xml::XmlNodeType::Element; }
 
         /** @return The qualified name of the element. */
-        [[nodiscard]] const XName&       getNameProperty()  const { return name_; }
+        [[nodiscard]] const XName& getNameProperty() const { return name_; }
+        /** @brief Sets the qualified name of the element. */
+        void setNameProperty(const XName& name) { name_ = name; }
 
-        /** @return The text content of the element. */
-        [[nodiscard]] const std::string& getValueProperty() const { return value_; }
+        /**
+         * @return The text contents of this element. If there is text content interspersed with
+         * nodes (mixed content), the text is concatenated (matches .NET's XElement.Value getter).
+         */
+        [[nodiscard]] std::string getValueProperty() const;
+        /** @brief Replaces all content of this element with a single text node containing @p v (a no-op child-wise if @p v is empty). */
+        void setValueProperty(const std::string& v);
 
-        /** Sets the text content of the element. */
-        void setValueProperty(const std::string& v)               { value_ = v; }
+        // --- Attributes ----------------------------------------------------------------
 
-        // Attributes
+        /**
+         * @brief Appends @p attr to this element's attributes.
+         * If @p attr already belongs to another element, it is moved here (see XContainer's doc-comment).
+         * @throws System::InvalidOperationException if this element already has an attribute with the same name.
+         */
+        void Add(std::shared_ptr<XAttribute> attr);
 
-        /** Appends an attribute to this element. */
-        void Add(std::shared_ptr<XAttribute> attr) { attributes_.push_back(std::move(attr)); }
-
-        /** Appends a child element to this element. */
-        void Add(std::shared_ptr<XElement> child)  { children_.push_back(std::move(child)); }
+        /** @brief Appends a text child containing @p text. Convenience for `Add(std::make_shared<XText>(text))`. */
+        void Add(const std::string& text);
 
         /** Returns the first attribute matching @p name, or nullptr. */
         [[nodiscard]] std::shared_ptr<XAttribute> Attribute(const XName& name) const {
@@ -50,39 +76,29 @@ namespace System::Xml::Linq {
             return nullptr;
         }
 
-        /** @return All attributes of this element. */
+        /** @return All attributes of this element, in document order. */
         [[nodiscard]] const std::vector<std::shared_ptr<XAttribute>>& getAttributesProperty() const { return attributes_; }
+        /** @return All attributes of this element, in document order (.NET-style method name; same content as getAttributesProperty()). */
+        [[nodiscard]] std::vector<std::shared_ptr<XAttribute>> Attributes() const { return attributes_; }
 
-        // Children
+        /** @return The first attribute of this element, or nullptr. */
+        [[nodiscard]] std::shared_ptr<XAttribute> getFirstAttributeProperty() const { return attributes_.empty() ? nullptr : attributes_.front(); }
+        /** @return The last attribute of this element, or nullptr. */
+        [[nodiscard]] std::shared_ptr<XAttribute> getLastAttributeProperty() const { return attributes_.empty() ? nullptr : attributes_.back(); }
+        /** @return true if this element has at least one attribute. */
+        [[nodiscard]] bool getHasAttributesProperty() const { return !attributes_.empty(); }
+        /** @return true if this element has at least one child element. */
+        [[nodiscard]] bool getHasElementsProperty() const;
+        /** @return true if this element has no content (no attributes are required to be empty — matches .NET, which defines IsEmpty in terms of content only). */
+        [[nodiscard]] bool getIsEmptyProperty() const { return children_.empty(); }
 
-        /** Returns the first direct child element matching @p name, or nullptr. */
-        [[nodiscard]] std::shared_ptr<XElement> Element(const XName& name) const {
-            for (auto& c : children_)
-                if (c->getNameProperty() == name) return c;
-            return nullptr;
-        }
+        /** @brief Removes all attributes from this element. */
+        void RemoveAttributes();
+        /** @brief Detaches @p attr from this element (used internally by XAttribute::Remove()). No-op if @p attr does not belong to this element. */
+        void RemoveAttribute(XAttribute* attr);
 
-        /** @return All direct child elements. */
-        [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements() const { return children_; }
-
-        /** Returns all direct child elements whose name matches @p name. */
-        [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements(const XName& name) const {
-            std::vector<std::shared_ptr<XElement>> result;
-            for (auto& c : children_)
-                if (c->getNameProperty() == name) result.push_back(c);
-            return result;
-        }
-
-        /** Returns all descendant elements (recursive) whose name matches @p name. */
-        [[nodiscard]] std::vector<std::shared_ptr<XElement>> Descendants(const XName& name) const {
-            std::vector<std::shared_ptr<XElement>> result;
-            for (auto& c : children_) {
-                if (c->getNameProperty() == name) result.push_back(c);
-                auto sub = c->Descendants(name);
-                result.insert(result.end(), sub.begin(), sub.end());
-            }
-            return result;
-        }
+        /** @brief Removes all attributes and content from this element. */
+        void RemoveAll();
 
         /** Returns the value of the attribute named @p name, or std::nullopt if absent. */
         [[nodiscard]] std::optional<std::string> getAttributeValue(const std::string& name) const {
@@ -91,44 +107,42 @@ namespace System::Xml::Linq {
             return std::nullopt;
         }
 
-        /**
-         * Serialises the element to a string.
-         * @param indent If true, apply indentation.
-         */
-        [[nodiscard]] std::string ToString(bool indent = false) const {
-            std::ostringstream oss;
-            writeXml(oss, 0, indent);
-            return oss.str();
-        }
+        // --- Serialization ---------------------------------------------------------------
+
+        void WriteTo(System::Xml::XmlWriter& writer) const override;
+
+        /** @brief Saves this element to @p fileName (formatted, unless @p options disables it). */
+        void Save(const std::string& fileName, SaveOptions options = SaveOptions::None) const;
+        /** @brief Writes this element to @p writer (no start/end-document wrapping). */
+        void Save(System::Xml::XmlWriter& writer) const;
 
         /**
-         * Parses XML text into an XElement (stub — requires XML parser backend).
-         * @param xml The XML source text (currently ignored).
+         * @brief Parses @p xml into an XElement.
+         * @param xml XML source text; must contain exactly one root element.
+         * @param options Controls whitespace handling (SetBaseUri/SetLineInfo have no effect — see LoadOptions).
+         * Only affects text nodes that mix whitespace with real content — the vendored tinyxml2
+         * parser never surfaces pure-whitespace-only runs immediately adjacent to element tags as
+         * text nodes at all (verified directly), so LoadOptions::PreserveWhitespace has no
+         * observable effect for that specific case (a limitation inherited from the parsing
+         * backend, already documented at the classic-DOM layer on XmlDocument::PreserveWhitespace).
+         * @throws System::Xml::XmlException on malformed XML.
          */
-        static std::shared_ptr<XElement> Parse(const std::string& /*xml*/) {
-            // Stub — requires XML parser backend (tinyxml2/pugixml)
-            return std::make_shared<XElement>("root");
-        }
+        [[nodiscard]] static std::shared_ptr<XElement> Parse(const std::string& xml, LoadOptions options = LoadOptions::None);
+
+        /**
+         * @brief Loads and parses the XML file at @p filePath into an XElement.
+         * @throws System::Xml::XmlException if the file is missing or malformed.
+         */
+        [[nodiscard]] static std::shared_ptr<XElement> Load(const std::string& filePath, LoadOptions options = LoadOptions::None);
+
+        [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override;
+
+    protected:
+        void SerializeTo(std::ostream& os, int depth, bool indent) const override;
+        [[nodiscard]] bool DeepEqualsCore(const XNode& other) const override;
 
     private:
-        void writeXml(std::ostringstream& oss, int depth, bool indent) const {
-            std::string pad = indent ? std::string(depth * 2, ' ') : "";
-            oss << pad << "<" << name_.getLocalNameProperty();
-            for (auto& a : attributes_)
-                oss << " " << a->ToString();
-            if (children_.empty() && value_.empty()) {
-                oss << "/>";
-            } else {
-                oss << ">";
-                if (!value_.empty()) oss << value_;
-                for (auto& c : children_) {
-                    if (indent) oss << "\n";
-                    c->writeXml(oss, depth + 1, indent);
-                }
-                if (!children_.empty() && indent) oss << "\n" << pad;
-                oss << "</" << name_.getLocalNameProperty() << ">";
-            }
-        }
+        void AppendTextValue(std::string& sb) const;
     };
 
 } // namespace System::Xml::Linq

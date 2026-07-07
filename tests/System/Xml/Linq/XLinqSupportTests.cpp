@@ -4,9 +4,9 @@
 //
 // Covers the small standalone System.Xml.Linq support types: LoadOptions, ReaderOptions,
 // SaveOptions, XObjectChange, XObjectChangeEventArgs, XNamespace. The XObject/XNode/XContainer
-// inheritance hierarchy (and the node types built on it: XCData, XComment, XContainer,
-// XDocumentType, XProcessingInstruction, XStreamingElement, XText, plus the LINQ-style
-// Extensions helpers) is deliberately deferred — see NEXT.md.
+// inheritance hierarchy (XCData, XComment, XContainer, XDocumentType, XProcessingInstruction,
+// XStreamingElement, XText, XNodeDocumentOrderComparer, XNodeEqualityComparer, and the
+// Extensions free functions) is covered in XLinqNodeTests.cpp.
 #include <gtest/gtest.h>
 #include "System/Xml/Linq/LoadOptions.hpp"
 #include "System/Xml/Linq/ReaderOptions.hpp"

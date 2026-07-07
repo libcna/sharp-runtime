@@ -5,11 +5,19 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include "System/Xml/Linq/LoadOptions.hpp"
+#include "System/Xml/Linq/SaveOptions.hpp"
+#include "System/Xml/Linq/XContainer.hpp"
+#include "System/Xml/Linq/XDocumentType.hpp"
 #include "System/Xml/Linq/XElement.hpp"
+
+namespace System::Xml {
+    class XmlWriter;
+}
 
 namespace System::Xml::Linq {
 
-    /** Represents the XML declaration (<?xml version="..." encoding="..."?>). */
+    /** Represents the XML declaration (<?xml version="..." encoding="..." standalone="..."?>). Not an XNode, matching .NET. */
     class XDeclaration {
         std::string version_;
         std::string encoding_;
@@ -30,75 +38,81 @@ namespace System::Xml::Linq {
 
         /** @return The serialised processing instruction string. */
         [[nodiscard]] std::string ToString() const {
-            return "<?xml version=\"" + version_ + "\" encoding=\"" + encoding_ + "\"?>";
+            std::string s = "<?xml version=\"" + (version_.empty() ? std::string("1.0") : version_) + "\"";
+            if (!encoding_.empty()) s += " encoding=\"" + encoding_ + "\"";
+            if (!standalone_.empty()) s += " standalone=\"" + standalone_ + "\"";
+            s += "?>";
+            return s;
         }
     };
 
-    /** Represents an XML document, optionally including a declaration and a root element. */
-    class XDocument {
+    /**
+     * @brief Represents an XML document: an optional declaration, an optional document type,
+     * at most one root element, and any number of top-level comments/processing instructions.
+     *
+     * C++ counterpart of .NET System.Xml.Linq.XDocument.
+     */
+    class XDocument : public XContainer {
         std::shared_ptr<XDeclaration> declaration_;
-        std::shared_ptr<XElement> root_;
 
     public:
         /** Default constructor — creates an empty document. */
         XDocument() = default;
 
         /** Constructs a document with only a root element. */
-        explicit XDocument(std::shared_ptr<XElement> root) : root_(std::move(root)) {}
+        explicit XDocument(std::shared_ptr<XElement> root) { if (root) Add(std::move(root)); }
 
         /** Constructs a document with an XML declaration and a root element. */
         XDocument(std::shared_ptr<XDeclaration> decl, std::shared_ptr<XElement> root)
-            : declaration_(std::move(decl)), root_(std::move(root)) {}
+            : declaration_(std::move(decl)) { if (root) Add(std::move(root)); }
+
+        [[nodiscard]] System::Xml::XmlNodeType getNodeTypeProperty() const override { return System::Xml::XmlNodeType::Document; }
 
         /** @return The XML declaration, or nullptr if absent. */
         [[nodiscard]] std::shared_ptr<XDeclaration> getDeclarationProperty() const { return declaration_; }
-
-        /** @return The root element, or nullptr if absent. */
-        [[nodiscard]] std::shared_ptr<XElement>     getRootProperty()        const { return root_; }
-
         /** Sets the XML declaration. */
         void setDeclarationProperty(std::shared_ptr<XDeclaration> d) { declaration_ = std::move(d); }
 
-        /** Sets the root element. */
-        void setRootProperty(std::shared_ptr<XElement> r)            { root_ = std::move(r); }
+        /** @return The root element, or nullptr if this document has none. */
+        [[nodiscard]] std::shared_ptr<XElement> getRootProperty() const;
+        /** @brief Replaces (or sets) the root element. If a root already exists it is first removed. */
+        void setRootProperty(std::shared_ptr<XElement> root);
 
-        /** Returns the root element if its local name matches @p name, otherwise nullptr. */
-        [[nodiscard]] std::shared_ptr<XElement> Element(const std::string& name) const {
-            if (root_ && root_->getNameProperty().getLocalNameProperty() == name) return root_;
-            return nullptr;
+        /** @return The document type declaration, or nullptr if absent. */
+        [[nodiscard]] std::shared_ptr<XDocumentType> getDocumentTypeProperty() const;
+
+        /** Returns the root element if its name matches @p name, otherwise nullptr (matches XContainer::Element, kept for API compatibility). */
+        [[nodiscard]] std::shared_ptr<XElement> Element(const XName& name) const {
+            auto root = getRootProperty();
+            return (root && root->getNameProperty() == name) ? root : nullptr;
         }
+
+        void WriteTo(System::Xml::XmlWriter& writer) const override;
+
+        /** @brief Saves this document to @p filePath (formatted, unless @p options disables it). */
+        void Save(const std::string& filePath, SaveOptions options = SaveOptions::None) const;
+        /** @brief Writes this document to @p writer (emits WriteStartDocument() first if a declaration is present). */
+        void Save(System::Xml::XmlWriter& writer) const;
 
         /**
-         * Serialises the document to a string.
-         * @param indent If true, apply indentation.
+         * @brief Parses @p xml into an XDocument.
+         * @param options See XElement::Parse's doc-comment for a caveat on LoadOptions::PreserveWhitespace.
+         * @throws System::Xml::XmlException on malformed XML.
          */
-        [[nodiscard]] std::string ToString(bool indent = false) const {
-            std::ostringstream oss;
-            if (declaration_) oss << declaration_->ToString() << "\n";
-            if (root_)        oss << root_->ToString(indent);
-            return oss.str();
-        }
+        [[nodiscard]] static std::shared_ptr<XDocument> Parse(const std::string& xml, LoadOptions options = LoadOptions::None);
 
         /**
-         * Parses XML text into an XDocument (stub — requires XML parser backend).
-         * @param xml The XML source text (currently ignored).
+         * @brief Loads and parses the XML file at @p filePath into an XDocument.
+         * @throws System::Xml::XmlException if the file is missing or malformed.
          */
-        static std::shared_ptr<XDocument> Parse(const std::string& /*xml*/) {
-            // Stub — requires XML parser backend (tinyxml2/pugixml)
-            return std::make_shared<XDocument>(std::make_shared<XElement>("root"));
-        }
+        [[nodiscard]] static std::shared_ptr<XDocument> Load(const std::string& filePath, LoadOptions options = LoadOptions::None);
 
-        /**
-         * Loads an XML file into an XDocument (stub — requires XML parser backend).
-         * @param filePath Path to the XML file (currently ignored).
-         */
-        static std::shared_ptr<XDocument> Load(const std::string& /*filePath*/) {
-            // Stub — requires XML parser backend
-            return std::make_shared<XDocument>(std::make_shared<XElement>("root"));
-        }
+        [[nodiscard]] SharpRuntime::intcs GetDeepHashCode() const override;
 
-        /** Saves the document to the given file path. */
-        void Save(const std::string& filePath) const;
+    protected:
+        void ValidateNode(const XNode& node) const override;
+        void SerializeTo(std::ostream& os, int depth, bool indent) const override;
+        [[nodiscard]] bool DeepEqualsCore(const XNode& other) const override;
     };
 
 } // namespace System::Xml::Linq
