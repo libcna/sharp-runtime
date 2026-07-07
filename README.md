@@ -47,23 +47,78 @@ The dotnet/runtime source is available at https://github.com/dotnet/runtime unde
 # 🛠️ Build
 
 ```bash
-cmake -S . -B build
-cmake --build build
+git submodule update --init --recursive
+cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake --build build --parallel 4
+./build/SharpRuntimeTests
+```
+
+A library-only build (no test binary) is also supported:
+
+```bash
+cmake -S . -B build-no-tests -DSHARP_RUNTIME_BUILD_TESTS=OFF
+cmake --build build-no-tests --parallel 4
+```
+
+---
+
+# 🗂️ Tracking: `plan.sqlite3`
+
+Porting progress and stabilization work are tracked in a local, git-ignored SQLite database,
+`plan.sqlite3`, with **two separate tables that must not be confused with each other**:
+
+## `task` — .NET type classification
+
+One row per type from [dotnet/runtime](https://github.com/dotnet/runtime)'s public surface. Tracks
+*whether and how* a given `System.*` type has been dealt with.
+
+| `task.status` | Meaning |
+|---|---|
+| `''` / `todo` | Not yet classified or ported. |
+| `ported` | Implemented, tested, meets the full porting checklist. |
+| `ignore` / `ignored` | Permanently out of scope (both values exist — `ignored` predates the current workflow and is left as-is, not "fixed" to `ignore`). |
+| `tobedecided` | Genuinely ambiguous; needs a human architecture decision, not a guess. |
+
+`in_progress` is **not** a valid `task.status` value.
+
+## `ticket` — stabilization work queue
+
+One row per concrete stabilization task (documentation fixes, correctness audits, platform checks,
+test coverage, etc.) that isn't itself "port a .NET type." Independent of `task`.
+
+| `ticket.status` | Meaning |
+|---|---|
+| `todo` | Not started. |
+| `doing` | Actively being worked. |
+| `done` | Complete — acceptance criteria met, build clean, tests passing/updated. |
+| `blocked` | Can't proceed for an external/technical reason (recorded in `notes`). |
+| `needs_user` | Requires a human decision that can't be made safely alone (recorded in `notes`). |
+| `wontfix` | Deliberately not doing this (recorded in `notes`, e.g. permanent out-of-scope). |
+
+`ticket.status` and `task.status` are **different systems with different value sets** — a ticket is
+never `ported`, and a task is never `doing`.
+
+```bash
+# Next ticket to work on
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+
+# Overall progress
+sqlite3 plan.sqlite3 "SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;"
 ```
 
 ---
 
 # 📊 Implementation Status Convention
 
-This project uses a **documentation-only status system** to track implementation progress of classes and functions.
-
-These statuses are written in Doxygen comments and are not enforced by the compiler.
+Doxygen `@note Status: ...` comments on individual classes/methods are a **secondary, human-readable
+hint**, not the source of truth — `plan.sqlite3`'s `task` table is authoritative for whether a type
+counts as ported. These statuses are not enforced by the compiler.
 
 ## Status values
 
 * **Todo** — not implemented yet
 * **Stub** — skeleton only, returns placeholder or fails
-* **Partial** — partially implemented, may be incomplete
+* **Partial** — partially implemented; compiles and mostly works but has known, documented gaps
 * **Implemented** — functionally complete
 * **Verified** — validated against expected .NET behavior
 

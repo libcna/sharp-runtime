@@ -2,6 +2,37 @@
 
 *Last updated: 2026-07-07 (branch: `feature/work`) — 10711 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
+## Stabilization phase (started 2026-07-07)
+
+With `plan.sqlite3`'s `task` table fully classified (0 `todo`/`''`/`tobedecided` rows across all
+16,199 tracked .NET types), work has shifted to **stabilization**: a separate `ticket` table in the
+same database tracks correctness/documentation/platform audits that aren't "port a .NET type." See
+`README.md`'s "Tracking: plan.sqlite3" section for the full `task` vs. `ticket` distinction, and
+`prompt.md` for the resume workflow.
+
+**Ticket queue status** (checked at the start of this phase): 1,476 tickets, all seeded `todo` —
+P0: 40, P1: 615, P2: 815, P3: 6. By category: `ported-type-audit` 1010 (one ticket per already-
+`ported` `task` row, re-verifying it against the current CLAUDE.md checklist), `code-audit` 120,
+`style` 103, `classification-audit` 60, `namespace-audit` 51, `correctness` 47, `status-audit` 37,
+`documentation` 19, `database` 9, `platform` 7, `build` 7, `tooling` 3, `workflow` 1, `test` 1,
+`legal` 1. Given the volume, P0/P1 alone (655 tickets) will likely take multiple sessions; P2's bulk
+`ported-type-audit` re-verification pass is not expected to be reached soon.
+
+**Build/test status** (re-verified at the start of this phase): clean full rebuild (0 errors/0
+warnings), `./build/SharpRuntimeTests` → **10,711 tests passing**. `vendor/googletest` is a properly
+initialized git submodule in this working tree (the ticket queue's own snapshot-based assumption
+that it might be missing did not apply here). Library-only build (`-DSHARP_RUNTIME_BUILD_TESTS=OFF`)
+verified separately in `build-no-tests/`.
+
+**Progress this session:** tickets #1–3 (repo/DB sanity), #4–5, #9, #16 (README rewritten with a new
+"Tracking: plan.sqlite3" section explaining `task` vs. `ticket`), #6–8 (`plan.md`/`plan_namespaces.md`
+marked historical, pointing at `plan.sqlite3` instead of a stale hand-maintained table), #10 (this
+section), #11–14 (build/test/submodule gates verified), #15 (SQL snippets added to `prompt.md`),
+#18 (`CLAUDE.md`'s stale "6626+ tests" floor updated to the real current baseline) — see ticket
+`notes` in `plan.sqlite3` for exact per-ticket detail. Continuing through the rest of P0 next.
+
+---
+
 ## Latest session (2026-07-07): System.Xml.XPath — the last 13 `tobedecided` items resolved
 
 **`System.Xml.XPath`** (⚠️ PARTIAL, 13/15 `plan.sqlite3` rows ported, 2 reclassified `ignore` as

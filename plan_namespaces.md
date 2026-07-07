@@ -1,20 +1,32 @@
-# plan_namespaces.md — .NET Namespace Plan
+# plan_namespaces.md — .NET Namespace Plan (HISTORICAL)
 *Last updated: 2026-06-13 (session 69) — 3939 tests passing*
+
+> ⚠️ **This file is historical and no longer maintained.** The interactive, per-namespace
+> workflow it describes (including the `in_progress` status below) was retired — the current,
+> live, authoritative source of truth is `plan.sqlite3`'s `task` table, tracked per-*type*
+> (much finer granularity than per-namespace) and always up to date. See `README.md`'s
+> "Tracking: plan.sqlite3" section and `plan.md`. `in_progress` is **not** a valid status value
+> in the current workflow — do not reintroduce it.
+>
+> ```bash
+> sqlite3 plan.sqlite3 "SELECT namespace, status, COUNT(*) FROM task GROUP BY namespace, status ORDER BY namespace;"
+> ```
+>
+> The table below is left as-is for historical reference only; it reflects the state as of
+> 2026-06-13 and has not been updated since.
 
 Reference source: `/rv/tmp/runtime/src/libraries/` (dotnet/runtime, MIT License)
 
 ---
 
-## Legend
+## Legend (historical — see warning above)
 
 | Status | Meaning |
 |--------|---------|
 | `ported` | Implemented in sharp-runtime — good coverage |
-| `in_progress` | Partially implemented, work ongoing |
+| `in_progress` | Partially implemented, work ongoing (retired status, see warning above) |
 | `todo` | Needs to be ported/implemented |
 | `ignore` | Out of scope for sharp-runtime |
-
-Status column is filled interactively: for each empty row, Claude describes what the namespace contains, then asks: **todo / ignore / ported / in_progress**.
 
 ---
 
