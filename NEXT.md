@@ -1,6 +1,89 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-06 (branch: `feature/work`, HEAD `26ab294`) — 10569 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-07 (branch: `feature/work`, HEAD `11b70b7`) — 10647 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Latest session (2026-07-07): System.Xml.Linq node hierarchy — the 12 `tobedecided` items resolved
+
+The `System.Xml.Linq` `tobedecided` group from the Milestone section below (`XObject`, `XNode`,
+`XContainer`, `XCData`, `XComment`, `XDocumentType`, `XProcessingInstruction`, `XStreamingElement`,
+`XText`, `XNodeDocumentOrderComparer`, `XNodeEqualityComparer`, `Extensions`) is done. The user was
+asked directly (not guessed) on 2026-07-07 whether to migrate `XElement`/`XAttribute`/`XDocument`'s
+storage to a real parent/sibling-tracking model now, and approved it.
+
+Commits `417b72d` (small additive `XmlWriter` methods) and `11b70b7` (the hierarchy + migration +
+tests):
+
+- **`XObject`** (abstract base of the whole hierarchy, and of `XAttribute`): `getParentProperty()`
+  (nearest `XElement`, matching .NET's `parent as XElement` — null if the parent is an
+  `XDocument`), `getDocumentProperty()` (walks to the root, returns it only if the root is an
+  `XDocument`). `Changed`/`Changing` are no-op `add_Xxx`/`remove_Xxx` accessors, matching this
+  codebase's existing convention (e.g. `NetworkChange`) — real change notification would require
+  every mutating method in the whole hierarchy to walk up and invoke handlers, out of scope.
+  Annotations/`BaseUri`/`IXmlLineInfo` are skipped entirely (no clean C++ equivalent for .NET's
+  generic per-object `object?` annotation bag without reflection this runtime otherwise avoids).
+- **`XNode`**: sibling navigation (`NextNode`/`PreviousNode`/`NodesBeforeSelf`/`NodesAfterSelf`),
+  `Remove()`/`ReplaceWith()`, static `CompareDocumentOrder`/`DeepEquals`, `ToString()`/
+  `ToString(SaveOptions)`, `WriteTo(XmlWriter&)`.
+- **`XContainer`**: `Add`/`AddFirst`/`RemoveNodes`, `Nodes()`/`Elements()`/`Element(name)`/
+  `Elements(name)`/`Descendants()`/`Descendants(name)`/`DescendantNodes()`, `FirstNode`/`LastNode`.
+  Children are stored as an ordered `std::vector<std::shared_ptr<XNode>>` rather than reproducing
+  .NET's internal circular-linked-list representation — same public API/semantics, simpler C++
+  (an explicitly authorized deviation per the task, not a shortcut taken silently).
+- **`XElement`/`XDocument`/`XAttribute` migrated onto this model**: `XElement` now holds an ordered
+  mix of `XNode` content (elements/text/CDATA/comments/PIs) instead of a flat `XElement`-only
+  children vector plus a separate `value_` string; `Value` get/set now really means "concatenated
+  descendant text" / "replace all content with one text node", matching .NET. `XAttribute` now
+  inherits `XObject` (parent tracking) and kept its existing `next_` intrusive sibling link — now
+  wired automatically by `XElement::Add`/`RemoveAttribute` instead of needing manual wiring; added
+  `PreviousAttribute`/`Remove()`. `XDocument` now enforces the real single-root-element /
+  single-doctype constraint for real (`XContainer::ValidateNode`, overridden by `XDocument`)
+  instead of holding `root_`/`declaration_` as unchecked ad hoc fields.
+- **Real bug fixed** (not optional, called out explicitly in the task): `XElement::Parse`/`Load`
+  and `XDocument::Parse`/`Load` were silent stubs — they ignored their input entirely and always
+  returned a fixed empty `<root/>`, in direct violation of CLAUDE.md's "never silently return a
+  wrong value." They now parse for real via the existing tinyxml2-backed
+  `System::Xml::XmlDocument` DOM wrapper (no new external dependency — reused, not reinvented),
+  walking its typed node wrappers (`XmlElement`/`XmlText`/`XmlCDataSection`/`XmlComment`/
+  `XmlProcessingInstruction`/`XmlDocumentType`/`XmlDeclaration`) to build a real `XNode` tree.
+  `XElement::Parse`/`Load` are now thin wrappers around `XDocument::Parse`/`Load` (parse as a
+  document, detach the root via `Remove()` so it doesn't outlive the temporary document with a
+  dangling parent pointer, return it) rather than a second, separately-maintained parser.
+- **`XText` → `XCData`** (CDATA derives from text, matching .NET), **`XComment`**,
+  **`XProcessingInstruction`**, **`XDocumentType`**, **`XNodeDocumentOrderComparer`**,
+  **`XNodeEqualityComparer`** (both also directly usable as `std::sort`/`std::unordered_set`
+  functors via `operator()`, beyond the .NET-named `Compare`/`Equals`/`GetHashCode` methods).
+- **`XStreamingElement`**: standalone, not part of the node tree (matches .NET — it derives from
+  neither `XElement` nor `XContainer`). Content items (`std::any`, since real .NET's fully-dynamic
+  `object?` content model has no direct C++ analogue) are limited to `std::string`,
+  `shared_ptr<XAttribute>`, `shared_ptr<XNode>` (any concrete node, via implicit upcast at the
+  `Add()` call site), and nested `shared_ptr<XStreamingElement>` — a deliberately scoped subset,
+  documented in the class comment, along with the fact that real .NET's "streaming" laziness comes
+  from C# iterator (`yield return`) semantics with no C++ analogue without hand-rolled
+  generators/coroutines (out of scope); this port still never builds an `XElement` tree for
+  itself, just doesn't defer *evaluation* of already-materialized content the way .NET can.
+- **`Extensions`**: `std::ranges`-constrained free functions (no LINQ, per CLAUDE.md) —
+  `Elements`/`Attributes`/`Nodes`/`Descendants`/`DescendantNodes`/`Ancestors`/`Remove`/
+  `InDocumentOrder` over a range of `shared_ptr<XContainer|XElement|XNode|XAttribute>`. Scoped to
+  what maps cleanly; `DescendantsAndSelf`/`DescendantNodesAndSelf` weren't duplicated (call
+  `Descendants()`/`DescendantNodes()` plus include the source item directly if needed).
+- **Design decision, documented as a scope cut**: re-adding a node that already has a parent
+  *moves* it (detaches from the old parent, then attaches) rather than cloning it the way real
+  .NET does. This avoids needing a full deep-clone virtual dispatch across every node type, and is
+  arguably more useful for a mutable in-memory game-data tree than silent copy-on-add. Verified
+  this doesn't leave dangling state via a dedicated test (`XContainerTests.Add_MovesNodeFromOldParent`).
+- **Documented parser-backend limitation** (inherited, not introduced): `LoadOptions::PreserveWhitespace`
+  only affects text nodes that mix whitespace with real content. The vendored tinyxml2 parser
+  never surfaces pure-whitespace-only runs immediately adjacent to element tags as text nodes at
+  all, in *any* whitespace mode — verified directly against tinyxml2 itself, not an assumption —
+  so the option has no observable effect for that specific case. Same caveat already existed on
+  `XmlDocument::getPreserveWhitespaceProperty()` at the classic-DOM layer; this just inherits it.
+- Added `XmlWriter::WriteProcessingInstruction`/`WriteDocType` (pure additions — tinyxml2's
+  `XMLDeclaration` node already prints as `<?...?>` for any target, and `XMLUnknown` prints raw
+  `<!...>`, so both map cleanly onto existing tinyxml2 node types).
+- 96 new tests (`tests/System/Xml/Linq/XLinqNodeTests.cpp`, plus updates to `XmlTests.cpp`'s
+  `XDocument::Load` test which previously tolerated the stub's fixed output for a missing file and
+  now correctly expects `XmlException`). 10194 → 10647 tests. `plan.sqlite3`: 12 rows
+  `tobedecided` → `ported`.
 
 ## Milestone: plan.sqlite3 has zero `todo`/`''` rows (16199 total rows)
 
@@ -20,12 +103,13 @@ reviewed all four groups on 2026-07-07 (asked via `AskUserQuestion`, not guessed
   a large new external dependency (OpenSSL/mbedTLS) or a hand-rolled, security-critical crypto
   implementation — neither justified for game code. Hash algorithms (MD5/SHA*/HMAC/PBKDF2, no key
   material/confidentiality guarantees to get wrong) remain `ported` and unaffected.
-- **`System.Xml.Linq` (12) — DECIDED: migrate the full `XObject`/`XNode`/`XContainer` hierarchy
-  now.** (`XCData`/`XComment`/`XDocumentType`/`XProcessingInstruction`/`XStreamingElement`/`XText`/
+- **`System.Xml.Linq` (12) — DONE.** Migrated the full `XObject`/`XNode`/`XContainer` hierarchy
+  (`XCData`/`XComment`/`XDocumentType`/`XProcessingInstruction`/`XStreamingElement`/`XText`/
   `XNodeDocumentOrderComparer`/`XNodeEqualityComparer`/`Extensions`, plus migrating `XElement`/
-  `XAttribute`/`XDocument`'s internal storage to a real parent/sibling-tracking model.) See the
-  `f793df0` log entry below for the story of how a failed background fork's partial sketch here was
-  found and handled (deleted, not reused) before this decision was made.
+  `XAttribute`/`XDocument`'s internal storage to a real parent/sibling-tracking model) — see the
+  "Latest session (2026-07-07)" section at the very top of this file for the full writeup. See the
+  `f793df0` log entry below for the story of how an *earlier* failed background fork's partial
+  sketch here was found and handled (deleted, not reused) before this work was done for real.
 - **`System.Xml.XPath` (15) — DECIDED: build `XPathNavigator` over `XmlDocument` only** (not a dual
   abstraction spanning both `XmlDocument` and `XDocument`/Xml.Linq — smaller, more tractable scope).
 - **`System.IO.FileSystemInfo` (1) — DECIDED: retrofit as a real common base for `FileInfo`/
