@@ -1,6 +1,93 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-07 (branch: `feature/work`) — 10711 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-07 (branch: `feature/work`, HEAD `16c823d`) — 10713 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Stabilization phase (started 2026-07-07) — RESUME HERE
+
+With `plan.sqlite3`'s `task` table fully classified (0 `todo`/`''`/`tobedecided` rows across all
+16,199 tracked .NET types), work has shifted to **stabilization**: a separate `ticket` table in the
+same database tracks correctness/documentation/platform audits that aren't "port a .NET type." See
+`README.md`'s "Tracking: plan.sqlite3" section for the full `task` vs. `ticket` distinction, and
+`prompt.md`'s "Stabilization work — the ticket table" section for the exact resume workflow and SQL
+snippets (select next / start / complete / block / needs_user).
+
+**To resume cold, from a fresh context:** read `CLAUDE.md`, this file, and `prompt.md`, then run:
+```bash
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 10;"
+```
+and keep working through tickets in priority order exactly as `prompt.md` describes — no need to
+re-read this whole section first, it's a snapshot of where things stood, not itself the workflow.
+
+### Ticket queue status (as of this checkpoint)
+
+| Status | P0 | P1 | P2 | P3 | Total |
+|---|---|---|---|---|---|
+| `done` | 17 | 1 | 0 | 0 | 18 |
+| `blocked` | 0 | 0 | 100 | 0 | 100 |
+| `todo` | 23 | 614 | 715 | 6 | 1358 |
+| **Total** | **40** | **615** | **815** | **6** | **1476** |
+
+The 100 `blocked` P2 tickets are all "Audit public int usage in `<file>`" — deliberately held, not
+forgotten (see "Known open decision" below). Everything else `todo` is untouched, ready to pick up
+in `ticket_no` order within P0, then P1.
+
+**Next up:** P0 ticket `#26` ("Audit all public headers for POSIX includes") is next in queue order.
+A partial answer already exists from this session's own investigation (see below) — reuse it instead
+of re-auditing from scratch.
+
+### What was completed this session (2026-07-07 stabilization kickoff)
+
+- **#1–3**: repo/DB sanity (branch `feature/work`, remote confirmed, `ticket` table schema verified
+  — **it already existed with all 1,476 rows pre-seeded**, created by a separate process before this
+  session; per the user's explicit instruction, it was preserved and used as-is, not recreated).
+- **#2**: DB backed up to `plan.sqlite3.backup.20260707_190433` before any ticket-driven writes
+  (git-ignored, same as `plan.sqlite3` itself — `*.sqlite3*` pattern in `.gitignore`).
+- **#4, #5, #9, #16**: `README.md` — new "Tracking: plan.sqlite3" section (task vs. ticket tables,
+  all status values, SQL snippets), Doxygen status-comment section clarified as a secondary hint,
+  build instructions fixed to include submodule init + test build/run (previously missing both).
+- **#6**: confirmed/documented (not "fixed" — see the DB's own pre-existing "legacy DB noise" note)
+  that `ignore` and `ignored` are two real, distinct values; `ignored` predates this workflow.
+- **#7, #8**: `plan.md`/`plan_namespaces.md` marked historical, pointing at `plan.sqlite3` instead of
+  a hand-maintained table that was ~3.5 weeks stale (2026-06-13, "3939 tests"). The 311-row namespace
+  table in `plan_namespaces.md` was left intact as historical reference, not regenerated — it's
+  superseded by the live, per-*type* (finer-grained) `task` table.
+- **#10**: this section.
+- **#11**: `vendor/googletest` confirmed a properly initialized git submodule (checked out at
+  `release-1.8.0-3558-g7e2c425d`); `CMakeLists.txt` already has a clear `FATAL_ERROR` fallback
+  message pointing at the fix if it were ever missing — no code change needed.
+- **#12, #13, #14**: full rebuild with tests ON verified (0 errors/0 warnings, 10,713 tests passing);
+  library-only build with `-DSHARP_RUNTIME_BUILD_TESTS=OFF` verified separately in `build-no-tests/`
+  (0 errors/0 warnings).
+- **#15**: ticket-processing SQL snippets added to `prompt.md` and `README.md`.
+- **#18**: `CLAUDE.md`'s stale "6626+ tests passing" floor updated to the real current baseline.
+- **#43 + 100 sub-tickets**: closed the "Audit public int parameters" umbrella ticket using this
+  session's *own, earlier* independent audit (before the ticket queue existed) — see "Known open
+  decision" below. The 100 individual "Audit public int usage in `<file>`" P2 tickets it spawned were
+  marked `blocked` on that same pending decision rather than left `todo` (processing them
+  individually risks a piecemeal, half-converted codebase before the underlying policy question is
+  resolved — see CLAUDE.md rule #10).
+
+Commit: `16c823d` — "Stabilization ticket queue: P0 documentation batch (tickets #4-11,14-16,18,43)".
+
+### Known open decision (unrelated to the ticket queue, predates it)
+
+**`int` vs `SharpRuntime::intcs`**: ~270 call sites across 20+ core files (`DateTime`, `Decimal`,
+`Console`, `IntPtr`, `Range`, `MemoryPool`, `UInt128`, etc.) use plain `int`/`long`/`short` where they
+mirror a .NET `int`/`long` parameter — the codebase's original, pre-existing convention, not a
+regression. Surfaced to the user via `AskUserQuestion` earlier on 2026-07-07; **the user chose to
+defer** ("zatím neřešit" / leave for now) rather than pick a fix. Do not action the 100 blocked
+tickets (or any other file touching this) until that decision changes. The two real options, if it's
+revisited: **(a)** narrow CLAUDE.md rule #7's practical scope to match reality, or **(b)** commission
+an explicit, planned, whole-codebase conversion pass (not opportunistic file-by-file changes).
+
+### Platform verification gap (still open, not part of the ticket queue's own P0 audit yet)
+
+Windows/Emscripten builds have never been CI-tested; `CMakeLists.txt` has `MSVC`/`WIN32` branches but
+they're unverified. No CI pipeline exists in this repository at all. Real integration against the
+downstream CNA/mobile-eggbert projects (the actual purpose of this library) has also not been
+verified from within this repository — that would need to happen in those projects' own repos.
+
+---
 
 ## Latest session (2026-07-07): System.Xml.XPath — the last 13 `tobedecided` items resolved
 

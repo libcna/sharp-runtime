@@ -75,3 +75,42 @@ Then loop back to Step 1 for the next item. **Do not stop between items to ask t
 Only interrupt the autonomous flow for things no reasonable heuristic can resolve safely: a build
 that won't go green after genuine effort, a destructive/irreversible action, or an explicit user
 instruction that conflicts with this file. Otherwise keep processing the queue.
+
+---
+
+## Stabilization work — the `ticket` table
+
+Once `task` has no `todo`/`''` rows left (mechanical porting queue exhausted), stabilization work
+is tracked separately in `plan.sqlite3`'s `ticket` table — **do not confuse it with `task`.**
+`ticket.status` values are `todo`/`doing`/`done`/`blocked`/`needs_user`/`wontfix` (never `ported`,
+never `ignore`). See `README.md`'s "Tracking: plan.sqlite3" section for the full column/status
+reference.
+
+Process one ticket at a time, in priority order (`P0` → `P1` → `P2` → `P3`, then `ticket_no`):
+
+```sql
+SELECT ticket_no, priority, category, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;
+
+UPDATE ticket SET status='doing', updated_at=datetime('now') WHERE ticket_no=<N>;
+-- ... do the work, run the ticket's validation_command or the standard build+test ...
+UPDATE ticket SET status='done', updated_at=datetime('now'),
+  notes=COALESCE(notes,'') || '\nDone: <short summary>' WHERE ticket_no=<N>;
+
+-- Can't proceed for an external/technical reason:
+UPDATE ticket SET status='blocked', updated_at=datetime('now'),
+  notes=COALESCE(notes,'') || '\nBlocked: <exact reason>' WHERE ticket_no=<N>;
+
+-- Genuinely ambiguous architecture decision — do not guess:
+UPDATE ticket SET status='needs_user', updated_at=datetime('now'),
+  notes=COALESCE(notes,'') || '\nNeeds user: <exact question>' WHERE ticket_no=<N>;
+
+-- Progress summary:
+SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;
+```
+
+Same autonomy rule as the `task` workflow above: don't stop between tickets to ask permission. Use
+`blocked`/`needs_user` (with a precise reason in `notes`) instead of guessing on a genuine
+architecture question, and keep going to the next ticket rather than getting stuck. Commit
+ticket-driven code/doc changes in focused, ticket-scoped commits (batching only when several
+tickets in the same run touch the same file for the same reason).

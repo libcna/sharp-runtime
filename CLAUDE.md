@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **6626+ tests passing.** `./build/SharpRuntimeTests` must show no failures.
+2. **10711+ tests passing.** `./build/SharpRuntimeTests` must show no failures. (Baseline verified 2026-07-07 — this floor should be raised as new tests are added, never lowered.)
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`.
