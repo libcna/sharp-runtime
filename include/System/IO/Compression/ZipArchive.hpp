@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "System/IO/Stream.hpp"
+#include "System/IO/Compression/CompressionLevel.hpp"
 
 namespace System::IO::Compression {
 
@@ -133,9 +134,11 @@ namespace System::IO::Compression {
          * Only valid in Create or Update mode.
          *
          * @param entryName  Path to use for the entry within the archive.
+         * @param compressionLevel Compression level to use when the entry is flushed on Dispose().
          * @return A @c ZipArchiveEntry whose @c Open() stream accepts the entry data.
          */
-        ZipArchiveEntry CreateEntry(const std::string& entryName);
+        ZipArchiveEntry CreateEntry(const std::string& entryName,
+                                    CompressionLevel compressionLevel = CompressionLevel::Optimal);
 
         /**
          * @brief Finalises and closes the archive.

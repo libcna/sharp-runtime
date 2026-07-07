@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 #include "System/Globalization/GregorianCalendarTypes.hpp"
 
@@ -18,6 +19,13 @@ namespace System::Globalization {
  */
 class GregorianCalendar : public Calendar {
     GregorianCalendarTypes type_;
+
+    static GregorianCalendarTypes ValidateType(GregorianCalendarTypes type) {
+        if (type < GregorianCalendarTypes::Localized || type > GregorianCalendarTypes::TransliteratedFrench) {
+            throw System::ArgumentOutOfRangeException("type");
+        }
+        return type;
+    }
 
 public:
     static constexpr int ADEra   = 1;    ///< Anno Domini era identifier.
@@ -36,8 +44,9 @@ public:
      *
      * C++ counterpart of .NET GregorianCalendar(GregorianCalendarTypes).
      * @param type The Gregorian calendar type variant.
+     * @throws System::ArgumentOutOfRangeException if @p type is outside Localized..TransliteratedFrench.
      */
-    explicit GregorianCalendar(GregorianCalendarTypes type) : type_(type) {}
+    explicit GregorianCalendar(GregorianCalendarTypes type) : type_(ValidateType(type)) {}
 
     /**
      * @brief Gets the Gregorian calendar type variant.
@@ -48,12 +57,35 @@ public:
     [[nodiscard]] GregorianCalendarTypes getCalendarTypeProperty() const { return type_; }
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET GregorianCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Sets the Gregorian calendar type variant.
      *
      * C++ counterpart of .NET GregorianCalendar.CalendarType setter.
      * @param t The new GregorianCalendarTypes value.
+     * @throws System::InvalidOperationException if this instance is read-only.
+     * @throws System::ArgumentOutOfRangeException if @p t is outside Localized..TransliteratedFrench.
      */
-    void setCalendarTypeProperty(GregorianCalendarTypes t) { type_ = t; }
+    void setCalendarTypeProperty(GregorianCalendarTypes t) {
+        VerifyWritable();
+        type_ = ValidateType(t);
+    }
+
+    /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET GregorianCalendar.Eras.
+     * @return A vector containing {ADEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {ADEra}; }
 
     /**
      * @brief Returns the era for the given DateTime.

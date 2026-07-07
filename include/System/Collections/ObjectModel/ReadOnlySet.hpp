@@ -5,6 +5,7 @@
 #include <memory>
 #include <unordered_set>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 
 namespace System::Collections::ObjectModel {
 
@@ -27,9 +28,13 @@ public:
      *
      * C++ counterpart of .NET ReadOnlySet<T>(ISet<T>).
      * @param set A shared pointer to the underlying unordered_set.
+     * @throws System::ArgumentNullException if @p set is null.
      */
     explicit ReadOnlySet(std::shared_ptr<std::unordered_set<T>> set)
-        : set_(std::move(set)) {}
+        : set_(std::move(set)) {
+        if (!set_)
+            throw System::ArgumentNullException("set");
+    }
 
     /**
      * @brief Gets an empty ReadOnlySet instance.

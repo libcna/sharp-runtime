@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Globalization/HijriCalendar.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <stdexcept>
 
 namespace System::Globalization {
@@ -90,12 +91,12 @@ int HijriCalendar::GetDayOfYear(const System::DateTime& time) const {
 
 bool HijriCalendar::IsLeapYear(int year, int /*era*/) const {
     if (year < 1 || year > MaxCalendarYear)
-        throw std::out_of_range("HijriCalendar year out of range.");
+        throw System::ArgumentOutOfRangeException("year");
     return ((year * 11) + 14) % 30 < 11;
 }
 
 int HijriCalendar::GetDaysInMonth(int year, int month, int era) const {
-    if (month < 1 || month > 12) throw std::out_of_range("month");
+    if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
     if (month == 12) return IsLeapYear(year, era) ? 30 : 29;
     return (month % 2 == 1) ? 30 : 29;
 }
@@ -106,7 +107,7 @@ int HijriCalendar::GetDaysInYear(int year, int era) const {
 
 System::DateTime HijriCalendar::AddMonths(const System::DateTime& time, int months) const {
     if (months < -120000 || months > 120000)
-        throw std::out_of_range("months out of range");
+        throw System::ArgumentOutOfRangeException("months");
     int y = GetYear(time), m = GetMonth(time), d = GetDayOfMonth(time);
     int i = m - 1 + months;
     if (i >= 0) { m = i % 12 + 1; y += i / 12; }

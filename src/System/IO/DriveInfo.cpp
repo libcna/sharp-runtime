@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/DriveInfo.hpp"
 
+#include <filesystem>
+
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -14,6 +16,24 @@
 #endif
 
 namespace System::IO {
+
+long long DriveInfo::getAvailableFreeSpaceProperty() const {
+    std::error_code ec;
+    auto info = std::filesystem::space(name_, ec);
+    return ec ? 0LL : static_cast<long long>(info.available);
+}
+
+long long DriveInfo::getTotalFreeSpaceProperty() const {
+    std::error_code ec;
+    auto info = std::filesystem::space(name_, ec);
+    return ec ? 0LL : static_cast<long long>(info.free);
+}
+
+long long DriveInfo::getTotalSizeProperty() const {
+    std::error_code ec;
+    auto info = std::filesystem::space(name_, ec);
+    return ec ? 0LL : static_cast<long long>(info.capacity);
+}
 
 std::vector<DriveInfo> DriveInfo::GetDrives() {
 #if defined(_WIN32)

@@ -7,6 +7,7 @@
 //   GregorianCalendar:      constructors, CalendarType, GetEra, IsLeapYear, AddMonths, AddYears
 //   HebrewCalendar:         IsLeapYear, GetMonthsInYear, GetDaysInYear, GetYear/Month/Day
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/GregorianCalendarTypes.hpp"
 #include "System/Globalization/GregorianCalendar.hpp"
 #include "System/Globalization/HebrewCalendar.hpp"
@@ -47,6 +48,20 @@ TEST(GregorianCalendarBatch29Test, SetCalendarType) {
     GregorianCalendar gc;
     gc.setCalendarTypeProperty(GregorianCalendarTypes::USEnglish);
     EXPECT_EQ(gc.getCalendarTypeProperty(), GregorianCalendarTypes::USEnglish);
+}
+
+TEST(GregorianCalendarBatch29Test, Ctor_InvalidType_Throws) {
+    EXPECT_THROW(GregorianCalendar(static_cast<GregorianCalendarTypes>(0)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(GregorianCalendar(static_cast<GregorianCalendarTypes>(13)),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(GregorianCalendarBatch29Test, Eras_ContainsADEra) {
+    GregorianCalendar gc;
+    auto eras = gc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], GregorianCalendar::ADEra);
 }
 
 TEST(GregorianCalendarBatch29Test, GetEra) {
@@ -125,6 +140,23 @@ TEST(HebrewCalendarBatch29Test, HebrewEraConstant) {
 TEST(HebrewCalendarBatch29Test, GetEra) {
     HebrewCalendar hc;
     EXPECT_EQ(hc.GetEra(System::DateTime(2024, 1, 1)), HebrewCalendar::HebrewEra);
+}
+
+TEST(HebrewCalendarBatch29Test, Eras_ContainsHebrewEra) {
+    HebrewCalendar hc;
+    auto eras = hc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], HebrewCalendar::HebrewEra);
+}
+
+TEST(HebrewCalendarBatch29Test, IsLeapYear_InvalidEra_ThrowsArgumentOutOfRange) {
+    HebrewCalendar hc;
+    EXPECT_THROW(hc.IsLeapYear(5784, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(HebrewCalendarBatch29Test, IsLeapYear_YearOutOfRange_ThrowsArgumentOutOfRange) {
+    HebrewCalendar hc;
+    EXPECT_THROW(hc.IsLeapYear(1), System::ArgumentOutOfRangeException);
 }
 
 TEST(HebrewCalendarBatch29Test, IsLeapYear_Known) {

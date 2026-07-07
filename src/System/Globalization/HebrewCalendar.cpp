@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Globalization/HebrewCalendar.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include <stdexcept>
 #include <algorithm>
@@ -172,7 +173,7 @@ static const unsigned char s_lunarMonthLen[7][14] = {
 int HebrewCalendar::getLunarMonthDay(int gregorianYear, DateBuffer& lunarDate) {
     int index = gregorianYear - FirstGregorianTableYear;
     if (index < 0 || index > (LastGregorianTableYear - FirstGregorianTableYear))
-        throw std::out_of_range("HebrewCalendar: Gregorian year out of supported range.");
+        throw System::ArgumentOutOfRangeException("year");
 
     lunarDate.day   = s_hebrewTable[index * 2];
     int yearType    = s_hebrewTable[index * 2 + 1];
@@ -191,9 +192,9 @@ int HebrewCalendar::getLunarMonthDay(int gregorianYear, DateBuffer& lunarDate) {
 
 int HebrewCalendar::getHebrewYearType(int year, int era) {
     if (era != CurrentEra && era != HebrewEra)
-        throw std::out_of_range("HebrewCalendar: invalid era.");
+        throw System::ArgumentOutOfRangeException("era");
     if (year < MinHebrewYear || year > MaxHebrewYear)
-        throw std::out_of_range("HebrewCalendar year out of supported range (5343–5999).");
+        throw System::ArgumentOutOfRangeException("year");
     return s_hebrewTable[(year - HebrewYearOf1AD - FirstGregorianTableYear) * 2 + 1];
 }
 
@@ -327,9 +328,9 @@ int HebrewCalendar::GetDayOfYear(const System::DateTime& time) const {
 
 bool HebrewCalendar::IsLeapYear(int year, int era) const {
     if (era != CurrentEra && era != HebrewEra)
-        throw std::out_of_range("HebrewCalendar: invalid era.");
+        throw System::ArgumentOutOfRangeException("era");
     if (year < MinHebrewYear || year > MaxHebrewYear)
-        throw std::out_of_range("HebrewCalendar year out of supported range (5343–5999).");
+        throw System::ArgumentOutOfRangeException("year");
     return ((7LL * year + 1) % 19) < 7;
 }
 
@@ -340,9 +341,9 @@ int HebrewCalendar::GetMonthsInYear(int year, int era) const {
 int HebrewCalendar::GetDaysInMonth(int year, int month, int era) const {
     int yearType = getHebrewYearType(year, era);
     int maxMonth = IsLeapYear(year, era) ? 13 : 12;
-    if (month < 1 || month > maxMonth) throw std::out_of_range("month");
+    if (month < 1 || month > maxMonth) throw System::ArgumentOutOfRangeException("month");
     int days = s_lunarMonthLen[yearType][month];
-    if (days == 0) throw std::out_of_range("month");
+    if (days == 0) throw System::ArgumentOutOfRangeException("month");
     return days;
 }
 

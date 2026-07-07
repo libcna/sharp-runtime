@@ -5,16 +5,28 @@
 
 #include <cstring>
 
+#include "System/ArgumentNullException.hpp"
+#include "System/ObjectDisposedException.hpp"
+
 namespace System::IO {
 
     BinaryWriter::BinaryWriter(Stream* stream, bool leaveOpen)
-        : stream_(stream), leaveOpen_(leaveOpen) {}
+        : stream_(stream), leaveOpen_(leaveOpen) {
+        if (!stream_)
+            throw System::ArgumentNullException("stream");
+    }
 
     BinaryWriter::~BinaryWriter() {
-        if (!leaveOpen_ && stream_) stream_->Close();
+        if (!disposed_ && !leaveOpen_ && stream_) stream_->Close();
+    }
+
+    void BinaryWriter::ThrowIfDisposed() const {
+        if (disposed_)
+            throw System::ObjectDisposedException("BinaryWriter", "Cannot access a closed file.");
     }
 
     void BinaryWriter::WriteBytes(const bytecs* buf, intcs count) {
+        ThrowIfDisposed();
         stream_->Write(buf, 0, count);
     }
 
@@ -65,23 +77,35 @@ namespace System::IO {
 
     void BinaryWriter::Write(const std::string& value) {
         // 7-bit encoded length (matching BinaryReader::ReadString)
-        uint32_t len = static_cast<uint32_t>(value.size());
-        while (len >= 0x80) {
-            bytecs b = static_cast<bytecs>((len & 0x7F) | 0x80);
-            WriteBytes(&b, 1);
-            len >>= 7;
-        }
-        bytecs b = static_cast<bytecs>(len);
-        WriteBytes(&b, 1);
+        Write7BitEncodedInt(static_cast<intcs>(value.size()));
         WriteBytes(reinterpret_cast<const bytecs*>(value.data()),
                    static_cast<intcs>(value.size()));
     }
 
+    void BinaryWriter::Write7BitEncodedInt(intcs value) {
+        uint32_t uValue = static_cast<uint32_t>(value);
+        while (uValue > 0x7Fu) {
+            Write(static_cast<bytecs>(uValue | ~0x7Fu));
+            uValue >>= 7;
+        }
+        Write(static_cast<bytecs>(uValue));
+    }
+
     void BinaryWriter::Write(const bytecs* buffer, intcs offset, intcs count) {
+        ThrowIfDisposed();
         stream_->Write(buffer, offset, count);
     }
 
-    void BinaryWriter::Flush() { stream_->Flush(); }
-    void BinaryWriter::Close() { stream_->Close(); }
+    void BinaryWriter::Flush() {
+        ThrowIfDisposed();
+        stream_->Flush();
+    }
+
+    void BinaryWriter::Close() {
+        if (!disposed_) {
+            if (!leaveOpen_ && stream_) stream_->Close();
+            disposed_ = true;
+        }
+    }
 
 } // namespace System::IO

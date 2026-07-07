@@ -20,11 +20,8 @@ namespace System::Xml::Linq {
         std::vector<std::shared_ptr<XElement>> children_;
 
     public:
-        /** Constructs an empty element with the given XName. */
+        /** Constructs an empty element with the given XName (plain strings convert implicitly via XName). */
         explicit XElement(const XName& name) : name_(name) {}
-
-        /** Constructs an empty element with a plain string name. */
-        explicit XElement(const std::string& name) : name_(name) {}
 
         /** Constructs an element with an XName and an initial text value. */
         XElement(const XName& name, const std::string& value) : name_(name), value_(value) {}
@@ -53,11 +50,6 @@ namespace System::Xml::Linq {
             return nullptr;
         }
 
-        /** Returns the first attribute matching the plain string @p name, or nullptr. */
-        [[nodiscard]] std::shared_ptr<XAttribute> Attribute(const std::string& name) const {
-            return Attribute(XName(name));
-        }
-
         /** @return All attributes of this element. */
         [[nodiscard]] const std::vector<std::shared_ptr<XAttribute>>& getAttributesProperty() const { return attributes_; }
 
@@ -70,11 +62,6 @@ namespace System::Xml::Linq {
             return nullptr;
         }
 
-        /** Returns the first direct child element matching the plain string @p name, or nullptr. */
-        [[nodiscard]] std::shared_ptr<XElement> Element(const std::string& name) const {
-            return Element(XName(name));
-        }
-
         /** @return All direct child elements. */
         [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements() const { return children_; }
 
@@ -84,11 +71,6 @@ namespace System::Xml::Linq {
             for (auto& c : children_)
                 if (c->getNameProperty() == name) result.push_back(c);
             return result;
-        }
-
-        /** Returns all direct child elements whose name matches the plain string @p name. */
-        [[nodiscard]] std::vector<std::shared_ptr<XElement>> Elements(const std::string& name) const {
-            return Elements(XName(name));
         }
 
         /** Returns all descendant elements (recursive) whose name matches @p name. */

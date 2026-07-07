@@ -200,7 +200,7 @@ public:
      * Stub — always returns the US region.
      * @return A const reference to the US RegionInfo instance.
      */
-    static const RegionInfo& CurrentRegion() {
+    static const RegionInfo& getCurrentRegionProperty() {
         static RegionInfo r("US");
         return r;
     }

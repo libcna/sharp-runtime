@@ -5,9 +5,12 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IDisposable.hpp"
 
 namespace System::Threading {
+
+    using SharpRuntime::intcs;
 
     /** A lighter-weight ManualResetEvent that avoids OS handles for short waits. */
     class ManualResetEventSlim : public System::IDisposable {
@@ -38,7 +41,7 @@ namespace System::Threading {
         }
 
         /** Blocks until the event is set or the timeout elapses; returns true if set. */
-        bool Wait(int millisecondsTimeout) {
+        bool Wait(intcs millisecondsTimeout) {
             if (set_.load(std::memory_order_acquire)) return true;
             std::unique_lock<std::mutex> lock(mtx_);
             return cv_.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout),

@@ -5,7 +5,11 @@
 #include <bit>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -25,31 +29,31 @@ struct BitVector32 {
      * Created via BitVector32::CreateSection.
      */
     struct Section {
-        uint16_t mask_;    ///< Bit mask for this section.
-        uint16_t offset_;  ///< Bit offset of this section within the 32-bit value.
+        SharpRuntime::shortcs mask_;    ///< Bit mask for this section.
+        SharpRuntime::shortcs offset_;  ///< Bit offset of this section within the 32-bit value.
 
         /**
          * @brief Constructs a Section with the given mask and bit offset.
          * @param mask   The bit mask for the section.
          * @param offset The bit offset of the section.
          */
-        Section(uint16_t mask, uint16_t offset) : mask_(mask), offset_(offset) {}
+        Section(SharpRuntime::shortcs mask, SharpRuntime::shortcs offset) : mask_(mask), offset_(offset) {}
 
         /**
          * @brief Gets the bit mask for this section.
          *
          * C++ counterpart of .NET BitVector32.Section.Mask.
-         * @return The mask as a 16-bit value (equivalent to .NET short).
+         * @return The mask (equivalent to .NET short).
          */
-        [[nodiscard]] int getMaskProperty()   const { return mask_; }
+        [[nodiscard]] SharpRuntime::shortcs getMaskProperty()   const { return mask_; }
 
         /**
          * @brief Gets the bit offset of this section within the 32-bit value.
          *
          * C++ counterpart of .NET BitVector32.Section.Offset.
-         * @return The offset as a 16-bit value (equivalent to .NET short).
+         * @return The offset (equivalent to .NET short).
          */
-        [[nodiscard]] int getOffsetProperty() const { return offset_; }
+        [[nodiscard]] SharpRuntime::shortcs getOffsetProperty() const { return offset_; }
 
         /**
          * @brief Determines whether this Section equals another Section.
@@ -68,8 +72,8 @@ struct BitVector32 {
          * C++ counterpart of .NET BitVector32.Section.GetHashCode().
          * @return A hash based on mask and offset.
          */
-        [[nodiscard]] int GetHashCode() const {
-            return static_cast<int>(mask_) ^ (static_cast<int>(offset_) << 16);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return static_cast<SharpRuntime::intcs>(mask_) ^ (static_cast<SharpRuntime::intcs>(offset_) << 16);
         }
 
         /**
@@ -125,7 +129,7 @@ public:
      * C++ counterpart of .NET BitVector32(int).
      * @param data The initial 32-bit value.
      */
-    explicit BitVector32(int data) : data_(static_cast<uint32_t>(data)) {}
+    explicit BitVector32(SharpRuntime::intcs data) : data_(static_cast<uint32_t>(data)) {}
 
     /** @brief Copy-constructs a BitVector32. */
     BitVector32(const BitVector32&) = default;
@@ -139,7 +143,7 @@ public:
      * C++ counterpart of .NET BitVector32.Data.
      * @return The raw 32-bit integer data.
      */
-    [[nodiscard]] uint32_t getDataProperty() const { return data_; }
+    [[nodiscard]] SharpRuntime::intcs getDataProperty() const { return static_cast<SharpRuntime::intcs>(data_); }
 
     /**
      * @brief Returns true if all bits specified by the bit mask @p bit are set.
@@ -148,7 +152,7 @@ public:
      * @param bit A bitmask specifying the bit(s) to test.
      * @return true if all specified bits are set.
      */
-    [[nodiscard]] bool operator[](int bit) const {
+    [[nodiscard]] bool operator[](SharpRuntime::intcs bit) const {
         return (data_ & static_cast<uint32_t>(bit)) == static_cast<uint32_t>(bit);
     }
 
@@ -159,7 +163,7 @@ public:
      * @param bit   A bitmask specifying the bit(s) to modify.
      * @param value true to set the bits; false to clear them.
      */
-    void set(int bit, bool value) {
+    void set(SharpRuntime::intcs bit, bool value) {
         if (value) data_ |= static_cast<uint32_t>(bit);
         else       data_ &= ~static_cast<uint32_t>(bit);
     }
@@ -171,8 +175,8 @@ public:
      * @param section The section describing the bit range.
      * @return The integer value extracted from the section.
      */
-    [[nodiscard]] int operator[](const Section& section) const {
-        return static_cast<int>((data_ >> section.offset_) & section.mask_);
+    [[nodiscard]] SharpRuntime::intcs operator[](const Section& section) const {
+        return static_cast<SharpRuntime::intcs>((data_ >> section.offset_) & static_cast<uint16_t>(section.mask_));
     }
 
     /**
@@ -182,9 +186,9 @@ public:
      * @param section The section describing the bit range.
      * @param value   The integer value to store (must fit within the section's mask).
      */
-    void set(const Section& section, int value) {
-        data_ = (data_ & ~(static_cast<uint32_t>(section.mask_) << section.offset_))
-              | ((static_cast<uint32_t>(value) & section.mask_) << section.offset_);
+    void set(const Section& section, SharpRuntime::intcs value) {
+        data_ = (data_ & ~(static_cast<uint32_t>(static_cast<uint16_t>(section.mask_)) << section.offset_))
+              | ((static_cast<uint32_t>(value) & static_cast<uint16_t>(section.mask_)) << section.offset_);
     }
 
     /**
@@ -193,7 +197,7 @@ public:
      * C++ counterpart of .NET BitVector32.CreateMask().
      * @return The integer 1.
      */
-    static int CreateMask() { return CreateMask(0); }
+    static SharpRuntime::intcs CreateMask() { return CreateMask(0); }
 
     /**
      * @brief Creates the next bit mask by shifting @p previous one bit to the left.
@@ -201,37 +205,49 @@ public:
      * C++ counterpart of .NET BitVector32.CreateMask(int).
      * @param previous The previous mask; pass 0 to get the first mask.
      * @return The next mask in the sequence.
+     * @throws System::InvalidOperationException if @p previous is already the last possible
+     *         mask (@c int32_t minimum), since shifting further would overflow.
      */
-    static int CreateMask(int previous) {
+    static SharpRuntime::intcs CreateMask(SharpRuntime::intcs previous) {
         if (previous == 0) return 1;
-        return static_cast<int>(static_cast<unsigned>(previous) << 1);
+        if (previous == std::numeric_limits<SharpRuntime::intcs>::min())
+            throw System::InvalidOperationException("Bit vector is full.");
+        return static_cast<SharpRuntime::intcs>(static_cast<uint32_t>(previous) << 1);
     }
 
     /**
      * @brief Creates a Section that can hold a value in the range [0, maxValue].
      *
      * C++ counterpart of .NET BitVector32.CreateSection(short).
-     * @param maxValue The maximum value the section must be able to hold.
+     * @param maxValue The maximum value the section must be able to hold; must be positive.
      * @return A Section starting at bit 0.
+     * @throws System::ArgumentOutOfRangeException if @p maxValue is not positive.
      */
-    static Section CreateSection(uint16_t maxValue) { return CreateSection(maxValue, Section(0, 0)); }
+    static Section CreateSection(SharpRuntime::shortcs maxValue) { return CreateSection(maxValue, Section(0, 0)); }
 
     /**
      * @brief Creates a Section following @p previous that can hold a value in [0, maxValue].
      *
      * C++ counterpart of .NET BitVector32.CreateSection(short, BitVector32.Section).
-     * @param maxValue The maximum value the section must be able to hold.
+     * @param maxValue The maximum value the section must be able to hold; must be positive.
      * @param previous The preceding Section; the new section starts just after it.
      * @return A new Section positioned after @p previous.
+     * @throws System::ArgumentOutOfRangeException if @p maxValue is not positive.
+     * @throws System::InvalidOperationException if the new section would start at or past bit 32.
      */
-    static Section CreateSection(uint16_t maxValue, const Section& previous) {
-        uint16_t offset = (previous.mask_ != 0)
-            ? static_cast<uint16_t>(previous.offset_ + std::popcount(static_cast<uint32_t>(previous.mask_)))
-            : 0;
+    static Section CreateSection(SharpRuntime::shortcs maxValue, const Section& previous) {
+        if (maxValue <= 0)
+            throw System::ArgumentOutOfRangeException("maxValue");
+
+        auto offset = static_cast<SharpRuntime::shortcs>(
+            previous.offset_ + std::popcount(static_cast<uint16_t>(previous.mask_)));
+        if (offset >= 32)
+            throw System::InvalidOperationException("Bit vector is full.");
+
         uint16_t mask = 0;
-        uint16_t v = maxValue;
+        auto v = static_cast<uint16_t>(maxValue);
         while (v > 0) { mask = static_cast<uint16_t>((mask << 1) | 1); v >>= 1; }
-        return Section(mask, offset);
+        return Section(static_cast<SharpRuntime::shortcs>(mask), offset);
     }
 
     /**
@@ -249,7 +265,7 @@ public:
      * C++ counterpart of .NET BitVector32.GetHashCode().
      * @return The raw 32-bit data cast to int.
      */
-    [[nodiscard]] int GetHashCode() const { return static_cast<int>(data_); }
+    [[nodiscard]] SharpRuntime::intcs GetHashCode() const { return static_cast<SharpRuntime::intcs>(data_); }
 
     /**
      * @brief Returns true if both BitVector32 values have identical bit patterns.

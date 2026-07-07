@@ -2,35 +2,55 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Text::Unicode {
 
-    /** Represents a contiguous range of Unicode code points in the BMP. */
+    using SharpRuntime::intcs;
+
+    /**
+     * @brief Represents a contiguous range of Unicode code points.
+     *
+     * C++ counterpart of .NET System.Text.Unicode.UnicodeRange.
+     *
+     * @note Currently only the Basic Multilingual Plane is supported (matches .NET).
+     */
     class UnicodeRange {
-        int firstCodePoint_;
-        int length_;
+        intcs firstCodePoint_;
+        intcs length_;
 
     public:
-        /** Constructs a UnicodeRange starting at firstCodePoint with the given length; throws if out of BMP bounds. */
-        UnicodeRange(int firstCodePoint, int length)
+        /**
+         * @brief Creates a new UnicodeRange.
+         * @param firstCodePoint The first code point in the range.
+         * @param length The number of code points in the range.
+         */
+        UnicodeRange(intcs firstCodePoint, intcs length)
             : firstCodePoint_(firstCodePoint), length_(length) {
+            // Parameter checking: the first code point and last code point must
+            // lie within the BMP. See https://unicode.org/faq/blocks_ranges.html for more info.
             if (firstCodePoint < 0 || firstCodePoint > 0xFFFF)
-                throw std::out_of_range("firstCodePoint must be in BMP (0x0000–0xFFFF).");
+                throw System::ArgumentOutOfRangeException("firstCodePoint");
             if (length < 0 || static_cast<long long>(firstCodePoint) + length > 0x10000)
-                throw std::out_of_range("length out of range.");
+                throw System::ArgumentOutOfRangeException("length");
         }
 
-        /** Gets the first code point in the range. */
-        [[nodiscard]] int getFirstCodePointProperty() const { return firstCodePoint_; }
-        /** Gets the number of code points in the range. */
-        [[nodiscard]] int getLengthProperty()         const { return length_; }
+        /** @brief The first code point in this range. */
+        [[nodiscard]] intcs getFirstCodePointProperty() const { return firstCodePoint_; }
+        /** @brief The number of code points in this range. */
+        [[nodiscard]] intcs getLengthProperty()         const { return length_; }
 
-        /** Creates a UnicodeRange spanning from firstCharacter to lastCharacter (inclusive). */
+        /**
+         * @brief Creates a new UnicodeRange from a span of characters.
+         * @param firstCharacter The first character in the range.
+         * @param lastCharacter The last character in the range.
+         * @return The UnicodeRange representing this span.
+         */
         static UnicodeRange Create(char16_t firstCharacter, char16_t lastCharacter) {
-            if (firstCharacter > lastCharacter)
-                throw std::invalid_argument("firstCharacter must be <= lastCharacter.");
-            return UnicodeRange(firstCharacter, lastCharacter - firstCharacter + 1);
+            if (lastCharacter < firstCharacter)
+                throw System::ArgumentOutOfRangeException("lastCharacter");
+            return UnicodeRange(firstCharacter, 1 + (lastCharacter - firstCharacter));
         }
     };
 

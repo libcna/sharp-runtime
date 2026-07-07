@@ -2,11 +2,14 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -18,21 +21,34 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Specialized.OrderedDictionary.
  * Keys and values are std::string (non-generic, mirroring the .NET non-generic version).
  * Provides O(1) key lookup via an internal index map and O(1) index access via parallel vectors.
+ *
+ * Storage is held behind a shared_ptr so that AsReadOnly() can return a live, read-only *view*
+ * of the same data (matching .NET, whose AsReadOnly() wraps the same underlying ArrayList/
+ * Hashtable instances) rather than either copying the data or — as a previous version of this
+ * header did — flipping the read-only flag on the original instance itself.
  */
 class OrderedDictionary {
-    std::vector<std::string>               keys_;
-    std::vector<std::string>               values_;
-    std::unordered_map<std::string, intcs> index_;
-    bool                                   readOnly_ = false;
+    struct Storage {
+        std::vector<std::string>               keys;
+        std::vector<std::string>               values;
+        std::unordered_map<std::string, intcs> index;
+    };
+
+    std::shared_ptr<Storage> storage_;
+    bool                     readOnly_ = false;
+
+    OrderedDictionary(std::shared_ptr<Storage> storage, bool readOnly)
+        : storage_(std::move(storage)), readOnly_(readOnly) {}
 
     void rebuildIndex() {
-        index_.clear();
-        for (intcs i = 0; i < static_cast<intcs>(keys_.size()); ++i)
-            index_[keys_[static_cast<size_t>(i)]] = i;
+        storage_->index.clear();
+        for (intcs i = 0; i < static_cast<intcs>(storage_->keys.size()); ++i)
+            storage_->index[storage_->keys[static_cast<size_t>(i)]] = i;
     }
 
     void checkMutable() const {
-        if (readOnly_) throw std::runtime_error("Collection is read-only.");
+        if (readOnly_)
+            throw System::NotSupportedException("Collection is read-only.");
     }
 
 public:
@@ -41,7 +57,7 @@ public:
      *
      * C++ counterpart of .NET OrderedDictionary().
      */
-    OrderedDictionary() = default;
+    OrderedDictionary() : storage_(std::make_shared<Storage>()) {}
 
     /**
      * @brief Constructs an empty OrderedDictionary with an optional comparer.
@@ -49,7 +65,7 @@ public:
      * C++ counterpart of .NET OrderedDictionary(IEqualityComparer).
      * The comparer is accepted for API compatibility but ignored.
      */
-    explicit OrderedDictionary(std::nullptr_t /*comparer*/) {}
+    explicit OrderedDictionary(std::nullptr_t /*comparer*/) : storage_(std::make_shared<Storage>()) {}
 
     /**
      * @brief Constructs an empty OrderedDictionary with an initial capacity hint.
@@ -57,7 +73,7 @@ public:
      * C++ counterpart of .NET OrderedDictionary(int).
      * @param capacity Initial capacity hint; ignored in this implementation.
      */
-    explicit OrderedDictionary(int /*capacity*/) {}
+    explicit OrderedDictionary(int /*capacity*/) : storage_(std::make_shared<Storage>()) {}
 
     /**
      * @brief Constructs an empty OrderedDictionary with a capacity hint and optional comparer.
@@ -66,7 +82,7 @@ public:
      * @param capacity  Initial capacity hint; ignored.
      * @param comparer  Equality comparer; accepted for API compatibility but ignored.
      */
-    OrderedDictionary(int /*capacity*/, std::nullptr_t /*comparer*/) {}
+    OrderedDictionary(int /*capacity*/, std::nullptr_t /*comparer*/) : storage_(std::make_shared<Storage>()) {}
 
     /**
      * @brief Gets the number of key/value pairs in the dictionary.
@@ -74,13 +90,13 @@ public:
      * C++ counterpart of .NET OrderedDictionary.Count.
      * @return The number of entries.
      */
-    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(keys_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(storage_->keys.size()); }
 
     /**
      * @brief Gets a value indicating whether the dictionary is read-only.
      *
      * C++ counterpart of .NET OrderedDictionary.IsReadOnly.
-     * @return true after AsReadOnly() has been called; otherwise false.
+     * @return true if this instance was obtained via AsReadOnly(); otherwise false.
      */
     [[nodiscard]] bool getIsReadOnlyProperty() const { return readOnly_; }
 
@@ -88,9 +104,9 @@ public:
      * @brief Gets a value indicating whether the dictionary has a fixed size.
      *
      * C++ counterpart of .NET IDictionary.IsFixedSize (explicit implementation).
-     * @return Always false — this dictionary can grow.
+     * @return true for a read-only view; otherwise false (this dictionary can grow).
      */
-    [[nodiscard]] bool getIsFixedSizeProperty() const { return false; }
+    [[nodiscard]] bool getIsFixedSizeProperty() const { return readOnly_; }
 
     /**
      * @brief Gets a value indicating whether access to the dictionary is thread-safe.
@@ -114,7 +130,7 @@ public:
      * C++ counterpart of .NET OrderedDictionary.Keys.
      * @return A const reference to the ordered key vector.
      */
-    [[nodiscard]] const std::vector<std::string>& getKeysProperty() const { return keys_; }
+    [[nodiscard]] const std::vector<std::string>& getKeysProperty() const { return storage_->keys; }
 
     /**
      * @brief Gets a vector of all values in insertion order.
@@ -122,19 +138,17 @@ public:
      * C++ counterpart of .NET OrderedDictionary.Values.
      * @return A const reference to the ordered value vector.
      */
-    [[nodiscard]] const std::vector<std::string>& getValuesProperty() const { return values_; }
+    [[nodiscard]] const std::vector<std::string>& getValuesProperty() const { return storage_->values; }
 
     /**
-     * @brief Returns a read-only wrapper for this dictionary.
+     * @brief Returns a read-only view sharing this dictionary's underlying storage.
      *
      * C++ counterpart of .NET OrderedDictionary.AsReadOnly().
-     * Marks this instance as read-only and returns a reference to it.
-     * @return A reference to this instance in read-only mode.
+     * The returned instance is a live view: further mutations to @c this are visible through it.
+     * @c this itself is left fully mutable — only the returned wrapper is read-only.
+     * @return A new OrderedDictionary wrapping the same storage in read-only mode.
      */
-    OrderedDictionary& AsReadOnly() {
-        readOnly_ = true;
-        return *this;
-    }
+    [[nodiscard]] OrderedDictionary AsReadOnly() const { return OrderedDictionary(storage_, true); }
 
     /**
      * @brief Adds a key/value pair at the end of the dictionary.
@@ -142,32 +156,37 @@ public:
      * C++ counterpart of .NET OrderedDictionary.Add(object, object).
      * @param key   The key to add.
      * @param value The value to associate with @p key.
-     * @throws std::runtime_error if the dictionary is read-only.
-     * @throws std::invalid_argument if @p key already exists.
+     * @throws System::NotSupportedException if the dictionary is read-only.
+     * @throws System::ArgumentException if @p key already exists.
      */
     void Add(const std::string& key, const std::string& value) {
         checkMutable();
-        if (index_.count(key)) throw std::invalid_argument("Key already exists: " + key);
-        index_[key] = static_cast<intcs>(keys_.size());
-        keys_.push_back(key);
-        values_.push_back(value);
+        if (storage_->index.count(key))
+            throw System::ArgumentException("An item with the same key has already been added.");
+        storage_->index[key] = static_cast<intcs>(storage_->keys.size());
+        storage_->keys.push_back(key);
+        storage_->values.push_back(value);
     }
 
     /**
      * @brief Inserts a key/value pair at the specified zero-based index.
      *
      * C++ counterpart of .NET OrderedDictionary.Insert(int, object, object).
-     * @param index The position at which to insert.
+     * @param index The position at which to insert; may equal Count to append.
      * @param key   The key to insert.
      * @param value The value to associate with @p key.
-     * @throws std::runtime_error if the dictionary is read-only.
-     * @throws std::invalid_argument if @p key already exists.
+     * @throws System::NotSupportedException if the dictionary is read-only.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than Count.
+     * @throws System::ArgumentException if @p key already exists.
      */
     void Insert(intcs index, const std::string& key, const std::string& value) {
         checkMutable();
-        if (index_.count(key)) throw std::invalid_argument("Key already exists: " + key);
-        keys_.insert(keys_.begin() + index, key);
-        values_.insert(values_.begin() + index, value);
+        if (index < 0 || index > getCountProperty())
+            throw System::ArgumentOutOfRangeException("index");
+        if (storage_->index.count(key))
+            throw System::ArgumentException("An item with the same key has already been added.");
+        storage_->keys.insert(storage_->keys.begin() + index, key);
+        storage_->values.insert(storage_->values.begin() + index, value);
         rebuildIndex();
     }
 
@@ -177,15 +196,15 @@ public:
      * C++ counterpart of .NET OrderedDictionary.Remove(object).
      * Does nothing if the key is not found.
      * @param key The key to remove.
-     * @throws std::runtime_error if the dictionary is read-only.
+     * @throws System::NotSupportedException if the dictionary is read-only.
      */
     void Remove(const std::string& key) {
         checkMutable();
-        auto it = index_.find(key);
-        if (it == index_.end()) return;
+        auto it = storage_->index.find(key);
+        if (it == storage_->index.end()) return;
         intcs i = it->second;
-        keys_.erase(keys_.begin() + i);
-        values_.erase(values_.begin() + i);
+        storage_->keys.erase(storage_->keys.begin() + i);
+        storage_->values.erase(storage_->values.begin() + i);
         rebuildIndex();
     }
 
@@ -194,26 +213,27 @@ public:
      *
      * C++ counterpart of .NET OrderedDictionary.RemoveAt(int).
      * @param index The zero-based index of the entry to remove.
-     * @throws std::runtime_error if the dictionary is read-only.
-     * @throws std::out_of_range if @p index is out of range.
+     * @throws System::NotSupportedException if the dictionary is read-only.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
     void RemoveAt(intcs index) {
         checkMutable();
-        if (index < 0 || index >= getCountProperty()) throw std::out_of_range("index out of range");
-        Remove(keys_[static_cast<size_t>(index)]);
+        if (index < 0 || index >= getCountProperty())
+            throw System::ArgumentOutOfRangeException("index");
+        Remove(storage_->keys[static_cast<size_t>(index)]);
     }
 
     /**
      * @brief Removes all entries from the dictionary.
      *
      * C++ counterpart of .NET OrderedDictionary.Clear().
-     * @throws std::runtime_error if the dictionary is read-only.
+     * @throws System::NotSupportedException if the dictionary is read-only.
      */
     void Clear() {
         checkMutable();
-        keys_.clear();
-        values_.clear();
-        index_.clear();
+        storage_->keys.clear();
+        storage_->values.clear();
+        storage_->index.clear();
     }
 
     /**
@@ -223,58 +243,83 @@ public:
      * @param key The key to locate.
      * @return true if an entry with @p key exists; otherwise false.
      */
-    [[nodiscard]] bool Contains(const std::string& key) const { return index_.count(key) > 0; }
+    [[nodiscard]] bool Contains(const std::string& key) const { return storage_->index.count(key) > 0; }
 
     /**
-     * @brief Returns a const reference to the value for the given key.
+     * @brief Returns the value for the given key, or "" if not found.
      *
-     * C++ counterpart of .NET OrderedDictionary.Item[object] getter.
+     * C++ counterpart of .NET OrderedDictionary.Item[object] getter, which returns null for a
+     * missing key rather than throwing.
      * @param key The key whose value to retrieve.
-     * @return A const reference to the value.
-     * @throws std::out_of_range if @p key is not found.
+     * @return The associated value, or "" if @p key is not present.
      */
-    [[nodiscard]] const std::string& operator[](const std::string& key) const {
-        auto it = index_.find(key);
-        if (it == index_.end()) throw std::out_of_range("Key not found: " + key);
-        return values_[static_cast<size_t>(it->second)];
+    [[nodiscard]] std::string operator[](const std::string& key) const {
+        auto it = storage_->index.find(key);
+        return (it != storage_->index.end()) ? storage_->values[static_cast<size_t>(it->second)] : std::string{};
     }
 
     /**
-     * @brief Returns a reference to the value for the given key.
+     * @brief Returns a mutable reference to the value for the given key, inserting a new entry
+     *        (with an empty value) at the end if @p key is not already present.
      *
-     * C++ counterpart of .NET OrderedDictionary.Item[object] setter.
-     * @param key The key whose value to access.
-     * @return A reference to the value.
-     * @throws std::out_of_range if @p key is not found.
+     * C++ counterpart of .NET OrderedDictionary.Item[object] setter, used as `dict[key] = value`.
+     * @param key The key whose value to access or insert.
+     * @return A reference to the associated value.
+     * @throws System::NotSupportedException if the dictionary is read-only.
      */
     std::string& operator[](const std::string& key) {
-        auto it = index_.find(key);
-        if (it == index_.end()) throw std::out_of_range("Key not found: " + key);
-        return values_[static_cast<size_t>(it->second)];
+        checkMutable();
+        auto it = storage_->index.find(key);
+        if (it != storage_->index.end())
+            return storage_->values[static_cast<size_t>(it->second)];
+        storage_->index[key] = static_cast<intcs>(storage_->keys.size());
+        storage_->keys.push_back(key);
+        storage_->values.emplace_back();
+        return storage_->values.back();
     }
 
     /**
      * @brief Returns the value at the given zero-based index.
      *
      * C++ counterpart of .NET OrderedDictionary.Item[int] getter.
-     * @param i The zero-based index.
+     * @param index The zero-based index.
      * @return A const reference to the value.
-     * @throws std::out_of_range if @p i is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    [[nodiscard]] const std::string& GetByIndex(intcs i) const {
-        return values_.at(static_cast<size_t>(i));
+    [[nodiscard]] const std::string& GetByIndex(intcs index) const {
+        if (index < 0 || index >= getCountProperty())
+            throw System::ArgumentOutOfRangeException("index");
+        return storage_->values[static_cast<size_t>(index)];
+    }
+
+    /**
+     * @brief Sets the value at the given zero-based index, leaving its key unchanged.
+     *
+     * C++ counterpart of .NET OrderedDictionary.Item[int] setter.
+     * @param index The zero-based index.
+     * @param value The new value.
+     * @throws System::NotSupportedException if the dictionary is read-only.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
+     */
+    void SetByIndex(intcs index, const std::string& value) {
+        checkMutable();
+        if (index < 0 || index >= getCountProperty())
+            throw System::ArgumentOutOfRangeException("index");
+        storage_->values[static_cast<size_t>(index)] = value;
     }
 
     /**
      * @brief Returns the key at the given zero-based index.
      *
      * C++ counterpart of accessing the key by position in .NET OrderedDictionary.
-     * @param i The zero-based index.
+     * @param index The zero-based index.
      * @return A const reference to the key string.
-     * @throws std::out_of_range if @p i is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    [[nodiscard]] const std::string& GetKey(intcs i) const {
-        return keys_.at(static_cast<size_t>(i));
+    [[nodiscard]] const std::string& GetKey(intcs index) const {
+        if (index < 0 || index >= getCountProperty())
+            throw System::ArgumentOutOfRangeException("index");
+        return storage_->keys[static_cast<size_t>(index)];
     }
 };
 

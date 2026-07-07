@@ -110,4 +110,94 @@ namespace System::Numerics {
     struct IMultiplicativeIdentity { static TSelf MultiplicativeIdentity(); ///< Returns the multiplicative identity (one) of TSelf.
     };
 
+    /** Stub interface for equality operators, mirroring .NET IEqualityOperators<TSelf,TOther,TResult>. */
+    template<typename TSelf, typename TOther, typename TResult>
+    struct IEqualityOperators {};
+
+    /** Stub interface for trigonometric functions, mirroring .NET ITrigonometricFunctions<TSelf>. */
+    template<typename TSelf>
+    struct ITrigonometricFunctions {
+        static TSelf Acos(TSelf x);
+        static TSelf AcosPi(TSelf x);
+        static TSelf Asin(TSelf x);
+        static TSelf AsinPi(TSelf x);
+        static TSelf Atan(TSelf x);
+        static TSelf AtanPi(TSelf x);
+        static TSelf Cos(TSelf x);
+        static TSelf CosPi(TSelf x);
+        static TSelf Sin(TSelf x);
+        static TSelf SinPi(TSelf x);
+        static TSelf Tan(TSelf x);
+        static TSelf TanPi(TSelf x);
+    };
+
+    /** Stub interface for hyperbolic functions, mirroring .NET IHyperbolicFunctions<TSelf>. */
+    template<typename TSelf>
+    struct IHyperbolicFunctions {
+        static TSelf Acosh(TSelf x);
+        static TSelf Asinh(TSelf x);
+        static TSelf Atanh(TSelf x);
+        static TSelf Cosh(TSelf x);
+        static TSelf Sinh(TSelf x);
+        static TSelf Tanh(TSelf x);
+    };
+
+    /** Stub interface for logarithmic functions, mirroring .NET ILogarithmicFunctions<TSelf>. */
+    template<typename TSelf>
+    struct ILogarithmicFunctions {
+        static TSelf Log(TSelf x);
+        static TSelf Log(TSelf x, TSelf newBase);
+        static TSelf Log2(TSelf x);
+        static TSelf Log10(TSelf x);
+    };
+
+    /** Stub interface for exponential functions, mirroring .NET IExponentialFunctions<TSelf>. */
+    template<typename TSelf>
+    struct IExponentialFunctions {
+        static TSelf Exp(TSelf x);
+        static TSelf Exp2(TSelf x);
+        static TSelf Exp10(TSelf x);
+    };
+
+    /** Stub interface for power functions, mirroring .NET IPowerFunctions<TSelf>. */
+    template<typename TSelf>
+    struct IPowerFunctions {
+        static TSelf Pow(TSelf x, TSelf y);
+    };
+
+    /** Stub interface for root functions, mirroring .NET IRootFunctions<TSelf>. */
+    template<typename TSelf>
+    struct IRootFunctions {
+        static TSelf Cbrt(TSelf x);
+        static TSelf Hypot(TSelf x, TSelf y);
+        static TSelf RootN(TSelf x, int n);
+        static TSelf Sqrt(TSelf x);
+    };
+
+    /** Stub interface exposing E/Pi/Tau constants, mirroring .NET IFloatingPointConstants<TSelf>. */
+    template<typename TSelf>
+    struct IFloatingPointConstants {
+        static TSelf E();   ///< Returns the mathematical constant e.
+        static TSelf Pi();  ///< Returns the mathematical constant pi.
+        static TSelf Tau(); ///< Returns the mathematical constant tau (2*pi).
+    };
+
+    /**
+     * @brief Stub interface aggregating the IEEE 754 binary floating-point contract, mirroring
+     * .NET IBinaryFloatingPointIeee754<TSelf>. Combines IFloatingPointIeee754, IFloatingPointConstants,
+     * and the transcendental function families; C++ types satisfy the equivalent contract via
+     * <cmath> free functions rather than interface conformance.
+     */
+    template<typename TSelf>
+    struct IBinaryFloatingPointIeee754
+        : IFloatingPointIeee754<TSelf>,
+          IFloatingPointConstants<TSelf>,
+          IExponentialFunctions<TSelf>,
+          IHyperbolicFunctions<TSelf>,
+          ILogarithmicFunctions<TSelf>,
+          IPowerFunctions<TSelf>,
+          IRootFunctions<TSelf>,
+          ITrigonometricFunctions<TSelf>
+    {};
+
 } // namespace System::Numerics

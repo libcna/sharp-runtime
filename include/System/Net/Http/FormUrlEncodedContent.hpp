@@ -63,7 +63,7 @@ public:
     }
 
     /** @return "application/x-www-form-urlencoded" */
-    [[nodiscard]] std::string getContentType() const override {
+    [[nodiscard]] std::string getContentTypeProperty() const override {
         return "application/x-www-form-urlencoded";
     }
 };

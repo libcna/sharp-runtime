@@ -6,6 +6,7 @@
 #include <cwctype>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/UnicodeCategory.hpp"
 
 namespace System::Globalization {
@@ -20,6 +21,13 @@ using SharpRuntime::intcs;
  * All methods are static; this class cannot be instantiated.
  */
 class CharUnicodeInfo {
+    /** @brief Throws ArgumentOutOfRangeException if @p index is out of bounds for @p s. */
+    static void CheckIndex(const std::u16string& s, intcs index) {
+        if (index < 0 || static_cast<size_t>(index) >= s.size()) {
+            throw System::ArgumentOutOfRangeException("index");
+        }
+    }
+
 public:
     CharUnicodeInfo() = delete;
 
@@ -44,6 +52,7 @@ public:
      * @return The decimal digit value (0–9), or -1 if the character is not a decimal digit.
      */
     static intcs GetDecimalDigitValue(const std::u16string& s, intcs index) {
+        CheckIndex(s, index);
         return GetDecimalDigitValue(s[static_cast<size_t>(index)]);
     }
 
@@ -51,11 +60,21 @@ public:
      * @brief Gets the digit value of a character, or -1 if not a digit.
      *
      * C++ counterpart of .NET CharUnicodeInfo.GetDigitValue(char).
+     * Unlike GetDecimalDigitValue, this also recognizes characters whose Unicode
+     * Numeric_Type is Digit rather than Decimal (e.g. superscript digits), matching
+     * .NET's distinction between the two methods.
      * @param ch The character to evaluate.
      * @return The digit value (0–9), or -1 if @p ch is not a digit.
      */
     static intcs GetDigitValue(charcs ch) {
-        return GetDecimalDigitValue(ch);
+        intcs decimalValue = GetDecimalDigitValue(ch);
+        if (decimalValue != -1) return decimalValue;
+        switch (ch) {
+            case 0x00B9: return 1; // superscript 1
+            case 0x00B2: return 2; // superscript 2
+            case 0x00B3: return 3; // superscript 3
+            default: return -1;
+        }
     }
 
     /**
@@ -67,6 +86,7 @@ public:
      * @return The digit value (0–9), or -1 if the character is not a digit.
      */
     static intcs GetDigitValue(const std::u16string& s, intcs index) {
+        CheckIndex(s, index);
         return GetDigitValue(s[static_cast<size_t>(index)]);
     }
 
@@ -98,6 +118,7 @@ public:
      * @return The numeric value, or -1.0 if the character has no numeric value.
      */
     static double GetNumericValue(const std::u16string& s, intcs index) {
+        CheckIndex(s, index);
         return GetNumericValue(s[static_cast<size_t>(index)]);
     }
 
@@ -121,6 +142,7 @@ public:
      * @return The UnicodeCategory value for the character at @p index.
      */
     static UnicodeCategory GetUnicodeCategory(const std::u16string& s, intcs index) {
+        CheckIndex(s, index);
         return GetUnicodeCategory(s[static_cast<size_t>(index)]);
     }
 
@@ -131,8 +153,12 @@ public:
      * Uses POSIX wide-character classification; non-BMP code points are mapped to OtherNotAssigned.
      * @param codePoint The Unicode code point to categorize.
      * @return The UnicodeCategory value for the code point.
+     * @throws System::ArgumentOutOfRangeException if @p codePoint is not in [0, 0x10FFFF].
      */
     static UnicodeCategory GetUnicodeCategory(intcs codePoint) {
+        if (codePoint < 0 || codePoint > 0x10FFFF) {
+            throw System::ArgumentOutOfRangeException("codePoint");
+        }
         wchar_t wc = (codePoint >= 0 && codePoint <= WCHAR_MAX)
                      ? static_cast<wchar_t>(codePoint) : L'\0';
         if (std::iswupper(wc)) return UnicodeCategory::UppercaseLetter;

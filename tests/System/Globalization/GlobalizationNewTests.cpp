@@ -118,6 +118,12 @@ TEST(ThaiBuddhistCalendarTests, Year) {
     System::DateTime dt(2024,1,1);
     EXPECT_EQ(cal.GetYear(dt), 2567);
 }
+TEST(ThaiBuddhistCalendarTests, Eras_ContainsThaiBuddhistEra) {
+    ThaiBuddhistCalendar cal;
+    auto eras = cal.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], ThaiBuddhistCalendar::ThaiBuddhistEra);
+}
 TEST(TaiwanCalendarTests, Year) {
     TaiwanCalendar cal;
     System::DateTime dt(2024,1,1);

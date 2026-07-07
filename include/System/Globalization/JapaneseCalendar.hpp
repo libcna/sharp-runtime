@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <stdexcept>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 
 namespace System::Globalization {
@@ -30,6 +31,16 @@ public:
     static constexpr int ReiwaEra  = 5; ///< Reiwa era identifier (from 2019-05-01).
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET JapaneseCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by JapaneseCalendar.
      *
      * C++ counterpart of .NET JapaneseCalendar.MinSupportedDateTime.
@@ -55,15 +66,19 @@ public:
      * C++ counterpart of .NET JapaneseCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year in the current era (default 99).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
      *
      * C++ counterpart of .NET JapaneseCalendar.TwoDigitYearMax setter.
      * @param value The new maximum two-digit year.
+     * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
+    void setTwoDigitYearMaxProperty(int value) override {
+        VerifyWritable();
+        twoDigitYearMax_ = value;
+    }
 
     /**
      * @brief Returns the number of Japanese imperial eras.
@@ -73,12 +88,22 @@ public:
     [[nodiscard]] int GetErasCount() const override { return 5; }
 
     /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET JapaneseCalendar.Eras.
+     * @return A vector of era identifiers, most recent era first.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override {
+        return {ReiwaEra, HeiseiEra, ShowaEra, TaishoEra, MeijiEra};
+    }
+
+    /**
      * @brief Returns the imperial era for the given DateTime.
      *
      * C++ counterpart of .NET JapaneseCalendar.GetEra(DateTime).
      * @param time The date to classify.
      * @return The era identifier (1–5).
-     * @throws std::out_of_range if @p time precedes the Meiji era (1868-09-08).
+     * @throws System::ArgumentOutOfRangeException if @p time precedes the Meiji era (1868-09-08).
      */
     [[nodiscard]] int GetEra(const System::DateTime& time) const override {
         int y = time.getYearProperty(), m = time.getMonthProperty(), d = time.getDayProperty();
@@ -87,7 +112,7 @@ public:
         if (y > 1926 || (y == 1926 && (m > 12 || (m == 12 && d >= 25)))) return ShowaEra;
         if (y > 1912 || (y == 1912 && (m > 7 || (m == 7 && d >= 30)))) return TaishoEra;
         if (y >= 1868) return MeijiEra;
-        throw std::out_of_range("JapaneseCalendar: date is before the Meiji era (1868-01-01).");
+        throw System::ArgumentOutOfRangeException("time");
     }
 
     /**

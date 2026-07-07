@@ -311,8 +311,9 @@ namespace System {
          * @brief Returns the date/time formatted according to @p format.
          *
          * C++ counterpart of .NET DateTime.ToString(string).
-         * Tokens: yyyy, yy, MM, M, dd, d, HH, H, hh, h, mm, m, ss, s, fff, ff, f.
-         * Literal text can be enclosed in single quotes.
+         * Tokens: yyyy, yy, MMMM, MMM, MM, M, dddd, ddd, dd, d, HH, H, hh, h, mm, m, ss, s, fff,
+         * ff, f. ddd/dddd and MMM/MMMM use fixed invariant-culture English names (no locale
+         * support). Literal text can be enclosed in single quotes.
          * @param format The format string.
          */
         [[nodiscard]] std::string ToString(const std::string& format) const;

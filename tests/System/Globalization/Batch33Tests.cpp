@@ -8,6 +8,8 @@
 //   TextElementEnumerator: MoveNext/GetTextElement/Reset, ASCII and UTF-8 multi-byte
 //   TextInfo:              ToLower/ToUpper/ToTitleCase, Clone, ReadOnly, operator==
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/StringInfo.hpp"
 #include "System/Globalization/TaiwanCalendar.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
@@ -51,6 +53,23 @@ TEST(StringInfoBatch33Test, SubstringByTextElements_StartAndLength) {
     EXPECT_EQ(si.SubstringByTextElements(1, 3), "ell");
 }
 
+TEST(StringInfoBatch33Test, SubstringByTextElements_StartOutOfRange_Throws) {
+    StringInfo si("hello");
+    EXPECT_THROW(si.SubstringByTextElements(5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(si.SubstringByTextElements(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringInfoBatch33Test, SubstringByTextElements_LengthOutOfRange_Throws) {
+    StringInfo si("hello");
+    EXPECT_THROW(si.SubstringByTextElements(0, 6), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(si.SubstringByTextElements(0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringInfoBatch33Test, GetTextElementEnumerator_InvalidIndex_ThrowsArgumentOutOfRange) {
+    EXPECT_THROW(StringInfo::GetTextElementEnumerator("hello", -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetTextElementEnumerator("hello", 6), System::ArgumentOutOfRangeException);
+}
+
 TEST(StringInfoBatch33Test, GetNextTextElement) {
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 0), "a");
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 2), "c");
@@ -88,6 +107,13 @@ TEST(TaiwanCalendarBatch33Test, GetErasCount) {
     EXPECT_EQ(tc.GetErasCount(), 1);
 }
 
+TEST(TaiwanCalendarBatch33Test, Eras_ContainsTaiwanEra) {
+    TaiwanCalendar tc;
+    auto eras = tc.getErasProperty();
+    ASSERT_EQ(eras.size(), 1u);
+    EXPECT_EQ(eras[0], TaiwanCalendar::TaiwanEra);
+}
+
 TEST(TaiwanCalendarBatch33Test, GetYear_2024_Is113) {
     TaiwanCalendar tc;
     EXPECT_EQ(tc.GetYear(System::DateTime(2024, 6, 1)), 113);
@@ -119,7 +145,15 @@ TEST(TextElementEnumeratorBatch33Test, EmptyString) {
 
 TEST(TextElementEnumeratorBatch33Test, BeforeFirstMoveNext_Throws) {
     TextElementEnumerator e("x");
-    EXPECT_THROW(e.GetTextElement(), std::runtime_error);
+    EXPECT_THROW(e.GetTextElement(), System::InvalidOperationException);
+}
+
+TEST(TextElementEnumeratorBatch33Test, AfterExhausted_Throws) {
+    TextElementEnumerator e("x");
+    EXPECT_TRUE(e.MoveNext());
+    EXPECT_FALSE(e.MoveNext());
+    EXPECT_THROW(e.GetTextElement(), System::InvalidOperationException);
+    EXPECT_THROW(e.getElementIndexProperty(), System::InvalidOperationException);
 }
 
 TEST(TextElementEnumeratorBatch33Test, Reset) {
@@ -201,6 +235,11 @@ TEST(TextInfoBatch33Test, ReadOnly_MakesReadOnly) {
     TextInfo ti;
     auto ro = TextInfo::ReadOnly(ti);
     EXPECT_TRUE(ro.getIsReadOnlyProperty());
+}
+
+TEST(TextInfoBatch33Test, SetListSeparator_OnReadOnly_Throws) {
+    auto ro = TextInfo::ReadOnly(TextInfo());
+    EXPECT_THROW(ro.setListSeparatorProperty(";"), System::InvalidOperationException);
 }
 
 TEST(TextInfoBatch33Test, EqualityOperator) {

@@ -6,6 +6,7 @@
 //   ListDictionary:    all new properties, set(), Keys, Values
 //   NameValueCollection: copy ctors, capacity ctors, all methods
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Specialized/ListDictionary.hpp"
 #include "System/Collections/Specialized/NameValueCollection.hpp"
 #include <any>
@@ -48,7 +49,7 @@ TEST(ListDictionaryBatch21Test, AddAndCount) {
 TEST(ListDictionaryBatch21Test, Add_DuplicateThrows) {
     ListDictionary d;
     d.Add("k", std::any(1));
-    EXPECT_THROW(d.Add("k", std::any(2)), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", std::any(2)), System::ArgumentException);
 }
 
 TEST(ListDictionaryBatch21Test, Contains_TrueAndFalse) {
@@ -65,10 +66,10 @@ TEST(ListDictionaryBatch21Test, Indexer_Const_Found) {
     EXPECT_EQ(std::any_cast<int>(cd["val"]), 99);
 }
 
-TEST(ListDictionaryBatch21Test, Indexer_Const_NotFoundThrows) {
+TEST(ListDictionaryBatch21Test, Indexer_Const_NotFound_ReturnsEmpty) {
     ListDictionary d;
     const ListDictionary& cd = d;
-    EXPECT_THROW((void)cd["missing"], std::out_of_range);
+    EXPECT_FALSE(cd["missing"].has_value());
 }
 
 TEST(ListDictionaryBatch21Test, Indexer_Mutable_Inserts) {
@@ -288,4 +289,36 @@ TEST(NameValueCollectionBatch21Test, OperatorBracket_ByIndex) {
     NameValueCollection c;
     c.Add("k", "val");
     EXPECT_EQ(c[0], "val");
+}
+
+TEST(NameValueCollectionBatch21Test, CaseInsensitive_LookupAndAdd) {
+    NameValueCollection c;
+    c.Add("Name_0", "Value_0");
+
+    EXPECT_EQ(c["NAME_0"], "Value_0");
+    EXPECT_EQ(c["name_0"], "Value_0");
+    EXPECT_EQ(c.Get("NAME_0"), "Value_0");
+    std::vector<std::string> expected{"Value_0"};
+    EXPECT_EQ(c.GetValues("NAME_0"), expected);
+
+    // Second Add() under a different casing appends to the SAME key, not a new one.
+    c.Add("NAME_0", "Value_1");
+    EXPECT_EQ(c.getCountProperty(), 1);
+    EXPECT_EQ(c.Get("Name_0"), "Value_0,Value_1");
+
+    const auto& keys = c.AllKeys();
+    ASSERT_EQ(keys.size(), 1u);
+    EXPECT_EQ(keys[0], "Name_0"); // original casing preserved
+}
+
+TEST(NameValueCollectionBatch21Test, CaseInsensitive_SetAndRemove) {
+    NameValueCollection c;
+    c.Add("Key", "value");
+    c.Set("KEY", "new-value");
+    EXPECT_EQ(c.getCountProperty(), 1);
+    EXPECT_EQ(c.Get("key"), "new-value");
+
+    c.Remove("kEy");
+    EXPECT_EQ(c.getCountProperty(), 0);
+    EXPECT_EQ(c.Get("Key"), "");
 }

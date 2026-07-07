@@ -9,72 +9,16 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/ComponentModel/INotifyPropertyChanged.hpp"
 #include "System/Collections/ObjectModel/Collection.hpp"
+#include "System/Collections/Specialized/NotifyCollectionChangedAction.hpp"
+#include "System/Collections/Specialized/NotifyCollectionChangedEventArgs.hpp"
+#include "System/Collections/Specialized/NotifyCollectionChangedEventHandler.hpp"
 
 namespace System::Collections::ObjectModel {
 
 using SharpRuntime::intcs;
-
-/**
- * @brief Describes the action that caused a CollectionChanged event.
- *
- * C++ counterpart of .NET System.Collections.Specialized.NotifyCollectionChangedAction.
- */
-enum class NotifyCollectionChangedAction {
-    Add     = 0, ///< An item was added to the collection.
-    Remove  = 1, ///< An item was removed from the collection.
-    Replace = 2, ///< An item was replaced in the collection.
-    Move    = 3, ///< An item was moved within the collection.
-    Reset   = 4  ///< The content of the collection changed dramatically.
-};
-
-/**
- * @brief Provides data for the CollectionChanged event.
- *
- * C++ counterpart of .NET System.Collections.Specialized.NotifyCollectionChangedEventArgs.
- *
- * @tparam T The type of elements in the collection.
- */
-template<typename T>
-struct NotifyCollectionChangedEventArgs {
-    /** @brief The action that caused the event. */
-    NotifyCollectionChangedAction Action;
-    /** @brief New items involved in the change (Add, Replace). */
-    std::vector<T> NewItems;
-    /** @brief Old items involved in the change (Remove, Replace). */
-    std::vector<T> OldItems;
-    /** @brief Zero-based index at which the change occurred in the new list. */
-    intcs NewStartingIndex = -1;
-    /** @brief Zero-based index at which the change occurred in the old list. */
-    intcs OldStartingIndex = -1;
-
-    /**
-     * @brief Constructs event args for a Reset or similarly simple action.
-     * @param action The action that caused the event.
-     */
-    explicit NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction action)
-        : Action(action) {}
-
-    /**
-     * @brief Constructs event args with a single new item and optional starting index.
-     * @param action  The action that caused the event.
-     * @param newItem The new item involved in the change.
-     * @param index   The zero-based starting index of the change.
-     */
-    NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction action,
-                                     T newItem, intcs index = -1)
-        : Action(action), NewItems({newItem}), NewStartingIndex(index) {}
-
-    /**
-     * @brief Constructs event args with a new item, an old item, and optional starting index.
-     * @param action  The action that caused the event.
-     * @param newItem The new item involved in the change.
-     * @param oldItem The old item involved in the change.
-     * @param index   The zero-based starting index of the change.
-     */
-    NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction action,
-                                     T newItem, T oldItem, intcs index = -1)
-        : Action(action), NewItems({newItem}), OldItems({oldItem}), NewStartingIndex(index) {}
-};
+using System::Collections::Specialized::NotifyCollectionChangedAction;
+using System::Collections::Specialized::NotifyCollectionChangedEventArgs;
+using System::Collections::Specialized::NotifyCollectionChangedEventHandler;
 
 /**
  * @brief A dynamic data collection that provides notifications when items are added,
@@ -107,7 +51,7 @@ class ObservableCollection : public Collection<T>, public System::ComponentModel
 
 public:
     /** @brief Handler type for CollectionChanged subscribers. */
-    using ChangedHandler = std::function<void(void*, const NotifyCollectionChangedEventArgs<T>&)>;
+    using ChangedHandler = NotifyCollectionChangedEventHandler<T>;
 
     /** @brief List of CollectionChanged event subscribers. */
     std::vector<ChangedHandler> CollectionChanged;
@@ -166,12 +110,7 @@ protected:
         this->items_.insert(this->items_.begin() + newIndex, removedItem);
 
         OnIndexerPropertyChanged();
-        NotifyCollectionChangedEventArgs<T> args(NotifyCollectionChangedAction::Move);
-        args.NewItems = {removedItem};
-        args.OldItems = {removedItem};
-        args.NewStartingIndex = newIndex;
-        args.OldStartingIndex = oldIndex;
-        OnCollectionChanged(args);
+        OnCollectionChanged(NotifyCollectionChangedEventArgs<T>::Move(removedItem, newIndex, oldIndex));
     }
 
     /**
@@ -200,10 +139,7 @@ protected:
 
         OnCountPropertyChanged();
         OnIndexerPropertyChanged();
-        NotifyCollectionChangedEventArgs<T> args(NotifyCollectionChangedAction::Remove);
-        args.OldItems = {removedItem};
-        args.OldStartingIndex = index;
-        OnCollectionChanged(args);
+        OnCollectionChanged(NotifyCollectionChangedEventArgs<T>(NotifyCollectionChangedAction::Remove, removedItem, index));
     }
 
     /**
@@ -219,10 +155,7 @@ protected:
 
         OnCountPropertyChanged();
         OnIndexerPropertyChanged();
-        NotifyCollectionChangedEventArgs<T> args(NotifyCollectionChangedAction::Add);
-        args.NewItems = {item};
-        args.NewStartingIndex = index;
-        OnCollectionChanged(args);
+        OnCollectionChanged(NotifyCollectionChangedEventArgs<T>(NotifyCollectionChangedAction::Add, item, index));
     }
 
     /**
@@ -238,12 +171,7 @@ protected:
         Collection<T>::SetItem(index, item);
 
         OnIndexerPropertyChanged();
-        NotifyCollectionChangedEventArgs<T> args(NotifyCollectionChangedAction::Replace);
-        args.NewItems = {item};
-        args.OldItems = {originalItem};
-        args.NewStartingIndex = index;
-        args.OldStartingIndex = index;
-        OnCollectionChanged(args);
+        OnCollectionChanged(NotifyCollectionChangedEventArgs<T>::Replace(item, originalItem, index));
     }
 
     /**

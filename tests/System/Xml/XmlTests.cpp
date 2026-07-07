@@ -2,10 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Note: XmlReader::Create, XmlWriter::Create and most virtual methods are stubs that
-// throw NotImplementedException (awaiting tinyxml2/pugixml integration).
+// XmlReader/XmlWriter are backed by vendored tinyxml2 (see XmlReader.cpp/XmlWriter.cpp).
 // XDocument::Save is declared but not yet defined — not tested here.
 // System::Xml::Linq types (XName, XAttribute, XElement, XDocument) are fully implemented.
+// See XmlDomTests.cpp for the classic XmlDocument DOM API and XmlSupportTests.cpp for
+// XmlException/XmlConvert/XmlQualifiedName/enum coverage.
 #include <gtest/gtest.h>
 #include "System/NotImplementedException.hpp"
 #include "System/Xml/XmlReader.hpp"

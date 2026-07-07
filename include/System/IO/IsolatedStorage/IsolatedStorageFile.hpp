@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "System/IO/FileMode.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorage.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageScope.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::IO::IsolatedStorage
@@ -22,7 +24,7 @@ namespace System::IO::IsolatedStorage
      *
      * @note Status: DONE
      */
-    class IsolatedStorageFile
+    class IsolatedStorageFile : public IsolatedStorage
     {
     private:
         std::filesystem::path rootDirectory_; ///< Root directory of this isolated storage scope.
@@ -32,8 +34,9 @@ namespace System::IO::IsolatedStorage
         [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath) const;
 
     public:
-        /** Constructs an IsolatedStorageFile rooted at @p rootDirectory. */
-        explicit IsolatedStorageFile(const std::filesystem::path& rootDirectory);
+        /** Constructs an IsolatedStorageFile rooted at @p rootDirectory with the given scope. */
+        explicit IsolatedStorageFile(const std::filesystem::path& rootDirectory,
+                                      IsolatedStorageScope scope = IsolatedStorageScope::None);
 
         /** Returns an isolated storage scoped to the current application. */
         [[nodiscard]] static IsolatedStorageFile GetUserStoreForApplication();
@@ -89,10 +92,10 @@ namespace System::IO::IsolatedStorage
         // --- Store lifecycle ---
 
         /** Removes the entire isolated storage store and all its contents. */
-        void Remove();
+        void Remove() override;
 
         /** Closes the isolated storage file (marks as disposed). */
-        void Close();
+        void Close() override;
 
         /** Releases all resources used by the isolated storage. */
         void Dispose();
@@ -100,10 +103,10 @@ namespace System::IO::IsolatedStorage
         // --- Space properties ---
 
         /** Returns the available free space in the store's volume in bytes. */
-        [[nodiscard]] SharpRuntime::longcs getAvailableFreeSpaceProperty() const;
+        [[nodiscard]] SharpRuntime::longcs getAvailableFreeSpaceProperty() const override;
 
         /** Returns the approximate used size of the store in bytes (sum of all file sizes). */
-        [[nodiscard]] SharpRuntime::longcs getUsedSizeProperty() const;
+        [[nodiscard]] SharpRuntime::longcs getUsedSizeProperty() const override;
 
         /** Returns the root directory path for this isolated storage scope. */
         [[nodiscard]] const std::filesystem::path& getRootDirectoryProperty() const;

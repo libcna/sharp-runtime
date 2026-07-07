@@ -8,6 +8,13 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/NotSupportedException.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
@@ -22,6 +29,8 @@
 #include "System/IO/MemoryStream.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
+#include "System/IO/SeekOrigin.hpp"
+#include "System/IO/RandomAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
@@ -40,6 +49,8 @@ using System::IO::FileStream;
 using System::IO::MemoryStream;
 using System::IO::FileMode;
 using System::IO::FileAccess;
+using System::IO::SeekOrigin;
+using System::IO::intcs;
 using System::IO::IsolatedStorage::IsolatedStorageFile;
 
 static std::string tf(const char* name) {
@@ -209,6 +220,30 @@ TEST(FileTests, ReadAllText_ThrowsForNonExistentFile) {
                  System::IO::FileNotFoundException);
 }
 
+TEST(FileTests, Exists_ExistingDirectory_False) {
+    // File.Exists must return false for a directory, matching .NET.
+    EXPECT_FALSE(File::Exists("/tmp"));
+}
+
+TEST(FileTests, Delete_NonExistentFile_DoesNotThrow) {
+    // .NET: deleting a nonexistent file is not an error.
+    EXPECT_NO_THROW(File::Delete(tf("no_such_file_for_delete_xyz.txt")));
+}
+
+TEST(FileTests, Copy_NonExistentSource_ThrowsFileNotFoundException) {
+    EXPECT_THROW(File::Copy(tf("no_such_src_xyz.txt"), tf("copy_dst_xyz.txt")),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileTests, Move_NonExistentSource_ThrowsFileNotFoundException) {
+    EXPECT_THROW(File::Move(tf("no_such_move_src_xyz.txt"), tf("move_dst_xyz.txt")),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileTests, Copy_EmptySourcePath_ThrowsArgumentException) {
+    EXPECT_THROW(File::Copy("", tf("dst_xyz.txt")), System::ArgumentException);
+}
+
 // ===========================================================================
 // FileInfo
 // ===========================================================================
@@ -254,6 +289,45 @@ TEST(FileInfoTests, getFullNameProperty_IsAbsolute) {
     EXPECT_EQ(full[0], '/');
 }
 
+TEST(FileInfoTests, getIsReadOnlyProperty_NonExistent_ReturnsFalse) {
+    FileInfo fi(tf("fi_no_such_readonly_xyz.txt"));
+    EXPECT_FALSE(fi.getIsReadOnlyProperty());
+}
+
+TEST(FileInfoTests, Delete_NonExistentFile_DoesNotThrow) {
+    FileInfo fi(tf("fi_no_such_delete_xyz.txt"));
+    EXPECT_NO_THROW(fi.Delete());
+}
+
+TEST(FileInfoTests, CopyTo_NonExistentSource_ThrowsFileNotFoundException) {
+    FileInfo fi(tf("fi_no_such_copy_src_xyz.txt"));
+    EXPECT_THROW(fi.CopyTo(tf("fi_copy_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, CopyTo_EmptyDest_ThrowsArgumentException) {
+    std::string p = tf("fi_copy_src_for_empty_dest.txt");
+    File::WriteAllText(p, "x");
+    FileInfo fi(p);
+    EXPECT_THROW(fi.CopyTo(""), System::ArgumentException);
+    File::Delete(p);
+}
+
+TEST(FileInfoTests, MoveTo_NonExistentSource_ThrowsFileNotFoundException) {
+    FileInfo fi(tf("fi_no_such_move_src_xyz.txt"));
+    EXPECT_THROW(fi.MoveTo(tf("fi_move_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, CopyTo_Succeeds_DestinationExists) {
+    std::string src = tf("fi_copyto_src.txt");
+    std::string dst = tf("fi_copyto_dst.txt");
+    File::WriteAllText(src, "copy me");
+    FileInfo fi(src);
+    fi.CopyTo(dst, true);
+    EXPECT_TRUE(File::Exists(dst));
+    File::Delete(src);
+    File::Delete(dst);
+}
+
 // ===========================================================================
 // Directory + DirectoryInfo
 // ===========================================================================
@@ -278,6 +352,37 @@ TEST(DirectoryTests, GetCurrentDirectory_NotEmpty) {
     EXPECT_FALSE(Directory::GetCurrentDirectory().empty());
 }
 
+TEST(DirectoryTests, Delete_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(Directory::Delete(tf("no_such_dir_for_delete_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, GetFiles_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW((void)Directory::GetFiles(tf("no_such_dir_for_getfiles_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, GetDirectories_NonExistentDir_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW((void)Directory::GetDirectories(tf("no_such_dir_for_getdirs_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, CreateDirectory_EmptyPath_ThrowsArgumentException) {
+    EXPECT_THROW(Directory::CreateDirectory(""), System::ArgumentException);
+}
+
+TEST(DirectoryTests, Move_NonExistentSource_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(Directory::Move(tf("no_such_src_xyz"), tf("move_dst_xyz")),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, Exists_ExistingFileNotDirectory_False) {
+    std::string p = tf("exists_file_not_dir.txt");
+    File::WriteAllText(p, "x");
+    EXPECT_FALSE(Directory::Exists(p));
+    File::Delete(p);
+}
+
 TEST(DirectoryInfoTests, Constructor_NoThrow) {
     EXPECT_NO_THROW(DirectoryInfo{"/tmp"});
 }
@@ -299,6 +404,21 @@ TEST(DirectoryInfoTests, Create_Delete_Roundtrip) {
     EXPECT_TRUE(di.getExistsProperty());
     di.Delete();
     EXPECT_FALSE(di.getExistsProperty());
+}
+
+TEST(DirectoryInfoTests, Delete_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_delete_xyz"));
+    EXPECT_THROW(di.Delete(), System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryInfoTests, MoveTo_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_move_xyz"));
+    EXPECT_THROW(di.MoveTo(tf("di_move_dst_xyz")), System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) {
+    DirectoryInfo di(tf("di_no_such_getfiles_xyz"));
+    EXPECT_THROW((void)di.GetFiles(), System::IO::DirectoryNotFoundException);
 }
 
 // ===========================================================================
@@ -432,6 +552,105 @@ TEST(BinaryReaderWriterTests, BinaryWriter_BaseStreamProperty) {
     EXPECT_EQ(bw.getBaseStreamProperty(), &ms);
 }
 
+TEST(BinaryReaderWriterTests, Ctor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BinaryReader br(nullptr), System::ArgumentNullException);
+}
+
+TEST(BinaryReaderWriterTests, ReadInt32_PastEndOfStream_ThrowsEndOfStreamException) {
+    MemoryStream ms; // empty stream
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadInt32(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadByte_AfterClose_ThrowsObjectDisposedException) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((int32_t)123);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    br.Close();
+    EXPECT_THROW(br.ReadByte(), System::ObjectDisposedException);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_ReturnsRequestedCount) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((uint8_t)1); bw.Write((uint8_t)2); bw.Write((uint8_t)3);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    auto bytes = br.ReadBytes(3);
+    ASSERT_EQ(bytes.size(), 3u);
+    EXPECT_EQ(bytes[0], 1);
+    EXPECT_EQ(bytes[1], 2);
+    EXPECT_EQ(bytes[2], 3);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_PastEndOfStream_TrimsInsteadOfThrowing) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((uint8_t)1);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    auto bytes = br.ReadBytes(10);
+    EXPECT_EQ(bytes.size(), 1u);
+}
+
+TEST(BinaryReaderWriterTests, ReadBytes_NegativeCount_ThrowsArgumentOutOfRange) {
+    MemoryStream ms;
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadBytes(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BinaryReaderWriterTests, Read7BitEncodedInt_RoundTripsWithReadString) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write(std::string("hello"));
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    EXPECT_EQ(br.Read7BitEncodedInt(), 5);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Ctor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BinaryWriter bw(nullptr), System::ArgumentNullException);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Write_AfterClose_ThrowsObjectDisposedException) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Close();
+    EXPECT_THROW(bw.Write((int32_t)1), System::ObjectDisposedException);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_RespectsLeaveOpen) {
+    MemoryStream ms;
+    {
+        BinaryWriter bw(&ms, true); // leaveOpen = true
+        bw.Write((int32_t)42);
+        bw.Close();
+    }
+    // Stream must still be usable after the writer closed, since leaveOpen was true.
+    EXPECT_NO_THROW(ms.ToArray());
+}
+
+TEST(BinaryReaderWriterTests, Write7BitEncodedInt_RoundTrip) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write7BitEncodedInt(300); // requires 2 encoded bytes
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    EXPECT_EQ(br.Read7BitEncodedInt(), 300);
+}
+
 // ===========================================================================
 // StreamWriter + StreamReader
 // ===========================================================================
@@ -499,6 +718,57 @@ TEST(StreamWriterReaderTests, StreamWriter_BaseStreamProperty) {
     EXPECT_EQ(sw.getBaseStreamProperty(), &ms);
 }
 
+TEST(StreamWriterReaderTests, WriteStringLiteral_DoesNotResolveToBoolOverload) {
+    // Regression: TextWriter previously had no Write(const char*) overload, so a string
+    // literal bound to Write(bool) via a preferred standard pointer-to-bool conversion
+    // instead of the user-defined conversion to std::string, silently writing "True".
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("hello");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadToEnd(), "hello");
+}
+
+TEST(StreamWriterReaderTests, StreamReader_PeekDoesNotAdvance) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("ab");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.Peek(), int('a'));
+    EXPECT_EQ(sr.Peek(), int('a'));
+    EXPECT_EQ(sr.Read(), int('a'));
+    EXPECT_EQ(sr.Read(), int('b'));
+    EXPECT_EQ(sr.Read(), -1);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_ReadLine) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("line1\nline2\nline3");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+TEST(StreamWriterReaderTests, StreamReader_PathCtor_ReadsFile) {
+    std::string p = tf("sr_file.txt");
+    File::WriteAllText(p, "from file reader");
+    StreamReader sr(p);
+    EXPECT_EQ(sr.ReadToEnd(), "from file reader");
+    sr.Close();
+    File::Delete(p);
+}
+
 // ===========================================================================
 // BufferedStream
 // ===========================================================================
@@ -528,6 +798,20 @@ TEST(BufferedStreamTests, DelegatesGetLengthProperty) {
     ms.Write(data, 0, 2);
     BufferedStream bs(&ms);
     EXPECT_EQ(bs.getLengthProperty(), 2);
+}
+
+TEST(BufferedStreamTests, Constructor_NullStream_ThrowsArgumentNullException) {
+    EXPECT_THROW(BufferedStream bs(nullptr), System::ArgumentNullException);
+}
+
+TEST(BufferedStreamTests, DelegatesPosition) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3};
+    ms.Write(data, 0, 3);
+    BufferedStream bs(&ms);
+    bs.setPositionProperty(1);
+    EXPECT_EQ(bs.getPositionProperty(), 1);
+    EXPECT_EQ(ms.getPositionProperty(), 1);
 }
 
 // ===========================================================================
@@ -602,6 +886,178 @@ TEST(FileStreamTests, WriteByte_Flush_NoThrow) {
     File::Delete(p);
 }
 
+TEST(FileStreamTests, CreateMode_WriteOnly_CanReadIsFalse) {
+    // Regression: getCanReadProperty() previously ignored the actual opened access
+    // and returned true here even though the file wasn't opened with std::ios::in.
+    std::string p = tf("fstream_create_writeonly.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    EXPECT_FALSE(fs.getCanReadProperty());
+    EXPECT_TRUE(fs.getCanWriteProperty());
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, CreateNew_ExistingFile_ThrowsIOException) {
+    std::string p = tf("fstream_createnew_exists.bin");
+    File::WriteAllText(p, "x");
+    EXPECT_THROW(FileStream(p, FileMode::CreateNew, FileAccess::ReadWrite), System::IO::IOException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, CreateNew_NonExistentFile_Succeeds) {
+    std::string p = tf("fstream_createnew_new.bin");
+    File::Delete(p); // ensure absent
+    EXPECT_NO_THROW({
+        FileStream fs(p, FileMode::CreateNew, FileAccess::ReadWrite);
+        fs.Close();
+    });
+    EXPECT_TRUE(File::Exists(p));
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Open_NonExistentFile_ThrowsFileNotFoundException) {
+    EXPECT_THROW(FileStream(tf("fstream_open_missing.bin"), FileMode::Open, FileAccess::Read),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileStreamTests, Truncate_NonExistentFile_ThrowsFileNotFoundException) {
+    EXPECT_THROW(FileStream(tf("fstream_truncate_missing.bin"), FileMode::Truncate, FileAccess::ReadWrite),
+                 System::IO::FileNotFoundException);
+}
+
+TEST(FileStreamTests, OpenOrCreate_NonExistentFile_CreatesEmpty) {
+    std::string p = tf("fstream_openorcreate_new.bin");
+    File::Delete(p);
+    FileStream fs(p, FileMode::OpenOrCreate, FileAccess::ReadWrite);
+    EXPECT_EQ(fs.getLengthProperty(), 0);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, OpenOrCreate_ExistingFile_PreservesContent) {
+    std::string p = tf("fstream_openorcreate_existing.bin");
+    File::WriteAllText(p, "hello");
+    FileStream fs(p, FileMode::OpenOrCreate, FileAccess::ReadWrite);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Append_WithReadAccess_ThrowsArgumentException) {
+    std::string p = tf("fstream_append_read.bin");
+    EXPECT_THROW(FileStream(p, FileMode::Append, FileAccess::ReadWrite), System::ArgumentException);
+}
+
+TEST(FileStreamTests, Create_WithReadOnlyAccess_ThrowsArgumentException) {
+    std::string p = tf("fstream_create_readonly.bin");
+    EXPECT_THROW(FileStream(p, FileMode::Create, FileAccess::Read), System::ArgumentException);
+}
+
+TEST(FileStreamTests, CanSeek_TrueWhileOpen) {
+    std::string p = tf("fstream_canseek.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::ReadWrite);
+    EXPECT_TRUE(fs.getCanSeekProperty());
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Position_ReflectsReadProgress) {
+    std::string p = tf("fstream_position_read.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_EQ(fs.getPositionProperty(), 0);
+    uint8_t buf[3] = {};
+    fs.Read(buf, 0, 3);
+    EXPECT_EQ(fs.getPositionProperty(), 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetPosition_SeeksForRead) {
+    std::string p = tf("fstream_setposition.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.setPositionProperty(2);
+    uint8_t buf[3] = {};
+    intcs n = fs.Read(buf, 0, 3);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 'c');
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromBegin_MatchesSetPosition) {
+    std::string p = tf("fstream_seek_begin.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    intcs newPos = fs.Seek(2, SeekOrigin::Begin);
+    EXPECT_EQ(newPos, 2);
+    EXPECT_EQ(fs.getPositionProperty(), 2);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromCurrent_AdvancesRelatively) {
+    std::string p = tf("fstream_seek_current.bin");
+    File::WriteAllText(p, "abcde");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.setPositionProperty(1);
+    intcs newPos = fs.Seek(2, SeekOrigin::Current);
+    EXPECT_EQ(newPos, 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Seek_FromEnd_ComputesFromLength) {
+    std::string p = tf("fstream_seek_end.bin");
+    File::WriteAllText(p, "abcde"); // length 5
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    intcs newPos = fs.Seek(-2, SeekOrigin::End);
+    EXPECT_EQ(newPos, 3);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_Truncates) {
+    std::string p = tf("fstream_setlength_truncate.bin");
+    File::WriteAllText(p, "abcdefgh");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.SetLength(3);
+    EXPECT_EQ(fs.getLengthProperty(), 3);
+    fs.Close();
+    EXPECT_EQ(File::ReadAllText(p), "abc");
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_Extends) {
+    std::string p = tf("fstream_setlength_extend.bin");
+    File::WriteAllText(p, "ab");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.SetLength(5);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_WhenReadOnly_ThrowsNotSupportedException) {
+    std::string p = tf("fstream_setlength_readonly.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_THROW(fs.SetLength(1), System::NotSupportedException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, ReadByte_ReturnsBytesThenMinusOne) {
+    std::string p = tf("fstream_readbyte.bin");
+    File::WriteAllText(p, "A");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_EQ(fs.ReadByte(), static_cast<intcs>('A'));
+    EXPECT_EQ(fs.ReadByte(), -1);
+    fs.Close();
+    File::Delete(p);
+}
+
 // ===========================================================================
 // IsolatedStorageFile
 // ===========================================================================
@@ -628,6 +1084,40 @@ TEST(IsolatedStorageFileTests, OpenFile_WriteAndDelete_Roundtrip) {
     EXPECT_TRUE(store.FileExists(fname));
     store.DeleteFile(fname);
     EXPECT_FALSE(store.FileExists(fname));
+}
+
+TEST(IsolatedStorageFileTests, OpenFile_OpenMode_SupportsReadAndWrite) {
+    // Regression: IsolatedStorageFileStream previously opened FileMode::Open as read-only
+    // (std::ios::in only), unlike .NET's IsolatedStorageFileStream(path, mode) which defaults
+    // access to ReadWrite for every mode except Append.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_openmode_rw.dat";
+    { auto s = store.CreateFile(fname); s.Close(); }
+
+    auto stream = store.OpenFile(fname, FileMode::Open);
+    EXPECT_TRUE(stream.getCanReadProperty());
+    EXPECT_TRUE(stream.getCanWriteProperty());
+    stream.Close();
+    store.DeleteFile(fname);
+}
+
+TEST(IsolatedStorageFileTests, OpenFile_SupportsSeek) {
+    // Regression: IsolatedStorageFileStream previously duplicated a thin std::fstream wrapper
+    // with no Position/Seek support at all; it now derives from the real FileStream.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string fname = "sharp_rt_iso_seek.dat";
+    auto stream = store.CreateFile(fname);
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    stream.Write(data, 0, 5);
+
+    stream.setPositionProperty(1);
+    uint8_t buf[3] = {};
+    intcs n = stream.Read(buf, 0, 3);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 2u);
+
+    stream.Close();
+    store.DeleteFile(fname);
 }
 
 TEST(IsolatedStorageFileTests, CreateFile_Creates) {
@@ -725,3 +1215,110 @@ TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     EXPECT_NO_THROW(store.Dispose());
 }
+
+TEST(IsolatedStorageFileTests, GetUserStoreForApplication_HasApplicationAndUserScope) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_EQ(store.getScopeProperty(),
+              System::IO::IsolatedStorage::IsolatedStorageScope::Application |
+              System::IO::IsolatedStorage::IsolatedStorageScope::User);
+}
+
+TEST(IsolatedStorageFileTests, GetUserStoreForAssembly_HasAssemblyAndUserScope) {
+    auto store = IsolatedStorageFile::GetUserStoreForAssembly();
+    EXPECT_EQ(store.getScopeProperty(),
+              System::IO::IsolatedStorage::IsolatedStorageScope::Assembly |
+              System::IO::IsolatedStorage::IsolatedStorageScope::User);
+}
+
+TEST(IsolatedStorageFileTests, IsAnIsolatedStorageBase_ViaVirtualDispatch) {
+    // Regression: IsolatedStorageFile previously did not derive from IsolatedStorage at all.
+    // Live disk free space can legitimately change between two calls under concurrent disk
+    // activity, so this checks the virtual dispatch resolves to a sane value, not bit-for-bit
+    // equality across two separate calls.
+    IsolatedStorageFile store = IsolatedStorageFile::GetUserStoreForApplication();
+    System::IO::IsolatedStorage::IsolatedStorage& base = store;
+    EXPECT_GE(base.getAvailableFreeSpaceProperty(), 0);
+    EXPECT_FALSE(base.IncreaseQuotaTo(1024));
+}
+
+// ===========================================================================
+// RandomAccess
+// ===========================================================================
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+
+TEST(RandomAccessTests, WriteThenRead_AtOffset_Roundtrip) {
+    std::string p = tf("randomaccess_rw.bin");
+    File::Delete(p);
+    int fd = ::open(p.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    ASSERT_GE(fd, 0);
+
+    uint8_t data[] = {10, 20, 30, 40};
+    System::IO::RandomAccess::Write(fd, data, 4, 0);
+
+    uint8_t readback[4] = {};
+    intcs n = System::IO::RandomAccess::Read(fd, readback, 4, 0);
+    EXPECT_EQ(n, 4);
+    EXPECT_EQ(readback[0], 10u);
+    EXPECT_EQ(readback[3], 40u);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, GetLength_ReflectsFileSize) {
+    std::string p = tf("randomaccess_len.bin");
+    File::WriteAllText(p, "abcde");
+    int fd = ::open(p.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), 5);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, SetLength_TruncatesFile) {
+    std::string p = tf("randomaccess_setlen.bin");
+    File::WriteAllText(p, "abcdefgh");
+    int fd = ::open(p.c_str(), O_RDWR);
+    ASSERT_GE(fd, 0);
+
+    System::IO::RandomAccess::SetLength(fd, 3);
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), 3);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, Read_AtNonZeroOffset) {
+    std::string p = tf("randomaccess_offset.bin");
+    File::WriteAllText(p, "abcdef");
+    int fd = ::open(p.c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+
+    uint8_t buf[3] = {};
+    intcs n = System::IO::RandomAccess::Read(fd, buf, 3, 2);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(buf[0], 'c');
+    EXPECT_EQ(buf[1], 'd');
+    EXPECT_EQ(buf[2], 'e');
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+TEST(RandomAccessTests, FlushToDisk_NoThrow) {
+    std::string p = tf("randomaccess_flush.bin");
+    File::WriteAllText(p, "x");
+    int fd = ::open(p.c_str(), O_RDWR);
+    ASSERT_GE(fd, 0);
+
+    EXPECT_NO_THROW(System::IO::RandomAccess::FlushToDisk(fd));
+
+    ::close(fd);
+    File::Delete(p);
+}
+#endif

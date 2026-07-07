@@ -13,6 +13,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/EventResetMode.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
@@ -20,6 +21,7 @@
 #include "System/Threading/ThreadPriority.hpp"
 #include "System/Threading/ThreadState.hpp"
 #include "System/Threading/AsyncLocal.hpp"
+#include "System/Threading/AsyncLocalValueChangedArgs.hpp"
 #include "System/Threading/Barrier.hpp"
 #include "System/Threading/CountdownEvent.hpp"
 #include "System/Threading/EventWaitHandle.hpp"
@@ -107,9 +109,24 @@ TEST(AsyncLocalTests, SetAndGet_Value) {
 }
 TEST(AsyncLocalTests, ValueChangedHandler_Called) {
     int callCount = 0;
-    AsyncLocal<int> al([&](int, int, bool) { ++callCount; });
+    int lastPrevious = -1, lastCurrent = -1;
+    AsyncLocal<int> al([&](const System::Threading::AsyncLocalValueChangedArgs<int>& args) {
+        ++callCount;
+        lastPrevious = args.getPreviousValueProperty();
+        lastCurrent = args.getCurrentValueProperty();
+    });
     al.setValueProperty(1);
-    EXPECT_EQ(callCount, 1);
+    al.setValueProperty(2);
+    EXPECT_EQ(callCount, 2);
+    EXPECT_EQ(lastPrevious, 1);
+    EXPECT_EQ(lastCurrent, 2);
+}
+
+TEST(AsyncLocalValueChangedArgsTests, PropertiesReflectConstructorArgs) {
+    System::Threading::AsyncLocalValueChangedArgs<int> args(10, 20, true);
+    EXPECT_EQ(args.getPreviousValueProperty(), 10);
+    EXPECT_EQ(args.getCurrentValueProperty(), 20);
+    EXPECT_TRUE(args.getThreadContextChangedProperty());
 }
 
 // ===========================================================================
@@ -121,7 +138,7 @@ TEST(BarrierTests, Constructor_StoresParticipantCount) {
     EXPECT_EQ(b.getParticipantCountProperty(), 3);
 }
 TEST(BarrierTests, NegativeCount_Throws) {
-    EXPECT_THROW(Barrier(-1), std::invalid_argument);
+    EXPECT_THROW(Barrier(-1), System::ArgumentOutOfRangeException);
 }
 TEST(BarrierTests, SingleParticipant_SignalAndWait_AdvancesPhase) {
     Barrier b(1);

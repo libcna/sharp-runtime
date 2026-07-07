@@ -34,9 +34,9 @@ public:
     }
 
     /** Returns the MIME type of the content (e.g. "text/plain"). */
-    [[nodiscard]] std::string getContentType() const override { return mediaType_; }
+    [[nodiscard]] std::string getContentTypeProperty() const override { return mediaType_; }
     /** Returns the character set of the content (e.g. "utf-8"). */
-    [[nodiscard]] std::string getCharSet()     const override { return charset_; }
+    [[nodiscard]] std::string getCharSetProperty()     const override { return charset_; }
 };
 
 } // namespace System::Net::Http

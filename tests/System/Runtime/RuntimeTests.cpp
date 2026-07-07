@@ -3,9 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include "System/Attribute.hpp"
 #include "System/Runtime/CompilerServices/MethodImplOptions.hpp"
 #include "System/Runtime/CompilerServices/MethodImplAttribute.hpp"
 #include "System/Runtime/CompilerServices/CallerAttributes.hpp"
+#include "System/Runtime/CompilerServices/CompilerGeneratedAttribute.hpp"
 #include "System/Runtime/GCSettings.hpp"
 #include "System/Runtime/AmbiguousImplementationException.hpp"
 #include "System/Runtime/InteropServices/InteropAttributes.hpp"
@@ -326,6 +328,23 @@ TEST(SupportedOSPlatformAttributeTests, Constructor_StoresPlatform) {
 TEST(UnsupportedOSPlatformAttributeTests, Constructor_StoresPlatform) {
     UnsupportedOSPlatformAttribute attr("browser");
     EXPECT_EQ(attr.getPlatformNameProperty(), "browser");
+    EXPECT_EQ(attr.getMessageProperty(), "");
+}
+
+TEST(UnsupportedOSPlatformAttributeTests, Constructor_WithMessage) {
+    UnsupportedOSPlatformAttribute attr("browser", "Not supported in the browser sandbox.");
+    EXPECT_EQ(attr.getPlatformNameProperty(), "browser");
+    EXPECT_EQ(attr.getMessageProperty(), "Not supported in the browser sandbox.");
+}
+
+TEST(SupportedOSPlatformGuardAttributeTests, Constructor_StoresPlatform) {
+    SupportedOSPlatformGuardAttribute attr("linux");
+    EXPECT_EQ(attr.getPlatformNameProperty(), "linux");
+}
+
+TEST(UnsupportedOSPlatformGuardAttributeTests, Constructor_StoresPlatform) {
+    UnsupportedOSPlatformGuardAttribute attr("windows");
+    EXPECT_EQ(attr.getPlatformNameProperty(), "windows");
 }
 
 TEST(ObsoletedOSPlatformAttributeTests, Constructor_AllFields) {
@@ -343,4 +362,15 @@ TEST(RequiresPreviewFeaturesAttributeTests, DefaultConstructor_EmptyMessage) {
 TEST(RequiresPreviewFeaturesAttributeTests, Constructor_WithMessage) {
     RequiresPreviewFeaturesAttribute attr("Preview feature");
     EXPECT_EQ(attr.getMessageProperty(), "Preview feature");
+}
+
+// ===========================================================================
+// CompilerGeneratedAttribute
+// ===========================================================================
+
+TEST(CompilerGeneratedAttributeTests, IsAttribute) {
+    CompilerGeneratedAttribute attr;
+    const System::Attribute& base = attr;
+    (void)base;
+    SUCCEED();
 }

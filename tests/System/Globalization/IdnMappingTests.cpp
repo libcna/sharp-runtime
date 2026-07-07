@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Globalization/IdnMapping.hpp"
 
 using namespace System::Globalization;
@@ -85,7 +86,14 @@ TEST(IdnMappingTests, TrailingDot) {
 
 TEST(IdnMappingTests, EmptyThrows) {
     IdnMapping idn;
-    EXPECT_THROW(idn.GetAscii(""), std::invalid_argument);
+    EXPECT_THROW(idn.GetAscii(""), System::ArgumentException);
+}
+
+TEST(IdnMappingTests, GetHashCode_MatchesForEqualInstances) {
+    IdnMapping a, b;
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+    b.setAllowUnassignedProperty(true);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
 }
 
 TEST(IdnMappingTests, Equality) {

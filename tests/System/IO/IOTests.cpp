@@ -20,8 +20,22 @@
 #include "System/IO/HandleInheritability.hpp"
 #include "System/IO/UnixFileMode.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/IO/InternalBufferOverflowException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
+#include "System/IO/DriveNotFoundException.hpp"
+#include "System/IO/ErrorEventArgs.hpp"
+#include "System/IO/ErrorEventHandler.hpp"
+#include "System/IO/FileFormatException.hpp"
+#include "System/IO/FileHandleType.hpp"
+#include "System/IO/FileSystemEventArgs.hpp"
+#include "System/IO/FileSystemEventHandler.hpp"
+#include "System/IO/FileSystemWatcher.hpp"
+#include "System/IO/NotifyFilters.hpp"
+#include "System/IO/RenamedEventArgs.hpp"
+#include "System/IO/RenamedEventHandler.hpp"
+#include "System/IO/WaitForChangedResult.hpp"
+#include "System/IO/WatcherChangeTypes.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/PathTooLongException.hpp"
 #include "System/IO/FileLoadException.hpp"
@@ -31,6 +45,13 @@
 #include "System/IO/EnumerationOptions.hpp"
 #include "System/IO/FileStreamOptions.hpp"
 #include "System/IO/DriveInfo.hpp"
+#include "System/ArgumentException.hpp"
+
+namespace {
+    std::string tf(const char* name) {
+        return std::string("/tmp/sharp_rt_io_") + name;
+    }
+}
 
 using System::IO::FileMode;
 using System::IO::FileAccess;
@@ -45,8 +66,22 @@ using System::IO::MatchType;
 using System::IO::HandleInheritability;
 using System::IO::UnixFileMode;
 using System::IO::IOException;
+using System::IO::InternalBufferOverflowException;
 using System::IO::FileNotFoundException;
 using System::IO::DirectoryNotFoundException;
+using System::IO::DriveNotFoundException;
+using System::IO::ErrorEventArgs;
+using System::IO::ErrorEventHandler;
+using System::IO::FileFormatException;
+using System::IO::FileHandleType;
+using System::IO::FileSystemEventArgs;
+using System::IO::FileSystemEventHandler;
+using System::IO::FileSystemWatcher;
+using System::IO::NotifyFilters;
+using System::IO::RenamedEventArgs;
+using System::IO::RenamedEventHandler;
+using System::IO::WaitForChangedResult;
+using System::IO::WatcherChangeTypes;
 using System::IO::EndOfStreamException;
 using System::IO::PathTooLongException;
 using System::IO::FileLoadException;
@@ -90,6 +125,15 @@ TEST(FileAccessTests, ReadWrite_IsThree) {
     EXPECT_EQ(static_cast<int>(FileAccess::ReadWrite), 3);
 }
 
+TEST(FileAccessTests, OperatorOr_ReadAndWrite_EqualsReadWrite) {
+    EXPECT_EQ(FileAccess::Read | FileAccess::Write, FileAccess::ReadWrite);
+}
+
+TEST(FileAccessTests, OperatorAnd_MasksToRead) {
+    auto masked = FileAccess::ReadWrite & FileAccess::Read;
+    EXPECT_EQ(masked, FileAccess::Read);
+}
+
 // ===========================================================================
 // FileShare
 // ===========================================================================
@@ -104,6 +148,15 @@ TEST(FileShareTests, ReadWrite_IsThree) {
 
 TEST(FileShareTests, Inheritable_Is16) {
     EXPECT_EQ(static_cast<int>(FileShare::Inheritable), 16);
+}
+
+TEST(FileShareTests, OperatorOr_ReadAndWrite_EqualsReadWrite) {
+    EXPECT_EQ(FileShare::Read | FileShare::Write, FileShare::ReadWrite);
+}
+
+TEST(FileShareTests, OperatorAnd_MasksToRead) {
+    auto masked = FileShare::ReadWrite & FileShare::Read;
+    EXPECT_EQ(masked, FileShare::Read);
 }
 
 // ===========================================================================
@@ -147,6 +200,14 @@ TEST(FileOptionsTests, RandomAccess_Value) {
 TEST(FileOptionsTests, Operator_OR) {
     auto r = FileOptions::RandomAccess | FileOptions::DeleteOnClose;
     EXPECT_EQ(static_cast<int>(r), 0x10000000 | 0x04000000);
+}
+
+TEST(FileOptionsTests, Asynchronous_Value) {
+    EXPECT_EQ(static_cast<unsigned int>(FileOptions::Asynchronous), 0x40000000u);
+}
+
+TEST(FileOptionsTests, Encrypted_Value) {
+    EXPECT_EQ(static_cast<int>(FileOptions::Encrypted), 0x00004000);
 }
 
 // ===========================================================================
@@ -308,6 +369,15 @@ TEST(FileNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw FileNotFoundException("err"), IOException);
 }
 
+TEST(FileNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(FileNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+TEST(FileNotFoundExceptionTests, MessageFileNameAndInnerCtor_StoresFileName) {
+    FileNotFoundException ex("not found", "/tmp/missing.txt", std::exception_ptr{});
+    EXPECT_EQ(ex.getFileNameProperty(), "/tmp/missing.txt");
+}
+
 // ===========================================================================
 // DirectoryNotFoundException
 // ===========================================================================
@@ -321,6 +391,298 @@ TEST(DirectoryNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
     EXPECT_NE(std::string(ex.what()).find("no such dir"), std::string::npos);
 }
 
+TEST(DirectoryNotFoundExceptionTests, MessageAndPathCtor_StoresDirectoryPath) {
+    DirectoryNotFoundException ex("no such dir", "/tmp/missing");
+    EXPECT_EQ(ex.getDirectoryPathProperty(), "/tmp/missing");
+}
+
+TEST(DirectoryNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(DirectoryNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+// ===========================================================================
+// DriveNotFoundException
+// ===========================================================================
+
+TEST(DriveNotFoundExceptionTests, DefaultCtor_WhatContainsDriveNotFound) {
+    DriveNotFoundException ex;
+    EXPECT_NE(std::string(ex.what()).find("drive"), std::string::npos);
+}
+
+TEST(DriveNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
+    DriveNotFoundException ex("no such drive");
+    EXPECT_NE(std::string(ex.what()).find("no such drive"), std::string::npos);
+}
+
+TEST(DriveNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(DriveNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+TEST(DriveNotFoundExceptionTests, IsA_IOException) {
+    EXPECT_THROW(throw DriveNotFoundException(), System::IO::IOException);
+}
+
+// ===========================================================================
+// ErrorEventArgs
+// ===========================================================================
+
+TEST(ErrorEventArgsTests, GetException_ReturnsStoredException) {
+    std::exception_ptr ptr;
+    try { throw IOException("boom"); } catch (...) { ptr = std::current_exception(); }
+    ErrorEventArgs args(ptr);
+    EXPECT_EQ(args.GetException(), ptr);
+}
+
+TEST(ErrorEventArgsTests, IsA_EventArgs) {
+    ErrorEventArgs args(std::exception_ptr{});
+    System::EventArgs& base = args;
+    (void)base;
+    SUCCEED();
+}
+
+// ===========================================================================
+// ErrorEventHandler
+// ===========================================================================
+
+TEST(ErrorEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    void* seenSender = nullptr;
+    ErrorEventHandler handler = [&](void* sender, const ErrorEventArgs& e) {
+        called = true;
+        seenSender = sender;
+        (void)e;
+    };
+    int fakeSender = 0;
+    ErrorEventArgs args(std::exception_ptr{});
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+    EXPECT_EQ(seenSender, &fakeSender);
+}
+
+// ===========================================================================
+// FileFormatException
+// ===========================================================================
+
+TEST(FileFormatExceptionTests, DefaultCtor_WhatContainsMessage) {
+    FileFormatException ex;
+    EXPECT_NE(std::string(ex.what()).find("Invalid file format"), std::string::npos);
+}
+
+TEST(FileFormatExceptionTests, MessageCtor_WhatContainsMessage) {
+    FileFormatException ex("bad format");
+    EXPECT_NE(std::string(ex.what()).find("bad format"), std::string::npos);
+}
+
+TEST(FileFormatExceptionTests, SourceUriCtor_MessageContainsUri_AndSourceUriIsSet) {
+    System::Uri uri("file:///tmp/bad.docx");
+    FileFormatException ex(uri);
+    EXPECT_NE(std::string(ex.what()).find("bad.docx"), std::string::npos);
+    ASSERT_NE(ex.getSourceUriProperty(), nullptr);
+    EXPECT_EQ(ex.getSourceUriProperty()->ToString(), uri.ToString());
+}
+
+TEST(FileFormatExceptionTests, DefaultCtor_SourceUriIsNull) {
+    FileFormatException ex;
+    EXPECT_EQ(ex.getSourceUriProperty(), nullptr);
+}
+
+TEST(FileFormatExceptionTests, IsA_FormatException) {
+    EXPECT_THROW(throw FileFormatException(), System::FormatException);
+}
+
+// ===========================================================================
+// FileHandleType
+// ===========================================================================
+
+TEST(FileHandleTypeTests, Unknown_IsZero) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::Unknown), 0);
+}
+
+TEST(FileHandleTypeTests, RegularFile_IsOne) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::RegularFile), 1);
+}
+
+TEST(FileHandleTypeTests, BlockDevice_IsSeven) {
+    EXPECT_EQ(static_cast<int>(FileHandleType::BlockDevice), 7);
+}
+
+// ===========================================================================
+// WatcherChangeTypes
+// ===========================================================================
+
+TEST(WatcherChangeTypesTests, Created_IsOne) {
+    EXPECT_EQ(static_cast<int>(WatcherChangeTypes::Created), 1);
+}
+
+TEST(WatcherChangeTypesTests, All_CombinesEveryValue) {
+    auto all = WatcherChangeTypes::Created | WatcherChangeTypes::Deleted |
+               WatcherChangeTypes::Changed | WatcherChangeTypes::Renamed;
+    EXPECT_EQ(all, WatcherChangeTypes::All);
+}
+
+// ===========================================================================
+// FileSystemEventArgs
+// ===========================================================================
+
+TEST(FileSystemEventArgsTests, PropertiesReturnConstructorValues) {
+    FileSystemEventArgs args(WatcherChangeTypes::Created, "/tmp/dir", "file.txt");
+    EXPECT_EQ(args.getChangeTypeProperty(), WatcherChangeTypes::Created);
+    EXPECT_EQ(args.getNameProperty(), "file.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/dir/file.txt");
+}
+
+TEST(FileSystemEventArgsTests, DirectoryWithTrailingSeparator_NoDoubleSeparator) {
+    FileSystemEventArgs args(WatcherChangeTypes::Changed, "/tmp/dir/", "file.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/dir/file.txt");
+}
+
+TEST(FileSystemEventArgsTests, IsA_EventArgs) {
+    FileSystemEventArgs args(WatcherChangeTypes::Deleted, "/tmp", "x");
+    System::EventArgs& base = args;
+    (void)base;
+    SUCCEED();
+}
+
+// ===========================================================================
+// FileSystemEventHandler
+// ===========================================================================
+
+TEST(FileSystemEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    void* seenSender = nullptr;
+    FileSystemEventHandler handler = [&](void* sender, const FileSystemEventArgs& e) {
+        called = true;
+        seenSender = sender;
+        (void)e;
+    };
+    int fakeSender = 0;
+    FileSystemEventArgs args(WatcherChangeTypes::Created, "/tmp", "x");
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+    EXPECT_EQ(seenSender, &fakeSender);
+}
+
+// ===========================================================================
+// NotifyFilters
+// ===========================================================================
+
+TEST(NotifyFiltersTests, FileName_IsOne) {
+    EXPECT_EQ(static_cast<int>(NotifyFilters::FileName), 1);
+}
+
+TEST(NotifyFiltersTests, OperatorOr_Combines) {
+    auto combined = NotifyFilters::FileName | NotifyFilters::LastWrite;
+    EXPECT_EQ(static_cast<int>(combined), 0x1 | 0x10);
+}
+
+// ===========================================================================
+// RenamedEventArgs
+// ===========================================================================
+
+TEST(RenamedEventArgsTests, PropertiesReturnConstructorValues) {
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "new.txt", "old.txt");
+    EXPECT_EQ(args.getNameProperty(), "new.txt");
+    EXPECT_EQ(args.getFullPathProperty(), "/tmp/new.txt");
+    EXPECT_EQ(args.getOldNameProperty(), "old.txt");
+    EXPECT_EQ(args.getOldFullPathProperty(), "/tmp/old.txt");
+}
+
+TEST(RenamedEventArgsTests, IsA_FileSystemEventArgs) {
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "a", "b");
+    FileSystemEventArgs& base = args;
+    (void)base;
+    SUCCEED();
+}
+
+// ===========================================================================
+// RenamedEventHandler
+// ===========================================================================
+
+TEST(RenamedEventHandlerTests, InvokesWithSenderAndArgs) {
+    bool called = false;
+    RenamedEventHandler handler = [&](void* sender, const RenamedEventArgs& e) {
+        called = true;
+        (void)sender;
+        (void)e;
+    };
+    RenamedEventArgs args(WatcherChangeTypes::Renamed, "/tmp", "a", "b");
+    int fakeSender = 0;
+    handler(&fakeSender, args);
+    EXPECT_TRUE(called);
+}
+
+// ===========================================================================
+// WaitForChangedResult
+// ===========================================================================
+
+TEST(WaitForChangedResultTests, DefaultConstructed_NotTimedOut) {
+    WaitForChangedResult r;
+    EXPECT_FALSE(r.TimedOut);
+}
+
+TEST(WaitForChangedResultTests, TimedOutResult_IsTimedOut) {
+    auto r = WaitForChangedResult::TimedOutResult();
+    EXPECT_TRUE(r.TimedOut);
+}
+
+// ===========================================================================
+// FileSystemWatcher
+// ===========================================================================
+
+TEST(FileSystemWatcherTests, DefaultCtor_PathIsEmpty) {
+    FileSystemWatcher fsw;
+    EXPECT_TRUE(fsw.getPathProperty().empty());
+}
+
+TEST(FileSystemWatcherTests, PathCtor_ExistingDirectory_Succeeds) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_EQ(fsw.getPathProperty(), "/tmp");
+}
+
+TEST(FileSystemWatcherTests, PathCtor_NonExistentDirectory_ThrowsArgumentException) {
+    EXPECT_THROW(FileSystemWatcher(tf("no_such_watch_dir_xyz")), System::ArgumentException);
+}
+
+TEST(FileSystemWatcherTests, FilterCtor_SetsFilter) {
+    FileSystemWatcher fsw("/tmp", "*.txt");
+    EXPECT_EQ(fsw.getFilterProperty(), "*.txt");
+}
+
+TEST(FileSystemWatcherTests, DefaultFilter_IsStar) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_EQ(fsw.getFilterProperty(), "*");
+}
+
+TEST(FileSystemWatcherTests, DefaultNotifyFilter_MatchesDotNetDefault) {
+    FileSystemWatcher fsw;
+    auto expected = NotifyFilters::LastWrite | NotifyFilters::FileName | NotifyFilters::DirectoryName;
+    EXPECT_EQ(fsw.getNotifyFilterProperty(), expected);
+}
+
+TEST(FileSystemWatcherTests, SetNotifyFilter_InvalidBits_ThrowsArgumentException) {
+    FileSystemWatcher fsw;
+    EXPECT_THROW(fsw.setNotifyFilterProperty(static_cast<NotifyFilters>(0x40000)), System::ArgumentException);
+}
+
+TEST(FileSystemWatcherTests, InternalBufferSize_ClampedToMinimum) {
+    FileSystemWatcher fsw;
+    fsw.setInternalBufferSizeProperty(100);
+    EXPECT_EQ(fsw.getInternalBufferSizeProperty(), 4096);
+}
+
+TEST(FileSystemWatcherTests, EnableRaisingEvents_RoundTrips) {
+    FileSystemWatcher fsw("/tmp");
+    EXPECT_FALSE(fsw.getEnableRaisingEventsProperty());
+    fsw.setEnableRaisingEventsProperty(true);
+    EXPECT_TRUE(fsw.getEnableRaisingEventsProperty());
+}
+
+TEST(FileSystemWatcherTests, ChangedHandlerList_CanRegisterHandler) {
+    FileSystemWatcher fsw("/tmp");
+    fsw.Changed.push_back([](void*, const FileSystemEventArgs&) {});
+    EXPECT_EQ(fsw.Changed.size(), 1u);
+}
+
 // ===========================================================================
 // EndOfStreamException
 // ===========================================================================
@@ -332,6 +694,10 @@ TEST(EndOfStreamExceptionTests, DefaultCtor_NoThrow) {
 TEST(EndOfStreamExceptionTests, MessageCtor_WhatContainsMessage) {
     EndOfStreamException ex("end of stream");
     EXPECT_NE(std::string(ex.what()).find("end of stream"), std::string::npos);
+}
+
+TEST(EndOfStreamExceptionTests, MessageAndInnerCtor_NoThrow) {
+    EXPECT_NO_THROW(EndOfStreamException("wrapped", std::exception_ptr{}));
 }
 
 // ===========================================================================
@@ -367,6 +733,11 @@ TEST(FileLoadExceptionTests, MessageFilenameCtor_getFileNameProperty) {
     EXPECT_EQ(ex.getFileNameProperty(), "bad.dll");
 }
 
+TEST(FileLoadExceptionTests, MessageFileNameAndInnerCtor_StoresFileName) {
+    FileLoadException ex("failed", "bad.dll", std::exception_ptr{});
+    EXPECT_EQ(ex.getFileNameProperty(), "bad.dll");
+}
+
 // ===========================================================================
 // InvalidDataException
 // ===========================================================================
@@ -378,6 +749,27 @@ TEST(InvalidDataExceptionTests, DefaultCtor_NoThrow) {
 TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
     InvalidDataException ex("corrupt data");
     EXPECT_NE(std::string(ex.what()).find("corrupt data"), std::string::npos);
+}
+
+// ===========================================================================
+// InternalBufferOverflowException
+// ===========================================================================
+
+TEST(InternalBufferOverflowExceptionTests, DefaultCtor_WhatNotEmpty) {
+    InternalBufferOverflowException ex;
+    EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(InternalBufferOverflowExceptionTests, MessageCtor_WhatContainsMessage) {
+    InternalBufferOverflowException ex("buffer overflowed");
+    EXPECT_NE(std::string(ex.what()).find("buffer overflowed"), std::string::npos);
+}
+
+TEST(InternalBufferOverflowExceptionTests, IsA_SystemException) {
+    EXPECT_THROW({
+        try { throw InternalBufferOverflowException("x"); }
+        catch (const System::SystemException&) { throw; }
+    }, InternalBufferOverflowException);
 }
 
 // ===========================================================================
@@ -418,6 +810,16 @@ TEST(IsolatedStorageExceptionTests, IsA_Exception) {
     EXPECT_THROW(throw IsolatedStorageException("err"), System::Exception);
 }
 
+TEST(IsolatedStorageExceptionTests, DefaultCtor_WhatNotEmpty) {
+    IsolatedStorageException ex;
+    EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(IsolatedStorageExceptionTests, MessageAndInnerCtor_WhatContainsMessage) {
+    IsolatedStorageException ex("wrapped failure", std::exception_ptr{});
+    EXPECT_NE(std::string(ex.what()).find("wrapped failure"), std::string::npos);
+}
+
 // ===========================================================================
 // EnumerationOptions
 // ===========================================================================
@@ -439,6 +841,23 @@ TEST(EnumerationOptionsTests, IgnoreInaccessible_DefaultTrue) {
 TEST(EnumerationOptionsTests, ReturnSpecialDirectories_DefaultFalse) {
     EnumerationOptions opts;
     EXPECT_FALSE(opts.ReturnSpecialDirectories);
+}
+
+TEST(EnumerationOptionsTests, AttributesToSkip_DefaultIsHiddenOrSystem) {
+    EnumerationOptions opts;
+    FileAttributes expected = static_cast<FileAttributes>(
+        static_cast<int>(FileAttributes::Hidden) | static_cast<int>(FileAttributes::System));
+    EXPECT_EQ(opts.AttributesToSkip, expected);
+}
+
+TEST(EnumerationOptionsTests, MaxRecursionDepth_DefaultIsIntMax) {
+    EnumerationOptions opts;
+    EXPECT_EQ(opts.MaxRecursionDepth, INT_MAX);
+}
+
+TEST(EnumerationOptionsTests, BufferSize_DefaultZero) {
+    EnumerationOptions opts;
+    EXPECT_EQ(opts.BufferSize, 0);
 }
 
 // ===========================================================================
@@ -507,4 +926,29 @@ TEST(DriveInfoTests, ToString_ReturnsName) {
 TEST(DriveInfoTests, GetDrives_NotEmpty) {
     auto drives = DriveInfo::GetDrives();
     EXPECT_FALSE(drives.empty());
+}
+
+TEST(DriveInfoTests, VolumeLabel_ReturnsName) {
+    DriveInfo d("/");
+    EXPECT_EQ(d.getVolumeLabelProperty(), "/");
+}
+
+TEST(DriveInfoTests, TotalSize_IsPositiveForRealDrive) {
+    DriveInfo d("/");
+    EXPECT_GT(d.getTotalSizeProperty(), 0);
+}
+
+TEST(DriveInfoTests, TotalFreeSpace_DoesNotExceedTotalSize) {
+    DriveInfo d("/");
+    EXPECT_LE(d.getTotalFreeSpaceProperty(), d.getTotalSizeProperty());
+}
+
+TEST(DriveInfoTests, AvailableFreeSpace_DoesNotExceedTotalFreeSpace) {
+    DriveInfo d("/");
+    EXPECT_LE(d.getAvailableFreeSpaceProperty(), d.getTotalFreeSpaceProperty());
+}
+
+TEST(DriveInfoTests, TotalSize_NonExistentPath_ReturnsZero) {
+    DriveInfo d("/no/such/path/xyz_abc_123");
+    EXPECT_EQ(d.getTotalSizeProperty(), 0);
 }

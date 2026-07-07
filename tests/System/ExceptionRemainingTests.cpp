@@ -350,8 +350,8 @@ TEST(CultureNotFoundExceptionTests, DefaultCtor_WhatNotEmpty) {
     System::Globalization::CultureNotFoundException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
 }
-TEST(CultureNotFoundExceptionTests, MessageAndName_StoreName) {
-    System::Globalization::CultureNotFoundException ex("bad culture", "xx-XX");
+TEST(CultureNotFoundExceptionTests, ParamNameAndInvalidCultureNameAndMessage_StoreName) {
+    System::Globalization::CultureNotFoundException ex("cultureName", "xx-XX", "bad culture");
     EXPECT_EQ(ex.getInvalidCultureNameProperty(), "xx-XX");
 }
 TEST(CultureNotFoundExceptionTests, IsA_Exception) {

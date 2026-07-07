@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 #include "System/Security/SecurityAttributes.hpp"
 #include "System/Security/SecurityException.hpp"
-#include "System/Security/CryptographicException.hpp"
 #include "System/Security/VerificationException.hpp"
 
 using System::Security::SecurityRuleSet;
@@ -18,7 +17,6 @@ using System::Security::SuppressUnmanagedCodeSecurityAttribute;
 using System::Security::UnverifiableCodeAttribute;
 using System::Security::SecurityRulesAttribute;
 using System::Security::SecurityException;
-using System::Security::CryptographicException;
 
 // ===========================================================================
 // SecurityRuleSet enum
@@ -162,34 +160,20 @@ TEST(SecurityExceptionTests, CaughtAsSystemException) {
         System::SystemException);
 }
 
-// ===========================================================================
-// CryptographicException
-// ===========================================================================
-
-TEST(CryptographicExceptionTests, DefaultMessage) {
-    CryptographicException ex;
-    EXPECT_STREQ(ex.what(), "Error occurred during cryptographic operation.");
+TEST(SecurityExceptionTests, HResult_IsCorSecurity) {
+    SecurityException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x8013150A));
 }
 
-TEST(CryptographicExceptionTests, CustomMessage) {
-    CryptographicException ex("Invalid key size");
-    EXPECT_STREQ(ex.what(), "Invalid key size");
+TEST(SecurityExceptionTests, MessageAndInnerException) {
+    try {
+        try {
+            throw std::runtime_error("root cause");
+        } catch (...) {
+            throw SecurityException("wrapped", std::current_exception());
+        }
+    } catch (const SecurityException& ex) {
+        EXPECT_STREQ(ex.what(), "wrapped");
+    }
 }
 
-TEST(CryptographicExceptionTests, MessageWithInner) {
-    CryptographicException ex("Hash failed", "SHA256 error");
-    std::string msg = ex.what();
-    EXPECT_NE(msg.find("Hash failed"), std::string::npos);
-    EXPECT_NE(msg.find("SHA256 error"), std::string::npos);
-}
-
-TEST(CryptographicExceptionTests, IsThrowable) {
-    EXPECT_THROW(throw CryptographicException(), CryptographicException);
-}
-
-TEST(CryptographicExceptionTests, CaughtAsSystemException) {
-    EXPECT_THROW(
-        { try { throw CryptographicException(); }
-          catch (const System::SystemException&) { throw; } },
-        System::SystemException);
-}

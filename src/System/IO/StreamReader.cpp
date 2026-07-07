@@ -2,32 +2,88 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/StreamReader.hpp"
-
-#include <vector>
+#include "System/IO/FileStream.hpp"
+#include "System/IO/FileMode.hpp"
+#include "System/IO/FileAccess.hpp"
 
 namespace System::IO
 {
-    StreamReader::StreamReader(Stream* stream)
-        : stream(stream)
+    StreamReader::StreamReader(Stream* stream, bool leaveOpen)
+        : stream_(stream), leaveOpen_(leaveOpen), ownsStream_(false)
     {
     }
 
-    std::string StreamReader::ReadToEnd() const
+    StreamReader::StreamReader(const std::string& path)
+        : stream_(new FileStream(path, FileMode::Open, FileAccess::Read)),
+          leaveOpen_(false), ownsStream_(true)
     {
-        if (stream == nullptr)
+    }
+
+    StreamReader::~StreamReader()
+    {
+        if (!leaveOpen_ && stream_) stream_->Close();
+        if (ownsStream_) delete stream_;
+    }
+
+    intcs StreamReader::Peek()
+    {
+        if (hasPeeked_) return static_cast<intcs>(peeked_);
+        if (stream_ == nullptr) return -1;
+
+        bytecs b;
+        const intcs n = stream_->Read(&b, 0, 1);
+        if (n == 0) return -1;
+
+        peeked_ = b;
+        hasPeeked_ = true;
+        return static_cast<intcs>(b);
+    }
+
+    intcs StreamReader::Read()
+    {
+        if (hasPeeked_)
         {
-            return "";
+            hasPeeked_ = false;
+            return static_cast<intcs>(peeked_);
+        }
+        if (stream_ == nullptr) return -1;
+
+        bytecs b;
+        const intcs n = stream_->Read(&b, 0, 1);
+        return n == 0 ? -1 : static_cast<intcs>(b);
+    }
+
+    std::string StreamReader::ReadLine()
+    {
+        intcs c = Read();
+        if (c == -1) return "";
+
+        std::string line;
+        while (c != -1 && c != '\n')
+        {
+            line.push_back(static_cast<char>(c));
+            c = Read();
+        }
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        return line;
+    }
+
+    std::string StreamReader::ReadToEnd()
+    {
+        std::string result;
+        if (hasPeeked_)
+        {
+            result.push_back(static_cast<char>(peeked_));
+            hasPeeked_ = false;
         }
 
-        const intcs length = stream->getLengthProperty();
-        if (length <= 0)
-        {
-            return "";
-        }
+        intcs c;
+        while ((c = Read()) != -1) result.push_back(static_cast<char>(c));
+        return result;
+    }
 
-        std::vector<char> buffer(static_cast<std::size_t>(length));
-        const intcs bytesRead = stream->Read(reinterpret_cast<SharpRuntime::bytecs*>(buffer.data()), 0, length);
-
-        return std::string(buffer.data(), static_cast<std::size_t>(bytesRead));
+    void StreamReader::Close()
+    {
+        if (stream_) stream_->Close();
     }
 }

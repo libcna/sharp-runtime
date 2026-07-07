@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <mutex>
 #include <condition_variable>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Threading/SemaphoreFullException.hpp"
 
 namespace System::Threading {
 
@@ -25,7 +28,12 @@ namespace System::Threading {
     public:
         /** Constructs a SemaphoreSlim with the given initial and maximum counts. */
         explicit SemaphoreSlim(intcs initialCount, intcs maxCount = 0x7fffffff)
-            : count_(initialCount), maxCount_(maxCount) {}
+            : count_(initialCount), maxCount_(maxCount) {
+            if (maxCount < 1)
+                throw System::ArgumentOutOfRangeException("maxCount");
+            if (initialCount < 0 || initialCount > maxCount)
+                throw System::ArgumentOutOfRangeException("initialCount");
+        }
 
         /** Returns the current count of the semaphore. */
         [[nodiscard]] intcs getCurrentCountProperty() const { return count_; }
@@ -50,9 +58,13 @@ namespace System::Threading {
 
         /** @brief Releases the semaphore a specified number of times. Returns previous count. */
         intcs Release(intcs releaseCount) {
+            if (releaseCount < 1)
+                throw System::ArgumentOutOfRangeException("releaseCount");
             std::lock_guard<std::mutex> lk(mutex_);
+            if (count_ + releaseCount > maxCount_)
+                throw System::Threading::SemaphoreFullException();
             intcs prev = count_;
-            count_ = std::min(count_ + releaseCount, maxCount_);
+            count_ += releaseCount;
             cv_.notify_all();
             return prev;
         }

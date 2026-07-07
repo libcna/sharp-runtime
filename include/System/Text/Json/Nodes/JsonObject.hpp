@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/Text/Json/Nodes/JsonNode.hpp"
+
+namespace System::Text::Json::Nodes {
+
+    using SharpRuntime::intcs;
+
+    /**
+     * @brief Represents a mutable JSON object (an ordered collection of name/value pairs).
+     *
+     * C++ counterpart of .NET System.Text.Json.Nodes.JsonObject.
+     *
+     * @note Backed by a `std::vector<std::pair<...>>` (linear lookup) rather than .NET's hybrid
+     * dictionary — preserves insertion order (which .NET's JsonObject also guarantees) without a
+     * separate name-to-index hash map; fine for the modestly-sized config/content JSON this
+     * runtime's game code realistically works with.
+     */
+    class JsonObject : public JsonNode {
+        std::vector<std::pair<std::string, std::shared_ptr<JsonNode>>> properties_;
+
+        [[nodiscard]] intcs findIndex(const std::string& propertyName) const {
+            for (size_t i = 0; i < properties_.size(); ++i)
+                if (properties_[i].first == propertyName) return static_cast<intcs>(i);
+            return -1;
+        }
+
+    public:
+        explicit JsonObject(JsonNodeOptions options = {}) : JsonNode(options) {}
+
+        /** @return The number of properties in the object. */
+        [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(properties_.size()); }
+
+        /** @return true if a property named @p propertyName exists. */
+        [[nodiscard]] bool ContainsKey(const std::string& propertyName) const { return findIndex(propertyName) >= 0; }
+
+        /** @brief Tries to get the value of @p propertyName; returns false if not present. */
+        [[nodiscard]] bool TryGetPropertyValue(const std::string& propertyName, std::shared_ptr<JsonNode>& value) const {
+            intcs idx = findIndex(propertyName);
+            if (idx < 0) return false;
+            value = properties_[static_cast<size_t>(idx)].second;
+            return true;
+        }
+
+        /** @brief Adds a new property. @throws System::ArgumentException if @p propertyName already exists. */
+        void Add(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
+            if (ContainsKey(propertyName))
+                throw System::ArgumentException("An item with the same key has already been added.", "propertyName");
+            if (value) value->setParentProperty(this);
+            properties_.emplace_back(propertyName, std::move(value));
+        }
+
+        /** @brief Removes the property named @p propertyName. @return true if it was present. */
+        bool Remove(const std::string& propertyName) {
+            intcs idx = findIndex(propertyName);
+            if (idx < 0) return false;
+            properties_.erase(properties_.begin() + idx);
+            return true;
+        }
+
+        /** @return The value of @p propertyName. @throws System::Collections::Generic::KeyNotFoundException if absent. */
+        [[nodiscard]] const std::shared_ptr<JsonNode>& operator[](const std::string& propertyName) const {
+            intcs idx = findIndex(propertyName);
+            if (idx < 0)
+                throw System::Collections::Generic::KeyNotFoundException("The given key '" + propertyName + "' was not present.");
+            return properties_[static_cast<size_t>(idx)].second;
+        }
+
+        /** @brief Sets the value of @p propertyName, adding it if not already present. */
+        void SetItem(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
+            if (value) value->setParentProperty(this);
+            intcs idx = findIndex(propertyName);
+            if (idx >= 0) properties_[static_cast<size_t>(idx)].second = std::move(value);
+            else properties_.emplace_back(propertyName, std::move(value));
+        }
+
+        /** @brief Removes all properties from the object. */
+        void Clear() { properties_.clear(); }
+
+        [[nodiscard]] auto begin() const { return properties_.begin(); }
+        [[nodiscard]] auto end() const { return properties_.end(); }
+
+        [[nodiscard]] JsonValueKind GetValueKind() const override { return JsonValueKind::Object; }
+
+        [[nodiscard]] nlohmann::ordered_json toNlohmann() const override {
+            nlohmann::ordered_json obj = nlohmann::ordered_json::object();
+            for (const auto& [name, value] : properties_) obj[name] = value ? value->toNlohmann() : nlohmann::ordered_json(nullptr);
+            return obj;
+        }
+
+        [[nodiscard]] std::shared_ptr<JsonNode> DeepClone() const override {
+            auto clone = std::make_shared<JsonObject>(getOptionsProperty());
+            for (const auto& [name, value] : properties_) clone->Add(name, value ? value->DeepClone() : nullptr);
+            return clone;
+        }
+    };
+
+} // namespace System::Text::Json::Nodes

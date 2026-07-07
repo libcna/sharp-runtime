@@ -268,11 +268,25 @@ namespace System {
                 i += n;
             } else if (c == 'M') {
                 int n = run('M');
-                result += (n >= 2) ? pad(mo, 2) : std::to_string(mo);
+                static constexpr const char* abbrevMonths[13] = {
+                    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+                static constexpr const char* fullMonths[13] = {
+                    "", "January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"};
+                if (n >= 4) result += fullMonths[mo];
+                else if (n == 3) result += abbrevMonths[mo];
+                else result += (n >= 2) ? pad(mo, 2) : std::to_string(mo);
                 i += n;
             } else if (c == 'd') {
                 int n = run('d');
-                result += (n >= 2) ? pad(dy, 2) : std::to_string(dy);
+                static constexpr const char* abbrevDays[7] = {
+                    "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+                static constexpr const char* fullDays[7] = {
+                    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+                if (n >= 4) result += fullDays[static_cast<int>(getDayOfWeekProperty())];
+                else if (n == 3) result += abbrevDays[static_cast<int>(getDayOfWeekProperty())];
+                else result += (n >= 2) ? pad(dy, 2) : std::to_string(dy);
                 i += n;
             } else if (c == 'H') {
                 int n = run('H');

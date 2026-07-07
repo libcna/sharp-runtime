@@ -6,7 +6,7 @@
 namespace System::IO {
 
     namespace {
-        constexpr const char* DefaultMsg = "Unable to read beyond the end of the stream.";
+        constexpr const char* DefaultMsg = "Attempted to read past the end of the stream.";
     }
 
     EndOfStreamException::EndOfStreamException()
@@ -17,5 +17,8 @@ namespace System::IO {
 
     EndOfStreamException::EndOfStreamException(const std::string& message)
         : IOException(message) {}
+
+    EndOfStreamException::EndOfStreamException(const std::string& message, std::exception_ptr inner)
+        : IOException(message, std::move(inner)) {}
 
 } // namespace System::IO

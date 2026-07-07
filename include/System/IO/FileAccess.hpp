@@ -19,4 +19,24 @@ namespace System::IO {
         ReadWrite = 3
     };
 
+    /**
+     * @brief Combines two FileAccess values with bitwise OR.
+     * @param a First value.
+     * @param b Second value.
+     * @return The combined value.
+     */
+    inline FileAccess operator|(FileAccess a, FileAccess b) {
+        return static_cast<FileAccess>(static_cast<int>(a) | static_cast<int>(b));
+    }
+
+    /**
+     * @brief Masks two FileAccess values with bitwise AND.
+     * @param a First value.
+     * @param b Second value.
+     * @return The masked value.
+     */
+    inline FileAccess operator&(FileAccess a, FileAccess b) {
+        return static_cast<FileAccess>(static_cast<int>(a) & static_cast<int>(b));
+    }
+
 } // namespace System::IO

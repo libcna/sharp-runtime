@@ -21,6 +21,9 @@ namespace System::IO {
         /** Constructs a StringWriter with an empty buffer. */
         StringWriter() = default;
 
+        using TextWriter::Write;
+        using TextWriter::WriteLine;
+
         /** Writes a string to the internal buffer. */
         void Write(const std::string& value) override { buf_ << value; }
 

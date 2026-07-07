@@ -4,7 +4,7 @@
 #include "System/IO/Compression/GZipStream.hpp"
 #include "System/IO/Compression/DeflateStream.hpp"
 #include "System/IO/MemoryStream.hpp"
-#include "System/NotImplementedException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -136,7 +136,7 @@ TEST(GZipStream, CanWriteIsTrueForCompress) {
 TEST(GZipStream, GetLengthThrows) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, true);
-    EXPECT_THROW((void)gz.getLengthProperty(), System::NotImplementedException);
+    EXPECT_THROW((void)gz.getLengthProperty(), System::NotSupportedException);
 }
 
 TEST(GZipStream, RoundTripMultipleWrites) {
@@ -228,7 +228,7 @@ TEST(DeflateStream, CanWriteIsTrueForCompress) {
 TEST(DeflateStream, GetLengthThrows) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, true);
-    EXPECT_THROW((void)ds.getLengthProperty(), System::NotImplementedException);
+    EXPECT_THROW((void)ds.getLengthProperty(), System::NotSupportedException);
 }
 
 TEST(DeflateStream, DeflateAndGZipOutputDiffer) {

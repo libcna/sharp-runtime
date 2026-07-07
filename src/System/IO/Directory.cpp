@@ -2,24 +2,38 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Directory.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/ArgumentException.hpp"
 
 #include <filesystem>
 #include <regex>
 
 namespace System::IO {
 
+    namespace {
+        void ThrowIfNullOrEmpty(const std::string& path, const std::string& paramName) {
+            if (path.empty()) throw System::ArgumentException("Path cannot be the empty string.", paramName);
+        }
+    }
+
     bool Directory::Exists(const std::string& path) {
-        return std::filesystem::exists(path) && std::filesystem::is_directory(path);
+        if (path.empty()) return false;
+        std::error_code ec;
+        bool isDir = std::filesystem::is_directory(path, ec);
+        return !ec && isDir;
     }
 
     void Directory::CreateDirectory(const std::string& path) {
+        ThrowIfNullOrEmpty(path, "path");
         std::error_code ec;
         std::filesystem::create_directories(path, ec);
         if (ec) throw IOException("Failed to create directory: " + ec.message());
     }
 
     void Directory::Delete(const std::string& path, bool recursive) {
+        ThrowIfNullOrEmpty(path, "path");
+        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         std::error_code ec;
         if (recursive) std::filesystem::remove_all(path, ec);
         else           std::filesystem::remove(path, ec);
@@ -27,12 +41,16 @@ namespace System::IO {
     }
 
     void Directory::Move(const std::string& src, const std::string& dst) {
+        ThrowIfNullOrEmpty(src, "sourceDirName");
+        ThrowIfNullOrEmpty(dst, "destDirName");
+        if (!Exists(src)) throw DirectoryNotFoundException("Could not find a part of the path '" + src + "'.");
         std::error_code ec;
         std::filesystem::rename(src, dst, ec);
         if (ec) throw IOException("Failed to move directory: " + ec.message());
     }
 
     std::vector<std::string> Directory::GetFiles(const std::string& path) {
+        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         std::vector<std::string> result;
         for (const auto& entry : std::filesystem::directory_iterator(path))
             if (entry.is_regular_file())
@@ -42,6 +60,7 @@ namespace System::IO {
 
     std::vector<std::string> Directory::GetFiles(const std::string& path,
                                                   const std::string& searchPattern) {
+        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         // Convert glob pattern (*.txt) to regex
         std::string pat = searchPattern;
         // Escape regex special chars except * and ?
@@ -66,6 +85,7 @@ namespace System::IO {
     }
 
     std::vector<std::string> Directory::GetDirectories(const std::string& path) {
+        if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         std::vector<std::string> result;
         for (const auto& entry : std::filesystem::directory_iterator(path))
             if (entry.is_directory())

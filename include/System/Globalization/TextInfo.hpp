@@ -6,6 +6,7 @@
 #include <cwctype>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Globalization {
 
@@ -113,8 +114,12 @@ public:
      *
      * C++ counterpart of .NET TextInfo.ListSeparator setter.
      * @param value The new list separator string.
+     * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setListSeparatorProperty(const std::string& value) { listSeparator_ = value; }
+    void setListSeparatorProperty(const std::string& value) {
+        VerifyWritable();
+        listSeparator_ = value;
+    }
 
     /**
      * @brief Converts a UTF-16 character to its lowercase equivalent.
@@ -264,6 +269,10 @@ private:
     std::string cultureName_;
     std::string listSeparator_{"," };
     bool isReadOnly_{false};
+
+    void VerifyWritable() const {
+        if (isReadOnly_) throw System::InvalidOperationException("Instance is read-only.");
+    }
 };
 
 } // namespace System::Globalization

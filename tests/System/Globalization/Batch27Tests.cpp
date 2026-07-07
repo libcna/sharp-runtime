@@ -8,6 +8,7 @@
 //   CultureInfo:           int ctor, CurrentUICulture, all properties
 //   CultureNotFoundException: all ctors, getInvalidCultureIdProperty
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/CompareInfo.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/CultureInfo.hpp"
@@ -16,6 +17,7 @@
 
 using System::Globalization::CompareInfo;
 using System::Globalization::CompareOptions;
+using System::Globalization::SortKey;
 using System::Globalization::CultureInfo;
 using System::Globalization::CultureNotFoundException;
 
@@ -78,6 +80,13 @@ TEST(CompareInfoBatch27Test, Compare_SubstringOverload) {
     EXPECT_EQ(ci.Compare("hello world", 6, 5, "world", 0, 5), 0);
 }
 
+TEST(CompareInfoBatch27Test, Compare_SubstringOverload_OutOfRange_Throws) {
+    CompareInfo ci("en-US");
+    EXPECT_THROW(ci.Compare("hello", 3, 10, "world", 0, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ci.Compare("hello", -1, 2, "world", 0, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ci.Compare("hello", 0, 2, "world", 3, 10), System::ArgumentOutOfRangeException);
+}
+
 TEST(CompareInfoBatch27Test, IsPrefix_IsSuffix) {
     CompareInfo ci("en-US");
     EXPECT_TRUE(ci.IsPrefix("hello", "hel"));
@@ -114,10 +123,25 @@ TEST(CompareInfoBatch27Test, GetSortKey) {
     EXPECT_EQ(sk.getOriginalStringProperty(), "test");
 }
 
+TEST(CompareInfoBatch27Test, GetSortKey_IgnoreCase_ProducesEqualKeys) {
+    // Sort keys must be consistent with Compare: strings equal under IgnoreCase
+    // should produce equal sort keys, matching the .NET contract.
+    CompareInfo ci("en-US");
+    auto skLower = ci.GetSortKey("hello", CompareOptions::IgnoreCase);
+    auto skUpper = ci.GetSortKey("HELLO", CompareOptions::IgnoreCase);
+    EXPECT_EQ(SortKey::Compare(skLower, skUpper), 0);
+}
+
 TEST(CompareInfoBatch27Test, GetHashCode) {
     CompareInfo ci("en-US");
     EXPECT_EQ(ci.GetHashCode("same", CompareOptions::None),
               ci.GetHashCode("same", CompareOptions::None));
+}
+
+TEST(CompareInfoBatch27Test, GetHashCode_IgnoreCase_MatchesAcrossCase) {
+    CompareInfo ci("en-US");
+    EXPECT_EQ(ci.GetHashCode("Hello", CompareOptions::IgnoreCase),
+              ci.GetHashCode("hello", CompareOptions::IgnoreCase));
 }
 
 TEST(CompareInfoBatch27Test, EqualityAndToString) {
@@ -149,20 +173,34 @@ TEST(CultureInfoBatch27Test, IntCtor) {
 }
 
 TEST(CultureInfoBatch27Test, InvariantCulture) {
-    const auto& inv = CultureInfo::InvariantCulture();
+    const auto& inv = CultureInfo::getInvariantCultureProperty();
     EXPECT_EQ(inv.getNameProperty(), "");
     EXPECT_TRUE(inv.getIsNeutralCultureProperty());
     EXPECT_TRUE(inv.getIsReadOnlyProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentCulture_ReturnsInvariant) {
-    const auto& cur = CultureInfo::CurrentCulture();
+    const auto& cur = CultureInfo::getCurrentCultureProperty();
     EXPECT_TRUE(cur.getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentUICulture_ReturnsInvariant) {
-    const auto& ui = CultureInfo::CurrentUICulture();
+    const auto& ui = CultureInfo::getCurrentUICultureProperty();
     EXPECT_TRUE(ui.getIsNeutralCultureProperty());
+}
+
+TEST(CultureInfoBatch27Test, SetCurrentCulture_ChangesGetter) {
+    CultureInfo previous = CultureInfo::getCurrentCultureProperty();
+    CultureInfo::setCurrentCultureProperty(CultureInfo("de-DE"));
+    EXPECT_EQ(CultureInfo::getCurrentCultureProperty().getNameProperty(), "de-DE");
+    CultureInfo::setCurrentCultureProperty(previous); // restore for other tests
+}
+
+TEST(CultureInfoBatch27Test, SetCurrentUICulture_ChangesGetter) {
+    CultureInfo previous = CultureInfo::getCurrentUICultureProperty();
+    CultureInfo::setCurrentUICultureProperty(CultureInfo("ja-JP"));
+    EXPECT_EQ(CultureInfo::getCurrentUICultureProperty().getNameProperty(), "ja-JP");
+    CultureInfo::setCurrentUICultureProperty(previous); // restore for other tests
 }
 
 // ===========================================================================
@@ -181,8 +219,18 @@ TEST(CultureNotFoundExceptionBatch27Test, MessageCtor) {
     EXPECT_NE(std::string(ex.what()).find("bad culture"), std::string::npos);
 }
 
-TEST(CultureNotFoundExceptionBatch27Test, MessageAndNameCtor) {
-    CultureNotFoundException ex("not found", "xx-XX");
+TEST(CultureNotFoundExceptionBatch27Test, ParamNameAndMessageCtor) {
+    CultureNotFoundException ex("cultureName", "not found");
+    EXPECT_EQ(ex.getInvalidCultureNameProperty(), "");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, ParamNameAndInvalidCultureNameAndMessageCtor) {
+    CultureNotFoundException ex("cultureName", "xx-XX", "not found");
+    EXPECT_EQ(ex.getInvalidCultureNameProperty(), "xx-XX");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageAndInvalidCultureNameAndInnerCtor) {
+    CultureNotFoundException ex("not found", "xx-XX", std::exception_ptr{});
     EXPECT_EQ(ex.getInvalidCultureNameProperty(), "xx-XX");
 }
 

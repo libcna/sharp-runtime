@@ -8,6 +8,9 @@
 //   StringCollection:   IsSynchronized, SyncRoot
 //   StringDictionary:   getKeysProperty, getValuesProperty, getSyncRootProperty
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Collections/Specialized/OrderedDictionary.hpp"
 #include "System/Collections/Specialized/StringCollection.hpp"
 #include "System/Collections/Specialized/StringDictionary.hpp"
@@ -62,7 +65,7 @@ TEST(OrderedDictionaryBatch22Test, AddAndContains) {
 TEST(OrderedDictionaryBatch22Test, Add_DuplicateThrows) {
     OrderedDictionary d;
     d.Add("k", "v");
-    EXPECT_THROW(d.Add("k", "v2"), std::invalid_argument);
+    EXPECT_THROW(d.Add("k", "v2"), System::ArgumentException);
 }
 
 TEST(OrderedDictionaryBatch22Test, Indexer_ByKey) {
@@ -71,9 +74,17 @@ TEST(OrderedDictionaryBatch22Test, Indexer_ByKey) {
     EXPECT_EQ(d["x"], "hello");
 }
 
-TEST(OrderedDictionaryBatch22Test, Indexer_Missing_Throws) {
+TEST(OrderedDictionaryBatch22Test, Indexer_Missing_ReturnsEmpty) {
+    const OrderedDictionary d;
+    EXPECT_EQ(d["missing"], "");
+}
+
+TEST(OrderedDictionaryBatch22Test, Indexer_Mutable_InsertsNewKey) {
     OrderedDictionary d;
-    EXPECT_THROW((void)d["missing"], std::out_of_range);
+    d["newkey"] = "value";
+    EXPECT_TRUE(d.Contains("newkey"));
+    EXPECT_EQ(d["newkey"], "value");
+    EXPECT_EQ(d.getCountProperty(), 1);
 }
 
 TEST(OrderedDictionaryBatch22Test, GetByIndex) {
@@ -144,14 +155,25 @@ TEST(OrderedDictionaryBatch22Test, ValuesProperty_InsertionOrder) {
     EXPECT_EQ(vals[1], "beta");
 }
 
-TEST(OrderedDictionaryBatch22Test, AsReadOnly_BlocksMutation) {
+TEST(OrderedDictionaryBatch22Test, AsReadOnly_WrapperIsReadOnly_OriginalStaysMutable) {
     OrderedDictionary d;
     d.Add("k", "v");
-    d.AsReadOnly();
-    EXPECT_TRUE(d.getIsReadOnlyProperty());
-    EXPECT_THROW(d.Add("x", "y"), std::runtime_error);
-    EXPECT_THROW(d.Remove("k"), std::runtime_error);
-    EXPECT_THROW(d.Clear(), std::runtime_error);
+    OrderedDictionary view = d.AsReadOnly();
+
+    // The wrapper is read-only...
+    EXPECT_TRUE(view.getIsReadOnlyProperty());
+    EXPECT_THROW(view.Add("x", "y"), System::NotSupportedException);
+    EXPECT_THROW(view.Remove("k"), System::NotSupportedException);
+    EXPECT_THROW(view.Clear(), System::NotSupportedException);
+
+    // ...but the original is NOT: AsReadOnly() must not mutate `d` itself.
+    EXPECT_FALSE(d.getIsReadOnlyProperty());
+    d.Add("x", "y");
+    EXPECT_EQ(d.getCountProperty(), 2);
+
+    // The wrapper shares storage with the original: it's a live view, not a snapshot.
+    EXPECT_EQ(view.getCountProperty(), 2);
+    EXPECT_TRUE(view.Contains("x"));
 }
 
 // ===========================================================================
@@ -214,6 +236,43 @@ TEST(StringCollectionBatch22Test, CopyTo) {
     EXPECT_EQ(dest[2], "q");
 }
 
+TEST(StringCollectionBatch22Test, CopyTo_NegativeIndex_Throws) {
+    StringCollection sc;
+    sc.Add("p");
+    std::vector<std::string> dest(4, "");
+    EXPECT_THROW(sc.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(StringCollectionBatch22Test, CopyTo_DestTooSmall_Throws) {
+    StringCollection sc;
+    sc.Add("p"); sc.Add("q");
+    std::vector<std::string> dest(2, "");
+    EXPECT_THROW(sc.CopyTo(dest, 1), System::ArgumentException);
+}
+
+TEST(StringCollectionBatch22Test, Insert_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW(sc.Insert(-1, "x"), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(sc.Insert(2, "x"), System::ArgumentOutOfRangeException);
+    sc.Insert(1, "b"); // index == Count is valid (append)
+    EXPECT_EQ(sc.getCountProperty(), 2);
+}
+
+TEST(StringCollectionBatch22Test, Indexer_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW((void)sc[-1], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)sc[1], System::ArgumentOutOfRangeException);
+}
+
+TEST(StringCollectionBatch22Test, RemoveAt_OutOfRange_Throws) {
+    StringCollection sc;
+    sc.Add("a");
+    EXPECT_THROW(sc.RemoveAt(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(sc.RemoveAt(1), System::ArgumentOutOfRangeException);
+}
+
 // ===========================================================================
 // StringDictionary
 // ===========================================================================
@@ -229,6 +288,16 @@ TEST(StringDictionaryBatch22Test, AddAndCount) {
     sd.Add("KEY", "val");
     EXPECT_EQ(sd.getCountProperty(), 1);
     EXPECT_TRUE(sd.ContainsKey("key")); // case-insensitive
+}
+
+TEST(StringDictionaryBatch22Test, Add_DuplicateKey_CaseInsensitive_Throws) {
+    StringDictionary sd;
+    sd.Add("Key", "Value");
+    EXPECT_THROW(sd.Add("Key", "value"), System::ArgumentException);
+    EXPECT_THROW(sd.Add("KEY", "value"), System::ArgumentException);
+    EXPECT_THROW(sd.Add("key", "value"), System::ArgumentException);
+    EXPECT_EQ(sd.getCountProperty(), 1);
+    EXPECT_EQ(sd.GetValue("key"), "Value");
 }
 
 TEST(StringDictionaryBatch22Test, GetKeysProperty) {

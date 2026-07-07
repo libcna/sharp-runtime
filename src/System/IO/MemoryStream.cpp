@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/MemoryStream.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <algorithm>
 
 namespace System::IO
@@ -57,5 +58,15 @@ namespace System::IO
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
         position_ = value;
+    }
+
+    void MemoryStream::SetLength(intcs value)
+    {
+        if (value < 0)
+            throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        if (!writable_)
+            throw System::NotSupportedException("Stream does not support writing.");
+        data_.resize(static_cast<size_t>(value), bytecs{0});
+        if (position_ > value) position_ = value;
     }
 }

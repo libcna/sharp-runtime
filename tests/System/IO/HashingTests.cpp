@@ -3,17 +3,42 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/IO/Hashing/Adler32.hpp"
 #include "System/IO/Hashing/Crc32.hpp"
+#include "System/IO/Hashing/Crc32ParameterSet.hpp"
+#include "System/IO/Hashing/Crc64.hpp"
+#include "System/IO/Hashing/Crc64ParameterSet.hpp"
 #include "System/IO/Hashing/XxHash32.hpp"
 #include "System/IO/Hashing/XxHash64.hpp"
+#include "System/IO/Hashing/XxHash3.hpp"
+#include "System/IO/Hashing/XxHash128.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ArgumentException.hpp"
 
+using System::IO::Hashing::Adler32;
 using System::IO::Hashing::Crc32;
+using System::IO::Hashing::Crc32ParameterSet;
+using System::IO::Hashing::Crc64;
+using System::IO::Hashing::Crc64ParameterSet;
 using System::IO::Hashing::XxHash32;
 using System::IO::Hashing::XxHash64;
+using System::IO::Hashing::XxHash3;
+using System::IO::Hashing::XxHash128;
 
 static std::vector<uint8_t> bytes(const char* s) {
     return std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(s),
                                 reinterpret_cast<const uint8_t*>(s) + __builtin_strlen(s));
+}
+
+static uint32_t crc32Hash(const std::vector<uint8_t>& v) {
+    return Crc32::HashToUInt32(v.data(), static_cast<int32_t>(v.size()));
+}
+static uint32_t xxHash32Hash(const std::vector<uint8_t>& v) {
+    return XxHash32::HashToUInt32(v.data(), static_cast<int32_t>(v.size()));
+}
+static uint64_t xxHash64Hash(const std::vector<uint8_t>& v) {
+    return XxHash64::HashToUInt64(v.data(), static_cast<int32_t>(v.size()));
 }
 
 // ---------------------------------------------------------------------------
@@ -22,12 +47,12 @@ static std::vector<uint8_t> bytes(const char* s) {
 
 TEST(HashingTests, Crc32EmptyInput) {
     // Empty: CRC starts at 0xFFFFFFFF XOR'd with 0xFFFFFFFF = 0
-    EXPECT_EQ(Crc32::HashToUInt32({}), 0x00000000u);
+    EXPECT_EQ(crc32Hash({}), 0x00000000u);
 }
 
 TEST(HashingTests, Crc32StandardVector) {
     // ISO 3309 / ITU-T V.42 standard CRC-32 check value for "123456789"
-    EXPECT_EQ(Crc32::HashToUInt32(bytes("123456789")), 0xCBF43926u);
+    EXPECT_EQ(crc32Hash(bytes("123456789")), 0xCBF43926u);
 }
 
 TEST(HashingTests, Crc32Reset) {
@@ -48,7 +73,7 @@ TEST(HashingTests, Crc32Reset) {
 TEST(HashingTests, Crc32StreamingMatchesOneShot) {
     // Append in two chunks must match a single one-shot call
     std::vector<uint8_t> full = bytes("123456789");
-    uint32_t oneShot = Crc32::HashToUInt32(full);
+    uint32_t oneShot = crc32Hash(full);
 
     Crc32 h;
     h.Append(full.data(), 4);
@@ -57,16 +82,16 @@ TEST(HashingTests, Crc32StreamingMatchesOneShot) {
 }
 
 TEST(HashingTests, Crc32DifferentInputsDifferentHashes) {
-    EXPECT_NE(Crc32::HashToUInt32(bytes("abc")),
-              Crc32::HashToUInt32(bytes("abd")));
+    EXPECT_NE(crc32Hash(bytes("abc")),
+              crc32Hash(bytes("abd")));
 }
 
 // Official .NET runtime test vectors (little-endian uint32 of the byte output)
 TEST(HashingTests, Crc32OfficialVectors) {
     // Single byte 0x01 → 0xA505DF1B  (bytes {0x1B,0xDF,0x05,0xA5} little-endian)
-    EXPECT_EQ(Crc32::HashToUInt32({0x01}), 0xA505DF1Bu);
+    EXPECT_EQ(crc32Hash({0x01}), 0xA505DF1Bu);
     // "The quick brown fox jumps over the lazy dog"
-    EXPECT_EQ(Crc32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog")),
+    EXPECT_EQ(crc32Hash(bytes("The quick brown fox jumps over the lazy dog")),
               0x414FA339u);
 }
 
@@ -81,7 +106,7 @@ TEST(HashingTests, XxHash32EmptyInput) {
 }
 
 TEST(HashingTests, XxHash32EmptyInputStaticHelper) {
-    EXPECT_EQ(XxHash32::HashToUInt32({}), 0x02CC5D05u);
+    EXPECT_EQ(xxHash32Hash({}), 0x02CC5D05u);
 }
 
 TEST(HashingTests, XxHash32NonZeroSeedDiffers) {
@@ -100,7 +125,7 @@ TEST(HashingTests, XxHash32Reset) {
 
 TEST(HashingTests, XxHash32StreamingMatchesOneShot) {
     std::vector<uint8_t> full = bytes("The quick brown fox jumps over the lazy dog");
-    uint32_t oneShot = XxHash32::HashToUInt32(full);
+    uint32_t oneShot = xxHash32Hash(full);
 
     XxHash32 h;
     // Feed in three chunks to exercise the partial-block buffering
@@ -112,7 +137,7 @@ TEST(HashingTests, XxHash32StreamingMatchesOneShot) {
 
 TEST(HashingTests, XxHash32SingleByteStreamingMatchesOneShot) {
     std::vector<uint8_t> data = bytes("abc");
-    uint32_t oneShot = XxHash32::HashToUInt32(data);
+    uint32_t oneShot = xxHash32Hash(data);
 
     XxHash32 h;
     for (auto b : data) h.Append(&b, 1);
@@ -123,7 +148,7 @@ TEST(HashingTests, XxHash32LargeInputStreamingMatchesOneShot) {
     // 100 bytes — exercises the 16-byte block processing path
     std::vector<uint8_t> data(100);
     for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<uint8_t>(i);
-    uint32_t oneShot = XxHash32::HashToUInt32(data);
+    uint32_t oneShot = xxHash32Hash(data);
 
     XxHash32 h;
     h.Append(data.data(), 50);
@@ -132,16 +157,16 @@ TEST(HashingTests, XxHash32LargeInputStreamingMatchesOneShot) {
 }
 
 TEST(HashingTests, XxHash32DifferentInputsDifferentHashes) {
-    EXPECT_NE(XxHash32::HashToUInt32(bytes("abc")),
-              XxHash32::HashToUInt32(bytes("abd")));
+    EXPECT_NE(xxHash32Hash(bytes("abc")),
+              xxHash32Hash(bytes("abd")));
 }
 
 // Official .NET runtime test vectors (seed=0)
 TEST(HashingTests, XxHash32OfficialVectors) {
-    EXPECT_EQ(XxHash32::HashToUInt32(bytes("abc")),                                          0x32D153FFu);
-    EXPECT_EQ(XxHash32::HashToUInt32(bytes("Nobody inspects the spammish repetition")),      0xE2293B2Fu);
-    EXPECT_EQ(XxHash32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog")),  0xE85EA4DEu);
-    EXPECT_EQ(XxHash32::HashToUInt32(bytes("The quick brown fox jumps over the lazy dog.")), 0x68D039C8u);
+    EXPECT_EQ(xxHash32Hash(bytes("abc")),                                          0x32D153FFu);
+    EXPECT_EQ(xxHash32Hash(bytes("Nobody inspects the spammish repetition")),      0xE2293B2Fu);
+    EXPECT_EQ(xxHash32Hash(bytes("The quick brown fox jumps over the lazy dog")),  0xE85EA4DEu);
+    EXPECT_EQ(xxHash32Hash(bytes("The quick brown fox jumps over the lazy dog.")), 0x68D039C8u);
 }
 
 TEST(HashingTests, XxHash32GetHashLengthInBytes) {
@@ -160,7 +185,7 @@ TEST(HashingTests, XxHash64EmptyInput) {
 }
 
 TEST(HashingTests, XxHash64EmptyInputStaticHelper) {
-    EXPECT_EQ(XxHash64::HashToUInt64({}), 0xEF46DB3751D8E999ULL);
+    EXPECT_EQ(xxHash64Hash({}), 0xEF46DB3751D8E999ULL);
 }
 
 TEST(HashingTests, XxHash64NonZeroSeedDiffers) {
@@ -179,7 +204,7 @@ TEST(HashingTests, XxHash64Reset) {
 
 TEST(HashingTests, XxHash64StreamingMatchesOneShot) {
     std::vector<uint8_t> full = bytes("The quick brown fox jumps over the lazy dog");
-    uint64_t oneShot = XxHash64::HashToUInt64(full);
+    uint64_t oneShot = xxHash64Hash(full);
 
     XxHash64 h;
     h.Append(full.data(), 10);
@@ -190,7 +215,7 @@ TEST(HashingTests, XxHash64StreamingMatchesOneShot) {
 
 TEST(HashingTests, XxHash64SingleByteStreamingMatchesOneShot) {
     std::vector<uint8_t> data = bytes("abc");
-    uint64_t oneShot = XxHash64::HashToUInt64(data);
+    uint64_t oneShot = xxHash64Hash(data);
 
     XxHash64 h;
     for (auto b : data) h.Append(&b, 1);
@@ -201,7 +226,7 @@ TEST(HashingTests, XxHash64LargeInputStreamingMatchesOneShot) {
     // 100 bytes — exercises the 32-byte block processing path
     std::vector<uint8_t> data(100);
     for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<uint8_t>(i);
-    uint64_t oneShot = XxHash64::HashToUInt64(data);
+    uint64_t oneShot = xxHash64Hash(data);
 
     XxHash64 h;
     h.Append(data.data(), 50);
@@ -210,16 +235,16 @@ TEST(HashingTests, XxHash64LargeInputStreamingMatchesOneShot) {
 }
 
 TEST(HashingTests, XxHash64DifferentInputsDifferentHashes) {
-    EXPECT_NE(XxHash64::HashToUInt64(bytes("abc")),
-              XxHash64::HashToUInt64(bytes("abd")));
+    EXPECT_NE(xxHash64Hash(bytes("abc")),
+              xxHash64Hash(bytes("abd")));
 }
 
 // Official .NET runtime test vectors (seed=0)
 TEST(HashingTests, XxHash64OfficialVectors) {
-    EXPECT_EQ(XxHash64::HashToUInt64(bytes("abc")),                                          0x44BC2CF5AD770999ULL);
-    EXPECT_EQ(XxHash64::HashToUInt64(bytes("Nobody inspects the spammish repetition")),      0xFBCEA83C8A378BF1ULL);
-    EXPECT_EQ(XxHash64::HashToUInt64(bytes("The quick brown fox jumps over the lazy dog")),  0x0B242D361FDA71BCULL);
-    EXPECT_EQ(XxHash64::HashToUInt64(bytes("The quick brown fox jumps over the lazy dog.")), 0x44AD33705751AD73ULL);
+    EXPECT_EQ(xxHash64Hash(bytes("abc")),                                          0x44BC2CF5AD770999ULL);
+    EXPECT_EQ(xxHash64Hash(bytes("Nobody inspects the spammish repetition")),      0xFBCEA83C8A378BF1ULL);
+    EXPECT_EQ(xxHash64Hash(bytes("The quick brown fox jumps over the lazy dog")),  0x0B242D361FDA71BCULL);
+    EXPECT_EQ(xxHash64Hash(bytes("The quick brown fox jumps over the lazy dog.")), 0x44AD33705751AD73ULL);
 }
 
 TEST(HashingTests, XxHash64GetHashLengthInBytes) {
@@ -230,8 +255,448 @@ TEST(HashingTests, XxHash64GetHashLengthInBytes) {
 TEST(HashingTests, XxHash64HashesAreDistinctFromXxHash32) {
     // Sanity: 64-bit hash of same input != lower 32 bits of XxHash32 (generally)
     std::vector<uint8_t> data = bytes("hello");
-    uint64_t h64 = XxHash64::HashToUInt64(data);
-    uint32_t h32 = XxHash32::HashToUInt32(data);
+    uint64_t h64 = xxHash64Hash(data);
+    uint32_t h32 = xxHash32Hash(data);
     // They come from different algorithms — the 32-bit hash must not equal the lower word of the 64-bit hash
     EXPECT_NE(static_cast<uint32_t>(h64 & 0xFFFFFFFF), h32);
+}
+
+TEST(HashingTests, XxHash32_GetCurrentHash_IsBigEndianBytesOfHashValue) {
+    // Regression: GetCurrentHashCore previously wrote the raw uint32_t via memcpy (host byte
+    // order), but .NET's XxHash32 always writes big-endian, regardless of host endianness.
+    XxHash32 h;
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 4u);
+    uint32_t expected = h.GetCurrentHashAsUInt32();
+    uint32_t fromBytes = (static_cast<uint32_t>(bytesOut[0]) << 24) |
+                         (static_cast<uint32_t>(bytesOut[1]) << 16) |
+                         (static_cast<uint32_t>(bytesOut[2]) << 8)  |
+                          static_cast<uint32_t>(bytesOut[3]);
+    EXPECT_EQ(fromBytes, expected);
+}
+
+TEST(HashingTests, XxHash64_GetCurrentHash_IsBigEndianBytesOfHashValue) {
+    XxHash64 h;
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 8u);
+    uint64_t expected = h.GetCurrentHashAsUInt64();
+    uint64_t fromBytes = 0;
+    for (int i = 0; i < 8; ++i) fromBytes = (fromBytes << 8) | bytesOut[static_cast<size_t>(i)];
+    EXPECT_EQ(fromBytes, expected);
+}
+
+TEST(HashingTests, XxHash32_Clone_IndependentState) {
+    XxHash32 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), hello.size());
+    XxHash32 clone = h.Clone();
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), clone.GetCurrentHashAsUInt32());
+    auto world = bytes("world");
+    clone.Append(world.data(), world.size());
+    EXPECT_NE(h.GetCurrentHashAsUInt32(), clone.GetCurrentHashAsUInt32());
+}
+
+// ---------------------------------------------------------------------------
+// NonCryptographicHashAlgorithm base class API
+// ---------------------------------------------------------------------------
+
+TEST(HashingTests, TryGetCurrentHash_TooShort_ReturnsFalse) {
+    Crc32 h;
+    uint8_t buf[2];
+    int32_t written = -1;
+    EXPECT_FALSE(h.TryGetCurrentHash(buf, 2, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(HashingTests, GetCurrentHash_TooShort_Throws) {
+    Crc32 h;
+    uint8_t buf[2];
+    EXPECT_THROW(h.GetCurrentHash(buf, 2), System::ArgumentException);
+}
+
+TEST(HashingTests, TryGetHashAndReset_Succeeds_ResetsState) {
+    Crc32 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    uint8_t buf[4];
+    int32_t written = 0;
+    ASSERT_TRUE(h.TryGetHashAndReset(buf, 4, written));
+    EXPECT_EQ(written, 4);
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), Crc32().GetCurrentHashAsUInt32());
+}
+
+// ---------------------------------------------------------------------------
+// Adler32 (RFC 1950)
+// ---------------------------------------------------------------------------
+
+TEST(HashingTests, Adler32_EmptyInput_IsOne) {
+    EXPECT_EQ(Adler32::HashToUInt32(nullptr, 0), 0x00000001u);
+}
+
+TEST(HashingTests, Adler32_WikipediaExample) {
+    // Well-known Adler-32 check value for the ASCII string "Wikipedia".
+    auto data = bytes("Wikipedia");
+    EXPECT_EQ(Adler32::HashToUInt32(data.data(), static_cast<int32_t>(data.size())), 0x11E60398u);
+}
+
+TEST(HashingTests, Adler32_Reset) {
+    Adler32 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), 0x00000001u);
+}
+
+TEST(HashingTests, Adler32_StreamingMatchesOneShot) {
+    auto data = bytes("Wikipedia");
+    Adler32 h;
+    h.Append(data.data(), 4);
+    h.Append(data.data() + 4, static_cast<int32_t>(data.size() - 4));
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), 0x11E60398u);
+}
+
+TEST(HashingTests, Adler32_Clone_IndependentState) {
+    Adler32 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    Adler32 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsUInt32(), clone.GetCurrentHashAsUInt32());
+}
+
+// ---------------------------------------------------------------------------
+// Crc32ParameterSet / Crc32C
+// ---------------------------------------------------------------------------
+
+TEST(HashingTests, Crc32C_OfficialCheckValue) {
+    // .NET official test vector for CRC-32C, "123456789" -> byte output "839206E3"
+    // (little-endian reflected output) => UInt32 value 0xE3069283.
+    auto data = bytes("123456789");
+    auto crc32c = Crc32ParameterSet::getCrc32CProperty();
+    Crc32 h(crc32c);
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    EXPECT_EQ(h.GetCurrentHashAsUInt32(), 0xE3069283u);
+}
+
+TEST(HashingTests, Crc32_DefaultParameterSet_MatchesWellKnown) {
+    EXPECT_EQ(Crc32ParameterSet::getCrc32Property()->getPolynomialProperty(), 0x04c11db7u);
+    EXPECT_EQ(Crc32ParameterSet::getCrc32Property()->getInitialValueProperty(), 0xffffffffu);
+    EXPECT_TRUE(Crc32ParameterSet::getCrc32Property()->getReflectValuesProperty());
+}
+
+TEST(HashingTests, Crc32ParameterSet_Create_CustomParameters) {
+    auto custom = Crc32ParameterSet::Create(0x04c11db7u, 0u, 0u, true);
+    EXPECT_EQ(custom->getPolynomialProperty(), 0x04c11db7u);
+    EXPECT_EQ(custom->getInitialValueProperty(), 0u);
+    EXPECT_EQ(custom->getFinalXorValueProperty(), 0u);
+}
+
+TEST(HashingTests, Crc32_NullParameterSet_Throws) {
+    EXPECT_THROW(Crc32{std::shared_ptr<Crc32ParameterSet>(nullptr)}, System::ArgumentNullException);
+}
+
+// ---------------------------------------------------------------------------
+// Crc64
+// ---------------------------------------------------------------------------
+
+TEST(HashingTests, Crc64_Ecma182_OfficialCheckValue) {
+    // .NET official test vector: CRC-64/ECMA-182, "123456789" -> 0x6C40DF5F0B497347
+    auto data = bytes("123456789");
+    Crc64 h;
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0x6C40DF5F0B497347ull);
+}
+
+TEST(HashingTests, Crc64_Nvme_OfficialCheckValue) {
+    // .NET official test vector: CRC-64/NVMe, "123456789" -> byte output "8898790A86148BAE"
+    // (little-endian reflected output) => UInt64 value 0xAE8B14860A799888.
+    auto data = bytes("123456789");
+    Crc64 h(Crc64ParameterSet::getNvmeProperty());
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0xAE8B14860A799888ull);
+}
+
+TEST(HashingTests, Crc64_Reset) {
+    Crc64 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    Crc64 fresh;
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), fresh.GetCurrentHashAsUInt64());
+}
+
+TEST(HashingTests, Crc64_Clone_IndependentState) {
+    Crc64 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    Crc64 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsUInt64(), clone.GetCurrentHashAsUInt64());
+}
+
+TEST(HashingTests, Crc64_NullParameterSet_Throws) {
+    EXPECT_THROW(Crc64{std::shared_ptr<Crc64ParameterSet>(nullptr)}, System::ArgumentNullException);
+}
+
+// ---------------------------------------------------------------------------
+// XxHash3 — official .NET test vectors (github.com/dotnet/runtime XxHash3Tests.cs)
+// ---------------------------------------------------------------------------
+
+static uint64_t xxHash3Hash(const std::vector<uint8_t>& v, int64_t seed = 0) {
+    return XxHash3::HashToUInt64(v.data(), static_cast<int32_t>(v.size()), seed);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_EmptySeed0) {
+    EXPECT_EQ(xxHash3Hash(bytes("")), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_EmptySeeded) {
+    EXPECT_EQ(xxHash3Hash(bytes(""), 0x13f0), 0x0f99783e68de7322ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length1) {
+    EXPECT_EQ(xxHash3Hash(bytes("Z")), 0x2753d05a8f320003ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length4Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("KdjE"), 0x499), 0x17ac41dfec94111fULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length9Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("EGM4yxHgk"), 0x6d1), 0x04661f74a752afb2ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length17Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("4pgR1N0LgL2QpoaNc"), 0x19c9), 0x34722478aff47051ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length129Seeded) {
+    EXPECT_EQ(xxHash3Hash(bytes("uqMPHc9Ks7bAPG6zdpkbSjcqkVXzOGBSyBXTvbzQlpdQ6Zv362rdkRlzBIbV7nPyLOGutx6Q4YD2wksGcsC6GapRBMT5QOQq3Vt6NkobpxENMG3anX1cChirvogNtnej8"),
+                            0x1b1d), 0xe822ad7ac402f592ULL);
+}
+
+TEST(HashingTests, XxHash3_OfficialVector_Length512Seeded) {
+    // Two concatenated segments totaling 512 bytes (well over the 240-byte streaming threshold).
+    std::string s =
+        "a2WBB5GKMkHnAySB7uXFtoT8z1GgX0MPgzX4Zu4QWjZ5sfUPXZq3UXFUbG74Fw8Jk55geWbT9PB35YSVEbtIizEgLcpOll09vmDXlLcR6MxmGl6apvXEAodsve1dgw4eq9Lsx8LLdd5kJY1HlJL7Sd4fckloMiVNR1n8UdOzUdyZa0T0iKRc9wYvpG6py0QWwevVqXlZjwEyYmSQsHoXEtwzjUaRL5Fx15E21ANuyugJVKk7S"
+        "gmi8CVrQYFQZbeF6e2POv5ZFzf1OgjLnYHp0xpfWDD8uOKH4zE882uBMshXjVSjFRY9Yv5rKdymxkR4VMTZTNPNgiuPJSKQlt0XU2NdzVdH7iTNZ3Hxt1vIyFEtqCqHjFGxXPNaPGJbioubL3hGCs5lqEOVPHHNQNxjhmzmyS3O2DsZrvXkFbD1HpLisgz6T4S3mEJ3tDhzWpAkC3UnitHpgaoJnyBa0EchtNbtekxnSBQ6yShQN3CktaPjfTfGWMmUzkYOZFoG2dYZ";
+    ASSERT_EQ(s.size(), 512u);
+    EXPECT_EQ(xxHash3Hash(bytes(s.c_str()), 0x21f), 0x2f37d7c5257055c5ULL);
+}
+
+TEST(HashingTests, XxHash3_EmptyInput_MatchesDefaultCtor) {
+    XxHash3 h;
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_Reset) {
+    XxHash3 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), 0x2d06800538d394c2ULL);
+}
+
+TEST(HashingTests, XxHash3_Clone_IndependentState) {
+    XxHash3 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    XxHash3 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsUInt64(), clone.GetCurrentHashAsUInt64());
+}
+
+TEST(HashingTests, XxHash3_GetHashLengthInBytes) {
+    XxHash3 h;
+    EXPECT_EQ(h.getHashLengthInBytesProperty(), 8);
+}
+
+TEST(HashingTests, XxHash3_GetCurrentHash_IsBigEndianBytesOfHashValue) {
+    XxHash3 h;
+    auto hello = bytes("hello world, this is a somewhat longer test string for hashing");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 8u);
+    uint64_t expected = h.GetCurrentHashAsUInt64();
+    uint64_t fromBytes = 0;
+    for (int i = 0; i < 8; ++i) fromBytes = (fromBytes << 8) | bytesOut[static_cast<size_t>(i)];
+    EXPECT_EQ(fromBytes, expected);
+}
+
+TEST(HashingTests, XxHash3_StreamingMatchesOneShot_Length512) {
+    std::string s(512, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    uint64_t oneShot = xxHash3Hash(data, 0x123);
+
+    XxHash3 h(0x123);
+    h.Append(data.data(), 37);
+    h.Append(data.data() + 37, 200);
+    h.Append(data.data() + 237, static_cast<int32_t>(data.size() - 237));
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), oneShot);
+}
+
+TEST(HashingTests, XxHash3_StreamingMatchesOneShot_ManySmallChunks) {
+    std::string s(600, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    uint64_t oneShot = xxHash3Hash(data);
+
+    XxHash3 h;
+    for (size_t i = 0; i < data.size(); ++i) h.Append(&data[i], 1);
+    EXPECT_EQ(h.GetCurrentHashAsUInt64(), oneShot);
+}
+
+TEST(HashingTests, XxHash3_DifferentInputsDifferentHashes) {
+    EXPECT_NE(xxHash3Hash(bytes("abc")), xxHash3Hash(bytes("abd")));
+}
+
+TEST(HashingTests, XxHash3_TryHash_DestinationTooShort_ReturnsFalse) {
+    auto data = bytes("abc");
+    uint8_t dest[7];
+    int32_t written = -1;
+    EXPECT_FALSE(XxHash3::TryHash(data.data(), 3, dest, 7, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(HashingTests, XxHash3_Hash_DestinationTooShort_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[7];
+    EXPECT_THROW(XxHash3::Hash(data.data(), 3, dest, 7), System::ArgumentException);
+}
+
+// ---------------------------------------------------------------------------
+// XxHash128 — official .NET test vectors (github.com/dotnet/runtime XxHash128Tests.cs)
+// ---------------------------------------------------------------------------
+
+static System::IO::Hashing::Hash128 xxHash128Hash(const std::vector<uint8_t>& v, int64_t seed = 0) {
+    return XxHash128::HashToHash128(v.data(), static_cast<int32_t>(v.size()), seed);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_EmptySeed0) {
+    auto h = xxHash128Hash(bytes(""));
+    EXPECT_EQ(h.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(h.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_EmptySeeded) {
+    auto h = xxHash128Hash(bytes(""), 0x13f0);
+    EXPECT_EQ(h.High64, 0x4a807558806f6b31ULL);
+    EXPECT_EQ(h.Low64, 0xeca8475b2cc08feeULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length1) {
+    auto h = xxHash128Hash(bytes("Z"));
+    EXPECT_EQ(h.High64, 0xa26f5ff5290b016cULL);
+    EXPECT_EQ(h.Low64, 0x2753d05a8f320003ULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length4Seeded) {
+    auto h = xxHash128Hash(bytes("KdjE"), 0x499);
+    EXPECT_EQ(h.High64, 0xf29da7d603a9409fULL);
+    EXPECT_EQ(h.Low64, 0x90373b3f6da10e37ULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length9Seeded) {
+    auto h = xxHash128Hash(bytes("EGM4yxHgk"), 0x6d1);
+    EXPECT_EQ(h.High64, 0xa98564b5fb852a84ULL);
+    EXPECT_EQ(h.Low64, 0xdef8b6b70a62024cULL);
+}
+
+TEST(HashingTests, XxHash128_OfficialVector_Length17Seeded) {
+    auto h = xxHash128Hash(bytes("4pgR1N0LgL2QpoaNc"), 0x19c9);
+    EXPECT_EQ(h.High64, 0x1f3ba7ee629b72e0ULL);
+    EXPECT_EQ(h.Low64, 0x8e26be7440f5fc90ULL);
+}
+
+TEST(HashingTests, XxHash128_EmptyInput_MatchesDefaultCtor) {
+    XxHash128 h;
+    auto current = h.GetCurrentHashAsHash128();
+    EXPECT_EQ(current.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(current.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_Reset) {
+    XxHash128 h;
+    auto data = bytes("hello");
+    h.Append(data.data(), static_cast<int32_t>(data.size()));
+    h.Reset();
+    auto current = h.GetCurrentHashAsHash128();
+    EXPECT_EQ(current.High64, 0x99aa06d3014798d8ULL);
+    EXPECT_EQ(current.Low64, 0x6001c324468d497fULL);
+}
+
+TEST(HashingTests, XxHash128_Clone_IndependentState) {
+    XxHash128 h;
+    auto hello = bytes("hello");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    XxHash128 clone = h.Clone();
+    auto world = bytes("world");
+    clone.Append(world.data(), static_cast<int32_t>(world.size()));
+    EXPECT_NE(h.GetCurrentHashAsHash128(), clone.GetCurrentHashAsHash128());
+}
+
+TEST(HashingTests, XxHash128_GetHashLengthInBytes) {
+    XxHash128 h;
+    EXPECT_EQ(h.getHashLengthInBytesProperty(), 16);
+}
+
+TEST(HashingTests, XxHash128_GetCurrentHash_IsBigEndianHighThenLow) {
+    XxHash128 h;
+    auto hello = bytes("hello world, this is a somewhat longer test string for hashing");
+    h.Append(hello.data(), static_cast<int32_t>(hello.size()));
+    auto bytesOut = h.GetCurrentHash();
+    ASSERT_EQ(bytesOut.size(), 16u);
+
+    auto current = h.GetCurrentHashAsHash128();
+    uint64_t highFromBytes = 0, lowFromBytes = 0;
+    for (int i = 0; i < 8; ++i) highFromBytes = (highFromBytes << 8) | bytesOut[static_cast<size_t>(i)];
+    for (int i = 0; i < 8; ++i) lowFromBytes = (lowFromBytes << 8) | bytesOut[static_cast<size_t>(8 + i)];
+    EXPECT_EQ(highFromBytes, current.High64);
+    EXPECT_EQ(lowFromBytes, current.Low64);
+}
+
+TEST(HashingTests, XxHash128_StreamingMatchesOneShot_Length512) {
+    std::string s(512, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    auto oneShot = xxHash128Hash(data, 0x123);
+
+    XxHash128 h(0x123);
+    h.Append(data.data(), 37);
+    h.Append(data.data() + 37, 200);
+    h.Append(data.data() + 237, static_cast<int32_t>(data.size() - 237));
+    EXPECT_EQ(h.GetCurrentHashAsHash128(), oneShot);
+}
+
+TEST(HashingTests, XxHash128_StreamingMatchesOneShot_ManySmallChunks) {
+    std::string s(600, 'x');
+    for (size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>('a' + (i % 26));
+    auto data = bytes(s.c_str());
+    auto oneShot = xxHash128Hash(data);
+
+    XxHash128 h;
+    for (size_t i = 0; i < data.size(); ++i) h.Append(&data[i], 1);
+    EXPECT_EQ(h.GetCurrentHashAsHash128(), oneShot);
+}
+
+TEST(HashingTests, XxHash128_DifferentInputsDifferentHashes) {
+    EXPECT_NE(xxHash128Hash(bytes("abc")), xxHash128Hash(bytes("abd")));
+}
+
+TEST(HashingTests, XxHash128_TryHash_DestinationTooShort_ReturnsFalse) {
+    auto data = bytes("abc");
+    uint8_t dest[15];
+    int32_t written = -1;
+    EXPECT_FALSE(XxHash128::TryHash(data.data(), 3, dest, 15, written));
+    EXPECT_EQ(written, 0);
+}
+
+TEST(HashingTests, XxHash128_Hash_DestinationTooShort_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[15];
+    EXPECT_THROW(XxHash128::Hash(data.data(), 3, dest, 15), System::ArgumentException);
 }

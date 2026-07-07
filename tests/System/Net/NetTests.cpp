@@ -6,11 +6,30 @@
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/HttpStatusCode.hpp"
 #include "System/Net/WebUtility.hpp"
+#include "System/Net/DecompressionMethods.hpp"
+#include "System/Net/HttpRequestHeader.hpp"
+#include "System/Net/HttpResponseHeader.hpp"
+#include "System/Net/HttpVersion.hpp"
+#include "System/Net/IPNetwork.hpp"
+#include "System/FormatException.hpp"
+#include "System/Net/ProtocolViolationException.hpp"
+#include "System/Net/WebExceptionStatus.hpp"
+#include "System/Net/WebException.hpp"
 
 using System::Net::IPAddress;
 using System::Net::IPEndPoint;
 using System::Net::HttpStatusCode;
 using System::Net::WebUtility;
+using System::Net::DecompressionMethods;
+using System::Net::HttpRequestHeader;
+using System::Net::HttpResponseHeader;
+using System::Net::HttpRequestHeaderGetName;
+using System::Net::HttpResponseHeaderGetName;
+using System::Net::HttpVersion;
+using System::Net::IPNetwork;
+using System::Net::ProtocolViolationException;
+using System::Net::WebExceptionStatus;
+using System::Net::WebException;
 
 // ===========================================================================
 // IPAddress
@@ -93,6 +112,118 @@ TEST(IPAddressTests, Parse_RoundTrip_PreservesAddress) {
     EXPECT_EQ(IPAddress::Parse(addr).ToString(), addr);
 }
 
+TEST(IPAddressTests, AddressFamily_IPv4) {
+    EXPECT_EQ(IPAddress::Loopback.getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetwork);
+}
+
+TEST(IPAddressTests, TryParse_Invalid_ReturnsFalse) {
+    IPAddress result;
+    EXPECT_FALSE(IPAddress::TryParse("not an ip", result));
+}
+
+TEST(IPAddressTests, TryParse_Valid_ReturnsTrue) {
+    IPAddress result;
+    EXPECT_TRUE(IPAddress::TryParse("8.8.8.8", result));
+    EXPECT_EQ(result.ToString(), "8.8.8.8");
+}
+
+TEST(IPAddressTests, GetAddressBytes_IPv4) {
+    IPAddress ip = IPAddress::Parse("192.168.1.100");
+    auto bytes = ip.GetAddressBytes();
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(bytes[0], 192);
+    EXPECT_EQ(bytes[1], 168);
+    EXPECT_EQ(bytes[2], 1);
+    EXPECT_EQ(bytes[3], 100);
+}
+
+TEST(IPAddressTests, IsLoopback_IPv4) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("127.0.0.1")));
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("127.5.5.5")));
+    EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("10.0.0.1")));
+}
+
+// ===========================================================================
+// IPAddress — IPv6
+// ===========================================================================
+
+TEST(IPAddressIPv6Tests, Parse_FullForm) {
+    IPAddress ip = IPAddress::Parse("2001:0db8:0000:0000:0000:ff00:0042:8329");
+    EXPECT_TRUE(ip.getIsIPv6Property());
+    EXPECT_EQ(ip.getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetworkV6);
+}
+
+TEST(IPAddressIPv6Tests, Parse_CompressedForm_RoundTrips) {
+    IPAddress ip = IPAddress::Parse("2001:db8::ff00:42:8329");
+    EXPECT_EQ(ip.ToString(), "2001:db8::ff00:42:8329");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Loopback) {
+    IPAddress ip = IPAddress::Parse("::1");
+    EXPECT_EQ(ip, IPAddress::IPv6Loopback);
+    EXPECT_EQ(ip.ToString(), "::1");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Any) {
+    IPAddress ip = IPAddress::Parse("::");
+    EXPECT_EQ(ip, IPAddress::IPv6Any);
+    EXPECT_EQ(ip.ToString(), "::");
+}
+
+TEST(IPAddressIPv6Tests, Parse_TrailingDoubleColon) {
+    IPAddress ip = IPAddress::Parse("2001:db8::");
+    auto bytes = ip.GetAddressBytes();
+    ASSERT_EQ(bytes.size(), 16u);
+    EXPECT_EQ(bytes[0], 0x20);
+    EXPECT_EQ(bytes[1], 0x01);
+}
+
+TEST(IPAddressIPv6Tests, Parse_WithScopeId) {
+    IPAddress ip = IPAddress::Parse("fe80::1%3");
+    EXPECT_EQ(ip.getScopeIdProperty(), 3);
+}
+
+TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
+    IPAddress ip = IPAddress::Parse("::ffff:192.168.1.1");
+    EXPECT_TRUE(ip.getIsIPv4MappedToIPv6Property());
+    EXPECT_EQ(ip.ToString(), "::ffff:192.168.1.1");
+}
+
+TEST(IPAddressIPv6Tests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), std::invalid_argument);
+}
+
+TEST(IPAddressIPv6Tests, GetAddressProperty_Throws) {
+    IPAddress ip = IPAddress::Parse("::1");
+    EXPECT_THROW((void)ip.getAddressProperty(), std::logic_error);
+}
+
+TEST(IPAddressIPv6Tests, GetScopeIdProperty_OnIPv4_Throws) {
+    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), std::logic_error);
+}
+
+TEST(IPAddressIPv6Tests, MapToIPv6_ThenMapToIPv4_RoundTrips) {
+    IPAddress v4 = IPAddress::Parse("192.168.1.1");
+    IPAddress v6 = v4.MapToIPv6();
+    EXPECT_TRUE(v6.getIsIPv4MappedToIPv6Property());
+    IPAddress back = v6.MapToIPv4();
+    EXPECT_EQ(back, v4);
+}
+
+TEST(IPAddressIPv6Tests, IsLoopback_IPv6) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::IPv6Loopback));
+    EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("2001:db8::1")));
+}
+
+TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
+    EXPECT_TRUE(IPAddress::Parse("fe80::1").getIsIPv6LinkLocalProperty());
+    EXPECT_FALSE(IPAddress::Parse("2001:db8::1").getIsIPv6LinkLocalProperty());
+}
+
+TEST(IPAddressIPv6Tests, Equality) {
+    EXPECT_EQ(IPAddress::Parse("2001:db8::1"), IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001"));
+}
+
 // ===========================================================================
 // IPEndPoint
 // ===========================================================================
@@ -161,6 +292,80 @@ TEST(IPEndPointTests, MinPort_IsZero) {
 
 TEST(IPEndPointTests, MaxPort_Is65535) {
     EXPECT_EQ(static_cast<int>(IPEndPoint::MaxPort), 65535);
+}
+
+TEST(IPEndPointTests, Constructor_PortOutOfRange_Throws) {
+    EXPECT_THROW(IPEndPoint(IPAddress::Loopback, -1), std::exception);
+    EXPECT_THROW(IPEndPoint(IPAddress::Loopback, 70000), std::exception);
+}
+
+TEST(IPEndPointTests, SetPort_OutOfRange_Throws) {
+    IPEndPoint ep;
+    EXPECT_THROW(ep.setPortProperty(-1), std::exception);
+    EXPECT_THROW(ep.setPortProperty(70000), std::exception);
+}
+
+TEST(IPEndPointTests, IsA_EndPoint) {
+    IPEndPoint ep(IPAddress::Loopback, 80);
+    System::Net::EndPoint* base = &ep;
+    EXPECT_EQ(base->getAddressFamilyProperty(), System::Net::Sockets::AddressFamily::InterNetwork);
+}
+
+TEST(IPEndPointTests, ToString_IPv6_HasBrackets) {
+    IPEndPoint ep(IPAddress::IPv6Loopback, 8080);
+    EXPECT_EQ(ep.ToString(), "[::1]:8080");
+}
+
+TEST(IPEndPointTests, GetHashCode_SameEndpoint_Equal) {
+    IPEndPoint a(IPAddress::Loopback, 80);
+    IPEndPoint b(IPAddress::Loopback, 80);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(IPEndPointTests, Serialize_ThenCreate_RoundTrips_IPv4) {
+    IPEndPoint ep(IPAddress::Parse("192.168.1.42"), 12345);
+    auto addr = ep.Serialize();
+    auto recreated = ep.Create(addr);
+    auto* asIPEndPoint = dynamic_cast<IPEndPoint*>(recreated.get());
+    ASSERT_NE(asIPEndPoint, nullptr);
+    EXPECT_EQ(asIPEndPoint->getAddressProperty(), ep.getAddressProperty());
+    EXPECT_EQ(asIPEndPoint->getPortProperty(), ep.getPortProperty());
+}
+
+TEST(IPEndPointTests, Serialize_ThenCreate_RoundTrips_IPv6) {
+    IPEndPoint ep(IPAddress::Parse("2001:db8::1"), 443);
+    auto addr = ep.Serialize();
+    auto recreated = ep.Create(addr);
+    auto* asIPEndPoint = dynamic_cast<IPEndPoint*>(recreated.get());
+    ASSERT_NE(asIPEndPoint, nullptr);
+    EXPECT_EQ(asIPEndPoint->getAddressProperty(), ep.getAddressProperty());
+    EXPECT_EQ(asIPEndPoint->getPortProperty(), ep.getPortProperty());
+}
+
+TEST(IPEndPointTests, Parse_IPv4WithPort) {
+    IPEndPoint ep = IPEndPoint::Parse("10.0.0.5:9000");
+    EXPECT_EQ(ep.getAddressProperty(), IPAddress::Parse("10.0.0.5"));
+    EXPECT_EQ(ep.getPortProperty(), 9000);
+}
+
+TEST(IPEndPointTests, Parse_IPv6WithPort) {
+    IPEndPoint ep = IPEndPoint::Parse("[2001:db8::1]:443");
+    EXPECT_EQ(ep.getAddressProperty(), IPAddress::Parse("2001:db8::1"));
+    EXPECT_EQ(ep.getPortProperty(), 443);
+}
+
+TEST(IPEndPointTests, Parse_AddressOnly_PortDefaultsToZero) {
+    IPEndPoint ep = IPEndPoint::Parse("10.0.0.5");
+    EXPECT_EQ(ep.getPortProperty(), 0);
+}
+
+TEST(IPEndPointTests, TryParse_Invalid_ReturnsFalse) {
+    IPEndPoint result;
+    EXPECT_FALSE(IPEndPoint::TryParse("not an endpoint", result));
+}
+
+TEST(IPEndPointTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPEndPoint::Parse("garbage"), std::invalid_argument);
 }
 
 // ===========================================================================
@@ -290,6 +495,30 @@ TEST(WebUtilityTests, HtmlDecode_NoEntities_Unchanged) {
     EXPECT_EQ(WebUtility::HtmlDecode("plain text"), "plain text");
 }
 
+TEST(WebUtilityTests, HtmlDecode_DecimalNumericEntity) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#65;&#66;&#67;"), "ABC");
+}
+
+TEST(WebUtilityTests, HtmlDecode_HexNumericEntity) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#x41;&#x42;"), "AB");
+}
+
+TEST(WebUtilityTests, HtmlDecode_NamedEntity_Nbsp) {
+    EXPECT_EQ(WebUtility::HtmlDecode("a&nbsp;b"), "a\xC2\xA0" "b");
+}
+
+TEST(WebUtilityTests, HtmlDecode_NamedEntity_Apos) {
+    EXPECT_EQ(WebUtility::HtmlDecode("it&apos;s"), "it's");
+}
+
+TEST(WebUtilityTests, HtmlDecode_UnknownEntity_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&unknownentity;"), "&unknownentity;");
+}
+
+TEST(WebUtilityTests, HtmlDecode_InvalidNumericEntity_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::HtmlDecode("&#notanumber;"), "&#notanumber;");
+}
+
 TEST(WebUtilityTests, HtmlEncode_HtmlDecode_RoundTrip) {
     std::string original = "<a href=\"url\">link & more</a>";
     EXPECT_EQ(WebUtility::HtmlDecode(WebUtility::HtmlEncode(original)), original);
@@ -331,4 +560,163 @@ TEST(WebUtilityTests, UrlDecode_NoEncoding_Unchanged) {
 TEST(WebUtilityTests, UrlEncode_UrlDecode_RoundTrip) {
     std::string original = "key=hello world&other=1+2";
     EXPECT_EQ(WebUtility::UrlDecode(WebUtility::UrlEncode(original)), original);
+}
+
+// ===========================================================================
+// DecompressionMethods
+// ===========================================================================
+
+TEST(DecompressionMethodsTests, None_IsZero) {
+    EXPECT_EQ(static_cast<int>(DecompressionMethods::None), 0);
+}
+
+TEST(DecompressionMethodsTests, FlagsCombine) {
+    auto v = DecompressionMethods::GZip | DecompressionMethods::Deflate;
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::GZip), static_cast<int>(DecompressionMethods::GZip));
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::Deflate), static_cast<int>(DecompressionMethods::Deflate));
+    EXPECT_EQ(static_cast<int>(v & DecompressionMethods::Brotli), 0);
+}
+
+TEST(DecompressionMethodsTests, All_ContainsEveryKnownMethod) {
+    auto all = DecompressionMethods::All;
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::GZip), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Deflate), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Brotli), 0);
+    EXPECT_NE(static_cast<int>(all & DecompressionMethods::Zstandard), 0);
+}
+
+// ===========================================================================
+// HttpRequestHeader / HttpResponseHeader
+// ===========================================================================
+
+TEST(HttpRequestHeaderTests, GetName_KnownValues) {
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::CacheControl), "Cache-Control");
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::ContentMd5), "Content-MD5");
+    EXPECT_EQ(HttpRequestHeaderGetName(HttpRequestHeader::UserAgent), "User-Agent");
+}
+
+TEST(HttpResponseHeaderTests, GetName_KnownValues) {
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::SetCookie), "Set-Cookie");
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::WwwAuthenticate), "WWW-Authenticate");
+    EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::ETag), "ETag");
+}
+
+// ===========================================================================
+// HttpVersion
+// ===========================================================================
+
+TEST(HttpVersionTests, Version11_Is1Dot1) {
+    EXPECT_EQ(HttpVersion::Version11.Major, 1);
+    EXPECT_EQ(HttpVersion::Version11.Minor, 1);
+}
+
+TEST(HttpVersionTests, Unknown_IsZeroZero) {
+    EXPECT_EQ(HttpVersion::Unknown.Major, 0);
+    EXPECT_EQ(HttpVersion::Unknown.Minor, 0);
+}
+
+TEST(HttpVersionTests, Version20_Is2Dot0) {
+    EXPECT_EQ(HttpVersion::Version20.Major, 2);
+    EXPECT_EQ(HttpVersion::Version20.Minor, 0);
+}
+
+// ===========================================================================
+// IPNetwork
+// ===========================================================================
+
+TEST(IPNetworkTests, Constructor_NormalizesBaseAddress) {
+    IPNetwork net(IPAddress::Parse("192.168.1.123"), 24);
+    EXPECT_EQ(net.getBaseAddressProperty(), IPAddress::Parse("192.168.1.0"));
+    EXPECT_EQ(net.getPrefixLengthProperty(), 24);
+}
+
+TEST(IPNetworkTests, Constructor_PrefixOutOfRange_Throws) {
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), std::out_of_range);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), std::out_of_range);
+}
+
+TEST(IPNetworkTests, Contains_AddressInSubnet_True) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("192.168.1.200")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("192.168.2.1")));
+}
+
+TEST(IPNetworkTests, Contains_PrefixZero_ContainsEverything) {
+    IPNetwork net(IPAddress::Any, 0);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("8.8.8.8")));
+    EXPECT_TRUE(net.Contains(IPAddress::Loopback));
+}
+
+TEST(IPNetworkTests, Contains_PrefixFull_OnlyExactAddress) {
+    IPNetwork net(IPAddress::Parse("10.0.0.1"), 32);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("10.0.0.1")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("10.0.0.2")));
+}
+
+TEST(IPNetworkTests, Contains_DifferentFamily_False) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("::1")));
+}
+
+TEST(IPNetworkTests, ToString_CidrNotation) {
+    IPNetwork net(IPAddress::Parse("192.168.1.0"), 24);
+    EXPECT_EQ(net.ToString(), "192.168.1.0/24");
+}
+
+TEST(IPNetworkTests, Parse_ValidCidr) {
+    IPNetwork net = IPNetwork::Parse("10.0.0.0/8");
+    EXPECT_EQ(net.getBaseAddressProperty(), IPAddress::Parse("10.0.0.0"));
+    EXPECT_EQ(net.getPrefixLengthProperty(), 8);
+}
+
+TEST(IPNetworkTests, Parse_IPv6Cidr) {
+    IPNetwork net = IPNetwork::Parse("2001:db8::/32");
+    EXPECT_EQ(net.getPrefixLengthProperty(), 32);
+    EXPECT_TRUE(net.Contains(IPAddress::Parse("2001:db8::1")));
+    EXPECT_FALSE(net.Contains(IPAddress::Parse("2001:db9::1")));
+}
+
+TEST(IPNetworkTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(IPNetwork::Parse("not-a-network"), System::FormatException);
+}
+
+TEST(IPNetworkTests, TryParse_Invalid_ReturnsFalse) {
+    IPNetwork result;
+    EXPECT_FALSE(IPNetwork::TryParse("garbage/abc", result));
+}
+
+TEST(IPNetworkTests, Equality) {
+    IPNetwork a(IPAddress::Parse("192.168.1.0"), 24);
+    IPNetwork b(IPAddress::Parse("192.168.1.123"), 24);
+    EXPECT_EQ(a, b);
+}
+
+// ===========================================================================
+// ProtocolViolationException / WebException / WebExceptionStatus
+// ===========================================================================
+
+TEST(ProtocolViolationExceptionTests, Message_IsPreserved) {
+    ProtocolViolationException ex("bad protocol");
+    EXPECT_STREQ(ex.what(), "bad protocol");
+}
+
+TEST(ProtocolViolationExceptionTests, IsA_InvalidOperationException) {
+    ProtocolViolationException ex("x");
+    System::InvalidOperationException* base = &ex;
+    EXPECT_STREQ(base->what(), "x");
+}
+
+TEST(WebExceptionStatusTests, Success_IsZero) {
+    EXPECT_EQ(static_cast<int>(WebExceptionStatus::Success), 0);
+}
+
+TEST(WebExceptionTests, DefaultConstructor_StatusIsUnknownError) {
+    WebException ex;
+    EXPECT_EQ(ex.getStatusProperty(), WebExceptionStatus::UnknownError);
+}
+
+TEST(WebExceptionTests, MessageAndStatus_ArePreserved) {
+    WebException ex("timed out", WebExceptionStatus::Timeout);
+    EXPECT_STREQ(ex.what(), "timed out");
+    EXPECT_EQ(ex.getStatusProperty(), WebExceptionStatus::Timeout);
 }

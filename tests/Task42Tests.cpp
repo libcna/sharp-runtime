@@ -36,6 +36,7 @@
 #include "System/IO/Hashing/XxHash64.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorage.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageScope.hpp"
+#include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonValueKind.hpp"
 #include "System/Text/EncodingProvider.hpp"
@@ -948,6 +949,8 @@ TEST(IsolatedStorageTests, Remove_NoThrow) {
 // ===========================================================================
 // Text::Json::JsonElement (direct tests)
 // ===========================================================================
+// JsonElement (like real .NET) has no public constructor that builds a value out of thin air —
+// every non-default instance is obtained by parsing/traversing a JsonDocument.
 
 TEST(JsonElementTests, DefaultCtor_KindUndefined) {
     System::Text::Json::JsonElement e;
@@ -955,76 +958,71 @@ TEST(JsonElementTests, DefaultCtor_KindUndefined) {
 }
 
 TEST(JsonElementTests, StringElement_GetString) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::String, "hello");
-    EXPECT_EQ(e.GetString(), "hello");
+    auto doc = System::Text::Json::JsonDocument::Parse("\"hello\"");
+    EXPECT_EQ(doc->getRootElementProperty().GetString(), "hello");
 }
 
 TEST(JsonElementTests, NumberElement_GetInt32) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::Number, "99");
-    EXPECT_EQ(e.GetInt32(), 99);
+    auto doc = System::Text::Json::JsonDocument::Parse("99");
+    EXPECT_EQ(doc->getRootElementProperty().GetInt32(), 99);
 }
 
 TEST(JsonElementTests, NumberElement_GetInt64) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::Number, "9876543210");
-    EXPECT_EQ(e.GetInt64(), 9876543210LL);
+    auto doc = System::Text::Json::JsonDocument::Parse("9876543210");
+    EXPECT_EQ(doc->getRootElementProperty().GetInt64(), 9876543210LL);
 }
 
 TEST(JsonElementTests, NumberElement_GetDouble) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::Number, "3.14");
-    EXPECT_NEAR(e.GetDouble(), 3.14, 1e-9);
+    auto doc = System::Text::Json::JsonDocument::Parse("3.14");
+    EXPECT_NEAR(doc->getRootElementProperty().GetDouble(), 3.14, 1e-9);
 }
 
 TEST(JsonElementTests, TrueElement_GetBoolean) {
-    System::Text::Json::JsonElement t(System::Text::Json::JsonValueKind::True);
-    EXPECT_TRUE(t.GetBoolean());
+    auto doc = System::Text::Json::JsonDocument::Parse("true");
+    EXPECT_TRUE(doc->getRootElementProperty().GetBoolean());
 }
 
 TEST(JsonElementTests, FalseElement_GetBoolean) {
-    System::Text::Json::JsonElement f(System::Text::Json::JsonValueKind::False);
-    EXPECT_FALSE(f.GetBoolean());
+    auto doc = System::Text::Json::JsonDocument::Parse("false");
+    EXPECT_FALSE(doc->getRootElementProperty().GetBoolean());
 }
 
 TEST(JsonElementTests, GetRawText) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::Number, "42");
-    EXPECT_EQ(e.GetRawText(), "42");
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    EXPECT_EQ(doc->getRootElementProperty().GetRawText(), "42");
 }
 
 TEST(JsonElementTests, TryGetProperty_Found) {
-    System::Text::Json::JsonElement obj;
-    auto child = std::make_shared<System::Text::Json::JsonElement>(
-        System::Text::Json::JsonValueKind::String, "val");
-    obj.addPropertyForTesting("key", child);
+    auto doc = System::Text::Json::JsonDocument::Parse(R"({"key":"val"})");
     System::Text::Json::JsonElement out;
-    EXPECT_TRUE(obj.TryGetProperty("key", out));
+    EXPECT_TRUE(doc->getRootElementProperty().TryGetProperty("key", out));
     EXPECT_EQ(out.GetString(), "val");
 }
 
 TEST(JsonElementTests, TryGetProperty_NotFound) {
-    System::Text::Json::JsonElement obj;
+    auto doc = System::Text::Json::JsonDocument::Parse("{}");
     System::Text::Json::JsonElement out;
-    EXPECT_FALSE(obj.TryGetProperty("missing", out));
+    EXPECT_FALSE(doc->getRootElementProperty().TryGetProperty("missing", out));
 }
 
 TEST(JsonElementTests, GetProperty_Throws_WhenMissing) {
-    System::Text::Json::JsonElement obj;
-    EXPECT_THROW((void)obj.GetProperty("x"), std::runtime_error);
+    auto doc = System::Text::Json::JsonDocument::Parse("{}");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("x"), std::exception);
 }
 
 TEST(JsonElementTests, EnumerateArray_Empty) {
-    System::Text::Json::JsonElement arr(System::Text::Json::JsonValueKind::Array);
-    EXPECT_TRUE(arr.EnumerateArray().empty());
+    auto doc = System::Text::Json::JsonDocument::Parse("[]");
+    EXPECT_TRUE(doc->getRootElementProperty().EnumerateArray().empty());
 }
 
 TEST(JsonElementTests, EnumerateArray_OneItem) {
-    System::Text::Json::JsonElement arr(System::Text::Json::JsonValueKind::Array);
-    arr.addArrayItemForTesting(std::make_shared<System::Text::Json::JsonElement>(
-        System::Text::Json::JsonValueKind::Number, "1"));
-    EXPECT_EQ(arr.EnumerateArray().size(), 1u);
+    auto doc = System::Text::Json::JsonDocument::Parse("[1]");
+    EXPECT_EQ(doc->getRootElementProperty().EnumerateArray().size(), 1u);
 }
 
 TEST(JsonElementTests, GetString_WrongKind_Throws) {
-    System::Text::Json::JsonElement e(System::Text::Json::JsonValueKind::Number, "5");
-    EXPECT_THROW((void)e.GetString(), std::runtime_error);
+    auto doc = System::Text::Json::JsonDocument::Parse("5");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetString(), std::exception);
 }
 
 // ===========================================================================

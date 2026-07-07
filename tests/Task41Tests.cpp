@@ -214,6 +214,7 @@ TEST(SortVersionTests, SortId_DefaultAllZero) {
 using System::Text::DecoderFallback;
 using System::Text::DecoderReplacementFallback;
 using System::Text::DecoderExceptionFallback;
+using System::Text::DecoderFallbackException;
 
 TEST(DecoderFallbackTests, ReplacementFallback_ReturnsQuestionMark) {
     auto fb = DecoderFallback::ReplacementFallback();
@@ -227,7 +228,7 @@ TEST(DecoderFallbackTests, ReplacementFallback_MaxCharCount_One) {
 
 TEST(DecoderFallbackTests, ExceptionFallback_GetFallbackString_Throws) {
     auto fb = DecoderFallback::ExceptionFallback();
-    EXPECT_THROW(fb->GetFallbackString(nullptr, 0), std::runtime_error);
+    EXPECT_THROW(fb->GetFallbackString(nullptr, 0), DecoderFallbackException);
 }
 
 TEST(DecoderFallbackTests, ExceptionFallback_MaxCharCount_Zero) {
@@ -255,6 +256,7 @@ TEST(DecoderReplacementFallbackTests, CustomReplacement) {
 using System::Text::EncoderFallback;
 using System::Text::EncoderReplacementFallback;
 using System::Text::EncoderExceptionFallback;
+using System::Text::EncoderFallbackException;
 
 TEST(EncoderFallbackTests, ReplacementFallback_ReturnsQuestionMarkBytes) {
     auto fb = EncoderFallback::ReplacementFallback();
@@ -270,7 +272,7 @@ TEST(EncoderFallbackTests, ReplacementFallback_MaxByteCount_One) {
 
 TEST(EncoderFallbackTests, ExceptionFallback_GetFallbackBytes_Throws) {
     auto fb = EncoderFallback::ExceptionFallback();
-    EXPECT_THROW(fb->GetFallbackBytes('x'), std::runtime_error);
+    EXPECT_THROW(fb->GetFallbackBytes('x'), EncoderFallbackException);
 }
 
 TEST(EncoderFallbackTests, ExceptionFallback_MaxByteCount_Zero) {
@@ -384,8 +386,8 @@ TEST(RegularExpressionAttributeTests, Pattern_Stored) {
 using System::Text::Json::JsonSerializerOptions;
 using System::Text::Json::JsonNamingPolicy;
 using System::Text::Json::JsonCommentHandling;
-using System::Text::Json::JsonNumberHandling;
 using System::Text::Json::JsonValueKind;
+using System::Text::Json::Serialization::JsonNumberHandling;
 
 TEST(JsonSerializerOptionsTests, DefaultCtor_AllDefaults) {
     JsonSerializerOptions opts;
@@ -407,10 +409,16 @@ TEST(JsonSerializerOptionsTests, AllowTrailingCommas_SetGet) {
     EXPECT_TRUE(opts.getAllowTrailingCommasProperty());
 }
 
-TEST(JsonNamingPolicyTests, Values) {
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::CamelCase),      0);
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::SnakeCaseLower), 1);
-    EXPECT_EQ(static_cast<int>(JsonNamingPolicy::KebabCaseLower), 3);
+TEST(JsonNamingPolicyTests, CamelCase_ConvertsFirstLetterToLowercase) {
+    EXPECT_EQ(JsonNamingPolicy::CamelCase()->ConvertName("PropertyName"), "propertyName");
+}
+
+TEST(JsonNamingPolicyTests, SnakeCaseLower_InsertsUnderscoresAtWordBoundaries) {
+    EXPECT_EQ(JsonNamingPolicy::SnakeCaseLower()->ConvertName("PropertyName"), "property_name");
+}
+
+TEST(JsonNamingPolicyTests, KebabCaseLower_InsertsHyphensAtWordBoundaries) {
+    EXPECT_EQ(JsonNamingPolicy::KebabCaseLower()->ConvertName("PropertyName"), "property-name");
 }
 
 TEST(JsonCommentHandlingTests, Values) {
@@ -478,8 +486,33 @@ TEST(JsonPropertyOrderAttributeTests, Order_Stored) {
 
 using System::Text::Json::JsonSerializer;
 
-TEST(JsonSerializerTests, Serialize_ThrowsNotImplemented) {
-    EXPECT_THROW(JsonSerializer::Serialize(nullptr), std::runtime_error);
+TEST(JsonSerializerTests, Serialize_Int) {
+    EXPECT_EQ(JsonSerializer::Serialize(42), "42");
+}
+
+TEST(JsonSerializerTests, Serialize_String) {
+    EXPECT_EQ(JsonSerializer::Serialize(std::string("hello")), "\"hello\"");
+}
+
+TEST(JsonSerializerTests, Serialize_VectorOfInt) {
+    EXPECT_EQ(JsonSerializer::Serialize(std::vector<int>{1, 2, 3}), "[1,2,3]");
+}
+
+TEST(JsonSerializerTests, Serialize_WriteIndented) {
+    JsonSerializerOptions opts;
+    opts.setWriteIndentedProperty(true);
+    EXPECT_EQ(JsonSerializer::Serialize(std::vector<int>{1, 2}, opts), "[\n  1,\n  2\n]");
+}
+
+TEST(JsonSerializerTests, Deserialize_Int) {
+    EXPECT_EQ(JsonSerializer::Deserialize<int>("42"), 42);
+}
+
+TEST(JsonSerializerTests, Deserialize_VectorOfInt) {
+    auto v = JsonSerializer::Deserialize<std::vector<int>>("[1,2,3]");
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[2], 3);
 }
 
 TEST(JsonSerializerTests, Deserialize_ParsesJson) {

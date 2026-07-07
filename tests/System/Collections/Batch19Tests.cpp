@@ -7,9 +7,13 @@
 //   ReadOnlySet: Empty, Count, IsEmpty, Contains, set operations
 //   BitVector32: Equals, GetHashCode, ToString(value), Section equality/hash/ToString
 #include <gtest/gtest.h>
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyObservableCollection.hpp"
 #include "System/Collections/ObjectModel/ReadOnlySet.hpp"
 #include "System/Collections/Specialized/BitVector32.hpp"
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -93,6 +97,10 @@ TEST(ReadOnlyObservableCollectionBatch19Test, ForwardsCollectionChangedFromSourc
 // ===========================================================================
 // ReadOnlySet
 // ===========================================================================
+
+TEST(ReadOnlySetBatch19Test, Ctor_NullSet_ThrowsArgumentNullException) {
+    EXPECT_THROW(ReadOnlySet<int>(nullptr), System::ArgumentNullException);
+}
 
 TEST(ReadOnlySetBatch19Test, CountAndContains) {
     auto s = std::make_shared<std::unordered_set<int>>(std::initializer_list<int>{1, 2, 3});
@@ -252,4 +260,34 @@ TEST(BitVector32Batch19Test, SectionGetSet) {
     bv.set(s2, 12);
     EXPECT_EQ(bv[s1], 5);
     EXPECT_EQ(bv[s2], 12);
+}
+
+TEST(BitVector32Batch19Test, CreateMask_LastMask_ThrowsInvalidOperationException) {
+    EXPECT_THROW(BitVector32::CreateMask(std::numeric_limits<SharpRuntime::intcs>::min()),
+                 System::InvalidOperationException);
+}
+
+TEST(BitVector32Batch19Test, CreateMask_Series_ReachesIntMinThenThrows) {
+    SharpRuntime::intcs mask = 0;
+    for (int i = 0; i < 32; ++i) mask = BitVector32::CreateMask(mask);
+    EXPECT_EQ(mask, std::numeric_limits<SharpRuntime::intcs>::min());
+    EXPECT_THROW(BitVector32::CreateMask(mask), System::InvalidOperationException);
+}
+
+TEST(BitVector32Batch19Test, CreateSection_NonPositiveMaxValue_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(BitVector32::CreateSection(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(BitVector32::CreateSection(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(BitVector32::CreateSection(std::numeric_limits<SharpRuntime::shortcs>::min()),
+                 System::ArgumentOutOfRangeException);
+
+    auto valid = BitVector32::CreateSection(1);
+    EXPECT_THROW(BitVector32::CreateSection(0, valid), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitVector32Batch19Test, CreateSection_Full_ThrowsInvalidOperationException) {
+    auto initial = BitVector32::CreateSection(std::numeric_limits<SharpRuntime::shortcs>::max(),
+                                               BitVector32::CreateSection(std::numeric_limits<SharpRuntime::shortcs>::max()));
+    auto overflow = BitVector32::CreateSection(7, initial);
+    EXPECT_THROW(BitVector32::CreateSection(std::numeric_limits<SharpRuntime::shortcs>::max(), overflow),
+                 System::InvalidOperationException);
 }

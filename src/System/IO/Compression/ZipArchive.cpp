@@ -40,7 +40,20 @@ public:
 struct PendingEntry {
     std::string                                         name;
     std::shared_ptr<std::vector<SharpRuntime::bytecs>> data;
+    int                                                  miniLevel = MZ_DEFAULT_COMPRESSION;
 };
+
+namespace {
+    int ToMinizLevel(CompressionLevel level) {
+        switch (level) {
+            case CompressionLevel::NoCompression: return MZ_NO_COMPRESSION;
+            case CompressionLevel::Fastest:       return MZ_BEST_SPEED;
+            case CompressionLevel::SmallestSize:  return MZ_BEST_COMPRESSION;
+            case CompressionLevel::Optimal:
+            default:                              return MZ_DEFAULT_COMPRESSION;
+        }
+    }
+}
 
 struct ZipArchiveState {
     mz_zip_archive          zip{};
@@ -148,7 +161,7 @@ static void flushWriter(ZipArchiveState& st) {
         for (auto& e : st.pending) {
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
-                                  MZ_DEFAULT_COMPRESSION);
+                                  static_cast<mz_uint>(e.miniLevel));
         }
         mz_zip_writer_finalize_archive(&writer);
         mz_zip_writer_end(&writer);
@@ -160,7 +173,7 @@ static void flushWriter(ZipArchiveState& st) {
         for (auto& e : st.pending) {
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
-                                  MZ_DEFAULT_COMPRESSION);
+                                  static_cast<mz_uint>(e.miniLevel));
         }
         void* buf = nullptr; size_t sz = 0;
         mz_zip_writer_finalize_heap_archive(&writer, &buf, &sz);
@@ -246,14 +259,14 @@ ZipArchiveEntry ZipArchive::GetEntry(const std::string& entryName) const {
     return ZipArchiveEntry{};
 }
 
-ZipArchiveEntry ZipArchive::CreateEntry(const std::string& entryName) {
+ZipArchiveEntry ZipArchive::CreateEntry(const std::string& entryName, CompressionLevel compressionLevel) {
     if (!state_)
         throw std::runtime_error("ZipArchive::CreateEntry: archive not open");
     if (state_->mode == ZipArchiveMode::Read)
         throw std::runtime_error("ZipArchive::CreateEntry: archive is read-only");
 
     auto buf = std::make_shared<std::vector<SharpRuntime::bytecs>>();
-    state_->pending.push_back({entryName, buf});
+    state_->pending.push_back({entryName, buf, ToMinizLevel(compressionLevel)});
 
     auto es       = std::make_shared<ZipArchiveEntryState>();
     es->archive   = state_;

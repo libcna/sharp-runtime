@@ -4,6 +4,7 @@
 //
 // Tests for Batch 20: HybridDictionary
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Specialized/HybridDictionary.hpp"
 #include <any>
 #include <string>
@@ -117,4 +118,37 @@ TEST(HybridDictionaryBatch20Test, STLIteration) {
     int count = 0;
     for (const auto& [k, v] : d) { (void)k; (void)v; ++count; }
     EXPECT_EQ(count, 2);
+}
+
+TEST(HybridDictionaryBatch20Test, Add_DuplicateKey_ThrowsArgumentException) {
+    HybridDictionary d;
+    d.Add("key", std::any(1));
+    EXPECT_THROW(d.Add("key", std::any(2)), System::ArgumentException);
+    EXPECT_EQ(std::any_cast<int>(d["key"]), 1);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+TEST(HybridDictionaryBatch20Test, CaseInsensitive_TreatsKeysAsEqual) {
+    HybridDictionary d(true);
+    d.Add("Key", std::any(std::string("value")));
+    EXPECT_TRUE(d.Contains("KEY"));
+    EXPECT_TRUE(d.Contains("key"));
+    EXPECT_EQ(std::any_cast<std::string>(d["KEY"]), "value");
+    EXPECT_THROW(d.Add("kEy", std::any(std::string("other"))), System::ArgumentException);
+
+    d.set("kEy", std::any(std::string("updated")));
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_EQ(std::any_cast<std::string>(d["Key"]), "updated");
+
+    d.Remove("KEY");
+    EXPECT_EQ(d.getCountProperty(), 0);
+}
+
+TEST(HybridDictionaryBatch20Test, CaseSensitive_TreatsKeysAsDistinct) {
+    HybridDictionary d(false);
+    d.Add("Key", std::any(1));
+    d.Add("KEY", std::any(2));
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_EQ(std::any_cast<int>(d["Key"]), 1);
+    EXPECT_EQ(std::any_cast<int>(d["KEY"]), 2);
 }

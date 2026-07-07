@@ -7,14 +7,26 @@
 #include <vector>
 
 #include "System/IO/MemoryStream.hpp"
+#include "System/IO/SeekOrigin.hpp"
 #include "System/IO/StringReader.hpp"
 #include "System/IO/StringWriter.hpp"
+#include "System/IO/UnmanagedMemoryStream.hpp"
+#include "System/IO/UnmanagedMemoryAccessor.hpp"
+#include "System/IO/FileAccess.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/ObjectDisposedException.hpp"
 
 using System::IO::MemoryStream;
+using System::IO::SeekOrigin;
 using System::IO::StringReader;
 using System::IO::StringWriter;
+using System::IO::UnmanagedMemoryStream;
+using System::IO::UnmanagedMemoryAccessor;
+using System::IO::FileAccess;
+using System::IO::intcs;
 
 // ---------------------------------------------------------------------------
 // MemoryStream — writable (default ctor)
@@ -177,6 +189,73 @@ TEST(MemoryStreamTests, SetPositionNegativeThrows) {
     EXPECT_THROW(ms.setPositionProperty(-1), System::ArgumentOutOfRangeException);
 }
 
+TEST(MemoryStreamTests, CanSeekIsTrue) {
+    MemoryStream ms;
+    EXPECT_TRUE(ms.getCanSeekProperty());
+}
+
+TEST(MemoryStreamTests, SeekFromBeginMatchesSetPosition) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    auto newPos = ms.Seek(2, SeekOrigin::Begin);
+    EXPECT_EQ(newPos, 2);
+    EXPECT_EQ(ms.getPositionProperty(), 2);
+}
+
+TEST(MemoryStreamTests, SeekFromCurrentAdvancesRelatively) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    ms.setPositionProperty(1);
+    auto newPos = ms.Seek(2, SeekOrigin::Current);
+    EXPECT_EQ(newPos, 3);
+}
+
+TEST(MemoryStreamTests, SeekFromEndComputesFromLength) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5}; // length 5
+    ms.Write(payload, 0, 5);
+    auto newPos = ms.Seek(-2, SeekOrigin::End);
+    EXPECT_EQ(newPos, 3);
+}
+
+TEST(MemoryStreamTests, SetLengthTruncates) {
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    ms.SetLength(2);
+    EXPECT_EQ(ms.getLengthProperty(), 2);
+}
+
+TEST(MemoryStreamTests, SetLengthExtendsWithZeros) {
+    MemoryStream ms;
+    ms.WriteByte(1);
+    ms.SetLength(3);
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+    EXPECT_EQ(ms.ToArray()[1], 0u);
+    EXPECT_EQ(ms.ToArray()[2], 0u);
+}
+
+TEST(MemoryStreamTests, SetLengthNegativeThrows) {
+    MemoryStream ms;
+    EXPECT_THROW(ms.SetLength(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, SetLengthOnReadOnlyThrowsNotSupportedException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.SetLength(1), System::NotSupportedException);
+}
+
+TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
+    uint8_t src[] = {0x41, 0x42};
+    MemoryStream ms(src, 2);
+    EXPECT_EQ(ms.ReadByte(), 0x41);
+    EXPECT_EQ(ms.ReadByte(), 0x42);
+    EXPECT_EQ(ms.ReadByte(), -1);
+}
+
 // ---------------------------------------------------------------------------
 // Stream — default Position behavior for non-seekable streams
 // ---------------------------------------------------------------------------
@@ -198,6 +277,26 @@ TEST(StreamTests, DefaultGetPositionThrowsNotSupported) {
 TEST(StreamTests, DefaultSetPositionThrowsNotSupported) {
     NonSeekableTestStream s;
     EXPECT_THROW(s.setPositionProperty(0), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultCanSeekIsFalse) {
+    NonSeekableTestStream s;
+    EXPECT_FALSE(s.getCanSeekProperty());
+}
+
+TEST(StreamTests, DefaultSeekThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.Seek(0, System::IO::SeekOrigin::Begin), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultSetLengthThrowsNotSupported) {
+    NonSeekableTestStream s;
+    EXPECT_THROW(s.SetLength(0), System::NotSupportedException);
+}
+
+TEST(StreamTests, DefaultReadByteReturnsMinusOneAtEnd) {
+    NonSeekableTestStream s;
+    EXPECT_EQ(s.ReadByte(), -1);
 }
 
 // ---------------------------------------------------------------------------
@@ -302,4 +401,144 @@ TEST(StringWriterTests, ToStringIdempotent) {
     StringWriter sw;
     sw.Write(std::string("data"));
     EXPECT_EQ(sw.ToString(), sw.ToString());
+}
+
+// ---------------------------------------------------------------------------
+// UnmanagedMemoryStream
+// ---------------------------------------------------------------------------
+
+TEST(UnmanagedMemoryStreamTests, ReadOnlyCtor_ReadsBytes) {
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    UnmanagedMemoryStream ums(data, 5);
+    EXPECT_EQ(ums.getLengthProperty(), 5);
+    EXPECT_TRUE(ums.getCanReadProperty());
+    EXPECT_FALSE(ums.getCanWriteProperty());
+    uint8_t buf[5] = {};
+    intcs n = ums.Read(buf, 0, 5);
+    EXPECT_EQ(n, 5);
+    EXPECT_EQ(buf[4], 5u);
+}
+
+TEST(UnmanagedMemoryStreamTests, ReadReturnsZeroAtEnd) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    uint8_t buf[2] = {};
+    ums.Read(buf, 0, 2);
+    EXPECT_EQ(ums.Read(buf, 0, 2), 0);
+}
+
+TEST(UnmanagedMemoryStreamTests, WriteWithinCapacity_UpdatesLength) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryStream ums(data, 0, 8, FileAccess::ReadWrite);
+    uint8_t payload[] = {9, 9, 9};
+    ums.Write(payload, 0, 3);
+    EXPECT_EQ(ums.getLengthProperty(), 3);
+    EXPECT_EQ(data[2], 9u);
+}
+
+TEST(UnmanagedMemoryStreamTests, WriteBeyondCapacity_Throws) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    uint8_t payload[] = {1, 2, 3};
+    EXPECT_THROW(ums.Write(payload, 0, 3), System::IO::IOException);
+}
+
+TEST(UnmanagedMemoryStreamTests, WriteWhenReadOnly_ThrowsNotSupportedException) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    uint8_t payload[] = {9};
+    EXPECT_THROW(ums.Write(payload, 0, 1), System::NotSupportedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, CanSeek_TrueWhileOpen) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    EXPECT_TRUE(ums.getCanSeekProperty());
+}
+
+TEST(UnmanagedMemoryStreamTests, SetPosition_SeeksForRead) {
+    uint8_t data[] = {10, 20, 30};
+    UnmanagedMemoryStream ums(data, 3);
+    ums.setPositionProperty(1);
+    uint8_t buf[2] = {};
+    ums.Read(buf, 0, 2);
+    EXPECT_EQ(buf[0], 20u);
+}
+
+TEST(UnmanagedMemoryStreamTests, SetLength_BeyondCapacity_Throws) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryStream ums(data, 0, 4, FileAccess::ReadWrite);
+    EXPECT_THROW(ums.SetLength(5), System::IO::IOException);
+}
+
+TEST(UnmanagedMemoryStreamTests, NullPointer_ThrowsArgumentNullException) {
+    EXPECT_THROW(UnmanagedMemoryStream(nullptr, 0), System::ArgumentNullException);
+}
+
+TEST(UnmanagedMemoryStreamTests, LengthGreaterThanCapacity_Throws) {
+    uint8_t data[4] = {};
+    EXPECT_THROW(UnmanagedMemoryStream(data, 4, 2, FileAccess::Read), System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// UnmanagedMemoryAccessor
+// ---------------------------------------------------------------------------
+
+TEST(UnmanagedMemoryAccessorTests, ReadWriteByte_Roundtrip) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    acc.Write(0, static_cast<uint8_t>(0xAB));
+    EXPECT_EQ(acc.ReadByte(0), 0xABu);
+}
+
+TEST(UnmanagedMemoryAccessorTests, ReadWriteInt32_Roundtrip) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    acc.Write(0, static_cast<int32_t>(-12345));
+    EXPECT_EQ(acc.ReadInt32(0), -12345);
+}
+
+TEST(UnmanagedMemoryAccessorTests, ReadWriteDouble_Roundtrip) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryAccessor acc(data, 8);
+    acc.Write(0, 3.14159);
+    EXPECT_DOUBLE_EQ(acc.ReadDouble(0), 3.14159);
+}
+
+TEST(UnmanagedMemoryAccessorTests, ReadWriteBoolean_Roundtrip) {
+    uint8_t data[1] = {};
+    UnmanagedMemoryAccessor acc(data, 1);
+    acc.Write(0, true);
+    EXPECT_TRUE(acc.ReadBoolean(0));
+}
+
+TEST(UnmanagedMemoryAccessorTests, CapacityProperty) {
+    uint8_t data[16] = {};
+    UnmanagedMemoryAccessor acc(data, 16);
+    EXPECT_EQ(acc.getCapacityProperty(), 16);
+}
+
+TEST(UnmanagedMemoryAccessorTests, ReadOnly_WriteThrowsNotSupportedException) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4, FileAccess::Read);
+    EXPECT_TRUE(acc.getCanReadProperty());
+    EXPECT_FALSE(acc.getCanWriteProperty());
+    EXPECT_THROW(acc.Write(0, static_cast<uint8_t>(1)), System::NotSupportedException);
+}
+
+TEST(UnmanagedMemoryAccessorTests, OutOfRangePosition_ThrowsArgumentOutOfRangeException) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    EXPECT_THROW(acc.ReadInt32(1), System::ArgumentOutOfRangeException); // needs 4 bytes at position 1, only 3 available
+}
+
+TEST(UnmanagedMemoryAccessorTests, AfterDispose_ThrowsObjectDisposedException) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    acc.Dispose();
+    EXPECT_THROW(acc.ReadByte(0), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryAccessorTests, NullBuffer_ThrowsArgumentNullException) {
+    EXPECT_THROW(UnmanagedMemoryAccessor(nullptr, 4), System::ArgumentNullException);
 }

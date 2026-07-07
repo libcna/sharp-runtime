@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "System/ArgumentNullException.hpp"
 #include "System/IO/Stream.hpp"
 
 namespace System::IO {
@@ -18,9 +19,14 @@ namespace System::IO {
         Stream* inner_;
         bool    ownsStream_;
     public:
-        /** Constructs a BufferedStream wrapping the given stream. */
+        /**
+         * @brief Constructs a BufferedStream wrapping the given stream.
+         * @throws System::ArgumentNullException if @p stream is null.
+         */
         explicit BufferedStream(Stream* stream, bool ownsStream = false)
-            : inner_(stream), ownsStream_(ownsStream) {}
+            : inner_(stream), ownsStream_(ownsStream) {
+            if (!inner_) throw System::ArgumentNullException("stream");
+        }
 
         /** Destroys the BufferedStream; closes the inner stream when ownsStream is true. */
         ~BufferedStream() override {
@@ -54,6 +60,16 @@ namespace System::IO {
         [[nodiscard]] bool getCanReadProperty()  const override { return inner_->getCanReadProperty(); }
         /** Returns true if the inner stream supports writing. */
         [[nodiscard]] bool getCanWriteProperty() const override { return inner_->getCanWriteProperty(); }
+
+        /** Delegates to the inner stream's Position getter. */
+        [[nodiscard]] SharpRuntime::intcs getPositionProperty() const override { return inner_->getPositionProperty(); }
+        /** Delegates to the inner stream's Position setter. */
+        void setPositionProperty(SharpRuntime::intcs value) override { inner_->setPositionProperty(value); }
+
+        /** Returns true if the inner stream supports seeking. */
+        [[nodiscard]] bool getCanSeekProperty() const override { return inner_->getCanSeekProperty(); }
+        /** Delegates to the inner stream's SetLength. */
+        void SetLength(SharpRuntime::intcs value) override { inner_->SetLength(value); }
     };
 
 } // namespace System::IO

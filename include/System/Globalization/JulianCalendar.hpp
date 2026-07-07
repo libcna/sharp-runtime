@@ -19,6 +19,16 @@ public:
     static constexpr int JulianEra = 1; ///< The only era value for this calendar.
 
     /**
+     * @brief Gets the algorithm type for this calendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.AlgorithmType.
+     * @return Always CalendarAlgorithmType::SolarCalendar.
+     */
+    [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
+        return CalendarAlgorithmType::SolarCalendar;
+    }
+
+    /**
      * @brief Gets the earliest date supported by JulianCalendar.
      *
      * C++ counterpart of .NET JulianCalendar.MinSupportedDateTime.
@@ -44,15 +54,19 @@ public:
      * C++ counterpart of .NET JulianCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 2029).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const { return twoDigitYearMax_; }
+    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
      *
      * C++ counterpart of .NET JulianCalendar.TwoDigitYearMax setter.
      * @param value The new maximum two-digit year.
+     * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) { twoDigitYearMax_ = value; }
+    void setTwoDigitYearMaxProperty(int value) override {
+        VerifyWritable();
+        twoDigitYearMax_ = value;
+    }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -68,6 +82,14 @@ public:
      * @return Always 1; the Julian calendar has a single era.
      */
     [[nodiscard]] int GetErasCount() const override { return 1; }
+
+    /**
+     * @brief Gets the list of era identifiers supported by this calendar.
+     *
+     * C++ counterpart of .NET JulianCalendar.Eras.
+     * @return A vector containing {JulianEra}.
+     */
+    [[nodiscard]] std::vector<int> getErasProperty() const override { return {JulianEra}; }
 
     /**
      * @brief Determines whether the specified year is a Julian leap year.

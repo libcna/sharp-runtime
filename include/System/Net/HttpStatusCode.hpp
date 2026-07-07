@@ -5,6 +5,11 @@
 
 namespace System::Net {
 
+    /**
+     * @brief HTTP status codes as per RFC 2616.
+     *
+     * C++ counterpart of .NET System.Net.HttpStatusCode.
+     */
     enum class HttpStatusCode {
         // 1xx Informational
         Continue                      = 100,

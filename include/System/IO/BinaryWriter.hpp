@@ -28,7 +28,9 @@ namespace System::IO {
     private:
         Stream* stream_;
         bool    leaveOpen_;
+        bool    disposed_ = false;
 
+        void ThrowIfDisposed() const;
         void WriteBytes(const bytecs* buf, intcs count);
 
     public:
@@ -68,9 +70,21 @@ namespace System::IO {
         /** Writes a region of a byte array to the stream. */
         virtual void Write(const bytecs* buffer, intcs offset, intcs count);
 
+        /**
+         * @brief Writes a 32-bit integer encoded 7 bits at a time (high bit = continuation).
+         *
+         * C++ counterpart of .NET BinaryWriter.Write7BitEncodedInt(int).
+         */
+        void Write7BitEncodedInt(intcs value);
+
         /** Clears all buffers and causes any buffered data to be written. */
         virtual void Flush();
-        /** Closes the writer and the underlying stream. */
+
+        /**
+         * @brief Closes the writer and, unless leaveOpen was set, the underlying stream.
+         *
+         * C++ counterpart of .NET BinaryWriter.Close(). Safe to call multiple times.
+         */
         virtual void Close();
     };
 

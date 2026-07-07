@@ -51,7 +51,7 @@ public:
     void setHeader(const std::string& name, const std::string& value) { headers_[name] = value; }
 
     /** Returns the map of all request headers. */
-    [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeaders() const {
+    [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeadersProperty() const {
         return headers_;
     }
 };

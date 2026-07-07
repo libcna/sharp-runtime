@@ -20,10 +20,10 @@ public:
     [[nodiscard]] virtual std::vector<SharpRuntime::bytecs> ReadAsByteArray() const = 0;
 
     /** Returns the MIME media type (e.g. "text/plain", "application/json"). */
-    [[nodiscard]] virtual std::string getContentType() const = 0;
+    [[nodiscard]] virtual std::string getContentTypeProperty() const = 0;
 
     /** Returns the charset (e.g. "utf-8"), or empty if not applicable. */
-    [[nodiscard]] virtual std::string getCharSet() const { return ""; }
+    [[nodiscard]] virtual std::string getCharSetProperty() const { return ""; }
 };
 
 } // namespace System::Net::Http

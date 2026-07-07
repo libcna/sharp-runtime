@@ -5,6 +5,7 @@
 // Tests for Calendar, GregorianCalendar, ISOWeek and the new DateTime
 // Add* convenience methods (AddDays, AddHours, AddMinutes, AddSeconds, AddMilliseconds).
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
 #include "System/Globalization/Calendar.hpp"
@@ -285,6 +286,80 @@ TEST(CalendarTests, GetWeekOfYear_Approximate) {
 }
 
 // ===========================================================================
+// Calendar::GetWeekOfYear — rule and firstDayOfWeek must actually be honored
+// (previously this always returned dayOfYear/7+1 regardless of parameters).
+// Jan 1, 2021 is a Friday.
+// ===========================================================================
+
+TEST(CalendarTests, GetWeekOfYear_FirstDay_SundayStart) {
+    Calendar cal;
+    DateTime d(2021, 1, 4); // Monday
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Sunday), 2);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstDay_RespectsFirstDayOfWeek) {
+    // Same date, different firstDayOfWeek must change the result.
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, DayOfWeek::Wednesday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstFullWeek_DiffersFromFirstDay) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFullWeek, DayOfWeek::Sunday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_FirstFourDayWeek) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_EQ(cal.GetWeekOfYear(d, CalendarWeekRule::FirstFourDayWeek, DayOfWeek::Sunday), 1);
+}
+
+TEST(CalendarTests, GetWeekOfYear_InvalidFirstDayOfWeek_Throws) {
+    Calendar cal;
+    DateTime d(2021, 1, 4);
+    EXPECT_THROW(cal.GetWeekOfYear(d, CalendarWeekRule::FirstDay, static_cast<DayOfWeek>(7)),
+                 System::ArgumentOutOfRangeException);
+}
+
+// ===========================================================================
+// Calendar::ToFourDigitYear / TwoDigitYearMax
+// ===========================================================================
+
+TEST(CalendarTests, TwoDigitYearMax_DefaultsTo2049) {
+    Calendar cal;
+    EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2049);
+}
+
+TEST(CalendarTests, ToFourDigitYear_BelowMaxCentury_UsesCurrentCentury) {
+    Calendar cal; // TwoDigitYearMax defaults to 2049
+    EXPECT_EQ(cal.ToFourDigitYear(30), 2030);
+}
+
+TEST(CalendarTests, ToFourDigitYear_AboveMaxCentury_UsesPreviousCentury) {
+    Calendar cal; // TwoDigitYearMax defaults to 2049
+    EXPECT_EQ(cal.ToFourDigitYear(50), 1950);
+}
+
+TEST(CalendarTests, ToFourDigitYear_YearAtOrAbove100_ReturnedAsIs) {
+    Calendar cal;
+    EXPECT_EQ(cal.ToFourDigitYear(2024), 2024);
+}
+
+TEST(CalendarTests, ToFourDigitYear_NegativeYear_Throws) {
+    Calendar cal;
+    EXPECT_THROW(cal.ToFourDigitYear(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(CalendarTests, ToFourDigitYear_RespectsCustomTwoDigitYearMax) {
+    Calendar cal;
+    cal.setTwoDigitYearMaxProperty(2099);
+    EXPECT_EQ(cal.ToFourDigitYear(99), 2099);
+    EXPECT_EQ(cal.getTwoDigitYearMaxProperty(), 2099);
+}
+
+// ===========================================================================
 // GregorianCalendar
 // ===========================================================================
 
@@ -296,6 +371,11 @@ TEST(GregorianCalendarTests, DefaultType_Localized) {
 TEST(GregorianCalendarTests, ExplicitType) {
     GregorianCalendar gc(GregorianCalendarTypes::USEnglish);
     EXPECT_EQ(gc.getCalendarTypeProperty(), GregorianCalendarTypes::USEnglish);
+}
+
+TEST(GregorianCalendarTests, AlgorithmType_IsSolar) {
+    GregorianCalendar gc;
+    EXPECT_EQ(gc.getAlgorithmTypeProperty(), CalendarAlgorithmType::SolarCalendar);
 }
 
 TEST(GregorianCalendarTests, SetCalendarType) {
@@ -396,6 +476,31 @@ TEST(ISOWeekTests, GetWeeksInYear_2020_Is53) {
 
 TEST(ISOWeekTests, GetWeeksInYear_2021_Is52) {
     EXPECT_EQ(ISOWeek::GetWeeksInYear(2021), 52);
+}
+
+TEST(ISOWeekTests, GetWeeksInYear_2032_Is53) {
+    // 2032 is a leap year whose preceding year (2031) ends on Thursday —
+    // a long ISO year per the P(y-1)==3 rule, not captured by checking P(y) alone.
+    EXPECT_EQ(ISOWeek::GetWeeksInYear(2032), 53);
+}
+
+TEST(ISOWeekTests, GetWeeksInYear_OutOfRange_Throws) {
+    EXPECT_THROW(ISOWeek::GetWeeksInYear(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ISOWeek::GetWeeksInYear(10000), System::ArgumentOutOfRangeException);
+}
+
+TEST(ISOWeekTests, ToDateTime_RoundTripsWithGetWeekOfYear) {
+    DateTime d(2021, 1, 4); // Monday, ISO week 1 of 2021
+    DateTime start = ISOWeek::ToDateTime(2021, 1, DayOfWeek::Monday);
+    EXPECT_EQ(start.getYearProperty(),  2021);
+    EXPECT_EQ(start.getMonthProperty(), 1);
+    EXPECT_EQ(start.getDayProperty(),   4);
+    EXPECT_EQ(d, start);
+}
+
+TEST(ISOWeekTests, ToDateTime_InvalidWeek_Throws) {
+    EXPECT_THROW(ISOWeek::ToDateTime(2021, 0, DayOfWeek::Monday), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ISOWeek::ToDateTime(2021, 54, DayOfWeek::Monday), System::ArgumentOutOfRangeException);
 }
 
 TEST(ISOWeekTests, GetYearStart_2021_Is_Jan4) {

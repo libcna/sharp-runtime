@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -12,16 +13,43 @@ namespace System::Collections::Specialized {
 
 using SharpRuntime::intcs;
 
+namespace detail {
+
+/** @brief Ordinal case-insensitive hash for NameValueCollection keys (matches .NET's default comparer). */
+struct NameValueCollectionKeyHash {
+    [[nodiscard]] size_t operator()(const std::string& key) const {
+        std::string lower = key;
+        std::ranges::transform(lower, lower.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return std::hash<std::string>{}(lower);
+    }
+};
+
+/** @brief Ordinal case-insensitive equality for NameValueCollection keys. */
+struct NameValueCollectionKeyEqual {
+    [[nodiscard]] bool operator()(const std::string& a, const std::string& b) const {
+        return a.size() == b.size() &&
+               std::ranges::equal(a, b, [](unsigned char c1, unsigned char c2) {
+                   return std::tolower(c1) == std::tolower(c2);
+               });
+    }
+};
+
+} // namespace detail
+
 /**
  * @brief A collection that associates string keys with one or more string values.
  *
  * C++ counterpart of .NET System.Collections.Specialized.NameValueCollection.
  * Multiple values for the same key are stored and returned comma-joined by Get().
- * Insertion order of keys is preserved.
+ * Insertion order of keys is preserved. Keys are compared ordinal case-insensitively,
+ * matching .NET's default (CaseInsensitiveComparer) behavior; AllKeys/Keys retain the
+ * original casing of the first insertion.
  */
 class NameValueCollection {
-    std::vector<std::string>                                  keys_;
-    std::unordered_map<std::string, std::vector<std::string>> map_;
+    std::vector<std::string> keys_;
+    std::unordered_map<std::string, std::vector<std::string>,
+                        detail::NameValueCollectionKeyHash, detail::NameValueCollectionKeyEqual> map_;
 
     static std::string joinComma(const std::vector<std::string>& v) {
         std::string out;
@@ -140,7 +168,10 @@ public:
      */
     void Remove(const std::string& name) {
         map_.erase(name);
-        keys_.erase(std::remove(keys_.begin(), keys_.end(), name), keys_.end());
+        detail::NameValueCollectionKeyEqual equal;
+        keys_.erase(std::remove_if(keys_.begin(), keys_.end(),
+                                    [&](const std::string& k) { return equal(k, name); }),
+                    keys_.end());
     }
 
     /**

@@ -33,7 +33,7 @@ public:
     }
 
     /** Returns the MIME type of the content (e.g. "application/octet-stream"). */
-    [[nodiscard]] std::string getContentType() const override { return mediaType_; }
+    [[nodiscard]] std::string getContentTypeProperty() const override { return mediaType_; }
 };
 
 } // namespace System::Net::Http

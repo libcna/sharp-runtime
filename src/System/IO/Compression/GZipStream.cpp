@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/GZipStream.hpp"
-#include "System/NotImplementedException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <zlib.h>
 #include <stdexcept>
 #include <string>
@@ -51,7 +51,7 @@ bool GZipStream::getCanReadProperty()  const { return mode_ == CompressionMode::
 bool GZipStream::getCanWriteProperty() const { return mode_ == CompressionMode::Compress;   }
 
 SharpRuntime::intcs GZipStream::getLengthProperty() const {
-    throw NotImplementedException("GZipStream does not support seeking.");
+    throw System::NotSupportedException("This operation is not supported.");
 }
 
 // ---------------------------------------------------------------------------

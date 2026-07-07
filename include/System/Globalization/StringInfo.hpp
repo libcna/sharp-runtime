@@ -4,6 +4,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
 
 namespace System::Globalization {
@@ -67,9 +68,11 @@ public:
      * C++ counterpart of .NET StringInfo.SubstringByTextElements(int).
      * @param startingTextElement The zero-based index of the first text element.
      * @return The substring from @p startingTextElement to the end.
+     * @throws System::ArgumentOutOfRangeException if @p startingTextElement is out of range.
      */
     [[nodiscard]] std::string SubstringByTextElements(int startingTextElement) const {
-        return string_.substr(startingTextElement);
+        return SubstringByTextElements(startingTextElement,
+                                       static_cast<int>(string_.size()) - startingTextElement);
     }
 
     /**
@@ -79,10 +82,21 @@ public:
      * @param startingTextElement   The zero-based index of the first text element.
      * @param lengthInTextElements  The number of text elements to include.
      * @return The specified substring.
+     * @throws System::ArgumentOutOfRangeException if @p startingTextElement or
+     *         @p lengthInTextElements is negative or out of range for the string.
      */
     [[nodiscard]] std::string SubstringByTextElements(int startingTextElement,
                                                        int lengthInTextElements) const {
-        return string_.substr(startingTextElement, lengthInTextElements);
+        size_t length = string_.size();
+        if (static_cast<unsigned int>(startingTextElement) >= static_cast<unsigned int>(length)) {
+            throw System::ArgumentOutOfRangeException("startingTextElement");
+        }
+        if (static_cast<unsigned int>(lengthInTextElements) >
+            static_cast<unsigned int>(length - static_cast<size_t>(startingTextElement))) {
+            throw System::ArgumentOutOfRangeException("lengthInTextElements");
+        }
+        return string_.substr(static_cast<size_t>(startingTextElement),
+                              static_cast<size_t>(lengthInTextElements));
     }
 
     /**
@@ -147,11 +161,11 @@ public:
      * @param str   The string to enumerate.
      * @param index The zero-based byte index at which to start enumeration.
      * @return A TextElementEnumerator positioned before the first element at @p index.
-     * @throws std::out_of_range if @p index is negative or greater than the string length.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than the string length.
      */
     static TextElementEnumerator GetTextElementEnumerator(const std::string& str, int index) {
         if (index < 0 || index > static_cast<int>(str.size()))
-            throw std::out_of_range("index");
+            throw System::ArgumentOutOfRangeException("index");
         return TextElementEnumerator(str.substr(index));
     }
 };

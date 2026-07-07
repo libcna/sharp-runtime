@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <any>
 #include <string>
 #include "System/Attribute.hpp"
 
@@ -179,10 +180,16 @@ namespace System::Diagnostics::CodeAnalysis {
         [[nodiscard]] const std::string& getJustificationProperty() const { return justification_; }
         /** @brief Sets the suppression justification. */
         void setJustificationProperty(const std::string& v) { justification_ = v; }
+        /** @return The message identifier for filtering specific instances; empty if not set. */
+        [[nodiscard]] const std::string& getMessageIdProperty() const { return messageId_; }
         /** @brief Sets the message identifier for filtering specific instances. */
         void setMessageIdProperty(const std::string& v) { messageId_ = v; }
+        /** @return The scope of the suppression (e.g. "member", "type"); empty if not set. */
+        [[nodiscard]] const std::string& getScopeProperty() const { return scope_; }
         /** @brief Sets the scope of the suppression (e.g. "member", "type"). */
         void setScopeProperty(const std::string& v)     { scope_ = v; }
+        /** @return The target of the suppression (fully-qualified member name); empty if not set. */
+        [[nodiscard]] const std::string& getTargetProperty() const { return target_; }
         /** @brief Sets the target of the suppression (fully-qualified member name). */
         void setTargetProperty(const std::string& v)    { target_ = v; }
     };
@@ -216,5 +223,113 @@ namespace System::Diagnostics::CodeAnalysis {
         /** @return The syntax kind identifier for this parameter or return value. */
         [[nodiscard]] const std::string& getSyntaxProperty() const { return syntax_; }
     };
+
+    /** @brief Indicates that the specified method parameter expects a constant, with optional bounds. */
+    class ConstantExpectedAttribute : public System::Attribute {
+        std::any min_;
+        std::any max_;
+    public:
+        /** @return The minimum bound of the expected constant, inclusive; empty if not set. */
+        [[nodiscard]] const std::any& getMinProperty() const { return min_; }
+        /** @brief Sets the minimum bound of the expected constant, inclusive. */
+        void setMinProperty(std::any v) { min_ = std::move(v); }
+        /** @return The maximum bound of the expected constant, inclusive; empty if not set. */
+        [[nodiscard]] const std::any& getMaxProperty() const { return max_; }
+        /** @brief Sets the maximum bound of the expected constant, inclusive. */
+        void setMaxProperty(std::any v) { max_ = std::move(v); }
+    };
+
+    /** @brief Indicates that an API is experimental and may change in the future. */
+    class ExperimentalAttribute : public System::Attribute {
+        std::string diagnosticId_;
+        std::string message_;
+        std::string urlFormat_;
+    public:
+        /**
+         * @brief Constructs the attribute with the diagnostic ID used when reporting API usage.
+         * @param diagnosticId The unique diagnostic ID for this experimental API.
+         */
+        explicit ExperimentalAttribute(const std::string& diagnosticId) : diagnosticId_(diagnosticId) {}
+        /** @return The diagnostic ID used when reporting use of this experimental API. */
+        [[nodiscard]] const std::string& getDiagnosticIdProperty() const { return diagnosticId_; }
+        /** @return Additional message about the experimental feature; empty if not set. */
+        [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
+        /** @brief Sets additional message about the experimental feature. */
+        void setMessageProperty(const std::string& v) { message_ = v; }
+        /** @return Format string for a URL to corresponding documentation; empty if not set. */
+        [[nodiscard]] const std::string& getUrlFormatProperty() const { return urlFormat_; }
+        /** @brief Sets the format string for a URL to corresponding documentation. */
+        void setUrlFormatProperty(const std::string& v) { urlFormat_ = v; }
+    };
+
+    /** @brief Indicates that the specified member requires assembly files to be on disk. */
+    class RequiresAssemblyFilesAttribute : public System::Attribute {
+        std::string message_;
+        std::string url_;
+    public:
+        /** @brief Constructs the attribute with no message. */
+        RequiresAssemblyFilesAttribute() = default;
+        /**
+         * @brief Constructs the attribute with a diagnostic message.
+         * @param message Explanation of why assembly files must be on disk.
+         */
+        explicit RequiresAssemblyFilesAttribute(const std::string& message) : message_(message) {}
+        /** @return Explanation of why assembly files must be on disk; empty if not set. */
+        [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
+        /** @return Optional URL with further documentation; empty if not set. */
+        [[nodiscard]] const std::string& getUrlProperty() const { return url_; }
+        /** @brief Sets the optional URL with further documentation. */
+        void setUrlProperty(const std::string& v) { url_ = v; }
+    };
+
+    /** @brief Indicates that the specified member requires the caller to be in an unsafe context. */
+    class RequiresUnsafeAttribute : public System::Attribute {};
+
+    /** @brief Specifies that a constructor sets all required members; callers need not set them. */
+    class SetsRequiredMembersAttribute : public System::Attribute {};
+
+    /**
+     * @brief Suppresses reporting of a specific rule violation unconditionally (no ConditionalAttribute),
+     *        so the annotation is always preserved in the compiled output, unlike SuppressMessageAttribute.
+     */
+    class UnconditionalSuppressMessageAttribute : public System::Attribute {
+        std::string category_;
+        std::string checkId_;
+        std::string justification_;
+        std::string messageId_;
+        std::string scope_;
+        std::string target_;
+    public:
+        /**
+         * @brief Constructs the attribute for the given category and check identifier.
+         * @param cat Rule category (e.g. "Microsoft.Design").
+         * @param id  Check identifier (e.g. "CA1000:DoNotDeclareStaticMembersOnGenericTypes").
+         */
+        UnconditionalSuppressMessageAttribute(const std::string& cat, const std::string& id)
+            : category_(cat), checkId_(id) {}
+        /** @return The rule category. */
+        [[nodiscard]] const std::string& getCategoryProperty()      const { return category_; }
+        /** @return The check identifier. */
+        [[nodiscard]] const std::string& getCheckIdProperty()       const { return checkId_; }
+        /** @return The suppression justification; empty if not set. */
+        [[nodiscard]] const std::string& getJustificationProperty() const { return justification_; }
+        /** @brief Sets the suppression justification. */
+        void setJustificationProperty(const std::string& v) { justification_ = v; }
+        /** @return The message identifier for filtering specific instances; empty if not set. */
+        [[nodiscard]] const std::string& getMessageIdProperty() const { return messageId_; }
+        /** @brief Sets the message identifier for filtering specific instances. */
+        void setMessageIdProperty(const std::string& v) { messageId_ = v; }
+        /** @return The scope of the suppression (e.g. "member", "type"); empty if not set. */
+        [[nodiscard]] const std::string& getScopeProperty() const { return scope_; }
+        /** @brief Sets the scope of the suppression (e.g. "member", "type"). */
+        void setScopeProperty(const std::string& v)     { scope_ = v; }
+        /** @return The target of the suppression (fully-qualified member name); empty if not set. */
+        [[nodiscard]] const std::string& getTargetProperty() const { return target_; }
+        /** @brief Sets the target of the suppression (fully-qualified member name). */
+        void setTargetProperty(const std::string& v)    { target_ = v; }
+    };
+
+    /** @brief Indicates that a ref (e.g. a struct's `this`, or an `out`/ref-struct parameter) escapes and is not scoped. */
+    class UnscopedRefAttribute : public System::Attribute {};
 
 } // namespace System::Diagnostics::CodeAnalysis

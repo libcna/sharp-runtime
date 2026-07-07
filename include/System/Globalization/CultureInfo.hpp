@@ -80,7 +80,7 @@ public:
      * Use this for locale-independent parsing and formatting.
      * @return A const reference to the shared invariant instance.
      */
-    [[nodiscard]] static const CultureInfo& InvariantCulture() {
+    [[nodiscard]] static const CultureInfo& getInvariantCultureProperty() {
         static CultureInfo instance("", true, true);
         return instance;
     }
@@ -88,24 +88,52 @@ public:
     /**
      * @brief Gets the CultureInfo representing the current thread's culture.
      *
-     * C++ counterpart of .NET CultureInfo.CurrentCulture.
-     * Stub — returns InvariantCulture.
-     * @return A const reference to InvariantCulture.
+     * C++ counterpart of .NET CultureInfo.CurrentCulture. Defaults to InvariantCulture
+     * (this runtime has no OS-locale detection); use setCurrentCultureProperty() to
+     * override, matching .NET's settable CurrentCulture property.
+     * @return A const reference to the current culture.
      */
-    [[nodiscard]] static const CultureInfo& CurrentCulture() {
-        return InvariantCulture();
+    [[nodiscard]] static const CultureInfo& getCurrentCultureProperty() {
+        return currentCulture_;
+    }
+
+    /**
+     * @brief Sets the CultureInfo representing the current thread's culture.
+     *
+     * C++ counterpart of .NET CultureInfo.CurrentCulture (setter).
+     * @param value The culture to make current.
+     */
+    static void setCurrentCultureProperty(const CultureInfo& value) {
+        currentCulture_ = value;
     }
 
     /**
      * @brief Gets the CultureInfo representing the current thread's UI culture.
      *
-     * C++ counterpart of .NET CultureInfo.CurrentUICulture.
-     * Stub — returns InvariantCulture.
-     * @return A const reference to InvariantCulture.
+     * C++ counterpart of .NET CultureInfo.CurrentUICulture. Defaults to InvariantCulture;
+     * use setCurrentUICultureProperty() to override.
+     * @return A const reference to the current UI culture.
      */
-    [[nodiscard]] static const CultureInfo& CurrentUICulture() {
-        return InvariantCulture();
+    [[nodiscard]] static const CultureInfo& getCurrentUICultureProperty() {
+        return currentUICulture_;
     }
+
+    /**
+     * @brief Sets the CultureInfo representing the current thread's UI culture.
+     *
+     * C++ counterpart of .NET CultureInfo.CurrentUICulture (setter).
+     * @param value The UI culture to make current.
+     */
+    static void setCurrentUICultureProperty(const CultureInfo& value) {
+        currentUICulture_ = value;
+    }
+
+private:
+    static CultureInfo currentCulture_;
+    static CultureInfo currentUICulture_;
 };
+
+inline CultureInfo CultureInfo::currentCulture_{"", true, true};
+inline CultureInfo CultureInfo::currentUICulture_{"", true, true};
 
 } // namespace System::Globalization

@@ -744,6 +744,11 @@ TEST(DateTimeOffsetTests, ToString_WithFormat_O) {
     EXPECT_NE(s.find("+02:00"), std::string::npos);
 }
 
+TEST(DateTimeOffsetTests, ToString_WithFormat_r_ProducesRfc1123) {
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::Zero);
+    EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 07:28:00 GMT");
+}
+
 // ===========================================================================
 // TimeOnly
 // ===========================================================================
@@ -1235,28 +1240,28 @@ TEST(UnicodeRangeTests, Create_AtoZ) {
 }
 
 TEST(UnicodeRangeTests, Create_InvalidOrder_Throws) {
-    EXPECT_THROW(UnicodeRange::Create(u'Z', u'A'), std::invalid_argument);
+    EXPECT_THROW(UnicodeRange::Create(u'Z', u'A'), System::ArgumentOutOfRangeException);
 }
 
 TEST(UnicodeRangesTests, All_Covers_BMP) {
-    auto r = UnicodeRanges::All();
+    auto r = UnicodeRanges::getAllProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0000);
     EXPECT_EQ(r.getLengthProperty(), 0x10000);
 }
 
 TEST(UnicodeRangesTests, BasicLatin_Starts0) {
-    auto r = UnicodeRanges::BasicLatin();
+    auto r = UnicodeRanges::getBasicLatinProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0000);
     EXPECT_EQ(r.getLengthProperty(), 128);
 }
 
 TEST(UnicodeRangesTests, Cyrillic_StartsAt0x0400) {
-    auto r = UnicodeRanges::Cyrillic();
+    auto r = UnicodeRanges::getCyrillicProperty();
     EXPECT_EQ(r.getFirstCodePointProperty(), 0x0400);
 }
 
 TEST(UnicodeRangesTests, None_LengthZero) {
-    auto r = UnicodeRanges::None();
+    auto r = UnicodeRanges::getNoneProperty();
     EXPECT_EQ(r.getLengthProperty(), 0);
 }
 
@@ -1266,9 +1271,10 @@ TEST(UnicodeRangesTests, None_LengthZero) {
 
 using System::Threading::CancellationTokenRegistration;
 
-TEST(CancellationTokenRegistrationTests, DefaultCtor_IsActive) {
+TEST(CancellationTokenRegistrationTests, DefaultCtor_IsNotActive) {
+    // A default-constructed registration has no associated callback to unregister.
     CancellationTokenRegistration reg;
-    EXPECT_TRUE(reg.getIsActiveProperty());
+    EXPECT_FALSE(reg.getIsActiveProperty());
 }
 
 TEST(CancellationTokenRegistrationTests, Dispose_BecomesInactive) {

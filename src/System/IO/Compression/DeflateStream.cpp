@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/DeflateStream.hpp"
-#include "System/NotImplementedException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <zlib.h>
 #include <stdexcept>
 #include <string>
@@ -52,7 +52,7 @@ bool DeflateStream::getCanReadProperty()  const { return mode_ == CompressionMod
 bool DeflateStream::getCanWriteProperty() const { return mode_ == CompressionMode::Compress;   }
 
 SharpRuntime::intcs DeflateStream::getLengthProperty() const {
-    throw NotImplementedException("DeflateStream does not support seeking.");
+    throw System::NotSupportedException("This operation is not supported.");
 }
 
 // ---------------------------------------------------------------------------

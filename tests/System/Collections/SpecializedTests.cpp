@@ -5,6 +5,7 @@
 #include <any>
 #include <string>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Specialized/NameValueCollection.hpp"
 #include "System/Collections/Specialized/StringCollection.hpp"
 #include "System/Collections/Specialized/BitVector32.hpp"
@@ -339,7 +340,7 @@ TEST(ListDictionaryTests, Add_Contains) {
 TEST(ListDictionaryTests, Add_DuplicateKey_Throws) {
     ListDictionary ld;
     ld.Add("k", std::any{1});
-    EXPECT_THROW(ld.Add("k", std::any{2}), std::invalid_argument);
+    EXPECT_THROW(ld.Add("k", std::any{2}), System::ArgumentException);
 }
 
 TEST(ListDictionaryTests, Remove_RemovesEntry) {
@@ -426,7 +427,7 @@ TEST(OrderedDictionaryTests, Add_IncreasesCount) {
 TEST(OrderedDictionaryTests, Add_DuplicateKey_Throws) {
     OrderedDictionary od;
     od.Add("k", "v");
-    EXPECT_THROW(od.Add("k", "v2"), std::invalid_argument);
+    EXPECT_THROW(od.Add("k", "v2"), System::ArgumentException);
 }
 
 TEST(OrderedDictionaryTests, Contains_True_False) {

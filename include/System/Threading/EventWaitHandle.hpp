@@ -5,10 +5,13 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Threading/WaitHandle.hpp"
 #include "System/Threading/EventResetMode.hpp"
 
 namespace System::Threading {
+
+    using SharpRuntime::intcs;
 
     /** Represents a thread-synchronisation event. */
     class EventWaitHandle : public WaitHandle {
@@ -44,7 +47,7 @@ namespace System::Threading {
         }
 
         /** Blocks until the event is signalled or the timeout elapses; returns true if signalled. */
-        bool WaitOne(int milliseconds) override {
+        bool WaitOne(intcs milliseconds) override {
             std::unique_lock<std::mutex> lock(mtx_);
             bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
                 [this]{ return set_.load(std::memory_order_acquire); });

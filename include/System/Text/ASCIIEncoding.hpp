@@ -29,6 +29,10 @@ namespace System::Text {
                                             SharpRuntime::intcs count) const override;
         /** Returns the encoding name "us-ascii". */
         [[nodiscard]] std::string getEncodingNameProperty() const override { return "us-ascii"; }
+        /** Returns the code page 20127 (US-ASCII). */
+        [[nodiscard]] int getCodePageProperty() const override { return 20127; }
+        /** ASCII always uses exactly one byte per character. */
+        [[nodiscard]] bool getIsSingleByteProperty() const override { return true; }
     };
 
 } // namespace System::Text

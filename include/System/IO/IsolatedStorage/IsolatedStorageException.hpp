@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <exception>
 #include "System/Exception.hpp"
 
 namespace System::IO::IsolatedStorage
@@ -15,13 +16,16 @@ namespace System::IO::IsolatedStorage
     class IsolatedStorageException : public System::Exception
     {
     public:
+        /** Initializes a new instance of the IsolatedStorageException class with a default message. */
+        IsolatedStorageException();
+
         /**
          * @brief Initializes a new instance of the IsolatedStorageException class.
-         *
          * @param message Exception message.
-         *
-         * @note Status: IMPLEMENTED
          */
         explicit IsolatedStorageException(const std::string& message);
+
+        /** Initializes a new instance of the IsolatedStorageException class with a message and an inner exception. */
+        IsolatedStorageException(const std::string& message, std::exception_ptr inner);
     };
 }

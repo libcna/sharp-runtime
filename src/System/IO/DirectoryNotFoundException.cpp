@@ -6,4 +6,8 @@ namespace System::IO {
     DirectoryNotFoundException::DirectoryNotFoundException() : IOException("Attempted to access a path that is not on the disk.") {}
     DirectoryNotFoundException::DirectoryNotFoundException(const char* message) : IOException(message) {}
     DirectoryNotFoundException::DirectoryNotFoundException(const std::string& message) : IOException(message) {}
+    DirectoryNotFoundException::DirectoryNotFoundException(const std::string& message, std::exception_ptr inner)
+        : IOException(message, std::move(inner)) {}
+    DirectoryNotFoundException::DirectoryNotFoundException(const std::string& message, const std::string& directoryPath)
+        : IOException(message), directoryPath_(directoryPath) {}
 } // namespace System::IO
