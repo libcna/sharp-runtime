@@ -5,8 +5,14 @@
 
 #include <tinyxml2/tinyxml2.h>
 
+#include <memory>
+
 #include "System/InvalidOperationException.hpp"
 #include "System/NotImplementedException.hpp"
+#include "System/Xml/XPath/XPathNodeIterator.hpp"
+#include "System/Xml/XPath/XmlDocumentNavigator.hpp"
+#include "System/Xml/IHasXmlNode.hpp"
+#include "System/Xml/XmlAttribute.hpp"
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlDocumentFragment.hpp"
 #include "System/Xml/XmlElement.hpp"
@@ -277,14 +283,42 @@ namespace System::Xml {
                 wrapped->WriteTo(writer);
     }
 
-    XmlNode* XmlNode::SelectSingleNode(const std::string&) const {
-        throw System::NotImplementedException(
-            "XmlNode::SelectSingleNode requires XPath support (System.Xml.XPath), which is a separate, not-yet-ported namespace.");
+    XPath::XPathNavigator* XmlNode::CreateNavigator() const {
+        XmlDocument* doc = GetDocument();
+        if (getNodeTypeProperty() == XmlNodeType::Attribute) {
+            // Attributes are not part of the tinyxml2 node tree, so XmlDocumentNavigator tracks
+            // them as (owning element, attribute identity) rather than a native_-bearing node;
+            // re-locate this attribute from its owner so the navigator lands in the Attribute
+            // position instead of misreporting it as a bare (parentless) content node.
+            const auto* attr = static_cast<const XmlAttribute*>(this);
+            XmlElement* owner = attr->getOwnerElementProperty();
+            if (!owner)
+                throw System::InvalidOperationException("Cannot create a navigator for a detached attribute.");
+            auto* nav = new XPath::XmlDocumentNavigator(doc, owner);
+            if (nav->MoveToAttribute(attr->getLocalNameProperty(), attr->getNamespaceURIProperty())) return nav;
+            delete nav;
+            throw System::InvalidOperationException("Cannot create a navigator for a detached attribute.");
+        }
+        return new XPath::XmlDocumentNavigator(doc, const_cast<XmlNode*>(this));
     }
 
-    XmlNodeList* XmlNode::SelectNodes(const std::string&) const {
-        throw System::NotImplementedException(
-            "XmlNode::SelectNodes requires XPath support (System.Xml.XPath), which is a separate, not-yet-ported namespace.");
+    XmlNode* XmlNode::SelectSingleNode(const std::string& xpath) const {
+        std::unique_ptr<XPath::XPathNavigator> nav(CreateNavigator());
+        std::unique_ptr<XPath::XPathNavigator> result(nav->SelectSingleNode(xpath));
+        if (!result) return nullptr;
+        const auto* hasNode = dynamic_cast<const IHasXmlNode*>(result.get());
+        return hasNode ? hasNode->GetNode() : nullptr;
+    }
+
+    XmlNodeList* XmlNode::SelectNodes(const std::string& xpath) const {
+        std::unique_ptr<XPath::XPathNavigator> nav(CreateNavigator());
+        std::unique_ptr<XPath::XPathNodeIterator> it(nav->Select(xpath));
+        std::vector<XmlNode*> nodes;
+        while (it->MoveNext()) {
+            const auto* hasNode = dynamic_cast<const IHasXmlNode*>(it->getCurrentProperty());
+            if (hasNode && hasNode->GetNode()) nodes.push_back(hasNode->GetNode());
+        }
+        return new XmlNodeList(std::move(nodes));
     }
 
 } // namespace System::Xml
