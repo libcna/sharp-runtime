@@ -18,6 +18,8 @@
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
+#include "System/IO/FileSystemInfo.hpp"
+#include "System/DateTime.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/BinaryReader.hpp"
@@ -38,6 +40,7 @@
 using System::IO::Path;
 using System::IO::File;
 using System::IO::FileInfo;
+using System::IO::FileSystemInfo;
 using System::IO::Directory;
 using System::IO::DirectoryInfo;
 using System::IO::BinaryReader;
@@ -326,6 +329,62 @@ TEST(FileInfoTests, CopyTo_Succeeds_DestinationExists) {
     EXPECT_TRUE(File::Exists(dst));
     File::Delete(src);
     File::Delete(dst);
+}
+
+// ===========================================================================
+// FileSystemInfo (base of FileInfo/DirectoryInfo)
+// ===========================================================================
+
+TEST(FileSystemInfoTests, FileInfo_IsPolymorphicallyAFileSystemInfo) {
+    std::string path = tf("fsi_poly_file.txt");
+    File::WriteAllText(path, "x");
+    FileInfo fi(path);
+    FileSystemInfo* base = &fi;
+    EXPECT_TRUE(base->getExistsProperty());
+    EXPECT_EQ(base->getNameProperty(), "sharp_rt_io_fsi_poly_file.txt");
+    base->Delete();
+    EXPECT_FALSE(File::Exists(path));
+}
+
+TEST(FileSystemInfoTests, DirectoryInfo_IsPolymorphicallyAFileSystemInfo) {
+    std::string path = tf("fsi_poly_dir");
+    DirectoryInfo di(path);
+    di.Create();
+    FileSystemInfo* base = &di;
+    EXPECT_TRUE(base->getExistsProperty());
+    base->Delete();
+    EXPECT_FALSE(di.getExistsProperty());
+}
+
+TEST(FileSystemInfoTests, ToString_ReturnsOriginalPath_NotFullName) {
+    FileInfo fi("relative_name.txt");
+    EXPECT_EQ(fi.ToString(), "relative_name.txt");
+    EXPECT_NE(fi.ToString(), fi.getFullNameProperty());
+}
+
+TEST(FileSystemInfoTests, LastWriteTime_RoundTrips) {
+    std::string path = tf("fsi_lastwrite.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    System::DateTime original = fi.getLastWriteTimeUtcProperty();
+    System::DateTime target(original.getTicksProperty() - System::DateTime::TicksPerDay);
+    fi.setLastWriteTimeUtcProperty(target);
+    EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getTicksProperty() / System::DateTime::TicksPerSecond,
+              target.getTicksProperty() / System::DateTime::TicksPerSecond);
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, CreationAndAccessTime_DoNotThrow_ForExistingFile) {
+    std::string path = tf("fsi_times.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    EXPECT_NO_THROW({
+        auto creation = fi.getCreationTimeUtcProperty();
+        auto access = fi.getLastAccessTimeUtcProperty();
+        (void)creation;
+        (void)access;
+    });
+    File::Delete(path);
 }
 
 // ===========================================================================

@@ -28,10 +28,26 @@ reviewed all four groups on 2026-07-07 (asked via `AskUserQuestion`, not guessed
   found and handled (deleted, not reused) before this decision was made.
 - **`System.Xml.XPath` (15) — DECIDED: build `XPathNavigator` over `XmlDocument` only** (not a dual
   abstraction spanning both `XmlDocument` and `XDocument`/Xml.Linq — smaller, more tractable scope).
-- **`System.IO.FileSystemInfo` (1)**, **`System.Numerics.Vector` (1)**, **`System.Text.Json.
-  JsonReaderState` (1)** — still open; not asked about explicitly (lower impact, 1 item each). Plan:
-  re-investigate `FileSystemInfo`'s reason directly (it may just need re-verification, not a real
-  decision); `Vector<T>`/`JsonReaderState` remain `tobedecided` pending a similar ask.
+- **`System.IO.FileSystemInfo` (1) — DECIDED: retrofit as a real common base for `FileInfo`/
+  `DirectoryInfo`.** Investigation found this wasn't a stale mark needing re-verification: `FileInfo`
+  and `DirectoryInfo` already existed as independent classes, each duplicating its own
+  `getNameProperty`/`getExistsProperty`/`Delete`/etc. — a genuine "retrofit an abstract base under
+  two already-shipped types, or add an unrelated parallel type" decision. Implemented:
+  `FileSystemInfo` is a real abstract base (`getFullNameProperty`/`getExtensionProperty`
+  concrete; `getNameProperty`/`getExistsProperty`/`Delete` pure virtual; real `CreationTime`/
+  `LastAccessTime`/`LastWriteTime` getters via platform `stat`/`std::filesystem`, `LastWriteTime`
+  setter via `std::filesystem::last_write_time`), `FileInfo`/`DirectoryInfo` now inherit it and use
+  its `fullPath_`/`originalPath_` instead of their own separate path member. `UnixFileMode`,
+  `LinkTarget`, `CreateAsSymbolicLink`, `ResolveLinkTarget`, and `CreationTime`/`LastAccessTime`
+  *setters* are documented gaps (no portable C++ stdlib support; POSIX `CreationTime` getters use
+  `st_ctime` as an approximation of birth time, same fallback real .NET itself uses on Linux).
+- **`System.Numerics.Vector<T>` (1) — DECIDED: permanently out of scope.** `Vector2`/`Vector3`/
+  `Vector4` (already `ported`) cover ordinary game-code needs; a generic hardware-SIMD `Vector<T>`
+  with per-platform intrinsics (SSE/AVX/NEON) is a large, separate undertaking not worth it here.
+- **`System.Text.Json.JsonReaderState` (1) — DECIDED: permanently out of scope.** Only meaningful
+  paired with a `Utf8JsonReader` (a low-level streaming pull-parser), which isn't tracked in
+  `plan.sqlite3` and isn't needed — `JsonDocument`/`JsonElement`/`JsonSerializer` already cover
+  practical DOM-based JSON use for game config/data files.
 
 ## Post-milestone quality audit: a new decision needed, not a bug list
 
