@@ -594,6 +594,43 @@ TEST(BinaryReaderWriterTests, WriteRead_Double_Roundtrip) {
     EXPECT_DOUBLE_EQ(br.ReadDouble(), 2.718281828);
 }
 
+// Fixes an asymmetry where Write(Single)/Write(double) previously did a raw host-native-order
+// memcpy straight to the wire buffer, while ReadSingle()/ReadDouble() always explicitly
+// reconstruct little-endian - byte-identical to the fix on every little-endian host this test
+// actually runs on (x86/x64/ARM), so this asserts the exact expected IEEE-754 little-endian byte
+// sequence directly (not host-endianness-dependent) to lock in the portable, intended behavior
+// rather than relying on the roundtrip test above, which cannot distinguish the two
+// implementations on a little-endian host.
+TEST(BinaryReaderWriterTests, WriteSingle_ProducesExactLittleEndianByteSequence) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write(1.0f); // IEEE-754 single bit pattern 0x3F800000
+    bw.Flush();
+    auto buf = ms.ToArray();
+    ASSERT_EQ(buf.size(), 4u);
+    EXPECT_EQ(buf[0], 0x00);
+    EXPECT_EQ(buf[1], 0x00);
+    EXPECT_EQ(buf[2], 0x80);
+    EXPECT_EQ(buf[3], 0x3F);
+}
+
+TEST(BinaryReaderWriterTests, WriteDouble_ProducesExactLittleEndianByteSequence) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write(1.0); // IEEE-754 double bit pattern 0x3FF0000000000000
+    bw.Flush();
+    auto buf = ms.ToArray();
+    ASSERT_EQ(buf.size(), 8u);
+    EXPECT_EQ(buf[0], 0x00);
+    EXPECT_EQ(buf[1], 0x00);
+    EXPECT_EQ(buf[2], 0x00);
+    EXPECT_EQ(buf[3], 0x00);
+    EXPECT_EQ(buf[4], 0x00);
+    EXPECT_EQ(buf[5], 0x00);
+    EXPECT_EQ(buf[6], 0xF0);
+    EXPECT_EQ(buf[7], 0x3F);
+}
+
 TEST(BinaryReaderWriterTests, WriteRead_String_Roundtrip) {
     MemoryStream ms;
     BinaryWriter bw(&ms, true);

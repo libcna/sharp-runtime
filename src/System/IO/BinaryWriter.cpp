@@ -60,14 +60,23 @@ namespace System::IO {
     void BinaryWriter::Write(uint64_t value) { Write(static_cast<longcs>(value)); }
 
     void BinaryWriter::Write(Single value) {
-        bytecs buf[4];
-        std::memcpy(buf, &value, 4);
-        WriteBytes(buf, 4);
+        // Extracts the raw IEEE-754 bit pattern into a same-width, same-endianness integer (a
+        // pure same-host memcpy, not a wire-format concern), then serializes it via the already
+        // explicit-little-endian Write(uint32_t) - symmetric with BinaryReader::ReadSingle(),
+        // which reconstructs via ReadUInt32() before reinterpreting the bits as a float. Fixes an
+        // asymmetry where this previously did a raw host-native-order memcpy straight to the wire
+        // buffer: byte-identical to the fix on every little-endian host (x86/x64/ARM), but would
+        // have written big-endian bytes on a big-endian host while ReadSingle() always assumes
+        // little-endian on the way back in - a real, if currently unreachable, latent bug.
+        uint32_t raw;
+        std::memcpy(&raw, &value, sizeof(raw));
+        Write(raw);
     }
     void BinaryWriter::Write(double value) {
-        bytecs buf[8];
-        std::memcpy(buf, &value, 8);
-        WriteBytes(buf, 8);
+        // Same reasoning as Write(Single) above, mirroring BinaryReader::ReadDouble().
+        uint64_t raw;
+        std::memcpy(&raw, &value, sizeof(raw));
+        Write(raw);
     }
 
     void BinaryWriter::Write(bool value) {
