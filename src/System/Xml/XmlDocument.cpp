@@ -258,6 +258,11 @@ namespace System::Xml {
         if (doc_.LoadFile(filename.c_str()) != tinyxml2::XML_SUCCESS)
             throw XmlException("XmlDocument::Load: failed to load '" + filename + "': " +
                                (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
+        // tinyxml2::XMLDocument::LoadFile() clears and frees every previously-allocated node
+        // (including detachedHolder_ from the constructor, or a prior Load/LoadXml call) before
+        // parsing; recreate it now, or IsDetached()/getParentNodeProperty() etc. would compare
+        // against a dangling pointer into freed (and likely reused) memory.
+        detachedHolder_ = doc_.NewElement("#detached-holder");
     }
 
     void XmlDocument::LoadXml(const std::string& xml) {
@@ -265,6 +270,8 @@ namespace System::Xml {
         if (doc_.Parse(xml.c_str()) != tinyxml2::XML_SUCCESS)
             throw XmlException(std::string("XmlDocument::LoadXml: parse error: ") +
                                (doc_.ErrorStr() ? doc_.ErrorStr() : "unknown error"));
+        // See the comment in Load() above: Parse() also clears and frees prior nodes.
+        detachedHolder_ = doc_.NewElement("#detached-holder");
     }
 
     void XmlDocument::Save(const std::string& filename) const {
