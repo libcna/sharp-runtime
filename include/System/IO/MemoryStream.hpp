@@ -62,10 +62,22 @@ namespace System::IO
         /** Resizes the underlying buffer to the given length, truncating or zero-extending it. */
         void SetLength(intcs value) override;
 
-        /** @brief Returns the underlying buffer as a vector. */
-        [[nodiscard]] const std::vector<bytecs>& ToArray() const { return data_; }
+        /**
+         * @brief Returns an independent copy of the buffer contents.
+         *
+         * C++ counterpart of .NET MemoryStream.ToArray(). Unlike GetBuffer(), the
+         * returned vector is safe to hold onto across further writes to this stream.
+         */
+        [[nodiscard]] std::vector<bytecs> ToArray() const { return data_; }
 
-        /** @brief Returns a copy of the buffer contents. */
-        [[nodiscard]] std::vector<bytecs> GetBuffer() const { return data_; }
+        /**
+         * @brief Returns a reference to the live internal buffer.
+         *
+         * C++ counterpart of .NET MemoryStream.GetBuffer(). The returned reference is
+         * invalidated by any subsequent write that reallocates the buffer (matching
+         * .NET's own caveat that the buffer may not reflect the stream's current length
+         * without also checking getLengthProperty()).
+         */
+        [[nodiscard]] const std::vector<bytecs>& GetBuffer() const { return data_; }
     };
 }

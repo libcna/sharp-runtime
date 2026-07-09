@@ -71,18 +71,25 @@ TEST(MemoryStreamTests, WriteBufferWithOffset) {
     EXPECT_EQ(ms.ToArray()[2], 101u);
 }
 
-TEST(MemoryStreamTests, GetBufferReturnsCopy) {
+TEST(MemoryStreamTests, GetBufferReturnsLiveReference) {
     MemoryStream ms;
     ms.WriteByte(7);
-    auto copy = ms.GetBuffer();
-    EXPECT_EQ(copy.size(), 1u);
-    EXPECT_EQ(copy[0], 7u);
+    const auto& buf1 = ms.GetBuffer();
+    const auto& buf2 = ms.GetBuffer();
+    EXPECT_EQ(&buf1, &buf2);
+    EXPECT_EQ(buf1.size(), 1u);
+    EXPECT_EQ(buf1[0], 7u);
 }
 
-TEST(MemoryStreamTests, ToArrayReturnsRef) {
+TEST(MemoryStreamTests, ToArrayReturnsIndependentCopy) {
     MemoryStream ms;
     ms.WriteByte(42);
-    EXPECT_EQ(ms.ToArray().size(), 1u);
+    auto snapshot = ms.ToArray();
+    EXPECT_EQ(snapshot.size(), 1u);
+    ms.WriteByte(43);
+    // snapshot must be unaffected by writes that happen after it was taken.
+    EXPECT_EQ(snapshot.size(), 1u);
+    EXPECT_EQ(snapshot[0], 42u);
 }
 
 TEST(MemoryStreamTests, CanWriteIsTrue) {
