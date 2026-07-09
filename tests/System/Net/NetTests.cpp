@@ -13,6 +13,7 @@
 #include "System/Net/HttpVersion.hpp"
 #include "System/Net/IPNetwork.hpp"
 #include "System/FormatException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/Net/ProtocolViolationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/WebExceptionStatus.hpp"
@@ -611,6 +612,14 @@ TEST(HttpResponseHeaderTests, GetName_KnownValues) {
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::SetCookie), "Set-Cookie");
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::WwwAuthenticate), "WWW-Authenticate");
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::ETag), "ETag");
+}
+
+TEST(HttpRequestHeaderTests, GetName_OutOfRange_ThrowsIndexOutOfRangeException) {
+    EXPECT_THROW(HttpRequestHeaderGetName(static_cast<HttpRequestHeader>(999)), System::IndexOutOfRangeException);
+}
+
+TEST(HttpResponseHeaderTests, GetName_OutOfRange_ThrowsIndexOutOfRangeException) {
+    EXPECT_THROW(HttpResponseHeaderGetName(static_cast<HttpResponseHeader>(999)), System::IndexOutOfRangeException);
 }
 
 // ===========================================================================
