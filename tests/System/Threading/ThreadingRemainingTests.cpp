@@ -289,6 +289,38 @@ TEST(LockTests, Enter_And_Exit_NoThrow) {
     EXPECT_NO_THROW(lk.Enter());
     EXPECT_NO_THROW(lk.Exit());
 }
+TEST(LockTests, Exit_NotHeld_ThrowsSynchronizationLockException) {
+    Lock lk;
+    EXPECT_THROW(lk.Exit(), System::Threading::SynchronizationLockException);
+}
+TEST(LockTests, Exit_FromNonOwningThread_ThrowsSynchronizationLockException) {
+    Lock lk;
+    lk.Enter();
+    bool threw = false;
+    std::thread t([&] {
+        try { lk.Exit(); } catch (const System::Threading::SynchronizationLockException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
+    lk.Exit();
+}
+TEST(LockTests, IsHeldByCurrentThread_ReflectsState) {
+    Lock lk;
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Enter();
+    EXPECT_TRUE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Exit();
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
+}
+TEST(LockTests, Enter_IsReentrant) {
+    Lock lk;
+    lk.Enter();
+    EXPECT_NO_THROW(lk.Enter());
+    lk.Exit();
+    EXPECT_TRUE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Exit();
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
+}
 TEST(LockTests, EnterScope_RAII_ReleasesOnDestruction) {
     Lock lk;
     {

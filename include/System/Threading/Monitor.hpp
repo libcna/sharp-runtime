@@ -2,12 +2,15 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Threading/SynchronizationLockException.hpp"
 
 namespace System::Threading {
 
@@ -31,6 +34,20 @@ namespace System::Threading {
         struct State {
             std::recursive_timed_mutex mutex;
             std::condition_variable_any cv;
+            std::atomic<std::thread::id> owner{};
+            std::atomic<int> depth{0};
+
+            void onAcquired() {
+                if (depth.fetch_add(1, std::memory_order_relaxed) == 0)
+                    owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+            }
+            void onReleasing() {
+                if (depth.fetch_sub(1, std::memory_order_relaxed) == 1)
+                    owner.store(std::thread::id(), std::memory_order_relaxed);
+            }
+            [[nodiscard]] bool heldByCurrentThread() const {
+                return owner.load(std::memory_order_relaxed) == std::this_thread::get_id();
+            }
         };
 
         static std::mutex& RegistryMutex() {
@@ -55,48 +72,97 @@ namespace System::Threading {
         Monitor() = delete;
 
         /** Acquires an exclusive lock on obj, blocking until it is available. Re-entrant on the same thread. */
-        static void Enter(const void* obj) { GetOrCreate(obj)->mutex.lock(); }
+        static void Enter(const void* obj) { auto s = GetOrCreate(obj); s->mutex.lock(); s->onAcquired(); }
         /** Acquires a lock on obj and sets lockTaken to true once acquired. */
-        static void Enter(const void* obj, bool& lockTaken) { GetOrCreate(obj)->mutex.lock(); lockTaken = true; }
+        static void Enter(const void* obj, bool& lockTaken) {
+            auto s = GetOrCreate(obj);
+            s->mutex.lock();
+            s->onAcquired();
+            lockTaken = true;
+        }
 
-        /** Releases one level of the exclusive lock on obj. */
-        static void Exit(const void* obj) { GetOrCreate(obj)->mutex.unlock(); }
+        /**
+         * @brief Releases one level of the exclusive lock on obj.
+         * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
+         */
+        static void Exit(const void* obj) {
+            auto s = GetOrCreate(obj);
+            if (!s->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
+            s->onReleasing();
+            s->mutex.unlock();
+        }
 
         /** Attempts to acquire an exclusive lock on obj without blocking; returns true on success. */
-        static bool TryEnter(const void* obj) { return GetOrCreate(obj)->mutex.try_lock(); }
+        static bool TryEnter(const void* obj) {
+            auto s = GetOrCreate(obj);
+            bool ok = s->mutex.try_lock();
+            if (ok) s->onAcquired();
+            return ok;
+        }
         /** Attempts to acquire a lock on obj without blocking; sets lockTaken and returns the same value. */
-        static void TryEnter(const void* obj, bool& lockTaken) { lockTaken = GetOrCreate(obj)->mutex.try_lock(); }
+        static void TryEnter(const void* obj, bool& lockTaken) { lockTaken = TryEnter(obj); }
         /** Attempts to acquire an exclusive lock on obj within the given timeout; returns true on success. */
         static bool TryEnter(const void* obj, intcs millisecondsTimeout) {
-            return GetOrCreate(obj)->mutex.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            auto s = GetOrCreate(obj);
+            bool ok = s->mutex.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            if (ok) s->onAcquired();
+            return ok;
         }
 
         /**
          * @brief Releases the lock on obj and blocks until it is reacquired via Pulse/PulseAll.
          * @note Assumes the calling thread holds the lock at recursion depth 1 (the common case for
          * lock(obj){ Monitor.Wait(obj); } patterns); deeper recursion is not unwound and reacquired.
+         * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
          */
         static bool Wait(const void* obj) {
             auto state = GetOrCreate(obj);
+            if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
             std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
+            // cv.wait() internally unlocks state->mutex for the duration of the wait and
+            // relocks it before returning; mirror that in our owner/depth tracking so a
+            // different thread's Enter() during the wait window is correctly recognized
+            // as the new owner.
+            state->onReleasing();
             state->cv.wait(lock);
+            state->onAcquired();
             lock.release();
             return true;
         }
 
-        /** Releases the lock on obj and blocks until reacquired or millisecondsTimeout elapses. */
+        /**
+         * @brief Releases the lock on obj and blocks until reacquired or millisecondsTimeout elapses.
+         * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
+         */
         static bool Wait(const void* obj, intcs millisecondsTimeout) {
             auto state = GetOrCreate(obj);
+            if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
             std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
+            state->onReleasing();
             bool ok = state->cv.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout)) == std::cv_status::no_timeout;
+            state->onAcquired();
             lock.release();
             return ok;
         }
 
-        /** Notifies a thread in the waiting queue of a change in the locked object's state. */
-        static void Pulse(const void* obj) { GetOrCreate(obj)->cv.notify_one(); }
-        /** Notifies all waiting threads of a change in the locked object's state. */
-        static void PulseAll(const void* obj) { GetOrCreate(obj)->cv.notify_all(); }
+        /**
+         * @brief Notifies a thread in the waiting queue of a change in the locked object's state.
+         * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
+         */
+        static void Pulse(const void* obj) {
+            auto s = GetOrCreate(obj);
+            if (!s->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
+            s->cv.notify_one();
+        }
+        /**
+         * @brief Notifies all waiting threads of a change in the locked object's state.
+         * @throws System::Threading::SynchronizationLockException if the calling thread does not hold the lock.
+         */
+        static void PulseAll(const void* obj) {
+            auto s = GetOrCreate(obj);
+            if (!s->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
+            s->cv.notify_all();
+        }
     };
 
 } // namespace System::Threading

@@ -9,6 +9,7 @@
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
 #include "System/Threading/Monitor.hpp"
+#include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/Mutex.hpp"
 #include "System/Threading/Semaphore.hpp"
 #include "System/Threading/SemaphoreSlim.hpp"
@@ -226,6 +227,54 @@ TEST(ThreadingTests, Monitor_TryEnter_WhileHeldByAnotherThread_ReturnsFalse) {
     t.join();
     EXPECT_FALSE(acquired.load());
     Monitor::Exit(&obj);
+}
+
+TEST(ThreadingTests, Monitor_Exit_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Exit(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Wait_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Wait(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Pulse_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Pulse(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Exit_FromNonOwningThread_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    Monitor::Enter(&obj);
+    bool threw = false;
+    std::thread t([&] {
+        try { Monitor::Exit(&obj); } catch (const System::Threading::SynchronizationLockException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
+    Monitor::Exit(&obj);
+}
+
+TEST(ThreadingTests, Monitor_AnotherThread_CanEnter_WhileFirstThreadIsWaiting) {
+    // Verifies owner/depth tracking is correctly transferred during Wait()'s internal
+    // unlock/relock window: while the waiter is blocked inside Wait(), a second thread
+    // must be able to Enter() and later Exit() without a spurious SynchronizationLockException.
+    int obj = 0;
+    std::atomic<bool> waiterEntered{false};
+    std::atomic<bool> signaled{false};
+    std::thread waiter([&] {
+        Monitor::Enter(&obj);
+        waiterEntered = true;
+        Monitor::Wait(&obj);
+        Monitor::Exit(&obj);
+    });
+    while (!waiterEntered.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // let waiter reach cv.wait()
+    EXPECT_NO_THROW(Monitor::Enter(&obj));
+    Monitor::PulseAll(&obj);
+    EXPECT_NO_THROW(Monitor::Exit(&obj));
+    waiter.join();
 }
 
 TEST(ThreadingTests, Monitor_PulseAll_WakesWaitingThread) {
