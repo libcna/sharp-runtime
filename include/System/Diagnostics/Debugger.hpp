@@ -17,15 +17,12 @@ namespace System::Diagnostics {
         /** @brief Not instantiable — all members are static. */
         Debugger() = delete;
 
-        /** @return true if a debugger is attached to the process; always false in this implementation. */
-        [[nodiscard]] static bool getIsAttachedProperty() noexcept {
-#if defined(__has_include) && __has_include(<sys/ptrace.h>)
-            // On Linux: if traced by a debugger, ptrace returns -1
-            return false; // conservative: assume not attached
-#else
-            return false;
-#endif
-        }
+        /**
+         * @return true if a debugger is attached to the process; always false in this
+         * implementation. Real attach detection (e.g. parsing /proc/self/status's
+         * TracerPid on Linux, or IsDebuggerPresent() on Windows) is not implemented.
+         */
+        [[nodiscard]] static bool getIsAttachedProperty() noexcept { return false; }
 
         /**
          * @brief Signals the debugger to break (triggers a debug trap).
