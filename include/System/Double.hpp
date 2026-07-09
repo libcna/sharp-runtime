@@ -33,8 +33,8 @@ public:
     // Constants
     // -----------------------------------------------------------------------
 
-    /** @brief Represents the smallest positive double value greater than zero. */
-    static constexpr double Epsilon          =  std::numeric_limits<double>::min();
+    /** @brief Represents the smallest positive double value greater than zero (the smallest denormal, ~4.94E-324; NOT the smallest normal value). */
+    static constexpr double Epsilon          =  std::numeric_limits<double>::denorm_min();
 
     /** @brief Represents the largest possible value of a double. */
     static constexpr double MaxValue         =  std::numeric_limits<double>::max();

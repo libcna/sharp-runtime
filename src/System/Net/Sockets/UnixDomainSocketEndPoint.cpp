@@ -7,6 +7,7 @@
 #include "System/PlatformNotSupportedException.hpp"
 
 #if defined(_WIN32)
+#include <winsock2.h>
 #include <afunix.h>
 #elif defined(__EMSCRIPTEN__)
 // No AF_UNIX support under Emscripten.

@@ -28,6 +28,12 @@ TEST(DoubleTests, Epsilon_IsPositive) {
     EXPECT_GT(Double::Epsilon, 0.0);
 }
 
+TEST(DoubleTests, Epsilon_MatchesDotNetValue) {
+    // .NET Double.Epsilon = 4.9406564584124654E-324 (smallest denormal, not the smallest normal value).
+    EXPECT_EQ(Double::Epsilon, std::numeric_limits<double>::denorm_min());
+    EXPECT_LT(Double::Epsilon, std::numeric_limits<double>::min());
+}
+
 TEST(DoubleTests, NaN_IsNaN) {
     EXPECT_TRUE(std::isnan(Double::NaN));
 }

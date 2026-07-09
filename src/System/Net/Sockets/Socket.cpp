@@ -358,12 +358,14 @@ namespace {
         }
     }
 
+#if !defined(_WIN32)
     timeval millisecondsToTimeval(intcs ms) {
         timeval tv{};
         tv.tv_sec = ms / 1000;
         tv.tv_usec = (ms % 1000) * 1000;
         return tv;
     }
+#endif
 
 } // namespace
 

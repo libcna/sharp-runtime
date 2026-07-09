@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -32,13 +33,32 @@ namespace System {
 
         /**
          * @brief Converts the string representation of a number to its UInt64 equivalent.
+         *
+         * C++ counterpart of .NET UInt64.Parse(string) with NumberStyles.Integer: leading/
+         * trailing whitespace and a leading sign are tolerated, but a leading '-' always
+         * overflows (unsigned types reject any negative sign, even "-0") and any trailing
+         * non-whitespace character is rejected.
          * @throws System::FormatException if the string is not a valid integer.
-         * @throws System::OverflowException if the value exceeds UInt64 range.
+         * @throws System::OverflowException if the value exceeds UInt64 range, or the string has a leading '-'.
          */
         static SharpRuntime::ulongcs Parse(const std::string& s) {
-            try { return std::stoull(s); }
-            catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a UInt64."); }
-            catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+            std::size_t start = s.find_first_not_of(" \t\n\r\f\v");
+            if (start != std::string::npos && s[start] == '-')
+                throw System::OverflowException("Value was either too large or too small for a UInt64.");
+            std::size_t pos = 0;
+            SharpRuntime::ulongcs v;
+            try {
+                v = std::stoull(s, &pos);
+            } catch (const std::out_of_range&) {
+                throw System::OverflowException("Value was either too large or too small for a UInt64.");
+            } catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            return v;
         }
 
         /**

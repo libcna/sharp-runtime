@@ -159,7 +159,7 @@ public:
         if (codePoint < 0 || codePoint > 0x10FFFF) {
             throw System::ArgumentOutOfRangeException("codePoint");
         }
-        wchar_t wc = (codePoint >= 0 && codePoint <= WCHAR_MAX)
+        wchar_t wc = (codePoint >= 0 && codePoint <= static_cast<intcs>(WCHAR_MAX))
                      ? static_cast<wchar_t>(codePoint) : L'\0';
         if (std::iswupper(wc)) return UnicodeCategory::UppercaseLetter;
         if (std::iswlower(wc)) return UnicodeCategory::LowercaseLetter;
