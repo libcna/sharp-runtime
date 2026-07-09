@@ -22,9 +22,11 @@ namespace System::Net {
      * infrastructure doesn't route real async I/O (see NEXT.md, System.Threading.Tasks
      * limitations), so those overloads would just be synchronous work wrapped in a Task
      * for no benefit.
-     * @note Resolution is restricted to IPv4 because System::Net::IPAddress is itself
-     * IPv4-only in this runtime; requesting AddressFamily::InterNetworkV6 explicitly
-     * returns an empty result rather than throwing.
+     * @note Resolution is restricted to IPv4: the getaddrinfo/GetAddrInfoW hints
+     * passed by this implementation always request AF_INET, regardless of the
+     * @p family argument (System::Net::IPAddress itself supports IPv6 fine).
+     * Requesting AddressFamily::InterNetworkV6 explicitly returns an empty result
+     * rather than throwing or actually resolving IPv6 addresses.
      * @note POSIX (getaddrinfo/getnameinfo/gethostname) and Windows (Winsock2) are both
      * implemented; Emscripten throws PlatformNotSupportedException.
      */
