@@ -29,6 +29,14 @@ Specifically:
 
 The dotnet/runtime source is available at https://github.com/dotnet/runtime under the MIT License.
 
+## Permanent deviations from .NET
+
+Some .NET features are intentionally out of scope and will never be ported — reflection
+(`System.Type`, `Activator`, `Enum.GetNames`/`GetValues`), the GC, delegates beyond
+`std::function`, serialization infrastructure, P/Invoke, and full symmetric/asymmetric
+cryptography, X.509 certificates, and TLS (`SslStream`). See **[CLAUDE.md](CLAUDE.md)**
+("Parity philosophy" section) for the complete list and the reasoning behind each one.
+
 ---
 
 # 🚀 Goals
