@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <cmath>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 #include "System/Numerics/Vector3.hpp"
 #include "System/Numerics/Vector4.hpp"
@@ -74,6 +75,17 @@ TEST(Matrix3x2Tests, CreateRotation) {
     auto m = Matrix3x2::CreateRotation(0.0f);
     EXPECT_TRUE(m.getIsIdentityProperty());
 }
+TEST(Matrix3x2Tests, Invert_SingularMatrix_ReturnsFalseAndNaN) {
+    Matrix3x2 singular{1, 2, 2, 4, 0, 0}; // determinant == 0
+    Matrix3x2 inv;
+    EXPECT_FALSE(Matrix3x2::Invert(singular, inv));
+    EXPECT_TRUE(std::isnan(inv.M11));
+    EXPECT_TRUE(std::isnan(inv.M12));
+    EXPECT_TRUE(std::isnan(inv.M21));
+    EXPECT_TRUE(std::isnan(inv.M22));
+    EXPECT_TRUE(std::isnan(inv.M31));
+    EXPECT_TRUE(std::isnan(inv.M32));
+}
 
 // --- Matrix4x4 ---
 TEST(Matrix4x4Tests, Identity) {
@@ -93,6 +105,30 @@ TEST(Matrix4x4Tests, Invert) {
     EXPECT_TRUE(Matrix4x4::Invert(m, inv));
     auto r = m * inv;
     EXPECT_TRUE(r.getIsIdentityProperty());
+}
+TEST(Matrix4x4Tests, Invert_SingularMatrix_ReturnsFalseAndNaN) {
+    Matrix4x4 singular{}; // all-zero matrix: determinant == 0
+    Matrix4x4 inv;
+    EXPECT_FALSE(Matrix4x4::Invert(singular, inv));
+    EXPECT_TRUE(std::isnan(inv.M11));
+    EXPECT_TRUE(std::isnan(inv.M44));
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NonPositiveFov_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(0.0f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(-1.0f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_FovTooLarge_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(3.2f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NonPositiveNearOrFar_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.0f, 100.0f), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 0.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NearGreaterThanFar_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 100.0f, 0.1f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_ValidArgs_NoThrow) {
+    EXPECT_NO_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 100.0f));
 }
 TEST(Matrix4x4Tests, TransformVector3) {
     auto m = Matrix4x4::CreateTranslation(10,0,0);

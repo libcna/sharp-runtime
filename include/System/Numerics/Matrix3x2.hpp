@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <string>
 #include "System/Numerics/Vector2.hpp"
@@ -112,7 +113,11 @@ struct Matrix3x2 {
      */
     static bool Invert(const Matrix3x2& m, Matrix3x2& result) {
         float det = m.GetDeterminant();
-        if (std::abs(det) < 1e-10f) { result = {}; return false; }
+        if (std::abs(det) < std::numeric_limits<float>::denorm_min()) {
+            constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+            result = {nan, nan, nan, nan, nan, nan};
+            return false;
+        }
         float inv = 1.0f / det;
         result = {m.M22*inv, -m.M12*inv, -m.M21*inv, m.M11*inv,
                   (m.M21*m.M32-m.M22*m.M31)*inv, (m.M12*m.M31-m.M11*m.M32)*inv};
