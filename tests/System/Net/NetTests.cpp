@@ -406,6 +406,10 @@ TEST(HttpStatusCodeTests, NotModified_Is304) {
     EXPECT_EQ(static_cast<int>(HttpStatusCode::NotModified), 304);
 }
 
+TEST(HttpStatusCodeTests, Unused_Is306) {
+    EXPECT_EQ(static_cast<int>(HttpStatusCode::Unused), 306);
+}
+
 TEST(HttpStatusCodeTests, BadRequest_Is400) {
     EXPECT_EQ(static_cast<int>(HttpStatusCode::BadRequest), 400);
 }

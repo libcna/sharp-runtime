@@ -22,6 +22,14 @@ namespace System::Threading {
          * @param message The error message.
          */
         explicit ThreadAbortException(const std::string& message) : SystemException(message) {}
+
+        /**
+         * @brief Gets an object that contains application-specific information related to the thread abort.
+         *
+         * C++ counterpart of .NET ThreadAbortException.ExceptionState. Always null in this runtime,
+         * since Thread.Abort() is not supported (matching .NET 5+ behavior).
+         */
+        [[nodiscard]] void* getExceptionStateProperty() const noexcept { return nullptr; }
     };
 
 } // namespace System::Threading

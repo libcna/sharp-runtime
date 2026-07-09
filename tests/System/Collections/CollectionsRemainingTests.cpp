@@ -43,6 +43,15 @@ TEST(KeyValuePairTests, Inequality_DifferentValue) {
     KeyValuePair<int, int> b(1, 3);
     EXPECT_TRUE(a != b);
 }
+TEST(KeyValuePairTests, Create_InfersTypesFromArguments) {
+    auto kv = System::Collections::Generic::Create(std::string("answer"), 42);
+    EXPECT_EQ(kv.Key, "answer");
+    EXPECT_EQ(kv.Value, 42);
+}
+TEST(KeyValuePairTests, ToString_FormatsAsBracketedPair) {
+    KeyValuePair<std::string, int> kv("answer", 42);
+    EXPECT_EQ(kv.ToString(), "[answer, 42]");
+}
 
 // ===========================================================================
 // SortedDictionary<TKey, TValue>

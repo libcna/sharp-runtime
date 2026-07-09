@@ -22,7 +22,7 @@ public:
         ++index_;
         return index_ < static_cast<int>(data_.size());
     }
-    const int& getCurrent() const override { return data_[static_cast<std::size_t>(index_)]; }
+    const int& getCurrentProperty() const override { return data_[static_cast<std::size_t>(index_)]; }
 };
 
 // Concrete enumerable backed by a vector
@@ -42,11 +42,11 @@ TEST(IAsyncEnumeratorTest, MoveNextAndCurrent) {
     std::vector<int> data{10, 20, 30};
     VectorAsyncEnumerator e(data);
     EXPECT_TRUE(e.MoveNextAsync());
-    EXPECT_EQ(e.getCurrent(), 10);
+    EXPECT_EQ(e.getCurrentProperty(), 10);
     EXPECT_TRUE(e.MoveNextAsync());
-    EXPECT_EQ(e.getCurrent(), 20);
+    EXPECT_EQ(e.getCurrentProperty(), 20);
     EXPECT_TRUE(e.MoveNextAsync());
-    EXPECT_EQ(e.getCurrent(), 30);
+    EXPECT_EQ(e.getCurrentProperty(), 30);
     EXPECT_FALSE(e.MoveNextAsync());
 }
 
@@ -73,7 +73,7 @@ TEST(IAsyncEnumerableTest, IterateAllElements) {
     VectorAsyncEnumerable col({5, 10, 15});
     auto e = col.GetAsyncEnumerator({});
     int sum = 0;
-    while (e->MoveNextAsync()) sum += e->getCurrent();
+    while (e->MoveNextAsync()) sum += e->getCurrentProperty();
     EXPECT_EQ(sum, 30);
 }
 
