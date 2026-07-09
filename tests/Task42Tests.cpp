@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/Timer.hpp"
 #include "System/Object.hpp"
 #include "System/Type.hpp"
@@ -56,6 +57,16 @@
 // ===========================================================================
 // Timer — fixed shared_ptr<State>, no dangling-this
 // ===========================================================================
+
+TEST(TimerTests, Constructor_DueTimeLessThanNegativeOne_Throws) {
+    EXPECT_THROW(System::Threading::Timer(
+        [](void*){}, nullptr, -2, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(TimerTests, Constructor_PeriodLessThanNegativeOne_Throws) {
+    EXPECT_THROW(System::Threading::Timer(
+        [](void*){}, nullptr, 0, -2), System::ArgumentOutOfRangeException);
+}
 
 TEST(TimerTests, FiresCallbackBeforeDispose) {
     std::atomic<int> count{0};
