@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/EventResetMode.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
@@ -430,6 +431,24 @@ TEST(ThreadLocalTests, Dispose_NoThrow) {
     ThreadLocal<int> tl;
     tl.getValueProperty();
     EXPECT_NO_THROW(tl.Dispose());
+}
+TEST(ThreadLocalTests, TwoInstances_SameType_AreIndependent) {
+    ThreadLocal<int> a;
+    ThreadLocal<int> b;
+    a.setValueProperty(1);
+    b.setValueProperty(2);
+    EXPECT_EQ(a.getValueProperty(), 1);
+    EXPECT_EQ(b.getValueProperty(), 2);
+}
+TEST(ThreadLocalTests, AfterDispose_GetValue_ThrowsObjectDisposedException) {
+    ThreadLocal<int> tl;
+    tl.Dispose();
+    EXPECT_THROW(tl.getValueProperty(), System::ObjectDisposedException);
+}
+TEST(ThreadLocalTests, AfterDispose_SetValue_ThrowsObjectDisposedException) {
+    ThreadLocal<int> tl;
+    tl.Dispose();
+    EXPECT_THROW(tl.setValueProperty(5), System::ObjectDisposedException);
 }
 
 // ===========================================================================
