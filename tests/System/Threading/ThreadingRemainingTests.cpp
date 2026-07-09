@@ -123,6 +123,22 @@ TEST(AsyncLocalTests, ValueChangedHandler_Called) {
     EXPECT_EQ(lastPrevious, 1);
     EXPECT_EQ(lastCurrent, 2);
 }
+TEST(AsyncLocalTests, SetSameValue_IsNoOp) {
+    int callCount = 0;
+    AsyncLocal<int> al([&](const System::Threading::AsyncLocalValueChangedArgs<int>&) { ++callCount; });
+    al.setValueProperty(5);
+    EXPECT_EQ(callCount, 1);
+    al.setValueProperty(5); // same value: must not fire the handler again
+    EXPECT_EQ(callCount, 1);
+}
+TEST(AsyncLocalTests, TwoInstances_SameType_AreIndependent) {
+    AsyncLocal<int> a;
+    AsyncLocal<int> b;
+    a.setValueProperty(1);
+    b.setValueProperty(2);
+    EXPECT_EQ(a.getValueProperty(), 1);
+    EXPECT_EQ(b.getValueProperty(), 2);
+}
 
 TEST(AsyncLocalValueChangedArgsTests, PropertiesReflectConstructorArgs) {
     System::Threading::AsyncLocalValueChangedArgs<int> args(10, 20, true);
