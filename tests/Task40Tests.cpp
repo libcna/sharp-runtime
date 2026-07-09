@@ -1066,6 +1066,22 @@ TEST(BFloat16Tests, IsNaN_NonNaN) {
     EXPECT_FALSE(BFloat16::IsNaN(BFloat16::One()));
 }
 
+TEST(BFloat16Tests, NaN_UsesNegativeSignBit) {
+    EXPECT_EQ(BFloat16::NaN().getBitsProperty(), uint16_t(0xFFC0u));
+}
+
+TEST(BFloat16Tests, Equality_NaNIsNeverEqualToItself) {
+    EXPECT_FALSE(BFloat16::NaN() == BFloat16::NaN());
+    EXPECT_TRUE(BFloat16::NaN() != BFloat16::NaN());
+}
+
+TEST(BFloat16Tests, Equality_PositiveAndNegativeZeroAreEqual) {
+    BFloat16 posZero(uint16_t(0x0000u));
+    BFloat16 negZero(uint16_t(0x8000u));
+    EXPECT_TRUE(posZero == negZero);
+    EXPECT_FALSE(posZero != negZero);
+}
+
 TEST(BFloat16Tests, IsInfinity_PosInf) {
     EXPECT_TRUE(BFloat16::IsPositiveInfinity(BFloat16::PositiveInfinity()));
 }

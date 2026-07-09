@@ -53,7 +53,7 @@ public:
     /** @return The smallest positive BFloat16 value greater than zero (~9.18×10⁻⁴¹). */
     static BFloat16 Epsilon()          { return BFloat16(uint16_t(0x0001u)); }
     /** @return A BFloat16 Not-a-Number (NaN) value. */
-    static BFloat16 NaN()              { return BFloat16(uint16_t(0x7FC0u)); }
+    static BFloat16 NaN()              { return BFloat16(uint16_t(0xFFC0u)); }
     /** @return Positive infinity. */
     static BFloat16 PositiveInfinity() { return BFloat16(uint16_t(0x7F80u)); }
     /** @return Negative infinity. */
@@ -78,10 +78,10 @@ public:
     /** Unary negation (flips the sign bit). */
     BFloat16 operator-()                  const { return BFloat16(static_cast<uint16_t>(bits_ ^ 0x8000u)); }
 
-    /** Bit-pattern equality. */
-    bool operator==(const BFloat16& o) const { return bits_ == o.bits_; }
-    /** Bit-pattern inequality. */
-    bool operator!=(const BFloat16& o) const { return bits_ != o.bits_; }
+    /** IEEE 754 equality via float promotion (NaN != NaN; +0 == -0). */
+    bool operator==(const BFloat16& o) const { return toFloat(bits_) == toFloat(o.bits_); }
+    /** IEEE 754 inequality via float promotion (NaN != NaN; +0 == -0). */
+    bool operator!=(const BFloat16& o) const { return toFloat(bits_) != toFloat(o.bits_); }
     /** Less-than comparison via float promotion. */
     bool operator< (const BFloat16& o) const { return toFloat(bits_) <  toFloat(o.bits_); }
     /** Less-than-or-equal comparison via float promotion. */
