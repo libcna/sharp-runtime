@@ -77,7 +77,7 @@ TEST(IntPtrTests, ToInt32_FitsInRange) {
 TEST(IntPtrTests, ToInt32_Overflow_Throws) {
     if (sizeof(intptr_t) > sizeof(int32_t)) {
         System::IntPtr p(static_cast<intptr_t>(std::numeric_limits<int64_t>::max()));
-        EXPECT_THROW(p.ToInt32(), std::overflow_error);
+        EXPECT_THROW(p.ToInt32(), System::OverflowException);
     }
 }
 

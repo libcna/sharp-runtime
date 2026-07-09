@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <limits>
-#include <stdexcept>
 #include <string>
+#include "System/OverflowException.hpp"
 
 namespace System
 {
@@ -56,12 +56,12 @@ namespace System
          * @brief Converts the value of this instance to a 32-bit signed integer.
          *
          * C++ counterpart of .NET IntPtr.ToInt32().
-         * @throws std::overflow_error if the value does not fit in a 32-bit signed integer
+         * @throws System::OverflowException if the value does not fit in a 32-bit signed integer
          *         (only possible when @c intptr_t is 64-bit on this platform).
          */
         [[nodiscard]] int32_t ToInt32() const {
             if (value > std::numeric_limits<int32_t>::max() || value < std::numeric_limits<int32_t>::min())
-                throw std::overflow_error("Arithmetic operation resulted in an overflow.");
+                throw System::OverflowException("Arithmetic operation resulted in an overflow.");
             return static_cast<int32_t>(value);
         }
 

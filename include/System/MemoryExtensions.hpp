@@ -5,10 +5,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -109,13 +109,13 @@ namespace System {
          * C++ counterpart of .NET MemoryExtensions.AsSpan(string, int).
          * @param text  The source string.
          * @param start The index at which to begin this slice.
-         * @throws std::out_of_range if @p start is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if @p start is out of bounds.
          */
         [[nodiscard]] static ReadOnlySpan<char> AsSpan(const std::string& text,
                                                         SharpRuntime::intcs start) {
             auto sz = static_cast<SharpRuntime::intcs>(text.size());
             if (start < 0 || start > sz)
-                throw std::out_of_range("start is out of range.");
+                throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<char>(text.data() + start, sz - start);
         }
 
@@ -126,14 +126,14 @@ namespace System {
          * @param text   The source string.
          * @param start  The index at which to begin this slice.
          * @param length The desired length of the slice.
-         * @throws std::out_of_range if @p start or @p length is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if @p start or @p length is out of bounds.
          */
         [[nodiscard]] static ReadOnlySpan<char> AsSpan(const std::string& text,
                                                         SharpRuntime::intcs start,
                                                         SharpRuntime::intcs length) {
             auto sz = static_cast<SharpRuntime::intcs>(text.size());
             if (start < 0 || length < 0 || start + length > sz)
-                throw std::out_of_range("start or length is out of range.");
+                throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<char>(text.data() + start, length);
         }
 
