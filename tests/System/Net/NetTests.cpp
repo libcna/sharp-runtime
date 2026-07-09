@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/HttpStatusCode.hpp"
@@ -13,6 +14,7 @@
 #include "System/Net/IPNetwork.hpp"
 #include "System/FormatException.hpp"
 #include "System/Net/ProtocolViolationException.hpp"
+#include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/WebExceptionStatus.hpp"
 #include "System/Net/WebException.hpp"
 
@@ -66,11 +68,16 @@ TEST(IPAddressTests, Parse_ArbitraryAddress) {
 }
 
 TEST(IPAddressTests, Parse_InvalidAddress_Throws) {
-    EXPECT_THROW(IPAddress::Parse("not.an.ip"), std::invalid_argument);
+    EXPECT_THROW(IPAddress::Parse("not.an.ip"), System::FormatException);
 }
 
 TEST(IPAddressTests, Parse_IncompleteOctets_Throws) {
-    EXPECT_THROW(IPAddress::Parse("192.168.1"), std::invalid_argument);
+    EXPECT_THROW(IPAddress::Parse("192.168.1"), System::FormatException);
+}
+
+TEST(IPAddressTests, ByteArrayConstructor_WrongLength_ThrowsArgumentException) {
+    std::vector<SharpRuntime::bytecs> bytes{1, 2, 3};
+    EXPECT_THROW(IPAddress ip(bytes), System::ArgumentException);
 }
 
 TEST(IPAddressTests, Equality_SameAddress_True) {
@@ -190,16 +197,21 @@ TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
 }
 
 TEST(IPAddressIPv6Tests, Parse_Invalid_Throws) {
-    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), std::invalid_argument);
+    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), System::FormatException);
 }
 
 TEST(IPAddressIPv6Tests, GetAddressProperty_Throws) {
     IPAddress ip = IPAddress::Parse("::1");
-    EXPECT_THROW((void)ip.getAddressProperty(), std::logic_error);
+    EXPECT_THROW((void)ip.getAddressProperty(), System::Net::Sockets::SocketException);
 }
 
 TEST(IPAddressIPv6Tests, GetScopeIdProperty_OnIPv4_Throws) {
-    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), std::logic_error);
+    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), System::Net::Sockets::SocketException);
+}
+
+TEST(IPAddressIPv6Tests, SetScopeIdProperty_OnIPv4_Throws) {
+    IPAddress ip = IPAddress::Loopback;
+    EXPECT_THROW(ip.setScopeIdProperty(1), System::Net::Sockets::SocketException);
 }
 
 TEST(IPAddressIPv6Tests, MapToIPv6_ThenMapToIPv4_RoundTrips) {
@@ -365,7 +377,7 @@ TEST(IPEndPointTests, TryParse_Invalid_ReturnsFalse) {
 }
 
 TEST(IPEndPointTests, Parse_Invalid_Throws) {
-    EXPECT_THROW(IPEndPoint::Parse("garbage"), std::invalid_argument);
+    EXPECT_THROW(IPEndPoint::Parse("garbage"), System::FormatException);
 }
 
 // ===========================================================================

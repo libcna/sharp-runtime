@@ -5,8 +5,8 @@
 #include "System/Net/SocketAddress.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include <cctype>
-#include <stdexcept>
 
 namespace System::Net {
 
@@ -62,7 +62,7 @@ namespace System::Net {
     IPEndPoint IPEndPoint::Parse(const std::string& s) {
         IPEndPoint result;
         if (!TryParse(s, result)) {
-            throw std::invalid_argument("An invalid IPEndPoint was specified: " + s);
+            throw System::FormatException("An invalid IPEndPoint was specified.");
         }
         return result;
     }

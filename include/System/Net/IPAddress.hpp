@@ -44,7 +44,10 @@ namespace System::Net {
         /** Constructs an IPv4 address from a 32-bit host-byte-order integer. */
         explicit IPAddress(uint32_t address) : addressOrScopeId_(address) {}
 
-        /** Constructs an IPv4 or IPv6 address from raw address bytes (4 bytes = IPv4, 16 bytes = IPv6). */
+        /**
+         * Constructs an IPv4 or IPv6 address from raw address bytes (4 bytes = IPv4, 16 bytes = IPv6).
+         * @throws System::ArgumentException if @p addressBytes is not 4 or 16 bytes long.
+         */
         explicit IPAddress(const std::vector<bytecs>& addressBytes);
 
         /** Constructs an IPv6 address with the given 16 address bytes and scope ID. */
@@ -60,18 +63,18 @@ namespace System::Net {
 
         /**
          * @return The raw 32-bit IPv4 address in host byte order.
-         * @throws std::logic_error if this is an IPv6 address.
+         * @throws System::Net::Sockets::SocketException if this is an IPv6 address.
          */
         [[nodiscard]] uint32_t getAddressProperty() const;
 
         /**
          * @return The IPv6 scope ID.
-         * @throws std::logic_error if this is an IPv4 address.
+         * @throws System::Net::Sockets::SocketException if this is an IPv4 address.
          */
         [[nodiscard]] longcs getScopeIdProperty() const;
         /**
          * Sets the IPv6 scope ID.
-         * @throws std::logic_error if this is an IPv4 address.
+         * @throws System::Net::Sockets::SocketException if this is an IPv4 address.
          */
         void setScopeIdProperty(longcs value);
 
@@ -112,7 +115,7 @@ namespace System::Net {
 
         /**
          * Parses a dotted-decimal IPv4 or colon-hex IPv6 string.
-         * @throws std::invalid_argument if @p s is not a valid IP address.
+         * @throws System::FormatException if @p s is not a valid IP address.
          */
         [[nodiscard]] static IPAddress Parse(const std::string& s);
 

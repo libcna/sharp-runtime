@@ -2,16 +2,22 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/IPAddress.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
+#include "System/Net/Sockets/SocketError.hpp"
+#include "System/Net/Sockets/SocketException.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <exception>
 #include <sstream>
-#include <stdexcept>
 
 namespace System::Net {
 
     using System::Net::Sockets::AddressFamily;
+    using System::Net::Sockets::SocketError;
+    using System::Net::Sockets::SocketException;
 
     namespace {
         bool tryParseIPv4Groups(const std::string& s, uint32_t& outAddr) {
@@ -185,7 +191,7 @@ namespace System::Net {
                     static_cast<uint16_t>(addressBytes[static_cast<size_t>(i * 2 + 1)]));
             }
         } else {
-            throw std::invalid_argument("An invalid IP address was specified.");
+            throw System::ArgumentException("An invalid IP address was specified.", "address");
         }
     }
 
@@ -204,17 +210,23 @@ namespace System::Net {
     }
 
     uint32_t IPAddress::getAddressProperty() const {
-        if (isIPv6_) throw std::logic_error("This operation is not supported for IPv6 addresses.");
+        if (isIPv6_)
+            throw SocketException(SocketError::OperationNotSupported,
+                                   "The requested property is not supported for the 'InterNetworkV6' AddressFamily.");
         return addressOrScopeId_;
     }
 
     longcs IPAddress::getScopeIdProperty() const {
-        if (!isIPv6_) throw std::logic_error("This operation is not supported for IPv4 addresses.");
+        if (!isIPv6_)
+            throw SocketException(SocketError::OperationNotSupported,
+                                   "The requested property is not supported for the 'InterNetwork' AddressFamily.");
         return static_cast<longcs>(addressOrScopeId_);
     }
 
     void IPAddress::setScopeIdProperty(longcs value) {
-        if (!isIPv6_) throw std::logic_error("This operation is not supported for IPv4 addresses.");
+        if (!isIPv6_)
+            throw SocketException(SocketError::OperationNotSupported,
+                                   "The requested property is not supported for the 'InterNetwork' AddressFamily.");
         addressOrScopeId_ = static_cast<uint32_t>(value);
     }
 
@@ -305,7 +317,8 @@ namespace System::Net {
     IPAddress IPAddress::Parse(const std::string& s) {
         IPAddress result;
         if (!TryParse(s, result)) {
-            throw std::invalid_argument("An invalid IP address was specified: " + s);
+            throw System::FormatException("An invalid IP address was specified.",
+                                           std::make_exception_ptr(SocketException(SocketError::InvalidArgument)));
         }
         return result;
     }
