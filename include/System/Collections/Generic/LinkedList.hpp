@@ -8,8 +8,10 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -127,6 +129,12 @@ class LinkedList {
         const T& Current() const override { return *cur_; }
     };
 
+    /** Validates that @p node is non-null and belongs to this list. C++ counterpart of .NET LinkedList<T>.ValidateNode. */
+    void validateNode(const LinkedListNode<T>& node) const {
+        if (!node) throw System::ArgumentNullException("node");
+        if (node.list_ptr_ != &list_) throw System::InvalidOperationException("The LinkedList node does not belong to current LinkedList.");
+    }
+
 public:
     /** @brief Initializes a new empty LinkedList<T>. */
     LinkedList() = default;
@@ -217,8 +225,11 @@ public:
      * @param node  The node before which to insert.
      * @param value The value to add.
      * @return The new node.
+     * @throws System::ArgumentNullException if @p node is null.
+     * @throws System::InvalidOperationException if @p node does not belong to this list.
      */
     LinkedListNode<T> AddBefore(LinkedListNode<T> node, const T& value) {
+        validateNode(node);
         auto it = list_.insert(node.iter_, value);
         return LinkedListNode<T>(&list_, it);
     }
@@ -230,8 +241,11 @@ public:
      * @param node  The node after which to insert.
      * @param value The value to add.
      * @return The new node.
+     * @throws System::ArgumentNullException if @p node is null.
+     * @throws System::InvalidOperationException if @p node does not belong to this list.
      */
     LinkedListNode<T> AddAfter(LinkedListNode<T> node, const T& value) {
+        validateNode(node);
         auto it = node.iter_;
         ++it;
         it = list_.insert(it, value);
@@ -239,18 +253,26 @@ public:
     }
 
     /**
-     * @brief Removes the node at the start of the list. No-op if the list is empty.
+     * @brief Removes the node at the start of the list.
      *
      * C++ counterpart of .NET LinkedList<T>.RemoveFirst().
+     * @throws System::InvalidOperationException if the list is empty.
      */
-    void RemoveFirst() { if (!list_.empty()) list_.pop_front(); }
+    void RemoveFirst() {
+        if (list_.empty()) throw System::InvalidOperationException("The LinkedList is empty.");
+        list_.pop_front();
+    }
 
     /**
-     * @brief Removes the node at the end of the list. No-op if the list is empty.
+     * @brief Removes the node at the end of the list.
      *
      * C++ counterpart of .NET LinkedList<T>.RemoveLast().
+     * @throws System::InvalidOperationException if the list is empty.
      */
-    void RemoveLast() { if (!list_.empty()) list_.pop_back(); }
+    void RemoveLast() {
+        if (list_.empty()) throw System::InvalidOperationException("The LinkedList is empty.");
+        list_.pop_back();
+    }
 
     /**
      * @brief Removes the first occurrence of @p value from the list.
@@ -271,9 +293,12 @@ public:
      *
      * C++ counterpart of .NET LinkedList<T>.Remove(LinkedListNode<T>).
      * @param node The node to remove.
+     * @throws System::ArgumentNullException if @p node is null.
+     * @throws System::InvalidOperationException if @p node does not belong to this list.
      */
     void Remove(LinkedListNode<T> node) {
-        if (node) list_.erase(node.iter_);
+        validateNode(node);
+        list_.erase(node.iter_);
     }
 
     /**

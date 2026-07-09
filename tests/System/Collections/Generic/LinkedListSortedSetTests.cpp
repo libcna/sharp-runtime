@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include "System/ArgumentNullException.hpp"
 #include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/SortedSet.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::LinkedList;
 using System::Collections::Generic::SortedSet;
@@ -70,15 +72,15 @@ TEST(LinkedListTests, RemoveLast) {
     EXPECT_EQ(ll.getLastProperty(), 2);
 }
 
-TEST(LinkedListTests, RemoveFirstOnEmptyIsNoop) {
+TEST(LinkedListTests, RemoveFirstOnEmptyThrowsInvalidOperationException) {
     LinkedList<int> ll;
-    EXPECT_NO_THROW(ll.RemoveFirst());
+    EXPECT_THROW(ll.RemoveFirst(), System::InvalidOperationException);
     EXPECT_EQ(ll.getCountProperty(), 0);
 }
 
-TEST(LinkedListTests, RemoveLastOnEmptyIsNoop) {
+TEST(LinkedListTests, RemoveLastOnEmptyThrowsInvalidOperationException) {
     LinkedList<int> ll;
-    EXPECT_NO_THROW(ll.RemoveLast());
+    EXPECT_THROW(ll.RemoveLast(), System::InvalidOperationException);
     EXPECT_EQ(ll.getCountProperty(), 0);
 }
 
@@ -247,6 +249,37 @@ TEST(LinkedListTests, Remove_ByNode_RemovesIt) {
     ll.Remove(n);
     EXPECT_EQ(ll.getCountProperty(), 2);
     EXPECT_FALSE(ll.Contains(20));
+}
+
+TEST(LinkedListTests, Remove_NullNode_ThrowsArgumentNullException) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    System::Collections::Generic::LinkedListNode<int> nullNode;
+    EXPECT_THROW(ll.Remove(nullNode), System::ArgumentNullException);
+}
+
+TEST(LinkedListTests, Remove_NodeFromOtherList_ThrowsInvalidOperationException) {
+    LinkedList<int> ll1;
+    ll1.AddLast(1);
+    LinkedList<int> ll2;
+    ll2.AddLast(1);
+    auto foreignNode = ll2.Find(1);
+    EXPECT_THROW(ll1.Remove(foreignNode), System::InvalidOperationException);
+}
+
+TEST(LinkedListTests, AddBefore_NullNode_ThrowsArgumentNullException) {
+    LinkedList<int> ll;
+    System::Collections::Generic::LinkedListNode<int> nullNode;
+    EXPECT_THROW(ll.AddBefore(nullNode, 1), System::ArgumentNullException);
+}
+
+TEST(LinkedListTests, AddAfter_NodeFromOtherList_ThrowsInvalidOperationException) {
+    LinkedList<int> ll1;
+    ll1.AddLast(1);
+    LinkedList<int> ll2;
+    ll2.AddLast(1);
+    auto foreignNode = ll2.Find(1);
+    EXPECT_THROW(ll1.AddAfter(foreignNode, 2), System::InvalidOperationException);
 }
 
 // ---------------------------------------------------------------------------
