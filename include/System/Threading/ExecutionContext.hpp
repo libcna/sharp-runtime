@@ -25,6 +25,18 @@ namespace System::Threading {
         ExecutionContext() = default;
 
     public:
+        /**
+         * @brief RAII-style handle returned by SuppressFlow(), used to undo the suppression.
+         *
+         * C++ counterpart of .NET System.Threading.AsyncFlowControl. A no-op placeholder in this
+         * runtime, consistent with SuppressFlow()/RestoreFlow()/IsFlowSuppressed() all being no-ops
+         * here (see class doc comment) — there is no ambient flow state to actually suppress.
+         */
+        struct AsyncFlowControl {
+            /** Undoes the flow suppression (no-op in this runtime). */
+            void Undo() {}
+        };
+
         /** Captures the current execution context; always returns nullptr in this runtime (see class doc). */
         [[nodiscard]] static ExecutionContext* Capture() { return nullptr; }
 
@@ -42,6 +54,9 @@ namespace System::Threading {
 
         /** Restores flowing of the execution context after a prior SuppressFlow (no-op in this runtime). */
         static void RestoreFlow() {}
+
+        /** Suppresses execution context flow (no-op in this runtime; see class doc comment). */
+        [[nodiscard]] static AsyncFlowControl SuppressFlow() { return AsyncFlowControl{}; }
 
         /** Runs @p callback with @p state under the given execution context (invoked synchronously in this runtime). */
         static void Run(ExecutionContext* /*executionContext*/, const std::function<void(void*)>& callback, void* state) {

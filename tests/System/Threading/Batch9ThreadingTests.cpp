@@ -279,6 +279,11 @@ TEST(ExecutionContextTests, IsFlowSuppressed_DefaultsFalse) {
     EXPECT_FALSE(ExecutionContext::IsFlowSuppressed());
 }
 
+TEST(ExecutionContextTests, SuppressFlow_ReturnsUndoableHandle) {
+    auto flowControl = ExecutionContext::SuppressFlow();
+    EXPECT_NO_THROW(flowControl.Undo());
+}
+
 // ===========================================================================
 // IThreadPoolWorkItem / WaitCallback / ThreadPool::UnsafeQueueUserWorkItem
 // ===========================================================================
