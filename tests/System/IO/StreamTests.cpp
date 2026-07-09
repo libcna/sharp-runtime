@@ -15,6 +15,7 @@
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
@@ -447,7 +448,33 @@ TEST(UnmanagedMemoryStreamTests, WriteBeyondCapacity_Throws) {
     uint8_t data[2] = {};
     UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
     uint8_t payload[] = {1, 2, 3};
-    EXPECT_THROW(ums.Write(payload, 0, 3), System::IO::IOException);
+    EXPECT_THROW(ums.Write(payload, 0, 3), System::NotSupportedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    EXPECT_THROW(ums.Write(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    uint8_t payload[] = {1};
+    EXPECT_THROW(ums.Write(payload, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    EXPECT_THROW(ums.Read(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    uint8_t out[2];
+    EXPECT_THROW(ums.Read(out, 0, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(UnmanagedMemoryStreamTests, WriteWhenReadOnly_ThrowsNotSupportedException) {
@@ -493,28 +520,28 @@ TEST(UnmanagedMemoryStreamTests, LengthGreaterThanCapacity_Throws) {
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteByte_Roundtrip) {
     uint8_t data[4] = {};
-    UnmanagedMemoryAccessor acc(data, 4);
+    UnmanagedMemoryAccessor acc(data, 4, FileAccess::ReadWrite);
     acc.Write(0, static_cast<uint8_t>(0xAB));
     EXPECT_EQ(acc.ReadByte(0), 0xABu);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteInt32_Roundtrip) {
     uint8_t data[4] = {};
-    UnmanagedMemoryAccessor acc(data, 4);
+    UnmanagedMemoryAccessor acc(data, 4, FileAccess::ReadWrite);
     acc.Write(0, static_cast<int32_t>(-12345));
     EXPECT_EQ(acc.ReadInt32(0), -12345);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteDouble_Roundtrip) {
     uint8_t data[8] = {};
-    UnmanagedMemoryAccessor acc(data, 8);
+    UnmanagedMemoryAccessor acc(data, 8, FileAccess::ReadWrite);
     acc.Write(0, 3.14159);
     EXPECT_DOUBLE_EQ(acc.ReadDouble(0), 3.14159);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteBoolean_Roundtrip) {
     uint8_t data[1] = {};
-    UnmanagedMemoryAccessor acc(data, 1);
+    UnmanagedMemoryAccessor acc(data, 1, FileAccess::ReadWrite);
     acc.Write(0, true);
     EXPECT_TRUE(acc.ReadBoolean(0));
 }
@@ -525,6 +552,14 @@ TEST(UnmanagedMemoryAccessorTests, CapacityProperty) {
     EXPECT_EQ(acc.getCapacityProperty(), 16);
 }
 
+TEST(UnmanagedMemoryAccessorTests, TwoArgCtor_DefaultsToReadOnly) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    EXPECT_TRUE(acc.getCanReadProperty());
+    EXPECT_FALSE(acc.getCanWriteProperty());
+    EXPECT_THROW(acc.Write(0, static_cast<uint8_t>(1)), System::NotSupportedException);
+}
+
 TEST(UnmanagedMemoryAccessorTests, ReadOnly_WriteThrowsNotSupportedException) {
     uint8_t data[4] = {};
     UnmanagedMemoryAccessor acc(data, 4, FileAccess::Read);
@@ -533,10 +568,18 @@ TEST(UnmanagedMemoryAccessorTests, ReadOnly_WriteThrowsNotSupportedException) {
     EXPECT_THROW(acc.Write(0, static_cast<uint8_t>(1)), System::NotSupportedException);
 }
 
-TEST(UnmanagedMemoryAccessorTests, OutOfRangePosition_ThrowsArgumentOutOfRangeException) {
+TEST(UnmanagedMemoryAccessorTests, PositionBeyondCapacity_ThrowsArgumentOutOfRangeException) {
     uint8_t data[4] = {};
     UnmanagedMemoryAccessor acc(data, 4);
-    EXPECT_THROW(acc.ReadInt32(1), System::ArgumentOutOfRangeException); // needs 4 bytes at position 1, only 3 available
+    EXPECT_THROW(acc.ReadByte(4), System::ArgumentOutOfRangeException); // position >= capacity
+}
+
+TEST(UnmanagedMemoryAccessorTests, PositionWithinCapacityButNotEnoughBytes_ThrowsArgumentException) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    // needs 4 bytes at position 1, but position(1) < capacity(4), so this is
+    // "not enough remaining bytes" (ArgumentException), not "out of range" (ArgumentOutOfRangeException).
+    EXPECT_THROW(acc.ReadInt32(1), System::ArgumentException);
 }
 
 TEST(UnmanagedMemoryAccessorTests, AfterDispose_ThrowsObjectDisposedException) {

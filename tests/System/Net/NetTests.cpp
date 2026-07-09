@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/HttpStatusCode.hpp"
@@ -652,8 +653,8 @@ TEST(IPNetworkTests, Constructor_NormalizesBaseAddress) {
 }
 
 TEST(IPNetworkTests, Constructor_PrefixOutOfRange_Throws) {
-    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), std::out_of_range);
-    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), std::out_of_range);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(IPNetworkTests, Contains_AddressInSubnet_True) {

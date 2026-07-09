@@ -7,6 +7,7 @@
 #include "System/Net/SocketAddress.hpp"
 #include "System/Net/Sockets/AddressFamily.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 using System::Net::EndPoint;
 using System::Net::DnsEndPoint;
@@ -40,7 +41,7 @@ TEST(SocketAddressTests, Indexer_ReadWrite) {
 
 TEST(SocketAddressTests, Indexer_OutOfRange_Throws) {
     SocketAddress addr(AddressFamily::InterNetwork);
-    EXPECT_THROW((void)addr[1000], std::out_of_range);
+    EXPECT_THROW((void)addr[1000], System::IndexOutOfRangeException);
 }
 
 TEST(SocketAddressTests, Equals_SameContents_True) {

@@ -37,10 +37,19 @@ namespace System::IO {
         isOpen_   = true;
     }
 
+    namespace {
+        void validateBufferArguments(const bytecs* buffer, intcs offset, intcs count)
+        {
+            if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+            if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+            if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        }
+    }
+
     intcs UnmanagedMemoryStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
         if (!getCanReadProperty()) throw System::NotSupportedException("Stream does not support reading.");
-        if (buffer == nullptr || offset < 0 || count < 0) return 0;
+        validateBufferArguments(buffer, offset, count);
 
         const intcs remaining = length_ - position_;
         const intcs toRead = std::min(count, remaining);
@@ -54,9 +63,10 @@ namespace System::IO {
     void UnmanagedMemoryStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
-        if (buffer == nullptr || count <= 0) return;
+        validateBufferArguments(buffer, offset, count);
+        if (count == 0) return;
         if (position_ + count > capacity_) {
-            throw IOException("Unable to expand length of this stream beyond its capacity.");
+            throw System::NotSupportedException("Unable to expand length of this stream beyond its capacity.");
         }
 
         std::memcpy(buffer_ + position_, buffer + offset, static_cast<size_t>(count));

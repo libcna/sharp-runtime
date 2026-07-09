@@ -49,7 +49,7 @@ namespace System::IO {
         [[nodiscard]] bool getIsOpenProperty() const { return isOpen_; }
 
     public:
-        /** Constructs an accessor over @p buffer with ReadWrite access. */
+        /** Constructs an accessor over @p buffer with Read access, matching .NET's 3-arg (buffer, offset, capacity) constructor default. */
         UnmanagedMemoryAccessor(bytecs* buffer, longcs capacity);
         /** Constructs an accessor over @p buffer with the specified access. */
         UnmanagedMemoryAccessor(bytecs* buffer, longcs capacity, FileAccess access);

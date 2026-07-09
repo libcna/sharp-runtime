@@ -2,9 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/IPNetwork.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
-#include <stdexcept>
 
 namespace System::Net {
 
@@ -35,7 +35,7 @@ namespace System::Net {
 
     IPNetwork::IPNetwork(const IPAddress& baseAddress, intcs prefixLength) {
         if (prefixLength < 0 || prefixLength > getMaxPrefixLength(baseAddress)) {
-            throw std::out_of_range("prefixLength is out of range for the address family.");
+            throw System::ArgumentOutOfRangeException("prefixLength");
         }
 
         baseAddress_ = clearNonPrefixBits(baseAddress, prefixLength);

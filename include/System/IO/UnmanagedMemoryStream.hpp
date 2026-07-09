@@ -40,9 +40,18 @@ namespace System::IO {
 
         ~UnmanagedMemoryStream() override = default;
 
-        /** Reads up to count bytes into buffer at offset; returns bytes actually read. */
+        /**
+         * @brief Reads up to count bytes into buffer at offset; returns bytes actually read.
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         */
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
-        /** Writes count bytes from buffer at offset into the unmanaged buffer. */
+        /**
+         * @brief Writes count bytes from buffer at offset into the unmanaged buffer.
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         * @throws System::NotSupportedException if the write would exceed the stream's fixed capacity.
+         */
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
         /** Writes a single byte to the unmanaged buffer. */
         void  WriteByte(bytecs value) override;

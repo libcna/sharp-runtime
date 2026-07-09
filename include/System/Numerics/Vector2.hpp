@@ -5,9 +5,9 @@
 #include <cmath>
 #include <locale>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Numerics {
 
@@ -58,17 +58,17 @@ struct Vector2 {
         return ss.str();
     }
 
-    /** @return The component at @p index (0 = X, 1 = Y). Throws std::out_of_range on invalid index. */
+    /** @return The component at @p index (0 = X, 1 = Y). @throws System::ArgumentOutOfRangeException on invalid index. */
     float operator[](int index) const {
         if (index == 0) return X;
         if (index == 1) return Y;
-        throw std::out_of_range("index");
+        throw System::ArgumentOutOfRangeException("index");
     }
-    /** @return A reference to the component at @p index (0 = X, 1 = Y). Throws std::out_of_range on invalid index. */
+    /** @return A reference to the component at @p index (0 = X, 1 = Y). @throws System::ArgumentOutOfRangeException on invalid index. */
     float& operator[](int index) {
         if (index == 0) return X;
         if (index == 1) return Y;
-        throw std::out_of_range("index");
+        throw System::ArgumentOutOfRangeException("index");
     }
 
     /** Component-wise addition. */
