@@ -20,6 +20,13 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.SortedDictionary<TKey,TValue>.
  * Backed by std::map<TKey,TValue>; provides O(log n) Add, Remove, and lookup.
  *
+ * @note Unlike .NET's SortedDictionary<TKey,TValue>, iterators do not detect
+ * concurrent modification: .NET throws InvalidOperationException if the
+ * dictionary is structurally modified while an enumerator is active, but
+ * sharp-runtime's iterators follow plain std::map invalidation rules instead
+ * (erasing an element only invalidates that element's iterator; other iterators
+ * remain valid). Do not mutate the dictionary while iterating it directly.
+ *
  * @tparam TKey   The type of the keys (must support operator<).
  * @tparam TValue The type of the values.
  */

@@ -20,6 +20,12 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.SortedList<TKey,TValue>.
  * Backed by std::map<TKey,TValue>; provides O(log n) key access and O(n) index access.
  *
+ * @note Unlike .NET's SortedList<TKey,TValue>, iterators do not detect concurrent
+ * modification: .NET throws InvalidOperationException if the list is structurally
+ * modified while an enumerator is active, but sharp-runtime's iterators follow
+ * plain std::map invalidation rules instead. Do not mutate the list while
+ * iterating it directly.
+ *
  * @tparam TKey   The type of the keys (must support operator<).
  * @tparam TValue The type of the values.
  */

@@ -109,6 +109,13 @@ public:
  * C++ counterpart of .NET System.Collections.Generic.LinkedList<T>.
  * Backed by std::list<T>; provides O(1) insertion and removal at known nodes.
  *
+ * @note Unlike .NET's LinkedList<T>, iterators/enumerators do not detect
+ * concurrent modification: .NET throws InvalidOperationException if the list is
+ * structurally modified while an enumerator is active, but sharp-runtime's
+ * iterators follow plain std::list invalidation rules instead (erasing a node
+ * only invalidates that node's iterator; other iterators remain valid). Do not
+ * mutate the list while iterating it directly.
+ *
  * @tparam T The type of elements in the linked list.
  */
 template<typename T>

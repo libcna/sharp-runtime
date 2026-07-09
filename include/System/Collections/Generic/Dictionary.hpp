@@ -22,6 +22,13 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.Dictionary<TKey,TValue>.
  * Backed by std::unordered_map; provides O(1) average-case lookup, insertion, and removal.
  *
+ * @note Unlike .NET's Dictionary<TKey,TValue>, iterators do not detect concurrent
+ * modification: .NET throws InvalidOperationException if the dictionary is
+ * structurally modified while an enumerator is active, but sharp-runtime's
+ * iterators follow plain std::unordered_map invalidation rules instead (insertion
+ * may invalidate all iterators; erasure only invalidates the erased element's
+ * iterator). Do not mutate the dictionary while iterating it directly.
+ *
  * @tparam TKey   The type of the keys.
  * @tparam TValue The type of the values.
  */

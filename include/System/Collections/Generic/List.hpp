@@ -25,6 +25,13 @@ using SharpRuntime::intcs;
  * Backed by std::vector<T>; provides O(1) amortized Add, O(1) indexed access,
  * and full IList<T> compliance.
  *
+ * @note Unlike .NET's List<T>, iterators returned by begin()/end() do not detect
+ * concurrent modification: .NET throws InvalidOperationException if the list is
+ * structurally modified (Add/Remove/Clear/etc.) while an enumerator is active,
+ * but sharp-runtime's iterators follow plain std::vector<T> invalidation rules
+ * instead (e.g. Add() may reallocate and invalidate all existing iterators
+ * without warning). Do not mutate the list while iterating it directly.
+ *
  * @tparam T The type of elements in the list.
  */
 template<typename T>

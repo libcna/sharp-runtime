@@ -18,6 +18,12 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.HashSet<T>.
  * Backed by std::unordered_set; provides O(1) average-case Add, Remove, and Contains.
  *
+ * @note Unlike .NET's HashSet<T>, iterators do not detect concurrent modification:
+ * .NET throws InvalidOperationException if the set is structurally modified while
+ * an enumerator is active, but sharp-runtime's iterators follow plain
+ * std::unordered_set invalidation rules instead. Do not mutate the set while
+ * iterating it directly.
+ *
  * @tparam T The type of elements in the set.
  */
 template<typename T>
