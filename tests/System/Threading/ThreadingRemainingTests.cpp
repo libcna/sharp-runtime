@@ -15,6 +15,7 @@
 #include <thread>
 #include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/EventResetMode.hpp"
@@ -191,7 +192,7 @@ TEST(CountdownEventTests, Constructor_StoresInitialCount) {
     EXPECT_EQ(ce.getCurrentCountProperty(), 5);
 }
 TEST(CountdownEventTests, NegativeCount_Throws) {
-    EXPECT_THROW(CountdownEvent(-1), std::invalid_argument);
+    EXPECT_THROW(CountdownEvent(-1), System::ArgumentOutOfRangeException);
 }
 TEST(CountdownEventTests, IsSet_FalseInitially) {
     CountdownEvent ce(2);
@@ -211,7 +212,17 @@ TEST(CountdownEventTests, Signal_ToZero_IsSet) {
 TEST(CountdownEventTests, Signal_AlreadyZero_Throws) {
     CountdownEvent ce(1);
     ce.Signal();
-    EXPECT_THROW(ce.Signal(), std::invalid_argument);
+    EXPECT_THROW(ce.Signal(), System::InvalidOperationException);
+}
+TEST(CountdownEventTests, AddCount_AlreadyZero_Throws) {
+    CountdownEvent ce(1);
+    ce.Signal();
+    EXPECT_THROW(ce.AddCount(), System::InvalidOperationException);
+}
+TEST(CountdownEventTests, AfterDispose_Wait_ThrowsObjectDisposedException) {
+    CountdownEvent ce(1);
+    ce.Dispose();
+    EXPECT_THROW(ce.Wait(), System::ObjectDisposedException);
 }
 TEST(CountdownEventTests, AddCount_IncreasesCount) {
     CountdownEvent ce(2);
