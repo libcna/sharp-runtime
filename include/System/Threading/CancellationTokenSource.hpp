@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 
 namespace System::Threading {
@@ -20,20 +21,33 @@ namespace System::Threading {
     class CancellationTokenSource {
         std::shared_ptr<Detail::CancellationState> state_ = std::make_shared<Detail::CancellationState>();
         bool disposed_ = false;
+
+        void ThrowIfDisposed() const {
+            if (disposed_) throw System::ObjectDisposedException("CancellationTokenSource", "The CancellationTokenSource has been disposed.");
+        }
+
     public:
         /** Initializes a new CancellationTokenSource. */
         CancellationTokenSource() = default;
 
-        /** Returns the CancellationToken associated with this source. */
+        /**
+         * @brief Returns the CancellationToken associated with this source.
+         * @throws System::ObjectDisposedException if this source has been disposed.
+         */
         [[nodiscard]] CancellationToken getTokenProperty() const {
+            ThrowIfDisposed();
             return CancellationToken(state_);
         }
 
         /** Returns true if cancellation has been requested. */
         [[nodiscard]] bool getIsCancellationRequestedProperty() const { return state_->cancelled.load(); }
 
-        /** Signals cancellation to all linked CancellationToken holders and runs their registered callbacks. */
+        /**
+         * @brief Signals cancellation to all linked CancellationToken holders and runs their registered callbacks.
+         * @throws System::ObjectDisposedException if this source has been disposed.
+         */
         void Cancel() {
+            ThrowIfDisposed();
             std::vector<std::function<void()>> callbacksToRun;
             {
                 // Checking-and-setting `cancelled` under the same lock used by Register() closes

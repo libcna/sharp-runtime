@@ -6,6 +6,7 @@
 #include <chrono>
 #include <thread>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
 #include "System/Threading/Monitor.hpp"
@@ -461,6 +462,18 @@ TEST(ThreadingTests, CancellationTokenSource_Cancel_PropagatesToken) {
     cts.Cancel();
     EXPECT_TRUE(cts.getIsCancellationRequestedProperty());
     EXPECT_TRUE(tok.getIsCancellationRequestedProperty());
+}
+
+TEST(ThreadingTests, CancellationTokenSource_AfterDispose_Cancel_ThrowsObjectDisposedException) {
+    CancellationTokenSource cts;
+    cts.Dispose();
+    EXPECT_THROW(cts.Cancel(), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, CancellationTokenSource_AfterDispose_GetToken_ThrowsObjectDisposedException) {
+    CancellationTokenSource cts;
+    cts.Dispose();
+    EXPECT_THROW(cts.getTokenProperty(), System::ObjectDisposedException);
 }
 
 // ---------------------------------------------------------------------------
