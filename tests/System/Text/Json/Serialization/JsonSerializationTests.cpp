@@ -263,7 +263,7 @@ TEST(ReferenceResolverTests, IgnoreCycles_GetReference_DetectsRepeatedIdentity) 
     EXPECT_TRUE(alreadyExists);
 }
 
-TEST(ReferenceResolverTests, IgnoreCycles_AddReference_NotImplemented) {
+TEST(ReferenceResolverTests, IgnoreCycles_AddReference_ThrowsInvalidOperation) {
     auto resolver = ReferenceHandler::IgnoreCycles()->CreateResolver(/*writing=*/false);
-    EXPECT_THROW(resolver->AddReference("1", nullptr), System::NotImplementedException);
+    EXPECT_THROW(resolver->AddReference("1", nullptr), System::InvalidOperationException);
 }

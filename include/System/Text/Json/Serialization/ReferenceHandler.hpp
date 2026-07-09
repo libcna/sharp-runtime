@@ -6,7 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
-#include "System/NotImplementedException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "System/Text/Json/Serialization/ReferenceResolver.hpp"
 
@@ -73,14 +73,14 @@ namespace System::Text::Json::Serialization {
 
         public:
             void AddReference(const std::string&, const void*) override {
-                throw System::NotImplementedException("AddReference is not supported when using the IgnoreCycles reference handler.");
+                throw System::InvalidOperationException();
             }
             [[nodiscard]] std::string GetReference(const void* value, bool& alreadyExists) override {
                 alreadyExists = !seen_.insert(value).second;
                 return "";
             }
             [[nodiscard]] const void* ResolveReference(const std::string&) override {
-                throw System::NotImplementedException("ResolveReference is not supported when using the IgnoreCycles reference handler.");
+                throw System::InvalidOperationException();
             }
         };
 

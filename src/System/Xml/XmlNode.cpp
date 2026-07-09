@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "System/InvalidOperationException.hpp"
-#include "System/NotImplementedException.hpp"
 #include "System/Xml/XPath/XPathNodeIterator.hpp"
 #include "System/Xml/XPath/XmlDocumentNavigator.hpp"
 #include "System/Xml/IHasXmlNode.hpp"
