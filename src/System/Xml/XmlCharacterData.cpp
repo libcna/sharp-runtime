@@ -32,8 +32,12 @@ namespace System::Xml {
 
     std::string XmlCharacterData::Substring(SharpRuntime::intcs offset, SharpRuntime::intcs count) const {
         std::string data = getDataProperty();
+        if (data.empty()) return "";
+        auto len = static_cast<SharpRuntime::intcs>(data.size());
+        if (len < offset + count) count = len - offset;
         if (offset < 0 || static_cast<size_t>(offset) > data.size())
             throw System::ArgumentOutOfRangeException("offset");
+        if (count < 0) throw System::ArgumentOutOfRangeException("count");
         return data.substr(static_cast<size_t>(offset), static_cast<size_t>(count));
     }
 

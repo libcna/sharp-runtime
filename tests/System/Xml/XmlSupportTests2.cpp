@@ -4,6 +4,7 @@
 //
 // Coverage for XmlQualifiedName, XmlConvert, NameTable, and the small XML interfaces.
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Xml/IHasXmlNode.hpp"
 #include "System/Xml/IXmlLineInfo.hpp"
@@ -112,6 +113,50 @@ TEST(XmlConvertTests, VerifyName_StartsWithDigit_Throws) {
 
 TEST(XmlConvertTests, VerifyNCName_ContainsColon_Throws) {
     EXPECT_THROW(XmlConvert::VerifyNCName("foo:bar"), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyName_Empty_ThrowsArgumentException) {
+    EXPECT_THROW(XmlConvert::VerifyName(""), System::ArgumentException);
+}
+
+TEST(XmlConvertTests, VerifyNCName_Empty_ThrowsArgumentException) {
+    EXPECT_THROW(XmlConvert::VerifyNCName(""), System::ArgumentException);
+}
+
+TEST(XmlConvertTests, VerifyNMTOKEN_Empty_ThrowsXmlException) {
+    EXPECT_THROW(XmlConvert::VerifyNMTOKEN(""), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyNMTOKEN_BadChar_ThrowsXmlException) {
+    EXPECT_THROW(XmlConvert::VerifyNMTOKEN("foo bar"), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyNMTOKEN_Valid_ReturnsUnchanged) {
+    EXPECT_EQ(XmlConvert::VerifyNMTOKEN("foo.bar-1"), "foo.bar-1");
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_Empty_ReturnsUnchanged) {
+    EXPECT_EQ(XmlConvert::VerifyTOKEN(""), "");
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_LeadingSpace_Throws) {
+    EXPECT_THROW(XmlConvert::VerifyTOKEN(" foo"), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_TrailingSpace_Throws) {
+    EXPECT_THROW(XmlConvert::VerifyTOKEN("foo "), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_DoubleSpace_Throws) {
+    EXPECT_THROW(XmlConvert::VerifyTOKEN("foo  bar"), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_Tab_Throws) {
+    EXPECT_THROW(XmlConvert::VerifyTOKEN("foo\tbar"), XmlException);
+}
+
+TEST(XmlConvertTests, VerifyTOKEN_Valid_ReturnsUnchanged) {
+    EXPECT_EQ(XmlConvert::VerifyTOKEN("foo bar"), "foo bar");
 }
 
 TEST(XmlConvertTests, IsStartNCNameChar_Letter_True) {

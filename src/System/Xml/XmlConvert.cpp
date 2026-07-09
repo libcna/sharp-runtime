@@ -126,7 +126,8 @@ namespace System::Xml {
     // --- Verification --------------------------------------------------------------------
 
     std::string XmlConvert::VerifyName(const std::string& name) {
-        if (name.empty() || !IsStartNCNameChar(name[0]))
+        if (name.empty()) throw System::ArgumentException("The value cannot be an empty string.", "name");
+        if (!IsStartNCNameChar(name[0]))
             throw XmlException("Invalid XML name: '" + name + "'.");
         for (size_t i = 1; i < name.size(); ++i)
             if (!IsNCNameChar(name[i]) && name[i] != ':')
@@ -135,7 +136,8 @@ namespace System::Xml {
     }
 
     std::string XmlConvert::VerifyNCName(const std::string& name) {
-        if (name.empty() || !IsStartNCNameChar(name[0]))
+        if (name.empty()) throw System::ArgumentException("The value cannot be an empty string.", "name");
+        if (!IsStartNCNameChar(name[0]))
             throw XmlException("Invalid XML NCName: '" + name + "'.");
         for (size_t i = 1; i < name.size(); ++i)
             if (!IsNCNameChar(name[i]))
@@ -145,16 +147,21 @@ namespace System::Xml {
 
     std::string XmlConvert::VerifyTOKEN(const std::string& token) {
         if (token.empty()) return token;
-        for (char ch : token)
-            if (!IsNCNameChar(ch) && ch != ':')
-                throw XmlException("Invalid XML Nmtoken: '" + token + "'.");
+        bool startsOrEndsWithSpace = token.front() == ' ' || token.back() == ' ';
+        bool hasControlChar = token.find_first_of("\t\n\r") != std::string::npos;
+        bool hasDoubleSpace = token.find("  ") != std::string::npos;
+        if (startsOrEndsWithSpace || hasControlChar || hasDoubleSpace)
+            throw XmlException(
+                "line-feed (#xA) or tab (#x9) characters, leading or trailing spaces and sequences of "
+                "one or more spaces (#x20) are not allowed in 'xs:token'.");
         return token;
     }
 
     std::string XmlConvert::VerifyNMTOKEN(const std::string& name) {
+        if (name.empty()) throw XmlException("Invalid NmToken value '" + name + "'.");
         for (char ch : name)
             if (!IsNCNameChar(ch) && ch != ':')
-                throw System::ArgumentException("Invalid XML Nmtoken: '" + name + "'.");
+                throw XmlException("Invalid NmToken value '" + name + "'.");
         return name;
     }
 

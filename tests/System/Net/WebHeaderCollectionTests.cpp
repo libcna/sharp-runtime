@@ -61,6 +61,11 @@ TEST(WebHeaderCollectionTests, Add_InvalidNameChars_Throws) {
     EXPECT_THROW(h.Add("Bad:Name", "value"), System::ArgumentException);
 }
 
+TEST(WebHeaderCollectionTests, Add_EmptyName_ThrowsArgumentException) {
+    WebHeaderCollection h;
+    EXPECT_THROW(h.Add("", "value"), System::ArgumentException);
+}
+
 TEST(WebHeaderCollectionTests, Add_InvalidValueCrlf_Throws) {
     WebHeaderCollection h;
     EXPECT_THROW(h.Add("X-Custom", "bad\r\nvalue"), System::ArgumentException);

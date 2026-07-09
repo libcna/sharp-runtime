@@ -5,6 +5,8 @@
 // Coverage for the classic XmlDocument DOM API (XmlNode/XmlDocument/XmlElement/XmlAttribute/etc.).
 #include <gtest/gtest.h>
 #include <cstdio>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlImplementation.hpp"
@@ -282,6 +284,34 @@ TEST(XmlCharacterDataTests, SplitText_SplitsIntoTwoSiblings) {
     EXPECT_EQ(t->getDataProperty(), "Hello");
     EXPECT_EQ(tail->getDataProperty(), "World");
     EXPECT_EQ(t->getNextSiblingProperty(), tail);
+}
+
+TEST(XmlCharacterDataTests, SplitText_OffsetGreaterThanLength_ThrowsArgumentOutOfRangeException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* t = doc.CreateTextNode("Hello");
+    root->AppendChild(t);
+    EXPECT_THROW(t->SplitText(10), System::ArgumentOutOfRangeException);
+}
+
+TEST(XmlCharacterDataTests, SplitText_NoParent_ThrowsInvalidOperationException) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("Hello");
+    EXPECT_THROW(t->SplitText(2), System::InvalidOperationException);
+}
+
+TEST(XmlCharacterDataTests, Substring_EmptyData_ReturnsEmptyRegardlessOfOffset) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("");
+    EXPECT_EQ(t->Substring(5, 3), "");
+    EXPECT_EQ(t->Substring(0, 0), "");
+}
+
+TEST(XmlCharacterDataTests, Substring_NonEmptyData_ClampsCountToLength) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("Hello");
+    EXPECT_EQ(t->Substring(2, 100), "llo");
 }
 
 // ===========================================================================
