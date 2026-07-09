@@ -90,7 +90,7 @@ namespace System::Numerics {
         /**
          * @brief Parses a decimal integer string (optional leading '+'/'-').
          *
-         * @throws std::invalid_argument on malformed input.
+         * @throws System::FormatException on malformed input.
          */
         static BigInteger Parse(const std::string& s);
 
@@ -118,13 +118,13 @@ namespace System::Numerics {
 
         /**
          * @brief Integer division (truncates toward zero, mirrors .NET).
-         * @throws std::overflow_error if @p o is zero.
+         * @throws System::DivideByZeroException if @p o is zero.
          */
         BigInteger operator/(const BigInteger& o) const;
 
         /**
          * @brief Remainder after integer division (sign follows dividend, mirrors .NET).
-         * @throws std::overflow_error if @p o is zero.
+         * @throws System::DivideByZeroException if @p o is zero.
          */
         BigInteger operator%(const BigInteger& o) const;
 

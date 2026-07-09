@@ -2,8 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Numerics/BigInteger.hpp"
+#include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
 #include <algorithm>
-#include <stdexcept>
 
 namespace System::Numerics {
 
@@ -206,14 +207,14 @@ int  BigInteger::Sign()                  const { return getIsZeroProperty() ? 0 
 // ---------------------------------------------------------------------------
 
 BigInteger BigInteger::Parse(const std::string& s) {
-    if (s.empty()) throw std::invalid_argument("BigInteger::Parse: empty string");
+    if (s.empty()) throw System::FormatException("The value could not be parsed.");
     BigInteger r;
     bool neg = (s[0] == '-');
     size_t start = (neg || s[0] == '+') ? 1 : 0;
-    if (start >= s.size()) throw std::invalid_argument("BigInteger::Parse: no digits");
+    if (start >= s.size()) throw System::FormatException("The value could not be parsed.");
     for (size_t k = start; k < s.size(); ++k)
         if (s[k] < '0' || s[k] > '9')
-            throw std::invalid_argument("BigInteger::Parse: invalid character");
+            throw System::FormatException("The value could not be parsed.");
 
     std::vector<uint32_t> m;
     int i = static_cast<int>(s.size());
@@ -287,7 +288,7 @@ BigInteger BigInteger::operator*(const BigInteger& o) const {
 }
 
 BigInteger BigInteger::operator/(const BigInteger& o) const {
-    if (o.getIsZeroProperty()) throw std::overflow_error("BigInteger: division by zero");
+    if (o.getIsZeroProperty()) throw System::DivideByZeroException("Attempted to divide by zero.");
     if (getIsZeroProperty())   return BigInteger(0);
     int c = cmpMag(mag_, o.mag_);
     if (c < 0) return BigInteger(0);
@@ -308,7 +309,7 @@ BigInteger BigInteger::operator/(const BigInteger& o) const {
 }
 
 BigInteger BigInteger::operator%(const BigInteger& o) const {
-    if (o.getIsZeroProperty()) throw std::overflow_error("BigInteger: modulo by zero");
+    if (o.getIsZeroProperty()) throw System::DivideByZeroException("Attempted to divide by zero.");
     if (getIsZeroProperty())   return BigInteger(0);
     int c = cmpMag(mag_, o.mag_);
     if (c < 0) return *this;  // |dividend| < |divisor| → remainder = dividend

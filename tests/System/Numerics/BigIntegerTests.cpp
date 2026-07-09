@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
 #include "System/Numerics/BigInteger.hpp"
 
 using System::Numerics::BigInteger;
@@ -313,6 +315,18 @@ TEST(BigIntegerTests, TryParse_EmptyString_ReturnsFalse) {
     EXPECT_FALSE(BigInteger::TryParse("", r));
 }
 
+TEST(BigIntegerTests, Parse_EmptyString_ThrowsFormatException) {
+    EXPECT_THROW(BigInteger::Parse(""), System::FormatException);
+}
+
+TEST(BigIntegerTests, Parse_InvalidCharacter_ThrowsFormatException) {
+    EXPECT_THROW(BigInteger::Parse("12x34"), System::FormatException);
+}
+
+TEST(BigIntegerTests, Parse_SignOnly_ThrowsFormatException) {
+    EXPECT_THROW(BigInteger::Parse("-"), System::FormatException);
+}
+
 TEST(BigIntegerTests, TryParse_NonNumeric_ReturnsFalse) {
     BigInteger r;
     EXPECT_FALSE(BigInteger::TryParse("123abc", r));
@@ -363,7 +377,7 @@ TEST(BigIntegerTests, Divide_BothNegative) {
 
 TEST(BigIntegerTests, Divide_ByZero_Throws) {
     BigInteger a(10), z(0);
-    EXPECT_THROW((void)(a / z), std::overflow_error);
+    EXPECT_THROW((void)(a / z), System::DivideByZeroException);
 }
 
 TEST(BigIntegerTests, Divide_LargeByLarge) {
@@ -396,7 +410,7 @@ TEST(BigIntegerTests, Modulo_NegativeDividend) {
 
 TEST(BigIntegerTests, Modulo_ByZero_Throws) {
     BigInteger a(10), z(0);
-    EXPECT_THROW((void)(a % z), std::overflow_error);
+    EXPECT_THROW((void)(a % z), System::DivideByZeroException);
 }
 
 TEST(BigIntegerTests, Modulo_Large) {
