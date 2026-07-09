@@ -38,6 +38,24 @@ TEST(DateTimeTests, ConstructFromKnownTicks) {
     EXPECT_EQ(dt.getTicksProperty(), 999'999'999'999'999'999LL);
 }
 
+TEST(DateTimeTests, ConstructFromNegativeTicks_Throws) {
+    EXPECT_THROW(DateTime(-1LL), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, ConstructFromTicksBeyondMaxValue_Throws) {
+    EXPECT_THROW(DateTime(DateTime::MaxTicks + 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, AddDays_BeyondMaxValue_Throws) {
+    DateTime maxDate(DateTime::MaxTicks);
+    EXPECT_THROW(maxDate.AddDays(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, AddDays_BeforeMinValue_Throws) {
+    DateTime minDate(0);
+    EXPECT_THROW(minDate.AddDays(-1), System::ArgumentOutOfRangeException);
+}
+
 TEST(DateTimeTests, EqualityBasedOnTicks) {
     DateTime a(1000LL), b(1000LL), c(2000LL);
     EXPECT_EQ(a, b);

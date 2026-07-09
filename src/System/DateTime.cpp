@@ -76,7 +76,10 @@ namespace System {
         : ticks_(0) {}
 
     DateTime::DateTime(longcs ticks)
-        : ticks_(ticks) {}
+        : ticks_(ticks) {
+        if (ticks < 0 || ticks > MaxTicks)
+            throw System::ArgumentOutOfRangeException("ticks", "Ticks must be between DateTime.MinValue.Ticks and DateTime.MaxValue.Ticks.");
+    }
 
     DateTime::DateTime(int year, int month, int day)
         : ticks_(dateToTicks(year, month, day)) {}
