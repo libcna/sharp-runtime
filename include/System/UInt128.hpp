@@ -8,6 +8,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 
 #if defined(_MSC_VER)
 #  error "UInt128 requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
@@ -70,10 +71,16 @@ namespace System {
         UInt128 operator-(const UInt128& o) const { return UInt128(value_ - o.value_); }
         /** @brief Multiplication operator. */
         UInt128 operator*(const UInt128& o) const { return UInt128(value_ * o.value_); }
-        /** @brief Division operator. */
-        UInt128 operator/(const UInt128& o) const { return UInt128(value_ / o.value_); }
-        /** @brief Modulo operator. */
-        UInt128 operator%(const UInt128& o) const { return UInt128(value_ % o.value_); }
+        /** @brief Division operator. @throws System::DivideByZeroException if @p o is zero. */
+        UInt128 operator/(const UInt128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return UInt128(value_ / o.value_);
+        }
+        /** @brief Modulo operator. @throws System::DivideByZeroException if @p o is zero. */
+        UInt128 operator%(const UInt128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return UInt128(value_ % o.value_);
+        }
         /** @brief Bitwise AND operator. */
         UInt128 operator&(const UInt128& o) const { return UInt128(value_ & o.value_); }
         /** @brief Bitwise OR operator. */

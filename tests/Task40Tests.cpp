@@ -383,6 +383,16 @@ TEST(Int128Tests, DivRem) {
     EXPECT_EQ(static_cast<long long>(remainder), 2LL);
 }
 
+TEST(Int128Tests, DivisionByZero_Throws) {
+    System::Int128 a(42), zero(0);
+    EXPECT_THROW(a / zero, System::DivideByZeroException);
+}
+
+TEST(Int128Tests, ModuloByZero_Throws) {
+    System::Int128 a(42), zero(0);
+    EXPECT_THROW(a % zero, System::DivideByZeroException);
+}
+
 TEST(Int128Tests, LeadingZeroCount_One) {
     System::Int128 v(1);
     EXPECT_EQ(System::Int128::LeadingZeroCount(v), 127);

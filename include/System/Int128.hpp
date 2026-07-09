@@ -9,6 +9,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 
 #if defined(_MSC_VER)
@@ -409,10 +410,16 @@ namespace System {
         Int128 operator-(const Int128& o) const noexcept { return Int128(value_ - o.value_); }
         /** @brief Multiplies two Int128 values. */
         Int128 operator*(const Int128& o) const noexcept { return Int128(value_ * o.value_); }
-        /** @brief Divides an Int128 by another. */
-        Int128 operator/(const Int128& o) const { return Int128(value_ / o.value_); }
-        /** @brief Computes the remainder of dividing one Int128 by another. */
-        Int128 operator%(const Int128& o) const { return Int128(value_ % o.value_); }
+        /** @brief Divides an Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        Int128 operator/(const Int128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return Int128(value_ / o.value_);
+        }
+        /** @brief Computes the remainder of dividing one Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        Int128 operator%(const Int128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return Int128(value_ % o.value_);
+        }
         /** @brief Computes the bitwise AND of two Int128 values. */
         Int128 operator&(const Int128& o) const noexcept { return Int128(value_ & o.value_); }
         /** @brief Computes the bitwise OR of two Int128 values. */
