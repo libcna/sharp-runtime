@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -12,6 +13,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Int128.hpp"
 #include "System/OverflowException.hpp"
@@ -44,9 +46,20 @@ namespace System {
          * @throws System::OverflowException if the value exceeds Int64 range.
          */
         [[nodiscard]] static longcs Parse(const std::string& s) {
-            try { return static_cast<int64_t>(std::stoll(s)); }
-            catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for an Int64."); }
-            catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+            std::size_t pos = 0;
+            int64_t v;
+            try {
+                v = static_cast<int64_t>(std::stoll(s, &pos));
+            } catch (const std::out_of_range&) {
+                throw System::OverflowException("Value was either too large or too small for an Int64.");
+            } catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            return v;
         }
 
         /**
@@ -54,7 +67,7 @@ namespace System {
          * C++ counterpart of .NET Int64.TryParse(string, out long).
          */
         static bool TryParse(const std::string& s, longcs& result) noexcept {
-            try { result = static_cast<int64_t>(std::stoll(s)); return true; }
+            try { result = Parse(s); return true; }
             catch (...) { result = 0; return false; }
         }
 
@@ -112,9 +125,12 @@ namespace System {
             return static_cast<int>(value ^ (static_cast<uint64_t>(value) >> 32));
         }
 
-        /** @brief Returns the absolute value of @p value. C++ counterpart of .NET Math.Abs(long). */
+        /**
+         * @brief Returns the absolute value of @p value. C++ counterpart of .NET Math.Abs(long).
+         * @throws System::OverflowException if @p value is MinValue.
+         */
         [[nodiscard]] static longcs Abs(longcs value) {
-            if (value == MinValue) throw std::overflow_error("Abs of Int64.MinValue overflows.");
+            if (value == MinValue) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return value < 0 ? -value : value;
         }
 
@@ -185,10 +201,10 @@ namespace System {
          * @brief Returns the floor of the base-2 logarithm of @p value.
          * C++ counterpart of .NET Int64.Log2(long). Matches .NET: Log2(0) is 0, not an error
          * (BitOperations.Log2(0) is documented to return 0).
-         * @throws std::domain_error if @p value is negative.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
         [[nodiscard]] static int Log2(longcs value) {
-            if (value < 0) throw std::domain_error("Log2 requires a non-negative value.");
+            if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
             if (value == 0) return 0;
             return std::bit_width(static_cast<uint64_t>(value)) - 1;
         }
@@ -206,13 +222,13 @@ namespace System {
         /**
          * @brief Copies the sign of @p sign to the magnitude of @p value.
          * C++ counterpart of .NET Int64.CopySign(long, long).
-         * @throws std::overflow_error if @p value is MinValue and @p sign is non-negative
+         * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
          *         (its magnitude does not fit in a signed Int64).
          */
         [[nodiscard]] static longcs CopySign(longcs value, longcs sign) {
             longcs absValue = value < 0 ? (value == MinValue ? value : -value) : value;
             if (sign >= 0) {
-                if (absValue < 0) throw std::overflow_error("Negating MinValue is not representable.");
+                if (absValue < 0) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
                 return absValue;
             }
             return -absValue;

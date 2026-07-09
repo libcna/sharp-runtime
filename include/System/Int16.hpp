@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -38,13 +39,21 @@ public:
      * @throws System::FormatException if the string is not a valid integer.
      */
     static SharpRuntime::shortcs Parse(const std::string& s) {
+        std::size_t pos = 0;
+        int v;
         try {
-            int v = std::stoi(s);
-            if (v < MinValue || v > MaxValue) throw System::OverflowException("Value out of Int16 range.");
-            return static_cast<int16_t>(v);
-        } catch (const System::OverflowException&) { throw; }
-          catch (const std::out_of_range&) { throw System::OverflowException("Value out of Int16 range."); }
-          catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+            v = std::stoi(s, &pos);
+        } catch (const std::out_of_range&) {
+            throw System::OverflowException("Value out of Int16 range.");
+        } catch (...) {
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+        for (; pos < s.size(); ++pos) {
+            if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                throw System::FormatException("Input string was not in a correct format.");
+        }
+        if (v < MinValue || v > MaxValue) throw System::OverflowException("Value out of Int16 range.");
+        return static_cast<int16_t>(v);
     }
 
     /**
@@ -96,10 +105,10 @@ public:
     /**
      * @brief Returns the absolute value of @p value.
      * C++ counterpart of .NET Math.Abs(short).
-     * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in Int16).
+     * @throws System::OverflowException if @p value is MinValue (its magnitude does not fit in Int16).
      */
     [[nodiscard]] static SharpRuntime::shortcs Abs(SharpRuntime::shortcs value) {
-        if (value == MinValue) throw std::overflow_error("Abs of Int16.MinValue overflows.");
+        if (value == MinValue) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return value < 0 ? static_cast<SharpRuntime::shortcs>(-value) : value;
     }
 
