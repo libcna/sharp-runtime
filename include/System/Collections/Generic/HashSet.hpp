@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -248,8 +249,13 @@ public:
      *
      * C++ counterpart of .NET HashSet<T>.EnsureCapacity(int).
      * @param capacity The minimum number of elements the set should support.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
-    void EnsureCapacity(intcs capacity) { set_.reserve(static_cast<std::size_t>(capacity)); }
+    void EnsureCapacity(intcs capacity) {
+        if (capacity < 0)
+            throw System::ArgumentOutOfRangeException("capacity");
+        set_.reserve(static_cast<std::size_t>(capacity));
+    }
 
     /**
      * @brief Reduces memory usage by shrinking the bucket array to fit the current element count.

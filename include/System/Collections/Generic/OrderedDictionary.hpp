@@ -47,8 +47,11 @@ public:
      *
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>(int capacity).
      * @param capacity The initial number of elements the dictionary can hold without resizing.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
     explicit OrderedDictionary(intcs capacity) {
+        if (capacity < 0)
+            throw System::ArgumentOutOfRangeException("capacity");
         entries_.reserve(static_cast<std::size_t>(capacity));
         keyIndex_.reserve(static_cast<std::size_t>(capacity));
     }
@@ -266,8 +269,11 @@ public:
      * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.EnsureCapacity(int).
      * @param capacity The minimum capacity to ensure.
      * @return The new capacity.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
     intcs EnsureCapacity(intcs capacity) {
+        if (capacity < 0)
+            throw System::ArgumentOutOfRangeException("capacity");
         auto cap = static_cast<std::size_t>(capacity);
         if (entries_.capacity() < cap) entries_.reserve(cap);
         return static_cast<intcs>(entries_.capacity());

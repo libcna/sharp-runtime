@@ -9,6 +9,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Generic {
@@ -189,8 +190,11 @@ public:
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.EnsureCapacity(int).
      * @param capacity The minimum number of entries the dictionary should be able to hold.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
     void EnsureCapacity(intcs capacity) {
+        if (capacity < 0)
+            throw System::ArgumentOutOfRangeException("capacity");
         map_.reserve(static_cast<std::size_t>(capacity));
     }
 

@@ -5,6 +5,7 @@
 #include <set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -220,8 +221,11 @@ public:
      * @param lower The minimum value (inclusive).
      * @param upper The maximum value (inclusive).
      * @return A new SortedSet<T> containing elements in the range.
+     * @throws System::ArgumentException if @p lower is greater than @p upper.
      */
     [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {
+        if (lower > upper)
+            throw System::ArgumentException("lowerValue is greater than upperValue.", "lowerValue");
         SortedSet<T> view;
         for (auto it = data_.lower_bound(lower); it != data_.end() && !(*it > upper); ++it)
             view.Add(*it);

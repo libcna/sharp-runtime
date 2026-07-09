@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -113,9 +114,12 @@ public:
      * @param list   The list to insert into.
      * @param index  Zero-based index at which insertion begins.
      * @param source Elements to insert.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than the list's size.
      */
     template<typename T>
     static void InsertRange(std::vector<T>& list, intcs index, const std::vector<T>& source) {
+        if (index < 0 || static_cast<std::size_t>(index) > list.size())
+            throw System::ArgumentOutOfRangeException("index");
         list.insert(list.begin() + index, source.begin(), source.end());
     }
 };

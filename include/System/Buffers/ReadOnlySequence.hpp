@@ -3,7 +3,6 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstddef>
-#include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -108,7 +107,7 @@ namespace System::Buffers {
             intcs s = start.GetInteger();
             intcs e = end.GetInteger();
             if (s < start_ || e > end_ || s > e)
-                throw std::out_of_range("ReadOnlySequence::Slice out of range");
+                throw System::ArgumentOutOfRangeException("start");
             ReadOnlySequence<T> result;
             result.data_  = data_;
             result.start_ = s;
@@ -183,7 +182,7 @@ namespace System::Buffers {
                 throw ArgumentOutOfRangeException("offset");
             intcs pos = origin.GetInteger() + static_cast<intcs>(offset);
             if (pos < start_ || pos > end_)
-                throw std::out_of_range("ReadOnlySequence::GetPosition out of range");
+                throw ArgumentOutOfRangeException("offset");
             return System::SequencePosition(nullptr, pos);
         }
 
@@ -232,12 +231,12 @@ namespace System::Buffers {
          * @brief Copies the sequence into @p destination.
          *
          * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.CopyTo(Span&lt;T&gt;).
-         * @throws std::out_of_range if destination is too small.
+         * @throws System::ArgumentOutOfRangeException if destination is too small.
          */
         void CopyTo(System::Span<T> destination) const {
             intcs len = end_ - start_;
             if (destination.getLengthProperty() < len)
-                throw std::out_of_range("ReadOnlySequence::CopyTo destination too small");
+                throw System::ArgumentOutOfRangeException("destination");
             std::copy(data_.begin() + start_, data_.begin() + end_,
                       destination.getPointer());
         }

@@ -347,8 +347,11 @@ class List : public IList<T> {
          * @param item       The value to locate.
          * @param startIndex The zero-based index to start searching at.
          * @return The index of the first occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or greater than Count.
          */
         [[nodiscard]] intcs IndexOf(const T& item, intcs startIndex) const {
+            if (startIndex < 0 || startIndex > static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i < static_cast<intcs>(items_.size()); ++i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
@@ -374,8 +377,11 @@ class List : public IList<T> {
          * @param item       The value to locate.
          * @param startIndex The zero-based index to start searching backward from.
          * @return The index of the last occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or >= Count.
          */
         [[nodiscard]] intcs LastIndexOf(const T& item, intcs startIndex) const {
+            if (startIndex < 0 || startIndex >= static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
@@ -396,8 +402,11 @@ class List : public IList<T> {
          *
          * C++ counterpart of .NET List<T>.EnsureCapacity(int).
          * @param capacity The minimum capacity to ensure.
+         * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
          */
         void EnsureCapacity(intcs capacity) {
+            if (capacity < 0)
+                throw System::ArgumentOutOfRangeException("capacity");
             if (capacity > static_cast<intcs>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
         }

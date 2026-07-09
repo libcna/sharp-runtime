@@ -237,7 +237,7 @@ TEST(ReadOnlySequenceTests, Slice_FromStart_CorrectLength) {
 TEST(ReadOnlySequenceTests, GetPosition_OutOfRange_Throws) {
     uint8_t data[] = {1, 2};
     ReadOnlySequence<uint8_t> seq(data, 2);
-    EXPECT_THROW(seq.GetPosition(10), std::out_of_range);
+    EXPECT_THROW(seq.GetPosition(10), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
