@@ -369,6 +369,11 @@ TEST(FileNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw FileNotFoundException("err"), IOException);
 }
 
+TEST(FileNotFoundExceptionTests, HResult_MatchesDotNet) {
+    FileNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070002));
+}
+
 TEST(FileNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(FileNotFoundException("wrapped", std::exception_ptr{}));
 }
@@ -731,6 +736,11 @@ TEST(PathTooLongExceptionTests, MessageCtor_WhatContainsMessage) {
 TEST(FileLoadExceptionTests, DefaultCtor_WhatNotEmpty) {
     FileLoadException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(FileLoadExceptionTests, HResult_MatchesDotNet) {
+    FileLoadException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131621));
 }
 
 TEST(FileLoadExceptionTests, MessageCtor_WhatContainsMessage) {

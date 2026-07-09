@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ObjectDisposedException.hpp"
 
@@ -14,6 +15,8 @@ namespace System::IO {
         : stream_(stream), leaveOpen_(leaveOpen) {
         if (!stream_)
             throw System::ArgumentNullException("stream");
+        if (!stream_->getCanWriteProperty())
+            throw System::ArgumentException("Stream was not writable.");
     }
 
     BinaryWriter::~BinaryWriter() {
