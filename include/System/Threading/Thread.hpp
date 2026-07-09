@@ -220,13 +220,7 @@ namespace System::Threading {
          * @brief Returns the ID of the processor on which the current thread is running.
          * @return Processor ID (best-effort; may be stale immediately).
          */
-        [[nodiscard]] static int GetCurrentProcessorId() {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-            return static_cast<int>(sched_getcpu());
-#else
-            return 0;
-#endif
-        }
+        [[nodiscard]] static int GetCurrentProcessorId();
 
         // -----------------------------------------------------------------------
         // CurrentThread proxy

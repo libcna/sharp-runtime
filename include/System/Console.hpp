@@ -261,37 +261,19 @@ namespace System {
          * @brief Gets a value indicating whether standard input has been redirected.
          * @return true if stdin is not a terminal.
          */
-        [[nodiscard]] static bool getIsInputRedirectedProperty() {
-#if defined(__linux__) || defined(__APPLE__)
-            return !isatty(fileno(stdin));
-#else
-            return false;
-#endif
-        }
+        [[nodiscard]] static bool getIsInputRedirectedProperty();
 
         /**
          * @brief Gets a value indicating whether standard output has been redirected.
          * @return true if stdout is not a terminal.
          */
-        [[nodiscard]] static bool getIsOutputRedirectedProperty() {
-#if defined(__linux__) || defined(__APPLE__)
-            return !isatty(fileno(stdout));
-#else
-            return false;
-#endif
-        }
+        [[nodiscard]] static bool getIsOutputRedirectedProperty();
 
         /**
          * @brief Gets a value indicating whether standard error has been redirected.
          * @return true if stderr is not a terminal.
          */
-        [[nodiscard]] static bool getIsErrorRedirectedProperty() {
-#if defined(__linux__) || defined(__APPLE__)
-            return !isatty(fileno(stderr));
-#else
-            return false;
-#endif
-        }
+        [[nodiscard]] static bool getIsErrorRedirectedProperty();
 
         // -----------------------------------------------------------------------
         // Input control
