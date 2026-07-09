@@ -568,7 +568,7 @@ namespace System
          * @brief Returns @p length characters of @p value starting at @p startIndex.
          *
          * C++ counterpart of .NET String.ToCharArray(int, int).
-         * @throws std::out_of_range if startIndex or length are out of bounds.
+         * @throws System::ArgumentOutOfRangeException if startIndex or length are out of bounds.
          */
         static std::vector<char> ToCharArray(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length);
 
