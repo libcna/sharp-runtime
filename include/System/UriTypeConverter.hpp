@@ -3,7 +3,6 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
-#include <stdexcept>
 #include "System/Uri.hpp"
 
 namespace System {
@@ -46,11 +45,9 @@ namespace System {
          * C++ counterpart of .NET UriTypeConverter.ConvertFrom(ITypeDescriptorContext, CultureInfo, object).
          * @param text The string representation of a URI.
          * @return A Uri constructed from @p text.
-         * @throws std::invalid_argument if @p text is empty.
+         * @throws System::UriFormatException if @p text is empty or malformed.
          */
         [[nodiscard]] virtual Uri ConvertFrom(const std::string& text) const {
-            if (text.empty())
-                throw std::invalid_argument("UriTypeConverter: cannot convert empty string to Uri.");
             return Uri(text);
         }
 

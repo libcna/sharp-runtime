@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/UriBuilder.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
 
@@ -97,7 +98,7 @@ TEST(UriBuilderTest, SchemeHostPortPathFragmentExtraCtor) {
 }
 
 TEST(UriBuilderTest, ExtraValue_InvalidPrefix_Throws) {
-    EXPECT_THROW(UriBuilder("https", "example.com", -1, "/x", "bad"), std::invalid_argument);
+    EXPECT_THROW(UriBuilder("https", "example.com", -1, "/x", "bad"), System::ArgumentException);
 }
 
 TEST(UriBuilderTest, Port_OutOfRange_Throws) {

@@ -56,14 +56,14 @@ namespace System {
         /**
          * @brief Constructs a Uri from an absolute or relative URI string.
          *
-         * @throws std::invalid_argument if the string is empty or the scheme is malformed.
+         * @throws System::UriFormatException if the string is empty or the scheme is malformed.
          */
         explicit Uri(const std::string& uriString);
 
         /**
          * @brief Constructs a Uri from a string, enforcing the specified kind.
          *
-         * @throws std::invalid_argument if the URI does not match the requested kind.
+         * @throws System::UriFormatException if the URI does not match the requested kind.
          */
         Uri(const std::string& uriString, UriKind uriKind);
 
@@ -72,7 +72,7 @@ namespace System {
          *
          * If @p relativeUri already contains a scheme, it is parsed as an independent URI.
          *
-         * @throws std::invalid_argument if @p baseUri is not absolute.
+         * @throws System::ArgumentOutOfRangeException if @p baseUri is not absolute.
          */
         Uri(const Uri& baseUri, const std::string& relativeUri);
 

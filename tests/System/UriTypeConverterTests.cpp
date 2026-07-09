@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/UriFormatException.hpp"
 #include "System/UriTypeConverter.hpp"
 
 using System::UriTypeConverter;
@@ -25,7 +26,7 @@ TEST(UriTypeConverterTest, ConvertFromString) {
 
 TEST(UriTypeConverterTest, ConvertFromEmptyThrows) {
     UriTypeConverter c;
-    EXPECT_THROW(c.ConvertFrom(""), std::invalid_argument);
+    EXPECT_THROW(c.ConvertFrom(""), System::UriFormatException);
 }
 
 TEST(UriTypeConverterTest, ConvertToString) {

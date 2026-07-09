@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include "System/Uri.hpp"
+#include "System/UriFormatException.hpp"
 
 using System::Uri;
 using System::UriKind;
@@ -171,7 +172,7 @@ TEST(UriTests, Relative_UriKind_Accepted) {
 }
 
 TEST(UriTests, Absolute_UriKind_RejectsRelative) {
-    EXPECT_THROW(Uri("/path/only", UriKind::Absolute), std::invalid_argument);
+    EXPECT_THROW(Uri("/path/only", UriKind::Absolute), System::UriFormatException);
 }
 
 // ---------------------------------------------------------------------------

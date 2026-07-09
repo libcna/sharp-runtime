@@ -2,9 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Uri.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/UriFormatException.hpp"
 #include <cctype>
 #include <functional>
-#include <stdexcept>
 
 namespace System {
 
@@ -45,7 +46,7 @@ namespace {
 
 void Uri::parse(const std::string& uriString) {
     if (uriString.empty())
-        throw std::invalid_argument("URI string must not be empty");
+        throw System::UriFormatException("URI string must not be empty");
 
     auto schemeSep = uriString.find("://");
     std::size_t opaqueColon = std::string::npos;
@@ -88,15 +89,15 @@ void Uri::parse(const std::string& uriString) {
 
     scheme_ = uriString.substr(0, schemeSep);
     if (scheme_.empty())
-        throw std::invalid_argument("URI scheme must not be empty");
+        throw System::UriFormatException("URI scheme must not be empty");
 
     // validate scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
     for (std::size_t i = 0; i < scheme_.size(); ++i) {
         char c = scheme_[i];
         if (i == 0 && !std::isalpha(static_cast<unsigned char>(c)))
-            throw std::invalid_argument("URI scheme must start with a letter");
+            throw System::UriFormatException("URI scheme must start with a letter");
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '+' && c != '-' && c != '.')
-            throw std::invalid_argument("Invalid character in URI scheme");
+            throw System::UriFormatException("Invalid character in URI scheme");
     }
 
     std::string rest = uriString.substr(schemeSep + 3);
@@ -169,14 +170,14 @@ Uri::Uri(const std::string& uriString) {
 Uri::Uri(const std::string& uriString, UriKind uriKind) {
     parse(uriString);
     if (uriKind == UriKind::Absolute && !isAbsoluteUri_)
-        throw std::invalid_argument("URI must be absolute");
+        throw System::UriFormatException("URI must be absolute");
     if (uriKind == UriKind::Relative && isAbsoluteUri_)
-        throw std::invalid_argument("URI must be relative");
+        throw System::UriFormatException("URI must be relative");
 }
 
 Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
     if (!baseUri.isAbsoluteUri_)
-        throw std::invalid_argument("Base URI must be absolute");
+        throw System::ArgumentOutOfRangeException("baseUri");
     if (relativeUri.empty()) {
         *this = baseUri;
         return;
