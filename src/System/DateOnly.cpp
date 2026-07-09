@@ -11,6 +11,14 @@
 
 namespace System {
 
+DateOnly::DateOnly(intcs year, intcs month, intcs day)
+    : year_(year), month_(month), day_(day) {
+    // Delegates validation to DateTime's constructor (the single source of truth for
+    // calendar-date validity in this codebase), matching .NET's own
+    // DateOnly(int,int,int) => DayNumberFromDateTime(new DateTime(year, month, day)).
+    (void)DateTime(year, month, day);
+}
+
 const DateOnly DateOnly::MinValue{1, 1, 1};
 const DateOnly DateOnly::MaxValue{9999, 12, 31};
 
@@ -99,7 +107,13 @@ bool DateOnly::TryParse(const std::string& s, DateOnly& result) {
     if (s.size() < 10 || s[4] != '-' || s[7] != '-') return false;
     if (std::sscanf(s.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return false;
     if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return false;
-    result = DateOnly(y, m, d);
+    try {
+        result = DateOnly(y, m, d);
+    } catch (...) {
+        // Rejects dates with a day that doesn't exist in the given month/year
+        // (e.g. February 30, or February 29 in a non-leap year).
+        return false;
+    }
     return true;
 }
 

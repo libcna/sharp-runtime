@@ -308,6 +308,14 @@ TEST(TimeOnlyTests, OperatorMinus_OneHourApart) {
     EXPECT_DOUBLE_EQ(diff.getTotalHoursProperty(), 1.0);
 }
 
+TEST(TimeOnlyTests, OperatorMinus_WrapsAroundMidnight_StaysNonNegative) {
+    // .NET "circular clock" semantics: t1 earlier than t2 wraps to a
+    // positive elapsed time through midnight, never negative.
+    TimeOnly t1(1, 0), t2(23, 0);
+    TimeSpan diff = t1 - t2;
+    EXPECT_DOUBLE_EQ(diff.getTotalHoursProperty(), 2.0);
+}
+
 // ---------------------------------------------------------------------------
 // Comparison operators
 // ---------------------------------------------------------------------------

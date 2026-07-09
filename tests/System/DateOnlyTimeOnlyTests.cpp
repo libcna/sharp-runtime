@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateOnly.hpp"
 #include "System/DateTime.hpp"
 #include "System/FormatException.hpp"
@@ -17,6 +18,28 @@ using System::TimeSpan;
 // ===========================================================================
 // DateOnly — AddDays / AddMonths / AddYears
 // ===========================================================================
+
+TEST(DateOnlyTests, Constructor_InvalidDayForMonth_Throws) {
+    EXPECT_THROW(DateOnly(2023, 2, 30), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateOnlyTests, Constructor_Feb29_NonLeapYear_Throws) {
+    EXPECT_THROW(DateOnly(2023, 2, 29), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateOnlyTests, Constructor_Feb29_LeapYear_Succeeds) {
+    EXPECT_NO_THROW(DateOnly(2024, 2, 29));
+}
+
+TEST(DateOnlyTests, Constructor_MonthOutOfRange_Throws) {
+    EXPECT_THROW(DateOnly(2023, 13, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateOnlyTests, TryParse_InvalidDayForMonth_ReturnsFalse) {
+    DateOnly d;
+    EXPECT_FALSE(DateOnly::TryParse("2023-02-30", d));
+    EXPECT_FALSE(DateOnly::TryParse("2023-02-29", d)); // non-leap year
+}
 
 TEST(DateOnlyTests, AddDays_Positive) {
     DateOnly d(2024, 1, 30);

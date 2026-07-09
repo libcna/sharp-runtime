@@ -38,8 +38,9 @@ namespace System {
          * @param year  The year (1–9999).
          * @param month The month (1–12).
          * @param day   The day (1–28/29/30/31 depending on month/year).
+         * @throws System::ArgumentOutOfRangeException if the year/month/day combination is not a valid date.
          */
-        DateOnly(intcs year, intcs month, intcs day) : year_(year), month_(month), day_(day) {}
+        DateOnly(intcs year, intcs month, intcs day);
 
         /** @brief Returns the year component of this date. */
         [[nodiscard]] intcs getYearProperty()  const { return year_; }
