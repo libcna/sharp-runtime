@@ -2,9 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/GZipStream.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/IO/InvalidDataException.hpp"
 #include "System/NotSupportedException.hpp"
 #include <zlib.h>
-#include <stdexcept>
 #include <string>
 
 namespace System::IO::Compression {
@@ -32,11 +33,11 @@ GZipStream::GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen)
 {
     if (mode_ == CompressionMode::Decompress) {
         if (inflateInit2(&state_->zs, 16 + MAX_WBITS) != Z_OK)
-            throw std::runtime_error("GZipStream: inflateInit2 failed");
+            throw System::IO::IOException("GZipStream: inflateInit2 failed");
     } else {
         if (deflateInit2(&state_->zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
                          16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK)
-            throw std::runtime_error("GZipStream: deflateInit2 failed");
+            throw System::IO::IOException("GZipStream: deflateInit2 failed");
     }
     state_->initialized = true;
 }
@@ -78,7 +79,7 @@ SharpRuntime::intcs GZipStream::Read(SharpRuntime::bytecs* buffer,
         int ret = inflate(&s.zs, Z_NO_FLUSH);
         if (ret == Z_STREAM_END) { s.finished = true; break; }
         if (ret != Z_OK && ret != Z_BUF_ERROR)
-            throw std::runtime_error("GZipStream: inflate error " + std::to_string(ret));
+            throw System::IO::InvalidDataException("GZipStream: invalid or corrupt compressed data (zlib error " + std::to_string(ret) + ")");
     }
     return count - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
 }
@@ -102,7 +103,7 @@ void GZipStream::Write(const SharpRuntime::bytecs* buffer,
         s.zs.avail_out = ZlibGZipState::BUFSIZE;
         int ret = deflate(&s.zs, Z_NO_FLUSH);
         if (ret != Z_OK && ret != Z_BUF_ERROR)
-            throw std::runtime_error("GZipStream: deflate error " + std::to_string(ret));
+            throw System::IO::IOException("GZipStream: deflate error " + std::to_string(ret));
         SharpRuntime::intcs produced =
             ZlibGZipState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
         if (produced > 0)

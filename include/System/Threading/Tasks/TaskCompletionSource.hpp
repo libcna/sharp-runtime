@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include "System/Threading/Tasks/Task.hpp"
+#include "System/Threading/Tasks/TaskCanceledException.hpp"
 
 namespace System::Threading::Tasks {
 
@@ -52,7 +53,7 @@ namespace System::Threading::Tasks {
         void SetCanceled() {
             if (completed_) throw std::invalid_argument("TaskCompletionSource already completed.");
             completed_ = true;
-            promise_.set_exception(std::make_exception_ptr(std::runtime_error("Task was canceled.")));
+            promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
         }
 
         /** Attempts to set a successful result; returns false if already completed. */
@@ -115,7 +116,7 @@ namespace System::Threading::Tasks {
         void SetCanceled() {
             if (completed_) throw std::invalid_argument("TaskCompletionSource already completed.");
             completed_ = true;
-            promise_.set_exception(std::make_exception_ptr(std::runtime_error("Task was canceled.")));
+            promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
         }
 
         /** Attempts to complete the task; returns false if already completed. */

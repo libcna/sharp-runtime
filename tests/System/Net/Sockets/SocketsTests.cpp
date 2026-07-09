@@ -4,10 +4,12 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <stdexcept>
+#include "System/InvalidOperationException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/NetworkStream.hpp"
+#include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/Net/Sockets/UdpClient.hpp"
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -38,19 +40,19 @@ TEST(TcpClientTests, EndPointConstructor_NoThrow) {
 
 TEST(TcpClientTests, Connect_InvalidHostname_Throws) {
     TcpClient client;
-    EXPECT_THROW(client.Connect("this.host.does.not.exist.invalid.example", 80), std::runtime_error);
+    EXPECT_THROW(client.Connect("this.host.does.not.exist.invalid.example", 80), System::Net::Sockets::SocketException);
 }
 
 TEST(TcpClientTests, Connect_ConnectionRefused_Throws) {
     // Port 1 on loopback is almost certainly not listening.
     TcpClient client;
-    EXPECT_THROW(client.Connect("127.0.0.1", 1), std::runtime_error);
+    EXPECT_THROW(client.Connect("127.0.0.1", 1), System::Net::Sockets::SocketException);
 }
 
 TEST(TcpClientTests, Connect_EndPoint_ConnectionRefused_Throws) {
     TcpClient client;
     IPEndPoint ep(IPAddress::Loopback, 1);
-    EXPECT_THROW(client.Connect(ep), std::runtime_error);
+    EXPECT_THROW(client.Connect(ep), System::Net::Sockets::SocketException);
 }
 
 TEST(TcpClientTests, Close_NoThrow) {
@@ -70,7 +72,7 @@ TEST(TcpClientTests, Available_ReturnsZero_WhenNotConnected) {
 
 TEST(TcpClientTests, GetStream_Throws_WhenNotConnected) {
     TcpClient client;
-    EXPECT_THROW((void)client.GetStream(), std::runtime_error);
+    EXPECT_THROW((void)client.GetStream(), System::InvalidOperationException);
 }
 
 // ===========================================================================
@@ -146,13 +148,13 @@ TEST(UdpClientTests, Connect_EndPoint_NoThrow) {
 
 TEST(UdpClientTests, Connect_InvalidHostname_Throws) {
     UdpClient client;
-    EXPECT_THROW(client.Connect("this.host.does.not.exist.invalid.example", 5000), std::runtime_error);
+    EXPECT_THROW(client.Connect("this.host.does.not.exist.invalid.example", 5000), System::Net::Sockets::SocketException);
 }
 
 TEST(UdpClientTests, Send_ThrowsWithoutConnect) {
     UdpClient client;
     std::vector<SharpRuntime::bytecs> data = {0x01, 0x02, 0x03};
-    EXPECT_THROW((void)client.Send(data, 3), std::runtime_error);
+    EXPECT_THROW((void)client.Send(data, 3), System::InvalidOperationException);
 }
 
 TEST(UdpClientTests, Close_NoThrow) {

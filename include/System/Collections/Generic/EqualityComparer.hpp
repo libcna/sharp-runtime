@@ -4,9 +4,9 @@
 #pragma once
 #include <functional>
 #include <memory>
-#include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Collections/Generic/IEqualityComparer.hpp"
+#include "System/NotSupportedException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -69,7 +69,8 @@ public:
      * C++ counterpart of .NET EqualityComparer<T>.Create(Func<T,T,bool>, Func<T,int>).
      * @param equals      A function that determines equality of two T values.
      * @param getHashCode A function that returns a hash code for a T value (optional;
-     *                    throws std::runtime_error if called when not provided).
+     *                    throws System::NotSupportedException if called when not provided,
+     *                    matching .NET's EqualityComparer<T>.Create).
      * @return A shared_ptr to a new EqualityComparer wrapping the given functions.
      */
     static std::shared_ptr<EqualityComparer<T>> Create(
@@ -86,7 +87,7 @@ public:
                 return equals_(x, y);
             }
             [[nodiscard]] intcs GetHashCode(const T& obj) const override {
-                if (!getHashCode_) throw std::runtime_error("GetHashCode not provided.");
+                if (!getHashCode_) throw System::NotSupportedException();
                 return getHashCode_(obj);
             }
         };

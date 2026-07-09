@@ -307,5 +307,5 @@ TEST(ModuleHandleTests, GetHashCode_Zero) {
 }
 TEST(ModuleHandleTests, ResolveTypeHandle_Throws) {
     System::ModuleHandle mh;
-    EXPECT_THROW(mh.ResolveTypeHandle(1), std::runtime_error);
+    EXPECT_THROW(mh.ResolveTypeHandle(1), System::NotSupportedException);
 }

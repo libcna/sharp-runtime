@@ -2,9 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/DeflateStream.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/IO/InvalidDataException.hpp"
 #include "System/NotSupportedException.hpp"
 #include <zlib.h>
-#include <stdexcept>
 #include <string>
 
 namespace System::IO::Compression {
@@ -33,11 +34,11 @@ DeflateStream::DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpe
     if (mode_ == CompressionMode::Decompress) {
         // -MAX_WBITS: raw deflate, no zlib wrapper
         if (inflateInit2(&state_->zs, -MAX_WBITS) != Z_OK)
-            throw std::runtime_error("DeflateStream: inflateInit2 failed");
+            throw System::IO::IOException("DeflateStream: inflateInit2 failed");
     } else {
         if (deflateInit2(&state_->zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
                          -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK)
-            throw std::runtime_error("DeflateStream: deflateInit2 failed");
+            throw System::IO::IOException("DeflateStream: deflateInit2 failed");
     }
     state_->initialized = true;
 }
@@ -79,7 +80,7 @@ SharpRuntime::intcs DeflateStream::Read(SharpRuntime::bytecs* buffer,
         int ret = inflate(&s.zs, Z_NO_FLUSH);
         if (ret == Z_STREAM_END) { s.finished = true; break; }
         if (ret != Z_OK && ret != Z_BUF_ERROR)
-            throw std::runtime_error("DeflateStream: inflate error " + std::to_string(ret));
+            throw System::IO::InvalidDataException("DeflateStream: invalid or corrupt compressed data (zlib error " + std::to_string(ret) + ")");
     }
     return count - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
 }
@@ -103,7 +104,7 @@ void DeflateStream::Write(const SharpRuntime::bytecs* buffer,
         s.zs.avail_out = ZlibDeflateState::BUFSIZE;
         int ret = deflate(&s.zs, Z_NO_FLUSH);
         if (ret != Z_OK && ret != Z_BUF_ERROR)
-            throw std::runtime_error("DeflateStream: deflate error " + std::to_string(ret));
+            throw System::IO::IOException("DeflateStream: deflate error " + std::to_string(ret));
         SharpRuntime::intcs produced =
             ZlibDeflateState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
         if (produced > 0)

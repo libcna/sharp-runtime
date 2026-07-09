@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/ZipArchive.hpp"
+#include "System/IO/IOException.hpp"
+#include "System/IO/InvalidDataException.hpp"
 #include "System/IO/MemoryStream.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/NotSupportedException.hpp"
 #include <miniz/miniz.h>
-#include <stdexcept>
 #include <cstring>
 #include <algorithm>
 
@@ -96,7 +99,7 @@ long long ZipArchiveEntry::getLengthProperty() const {
 }
 
 System::IO::Stream* ZipArchiveEntry::Open() {
-    if (!state_) throw std::runtime_error("ZipArchiveEntry::Open: invalid entry");
+    if (!state_) throw System::InvalidOperationException("ZipArchiveEntry::Open: invalid entry");
 
     if (state_->isWrite) {
         // Write-mode: return a stream that writes into our pending buffer
@@ -106,12 +109,12 @@ System::IO::Stream* ZipArchiveEntry::Open() {
     // Read-mode: extract via miniz
     auto& arc = *state_->archive;
     if (!arc.readerOpen)
-        throw std::runtime_error("ZipArchiveEntry::Open: archive not open for reading");
+        throw System::InvalidOperationException("ZipArchiveEntry::Open: archive not open for reading");
 
     size_t outSize = 0;
     void* raw = mz_zip_reader_extract_to_heap(&arc.zip, state_->index, &outSize, 0);
     if (!raw)
-        throw std::runtime_error("ZipArchiveEntry::Open: extract failed for " + state_->fullName);
+        throw System::IO::InvalidDataException("ZipArchiveEntry::Open: extract failed for " + state_->fullName);
 
     auto* ms = new System::IO::MemoryStream(
         reinterpret_cast<SharpRuntime::bytecs*>(raw),
@@ -123,7 +126,7 @@ System::IO::Stream* ZipArchiveEntry::Open() {
 void ZipArchiveEntry::Delete() {
     if (!state_) return;
     if (state_->archive->mode != ZipArchiveMode::Update)
-        throw std::runtime_error("ZipArchiveEntry::Delete: archive must be in Update mode");
+        throw System::NotSupportedException("ZipArchiveEntry::Delete: archive must be in Update mode");
     // Mark as deleted — simplified: just clear the entry state
     state_ = nullptr;
 }
@@ -146,7 +149,7 @@ static void openReader(ZipArchiveState& st) {
         ok = mz_zip_reader_init_mem(&st.zip, st.memBuf.data(), st.memBuf.size(), 0);
     }
     if (!ok)
-        throw std::runtime_error("ZipArchive: failed to open zip for reading: " +
+        throw System::IO::InvalidDataException("ZipArchive: failed to open zip for reading: " +
                                  (st.filePath.empty() ? "(memory)" : st.filePath));
     st.readerOpen = true;
 }
@@ -157,7 +160,7 @@ static void flushWriter(ZipArchiveState& st) {
     if (!st.filePath.empty()) {
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_file(&writer, st.filePath.c_str(), 0))
-            throw std::runtime_error("ZipArchive: failed to init writer for " + st.filePath);
+            throw System::IO::IOException("ZipArchive: failed to init writer for " + st.filePath);
         for (auto& e : st.pending) {
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
@@ -169,7 +172,7 @@ static void flushWriter(ZipArchiveState& st) {
         // Memory-based write — store result back in memBuf
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_heap(&writer, 0, 65536))
-            throw std::runtime_error("ZipArchive: failed to init heap writer");
+            throw System::IO::IOException("ZipArchive: failed to init heap writer");
         for (auto& e : st.pending) {
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
@@ -261,9 +264,9 @@ ZipArchiveEntry ZipArchive::GetEntry(const std::string& entryName) const {
 
 ZipArchiveEntry ZipArchive::CreateEntry(const std::string& entryName, CompressionLevel compressionLevel) {
     if (!state_)
-        throw std::runtime_error("ZipArchive::CreateEntry: archive not open");
+        throw System::InvalidOperationException("ZipArchive::CreateEntry: archive not open");
     if (state_->mode == ZipArchiveMode::Read)
-        throw std::runtime_error("ZipArchive::CreateEntry: archive is read-only");
+        throw System::NotSupportedException("ZipArchive::CreateEntry: archive is read-only");
 
     auto buf = std::make_shared<std::vector<SharpRuntime::bytecs>>();
     state_->pending.push_back({entryName, buf, ToMinizLevel(compressionLevel)});

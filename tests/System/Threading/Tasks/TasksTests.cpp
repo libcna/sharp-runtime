@@ -178,7 +178,7 @@ TEST(TaskCompletionSourceTests, TrySetException_FirstTime_True) {
 TEST(TaskCompletionSourceTests, SetCanceled_GetResult_Throws) {
     TaskCompletionSource<int> tcs;
     tcs.SetCanceled();
-    EXPECT_THROW(tcs.GetResult(), std::runtime_error);
+    EXPECT_THROW(tcs.GetResult(), System::Threading::Tasks::TaskCanceledException);
 }
 
 TEST(TaskCompletionSourceTests, TrySetCanceled_FirstTime_True) {
@@ -222,7 +222,7 @@ TEST(TaskCompletionSourceVoidTests, SetException_Wait_Throws) {
 TEST(TaskCompletionSourceVoidTests, SetCanceled_Wait_Throws) {
     TaskCompletionSource<void> tcs;
     tcs.SetCanceled();
-    EXPECT_THROW(tcs.Wait(), std::runtime_error);
+    EXPECT_THROW(tcs.Wait(), System::Threading::Tasks::TaskCanceledException);
 }
 
 // ===========================================================================

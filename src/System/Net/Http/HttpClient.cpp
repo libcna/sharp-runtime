@@ -18,6 +18,7 @@
 
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/Http/ByteArrayContent.hpp"
+#include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/StringContent.hpp"
 #include <algorithm>
 #include <cctype>
@@ -112,7 +113,7 @@ static SocketFd connectToHost(const std::string& host, int port) {
     std::string portStr  = std::to_string(port);
     int rv = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &res);
     if (rv != 0)
-        throw std::runtime_error("HttpClient: DNS resolution failed for '" + host + "'.");
+        throw HttpRequestException("HttpClient: DNS resolution failed for '" + host + "'.");
 
     SocketFd fd = kInvalidSocket;
     for (auto* p = res; p != nullptr; p = p->ai_next) {
@@ -125,7 +126,7 @@ static SocketFd connectToHost(const std::string& host, int port) {
     freeaddrinfo(res);
 
     if (fd == kInvalidSocket)
-        throw std::runtime_error(
+        throw HttpRequestException(
             "HttpClient: could not connect to " + host + ":" + std::to_string(port));
     return fd;
 }
@@ -136,7 +137,7 @@ static void sendAll(SocketFd fd, const std::string& data) {
         int n = static_cast<int>(
             ::send(fd, data.c_str() + sent,
                    static_cast<int>(data.size() - sent), 0));
-        if (n <= 0) throw std::runtime_error("HttpClient: send() failed.");
+        if (n <= 0) throw HttpRequestException("HttpClient: send() failed.");
         sent += static_cast<size_t>(n);
     }
 }

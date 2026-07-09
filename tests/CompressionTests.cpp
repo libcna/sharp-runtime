@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include "System/IO/Compression/GZipStream.hpp"
 #include "System/IO/Compression/DeflateStream.hpp"
+#include "System/IO/InvalidDataException.hpp"
 #include "System/IO/MemoryStream.hpp"
 #include "System/NotSupportedException.hpp"
 #include <string>
@@ -245,5 +246,5 @@ TEST(DeflateStream, GZipCannotDecompressRawDeflate) {
     MemoryStream src(deflated.data(), static_cast<intcs>(deflated.size()));
     GZipStream gz(&src, CompressionMode::Decompress, true);
     std::vector<bytecs> out(1024);
-    EXPECT_THROW(gz.Read(out.data(), 0, static_cast<intcs>(out.size())), std::runtime_error);
+    EXPECT_THROW(gz.Read(out.data(), 0, static_cast<intcs>(out.size())), System::IO::InvalidDataException);
 }

@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
+#include "System/NotSupportedException.hpp"
 
 namespace System {
 
@@ -34,9 +34,9 @@ struct ModuleHandle {
 
     // Token-resolution methods — all throw NotSupportedException.
 
-    /** @brief Not supported — throws std::runtime_error. */
+    /** @brief Not supported — throws NotSupportedException. */
     [[noreturn]] RuntimeTypeHandle ResolveTypeHandle(int typeToken) const {
-        throw std::runtime_error("ModuleHandle.ResolveTypeHandle is not supported.");
+        throw System::NotSupportedException("ModuleHandle.ResolveTypeHandle is not supported.");
     }
 };
 

@@ -13,6 +13,9 @@
 #include "System/ReadOnlyMemory.hpp"
 #include "System/IO/Stream.hpp"
 #include "System/IO/MemoryStream.hpp"
+#include "System/IO/File.hpp"
+#include "System/IO/FileNotFoundException.hpp"
+#include "System/IO/IOException.hpp"
 
 namespace System {
 
@@ -201,7 +204,8 @@ namespace System {
          * @brief Creates a BinaryData instance from the specified file.
          * @param path Path to the file.
          * @return New BinaryData instance containing all bytes from the file.
-         * @throws std::runtime_error if the file cannot be opened.
+         * @throws System::IO::FileNotFoundException if the file does not exist.
+         * @throws System::IO::IOException if the file exists but cannot be opened.
          */
         [[nodiscard]] static BinaryData FromFile(const std::string& path) {
             return FromFile(path, "");
@@ -212,12 +216,15 @@ namespace System {
          * @param path      Path to the file.
          * @param mediaType MIME type string.
          * @return New BinaryData instance containing all bytes from the file.
-         * @throws std::runtime_error if the file cannot be opened.
+         * @throws System::IO::FileNotFoundException if the file does not exist.
+         * @throws System::IO::IOException if the file exists but cannot be opened.
          */
         [[nodiscard]] static BinaryData FromFile(const std::string& path,
                                                   std::string mediaType) {
+            if (!System::IO::File::Exists(path))
+                throw System::IO::FileNotFoundException("Unable to find the specified file.", path);
             std::ifstream file(path, std::ios::binary);
-            if (!file) throw std::runtime_error("BinaryData::FromFile: cannot open " + path);
+            if (!file) throw System::IO::IOException("Failed to open file: " + path);
             std::vector<uint8_t> bytes(
                 (std::istreambuf_iterator<char>(file)),
                 std::istreambuf_iterator<char>());
