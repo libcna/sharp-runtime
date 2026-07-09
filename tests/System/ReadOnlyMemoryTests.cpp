@@ -42,8 +42,8 @@ TEST(ReadOnlyMemoryTest, IndexAccess) {
 TEST(ReadOnlyMemoryTest, IndexOutOfRange_Throws) {
     std::vector<int> v = {1, 2};
     ReadOnlyMemory<int> m(v);
-    EXPECT_THROW(m[2], std::out_of_range);
-    EXPECT_THROW(m[-1], std::out_of_range);
+    EXPECT_THROW(m[2], System::ArgumentOutOfRangeException);
+    EXPECT_THROW(m[-1], System::ArgumentOutOfRangeException);
 }
 
 TEST(ReadOnlyMemoryTest, SliceStartLength) {
@@ -66,7 +66,7 @@ TEST(ReadOnlyMemoryTest, SliceStart) {
 TEST(ReadOnlyMemoryTest, SliceOutOfRange_Throws) {
     std::vector<int> v = {1, 2, 3};
     ReadOnlyMemory<int> m(v);
-    EXPECT_THROW(m.Slice(1, 5), std::out_of_range);
+    EXPECT_THROW(m.Slice(1, 5), System::ArgumentOutOfRangeException);
 }
 
 TEST(ReadOnlyMemoryTest, ToArray) {
@@ -145,7 +145,7 @@ TEST(ReadOnlyMemoryTest, CopyTo_DestTooShort_Throws) {
     std::vector<int> dst(1, 0);
     ReadOnlyMemory<int> source(src);
     Memory<int> destination(dst);
-    EXPECT_THROW(source.CopyTo(destination), std::invalid_argument);
+    EXPECT_THROW(source.CopyTo(destination), System::ArgumentException);
 }
 
 TEST(ReadOnlyMemoryTest, TryCopyTo_Success_ReturnsTrue) {

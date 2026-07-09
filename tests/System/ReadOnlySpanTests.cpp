@@ -56,8 +56,8 @@ TEST(ReadOnlySpanTests, Indexer_ReturnsCorrectElement) {
 TEST(ReadOnlySpanTests, Indexer_OutOfRange_Throws) {
     int arr[] = {1};
     ReadOnlySpan<int> s(arr, 1);
-    EXPECT_THROW((void)s[1], std::out_of_range);
-    EXPECT_THROW((void)s[-1], std::out_of_range);
+    EXPECT_THROW((void)s[1], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)s[-1], System::ArgumentOutOfRangeException);
 }
 
 TEST(ReadOnlySpanTests, GetPointer_ReturnsFirstElement) {
@@ -102,8 +102,8 @@ TEST(ReadOnlySpanTests, Slice_StartAndLength) {
 TEST(ReadOnlySpanTests, Slice_OutOfRange_Throws) {
     int arr[] = {1, 2};
     ReadOnlySpan<int> s(arr, 2);
-    EXPECT_THROW((void)s.Slice(3), std::out_of_range);
-    EXPECT_THROW((void)s.Slice(0, 5), std::out_of_range);
+    EXPECT_THROW((void)s.Slice(3), System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)s.Slice(0, 5), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ TEST(ReadOnlySpanTests, CopyTo_DestinationTooShort_Throws) {
     ReadOnlySpan<int> ros(src, 3);
     std::vector<int> dst(2, 0);
     Span<int> sp(dst.data(), 2);
-    EXPECT_THROW(ros.CopyTo(sp), std::invalid_argument);
+    EXPECT_THROW(ros.CopyTo(sp), System::ArgumentException);
 }
 
 TEST(ReadOnlySpanTests, TryCopyTo_Success) {

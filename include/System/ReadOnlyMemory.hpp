@@ -5,8 +5,8 @@
 #include <functional>
 #include <string>
 #include <vector>
-#include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArraySegment.hpp"
 #include "System/Buffers/MemoryHandle.hpp"
 #include "System/Span.hpp"
@@ -103,11 +103,11 @@ namespace System {
 
         /**
          * @brief Element access by index.
-         * @throws std::out_of_range if index is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if index is out of bounds.
          */
         [[nodiscard]] const T& operator[](intcs index) const {
             if (index < 0 || index >= length_)
-                throw std::out_of_range("ReadOnlyMemory index out of range");
+                throw System::ArgumentOutOfRangeException("index");
             return ptr_[index];
         }
 
@@ -115,11 +115,11 @@ namespace System {
          * @brief Returns a slice of this memory starting at @p start with @p length elements.
          *
          * C++ counterpart of .NET ReadOnlyMemory<T>.Slice(int, int).
-         * @throws std::out_of_range if the slice extends outside the current range.
+         * @throws System::ArgumentOutOfRangeException if the slice extends outside the current range.
          */
         [[nodiscard]] ReadOnlyMemory<T> Slice(intcs start, intcs length) const {
             if (start < 0 || length < 0 || start + length > length_)
-                throw std::out_of_range("ReadOnlyMemory slice out of range");
+                throw System::ArgumentOutOfRangeException("start");
             return ReadOnlyMemory<T>(ptr_ + start, length);
         }
 
@@ -127,7 +127,7 @@ namespace System {
          * @brief Returns a slice from @p start to the end of the memory region.
          *
          * C++ counterpart of .NET ReadOnlyMemory<T>.Slice(int).
-         * @throws std::out_of_range if start is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if start is out of bounds.
          */
         [[nodiscard]] ReadOnlyMemory<T> Slice(intcs start) const {
             return Slice(start, length_ - start);
@@ -146,7 +146,7 @@ namespace System {
          * @brief Copies the contents into @p destination.
          *
          * C++ counterpart of .NET ReadOnlyMemory<T>.CopyTo(Memory<T>).
-         * @throws std::invalid_argument if destination is shorter than this region.
+         * @throws System::ArgumentException if destination is shorter than this region.
          */
         void CopyTo(Memory<T>& destination) const {
             getSpanProperty().CopyTo(destination.getSpanProperty());

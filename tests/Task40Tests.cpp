@@ -66,7 +66,7 @@ TEST(SpanTests, IndexOperator_ReadsAndWrites) {
 TEST(SpanTests, IndexOperator_OutOfRange_Throws) {
     int arr[] = {1};
     Span<int> s(arr, 1);
-    EXPECT_THROW(s[1], std::out_of_range);
+    EXPECT_THROW(s[1], System::ArgumentOutOfRangeException);
 }
 
 TEST(SpanTests, Slice_SubRange) {

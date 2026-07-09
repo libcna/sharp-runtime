@@ -5,10 +5,11 @@
 #include <algorithm>
 #include <functional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 #include "System/ArraySegment.hpp"
 #include "System/ReadOnlyMemory.hpp"
@@ -75,14 +76,14 @@ namespace System {
          * @param array  The underlying vector.
          * @param start  Zero-based index of the first element.
          * @param length Number of elements in the region.
-         * @throws std::out_of_range if start or length are out of bounds.
+         * @throws System::ArgumentOutOfRangeException if start or length are out of bounds.
          */
         Memory(std::vector<T>& array, intcs start, intcs length)
             : data_(&array), offset_(start), length_(length)
         {
             if (start < 0 || length < 0 ||
                 start + length > static_cast<intcs>(array.size()))
-                throw std::out_of_range("Memory<T>: start/length out of range");
+                throw System::ArgumentOutOfRangeException("start");
         }
 
         // -----------------------------------------------------------------------
@@ -133,12 +134,12 @@ namespace System {
          *
          * C++ counterpart of .NET Memory&lt;T&gt;.Slice(int).
          * @param start Zero-based start index within this region.
-         * @throws std::out_of_range if @p start is out of range.
+         * @throws System::ArgumentOutOfRangeException if @p start is out of range.
          */
         [[nodiscard]] Memory<T> Slice(intcs start) const
         {
             if (start < 0 || start > length_)
-                throw std::out_of_range("Memory<T>::Slice: start out of range");
+                throw System::ArgumentOutOfRangeException("start");
             if (data_ == nullptr) return Memory<T>{};
             return Memory<T>(*data_, offset_ + start, length_ - start);
         }
@@ -149,12 +150,12 @@ namespace System {
          * C++ counterpart of .NET Memory&lt;T&gt;.Slice(int, int).
          * @param start  Zero-based start index within this region.
          * @param length Number of elements in the slice.
-         * @throws std::out_of_range if parameters are out of range.
+         * @throws System::ArgumentOutOfRangeException if parameters are out of range.
          */
         [[nodiscard]] Memory<T> Slice(intcs start, intcs length) const
         {
             if (start < 0 || length < 0 || start + length > length_)
-                throw std::out_of_range("Memory<T>::Slice: parameters out of range");
+                throw System::ArgumentOutOfRangeException("start");
             if (data_ == nullptr) return Memory<T>{};
             return Memory<T>(*data_, offset_ + start, length);
         }
@@ -167,12 +168,12 @@ namespace System {
          * @brief Copies the contents into @p destination.
          *
          * C++ counterpart of .NET Memory&lt;T&gt;.CopyTo(Memory&lt;T&gt;).
-         * @throws std::invalid_argument if destination is shorter than this region.
+         * @throws System::ArgumentException if destination is shorter than this region.
          */
         void CopyTo(Memory<T>& destination) const
         {
             if (length_ > destination.length_)
-                throw std::invalid_argument("Memory<T>::CopyTo: destination too short");
+                throw System::ArgumentException("Memory<T>::CopyTo: destination too short");
             if (data_ == nullptr || length_ == 0) return;
             std::copy(data_->data() + offset_,
                       data_->data() + offset_ + length_,

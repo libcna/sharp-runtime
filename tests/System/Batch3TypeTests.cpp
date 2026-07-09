@@ -160,7 +160,7 @@ TEST(ReadOnlyMemoryTests, ElementAccess_CorrectValue) {
 TEST(ReadOnlyMemoryTests, OutOfRange_Throws) {
     std::vector<int> v = {1};
     System::ReadOnlyMemory<int> m(v);
-    EXPECT_THROW(m[5], std::out_of_range);
+    EXPECT_THROW(m[5], System::ArgumentOutOfRangeException);
 }
 TEST(ReadOnlyMemoryTests, Slice_CorrectLength) {
     std::vector<int> v = {1, 2, 3, 4, 5};
