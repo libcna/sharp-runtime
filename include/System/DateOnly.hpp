@@ -125,7 +125,7 @@ namespace System {
          *
          * C++ counterpart of .NET DateOnly.AddDays(int).
          */
-        [[nodiscard]] DateOnly AddDays(int n) const;
+        [[nodiscard]] DateOnly AddDays(intcs n) const;
 
         /**
          * @brief Returns a new DateOnly with @p n months added (may be negative).
@@ -133,14 +133,14 @@ namespace System {
          * C++ counterpart of .NET DateOnly.AddMonths(int).
          * Clamps the day to the end of the resulting month when needed.
          */
-        [[nodiscard]] DateOnly AddMonths(int n) const;
+        [[nodiscard]] DateOnly AddMonths(intcs n) const;
 
         /**
          * @brief Returns a new DateOnly with @p n years added (may be negative).
          *
          * C++ counterpart of .NET DateOnly.AddYears(int).
          */
-        [[nodiscard]] DateOnly AddYears(int n) const;
+        [[nodiscard]] DateOnly AddYears(intcs n) const;
 
         /**
          * @brief Extracts the date part from the specified DateTime.

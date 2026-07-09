@@ -4,8 +4,8 @@
 #pragma once
 #include <algorithm>
 #include <cctype>
-#include <stdexcept>
 #include <string>
+#include "System/FormatException.hpp"
 
 namespace System {
 
@@ -30,12 +30,12 @@ namespace System {
          *
          * C++ counterpart of .NET Boolean.Parse(string).
          * Case-insensitive; leading/trailing whitespace is ignored.
-         * @throws std::invalid_argument if the string is not recognised.
+         * @throws System::FormatException if the string is not recognised.
          */
         [[nodiscard]] static bool Parse(const std::string& s) {
             bool result;
             if (!TryParse(s, result))
-                throw std::invalid_argument("String was not recognized as a valid Boolean.");
+                throw System::FormatException("String was not recognized as a valid Boolean.");
             return result;
         }
 

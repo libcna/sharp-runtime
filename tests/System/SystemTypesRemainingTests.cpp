@@ -17,6 +17,7 @@
 #include "System/PlatformID.hpp"
 #include "System/EnvironmentVariableTarget.hpp"
 #include "System/Nullable.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Lazy.hpp"
 #include "System/HashCode.hpp"
@@ -477,7 +478,7 @@ TEST(ArraySegmentTests, OperatorBracket_ReadsCorrectElement) {
 TEST(ArraySegmentTests, OperatorBracket_OutOfRange_Throws) {
     std::vector<int> v = {1, 2, 3};
     ArraySegment<int> seg(v, 0, 2);
-    EXPECT_THROW(seg[5], std::out_of_range);
+    EXPECT_THROW(seg[5], System::ArgumentOutOfRangeException);
 }
 TEST(ArraySegmentTests, Slice_SubSegment) {
     std::vector<int> v = {1, 2, 3, 4, 5};
@@ -489,7 +490,7 @@ TEST(ArraySegmentTests, Slice_SubSegment) {
 }
 TEST(ArraySegmentTests, OutOfRangeCtor_Throws) {
     std::vector<int> v = {1, 2};
-    EXPECT_THROW((ArraySegment<int>(v, 0, 10)), std::out_of_range);
+    EXPECT_THROW((ArraySegment<int>(v, 0, 10)), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
@@ -521,7 +522,7 @@ TEST(IndexTests, End_OffsetEqualsLength) {
     EXPECT_EQ(Index::End().GetOffset(5), 5);
 }
 TEST(IndexTests, NegativeValue_Throws) {
-    EXPECT_THROW(Index(-1), std::out_of_range);
+    EXPECT_THROW(Index(-1), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

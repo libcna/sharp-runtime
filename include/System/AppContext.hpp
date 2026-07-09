@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include "System/AppDomain.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System {
 
@@ -88,11 +89,11 @@ namespace System {
          * @param isEnabled  Set to the switch value on success, or false on failure.
          * @return true if the switch was found and its value was assigned to @p isEnabled;
          *         false if the switch has not been set.
-         * @throws std::invalid_argument if @p switchName is empty.
+         * @throws System::ArgumentException if @p switchName is empty.
          */
         static bool TryGetSwitch(const std::string& switchName, bool& isEnabled) {
             if (switchName.empty())
-                throw std::invalid_argument("switchName cannot be null or empty.");
+                throw System::ArgumentException("The value cannot be an empty string.", "switchName");
             std::lock_guard<std::mutex> lock(mutex_());
             auto& sw = switches_();
             auto it = sw.find(switchName);
@@ -110,11 +111,11 @@ namespace System {
          * C++ counterpart of .NET AppContext.SetSwitch(string, bool).
          * @param switchName The name of the switch.
          * @param isEnabled  The value to assign to the switch.
-         * @throws std::invalid_argument if @p switchName is empty.
+         * @throws System::ArgumentException if @p switchName is empty.
          */
         static void SetSwitch(const std::string& switchName, bool isEnabled) {
             if (switchName.empty())
-                throw std::invalid_argument("switchName cannot be null or empty.");
+                throw System::ArgumentException("The value cannot be an empty string.", "switchName");
             std::lock_guard<std::mutex> lock(mutex_());
             switches_()[switchName] = isEnabled;
         }

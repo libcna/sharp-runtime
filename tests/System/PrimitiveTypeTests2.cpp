@@ -15,6 +15,8 @@
 #include "System/Boolean.hpp"
 #include "System/Char.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 #include "System/Single.hpp"
 #include "System/Double.hpp"
 
@@ -53,15 +55,15 @@ TEST(Int16Tests, ParseMinValue) {
 }
 
 TEST(Int16Tests, ParseOverflowThrows) {
-    EXPECT_THROW(Int16::Parse(std::string("32768")), std::out_of_range);
+    EXPECT_THROW(Int16::Parse(std::string("32768")), System::OverflowException);
 }
 
 TEST(Int16Tests, ParseUnderflowThrows) {
-    EXPECT_THROW(Int16::Parse(std::string("-32769")), std::out_of_range);
+    EXPECT_THROW(Int16::Parse(std::string("-32769")), System::OverflowException);
 }
 
 TEST(Int16Tests, ParseInvalidThrows) {
-    EXPECT_THROW(Int16::Parse(std::string("abc")), std::invalid_argument);
+    EXPECT_THROW(Int16::Parse(std::string("abc")), System::FormatException);
 }
 
 TEST(Int16Tests, TryParseValid) {
@@ -208,9 +210,9 @@ TEST(BooleanTests, ParseFalseLower) {
 }
 
 TEST(BooleanTests, ParseInvalidThrows) {
-    EXPECT_THROW(Boolean::Parse(std::string("yes")),  std::invalid_argument);
-    EXPECT_THROW(Boolean::Parse(std::string("1")),    std::invalid_argument);
-    EXPECT_THROW(Boolean::Parse(std::string("")),     std::invalid_argument);
+    EXPECT_THROW(Boolean::Parse(std::string("yes")),  System::FormatException);
+    EXPECT_THROW(Boolean::Parse(std::string("1")),    System::FormatException);
+    EXPECT_THROW(Boolean::Parse(std::string("")),     System::FormatException);
 }
 
 TEST(BooleanTests, TryParseTrue) {
@@ -333,11 +335,11 @@ TEST(CharTests, ParseSingleChar) {
 }
 
 TEST(CharTests, ParseMultiCharThrows) {
-    EXPECT_THROW(Char::Parse(std::string("ab")), std::invalid_argument);
+    EXPECT_THROW(Char::Parse(std::string("ab")), System::FormatException);
 }
 
 TEST(CharTests, ParseEmptyThrows) {
-    EXPECT_THROW(Char::Parse(std::string("")), std::invalid_argument);
+    EXPECT_THROW(Char::Parse(std::string("")), System::FormatException);
 }
 
 TEST(CharTests, ToStringChar) {
@@ -357,7 +359,7 @@ TEST(CharTests, Parse_ThreeByte_UTF8) {
 
 TEST(CharTests, Parse_TwoByte_UTF8_TwoCharsThrows) {
     // "éé" = two code points — must throw
-    EXPECT_THROW(Char::Parse("\xC3\xA9\xC3\xA9"), std::invalid_argument);
+    EXPECT_THROW(Char::Parse("\xC3\xA9\xC3\xA9"), System::FormatException);
 }
 
 TEST(CharTests, ToString_TwoByte_UTF8) {

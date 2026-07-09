@@ -13,6 +13,8 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -243,8 +245,8 @@ namespace System {
          * C++ counterpart of .NET Byte.Parse(string) with NumberStyles.Integer:
          * leading/trailing whitespace and a leading sign are tolerated, but any
          * trailing non-whitespace character is rejected.
-         * @throws std::invalid_argument on bad format.
-         * @throws std::out_of_range if the value is outside [0, 255].
+         * @throws System::FormatException on bad format.
+         * @throws System::OverflowException if the value is outside [0, 255].
          */
         [[nodiscard]] static bytecs Parse(const std::string& s) {
             std::size_t pos = 0;
@@ -252,17 +254,17 @@ namespace System {
             try {
                 v = std::stoi(s, &pos);
             } catch (const std::out_of_range&) {
-                throw std::out_of_range("Value out of Byte range.");
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             } catch (...) {
-                throw std::invalid_argument("Input string was not in a correct format.");
+                throw System::FormatException("Input string was not in a correct format.");
             }
             // Reject trailing non-whitespace (.NET NumberStyles.Integer parity).
             for (; pos < s.size(); ++pos) {
                 if (!std::isspace(static_cast<unsigned char>(s[pos])))
-                    throw std::invalid_argument("Input string was not in a correct format.");
+                    throw System::FormatException("Input string was not in a correct format.");
             }
             if (v < 0 || v > MaxValue)
-                throw std::out_of_range("Value out of Byte range.");
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             return static_cast<bytecs>(v);
         }
 

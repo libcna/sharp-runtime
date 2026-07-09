@@ -63,13 +63,13 @@ intcs DateOnly::CompareTo(const DateOnly& other) const {
     return (a < b) ? -1 : (a > b) ? 1 : 0;
 }
 
-DateOnly DateOnly::AddDays(int n) const {
+DateOnly DateOnly::AddDays(intcs n) const {
     int y, m, d;
     jdnToDate(dateToJDN(year_, month_, day_) + n, y, m, d);
     return DateOnly(y, m, d);
 }
 
-DateOnly DateOnly::AddMonths(int n) const {
+DateOnly DateOnly::AddMonths(intcs n) const {
     int y = year_, m = month_ + n, d = day_;
     while (m > 12) { m -= 12; ++y; }
     while (m < 1)  { m += 12; --y; }
@@ -80,7 +80,7 @@ DateOnly DateOnly::AddMonths(int n) const {
     return DateOnly(y, m, d);
 }
 
-DateOnly DateOnly::AddYears(int n) const {
+DateOnly DateOnly::AddYears(intcs n) const {
     return AddMonths(n * 12);
 }
 

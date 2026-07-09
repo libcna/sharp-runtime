@@ -4,9 +4,10 @@
 #pragma once
 #include <algorithm>
 #include <functional>
-#include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
@@ -57,13 +58,13 @@ namespace System {
          * @param array  The underlying vector.
          * @param offset Zero-based index of the first element in the segment.
          * @param count  Number of elements in the segment.
-         * @throws std::out_of_range if offset or count are negative or exceed the array bounds.
+         * @throws System::ArgumentOutOfRangeException if offset or count are negative or exceed the array bounds.
          */
         ArraySegment(std::vector<T>& array, intcs offset, intcs count)
             : array_(&array), offset_(offset), count_(count)
         {
             if (offset < 0 || count < 0 || offset + count > static_cast<intcs>(array.size()))
-                throw std::out_of_range("ArraySegment: offset/count out of range");
+                throw System::ArgumentOutOfRangeException("offset", "offset/count out of range");
         }
 
         // -----------------------------------------------------------------------
@@ -116,12 +117,12 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>[int] setter.
          * @param index Zero-based index within the segment.
-         * @throws std::out_of_range if @p index is outside [0, Count).
+         * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
          */
         [[nodiscard]] T& operator[](intcs index)
         {
             if (index < 0 || index >= count_)
-                throw std::out_of_range("ArraySegment: index out of range");
+                throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
             return (*array_)[offset_ + index];
         }
 
@@ -130,12 +131,12 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>[int] getter.
          * @param index Zero-based index within the segment.
-         * @throws std::out_of_range if @p index is outside [0, Count).
+         * @throws System::ArgumentOutOfRangeException if @p index is outside [0, Count).
          */
         [[nodiscard]] const T& operator[](intcs index) const
         {
             if (index < 0 || index >= count_)
-                throw std::out_of_range("ArraySegment: index out of range");
+                throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
             return (*array_)[offset_ + index];
         }
 
@@ -161,12 +162,12 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>.Slice(int).
          * @param index The zero-based starting index of the slice within the segment.
-         * @throws std::out_of_range if @p index is out of range.
+         * @throws System::ArgumentOutOfRangeException if @p index is out of range.
          */
         [[nodiscard]] ArraySegment<T> Slice(intcs index) const
         {
             if (index < 0 || index > count_)
-                throw std::out_of_range("ArraySegment::Slice: index out of range");
+                throw System::ArgumentOutOfRangeException("index", "ArraySegment::Slice: index out of range");
             return ArraySegment<T>(*array_, offset_ + index, count_ - index);
         }
 
@@ -176,12 +177,12 @@ namespace System {
          * C++ counterpart of .NET ArraySegment<T>.Slice(int, int).
          * @param index Zero-based start index within the segment.
          * @param count Number of elements in the slice.
-         * @throws std::out_of_range if the parameters are out of range.
+         * @throws System::ArgumentOutOfRangeException if the parameters are out of range.
          */
         [[nodiscard]] ArraySegment<T> Slice(intcs index, intcs count) const
         {
             if (index < 0 || count < 0 || index + count > count_)
-                throw std::out_of_range("ArraySegment::Slice: out of range");
+                throw System::ArgumentOutOfRangeException("index", "ArraySegment::Slice: out of range");
             return ArraySegment<T>(*array_, offset_ + index, count);
         }
 
@@ -209,7 +210,7 @@ namespace System {
          * elements if necessary.
          * @param destination      The target vector.
          * @param destinationIndex Zero-based index in @p destination at which to start writing.
-         * @throws std::out_of_range if the destination does not have enough room.
+         * The destination vector is automatically resized (never throws for insufficient room).
          */
         void CopyTo(std::vector<T>& destination, intcs destinationIndex) const
         {
@@ -224,12 +225,12 @@ namespace System {
          *
          * C++ counterpart of .NET ArraySegment<T>.CopyTo(ArraySegment<T>).
          * @param destination The target segment; must be at least as large as this segment.
-         * @throws std::invalid_argument if the destination is too short.
+         * @throws System::ArgumentException if the destination is too short.
          */
         void CopyTo(ArraySegment<T>& destination) const
         {
             if (count_ > destination.count_)
-                throw std::invalid_argument("Destination ArraySegment is too short.");
+                throw System::ArgumentException("Destination ArraySegment is too short.");
             std::copy(begin(), end(), destination.begin());
         }
 

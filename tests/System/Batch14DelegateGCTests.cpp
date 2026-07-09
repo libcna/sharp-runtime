@@ -104,12 +104,12 @@ TEST(MulticastNotSupportedExceptionTests, InnerExceptionCtor_WhatContainsBoth) {
 
 TEST(AppContextExtraTests, SetSwitch_EmptyName_Throws) {
     bool enabled = false;
-    EXPECT_THROW(System::AppContext::SetSwitch("", true), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::SetSwitch("", true), System::ArgumentException);
 }
 
 TEST(AppContextExtraTests, TryGetSwitch_EmptyName_Throws) {
     bool enabled = false;
-    EXPECT_THROW(System::AppContext::TryGetSwitch("", enabled), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::TryGetSwitch("", enabled), System::ArgumentException);
 }
 
 TEST(AppContextExtraTests, TryGetSwitch_UnknownSwitch_ReturnsFalse) {

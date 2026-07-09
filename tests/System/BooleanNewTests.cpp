@@ -78,7 +78,7 @@ TEST(BooleanNewTests, Parse_BothWhitespace_ReturnsTrue) {
     EXPECT_TRUE(Boolean::Parse("  true  "));
 }
 TEST(BooleanNewTests, Parse_InvalidString_Throws) {
-    EXPECT_THROW(Boolean::Parse("yes"), std::invalid_argument);
+    EXPECT_THROW(Boolean::Parse("yes"), System::FormatException);
 }
 
 TEST(BooleanNewTests, TryParse_UppercaseTRUE_Succeeds) {

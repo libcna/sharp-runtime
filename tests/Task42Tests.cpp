@@ -336,7 +336,7 @@ TEST(ByteTests, Parse_Valid) {
 }
 
 TEST(ByteTests, Parse_OutOfRange) {
-    EXPECT_THROW(System::Byte::Parse("300"), std::out_of_range);
+    EXPECT_THROW(System::Byte::Parse("300"), System::OverflowException);
 }
 
 TEST(ByteTests, TryParse_Success) {
@@ -473,12 +473,12 @@ TEST(AppContextTests, TryGetSwitch_Missing) {
 }
 
 TEST(AppContextTests, SetSwitch_EmptyName_Throws) {
-    EXPECT_THROW(System::AppContext::SetSwitch("", true), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::SetSwitch("", true), System::ArgumentException);
 }
 
 TEST(AppContextTests, TryGetSwitch_EmptyName_Throws) {
     bool e = false;
-    EXPECT_THROW(System::AppContext::TryGetSwitch("", e), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::TryGetSwitch("", e), System::ArgumentException);
 }
 
 // ===========================================================================
