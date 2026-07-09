@@ -7,6 +7,10 @@
 #include <sstream>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -30,7 +34,7 @@ namespace System {
 
         /**
          * @brief Constructs a Version with the given major and minor components.
-         * @throws std::invalid_argument if @p major or @p minor is negative.
+         * @throws System::ArgumentOutOfRangeException if @p major or @p minor is negative.
          */
         Version(intcs major, intcs minor) : Major(major), Minor(minor) {
             requireNonNegative(major, "major");
@@ -39,7 +43,7 @@ namespace System {
 
         /**
          * @brief Constructs a Version with major, minor, and build components.
-         * @throws std::invalid_argument if @p major, @p minor, or @p build is negative.
+         * @throws System::ArgumentOutOfRangeException if @p major, @p minor, or @p build is negative.
          */
         Version(intcs major, intcs minor, intcs build) : Major(major), Minor(minor), Build(build) {
             requireNonNegative(major, "major");
@@ -49,7 +53,7 @@ namespace System {
 
         /**
          * @brief Constructs a Version with all four components.
-         * @throws std::invalid_argument if any component is negative (unlike the
+         * @throws System::ArgumentOutOfRangeException if any component is negative (unlike the
          *         2-/3-arg overloads, this one validates @p revision too, since it
          *         is explicitly user-supplied here rather than defaulted to -1).
          */
@@ -64,11 +68,20 @@ namespace System {
         /** @brief Parses a version from a dot-separated string such as "1.2.3.4". */
         explicit Version(const std::string& versionString) { parse(versionString); }
 
-        /** @brief Parses a version from a dot-separated string. Throws std::invalid_argument on failure. */
-        static Version Parse(const std::string& s) {
-            try { return Version(s); }
-            catch (...) { throw std::invalid_argument("Invalid version string: " + s); }
-        }
+        /**
+         * @brief Parses a version from a dot-separated string.
+         *
+         * Real .NET's Version(string)/Version.Parse(string) share the exact same
+         * validation logic and throw the exact same exception types on failure (see
+         * the private parse() helper below) — matched here by simply delegating to
+         * the constructor with no separate exception-translation layer.
+         * @throws System::ArgumentException if the string has fewer than two or more
+         *         than four dot-separated components.
+         * @throws System::ArgumentOutOfRangeException if a component is negative.
+         * @throws System::FormatException if a component is not an integer.
+         * @throws System::OverflowException if a component exceeds Int32 range.
+         */
+        static Version Parse(const std::string& s) { return Version(s); }
 
         /** @brief Tries to parse a version string without throwing. Returns true on success. */
         static bool TryParse(const std::string& s, Version& result) {
@@ -123,11 +136,11 @@ namespace System {
         /**
          * @brief Returns the version string with exactly fieldCount components.
          * @param fieldCount Number of components to include (1–4).
-         * @throws std::invalid_argument if fieldCount is out of range.
+         * @throws System::ArgumentException if fieldCount is out of range.
          */
         [[nodiscard]] std::string ToString(intcs fieldCount) const {
             if (fieldCount < 0 || fieldCount > 4)
-                throw std::invalid_argument("fieldCount must be 0-4");
+                throw System::ArgumentException("fieldCount must be 0-4", "fieldCount");
             if (fieldCount == 0) return "";
             std::ostringstream oss;
             oss << Major;
@@ -153,7 +166,7 @@ namespace System {
     private:
         static void requireNonNegative(intcs value, const char* name) {
             if (value < 0)
-                throw std::invalid_argument(std::string(name) + " must be greater than or equal to zero.");
+                throw System::ArgumentOutOfRangeException(name, std::string(name) + " must be greater than or equal to zero.");
         }
 
         intcs cmp(const Version& o) const {
@@ -167,20 +180,32 @@ namespace System {
             return 0;
         }
         void parse(const std::string& s) {
+            static constexpr const char* kComponentNames[4] = {"major", "minor", "build", "revision"};
+
             std::vector<std::string> toks;
             std::istringstream ss(s);
             std::string tok;
             while (std::getline(ss, tok, '.')) toks.push_back(tok);
             // .NET requires at least "major.minor" and at most 4 dot-separated components.
             if (toks.size() < 2 || toks.size() > 4)
-                throw std::invalid_argument("Version string portion was too short or too long.");
+                throw System::ArgumentException("Version string portion was too short or too long.", "version");
 
             intcs parts[4] = {0, 0, -1, -1};
             for (std::size_t i = 0; i < toks.size(); ++i) {
                 std::size_t consumed = 0;
-                int v = std::stoi(toks[i], &consumed);
-                if (consumed != toks[i].size() || v < 0)
-                    throw std::invalid_argument("Version's parameters must be greater than or equal to zero.");
+                int v;
+                try {
+                    v = std::stoi(toks[i], &consumed);
+                } catch (const std::out_of_range&) {
+                    throw System::OverflowException("Value was either too large or too small for an Int32.");
+                } catch (const std::invalid_argument&) {
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                if (consumed != toks[i].size())
+                    throw System::FormatException("Input string was not in a correct format.");
+                if (v < 0)
+                    throw System::ArgumentOutOfRangeException(kComponentNames[i],
+                        std::string(kComponentNames[i]) + " must be greater than or equal to zero.");
                 parts[i] = static_cast<intcs>(v);
             }
             Major = parts[0]; Minor = parts[1]; Build = parts[2]; Revision = parts[3];
