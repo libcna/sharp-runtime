@@ -4,6 +4,7 @@
 //
 // Tests for new DateTime calendar-component properties and constructors.
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
 
@@ -41,13 +42,13 @@ TEST(DateTimeConstructorTests, YMDHMSMs_Stored) {
 }
 
 TEST(DateTimeConstructorTests, InvalidMonth_Throws) {
-    EXPECT_THROW(System::DateTime(2000, 13, 1), std::out_of_range);
-    EXPECT_THROW(System::DateTime(2000, 0, 1),  std::out_of_range);
+    EXPECT_THROW(System::DateTime(2000, 13, 1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(System::DateTime(2000, 0, 1),  System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeConstructorTests, InvalidDay_Throws) {
-    EXPECT_THROW(System::DateTime(2000, 2, 30), std::out_of_range); // Feb has 29 in 2000
-    EXPECT_THROW(System::DateTime(2001, 2, 29), std::out_of_range); // 2001 is not leap
+    EXPECT_THROW(System::DateTime(2000, 2, 30), System::ArgumentOutOfRangeException); // Feb has 29 in 2000
+    EXPECT_THROW(System::DateTime(2001, 2, 29), System::ArgumentOutOfRangeException); // 2001 is not leap
 }
 
 TEST(DateTimeConstructorTests, LeapDay_Valid) {

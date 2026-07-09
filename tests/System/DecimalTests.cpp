@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include "System/Decimal.hpp"
+#include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
 
 using System::Decimal;
 
@@ -69,7 +71,7 @@ TEST(DecimalTests, TryParseInvalid) {
 }
 
 TEST(DecimalTests, ParseInvalidThrows) {
-    EXPECT_THROW(Decimal::Parse("bad"), std::invalid_argument);
+    EXPECT_THROW(Decimal::Parse("bad"), System::FormatException);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +186,7 @@ TEST(DecimalTests, DivideWithRepeatResult) {
 }
 
 TEST(DecimalTests, DivideByZeroThrows) {
-    EXPECT_THROW(Decimal(1) / Decimal(0), std::overflow_error);
+    EXPECT_THROW(Decimal(1) / Decimal(0), System::DivideByZeroException);
 }
 
 TEST(DecimalTests, DivideNegative) {

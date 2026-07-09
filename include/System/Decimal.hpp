@@ -99,8 +99,7 @@ public:
      *
      * C++ counterpart of .NET Decimal(double).
      * Mirrors .NET behaviour: Decimal(0.1) may differ from Parse("0.1").
-     * @throws std::invalid_argument if @p v is NaN.
-     * @throws std::overflow_error if @p v is Infinity or too large.
+     * @throws System::OverflowException if @p v is NaN, Infinity, or too large.
      */
     explicit Decimal(double v);
 
@@ -108,8 +107,7 @@ public:
      * @brief Constructs a Decimal from a single-precision floating-point number.
      *
      * C++ counterpart of .NET Decimal(float). Implemented by widening to double.
-     * @throws std::invalid_argument if @p v is NaN.
-     * @throws std::overflow_error if @p v is Infinity or too large.
+     * @throws System::OverflowException if @p v is NaN, Infinity, or too large.
      */
     explicit Decimal(float v);
 
@@ -137,7 +135,7 @@ public:
      * @param hi         The high 32 bits of the 96-bit mantissa.
      * @param isNegative true to represent a negative value; otherwise false.
      * @param scale      A power of 10 ranging from 0 to 28.
-     * @throws std::out_of_range if @p scale is greater than 28.
+     * @throws System::ArgumentOutOfRangeException if @p scale is greater than 28.
      */
     Decimal(intcs lo, intcs mid, intcs hi, bool isNegative, bytecs scale);
 
@@ -242,7 +240,7 @@ public:
      * @brief Converts this Decimal to a 32-bit signed integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToInt32(decimal).
-     * @throws std::overflow_error if the value is outside the Int32 range.
+     * @throws System::OverflowException if the value is outside the Int32 range.
      */
     [[nodiscard]] intcs  ToInt32() const;
 
@@ -250,7 +248,7 @@ public:
      * @brief Converts this Decimal to a 64-bit signed integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToInt64(decimal).
-     * @throws std::overflow_error if the value is outside the Int64 range.
+     * @throws System::OverflowException if the value is outside the Int64 range.
      */
     [[nodiscard]] longcs ToInt64() const;
 
@@ -258,7 +256,7 @@ public:
      * @brief Converts this Decimal to a 32-bit unsigned integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToUInt32(decimal).
-     * @throws std::overflow_error if the value is negative or exceeds uint32 range.
+     * @throws System::OverflowException if the value is negative or exceeds uint32 range.
      */
     [[nodiscard]] uintcs ToUInt32() const;
 
@@ -266,7 +264,7 @@ public:
      * @brief Converts this Decimal to a 64-bit unsigned integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToUInt64(decimal).
-     * @throws std::overflow_error if the value is negative or exceeds uint64 range.
+     * @throws System::OverflowException if the value is negative or exceeds uint64 range.
      */
     [[nodiscard]] ulongcs ToUInt64() const;
 
@@ -274,7 +272,7 @@ public:
      * @brief Converts a Decimal to an unsigned byte, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToByte(decimal).
-     * @throws std::overflow_error if the value is outside the byte range.
+     * @throws System::OverflowException if the value is outside the byte range.
      */
     [[nodiscard]] static bytecs ToByte(const Decimal& value);
 
@@ -282,7 +280,7 @@ public:
      * @brief Converts a Decimal to a signed byte, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToSByte(decimal).
-     * @throws std::overflow_error if the value is outside the sbyte range.
+     * @throws System::OverflowException if the value is outside the sbyte range.
      */
     [[nodiscard]] static sbytecs ToSByte(const Decimal& value);
 
@@ -290,7 +288,7 @@ public:
      * @brief Converts a Decimal to a 16-bit signed integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToInt16(decimal).
-     * @throws std::overflow_error if the value is outside the Int16 range.
+     * @throws System::OverflowException if the value is outside the Int16 range.
      */
     [[nodiscard]] static shortcs ToInt16(const Decimal& value);
 
@@ -298,7 +296,7 @@ public:
      * @brief Converts a Decimal to a 16-bit unsigned integer, truncating any fractional part.
      *
      * C++ counterpart of .NET Decimal.ToUInt16(decimal).
-     * @throws std::overflow_error if the value is outside the UInt16 range.
+     * @throws System::OverflowException if the value is outside the UInt16 range.
      */
     [[nodiscard]] static ushortcs ToUInt16(const Decimal& value);
 
@@ -347,7 +345,7 @@ public:
      * @brief Converts the string representation of a number to its Decimal equivalent.
      *
      * C++ counterpart of .NET Decimal.Parse(string).
-     * @throws std::invalid_argument if the string is malformed or overflows.
+     * @throws System::FormatException if the string is malformed or overflows.
      */
     static Decimal Parse(const std::string& s);
 
@@ -370,7 +368,7 @@ public:
     Decimal operator-(const Decimal& o) const;
     /** @brief Multiplies two Decimal values. */
     Decimal operator*(const Decimal& o) const;
-    /** @brief Divides one Decimal by another. @throws std::overflow_error on division by zero. */
+    /** @brief Divides one Decimal by another. @throws System::DivideByZeroException on division by zero. */
     Decimal operator/(const Decimal& o) const;
     /** @brief Returns the remainder of dividing two Decimal values. */
     Decimal operator%(const Decimal& o) const;
@@ -454,7 +452,7 @@ public:
      * @brief Divides one Decimal value by another.
      *
      * C++ counterpart of .NET Decimal.Divide(decimal, decimal).
-     * @throws std::overflow_error on division by zero.
+     * @throws System::DivideByZeroException on division by zero.
      */
     static Decimal Divide(const Decimal& d1, const Decimal& d2)   { return d1 / d2; }
 
@@ -534,7 +532,7 @@ public:
      * C++ counterpart of .NET Decimal.Round(decimal, int).
      * @param d        Value to round.
      * @param decimals Number of decimal places (0–28).
-     * @throws std::out_of_range if @p decimals is outside 0–28.
+     * @throws System::ArgumentOutOfRangeException if @p decimals is outside 0–28.
      */
     static Decimal Round(const Decimal& d, int decimals) { return Round(d, decimals, MidpointRounding::ToEven); }
 
@@ -552,7 +550,7 @@ public:
      * @param d        Value to round.
      * @param decimals Number of decimal places (0–28).
      * @param mode     The rounding convention to use for midpoint values.
-     * @throws std::out_of_range if @p decimals is outside 0–28.
+     * @throws System::ArgumentOutOfRangeException if @p decimals is outside 0–28.
      */
     static Decimal Round(const Decimal& d, int decimals, MidpointRounding mode);
 

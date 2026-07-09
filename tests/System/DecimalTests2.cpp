@@ -2,10 +2,11 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
-#include <stdexcept>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Decimal.hpp"
 #include "System/MidpointRounding.hpp"
+#include "System/OverflowException.hpp"
 
 using System::Decimal;
 using System::MidpointRounding;
@@ -50,7 +51,7 @@ TEST(DecimalTests2, CtorFromBits_Negative) {
 }
 
 TEST(DecimalTests2, CtorFromBits_ScaleTooLarge_Throws) {
-    EXPECT_THROW(Decimal(1, 0, 0, false, 29), std::out_of_range);
+    EXPECT_THROW(Decimal(1, 0, 0, false, 29), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,8 +92,8 @@ TEST(DecimalTests2, ToByte_Valid) {
 }
 
 TEST(DecimalTests2, ToByte_OutOfRange_Throws) {
-    EXPECT_THROW(Decimal::ToByte(Decimal(-1)), std::overflow_error);
-    EXPECT_THROW(Decimal::ToByte(Decimal(256)), std::overflow_error);
+    EXPECT_THROW(Decimal::ToByte(Decimal(-1)), System::OverflowException);
+    EXPECT_THROW(Decimal::ToByte(Decimal(256)), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToSByte_Valid) {
@@ -100,7 +101,7 @@ TEST(DecimalTests2, ToSByte_Valid) {
 }
 
 TEST(DecimalTests2, ToSByte_OutOfRange_Throws) {
-    EXPECT_THROW(Decimal::ToSByte(Decimal(200)), std::overflow_error);
+    EXPECT_THROW(Decimal::ToSByte(Decimal(200)), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToInt16_Valid) {
@@ -108,7 +109,7 @@ TEST(DecimalTests2, ToInt16_Valid) {
 }
 
 TEST(DecimalTests2, ToInt16_OutOfRange_Throws) {
-    EXPECT_THROW(Decimal::ToInt16(Decimal(100000)), std::overflow_error);
+    EXPECT_THROW(Decimal::ToInt16(Decimal(100000)), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToUInt16_Valid) {
@@ -116,8 +117,8 @@ TEST(DecimalTests2, ToUInt16_Valid) {
 }
 
 TEST(DecimalTests2, ToUInt16_OutOfRange_Throws) {
-    EXPECT_THROW(Decimal::ToUInt16(Decimal(-1)), std::overflow_error);
-    EXPECT_THROW(Decimal::ToUInt16(Decimal(70000)), std::overflow_error);
+    EXPECT_THROW(Decimal::ToUInt16(Decimal(-1)), System::OverflowException);
+    EXPECT_THROW(Decimal::ToUInt16(Decimal(70000)), System::OverflowException);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,11 +128,11 @@ TEST(DecimalTests2, ToUInt16_OutOfRange_Throws) {
 // ---------------------------------------------------------------------------
 
 TEST(DecimalTests2, ToInt32_Overflow_Throws) {
-    EXPECT_THROW(Decimal::MaxValue.ToInt32(), std::overflow_error);
+    EXPECT_THROW(Decimal::MaxValue.ToInt32(), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToInt64_Overflow_Throws) {
-    EXPECT_THROW(Decimal::MaxValue.ToInt64(), std::overflow_error);
+    EXPECT_THROW(Decimal::MaxValue.ToInt64(), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToUInt64_NegativeTruncatingToZero_ReturnsZero) {
@@ -139,7 +140,7 @@ TEST(DecimalTests2, ToUInt64_NegativeTruncatingToZero_ReturnsZero) {
 }
 
 TEST(DecimalTests2, ToUInt64_NegativeNonZero_Throws) {
-    EXPECT_THROW(Decimal::Parse("-3.5").ToUInt64(), std::overflow_error);
+    EXPECT_THROW(Decimal::Parse("-3.5").ToUInt64(), System::OverflowException);
 }
 
 TEST(DecimalTests2, ToUInt32_NegativeTruncatingToZero_ReturnsZero) {

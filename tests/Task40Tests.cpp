@@ -897,7 +897,7 @@ TEST(FormattableStringTests, CurrentCulture_ReturnsToString) {
 
 TEST(FormattableStringTests, GetArgument_OutOfRange_Throws) {
     System::FormattableString fs("{0}", {"x"});
-    EXPECT_THROW(fs.GetArgument(5), std::out_of_range);
+    EXPECT_THROW(fs.GetArgument(5), System::IndexOutOfRangeException);
 }
 
 // ===========================================================================

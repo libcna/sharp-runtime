@@ -61,5 +61,5 @@ TEST(FormattableStringTests2, CurrentCulture_SameAsToString) {
 
 TEST(FormattableStringTests2, GetArgument_OutOfRange_Throws) {
     FormattableString fs("{0}", {"a"});
-    EXPECT_THROW(fs.GetArgument(5), std::out_of_range);
+    EXPECT_THROW(fs.GetArgument(5), System::IndexOutOfRangeException);
 }

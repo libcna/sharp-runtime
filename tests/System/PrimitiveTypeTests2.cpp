@@ -600,7 +600,7 @@ TEST(DoubleTests, ParseZero) {
 }
 
 TEST(DoubleTests, ParseInvalidThrows) {
-    EXPECT_THROW(Double::Parse(std::string("abc")), std::invalid_argument);
+    EXPECT_THROW(Double::Parse(std::string("abc")), System::FormatException);
 }
 
 TEST(DoubleTests, TryParseValid) {

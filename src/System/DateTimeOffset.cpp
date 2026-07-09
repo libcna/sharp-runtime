@@ -5,12 +5,12 @@
 #include "System/DateTimeOffset.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <stdexcept>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -312,7 +312,7 @@ namespace System {
     DateTimeOffset DateTimeOffset::Parse(const std::string& s) {
         DateTimeOffset result;
         if (!TryParse(s, result))
-            throw std::invalid_argument("String was not recognized as a valid DateTimeOffset.");
+            throw System::FormatException("String was not recognized as a valid DateTimeOffset.");
         return result;
     }
 

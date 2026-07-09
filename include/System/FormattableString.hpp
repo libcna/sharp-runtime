@@ -2,10 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
 #include <string>
 #include <vector>
 #include "System/IFormatProvider.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 namespace System {
 
@@ -68,10 +68,12 @@ namespace System {
          * C++ counterpart of .NET FormattableString.GetArgument(int).
          * @param index The zero-based index of the argument.
          * @return The string argument at @p index.
-         * @throws std::out_of_range if @p index is out of bounds.
+         * @throws System::IndexOutOfRangeException if @p index is out of bounds.
          */
         [[nodiscard]] virtual const std::string& GetArgument(int index) const {
-            return args_.at(static_cast<std::size_t>(index));
+            if (index < 0 || static_cast<std::size_t>(index) >= args_.size())
+                throw System::IndexOutOfRangeException();
+            return args_[static_cast<std::size_t>(index)];
         }
 
         /**
