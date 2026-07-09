@@ -25,7 +25,14 @@ namespace System::Xml {
         XmlImplementation();
         explicit XmlImplementation(std::shared_ptr<XmlNameTable> nt);
 
-        /** @return Always false; DOM Level 2 feature testing is not implemented. */
+        /**
+         * @brief Tests whether the DOM implementation supports a specific feature.
+         *
+         * C++ counterpart of .NET XmlImplementation.HasFeature(string, string).
+         * @param strFeature The feature name to test (case-insensitive; only "XML" is recognized).
+         * @param strVersion The feature version to test ("1.0", "2.0", or empty for "any version").
+         * @return true if @p strFeature is "XML" and @p strVersion is empty, "1.0", or "2.0".
+         */
         [[nodiscard]] bool HasFeature(const std::string& strFeature, const std::string& strVersion) const;
 
         /** @return A new, empty XmlDocument sharing this implementation's NameTable. */

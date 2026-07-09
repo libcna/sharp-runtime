@@ -7,6 +7,7 @@
 #include <cstdio>
 #include "System/Xml/XmlDocument.hpp"
 #include "System/Xml/XmlException.hpp"
+#include "System/Xml/XmlImplementation.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
 using namespace System::Xml;
@@ -387,4 +388,38 @@ TEST(XmlNodeTests, NamespaceURI_ResolvesFromAncestorXmlnsDeclaration) {
     auto* root = doc.getDocumentElementProperty();
     auto* child = root->getFirstChildProperty();
     EXPECT_EQ(child->getNamespaceURIProperty(), "urn:test");
+}
+
+// ===========================================================================
+// XmlImplementation.HasFeature
+// ===========================================================================
+
+TEST(XmlImplementationTests, HasFeature_Xml_EmptyVersion_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_Xml_Version1_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", "1.0"));
+}
+
+TEST(XmlImplementationTests, HasFeature_Xml_Version2_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", "2.0"));
+}
+
+TEST(XmlImplementationTests, HasFeature_CaseInsensitiveFeatureName_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("xml", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_UnknownFeature_ReturnsFalse) {
+    XmlImplementation impl;
+    EXPECT_FALSE(impl.HasFeature("HTML", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_UnknownVersion_ReturnsFalse) {
+    XmlImplementation impl;
+    EXPECT_FALSE(impl.HasFeature("XML", "3.0"));
 }
