@@ -3,9 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
-#include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/Buffers/IBufferWriter.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Memory.hpp"
@@ -31,7 +31,7 @@ namespace System::Buffers {
 
         void checkAndResizeBuffer(intcs sizeHint) {
             if (sizeHint < 0)
-                throw std::invalid_argument("sizeHint must be non-negative");
+                throw System::ArgumentException("sizeHint must be non-negative", "sizeHint");
             if (sizeHint == 0) sizeHint = 1;
             if (sizeHint > getFreeCapacityProperty()) {
                 intcs currentLength = static_cast<intcs>(buffer_.size());
@@ -57,11 +57,11 @@ namespace System::Buffers {
         /**
          * @brief Constructs an ArrayBufferWriter with the specified initial capacity.
          * @param initialCapacity The minimum initial capacity of the backing buffer.
-         * @throws std::invalid_argument if initialCapacity is zero or negative.
+         * @throws System::ArgumentException if initialCapacity is zero or negative.
          */
         explicit ArrayBufferWriter(intcs initialCapacity) {
             if (initialCapacity <= 0)
-                throw std::invalid_argument("initialCapacity must be positive");
+                throw System::ArgumentException("initialCapacity must be positive", "initialCapacity");
             buffer_.resize(static_cast<std::size_t>(initialCapacity));
         }
 
@@ -125,12 +125,12 @@ namespace System::Buffers {
         /**
          * @brief Notifies the writer that @p count elements have been written.
          * @param count Number of elements written to the span returned by GetSpan().
-         * @throws std::invalid_argument if count is negative.
+         * @throws System::ArgumentException if count is negative.
          * @throws InvalidOperationException if count would advance past the end of the buffer.
          */
         void Advance(intcs count) override {
             if (count < 0)
-                throw std::invalid_argument("count must be non-negative");
+                throw System::ArgumentException("count must be non-negative", "count");
             if (writtenCount_ > getCapacityProperty() - count)
                 throw InvalidOperationException("Cannot advance past the end of the buffer.");
             writtenCount_ += count;

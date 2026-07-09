@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Buffers/ArrayBufferWriter.hpp"
 #include "System/InvalidOperationException.hpp"
 
@@ -24,7 +25,7 @@ TEST(ArrayBufferWriterTest, CtorWithCapacity) {
 }
 
 TEST(ArrayBufferWriterTest, CtorZeroCapacityThrows) {
-    EXPECT_THROW(ArrayBufferWriter<int>(0), std::invalid_argument);
+    EXPECT_THROW(ArrayBufferWriter<int>(0), System::ArgumentException);
 }
 
 TEST(ArrayBufferWriterTest, AdvanceIncreasesWrittenCount) {
@@ -106,5 +107,5 @@ TEST(ArrayBufferWriterTest, Advance_PastEnd_ThrowsInvalidOperationException) {
 
 TEST(ArrayBufferWriterTest, Advance_NegativeCount_ThrowsInvalidArgument) {
     ArrayBufferWriter<int> w(4);
-    EXPECT_THROW(w.Advance(-1), std::invalid_argument);
+    EXPECT_THROW(w.Advance(-1), System::ArgumentException);
 }

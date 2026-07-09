@@ -80,8 +80,8 @@ TEST(ArrayBufferWriterTests, CustomCapacity_SetCorrectly) {
 }
 
 TEST(ArrayBufferWriterTests, InvalidCapacity_Throws) {
-    EXPECT_THROW(ArrayBufferWriter<int>(0), std::invalid_argument);
-    EXPECT_THROW(ArrayBufferWriter<int>(-1), std::invalid_argument);
+    EXPECT_THROW(ArrayBufferWriter<int>(0), System::ArgumentException);
+    EXPECT_THROW(ArrayBufferWriter<int>(-1), System::ArgumentException);
 }
 
 TEST(ArrayBufferWriterTests, GetSpan_ReturnsWritableSpan) {
@@ -139,7 +139,7 @@ TEST(ArrayBufferWriterTests, GetSpan_GrowsBufferWhenNeeded) {
 
 TEST(ArrayBufferWriterTests, Advance_NegativeCount_Throws) {
     ArrayBufferWriter<uint8_t> writer(8);
-    EXPECT_THROW(writer.Advance(-1), std::invalid_argument);
+    EXPECT_THROW(writer.Advance(-1), System::ArgumentException);
 }
 
 // ===========================================================================
