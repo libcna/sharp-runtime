@@ -10,7 +10,7 @@ namespace System::IO {
     class PathTooLongException : public IOException {
     public:
         /** Initializes a PathTooLongException with a default message. */
-        PathTooLongException() : IOException("The specified path, file name, or both are too long. The fully qualified file name must be less than 260 characters, and the directory name must be less than 248 characters.") {}
+        PathTooLongException() : IOException("The specified file name or path is too long, or a component of the specified path is too long.") {}
         /** Initializes a PathTooLongException with the specified message. */
         explicit PathTooLongException(const std::string& message) : IOException(message) {}
         /** Initializes a PathTooLongException with a message and an inner exception. */

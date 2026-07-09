@@ -386,6 +386,11 @@ TEST(DirectoryNotFoundExceptionTests, DefaultCtor_NoThrow) {
     EXPECT_NO_THROW(DirectoryNotFoundException{});
 }
 
+TEST(DirectoryNotFoundExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    DirectoryNotFoundException ex;
+    EXPECT_STREQ(ex.what(), "Unable to find the specified directory.");
+}
+
 TEST(DirectoryNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
     DirectoryNotFoundException ex("no such dir");
     EXPECT_NE(std::string(ex.what()).find("no such dir"), std::string::npos);
@@ -709,6 +714,11 @@ TEST(PathTooLongExceptionTests, DefaultCtor_WhatNotEmpty) {
     EXPECT_FALSE(std::string(ex.what()).empty());
 }
 
+TEST(PathTooLongExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    PathTooLongException ex;
+    EXPECT_STREQ(ex.what(), "The specified file name or path is too long, or a component of the specified path is too long.");
+}
+
 TEST(PathTooLongExceptionTests, MessageCtor_WhatContainsMessage) {
     PathTooLongException ex("path is too long");
     EXPECT_NE(std::string(ex.what()).find("path is too long"), std::string::npos);
@@ -744,6 +754,11 @@ TEST(FileLoadExceptionTests, MessageFileNameAndInnerCtor_StoresFileName) {
 
 TEST(InvalidDataExceptionTests, DefaultCtor_NoThrow) {
     EXPECT_NO_THROW(InvalidDataException{});
+}
+
+TEST(InvalidDataExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    InvalidDataException ex;
+    EXPECT_STREQ(ex.what(), "Found invalid data while decoding.");
 }
 
 TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
