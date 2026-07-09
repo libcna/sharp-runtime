@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/OverflowException.hpp"
 #include "System/SByte.hpp"
 
 using System::SByte;
@@ -12,7 +13,7 @@ TEST(SByteTest, MinValue) { EXPECT_EQ(SByte::MinValue, sbytecs(-128)); }
 
 TEST(SByteTest, Parse_Valid) { EXPECT_EQ(SByte::Parse("42"), sbytecs(42)); }
 TEST(SByteTest, Parse_Negative) { EXPECT_EQ(SByte::Parse("-10"), sbytecs(-10)); }
-TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), std::out_of_range); }
+TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), System::OverflowException); }
 
 TEST(SByteTest, TryParse_Valid) {
     sbytecs r = 0;
@@ -31,12 +32,12 @@ TEST(SByteTest, ToString_Hex) { EXPECT_EQ(SByte::ToString(sbytecs(255), "X2"), "
 TEST(SByteTest, Abs_Positive) { EXPECT_EQ(SByte::Abs(sbytecs(5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Negative) { EXPECT_EQ(SByte::Abs(sbytecs(-5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Zero) { EXPECT_EQ(SByte::Abs(sbytecs(0)), sbytecs(0)); }
-TEST(SByteTest, Abs_MinValue_Throws) { EXPECT_THROW(SByte::Abs(SByte::MinValue), std::overflow_error); }
+TEST(SByteTest, Abs_MinValue_Throws) { EXPECT_THROW(SByte::Abs(SByte::MinValue), System::OverflowException); }
 
 TEST(SByteTest, CopySign_PositiveSign) { EXPECT_EQ(SByte::CopySign(sbytecs(-3), sbytecs(1)), sbytecs(3)); }
 TEST(SByteTest, CopySign_NegativeSign) { EXPECT_EQ(SByte::CopySign(sbytecs(3), sbytecs(-1)), sbytecs(-3)); }
 TEST(SByteTest, CopySign_MinValue_NonNegativeSign_Throws) {
-    EXPECT_THROW(SByte::CopySign(SByte::MinValue, sbytecs(1)), std::overflow_error);
+    EXPECT_THROW(SByte::CopySign(SByte::MinValue, sbytecs(1)), System::OverflowException);
 }
 TEST(SByteTest, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
     // Matches .NET: the negation double-wraps back to MinValue without throwing

@@ -107,9 +107,9 @@ TEST(UInt32Tests, ParseValid) {
 }
 
 TEST(UInt32Tests, ParseInvalidThrows) {
-    EXPECT_THROW(UInt32::Parse("abc"),          std::invalid_argument);
-    EXPECT_THROW(UInt32::Parse(""),             std::invalid_argument);
-    EXPECT_THROW(UInt32::Parse("99999999999"),  std::invalid_argument);
+    EXPECT_THROW(UInt32::Parse("abc"),          System::FormatException);
+    EXPECT_THROW(UInt32::Parse(""),             System::FormatException);
+    EXPECT_THROW(UInt32::Parse("99999999999"),  System::OverflowException);
 }
 
 TEST(UInt32Tests, TryParseSuccess) {

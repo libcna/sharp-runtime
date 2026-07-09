@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/FormatException.hpp"
 #include "System/UInt64.hpp"
 
 using System::UInt64;
@@ -27,7 +28,7 @@ TEST(UInt64Test, ParseLarge) {
 }
 
 TEST(UInt64Test, ParseInvalidThrows) {
-    EXPECT_THROW(UInt64::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(UInt64::Parse("abc"), System::FormatException);
 }
 
 TEST(UInt64Test, TryParseSuccess) {

@@ -106,11 +106,11 @@ TEST(UInt16Tests, ParseMaxValue) {
 }
 
 TEST(UInt16Tests, ParseOverflowThrows) {
-    EXPECT_THROW(UInt16::Parse(std::string("65536")), std::out_of_range);
+    EXPECT_THROW(UInt16::Parse(std::string("65536")), System::OverflowException);
 }
 
 TEST(UInt16Tests, ParseInvalidThrows) {
-    EXPECT_THROW(UInt16::Parse(std::string("abc")), std::invalid_argument);
+    EXPECT_THROW(UInt16::Parse(std::string("abc")), System::FormatException);
 }
 
 TEST(UInt16Tests, TryParseValid) {
@@ -152,15 +152,15 @@ TEST(SByteTests, ParseZero) {
 }
 
 TEST(SByteTests, ParseOverflowThrows) {
-    EXPECT_THROW(SByte::Parse(std::string("128")), std::out_of_range);
+    EXPECT_THROW(SByte::Parse(std::string("128")), System::OverflowException);
 }
 
 TEST(SByteTests, ParseUnderflowThrows) {
-    EXPECT_THROW(SByte::Parse(std::string("-129")), std::out_of_range);
+    EXPECT_THROW(SByte::Parse(std::string("-129")), System::OverflowException);
 }
 
 TEST(SByteTests, ParseInvalidThrows) {
-    EXPECT_THROW(SByte::Parse(std::string("!!")), std::invalid_argument);
+    EXPECT_THROW(SByte::Parse(std::string("!!")), System::FormatException);
 }
 
 TEST(SByteTests, TryParseValid) {
@@ -510,7 +510,7 @@ TEST(SingleTests, ParseNegative) {
 }
 
 TEST(SingleTests, ParseInvalidThrows) {
-    EXPECT_THROW(Single::Parse(std::string("abc")), std::invalid_argument);
+    EXPECT_THROW(Single::Parse(std::string("abc")), System::FormatException);
 }
 
 TEST(SingleTests, TryParseValid) {

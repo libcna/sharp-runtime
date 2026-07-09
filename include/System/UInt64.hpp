@@ -8,10 +8,11 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -31,11 +32,13 @@ namespace System {
 
         /**
          * @brief Converts the string representation of a number to its UInt64 equivalent.
-         * @throws std::invalid_argument if the string is not a valid integer.
+         * @throws System::FormatException if the string is not a valid integer.
+         * @throws System::OverflowException if the value exceeds UInt64 range.
          */
         static SharpRuntime::ulongcs Parse(const std::string& s) {
             try { return std::stoull(s); }
-            catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a UInt64."); }
+            catch (...) { throw System::FormatException("Input string was not in a correct format."); }
         }
 
         /**

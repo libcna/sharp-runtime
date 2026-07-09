@@ -12,6 +12,8 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -37,17 +39,18 @@ namespace System {
         /**
          * @brief Parses @p s as a decimal SByte value.
          * C++ counterpart of .NET SByte.Parse(string).
-         * @throws std::out_of_range if the value exceeds SByte range.
-         * @throws std::invalid_argument if the string is not a valid integer.
+         * @throws System::OverflowException if the value exceeds SByte range.
+         * @throws System::FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static sbytecs Parse(const std::string& s) {
             try {
                 int v = std::stoi(s);
                 if (v < MinValue || v > MaxValue)
-                    throw std::out_of_range("Value out of SByte range.");
+                    throw System::OverflowException("Value was either too large or too small for a signed byte.");
                 return static_cast<int8_t>(v);
-            } catch (const std::out_of_range&) { throw; }
-              catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            } catch (const System::OverflowException&) { throw; }
+              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a signed byte."); }
+              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
         }
 
         /**
@@ -121,20 +124,20 @@ namespace System {
         /** @brief Returns the absolute value of @p value. C++ counterpart of .NET SByte.Abs(sbyte). */
         [[nodiscard]] static sbytecs Abs(sbytecs value) {
             if (value == MinValue)
-                throw std::overflow_error("Negating SByte.MinValue would overflow.");
+                throw System::OverflowException("Negating SByte.MinValue would overflow.");
             return value < 0 ? static_cast<sbytecs>(-value) : value;
         }
 
         /**
          * @brief Returns a value with the magnitude of @p value and the sign of @p sign.
          * C++ counterpart of .NET SByte.CopySign(sbyte, sbyte).
-         * @throws std::overflow_error if @p value is MinValue and @p sign is non-negative
+         * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
          *         (its magnitude does not fit in a signed SByte).
          */
         [[nodiscard]] static sbytecs CopySign(sbytecs value, sbytecs sign) {
             sbytecs abs = value < 0 ? (value == MinValue ? value : static_cast<sbytecs>(-value)) : value;
             if (sign >= 0) {
-                if (abs < 0) throw std::overflow_error("Negating MinValue is not representable.");
+                if (abs < 0) throw System::OverflowException("Negating MinValue is not representable.");
                 return abs;
             }
             return static_cast<sbytecs>(-abs);
