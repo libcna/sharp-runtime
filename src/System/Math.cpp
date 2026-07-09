@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 
 namespace System
 {
@@ -38,7 +37,7 @@ namespace System
     intcs Math::Abs(intcs value)
     {
         if (value == std::numeric_limits<intcs>::min())
-            throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return value < 0 ? -value : value;
     }
 
@@ -66,7 +65,7 @@ namespace System
     {
         if (min > max)
         {
-            throw std::invalid_argument("min cannot be greater than max.");
+            throw System::ArgumentException("min cannot be greater than max.");
         }
         if (value < min)
         {
@@ -83,7 +82,7 @@ namespace System
     {
         if (min > max)
         {
-            throw std::invalid_argument("min cannot be greater than max.");
+            throw System::ArgumentException("min cannot be greater than max.");
         }
         if (value < min)
         {
@@ -99,14 +98,14 @@ namespace System
     longcs Math::Abs(longcs value)
     {
         if (value == std::numeric_limits<longcs>::min())
-            throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return value < 0 ? -value : value;
     }
     longcs Math::Min(longcs a, longcs b) { return a < b ? a : b; }
     longcs Math::Max(longcs a, longcs b) { return a > b ? a : b; }
     longcs Math::Clamp(longcs value, longcs min, longcs max)
     {
-        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
         if (value < min) return min;
         if (value > max) return max;
         return value;
