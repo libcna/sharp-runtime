@@ -26,17 +26,15 @@ public:
     /** @return True if @p value is a positive exact power of two. */
     static bool IsPow2(int64_t value)  noexcept { return value > 0  && (value & (value - 1)) == 0; }
 
-    /** @return The smallest power of two that is >= @p value; returns 1 for 0. */
+    /** @return The smallest power of two that is >= @p value; returns 0 if @p value is 0 or the result overflows. */
     static uint32_t RoundUpToPowerOf2(uint32_t value) noexcept {
-        if (value == 0) return 1;
         --value;
         value |= value >> 1; value |= value >> 2; value |= value >> 4;
         value |= value >> 8; value |= value >> 16;
         return value + 1;
     }
-    /** @return The smallest power of two that is >= @p value; returns 1 for 0. */
+    /** @return The smallest power of two that is >= @p value; returns 0 if @p value is 0 or the result overflows. */
     static uint64_t RoundUpToPowerOf2(uint64_t value) noexcept {
-        if (value == 0) return 1;
         --value;
         value |= value >> 1;  value |= value >> 2;  value |= value >> 4;
         value |= value >> 8;  value |= value >> 16; value |= value >> 32;

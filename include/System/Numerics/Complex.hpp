@@ -87,8 +87,11 @@ namespace System::Numerics {
         static Complex Tanh(const Complex& c)                         { return Complex(std::tanh(c.value)); }
         /** @return Natural logarithm of @p c to the specified @p baseValue. */
         static Complex Log(const Complex& c, double baseValue)        { return Complex(std::log(c.value) / std::log(baseValue)); }
-        /** @return The reciprocal 1/c. Returns (infinity, 0) if c is zero. */
-        static Complex Reciprocal(const Complex& c)                   { return Complex(1.0 / c.value); }
+        /** @return The reciprocal 1/c. Returns Zero if c is zero (matching .NET's explicit zero-value special case). */
+        static Complex Reciprocal(const Complex& c) {
+            if (c.value.real() == 0.0 && c.value.imag() == 0.0) return Zero;
+            return Complex(1.0 / c.value);
+        }
         /** @return Complex number from polar coordinates (magnitude, phase in radians). */
         static Complex FromPolarCoordinates(double magnitude, double phase) {
             return Complex(std::polar(magnitude, phase));
