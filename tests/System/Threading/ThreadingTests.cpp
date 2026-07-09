@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
 #include "System/Threading/Monitor.hpp"
@@ -289,6 +290,11 @@ TEST(ThreadingTests, Semaphore_Release_ReturnsPreviousCount) {
     EXPECT_EQ(prev, 0);
 }
 
+TEST(ThreadingTests, Semaphore_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    Semaphore s(1, 2);
+    EXPECT_THROW(s.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // SemaphoreSlim
 // ---------------------------------------------------------------------------
@@ -315,6 +321,11 @@ TEST(ThreadingTests, SemaphoreSlim_Release_Multiple_IncreasesCount) {
     SemaphoreSlim ss(0, 10);
     ss.Release(4);
     EXPECT_EQ(ss.getCurrentCountProperty(), 4);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Wait_TimeoutLessThanNegativeOne_Throws) {
+    SemaphoreSlim ss(1, 2);
+    EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +359,11 @@ TEST(ThreadingTests, ManualResetEvent_StaysSignaledAfterMultipleWaits) {
     ManualResetEvent e(true);
     EXPECT_TRUE(e.WaitOne(0));
     EXPECT_TRUE(e.WaitOne(0)); // still signaled
+}
+
+TEST(ThreadingTests, ManualResetEvent_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    ManualResetEvent e(false);
+    EXPECT_THROW(e.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

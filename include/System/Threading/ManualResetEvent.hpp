@@ -6,6 +6,7 @@
 #include <condition_variable>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
 
@@ -48,8 +49,10 @@ namespace System::Threading {
          * Blocks until the event is signaled or the timeout elapses.
          * @param milliseconds Maximum time to wait.
          * @return True if the event was signaled before the timeout.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
          */
         bool WaitOne(intcs milliseconds) {
+            WaitHandle::ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lk(mutex_);
             return cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return signaled_; });
         }

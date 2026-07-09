@@ -8,6 +8,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/SemaphoreFullException.hpp"
+#include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
 
@@ -45,8 +46,12 @@ namespace System::Threading {
             --count_;
         }
 
-        /** @brief Tries to enter the semaphore within a timeout. Returns true on success. */
+        /**
+         * @brief Tries to enter the semaphore within a timeout. Returns true on success.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         */
         bool Wait(intcs milliseconds) {
+            WaitHandle::ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lk(mutex_);
             bool ok = cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return count_ > 0; });
             if (ok) --count_;

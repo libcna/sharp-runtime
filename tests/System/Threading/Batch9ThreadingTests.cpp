@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/AbandonedMutexException.hpp"
 #include "System/Threading/Barrier.hpp"
@@ -221,6 +222,28 @@ TEST(MutexTests, WaitOne_Timeout_WhenHeldByAnotherThread_WaitsFullDuration) {
     auto elapsed = std::chrono::steady_clock::now() - start;
     EXPECT_FALSE(acquired.load());
     EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 90);
+    m.ReleaseMutex();
+}
+
+TEST(MutexTests, WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    Mutex m;
+    EXPECT_THROW(m.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
+TEST(MutexTests, ReleaseMutex_NotOwned_ThrowsApplicationException) {
+    Mutex m;
+    EXPECT_THROW(m.ReleaseMutex(), System::ApplicationException);
+}
+
+TEST(MutexTests, ReleaseMutex_FromNonOwningThread_ThrowsApplicationException) {
+    Mutex m;
+    m.WaitOne();
+    bool threw = false;
+    std::thread t([&] {
+        try { m.ReleaseMutex(); } catch (const System::ApplicationException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
     m.ReleaseMutex();
 }
 

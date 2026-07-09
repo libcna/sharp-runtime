@@ -46,8 +46,12 @@ namespace System::Threading {
             return true;
         }
 
-        /** Blocks until the event is signalled or the timeout elapses; returns true if signalled. */
+        /**
+         * @brief Blocks until the event is signalled or the timeout elapses; returns true if signalled.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         */
         bool WaitOne(intcs milliseconds) override {
+            ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lock(mtx_);
             bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
                 [this]{ return set_.load(std::memory_order_acquire); });

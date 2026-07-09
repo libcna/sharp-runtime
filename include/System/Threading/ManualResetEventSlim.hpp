@@ -7,6 +7,8 @@
 #include <mutex>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IDisposable.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
 
@@ -17,6 +19,11 @@ namespace System::Threading {
         std::atomic<bool> set_{false};
         std::mutex mtx_;
         std::condition_variable cv_;
+        bool disposed_ = false;
+
+        void ThrowIfDisposed() const {
+            if (disposed_) throw System::ObjectDisposedException("ManualResetEventSlim");
+        }
 
     public:
         /** Constructs a ManualResetEventSlim with the specified initial state. */
@@ -28,20 +35,34 @@ namespace System::Threading {
             cv_.notify_all();
         }
 
-        /** Resets the event to the non-signalled state. */
+        /**
+         * @brief Resets the event to the non-signalled state.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
         void Reset() {
+            ThrowIfDisposed();
             set_.store(false, std::memory_order_release);
         }
 
-        /** Blocks until the event is set. */
+        /**
+         * @brief Blocks until the event is set.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
         void Wait() {
+            ThrowIfDisposed();
             if (set_.load(std::memory_order_acquire)) return;
             std::unique_lock<std::mutex> lock(mtx_);
             cv_.wait(lock, [this]{ return set_.load(std::memory_order_acquire); });
         }
 
-        /** Blocks until the event is set or the timeout elapses; returns true if set. */
+        /**
+         * @brief Blocks until the event is set or the timeout elapses; returns true if set.
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
         bool Wait(intcs millisecondsTimeout) {
+            WaitHandle::ValidateTimeout(millisecondsTimeout);
+            ThrowIfDisposed();
             if (set_.load(std::memory_order_acquire)) return true;
             std::unique_lock<std::mutex> lock(mtx_);
             return cv_.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout),
@@ -53,8 +74,8 @@ namespace System::Threading {
             return set_.load(std::memory_order_acquire);
         }
 
-        /** Releases resources (no-op for this implementation). */
-        void Dispose() override {}
+        /** Releases resources for this event. */
+        void Dispose() override { disposed_ = true; }
     };
 
 } // namespace System::Threading

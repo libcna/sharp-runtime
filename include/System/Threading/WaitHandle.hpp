@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IDisposable.hpp"
 
 namespace System::Threading {
@@ -21,6 +22,18 @@ namespace System::Threading {
         static constexpr intcs WaitTimeout = 258;   // WAIT_TIMEOUT on Windows
         /** Sentinel for an invalid native handle. */
         static constexpr intcs InvalidHandle = -1;
+
+        /**
+         * @brief Validates a millisecondsTimeout argument for WaitOne-style methods.
+         *
+         * C++ counterpart of the bounds check in .NET WaitHandle.WaitOne(int), shared by
+         * every timed wait method in this hierarchy (and by the non-WaitHandle-derived
+         * Mutex/Semaphore/SemaphoreSlim/ManualResetEventSlim wait methods).
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
+         */
+        static void ValidateTimeout(intcs millisecondsTimeout) {
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(millisecondsTimeout, static_cast<intcs>(-1), "millisecondsTimeout");
+        }
 
         /** Destroys the WaitHandle. */
         virtual ~WaitHandle() = default;

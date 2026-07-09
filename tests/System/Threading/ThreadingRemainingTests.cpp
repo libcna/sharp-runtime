@@ -245,6 +245,10 @@ TEST(EventWaitHandleTests, Set_Then_Reset_NotSet) {
     ewh.Reset();
     EXPECT_FALSE(ewh.WaitOne(1));
 }
+TEST(EventWaitHandleTests, WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    EventWaitHandle ewh(false, EventResetMode::ManualReset);
+    EXPECT_THROW(ewh.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
 
 // ===========================================================================
 // LazyInitializer
@@ -327,6 +331,20 @@ TEST(ManualResetEventSlimTests, Wait_WithTimeout_NotSet_ReturnsFalse) {
 TEST(ManualResetEventSlimTests, Wait_WithTimeout_AlreadySet_ReturnsTrue) {
     ManualResetEventSlim mre(true);
     EXPECT_TRUE(mre.Wait(100));
+}
+TEST(ManualResetEventSlimTests, Wait_TimeoutLessThanNegativeOne_Throws) {
+    ManualResetEventSlim mre;
+    EXPECT_THROW(mre.Wait(-2), System::ArgumentOutOfRangeException);
+}
+TEST(ManualResetEventSlimTests, AfterDispose_Wait_ThrowsObjectDisposedException) {
+    ManualResetEventSlim mre;
+    mre.Dispose();
+    EXPECT_THROW(mre.Wait(), System::ObjectDisposedException);
+}
+TEST(ManualResetEventSlimTests, AfterDispose_Reset_ThrowsObjectDisposedException) {
+    ManualResetEventSlim mre(true);
+    mre.Dispose();
+    EXPECT_THROW(mre.Reset(), System::ObjectDisposedException);
 }
 
 // ===========================================================================
