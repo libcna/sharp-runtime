@@ -342,6 +342,11 @@ TEST(IOExceptionTests, IsA_SystemException) {
     EXPECT_THROW(throw IOException("err"), System::SystemException);
 }
 
+TEST(IOExceptionTests, HResult_MatchesDotNet) {
+    IOException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131620));
+}
+
 // ===========================================================================
 // FileNotFoundException
 // ===========================================================================
@@ -783,6 +788,11 @@ TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
 TEST(InternalBufferOverflowExceptionTests, DefaultCtor_WhatNotEmpty) {
     InternalBufferOverflowException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(InternalBufferOverflowExceptionTests, HResult_MatchesDotNet) {
+    InternalBufferOverflowException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131905));
 }
 
 TEST(InternalBufferOverflowExceptionTests, MessageCtor_WhatContainsMessage) {

@@ -13,6 +13,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/ApartmentState.hpp"
@@ -556,3 +557,7 @@ THREADING_EXCEPT_SIMPLE(ThreadAbortException)
 THREADING_EXCEPT_SIMPLE(ThreadInterruptedException)
 THREADING_EXCEPT_SIMPLE(ThreadStateException)
 THREADING_EXCEPT_SIMPLE(WaitHandleCannotBeOpenedException)
+
+TEST(WaitHandleCannotBeOpenedExceptionTests, IsA_ApplicationException) {
+    EXPECT_THROW(throw WaitHandleCannotBeOpenedException(), System::ApplicationException);
+}
