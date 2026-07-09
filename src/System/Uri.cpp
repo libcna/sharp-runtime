@@ -14,11 +14,19 @@ namespace System {
 // ---------------------------------------------------------------------------
 
 intcs Uri::defaultPortForScheme(const std::string& scheme) {
-    if (scheme == "http")  return 80;
-    if (scheme == "https") return 443;
-    if (scheme == "ftp")   return 21;
-    if (scheme == "ssh")   return 22;
-    if (scheme == "smtp")  return 25;
+    // Matches .NET's built-in UriParser scheme table exactly (UriSyntax.cs);
+    // note "ssh" and bare "smtp" are not .NET built-in schemes and have no default port.
+    if (scheme == "http")    return 80;
+    if (scheme == "https")   return 443;
+    if (scheme == "ws")      return 80;
+    if (scheme == "wss")     return 443;
+    if (scheme == "ftp")     return 21;
+    if (scheme == "gopher")  return 70;
+    if (scheme == "nntp")    return 119;
+    if (scheme == "mailto")  return 25;
+    if (scheme == "telnet")  return 23;
+    if (scheme == "ldap")    return 389;
+    if (scheme == "net.tcp") return 808;
     return -1;
 }
 
@@ -41,6 +49,45 @@ namespace {
             return std::string::npos;
         }
         return std::string::npos;
+    }
+
+    /**
+     * @brief Removes "." and ".." path segments per RFC 3986 §5.2.4.
+     *
+     * Used when combining a base and relative URI, matching .NET's Uri.Compress()
+     * step in CombineUri (Uri.cs), which normalizes the merged path this same way.
+     */
+    std::string removeDotSegments(const std::string& path) {
+        std::string input = path;
+        std::string output;
+        while (!input.empty()) {
+            if (input.rfind("../", 0) == 0) {
+                input.erase(0, 3);
+            } else if (input.rfind("./", 0) == 0) {
+                input.erase(0, 2);
+            } else if (input.rfind("/./", 0) == 0) {
+                input.erase(0, 2); // leaves the leading '/'
+            } else if (input == "/.") {
+                input = "/";
+            } else if (input.rfind("/../", 0) == 0) {
+                input.erase(0, 3); // leaves the leading '/'
+                auto lastSlash = output.rfind('/');
+                output.erase(lastSlash == std::string::npos ? 0 : lastSlash);
+            } else if (input == "/..") {
+                input = "/";
+                auto lastSlash = output.rfind('/');
+                output.erase(lastSlash == std::string::npos ? 0 : lastSlash);
+            } else if (input == "." || input == "..") {
+                input.clear();
+            } else {
+                std::size_t start = (input[0] == '/') ? 1 : 0;
+                auto nextSlash = input.find('/', start);
+                std::size_t segEnd = (nextSlash == std::string::npos) ? input.size() : nextSlash;
+                output += input.substr(0, segEnd);
+                input.erase(0, segEnd);
+            }
+        }
+        return output;
     }
 }
 
@@ -186,13 +233,32 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         parse(relativeUri);
         return;
     }
-    // Combine: base scheme+host + relative path
+    // Split off query/fragment so dot-segment removal (RFC 3986 §5.2.4) only ever
+    // operates on the path component, matching .NET's CombineUri + Compress() (Uri.cs).
+    std::string relativePath = relativeUri;
+    std::string relativeTail; // query/fragment, appended back verbatim after normalization
+    auto tailPos = relativePath.find_first_of("?#");
+    if (tailPos != std::string::npos) {
+        relativeTail = relativePath.substr(tailPos);
+        relativePath = relativePath.substr(0, tailPos);
+    }
+
+    std::string mergedPath;
+    if (!relativePath.empty() && relativePath[0] == '/') {
+        mergedPath = relativePath;
+    } else {
+        // RFC 3986 §5.3 merge: base path truncated up to and including its last '/'.
+        auto lastSlash = baseUri.path_.rfind('/');
+        std::string basePrefix = (lastSlash == std::string::npos) ? "/" : baseUri.path_.substr(0, lastSlash + 1);
+        mergedPath = basePrefix + relativePath;
+    }
+    mergedPath = removeDotSegments(mergedPath);
+
     std::string combined = baseUri.scheme_ + "://" + baseUri.host_;
     if (baseUri.port_ != defaultPortForScheme(baseUri.scheme_) && baseUri.port_ != -1)
         combined += ':' + std::to_string(baseUri.port_);
-    if (!relativeUri.empty() && relativeUri[0] != '/')
-        combined += baseUri.path_;
-    combined += relativeUri;
+    combined += mergedPath;
+    combined += relativeTail;
     parse(combined);
 }
 

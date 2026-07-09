@@ -268,3 +268,47 @@ TEST(UriTests, Opaque_WithQueryAndFragment) {
     EXPECT_EQ(u.getQueryProperty(), "?ext=42");
     EXPECT_EQ(u.getFragmentProperty(), "#note");
 }
+
+// ---------------------------------------------------------------------------
+// Combine (base, relative) — RFC 3986 §5.3 merge + dot-segment removal
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Combine_TrailingSlashBase_AppendsRelative) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b/c");
+}
+
+TEST(UriTests, Combine_NoTrailingSlashBase_ReplacesLastSegment) {
+    Uri base("http://example.com/a/b");
+    Uri combined(base, "c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/c");
+}
+
+TEST(UriTests, Combine_DotDotSegment_ResolvesUpOneLevel) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "../c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/c");
+}
+
+TEST(UriTests, Combine_AbsolutePathRelative_ReplacesWholePath) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "/absolute-path");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/absolute-path");
+}
+
+TEST(UriTests, Combine_DotSegment_IsRemoved) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "./c");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://example.com/a/b/c");
+}
+
+// ---------------------------------------------------------------------------
+// Default ports — must match .NET's built-in scheme table exactly
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, DefaultPort_UnregisteredScheme_IsMinusOne) {
+    // "ssh" is not a .NET built-in scheme and has no default port.
+    Uri u("ssh://host/");
+    EXPECT_EQ(u.getPortProperty(), -1);
+}
