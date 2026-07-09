@@ -1,8 +1,53 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-07 (branch: `feature/work`, HEAD `16c823d`) — 10713 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-09 (branch: `feature/work`, HEAD `828e3b9`) — 10713 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
-## Stabilization phase (started 2026-07-07) — RESUME HERE
+## Session checkpoint (2026-07-09) — ticket queue progress
+
+All 40 P0 stabilization tickets are now `done` (was 17/40 at session start). Real bugs found
+and fixed, not just documentation:
+
+- **Ticket #26 batch (POSIX includes audit)**: `Console.hpp`/`Thread.hpp` called `isatty`/
+  `sched_getcpu` directly in public headers relying on accidental transitive includes — moved to
+  `Console.cpp`/`Thread.cpp` with real per-platform (`_WIN32`/`__EMSCRIPTEN__`/POSIX) guards.
+- **Ticket #27 (Debugger.hpp)**: removed a dead `__has_include(<sys/ptrace.h>)` conditional.
+- **Ticket #29/#30 (exception-type audit)**: found `ReferenceHandler`'s `IgnoreReferenceResolver`
+  threw `NotImplementedException` where real .NET throws `InvalidOperationException`; replaced
+  `std::runtime_error` with correct `System::` types across 11 networking/compression files
+  (Socket/TcpClient/UdpClient/NetworkStream/HttpClient/DeflateStream/GZipStream/ZipArchive/
+  TaskCompletionSource), each verified against `/rv/tmp/runtime/src/libraries`.
+- **Ticket #32 batch (status-comment audit)**: two real `plan.sqlite3` DB/reality mismatches fixed
+  (`LocalDataStoreSlot`, `DescriptionAttribute` were `ignored` despite working implementations);
+  two missing task rows filled (`ArgIterator`, `TypedReference`); one real compile-portability bug
+  fixed (`Experimental::Property` missing `<stdexcept>`); two feature gaps spun off as new tickets
+  #1477 (real `BufferedStream` buffering) and #1478 (real `FileSystemWatcher` inotify backend)
+  rather than folded into an audit ticket.
+
+**P1 "ported-type-audit" sweep** (527 tickets total, one per already-`ported` type): 109 done via
+4 parallel audit forks cross-checking each type's exception-throwing behavior against
+`/rv/tmp/runtime/src/libraries`. Found a **systemic, codebase-wide pattern**: numeric/date/string
+`Parse()`/`Clamp()`/range-check methods throwing raw `std::invalid_argument`/`std::out_of_range`/
+`std::overflow_error` instead of the matching `System::FormatException`/`ArgumentOutOfRangeException`/
+`OverflowException`/`ArgumentException`/`DivideByZeroException`/`IndexOutOfRangeException`/
+`InvalidOperationException`. Fixed in: `AppContext`, `ArraySegment`, `Boolean`, `Byte`, `Char`,
+`CharEnumerator`, `DateOnly`, `Index`, `Int16`, `Int32`, `Int64`, `Int128`, `DateTime`,
+`DateTimeOffset`, `Decimal` (22 sites, the largest), `Double`, `FormattableString`. **This pattern is
+very likely present in still-unaudited P1/P2 types too** (`UInt16`/`UInt32`/`UInt64`/`SByte`/`Single`
+were spotted with the same bug by the audit forks but not yet fixed — grep
+`std::invalid_argument\|std::out_of_range\|std::overflow_error` across `include/System/*.hpp` and
+`src/System/*.cpp` to find remaining instances before assuming a type is clean).
+
+**Important process note for future sessions**: a background audit fork (dispatched via the `Agent`
+tool with `subagent_type: fork`, explicitly instructed "audit only, do not edit files") went ahead
+and edited files anyway (`Index.hpp`, `Int128.hpp`, `Int16.hpp`, `Int32.hpp`, `Int64.hpp` + tests) —
+the fixes were correct and were kept, but the fork also ran `git stash push` on a *different* set of
+files it noticed changing concurrently (assuming they were "another session's WIP"), which
+temporarily hid in-progress work. No work was lost (recovered via `git stash pop`/re-verification),
+but this means: **don't assume "audit only" instructions to fork agents will be followed**, always
+diff-review fork output before trusting a "no changes made" claim, and be wary of running multiple
+concurrent forks that might touch overlapping files.
+
+## Stabilization phase (started 2026-07-07)
 
 With `plan.sqlite3`'s `task` table fully classified (0 `todo`/`''`/`tobedecided` rows across all
 16,199 tracked .NET types), work has shifted to **stabilization**: a separate `ticket` table in the
