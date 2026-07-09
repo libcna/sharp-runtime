@@ -12,6 +12,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -31,16 +34,17 @@ public:
      * @brief Converts the string representation of a number to its 16-bit signed integer equivalent.
      * @param s String to parse.
      * @return Parsed int16 value.
-     * @throws std::out_of_range if the value exceeds Int16 range.
-     * @throws std::invalid_argument if the string is not a valid integer.
+     * @throws System::OverflowException if the value exceeds Int16 range.
+     * @throws System::FormatException if the string is not a valid integer.
      */
     static SharpRuntime::shortcs Parse(const std::string& s) {
         try {
             int v = std::stoi(s);
-            if (v < MinValue || v > MaxValue) throw std::out_of_range("Value out of Int16 range.");
+            if (v < MinValue || v > MaxValue) throw System::OverflowException("Value out of Int16 range.");
             return static_cast<int16_t>(v);
-        } catch (const std::out_of_range&) { throw; }
-          catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        } catch (const System::OverflowException&) { throw; }
+          catch (const std::out_of_range&) { throw System::OverflowException("Value out of Int16 range."); }
+          catch (...) { throw System::FormatException("Input string was not in a correct format."); }
     }
 
     /**
@@ -165,10 +169,10 @@ public:
     /**
      * @brief Returns the floor of the base-2 logarithm of @p value.
      * C++ counterpart of .NET Int16.Log2(short). Matches .NET: Log2(0) is 0, not an error.
-     * @throws std::out_of_range if @p value is negative.
+     * @throws System::ArgumentOutOfRangeException if @p value is negative.
      */
     [[nodiscard]] static int Log2(SharpRuntime::shortcs value) {
-        if (value < 0) throw std::out_of_range("value must be non-negative.");
+        if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         if (value == 0) return 0;
         return std::bit_width(static_cast<uint16_t>(value)) - 1;
     }

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Int16.hpp"
 
 using System::Int16;
@@ -76,4 +77,4 @@ TEST(Int16NewTests, Log2_Zero_IsZero) {
     // Matches .NET's actual BitOperations.Log2(0) semantics: 0, not an error.
     EXPECT_EQ(Int16::Log2(0), 0);
 }
-TEST(Int16NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int16::Log2(-1), std::out_of_range); }
+TEST(Int16NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int16::Log2(-1), System::ArgumentOutOfRangeException); }

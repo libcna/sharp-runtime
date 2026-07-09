@@ -3,9 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstddef>
-#include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
@@ -35,10 +35,10 @@ namespace System {
          * @param fromEnd If true, the index is measured from the end of the collection. If the
          *                Index is constructed from the end, index value 1 means pointing at the
          *                last element and index value 0 means pointing at beyond the last element.
-         * @throws std::out_of_range if @p value is negative.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
         Index(intcs value, bool fromEnd = false) : value_(value), fromEnd_(fromEnd) {
-            if (value < 0) throw std::out_of_range("Index: value must be non-negative.");
+            if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         }
 
         /** @brief Returns true if the index is from the end of the collection. */

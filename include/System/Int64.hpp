@@ -12,7 +12,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
 #include "System/Int128.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -38,11 +40,13 @@ namespace System {
         /**
          * @brief Parses @p s as a decimal Int64 value.
          * C++ counterpart of .NET Int64.Parse(string).
-         * @throws std::invalid_argument on bad format.
+         * @throws System::FormatException on bad format.
+         * @throws System::OverflowException if the value exceeds Int64 range.
          */
         [[nodiscard]] static longcs Parse(const std::string& s) {
             try { return static_cast<int64_t>(std::stoll(s)); }
-            catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for an Int64."); }
+            catch (...) { throw System::FormatException("Input string was not in a correct format."); }
         }
 
         /**

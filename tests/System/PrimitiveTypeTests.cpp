@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/FormatException.hpp"
 #include "System/Int32.hpp"
 #include "System/Int64.hpp"
+#include "System/OverflowException.hpp"
 #include "System/UInt32.hpp"
 
 using System::Int32;
@@ -27,9 +29,9 @@ TEST(Int32Tests, ParseValid) {
 }
 
 TEST(Int32Tests, ParseInvalidThrows) {
-    EXPECT_THROW(Int32::Parse("abc"),          std::invalid_argument);
-    EXPECT_THROW(Int32::Parse(""),             std::invalid_argument);
-    EXPECT_THROW(Int32::Parse("99999999999"),  std::invalid_argument);
+    EXPECT_THROW(Int32::Parse("abc"),          System::FormatException);
+    EXPECT_THROW(Int32::Parse(""),             System::FormatException);
+    EXPECT_THROW(Int32::Parse("99999999999"),  System::OverflowException);
 }
 
 TEST(Int32Tests, TryParseSuccess) {
@@ -68,9 +70,9 @@ TEST(Int64Tests, ParseValid) {
 }
 
 TEST(Int64Tests, ParseInvalidThrows) {
-    EXPECT_THROW(Int64::Parse("xyz"),                   std::invalid_argument);
-    EXPECT_THROW(Int64::Parse(""),                      std::invalid_argument);
-    EXPECT_THROW(Int64::Parse("99999999999999999999"),  std::invalid_argument);
+    EXPECT_THROW(Int64::Parse("xyz"),                   System::FormatException);
+    EXPECT_THROW(Int64::Parse(""),                      System::FormatException);
+    EXPECT_THROW(Int64::Parse("99999999999999999999"),  System::OverflowException);
 }
 
 TEST(Int64Tests, TryParseSuccess) {

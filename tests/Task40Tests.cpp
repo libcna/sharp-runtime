@@ -352,7 +352,7 @@ TEST(Int128Tests, Parse_Negative) {
 }
 
 TEST(Int128Tests, Parse_Invalid_Throws) {
-    EXPECT_THROW(System::Int128::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(System::Int128::Parse("abc"), System::FormatException);
 }
 
 TEST(Int128Tests, TryParse_Success) {
@@ -494,7 +494,7 @@ TEST(Int128Tests, Clamp_AboveMax_ReturnsMax) {
 }
 
 TEST(Int128Tests, Clamp_MinGreaterThanMax_Throws) {
-    EXPECT_THROW(System::Int128::Clamp(System::Int128(5), System::Int128(10), System::Int128(0)), std::invalid_argument);
+    EXPECT_THROW(System::Int128::Clamp(System::Int128(5), System::Int128(10), System::Int128(0)), System::ArgumentException);
 }
 
 TEST(Int128Tests, Max_ReturnsLarger) {
@@ -555,7 +555,7 @@ TEST(Int128Tests, Log2_CrossesUpperHalf) {
 }
 
 TEST(Int128Tests, Log2_Negative_Throws) {
-    EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), std::out_of_range);
+    EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

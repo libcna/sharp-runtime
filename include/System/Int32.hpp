@@ -13,6 +13,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -41,11 +44,13 @@ public:
      * C++ counterpart of .NET Int32.Parse(string).
      * @param s String to parse.
      * @return Parsed int32 value.
-     * @throws std::invalid_argument if the string is not a valid integer.
+     * @throws System::FormatException if the string is not a valid integer.
+     * @throws System::OverflowException if the value exceeds Int32 range.
      */
     static SharpRuntime::intcs Parse(const std::string& s) {
         try { return static_cast<int32_t>(std::stoi(s)); }
-        catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for an Int32."); }
+        catch (...) { throw System::FormatException("Input string was not in a correct format."); }
     }
 
     /**
@@ -368,11 +373,11 @@ public:
      * @brief Returns the integer base-2 logarithm of a 32-bit integer.
      *
      * C++ counterpart of .NET Int32.Log2(int).
-     * @throws std::invalid_argument if @p value is negative.
+     * @throws System::ArgumentOutOfRangeException if @p value is negative.
      */
     [[nodiscard]] static SharpRuntime::intcs Log2(SharpRuntime::intcs value) {
         if (value < 0)
-            throw std::invalid_argument("value must be non-negative.");
+            throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         if (value == 0) return 0;
         return static_cast<SharpRuntime::intcs>(std::bit_width(static_cast<uint32_t>(value)) - 1);
     }
