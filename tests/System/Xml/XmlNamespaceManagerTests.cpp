@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Xml/NameTable.hpp"
 #include "System/Xml/XmlNamespaceManager.hpp"
 
@@ -31,6 +32,21 @@ TEST(XmlNamespaceManagerTests, AddNamespace_ThenLookupNamespace_Resolves) {
     auto ns = mgr.LookupNamespace("foo");
     ASSERT_TRUE(ns.has_value());
     EXPECT_EQ(*ns, "urn:foo");
+}
+
+TEST(XmlNamespaceManagerTests, AddNamespace_XmlnsPrefix_Throws) {
+    XmlNamespaceManager mgr(NewNameTable());
+    EXPECT_THROW(mgr.AddNamespace("xmlns", "urn:foo"), System::ArgumentException);
+}
+
+TEST(XmlNamespaceManagerTests, AddNamespace_XmlPrefixWithWrongUri_Throws) {
+    XmlNamespaceManager mgr(NewNameTable());
+    EXPECT_THROW(mgr.AddNamespace("xml", "urn:bogus"), System::ArgumentException);
+}
+
+TEST(XmlNamespaceManagerTests, AddNamespace_XmlPrefixWithCorrectUri_Allowed) {
+    XmlNamespaceManager mgr(NewNameTable());
+    EXPECT_NO_THROW(mgr.AddNamespace("xml", "http://www.w3.org/XML/1998/namespace"));
 }
 
 TEST(XmlNamespaceManagerTests, LookupPrefix_FindsMatchingUri) {

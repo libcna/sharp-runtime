@@ -5,9 +5,11 @@
 // Coverage for the classic XmlDocument DOM API (XmlNode/XmlDocument/XmlElement/XmlAttribute/etc.).
 #include <gtest/gtest.h>
 #include <cstdio>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/XmlDocument.hpp"
+#include "System/Xml/XmlEntity.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlImplementation.hpp"
 #include "System/Xml/XmlWriter.hpp"
@@ -326,6 +328,22 @@ TEST(XmlDeclarationTests, CreateXmlDeclaration_StoresVersionEncodingStandalone) 
     EXPECT_EQ(decl->getStandaloneProperty(), "yes");
 }
 
+TEST(XmlDeclarationTests, CreateXmlDeclaration_InvalidVersion_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateXmlDeclaration("9.9", "", ""), System::ArgumentException);
+}
+
+TEST(XmlDeclarationTests, CreateXmlDeclaration_InvalidStandalone_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateXmlDeclaration("1.0", "", "maybe"), System::ArgumentException);
+}
+
+TEST(XmlDeclarationTests, SetStandaloneProperty_InvalidValue_Throws) {
+    XmlDocument doc;
+    auto* decl = doc.CreateXmlDeclaration("1.0", "", "");
+    EXPECT_THROW(decl->setStandaloneProperty("maybe"), System::ArgumentException);
+}
+
 TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_SplitsTargetAndData) {
     XmlDocument doc;
     auto* pi = doc.CreateProcessingInstruction("xml-stylesheet", "type=\"text/xsl\" href=\"style.xsl\"");
@@ -452,4 +470,14 @@ TEST(XmlImplementationTests, HasFeature_UnknownFeature_ReturnsFalse) {
 TEST(XmlImplementationTests, HasFeature_UnknownVersion_ReturnsFalse) {
     XmlImplementation impl;
     EXPECT_FALSE(impl.HasFeature("XML", "3.0"));
+}
+
+// ===========================================================================
+// XmlEntity
+// ===========================================================================
+
+TEST(XmlEntityTests, SetInnerTextProperty_Throws) {
+    XmlDocument doc;
+    XmlEntity entity(&doc, "foo", "", "", "");
+    EXPECT_THROW(entity.setInnerTextProperty("bar"), System::InvalidOperationException);
 }

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlNamespaceManager.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System::Xml {
 
@@ -36,6 +37,12 @@ namespace System::Xml {
     }
 
     void XmlNamespaceManager::AddNamespace(const std::string& prefix, const std::string& uri) {
+        if (prefix == "xml" && uri != kNsXml)
+            throw System::ArgumentException(
+                "Prefix \"xml\" is reserved for use by XML and can be mapped only to namespace name "
+                "\"http://www.w3.org/XML/1998/namespace\".");
+        if (prefix == "xmlns")
+            throw System::ArgumentException("Prefix \"xmlns\" is reserved for use by XML.");
         scopes_.back()[prefix] = uri;
     }
 

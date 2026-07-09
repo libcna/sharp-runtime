@@ -46,7 +46,11 @@ namespace System::Xml {
         /** @brief Pops the most recently pushed scope. @return false if there was no scope to pop (already at the root scope). */
         bool PopScope();
 
-        /** @brief Adds the given namespace to the current (innermost) scope. */
+        /**
+         * @brief Adds the given namespace to the current (innermost) scope.
+         * @throws System::ArgumentException if @p prefix is "xml" and @p uri is not the reserved
+         *         XML namespace URI, or if @p prefix is "xmlns" (always reserved).
+         */
         void AddNamespace(const std::string& prefix, const std::string& uri);
         /** @brief Removes a namespace declaration matching both @p prefix and @p uri from the current scope, if present. */
         void RemoveNamespace(const std::string& prefix, const std::string& uri);

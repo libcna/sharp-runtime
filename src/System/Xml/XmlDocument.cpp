@@ -6,12 +6,21 @@
 #include <cctype>
 #include <tinyxml2/tinyxml2.h>
 
+#include "System/ArgumentException.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
 namespace System::Xml {
 
     namespace {
+        // VersionNum ::= '1.' [0-9]+  (XmlDeclaration.cs IsValidXmlVersion)
+        bool IsValidXmlVersion(const std::string& ver) {
+            if (ver.size() < 3 || ver[0] != '1' || ver[1] != '.') return false;
+            for (size_t i = 2; i < ver.size(); ++i)
+                if (!std::isdigit(static_cast<unsigned char>(ver[i]))) return false;
+            return true;
+        }
+
         bool StartsWithDoctype(const char* v) {
             if (!v) return false;
             std::string s(v);
@@ -168,6 +177,10 @@ namespace System::Xml {
     }
 
     XmlDeclaration* XmlDocument::CreateXmlDeclaration(const std::string& version, const std::string& encoding, const std::string& standalone) {
+        if (!IsValidXmlVersion(version))
+            throw System::ArgumentException("Wrong XML version information. The XML must match production \"VersionNum ::= '1.' [0-9]+\".");
+        if (!standalone.empty() && standalone != "yes" && standalone != "no")
+            throw System::ArgumentException("Wrong value for the XML declaration standalone attribute of '" + standalone + "'.");
         std::string text = "xml version=\"" + version + "\"";
         if (!encoding.empty()) text += " encoding=\"" + encoding + "\"";
         if (!standalone.empty()) text += " standalone=\"" + standalone + "\"";
