@@ -884,6 +884,43 @@ TEST(StreamWriterReaderTests, StreamWriter_BaseStreamProperty) {
     EXPECT_EQ(sw.getBaseStreamProperty(), &ms);
 }
 
+TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
+    // Regression: Close() previously closed the underlying stream unconditionally, ignoring
+    // leaveOpen (only the destructor honored it). MemoryStream::Close() clears its buffer, so
+    // a nonzero length after StreamWriter::Close() proves the underlying stream was left open.
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write(std::string("data"));
+    sw.Flush();
+    sw.Close();
+    EXPECT_GT(ms.getLengthProperty(), 0);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, false);
+    sw.Write(std::string("data"));
+    sw.Flush();
+    sw.Close();
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
+    uint8_t data[] = {'a', 'b', 'c'};
+    MemoryStream ms(data, 3);
+    StreamReader sr(&ms, true);
+    sr.Close();
+    EXPECT_GT(ms.getLengthProperty(), 0);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    uint8_t data[] = {'a', 'b', 'c'};
+    MemoryStream ms(data, 3);
+    StreamReader sr(&ms, false);
+    sr.Close();
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
 TEST(StreamWriterReaderTests, WriteStringLiteral_DoesNotResolveToBoolOverload) {
     // Regression: TextWriter previously had no Write(const char*) overload, so a string
     // literal bound to Write(bool) via a preferred standard pointer-to-bool conversion

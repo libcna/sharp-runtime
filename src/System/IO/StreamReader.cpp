@@ -84,6 +84,11 @@ namespace System::IO
 
     void StreamReader::Close()
     {
-        if (stream_) stream_->Close();
+        // Verified against StreamReader.cs: Close() delegates to Dispose(true), which checks
+        // _closable (i.e. !leaveOpen) before closing the underlying stream -- matching this
+        // type's own destructor (above), which already got this right. This method previously
+        // closed the stream unconditionally, defeating leaveOpen's entire purpose for any
+        // caller that called Close() explicitly instead of only relying on the destructor.
+        if (!leaveOpen_ && stream_) stream_->Close();
     }
 }

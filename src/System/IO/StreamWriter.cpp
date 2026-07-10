@@ -28,6 +28,12 @@ namespace System::IO {
     void StreamWriter::Write(const char* value)         { WriteRaw(value, std::strlen(value)); }
 
     void StreamWriter::Flush() { stream_->Flush(); }
-    void StreamWriter::Close() { stream_->Close(); }
+
+    // Verified against StreamWriter.cs: Close() delegates to Dispose(true), which checks
+    // _closable (i.e. !leaveOpen) before closing the underlying stream -- matching this type's
+    // own destructor (above), which already got this right. This method previously closed the
+    // stream unconditionally, defeating leaveOpen's entire purpose for any caller that called
+    // Close() explicitly instead of only relying on the destructor.
+    void StreamWriter::Close() { if (!leaveOpen_) stream_->Close(); }
 
 } // namespace System::IO
