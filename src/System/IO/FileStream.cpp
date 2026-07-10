@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileStream.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 
@@ -104,14 +106,30 @@ namespace System::IO
 
     intcs FileStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open() || buffer == nullptr || offset < 0 || count < 0) return 0;
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (buffer == nullptr)
+            throw System::ArgumentNullException("buffer");
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count == 0) return 0;
         file_.read(reinterpret_cast<char*>(buffer + offset), count);
         return static_cast<intcs>(file_.gcount());
     }
 
     void FileStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open() || buffer == nullptr || count <= 0) return;
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (buffer == nullptr)
+            throw System::ArgumentNullException("buffer");
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count == 0) return;
         file_.write(reinterpret_cast<const char*>(buffer + offset),
                     static_cast<std::streamsize>(count));
     }
@@ -155,6 +173,12 @@ namespace System::IO
     {
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        // Check open state before canWrite_: canWrite_ reflects the access mode requested at
+        // construction and is never reset by Close(), so without this check SetLength() after
+        // Close() would still resize the file on disk via path_ below despite the stream
+        // claiming to be closed.
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
 

@@ -1154,6 +1154,67 @@ TEST(FileStreamTests, ReadByte_ReturnsBytesThenMinusOne) {
     File::Delete(p);
 }
 
+TEST(FileStreamTests, Read_AfterClose_ThrowsObjectDisposedException) {
+    std::string p = tf("fstream_read_after_close.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.Close();
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, 0, 3), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Write_AfterClose_ThrowsObjectDisposedException) {
+    std::string p = tf("fstream_write_after_close.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    fs.Close();
+    uint8_t buf[3] = {1, 2, 3};
+    EXPECT_THROW(fs.Write(buf, 0, 3), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    std::string p = tf("fstream_read_null.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_THROW(fs.Read(nullptr, 0, 3), System::ArgumentNullException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    std::string p = tf("fstream_read_negoffset.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, -1, 3), System::ArgumentOutOfRangeException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    std::string p = tf("fstream_read_negcount.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_AfterClose_ThrowsObjectDisposedException_DoesNotResizeFile) {
+    // Regression: SetLength() previously checked only canWrite_ (never reset by Close()),
+    // so calling it after Close() silently resized the file on disk despite the stream
+    // claiming to be closed.
+    std::string p = tf("fstream_setlength_after_close.bin");
+    File::WriteAllText(p, "abcdefgh");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.Close();
+    EXPECT_THROW(fs.SetLength(3), System::ObjectDisposedException);
+    EXPECT_EQ(File::ReadAllText(p), "abcdefgh");
+    File::Delete(p);
+}
+
 // ===========================================================================
 // IsolatedStorageFile
 // ===========================================================================
