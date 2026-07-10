@@ -1,6 +1,116 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `e1f3d9d`) — 11262 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `2833f34`) — 11262 tests passing (Debug, default `cmake --build build` config); library-only Release build (GCC 14, `-Werror`) now separately verified clean too — see checkpoint below*
+
+## Session checkpoint (2026-07-10, continued again) — build-verification gap: library-only Release build with GCC 14 was never actually tested, and failed
+
+**This corrects every earlier "full clean rebuild verified (0 errors/0 warnings)" claim in this
+file.** Those claims were true only for the default build configuration this session always
+ran — `cmake --build build --parallel 4` with no `CMAKE_BUILD_TYPE` set (so no `-O2`/`-O3`) and
+`SHARP_RUNTIME_BUILD_TESTS=ON` (the CMake default). That configuration was never representative
+of a downstream consumer building just the library in Release mode, and it turns out an
+optimization-dependent GCC diagnostic only fires at `-O2`+ — so a real build failure sat
+undetected all session.
+
+**Compiler:** `gcc (Debian 14.2.0-19) 14.2.0` / `g++` same version (`gcc --version` / `g++
+--version`), CMake 3.31.6, on this checkout's Linux host.
+
+**Exact commands run, in order:**
+```
+cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build_no_tests --parallel 8
+```
+This is a **library-only** build (`SHARP_RUNTIME_BUILD_TESTS=OFF` — no googletest, no test
+target at all) at `-DCMAKE_BUILD_TYPE=Release`, which is what actually enables `-O2`/`-O3`; the
+project's `-Wall -Wextra -Werror` flags (`CMakeLists.txt`) are unconditional across build types,
+but several of the warnings they turn fatal are themselves optimization-dependent GCC analyses
+that silently don't run at `-O0`, which is what the session's habitual `cmake --build build`
+(no explicit `CMAKE_BUILD_TYPE`) actually built at all session — explaining how this went
+undetected through every prior "clean build" checkpoint.
+
+**Initial failure (reproduced before any fix):**
+```
+src/System/Net/NetworkInformation/Ping.cpp:160:20: error: 'void* memset(void*, int, size_t)'
+  offset [0, 6] is out of the bounds [0, 0] [-Werror=array-bounds=]
+src/System/Net/NetworkInformation/Ping.cpp:171:20: error: 'void* memset(void*, int, size_t)'
+  offset [0, 6] is out of the bounds [0, 0] [-Werror=array-bounds=]
+```
+Root cause: `sendPingCore` built the ICMP packet by `reinterpret_cast`ing `packet.data()` (a
+`uint8_t*` into a `std::vector<uint8_t>`) to `icmp6_hdr*`/`icmphdr*` and `memset`ing through
+that pointer. At `-O2`, GCC's array-bounds analysis cannot prove the vector's dynamic storage
+is large enough through that cast and treats the `memset` as writing past a zero-size object.
+**Fix:** build the header in a local, properly-typed `icmp6_hdr`/`icmphdr` object
+(value-initialized with `{}`, so every field starts zero — no `memset` needed at all), populate
+its fields normally, then `std::memcpy` the fully-formed struct into `packet.data()`. For the
+IPv4 branch, the checksum needs the payload already copied in, so the local header is populated
+twice: once with `checksum = 0` to compose the packet for checksum calculation, then again with
+the real checksum after `internetChecksum()` runs. No `reinterpret_cast` of `packet.data()`
+remains; no `-Werror` suppression pragma was added. Verified: `PingTests.Send_Loopback_Succeeds`
+and `Send_CustomBuffer_EchoedBack` (which do a real ICMP round-trip against loopback and check
+the echoed payload byte-for-byte) still pass, confirming the packet bytes are unchanged.
+
+**Second failure, uncovered only after the first was fixed** (same command, same run):
+```
+.../new_allocator.h:172:33: error: 'void operator delete(void*, std::size_t)' called on pointer
+  '<unknown>' with nonzero offset [2, 9223372036854775807] [-Werror=free-nonheap-object]
+```
+4 instances, all inlined into `src/System/Text/Encoding.cpp` from
+`UnicodeEncoding::GetBytes`/`UTF32Encoding::GetBytes` (both header-only, in
+`include/System/Text/UnicodeEncoding.hpp` / `UTF32Encoding.hpp`). This is GCC 14's documented
+`-Wfree-nonheap-object`/`-Warray-bounds` false-positive class with `vector::reserve()` followed
+by `push_back()`/`emplace_back()`, when the growth-reallocation branch gets inlined through a
+virtual call and a capturing lambda at `-O2`+ — GCC's escape analysis loses track that the
+`operator delete` inside `_M_realloc_append`'s `_Guard` destructor and the `operator new` from
+`reserve()` moments earlier are the same allocation. Verified this is a false positive, not a
+real bug, by hand-proving both `reserve()` calls are legitimate upper bounds before touching
+anything: `UnicodeEncoding::GetBytes` emits at most 2 output bytes per consumed UTF-8 input
+byte on every code path (including the malformed-input fallback, which consumes 1 byte and
+emits one 2-byte BMP replacement unit) — so `s.size() * 2 + 2` (`+2` for the optional BOM)
+can never be exceeded; `UTF32Encoding::GetBytes` emits exactly 4 bytes per decoded code point
+and there are at most `s.size()` code points, so `s.size() * 4 + 4` can never be exceeded
+either. Since the growth-reallocation branch is provably unreachable at runtime but the
+compiler can't prove that statically, **fixed by eliminating the `reserve()` + `push_back()`
+code shape entirely**: both `GetBytes()` overloads now `resize()` the output vector up front to
+that same proven-sufficient bound, write through direct indexing (`out[pos++] = ...`), then
+`resize(pos)` down to the actual length at the end (a shrink, which never reallocates). No
+`-Werror` suppression pragma was added; this is a real code-structure change, not a warning
+workaround. `UTF32Encoding::writeUnit`'s signature changed from `(vector&, uint32_t)` to
+`(vector&, size_t& pos, uint32_t)` to support indexed writes; both of its call sites (within
+the same class) were updated. Verified: `UnicodeEncodingTests` (12/12) and `UTF32EncodingTests`
+(9/9) — including exact-output-size assertions (`GetBytes_WithBOM_SizeIs8ForSingleChar`,
+`GetBytes_NoBOM_SizeIs4ForSingleChar`) — still pass unchanged.
+
+**Verification after both fixes, run in this exact order:**
+1. `cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release` +
+   `cmake --build build_no_tests --parallel 8` — **library-only Release build, exit 0, 0
+   errors, 0 warnings** (`grep -c "error:"` and `grep -c "warning:"` on the full build log both
+   return `0`). `libSHARP_RUNTIME.a` was produced.
+2. `vendor/googletest` submodule **is present and populated** in this checkout (`git submodule
+   status` shows it checked out at `7e2c425d`, not an empty/missing directory) — so per the
+   ticket's instructions, the full test build and suite were run, not skipped:
+   `rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` (the session's normal default
+   config — tests **on**, no explicit optimization level) + `cmake --build build --parallel 8`
+   — 0 errors, 0 warnings. `./build/SharpRuntimeTests` — **11262/11262 tests passed**, 0
+   failures (same count as before this fix — no regression tests were added for this change
+   since it's a pure code-structure/compiler-diagnostic fix with no behavioral change; existing
+   `PingTests`/`UnicodeEncodingTests`/`UTF32EncodingTests` already cover the touched code and
+   all still pass byte-for-byte).
+3. **Not yet run in this checkpoint:** a Release-mode build *with* tests enabled
+   (`-DCMAKE_BUILD_TYPE=Release` and `SHARP_RUNTIME_BUILD_TESTS=ON` together), and Debug-mode
+   library-only. Only the two configurations explicitly named in the reproduction request were
+   verified. If a future session wants "every `(BUILD_TYPE, BUILD_TESTS)` combination verified
+   clean," that is still open — flagging so a future "clean build" claim doesn't overclaim
+   coverage the way this one implicitly did.
+
+**Process takeaway, carried forward:** this session's recurring `cmake --build build --parallel
+4` command (per `CLAUDE.md`'s own "Useful commands" section) never sets `CMAKE_BUILD_TYPE`, so
+it never enables `-O2`/`-O3`, so it can never catch an optimization-dependent `-Werror`
+diagnostic like either of the two above. Every future "clean build" claim in this file should
+state which configuration(s) were actually run rather than an unqualified "full clean rebuild
+verified" — that phrasing is what let this exact gap go unnoticed. Per the requesting
+instructions: **no further P2 ticket work should proceed from a fresh context until this
+checkpoint's fix is confirmed present** (it is, as of this checkpoint — both fixes are
+committed).
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: genuinely EVERY critical now fixed, including Text.Json (56/56)
 
