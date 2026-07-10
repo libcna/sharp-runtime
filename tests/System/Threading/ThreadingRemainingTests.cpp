@@ -211,6 +211,34 @@ TEST(BarrierTests, PostPhaseAction_CalledAfterPhase) {
     EXPECT_EQ(phasesCalled, 1);
 }
 
+// Regression tests for a wave-3 audit finding: Dispose() was a true no-op with no disposed_
+// flag at all -- every method remained fully usable after disposal. Verified against
+// Barrier.cs: SignalAndWait/AddParticipants/RemoveParticipants all call
+// ObjectDisposedException.ThrowIf(_disposed, this) as their first check.
+TEST(BarrierTests, SignalAndWait_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_THROW(b.SignalAndWait(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, AddParticipant_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_THROW(b.AddParticipant(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, RemoveParticipant_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(2);
+    b.Dispose();
+    EXPECT_THROW(b.RemoveParticipant(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, Dispose_CalledTwice_DoesNotThrow) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_NO_THROW(b.Dispose());
+}
+
 // ===========================================================================
 // CountdownEvent
 // ===========================================================================

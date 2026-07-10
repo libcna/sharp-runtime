@@ -13,6 +13,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/BarrierPostPhaseException.hpp"
 
 namespace System::Threading {
@@ -45,11 +46,20 @@ namespace System::Threading {
         std::condition_variable cv_;
         std::exception_ptr lastPostPhaseException_;
         std::atomic<std::thread::id> actionCallerId_;
+        bool disposed_ = false;
 
         void ThrowIfCalledFromPostPhaseAction() const {
             if (actionCallerId_.load() == std::this_thread::get_id())
                 throw System::InvalidOperationException(
                     "This method may not be called from within the postPhaseAction.");
+        }
+
+        // Verified against Barrier.cs: SignalAndWait/AddParticipants/RemoveParticipants all
+        // call ObjectDisposedException.ThrowIf(_disposed, this) as their first check. This port
+        // previously had no disposed_ flag at all -- Dispose() was a true no-op and every method
+        // remained fully usable after disposal.
+        void ThrowIfDisposed() const {
+            if (disposed_) throw System::ObjectDisposedException("Barrier");
         }
 
     public:
@@ -68,10 +78,12 @@ namespace System::Threading {
 
         /**
          * @brief Signals that a participant has reached the barrier and blocks until all participants have arrived.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
          * @throws System::InvalidOperationException if called from within the post-phase action.
          * @throws BarrierPostPhaseException if the post-phase action threw during this phase.
          */
         void SignalAndWait() {
+            ThrowIfDisposed();
             ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ == 0)
@@ -89,9 +101,11 @@ namespace System::Threading {
 
         /**
          * @brief Notifies the barrier that there will be one additional participant; returns new participant count.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
          * @throws System::InvalidOperationException if called from within the post-phase action.
          */
         intcs AddParticipant() {
+            ThrowIfDisposed();
             ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ >= 32767)
@@ -103,9 +117,11 @@ namespace System::Threading {
 
         /**
          * @brief Notifies the barrier that there will be one fewer participant.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
          * @throws System::InvalidOperationException if called from within the post-phase action.
          */
         void RemoveParticipant() {
+            ThrowIfDisposed();
             ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ == 0)
@@ -118,8 +134,17 @@ namespace System::Threading {
             }
         }
 
-        /** Releases resources used by the Barrier. */
-        void Dispose() {}
+        /**
+         * @brief Releases resources used by the Barrier.
+         * @throws System::InvalidOperationException if called from within the post-phase action.
+         * @note Verified against Barrier.cs's Dispose()/Dispose(bool): real .NET checks the same
+         * post-phase-action reentrancy guard as SignalAndWait/AddParticipants/RemoveParticipants
+         * before disposing, and Dispose(bool) is idempotent. Calling this repeatedly is safe.
+         */
+        void Dispose() {
+            ThrowIfCalledFromPostPhaseAction();
+            disposed_ = true;
+        }
 
     private:
         /**
