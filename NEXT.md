@@ -1,6 +1,189 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-09 (branch: `feature/work`, HEAD `828e3b9`) — 10713 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `a8b7a14`) — 10986 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10) — P2 wave-1 audit findings, all fixed
+
+*Branch: `feature/work`, HEAD `a8b7a14` — 10986 tests passing (up from 10935 at session start),
+full clean rebuild verified (0 errors/0 warnings)*
+
+### Context
+
+Continuation of the 2026-07-09 autonomous stabilization session (user unavailable ~20h,
+explicit standing instruction to keep working rather than wait). P1 ticket queue was already
+exhausted; user explicitly chose "continue into P2 queue" when asked for direction. This
+session processed every finding from the P2 "wave 1" parallel audit (Collections/
+Globalization/Text/Security namespaces, ~178 types) through to a fix, verified against real
+`/rv/tmp/runtime/src/libraries` source, tests added, committed, and ticket notes updated —
+per the Ticket completion checklist in README.md.
+
+### Ticket queue progress
+
+P2 `ported-type-audit`: 24 done, 1 `needs_user` (added this session; was 0/482 addressed via
+wave-1 findings before this session's continuation began, aside from tickets closed in the
+pre-compaction portion already covered by an earlier NEXT.md entry).
+
+### What was fixed (real bugs, not just documentation)
+
+- **SortKey::operator== (System.Globalization)**: compared the original source string in
+  addition to `keyData_`; real .NET `SortKey.Equals` compares only `_keyData` bytes
+  (`SortKey.cs`). Fixed; found as a direct consequence of a `CompareInfo` regression test.
+  Commit `a2bd921`.
+- **CompareInfo (System.Globalization)**: 5 call sites checked only `CompareOptions::IgnoreCase`,
+  silently ignoring `CompareOptions::OrdinalIgnoreCase` (a separate, non-overlapping bit) —
+  verified against `CompareInfo.Invariant.cs`. Commit `a2bd921`. Ticket #317/#784/#806.
+- **Byte/SByte Log10/Log2/LeadingZeroCount (System)**: threw raw `std::domain_error` for
+  value 0 (Byte) or used the wrong exception type + wrong boundary (SByte, `<=0` instead of
+  `<0`); SByte.LeadingZeroCount special-cased negative values to return 8 instead of
+  reinterpreting the raw 8-bit bit pattern (-1 has 0 leading zeros, not 8). Verified against
+  `Byte.cs`/`SByte.cs`/`BitOperations.cs`. Commit `ea4d85e`. Ticket #438/#564. Also corrected a
+  stale memory claim that UInt16/32/64/SByte `Parse()` still needed the exception-type fix —
+  re-checked and found already correct from an earlier pass.
+- **ConcurrentQueue/ConcurrentStack/FrozenDictionary/FrozenSet CopyTo (System.Collections.*)**:
+  all threw raw `std::out_of_range` for both negative-index and too-small-destination cases;
+  real .NET splits these into `ArgumentOutOfRangeException`/`ArgumentException`.
+  `ConcurrentStack.PushRange`/`TryPopRange` had the same issue. `FrozenDictionary`'s indexer
+  threw `std::out_of_range` on missing key; real .NET throws `KeyNotFoundException`. Commit
+  `48f3636`. Tickets #659/#660/#663/#664/#327.
+- **ConcurrentDictionary::operator[] (System.Collections.Concurrent)**: returned `TValue&`
+  directly into the internal map with the lock released on return — a concurrent `TryRemove`
+  could erase the node while another thread held a now-dangling reference; also silently
+  default-inserted on a missing-key read via `std::unordered_map::operator[]` instead of
+  throwing `KeyNotFoundException` like real .NET. Fixed with a `ValueProxy` (locked
+  copy-on-read, locked upsert-on-write). Commit `3605260`. Ticket #658.
+- **JulianCalendar (System.Globalization)**: `GetYear`/`GetMonth`/`GetDayOfMonth`/
+  `GetDayOfYear`/`GetDaysInYear`/`ToDateTime`/`AddMonths`/`AddYears` were all inherited
+  unmodified from the Gregorian-only `Calendar` base — the type never actually applied the
+  Julian↔Gregorian day-number offset, so it wasn't really a Julian calendar despite
+  `IsLeapYear`/`GetDaysInMonth` correctly using the Julian leap rule. Ported .NET's real
+  `GetDatePart`/`DateToTicks` algorithm. Also fixed `TwoDigitYearMax` default (2029→2049).
+  Verified with a compiled round-trip check. Commit `4559fd9`. Ticket #800.
+- **HebrewCalendar/HijriCalendar/UmAlQuraCalendar (System.Globalization)**: none of the three
+  overrode `ToDateTime` at all — calling it fell back to `Calendar`'s Gregorian-only base,
+  silently misinterpreting native year/month/day as literal Gregorian values. Each type
+  already had an internal day-number conversion helper used by `AddMonths`; wired it up as
+  `ToDateTime`. Verified with a compiled round-trip check. Commit `1f966f0`. Tickets
+  #795/#796/#814.
+- **JapaneseCalendar.MinSupportedDateTime (System.Globalization)**: was `DateTime(1868,9,8)`;
+  real .NET's `s_calendarMinValue` is `DateTime(1868,10,23)` — off by 45 days. Commit
+  `ef5731c`. Ticket #799.
+- **CharUnicodeInfo.GetUnicodeCategory (System.Globalization)**: checked `iswspace()` before
+  the C0-control-range check, so TAB/LF/VT/FF/CR were misclassified as `SpaceSeparator`
+  instead of `Control` (verified against Python `unicodedata` ground truth: all of
+  U+0000-U+001F is Cc). Commit `5dda506`. Ticket #783.
+- **TextInfo.ToTitleCase (System.Globalization)**: always lowercased every character after a
+  word's first letter, destroying acronyms ("USA"→"Usa"). Real .NET explicitly preserves
+  all-uppercase words (`TextInfo.cs`'s own comment: "prevent from lowercasing acronyms like
+  URT, USA, etc"). Commit `4eb2c14`. Ticket #811.
+- **StringBuilder::operator[] (System.Text)**: delegated straight to
+  `std::string::operator[]`, UB for an out-of-range index; real .NET throws
+  `IndexOutOfRangeException`. Commit `b6b36d0`. Ticket #1156.
+- **Ascii::Trim/TrimStart/TrimEnd (System.Text)**: signed-char bug (`value[i] <= 32` on a
+  signed `char` made high-bit bytes, e.g. UTF-8 continuation bytes, read as negative and
+  always trim); also over-broad whitespace set (`<=32` trims NUL and other C0 controls that
+  real .NET's exact 6-byte `TrimMask` — TAB/LF/VT/FF/CR/space — does not). Commit `afa3b5b`.
+  Ticket #1131.
+- **GenericPrincipal (System.Security.Principal)**: constructor didn't validate a null
+  identity; real .NET throws `ArgumentNullException` immediately. Commit `d064a40`. Ticket
+  #1126.
+- **OidCollection.CopyTo (System.Security.Cryptography)**: missing entirely. Implemented
+  matching .NET's exact validation (`ArgumentOutOfRangeException` for `index>=array.Length`
+  — deliberately "≥" per `OidCollection.cs`; `ArgumentException` for insufficient room).
+  Commit `d064a40`. Ticket #1113.
+- **Rune::TryGetRuneAt (System.Text)**: UTF-8 decoder accepted ill-formed input — no
+  continuation-byte validation (`10xxxxxx` pattern) and no overlong-encoding rejection (RFC
+  3629). Verified with a compiled reproduction: `"\xC0\x80"` (overlong U+0000) decoded to
+  real U+0000 instead of being rejected; `"\xC2\x41"` (bad continuation) decoded to a bogus
+  code point. Commit `879158b`. Ticket #1154.
+- **UTF7Encoding (System.Text)**: silently substituted `'?'` for non-ASCII input/bytes
+  instead of implementing real UTF-7 (RFC 2152 shift-sequence encoding) or throwing —
+  directly against CLAUDE.md's "never silently return a wrong value" rule; was marked
+  `ported` in `plan.sqlite3`'s `task` table despite being an admitted stub. Now throws
+  `NotImplementedException` for the non-ASCII case instead of corrupting data; full RFC 2152
+  support stays out of scope (SYSLIB0001-obsolete in real .NET). Commit `6156124`. Ticket
+  #1160.
+- **UnicodeEncoding/UTF32Encoding (System.Text)**: same UTF-8 decode-loop bug as `Rune`
+  (each has its own copy of the decode helper) — fixed identically. Also: `UnicodeEncoding
+  ::GetString` didn't validate surrogate pairing (unpaired/lone surrogates reached
+  `encodeUtf8` unvalidated, producing CESU-8/WTF-8-style output that isn't valid UTF-8);
+  `UTF32Encoding::GetString` didn't validate a decoded 32-bit unit was a real Unicode scalar
+  value before encoding (garbage input could produce structurally invalid UTF-8 byte
+  patterns, not just the wrong code point). Both now replace with U+FFFD, matching .NET's
+  default `DecoderFallback`. Commit `a8b7a14`. Tickets #1162/#1159.
+
+### What was found but deliberately NOT fixed this session, and why
+
+- **Comparer / ListDictionaryInternal (System.Collections)**: pointer-identity comparison
+  instead of .NET's value-based `Equals`/`CompareTo` — confirmed as the *same permanent
+  architectural root cause* as `StructuralComparisons` (already documented in an earlier
+  session): C++ has no common object root, so a non-generic `const void*`-typed API cannot
+  safely re-derive the concrete type to call a virtual `Equals`/`CompareTo`. Strengthened doc
+  comments with `@warning` blocks cross-referencing all three types; no behavior change — a
+  real fix needs an interface redesign, out of scope per CLAUDE.md rule #10. Commit `3465295`.
+  Tickets #642/#654/#342.
+- **UTF8Encoding (System.Text)**: `GetBytes`/`GetString` are a straight byte passthrough
+  (this runtime's `std::string` is already UTF-8-native) with zero well-formedness
+  validation in either direction. A different, larger-scoped gap than the decode-loop bug
+  fixed in `UnicodeEncoding`/`UTF32Encoding` — would need real `DecoderFallback`/
+  `EncoderFallback` infrastructure, not a decode-loop fix. Ticket #1161 set to `needs_user`:
+  is full validation worth implementing given `GetBytes`/`GetString` are mostly called with
+  already-valid `std::string` data internally?
+
+### Process notes for future sessions
+
+- **The `Byte`/`SByte` exception-type memory note was stale.** A prior session's memory
+  claimed `UInt16`/`UInt32`/`UInt64`/`SByte`'s `Parse()` still needed the raw-`std::`-
+  exception fix; re-checking found it already correct (fixed in an earlier pass that wasn't
+  written back to memory). Always re-verify a memory's claims against current source before
+  trusting them — a memory is a snapshot, not a live fact.
+- **The same UTF-8 decode-loop bug (missing continuation-byte + overlong-encoding
+  validation) was independently copy-pasted into `Rune`, `UnicodeEncoding`, and
+  `UTF32Encoding`.** When one instance of a bug is found in a codebase with duplicated
+  helper logic, grep siblings for the same code shape before considering the bug class
+  closed — `grep -rn "static void decodeUtf8" include/System/Text/` would have found all
+  three at once.
+- **Always verify exact expected byte output for encoding-fallback fixes with a compiled
+  reproduction before writing test assertions.** Rejecting an ill-formed multi-byte sequence
+  resyncs one byte at a time, so a 2-byte overlong sequence produces *two* U+FFFD
+  replacement characters, not one — an intuitive-but-wrong assumption that a first draft of
+  the regression tests got wrong until checked against actual compiled output.
+- **`ticket.status` has a DB CHECK constraint**: only `todo|doing|done|blocked|needs_user|
+  wontfix` are valid (NOT `tobedecided`, which is a `task.status` value for the *other*
+  table). Trying to set an invalid value fails the whole `sqlite3` invocation silently
+  mid-batch if not checked — always verify the write succeeded with a follow-up `SELECT`.
+
+### Currently in flight (dispatched, not yet reviewed as of this checkpoint)
+
+Four parallel read-only audit agents dispatched for P2 wave 2, covering ~140 more
+`ported-type-audit` types (same methodology as wave 1 — compare against
+`/rv/tmp/runtime/src/libraries`, report findings, findings get independently re-verified
+before any fix is applied):
+1. `System.Globalization` remaining types (Calendar, CultureInfo, DateTimeFormatInfo,
+   NumberFormatInfo, RegionInfo, and ~20 more — 27 tickets).
+2. Collections family: `System.Collections` + `.Immutable` + `.ObjectModel` + `.Specialized`
+   (46 tickets) — explicitly told NOT to re-flag the already-documented `IComparer`/void*
+   pointer-identity limitation, and to check for the `ConcurrentDictionary`-style
+   reference-escape bug pattern in indexers.
+3. `System.Text` + `System.Text.RegularExpressions` (38 tickets) — told to check whether
+   `Regex` is a real implementation or a stub, and to skip re-flagging the UTF-8 decode bug
+   if already fixed (grep for `isContinuation`).
+4. `System.Security.Cryptography` (28 tickets) — told to check for the same
+   "constructor doesn't initialize a base-class field a bounds check depends on" bug class
+   already found in the hash algorithms' `hashSizeValue_` (commit `74ebec4`, an earlier
+   session), and that AES/RSA/EC/X.509/TLS are out of scope by design, not a gap to flag.
+
+**If resuming after these land**: read each agent's final report, re-verify every finding
+against `/rv/tmp/runtime/src/libraries` directly (do not trust the report at face value —
+this session repeatedly found stale/wrong audit claims), fix confirmed real bugs following
+the Ticket completion checklist (README.md), and update `plan.sqlite3` ticket notes with
+the commit hash before moving to the next finding.
+
+**To resume cold, from a fresh context:**
+```bash
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' AND priority='P2' ORDER BY ticket_no LIMIT 10;"
+```
+
+---
 
 ## Session checkpoint (2026-07-09) — ticket queue progress
 
