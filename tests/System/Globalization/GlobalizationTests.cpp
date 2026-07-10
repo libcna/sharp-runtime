@@ -26,8 +26,10 @@ TEST(CultureInfoTests, InvariantCulture_NameIsEmpty) {
     EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getNameProperty(), "");
 }
 
-TEST(CultureInfoTests, InvariantCulture_IsNeutral) {
-    EXPECT_TRUE(CultureInfo::getInvariantCultureProperty().getIsNeutralCultureProperty());
+// Real .NET's invariant culture has IsNeutralCulture == false (CultureData.cs:
+// `invariant._bNeutral = false;`).
+TEST(CultureInfoTests, InvariantCulture_IsNotNeutral) {
+    EXPECT_FALSE(CultureInfo::getInvariantCultureProperty().getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoTests, InvariantCulture_IsReadOnly) {

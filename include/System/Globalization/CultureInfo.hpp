@@ -81,7 +81,11 @@ public:
      * @return A const reference to the shared invariant instance.
      */
     [[nodiscard]] static const CultureInfo& getInvariantCultureProperty() {
-        static CultureInfo instance("", true, true);
+        // Real .NET's invariant culture has IsNeutralCulture == false (CultureData.cs:
+        // `invariant._bNeutral = false;`) -- it's read-only, but not "neutral" (a neutral
+        // culture is a language without a specific region, e.g. "en"; invariant is neither
+        // neutral nor specific).
+        static CultureInfo instance("", false, true);
         return instance;
     }
 
@@ -133,7 +137,9 @@ private:
     static CultureInfo currentUICulture_;
 };
 
-inline CultureInfo CultureInfo::currentCulture_{"", true, true};
-inline CultureInfo CultureInfo::currentUICulture_{"", true, true};
+// Default value matches InvariantCulture: name "", not neutral (real .NET's invariant
+// culture has IsNeutralCulture == false, CultureData.cs), read-only until explicitly set.
+inline CultureInfo CultureInfo::currentCulture_{"", false, true};
+inline CultureInfo CultureInfo::currentUICulture_{"", false, true};
 
 } // namespace System::Globalization

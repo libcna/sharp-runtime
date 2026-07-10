@@ -200,21 +200,24 @@ TEST(CultureInfoBatch27Test, IntCtor) {
     EXPECT_EQ(ci.getNameProperty(), "en-US");
 }
 
+// Real .NET's invariant culture has IsNeutralCulture == false (CultureData.cs:
+// `invariant._bNeutral = false;`) -- it is neither a neutral culture (a language without a
+// region, e.g. "en") nor a specific one; it's read-only, but not neutral.
 TEST(CultureInfoBatch27Test, InvariantCulture) {
     const auto& inv = CultureInfo::getInvariantCultureProperty();
     EXPECT_EQ(inv.getNameProperty(), "");
-    EXPECT_TRUE(inv.getIsNeutralCultureProperty());
+    EXPECT_FALSE(inv.getIsNeutralCultureProperty());
     EXPECT_TRUE(inv.getIsReadOnlyProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentCulture_ReturnsInvariant) {
     const auto& cur = CultureInfo::getCurrentCultureProperty();
-    EXPECT_TRUE(cur.getIsNeutralCultureProperty());
+    EXPECT_FALSE(cur.getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoBatch27Test, CurrentUICulture_ReturnsInvariant) {
     const auto& ui = CultureInfo::getCurrentUICultureProperty();
-    EXPECT_TRUE(ui.getIsNeutralCultureProperty());
+    EXPECT_FALSE(ui.getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoBatch27Test, SetCurrentCulture_ChangesGetter) {
