@@ -12,7 +12,6 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Threading/LockCookie.hpp"
-#include "System/Threading/SynchronizationLockException.hpp"
 
 namespace System::Threading {
 
@@ -88,10 +87,18 @@ namespace System::Threading {
             AcquireReaderLock(static_cast<intcs>(timeout.getTotalMillisecondsProperty()));
         }
 
-        /** Releases one level of the reader lock acquired by the calling thread. */
+        /**
+         * @brief Releases one level of the reader lock acquired by the calling thread.
+         * @throws System::ApplicationException if the calling thread doesn't hold the lock.
+         * @note Verified against ReaderWriterLock.cs's GetNotOwnerException(): real .NET's
+         * private ReaderWriterLockApplicationException derives from ApplicationException, not
+         * SynchronizationLockException -- the same exception family as the already-correct
+         * timeout path in this class (AcquireReaderLock/AcquireWriterLock).
+         */
         void ReleaseReaderLock() {
             intcs& level = MyReaderLevel();
-            if (level <= 0) throw SynchronizationLockException();
+            if (level <= 0)
+                throw System::ApplicationException("Attempt to release a lock that is not owned by the calling thread.");
             if (--level == 0) mtx_.unlock_shared();
         }
 
@@ -116,9 +123,14 @@ namespace System::Threading {
             AcquireWriterLock(static_cast<intcs>(timeout.getTotalMillisecondsProperty()));
         }
 
-        /** Releases one level of the writer lock acquired by the calling thread. */
+        /**
+         * @brief Releases one level of the writer lock acquired by the calling thread.
+         * @throws System::ApplicationException if the calling thread doesn't hold the lock.
+         * @note See ReleaseReaderLock's doc comment for the exception-type rationale.
+         */
         void ReleaseWriterLock() {
-            if (writerThreadId_.load() != CurrentThreadId()) throw SynchronizationLockException();
+            if (writerThreadId_.load() != CurrentThreadId())
+                throw System::ApplicationException("Attempt to release a lock that is not owned by the calling thread.");
             if (--writerLevel_ == 0) {
                 writerThreadId_.store(-1);
                 ++writerSeqNum_;

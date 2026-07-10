@@ -188,6 +188,22 @@ TEST(ReaderWriterLockTests, AcquireReaderLock_NegativeTimeoutBelowMinusOne_Throw
     EXPECT_THROW(lock.AcquireReaderLock(-2), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests for a wave-3 audit finding: ReleaseReaderLock/ReleaseWriterLock threw
+// SynchronizationLockException when the calling thread didn't hold the lock. Verified against
+// ReaderWriterLock.cs's GetNotOwnerException(): real .NET's private
+// ReaderWriterLockApplicationException derives from ApplicationException, not
+// SynchronizationLockException -- the same exception family as the already-correct timeout
+// path in this class (AcquireReaderLock/AcquireWriterLock, tested above).
+TEST(ReaderWriterLockTests, ReleaseReaderLock_NotHeld_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    EXPECT_THROW(lock.ReleaseReaderLock(), System::ApplicationException);
+}
+
+TEST(ReaderWriterLockTests, ReleaseWriterLock_NotHeld_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    EXPECT_THROW(lock.ReleaseWriterLock(), System::ApplicationException);
+}
+
 TEST(ReaderWriterLockTests, AcquireWriterLock_TimesOut_ThrowsApplicationException) {
     ReaderWriterLock lock;
     lock.AcquireWriterLock(-1);
