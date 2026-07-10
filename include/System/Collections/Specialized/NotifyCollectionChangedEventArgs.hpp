@@ -85,18 +85,23 @@ public:
      * @param changedItems  The items affected by the change.
      * @param startingIndex The zero-based index where the change occurred.
      * @throws System::ArgumentException if @p action is not Add or Remove.
+     * @throws System::ArgumentOutOfRangeException if @p startingIndex is less than -1.
      */
     NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction action, std::vector<T> changedItems,
                                       SharpRuntime::intcs startingIndex = -1)
         : Action(action) {
         switch (action) {
             case NotifyCollectionChangedAction::Add:
-                NewItems = std::move(changedItems);
-                NewStartingIndex = startingIndex;
-                break;
             case NotifyCollectionChangedAction::Remove:
-                OldItems = std::move(changedItems);
-                OldStartingIndex = startingIndex;
+                if (startingIndex < -1)
+                    throw System::ArgumentOutOfRangeException("startingIndex");
+                if (action == NotifyCollectionChangedAction::Add) {
+                    NewItems = std::move(changedItems);
+                    NewStartingIndex = startingIndex;
+                } else {
+                    OldItems = std::move(changedItems);
+                    OldStartingIndex = startingIndex;
+                }
                 break;
             default:
                 throw System::ArgumentException("This constructor can only be used with the Add or Remove action.", "action");
