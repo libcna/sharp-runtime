@@ -149,6 +149,17 @@ TEST(DateTimeFormatInfoBatch28Test, Clone_IsMutable) {
     EXPECT_FALSE(clone.getIsReadOnlyProperty());
 }
 
+// Clone() previously copied isReadOnly_ verbatim, so cloning a read-only instance (e.g.
+// InvariantInfo) produced another read-only clone instead of a mutable one -- real .NET
+// always resets _isReadOnly = false on the clone (DateTimeFormatInfo.cs), regardless of the
+// source's read-only status.
+TEST(DateTimeFormatInfoBatch28Test, Clone_OfReadOnlyInstance_IsStillMutable) {
+    const auto& readOnly = DateTimeFormatInfo::getInvariantInfoProperty();
+    ASSERT_TRUE(readOnly.getIsReadOnlyProperty());
+    auto clone = readOnly.Clone();
+    EXPECT_FALSE(clone.getIsReadOnlyProperty());
+}
+
 TEST(DateTimeFormatInfoBatch28Test, FormatPatterns) {
     DateTimeFormatInfo dtfi;
     EXPECT_FALSE(dtfi.getFullDateTimePatternProperty().empty());
@@ -221,21 +232,29 @@ TEST(DateTimeFormatInfoBatch28Test, GenitiveNames) {
     EXPECT_EQ(dtfi.getMonthGenitiveNamesProperty()[0],            "January");
 }
 
+// GetEraName's real invariant-culture value is "A.D." (the full era name), not "AD" (which is
+// the *abbreviated* name returned by GetAbbreviatedEraName) -- verified against CalendarData.cs:
+// `invariant.saEraNames = ["A.D."]` vs `invariant.saAbbrevEraNames = ["AD"]`. An invalid era
+// now throws ArgumentOutOfRangeException instead of silently returning "".
 TEST(DateTimeFormatInfoBatch28Test, GetEraName) {
     DateTimeFormatInfo dtfi;
-    EXPECT_EQ(dtfi.GetEraName(1), "AD");
-    EXPECT_EQ(dtfi.GetEraName(2), "");
+    EXPECT_EQ(dtfi.GetEraName(1), "A.D.");
+    EXPECT_THROW(dtfi.GetEraName(2), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeFormatInfoBatch28Test, GetAbbreviatedEraName) {
     DateTimeFormatInfo dtfi;
     EXPECT_EQ(dtfi.GetAbbreviatedEraName(1), "AD");
+    EXPECT_THROW(dtfi.GetAbbreviatedEraName(2), System::ArgumentOutOfRangeException);
 }
 
+// .NET's GetEra(string) compares case-insensitively (DateTimeFormatInfo.cs).
 TEST(DateTimeFormatInfoBatch28Test, GetEra) {
     DateTimeFormatInfo dtfi;
     EXPECT_EQ(dtfi.GetEra("AD"),    1);
     EXPECT_EQ(dtfi.GetEra("A.D."), 1);
+    EXPECT_EQ(dtfi.GetEra("ad"),   1);
+    EXPECT_EQ(dtfi.GetEra("a.d."), 1);
     EXPECT_EQ(dtfi.GetEra("BC"),   -1);
 }
 

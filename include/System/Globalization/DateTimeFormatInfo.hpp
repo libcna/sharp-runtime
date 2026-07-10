@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -77,10 +79,18 @@ public:
     /**
      * @brief Returns a mutable copy of this instance.
      *
-     * C++ counterpart of .NET DateTimeFormatInfo.Clone().
+     * C++ counterpart of .NET DateTimeFormatInfo.Clone(). Real .NET always resets
+     * `_isReadOnly = false` on the clone regardless of the source's read-only status
+     * (DateTimeFormatInfo.cs) -- copying isReadOnly_ verbatim (as this previously did) meant
+     * cloning the read-only InvariantInfo produced another read-only instance, breaking the
+     * standard "clone then customize" idiom.
      * @return A modifiable copy.
      */
-    [[nodiscard]] DateTimeFormatInfo Clone() const { return *this; }
+    [[nodiscard]] DateTimeFormatInfo Clone() const {
+        DateTimeFormatInfo copy = *this;
+        copy.isReadOnly_ = false;
+        return copy;
+    }
 
     /**
      * @brief Gets the native name of the calendar associated with this format info.
@@ -313,36 +323,51 @@ public:
      * @brief Gets the string representation of the specified era.
      *
      * C++ counterpart of .NET DateTimeFormatInfo.GetEraName(int).
-     * Stub — returns "AD" for era 1, empty string otherwise.
+     * Stub — returns the invariant-culture full era name "A.D." for era 1 (verified against
+     * CalendarData.cs: `invariant.saEraNames = ["A.D."]` — NOT "AD", which is the
+     * *abbreviated* name; a prior version of this method returned "AD" here too).
      * @param era The era index (1-based).
      * @return The era name string.
+     * @throws System::ArgumentOutOfRangeException if @p era is not a supported era (only 1,
+     *         in this invariant-only implementation).
      */
     [[nodiscard]] std::string GetEraName(intcs era) const {
-        return era == 1 ? "AD" : "";
+        if (era != 1) throw System::ArgumentOutOfRangeException("era");
+        return "A.D.";
     }
 
     /**
      * @brief Gets the abbreviated string representation of the specified era.
      *
      * C++ counterpart of .NET DateTimeFormatInfo.GetAbbreviatedEraName(int).
-     * Stub — returns "AD" for era 1, empty string otherwise.
+     * Stub — returns the invariant-culture abbreviated era name "AD" for era 1 (verified
+     * against CalendarData.cs: `invariant.saAbbrevEraNames = ["AD"]`).
      * @param era The era index (1-based).
      * @return The abbreviated era name string.
+     * @throws System::ArgumentOutOfRangeException if @p era is not a supported era.
      */
     [[nodiscard]] std::string GetAbbreviatedEraName(intcs era) const {
-        return era == 1 ? "AD" : "";
+        if (era != 1) throw System::ArgumentOutOfRangeException("era");
+        return "AD";
     }
 
     /**
      * @brief Returns the era that corresponds to the specified string.
      *
-     * C++ counterpart of .NET DateTimeFormatInfo.GetEra(string).
-     * Stub — returns 1 for "AD"/"A.D.", -1 otherwise.
+     * C++ counterpart of .NET DateTimeFormatInfo.GetEra(string). Compares case-insensitively,
+     * matching real .NET (DateTimeFormatInfo.cs: "Compare the era name in a case-insensitive
+     * way").
      * @param eraName The name of the era.
      * @return The era integer, or -1 if not found.
      */
     [[nodiscard]] intcs GetEra(const std::string& eraName) const {
-        if (eraName == "AD" || eraName == "A.D.") return 1;
+        auto ciEquals = [](const std::string& a, const std::string& b) {
+            return a.size() == b.size() &&
+                   std::equal(a.begin(), a.end(), b.begin(), [](unsigned char x, unsigned char y) {
+                       return std::tolower(x) == std::tolower(y);
+                   });
+        };
+        if (ciEquals(eraName, "AD") || ciEquals(eraName, "A.D.")) return 1;
         return -1;
     }
 
