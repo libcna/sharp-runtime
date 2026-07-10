@@ -64,6 +64,8 @@ struct Quaternion {
     Quaternion operator*(float s)            const { return {X*s,Y*s,Z*s,W*s}; }
     /** Scalar division. */
     Quaternion operator/(float s)            const { return {X/s,Y/s,Z/s,W/s}; }
+    /** Divides this quaternion by @p q (i.e. *this * Inverse(q)). */
+    Quaternion operator/(const Quaternion& q) const { return *this * Inverse(q); }
     /** Equality comparison (exact floating-point). */
     bool operator==(const Quaternion& r)    const { return Equals(r); }
     /** Inequality comparison. */
@@ -81,12 +83,26 @@ struct Quaternion {
 
     /** @return Dot product a·b of the quaternions treated as 4-D vectors. */
     static float       Dot(Quaternion a, Quaternion b)         { return a.X*b.X+a.Y*b.Y+a.Z*b.Z+a.W*b.W; }
-    /** @return Unit quaternion in the direction of @p q (normalised by length). */
-    static Quaternion  Normalize(Quaternion q)                 { float l=q.Length(); return l>0?q/l:q; }
+    /**
+     * @return Unit quaternion in the direction of @p q (normalised by length).
+     * @note Matches .NET exactly: an unconditional q/Length(), including for a zero-length
+     * @p q, which produces a NaN-component quaternion (not a caught/guarded case in .NET's
+     * own implementation either — see Quaternion.cs).
+     */
+    static Quaternion  Normalize(Quaternion q)                 { return q/q.Length(); }
     /** @return Conjugate q* = (-X, -Y, -Z, W) — inverse rotation for unit quaternions. */
     static Quaternion  Conjugate(Quaternion q)                 { return {-q.X,-q.Y,-q.Z,q.W}; }
-    /** @return Multiplicative inverse of @p q; equivalent to Conjugate for unit quaternions. */
-    static Quaternion  Inverse(Quaternion q)                   { float n=q.LengthSquared(); return n>0?Conjugate(q)/n:q; }
+    /**
+     * @return Multiplicative inverse of @p q; equivalent to Conjugate for unit quaternions.
+     * Returns Zero() when LengthSquared() is at or below .NET's float epsilon threshold
+     * (1.192092896e-7f, matching Quaternion.cs's Inverse), not just when it is exactly zero —
+     * otherwise a near-zero-but-nonzero length would blow up to huge/near-infinite components.
+     */
+    static Quaternion  Inverse(Quaternion q) {
+        constexpr float epsilon = 1.192092896e-7f;
+        float n = q.LengthSquared();
+        return n > epsilon ? Conjugate(q)/n : Zero();
+    }
     /** @return Negated quaternion -q (all components negated). */
     static Quaternion  Negate(Quaternion q)                    { return -q; }
     /** @return Component-wise sum a + b. */
@@ -99,6 +115,8 @@ struct Quaternion {
     static Quaternion  Multiply(Quaternion q, float s)         { return q*s; }
     /** @return @p a composed with the inverse of @p b (i.e. a * Inverse(b)). */
     static Quaternion  Divide(Quaternion a, Quaternion b)      { return a*Inverse(b); }
+    /** @return @p value1 rotated by @p value2, applied in @p value1-then-@p value2 order (i.e. value2 * value1). */
+    static Quaternion  Concatenate(Quaternion value1, Quaternion value2) { return value2*value1; }
 
     /**
      * Creates a unit quaternion from an axis-angle representation.
@@ -133,10 +151,11 @@ struct Quaternion {
      * @param t  Interpolation factor in [0, 1]; 0 returns a, 1 returns b.
      */
     static Quaternion Slerp(Quaternion a, Quaternion b, float t) {
+        constexpr float slerpEpsilon = 1e-6f; // matches Quaternion.cs's SlerpEpsilon
         float cosAngle = Dot(a, b);
         if (cosAngle < 0) { b = -b; cosAngle = -cosAngle; }
         float k0, k1;
-        if (cosAngle > 0.9999f) {
+        if (cosAngle > (1.0f - slerpEpsilon)) {
             k0 = 1.0f - t; k1 = t;
         } else {
             float angle = std::acos(cosAngle);

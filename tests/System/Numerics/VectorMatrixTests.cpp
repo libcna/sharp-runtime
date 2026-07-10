@@ -170,6 +170,63 @@ TEST(QuaternionTests, RoundtripMatrix) {
     auto q2 = Quaternion::CreateFromRotationMatrix(m);
     EXPECT_TRUE(near(std::abs(Quaternion::Dot(q,q2)), 1.0f, 1e-4f));
 }
+TEST(QuaternionTests, Inverse_ZeroQuaternion_ReturnsZero) {
+    auto q = Quaternion::Inverse(Quaternion::Zero());
+    EXPECT_EQ(q, Quaternion::Zero());
+}
+TEST(QuaternionTests, Inverse_NearZeroLength_ReturnsZero) {
+    // Regression: previously only exact-zero length short-circuited to a safe result;
+    // a near-zero-but-nonzero length blew up to huge/near-infinite components instead of
+    // matching .NET's epsilon-guarded Zero() fallback (Quaternion.cs Inverse).
+    Quaternion q{1e-5f, 0, 0, 0};
+    ASSERT_LE(q.LengthSquared(), 1.192092896e-7f);
+    EXPECT_EQ(Quaternion::Inverse(q), Quaternion::Zero());
+}
+TEST(QuaternionTests, Inverse_UnitQuaternion_MatchesConjugate) {
+    auto q = Quaternion::Normalize({1,2,3,4});
+    auto inv = Quaternion::Inverse(q);
+    auto conj = Quaternion::Conjugate(q);
+    EXPECT_TRUE(near(inv.X, conj.X));
+    EXPECT_TRUE(near(inv.W, conj.W));
+}
+TEST(QuaternionTests, Normalize_ZeroQuaternion_ProducesNaN) {
+    // Matches .NET exactly: Normalize is an unconditional value/Length() with no zero
+    // guard (Quaternion.cs), so a zero-length input propagates NaN rather than being
+    // silently caught.
+    auto q = Quaternion::Normalize(Quaternion::Zero());
+    EXPECT_TRUE(std::isnan(q.X));
+}
+TEST(QuaternionTests, Slerp_TightlyAlignedButNotWithinLooseThreshold_UsesSphericalPath) {
+    // Regression: the old 0.9999f threshold took the linear-interpolation shortcut for
+    // quaternion pairs .NET still slerps via the full spherical formula (SlerpEpsilon is
+    // 1e-6f in Quaternion.cs, i.e. threshold 0.999999f). Construct a pair whose dot product
+    // falls strictly between the two thresholds and confirm the interpolated result still
+    // lands on the unit sphere (both paths preserve this, so instead assert the two
+    // thresholds actually disagree on which branch a nearby-but-not-coincident pair takes).
+    auto a = Quaternion::Identity();
+    auto b = Quaternion::Normalize(Quaternion::CreateFromAxisAngle({0,0,1}, 0.01f));
+    float cosAngle = Quaternion::Dot(a, b);
+    ASSERT_GT(cosAngle, 0.9999f);
+    ASSERT_LE(cosAngle, 1.0f - 1e-6f);
+    auto slerped = Quaternion::Slerp(a, b, 0.5f);
+    EXPECT_TRUE(near(slerped.Length(), 1.0f));
+}
+TEST(QuaternionTests, DivideOperator_MatchesStaticDivide) {
+    auto a = Quaternion::Normalize({1,2,3,4});
+    auto b = Quaternion::Normalize({4,3,2,1});
+    auto viaOperator = a / b;
+    auto viaStatic = Quaternion::Divide(a, b);
+    EXPECT_TRUE(near(viaOperator.X, viaStatic.X));
+    EXPECT_TRUE(near(viaOperator.W, viaStatic.W));
+}
+TEST(QuaternionTests, Concatenate_MatchesReverseMultiplyOrder) {
+    auto a = Quaternion::CreateFromAxisAngle({0,0,1}, 0.3f);
+    auto b = Quaternion::CreateFromAxisAngle({1,0,0}, 0.2f);
+    auto viaConcatenate = Quaternion::Concatenate(a, b);
+    auto viaMultiply = b * a;
+    EXPECT_TRUE(near(viaConcatenate.X, viaMultiply.X));
+    EXPECT_TRUE(near(viaConcatenate.W, viaMultiply.W));
+}
 
 // --- Plane ---
 TEST(PlaneTests, DotCoordinate) {

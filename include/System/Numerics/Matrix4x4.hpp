@@ -424,7 +424,7 @@ inline Quaternion Quaternion::CreateFromRotationMatrix(const Matrix4x4& m) {
     if (trace > 0) {
         float s = 0.5f/std::sqrt(trace+1.0f);
         return {(m.M23-m.M32)*s,(m.M31-m.M13)*s,(m.M12-m.M21)*s,0.25f/s};
-    } else if (m.M11>m.M22 && m.M11>m.M33) {
+    } else if (m.M11>=m.M22 && m.M11>=m.M33) {
         float s = 2.0f*std::sqrt(1.0f+m.M11-m.M22-m.M33);
         return {0.25f*s,(m.M12+m.M21)/s,(m.M31+m.M13)/s,(m.M23-m.M32)/s};
     } else if (m.M22>m.M33) {
