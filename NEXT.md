@@ -1,10 +1,10 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD pending) — 11243 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `208c674`) — 11243 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
 ## Session checkpoint (2026-07-10, continued again) — XmlNode ancestor-cycle + cross-document guard added
 
-*Branch: `feature/work`, HEAD pending — 11243 tests passing (up from 11237 at the top of the
+*Branch: `feature/work`, HEAD `208c674` — 11243 tests passing (up from 11237 at the top of the
 Threading-dangerous-moderates checkpoint below), full clean rebuild verified (0 errors/0
 warnings)*
 
