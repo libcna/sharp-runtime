@@ -149,7 +149,21 @@ namespace System::IO
         if (file_.is_open()) file_.close();
     }
 
-    intcs FileStream::getLengthProperty() const { return length_; }
+    intcs FileStream::getLengthProperty() const {
+        // Verified against FileStream.cs's Length getter: real .NET queries the underlying
+        // file's current length live (accounting for any writes made so far through this
+        // stream), not a value cached once and only ever updated by SetLength(). This port
+        // previously only updated length_ from SetLength(), so a Write() that extended the
+        // file left getLengthProperty() returning the stale construction-time length (often 0
+        // for a freshly created file) until the stream was closed and reopened.
+        if (file_.is_open() && canWrite_) {
+            auto& f = const_cast<std::fstream&>(file_);
+            f.flush();
+        }
+        std::error_code ec;
+        auto size = std::filesystem::file_size(path_, ec);
+        return ec ? length_ : static_cast<intcs>(size);
+    }
 
     bool FileStream::IsOpen() const { return file_.is_open(); }
 

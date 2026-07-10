@@ -1043,6 +1043,23 @@ TEST(FileStreamTests, getLengthProperty_AfterWrite) {
     File::Delete(p);
 }
 
+TEST(FileStreamTests, getLengthProperty_OnSameOpenInstance_AfterWrite_ReflectsExtension) {
+    // Regression: previously length_ was only cached at construction (0 for FileMode::Create)
+    // and only ever updated by SetLength() -- Write() never touched it, so querying Length on
+    // the SAME still-open FileStream right after a create-then-write returned the stale,
+    // construction-time value (0) instead of the file's actual current size.
+    std::string p = tf("fstream_len_live.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    EXPECT_EQ(fs.getLengthProperty(), 0);
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    fs.Write(data, 0, 5);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Write(data, 0, 3);
+    EXPECT_EQ(fs.getLengthProperty(), 8);
+    fs.Close();
+    File::Delete(p);
+}
+
 TEST(FileStreamTests, WriteByte_Flush_NoThrow) {
     std::string p = tf("fstream_wb.bin");
     FileStream fs(p, FileMode::Create, FileAccess::Write);
