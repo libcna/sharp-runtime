@@ -387,4 +387,11 @@ System::DateTime HebrewCalendar::AddYears(const System::DateTime& time, int year
     return System::DateTime(ticks);
 }
 
+System::DateTime HebrewCalendar::ToDateTime(int year, int month, int day, int hour, int minute,
+                                            int second, int millisecond, int /*era*/) const {
+    int daysInMonth = GetDaysInMonth(year, month);
+    if (day < 1 || day > daysInMonth) throw System::ArgumentOutOfRangeException("day");
+    return hebrewToGregorian(year, month, day, hour, minute, second, millisecond);
+}
+
 } // namespace System::Globalization

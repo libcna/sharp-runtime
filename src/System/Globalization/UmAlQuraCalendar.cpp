@@ -232,4 +232,19 @@ System::DateTime UmAlQuraCalendar::AddYears(const System::DateTime& time, int ye
     return AddMonths(time, years * 12);
 }
 
+System::DateTime UmAlQuraCalendar::ToDateTime(int year, int month, int day, int hour, int minute,
+                                              int second, int millisecond, int era) const {
+    checkYearMonth(year, month, era);
+    int daysInMonth = GetDaysInMonth(year, month, era);
+    if (day < 1 || day > daysInMonth) throw System::ArgumentOutOfRangeException("day");
+
+    long long ticks = absoluteDateUAQ(year, month, day) * System::DateTime::TicksPerDay
+                      - System::DateTime::TicksPerDay // abs day 1 has tick 0
+                      + hour * System::DateTime::TicksPerHour
+                      + minute * System::DateTime::TicksPerMinute
+                      + second * System::DateTime::TicksPerSecond
+                      + static_cast<long long>(millisecond) * System::DateTime::TicksPerMillisecond;
+    return System::DateTime(ticks);
+}
+
 } // namespace System::Globalization

@@ -123,4 +123,20 @@ System::DateTime HijriCalendar::AddYears(const System::DateTime& time, int years
     return AddMonths(time, years * 12);
 }
 
+System::DateTime HijriCalendar::ToDateTime(int year, int month, int day, int hour, int minute,
+                                           int second, int millisecond, int /*era*/) const {
+    int daysInMonth = GetDaysInMonth(year, month);
+    if (day < 1 || day > daysInMonth) throw System::ArgumentOutOfRangeException("day");
+
+    long long absoluteDate = absoluteDateHijri(year, month, day);
+    if (absoluteDate < 0) throw System::ArgumentOutOfRangeException("year");
+
+    long long ticks = absoluteDate * System::DateTime::TicksPerDay
+        + hour * System::DateTime::TicksPerHour
+        + minute * System::DateTime::TicksPerMinute
+        + second * System::DateTime::TicksPerSecond
+        + static_cast<long long>(millisecond) * System::DateTime::TicksPerMillisecond;
+    return System::DateTime(ticks);
+}
+
 } // namespace System::Globalization

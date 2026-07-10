@@ -111,6 +111,24 @@ TEST(HijriCalendarBatch30Test, AddYears_Roundtrip) {
     EXPECT_EQ(hc.GetYear(dt2), hc.GetYear(dt) + 1);
 }
 
+// ToDateTime was previously missing entirely, so it fell back to Calendar's Gregorian-only
+// base implementation -- Hijri year/month/day components were misinterpreted as literal
+// Gregorian ones instead of being converted. Verifies the real conversion round-trips.
+TEST(HijriCalendarBatch30Test, ToDateTime_RoundTripsThroughGetYearMonthDay) {
+    HijriCalendar hc;
+    System::DateTime greg(2024, 6, 15);
+    int y = hc.GetYear(greg), m = hc.GetMonth(greg), d = hc.GetDayOfMonth(greg);
+    System::DateTime back = hc.ToDateTime(y, m, d, 0, 0, 0, 0);
+    EXPECT_EQ(back.getYearProperty(), 2024);
+    EXPECT_EQ(back.getMonthProperty(), 6);
+    EXPECT_EQ(back.getDayProperty(), 15);
+}
+
+TEST(HijriCalendarBatch30Test, ToDateTime_InvalidDay_Throws) {
+    HijriCalendar hc;
+    EXPECT_THROW(hc.ToDateTime(1445, 1, 31, 0, 0, 0, 0), System::ArgumentOutOfRangeException);
+}
+
 // ===========================================================================
 // ISOWeek
 // ===========================================================================
