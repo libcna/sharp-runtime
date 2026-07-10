@@ -33,7 +33,7 @@ namespace System::Security::Cryptography {
         std::vector<bytecs> HashFinal() override;
 
     public:
-        MD5() { Initialize(); }
+        MD5() { hashSizeValue_ = 128; Initialize(); }
 
         void Initialize() override;
     };

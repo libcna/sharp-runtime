@@ -30,7 +30,7 @@ namespace System::Security::Cryptography {
         std::vector<bytecs> HashFinal() override;
 
     public:
-        SHA512() { Initialize(); }
+        SHA512() { hashSizeValue_ = 512; Initialize(); }
 
         void Initialize() override;
     };

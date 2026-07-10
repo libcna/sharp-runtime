@@ -28,7 +28,7 @@ namespace System::Security::Cryptography {
         std::vector<bytecs> HashFinal() override;
 
     public:
-        SHA384() { Initialize(); }
+        SHA384() { hashSizeValue_ = 384; Initialize(); }
 
         void Initialize() override;
     };

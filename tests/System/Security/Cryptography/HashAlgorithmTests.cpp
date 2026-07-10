@@ -185,3 +185,49 @@ TEST(HMACSHA256Tests, KeyLongerThanBlockSize_IsHashedFirst) {
     EXPECT_EQ(toHex(hmac.ComputeHash(toBytes("Test Using Larger Than Block-Size Key - Hash Key First"))),
               "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
 }
+
+// --- getHashSizeProperty() / TryComputeHash() -----------------------------------------------
+//
+// Regression: hashSizeValue_ was never set by MD5/SHA1/SHA256/SHA384/SHA512's constructors
+// (stayed at HashAlgorithm's default of 0). getHashSizeProperty() returned 0 instead of the
+// real bit length, and TryComputeHash's undersized-buffer guard
+// (destination.size() < hashSizeValue_ / 8) became "size < 0" -- always false for any
+// unsigned size -- so it never rejected a too-small destination, and the unconditional
+// std::copy(final.begin(), final.end(), destination.begin()) that followed wrote the real
+// digest (16/20/32/48/64 bytes) into whatever buffer was passed, however small, an actual
+// out-of-bounds write.
+
+TEST(HashSizePropertyTests, MD5_Is128) {
+    EXPECT_EQ(MD5().getHashSizeProperty(), 128);
+}
+TEST(HashSizePropertyTests, SHA1_Is160) {
+    EXPECT_EQ(SHA1().getHashSizeProperty(), 160);
+}
+TEST(HashSizePropertyTests, SHA256_Is256) {
+    EXPECT_EQ(SHA256().getHashSizeProperty(), 256);
+}
+TEST(HashSizePropertyTests, SHA384_Is384) {
+    EXPECT_EQ(SHA384().getHashSizeProperty(), 384);
+}
+TEST(HashSizePropertyTests, SHA512_Is512) {
+    EXPECT_EQ(SHA512().getHashSizeProperty(), 512);
+}
+
+TEST(TryComputeHashTests, MD5_UndersizedDestination_ReturnsFalseAndDoesNotWrite) {
+    MD5 md5;
+    std::vector<SharpRuntime::bytecs> destination(4, 0xFF); // real digest is 16 bytes
+    SharpRuntime::intcs bytesWritten = -1;
+    EXPECT_FALSE(md5.TryComputeHash(toBytes("abc"), destination, bytesWritten));
+    EXPECT_EQ(bytesWritten, 0);
+    // Buffer must be untouched -- confirms no out-of-bounds write occurred.
+    EXPECT_EQ(destination, std::vector<SharpRuntime::bytecs>(4, 0xFF));
+}
+
+TEST(TryComputeHashTests, SHA256_ExactSizedDestination_Succeeds) {
+    SHA256 sha256;
+    std::vector<SharpRuntime::bytecs> destination(32, 0);
+    SharpRuntime::intcs bytesWritten = 0;
+    EXPECT_TRUE(sha256.TryComputeHash(toBytes("abc"), destination, bytesWritten));
+    EXPECT_EQ(bytesWritten, 32);
+    EXPECT_EQ(toHex(destination), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
