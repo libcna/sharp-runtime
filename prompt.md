@@ -5,9 +5,14 @@
 1. Read `CLAUDE.md` and `NEXT.md`.
 2. Open `plan.sqlite3` — table `task` with columns: `id, namespace, name, type, internal, outofscope, status`.
 
-All progress state lives in `plan.sqlite3` (status column) and git history (commits per port).
-This file is safe to re-read from a completely fresh context after any compaction/reset — resume
-by re-running Step 1, no conversation memory required.
+**All progress state lives in `plan.sqlite3` and git history — never in conversation/chat memory.**
+Conversation context gets summarized or reset (compaction, a new session, a crashed process); the
+database and the commit log do not. Concretely: every decision, finding, or partial result that
+matters beyond the current turn must be written to `plan.sqlite3` (`task.status`/`ticket.notes`) or
+committed to git *before* moving on — not left implicit in something said earlier in the chat. If a
+fact is only "known" because it was mentioned in conversation and never persisted, treat it as not
+known at all after a reset. This file is safe to re-read from a completely fresh context after any
+compaction/reset — resume by re-running Step 1, no conversation memory required.
 
 ## Workflow — one iteration (fully autonomous, no per-item confirmation)
 
@@ -85,6 +90,13 @@ is tracked separately in `plan.sqlite3`'s `ticket` table — **do not confuse it
 `ticket.status` values are `todo`/`doing`/`done`/`blocked`/`needs_user`/`wontfix` (never `ported`,
 never `ignore`). See `README.md`'s "Tracking: plan.sqlite3" section for the full column/status
 reference.
+
+The same no-chat-memory rule applies here: a finding from an audit (your own, a subagent's, or a
+prior session's) is only real once it's written into `ticket.notes` or a commit — not while it
+exists only as something said in this conversation. Write detailed `notes` on every ticket you
+touch (what was checked, what was found, commit hash, what was deliberately deferred and why) so a
+future session with zero memory of this one can trust the ticket's status without re-investigating
+it from scratch. See README.md's "Ticket completion checklist" for exactly what "done" requires.
 
 Process one ticket at a time, in priority order (`P0` → `P1` → `P2` → `P3`, then `ticket_no`):
 
