@@ -299,6 +299,15 @@ TEST(HttpClientTests, BaseAddress) {
     EXPECT_EQ(client.getBaseAddressProperty(), "http://api.example.com");
 }
 
+// Verified against HttpClient.cs's CheckRequestBeforeSend: every Send overload validates
+// the request is non-null. Previously this dereferenced a null request immediately (UB/
+// crash) instead of throwing a catchable exception.
+TEST(HttpClientTests, Send_NullRequest_ThrowsArgumentNullException) {
+    HttpClient client;
+    std::shared_ptr<HttpRequestMessage> nullRequest;
+    EXPECT_THROW(client.Send(nullRequest), System::ArgumentNullException);
+}
+
 // ---------------------------------------------------------------------------
 // FormUrlEncodedContent
 // ---------------------------------------------------------------------------

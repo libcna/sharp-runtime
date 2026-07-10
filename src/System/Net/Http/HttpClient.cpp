@@ -20,6 +20,7 @@
 #include "System/Net/Http/ByteArrayContent.hpp"
 #include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/StringContent.hpp"
+#include "System/ArgumentNullException.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -347,6 +348,11 @@ HttpClient::~HttpClient() {
 std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     std::shared_ptr<HttpRequestMessage> request)
 {
+    // Verified against HttpClient.cs's CheckRequestBeforeSend: every Send/SendAsync overload
+    // validates the request is non-null before touching it. Previously this dereferenced
+    // request immediately with no check -- a null-pointer dereference (UB/crash) instead of
+    // a catchable exception.
+    System::ArgumentNullException::ThrowIfNull(request.get(), "request");
 #if defined(__EMSCRIPTEN__)
     (void)request;
     throw System::PlatformNotSupportedException(
