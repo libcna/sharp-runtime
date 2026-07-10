@@ -9,6 +9,7 @@
 //   SortKey:         constructors, getters, Compare, operator==, ToString
 //   SortVersion:     constructors, getters, operator==/!=
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/NumberStyles.hpp"
 #include "System/Globalization/PersianCalendar.hpp"
@@ -184,6 +185,31 @@ TEST(RegionInfoBatch32Test, IsMetric) {
 TEST(RegionInfoBatch32Test, CurrentRegion) {
     const auto& cr = RegionInfo::getCurrentRegionProperty();
     EXPECT_EQ(cr.getNameProperty(), "US");
+}
+
+TEST(RegionInfoBatch32Test, Constructor_EmptyName_Throws) {
+    EXPECT_THROW(RegionInfo r(""), System::ArgumentException);
+}
+
+TEST(RegionInfoBatch32Test, IntConstructor_InvariantLcid_Throws) {
+    EXPECT_THROW(RegionInfo r(0x007F), System::ArgumentException);
+}
+
+TEST(RegionInfoBatch32Test, IntConstructor_NeutralLcid_Throws) {
+    EXPECT_THROW(RegionInfo r(0x0000), System::ArgumentException);
+}
+
+TEST(RegionInfoBatch32Test, IntConstructor_CustomDefaultLcid_Throws) {
+    EXPECT_THROW(RegionInfo r(0x0C00), System::ArgumentException);
+}
+
+TEST(RegionInfoBatch32Test, IntConstructor_CustomUnspecifiedLcid_Throws) {
+    EXPECT_THROW(RegionInfo r(0x1000), System::ArgumentException);
+}
+
+TEST(RegionInfoBatch32Test, IntConstructor_OrdinaryLcid_YieldsUS) {
+    RegionInfo r(0x0409); // en-US
+    EXPECT_EQ(r.getNameProperty(), "US");
 }
 
 // ===========================================================================
