@@ -993,41 +993,40 @@ TEST(StreamWriterReaderTests, StreamWriter_BaseStreamProperty) {
     EXPECT_EQ(sw.getBaseStreamProperty(), &ms);
 }
 
+// Regression: Close() previously closed the underlying stream unconditionally, ignoring
+// leaveOpen (only the destructor honored it). These use FlushTrackingStream (defined above,
+// near the BinaryWriter tests) rather than MemoryStream: MemoryStream::Close() is itself a
+// no-op against real .NET (see MemoryStreamTests.Close_DoesNotClearBufferOrPosition), so its
+// buffer being cleared or not is no longer a signal of whether Close() was actually called on
+// it.
 TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
-    // Regression: Close() previously closed the underlying stream unconditionally, ignoring
-    // leaveOpen (only the destructor honored it). MemoryStream::Close() clears its buffer, so
-    // a nonzero length after StreamWriter::Close() proves the underlying stream was left open.
-    MemoryStream ms;
-    StreamWriter sw(&ms, true);
+    FlushTrackingStream fs;
+    StreamWriter sw(&fs, true);
     sw.Write(std::string("data"));
-    sw.Flush();
     sw.Close();
-    EXPECT_GT(ms.getLengthProperty(), 0);
+    EXPECT_FALSE(fs.closeCalled);
 }
 
 TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
-    MemoryStream ms;
-    StreamWriter sw(&ms, false);
+    FlushTrackingStream fs;
+    StreamWriter sw(&fs, false);
     sw.Write(std::string("data"));
-    sw.Flush();
     sw.Close();
-    EXPECT_EQ(ms.getLengthProperty(), 0);
+    EXPECT_TRUE(fs.closeCalled);
 }
 
 TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
-    uint8_t data[] = {'a', 'b', 'c'};
-    MemoryStream ms(data, 3);
-    StreamReader sr(&ms, true);
+    FlushTrackingStream fs;
+    StreamReader sr(&fs, true);
     sr.Close();
-    EXPECT_GT(ms.getLengthProperty(), 0);
+    EXPECT_FALSE(fs.closeCalled);
 }
 
 TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
-    uint8_t data[] = {'a', 'b', 'c'};
-    MemoryStream ms(data, 3);
-    StreamReader sr(&ms, false);
+    FlushTrackingStream fs;
+    StreamReader sr(&fs, false);
     sr.Close();
-    EXPECT_EQ(ms.getLengthProperty(), 0);
+    EXPECT_TRUE(fs.closeCalled);
 }
 
 TEST(StreamWriterReaderTests, WriteStringLiteral_DoesNotResolveToBoolOverload) {
@@ -1063,6 +1062,23 @@ TEST(StreamWriterReaderTests, StreamReader_ReadLine) {
     MemoryStream ms;
     StreamWriter sw(&ms, true);
     sw.Write("line1\nline2\nline3");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+// Regression test for a wave-3 audit finding: ReadLine() only stopped scanning at '\n', so a
+// lone '\r' (classic Mac line ending, not followed by '\n') was treated as ordinary line
+// content instead of a line terminator. Verified against StreamReader.cs's ReadLine(), which
+// treats '\r' and '\n' as interchangeable terminators.
+TEST(StreamWriterReaderTests, StreamReader_ReadLine_LoneCarriageReturn_TerminatesLine) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("line1\rline2\nline3");
     sw.Flush();
     auto buf = ms.ToArray();
     MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));

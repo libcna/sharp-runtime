@@ -416,6 +416,24 @@ TEST(StringReaderTests, ReadLineStripsCarriageReturn) {
     EXPECT_EQ(sr.ReadLine(), "line2");
 }
 
+// Regression test for a wave-3 audit finding: ReadLine() only stopped scanning at '\n', so a
+// lone '\r' (classic Mac line ending, not followed by '\n') was treated as ordinary line
+// content instead of a line terminator -- merging "line1\rline2\nline3" into two lines
+// ("line1\rline2", "line3") instead of three. Verified against StringReader.cs's ReadLine(),
+// which treats '\r' and '\n' as interchangeable terminators.
+TEST(StringReaderTests, ReadLine_LoneCarriageReturn_TerminatesLine) {
+    StringReader sr("line1\rline2\nline3");
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+TEST(StringReaderTests, ReadLine_TrailingLoneCarriageReturn_TerminatesFinalLine) {
+    StringReader sr("line1\rline2");
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+}
+
 TEST(StringReaderTests, ReadLineAtEndReturnsEmpty) {
     StringReader sr("only");
     sr.ReadLine(); // consume "only"

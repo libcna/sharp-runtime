@@ -53,18 +53,25 @@ namespace System::IO
         return n == 0 ? -1 : static_cast<intcs>(b);
     }
 
+    // Verified against StreamReader.cs's ReadLine(): real .NET treats '\r' and '\n' as
+    // interchangeable line terminators -- a lone '\r' (classic Mac line ending) ends the line
+    // on its own, not just as part of "\r\n". If '\r' is immediately followed by '\n', that
+    // '\n' is consumed as part of the same terminator (CRLF); a '\r' not followed by '\n'
+    // still terminates the line by itself. This previously only stopped scanning at '\n', so a
+    // lone '\r' was treated as ordinary line content -- silently merging what should be two
+    // separate lines into one, with the '\r' left embedded in the middle of the result.
     std::string StreamReader::ReadLine()
     {
         intcs c = Read();
         if (c == -1) return "";
 
         std::string line;
-        while (c != -1 && c != '\n')
+        while (c != -1 && c != '\n' && c != '\r')
         {
             line.push_back(static_cast<char>(c));
             c = Read();
         }
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (c == '\r' && Peek() == '\n') Read();
         return line;
     }
 
