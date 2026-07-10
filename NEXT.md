@@ -1,6 +1,107 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `f12da05`) — 11305 tests passing (Debug, default `cmake --build build` config, verified via full `rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build --parallel 8` + `./build/SharpRuntimeTests`); library-only Release build also separately re-verified clean (`cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release && cmake --build build_no_tests --parallel 8`, exit 0, 0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `13ab167`) — 11337 tests passing (Debug, default `cmake --build build --parallel 8` config, verified via `./build/SharpRuntimeTests` after every fix in this batch, most recently after the SpinLock rewrite).*
+
+## Session checkpoint (2026-07-10, continued again) — Threading dangerous-moderate findings: 10 fixed, 1 deliberately deferred (10 commits)
+
+Scope for this session, per explicit instruction: finish Threading's remaining dangerous-despite-
+moderate findings before touching Xml core, and do not start the Text.Json
+`JsonEncodedText::Encode`/`AllowTrailingCommas` refactors flagged as bigger lifts in the previous
+checkpoint. All 10 fixes below follow the same discipline as prior batches: verify against real
+.NET source in `/rv/tmp/runtime/src/libraries/` → write/extend a regression test → fix → build
+clean → run the targeted test suite → bump the corresponding `plan.sqlite3` row's `updated_at` →
+commit, one coherent fix per commit.
+
+**Fresh audit note:** this file's own Threading catalogue (see the wave-3 "Full findings
+catalogue" section further down) was condensed prose for the moderate/minor tier, not an itemized
+list, and referenced a prior session's agent transcript that isn't accessible in this session. A
+fresh audit fork re-derived concrete findings by reading current source against the .NET
+reference; several catalogued items turned out already-fixed by earlier sessions and were skipped.
+
+### Fixed (10 findings, commits `77fc618`..`13ab167`)
+
+- `Semaphore(initialCount, maximumCount)` threw the same `ArgumentOutOfRangeException` for both
+  `initialCount < 0` and `initialCount > maximumCount` — real .NET throws a plain
+  `ArgumentException` for the latter case (`initialCount` is a valid non-negative value, just
+  inconsistent with `maximumCount`). Split into three distinct checks matching `Semaphore.cs`.
+- `ReaderWriterLock::ReleaseReaderLock/ReleaseWriterLock` without ownership threw
+  `SynchronizationLockException` — real .NET throws `ApplicationException` here specifically
+  (unlike every other lock type in this namespace), matching `ReaderWriterLock.cs`.
+- `Barrier::Dispose()` was a true no-op — added a `disposed_` flag, `ThrowIfDisposed()` guards on
+  `SignalAndWait`/`AddParticipant`/`RemoveParticipant`, and `Dispose()` now actually marks the
+  instance disposed (still respecting the existing post-phase-action guard), matching
+  `Barrier.cs`.
+- `Timer::Change(dueTime, period)` treated `dueTime = Timeout.Infinite (-1)` as "fire immediately"
+  because `std::chrono::wait_for` treats a negative duration as already-expired — rewrote the
+  timer thread to block on a condition variable whenever `dueTime == -1`, matching
+  `TimerQueueTimer.cs`'s `dueTime == Timeout.UnsignedInfinite` → "not scheduled" semantics (this
+  applies both to a never-started timer and to `Change(-1, ...)` pausing an active one). Bonus
+  fix: single-shot timers are now re-armable via a later `Change()` call, matching real .NET.
+- `PeriodicTimer` had no period validation and busy-looped at 100% CPU for `Zero`/negative
+  periods — added the same `>= 1 && <= 0xFFFFFFFE` validation as `PeriodicTimer.cs`, plus
+  `Timeout.InfiniteTimeSpan` support (blocks until `Dispose()` rather than never ticking via a
+  hot loop).
+- `AutoResetEvent::WaitOne(intcs milliseconds)` had no timeout validation, unlike every sibling
+  wait-handle type in this namespace — added `WaitHandle::ValidateTimeout()`.
+- `Lock::TryEnter(TimeSpan)` passed `Timeout::InfiniteTimeSpan` straight through as a negative
+  `std::chrono` duration, which `try_lock_for` treats like a non-blocking `try_lock()` — the one
+  call site the `-1`/Infinite special-casing pattern (already applied everywhere else this
+  session) had missed. Now special-cased like the `intcs` overload.
+- `Channel<T>::WaitToReadAsync()`/`WaitToWriteAsync()` never inspected `closeError` — closing a
+  channel with an exception and an empty queue returned `false` (as if gracefully closed) instead
+  of faulting the task, silently discarding the real error on the primary read/write path (it was
+  only observable via the separate `getCompletionProperty()` task). Verified against
+  `UnboundedChannel.cs`; both methods now rethrow `closeError` when present.
+- `Parallel::For/ForEach/Invoke` called `future.get()` per future with no `try`/`catch` — the
+  first exception observed escaped **unwrapped**, and every other future's exception was silently
+  discarded when its `std::future` was destroyed unobserved. Real .NET always aggregates every
+  exception raised into a single `AggregateException`, even for a single failure. Added a shared
+  `waitAllCollectingExceptions()` helper; scheduling still runs to completion after a failure
+  rather than stopping early like .NET's internal self-replicating-task algorithm (an efficiency
+  difference, not a correctness one — out of scope for this fix).
+- `SpinLock` was a bare `std::atomic_flag` with the `enableThreadOwnerTracking` constructor
+  parameter fully ignored, `getIsHeldProperty()` hard-coded to always return `false`, no
+  re-entrancy detection, and `Exit()` releasing unconditionally regardless of which thread called
+  it — silently permitting lock-corruption bugs (double-release, cross-thread release) that real
+  .NET surfaces as exceptions. Rewrote with an atomic owner-thread-id (tracking enabled) or atomic
+  held-flag (tracking disabled) and a bounded spin/yield loop, matching `SpinLock.cs`'s public
+  contract: `LockRecursionException` on same-thread re-entry, `SynchronizationLockException` on
+  `Exit()` without ownership, `ArgumentException` when `lockTaken` isn't pre-initialized to
+  `false`, `InvalidOperationException` from `IsHeldByCurrentThread` when tracking is disabled.
+  Also added the missing `TryEnter(intcs, bool&)`/`TryEnter(TimeSpan, bool&)` timeout overloads
+  and `getIsThreadOwnerTrackingEnabledProperty()`. `TryEnter`'s C++-friendly `bool` return (an
+  existing convention in this port, unlike .NET's `void` + out-param) was preserved.
+
+### Deliberately deferred — risky design boundary, not fixed this session
+
+- **`Task::Wait()`/`getResultProperty()`/`ValueTask::getResultProperty()` don't wrap thrown
+  exceptions in `AggregateException`.** Real .NET's `Task.Wait()` always wraps a faulted task's
+  exception in `AggregateException`; this port propagates the original exception type unwrapped.
+  **Why deferred:** the current (unwrapped) behavior is called out in `Task.hpp`'s own code
+  comments as "an established, deliberate simplification" from a prior session, and ~10 existing
+  tests in `TasksTests.cpp` (lines 96, 107, 114, 119, 145, 245, 251, 328, 471, 479) explicitly
+  assert the unwrapped exception type propagates. Changing this is a real design decision, not a
+  targeted fix: wrap always and rewrite all ~10 tests plus audit every internal
+  Task-exception-catching call site, or leave it as a permanent documented deviation, or add a new
+  opt-in wrapping API alongside the existing one. Per this session's explicit instruction to stop
+  at risky design boundaries rather than rush, this needs a documented design decision from the
+  user before any future attempt — **no design has been written yet.**
+- `Parallel`'s exception aggregation (fixed this session, see above) does **not** conflict with
+  this deferral — `Parallel.hpp` had no such prior "deliberate simplification" precedent or
+  existing tests asserting unwrapped-exception behavior, so it was safe to fix directly.
+
+### Wave-3 catalogue: Threading now resolved for this session's dangerous-moderate scope
+
+Threading's dangerous-moderate findings are now resolved one way or another: 10 fixed, 1
+explicitly deferred with a documented rationale (above) pending a user design decision. Per this
+session's instruction, Xml core dangerous-moderate findings are next.
+
+**Recommended next session priority:** Xml core dangerous-moderate findings → Xml.Linq+XPath
+dangerous-moderate findings → Text.Json's 6 remaining dangerous findings (see the checkpoint
+below for the `JsonEncodedText::Encode`/`AllowTrailingCommas` refactor scope — still not started,
+still flagged as bigger lifts) → everything else, ordinary-severity moderates → minors last. The
+`Task`/`AggregateException` deferral above needs a user decision whenever it's revisited; it does
+not block other namespaces.
 
 ## Session checkpoint (2026-07-10, continued again) — dangerous-despite-moderate wave-3 findings: 24 fixed across 4 namespace slices (21 commits)
 
