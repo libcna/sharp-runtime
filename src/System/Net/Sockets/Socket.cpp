@@ -10,6 +10,7 @@
 #include "System/Net/Dns.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 #if defined(_WIN32)
 #  include <winsock2.h>
@@ -156,6 +157,22 @@ namespace {
     [[noreturn]] void throwSocketError(const char* what) {
         int err = lastError();
         throw SocketException(static_cast<intcs>(err), what);
+    }
+
+    // Verified against Socket.Tasks.cs's ValidateBufferArguments: casting to uint32_t before
+    // comparing catches a negative offset/count as an out-of-range value too (a negative
+    // int becomes a huge unsigned value), matching (uint)offset > (uint)buffer.Length and
+    // (uint)size > (uint)(buffer.Length - offset) in the .NET source. Previously this port
+    // did buffer.data() + offset with no bounds check at all -- a genuine out-of-bounds
+    // heap read (Send/SendTo) or write (Receive/ReceiveFrom) when offset+count exceeded the
+    // buffer, not just a parity gap.
+    template<typename Buf>
+    void validateBufferArgs(const Buf& buffer, intcs offset, intcs count) {
+        uint32_t size = static_cast<uint32_t>(buffer.size());
+        if (static_cast<uint32_t>(offset) > size)
+            throw System::ArgumentOutOfRangeException("offset");
+        if (static_cast<uint32_t>(count) > size - static_cast<uint32_t>(offset))
+            throw System::ArgumentOutOfRangeException("count");
     }
 
 } // namespace
@@ -495,6 +512,7 @@ std::shared_ptr<Socket> Socket::Accept() {
 }
 
 intcs Socket::Send(const std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags) {
+    validateBufferArgs(buffer, offset, count);
     if (count == 0) return 0;
 #if defined(_WIN32)
     int sent = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
@@ -513,6 +531,7 @@ intcs Socket::Send(const std::vector<bytecs>& buffer, SocketFlags flags) {
 }
 
 intcs Socket::Receive(std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags) {
+    validateBufferArgs(buffer, offset, count);
     if (count == 0) return 0;
 #if defined(_WIN32)
     int received = ::recv(toSk(fd_), reinterpret_cast<char*>(buffer.data() + offset), count,
@@ -532,6 +551,7 @@ intcs Socket::Receive(std::vector<bytecs>& buffer, SocketFlags flags) {
 
 intcs Socket::SendTo(const std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags,
                       const System::Net::EndPoint& remoteEP) {
+    validateBufferArgs(buffer, offset, count);
     sockaddr_storage storage{};
     socklen_t len = buildNativeAddress(remoteEP, storage);
 #if defined(_WIN32)
@@ -553,6 +573,7 @@ intcs Socket::SendTo(const std::vector<bytecs>& buffer, const System::Net::EndPo
 
 SocketReceiveFromResult Socket::ReceiveFrom(std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags,
                                               const System::Net::EndPoint& /*remoteEPTemplate*/) {
+    validateBufferArgs(buffer, offset, count);
     sockaddr_storage storage{};
     socklen_t len = sizeof(storage);
 #if defined(_WIN32)

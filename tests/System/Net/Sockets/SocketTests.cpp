@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
 
@@ -53,6 +54,57 @@ TEST(SocketTests, TcpBindListenAcceptConnectSendReceive) {
     EXPECT_EQ(recvBuf[0], 'h');
     EXPECT_EQ(recvBuf[1], 'i');
     EXPECT_EQ(recvBuf[2], '!');
+
+    client.Close();
+    acceptedSocket->Close();
+}
+
+// Regression test for a wave-3 audit finding: Send/Receive/SendTo/ReceiveFrom used to do
+// buffer.data() + offset with no bounds check against buffer.size() -- a genuine
+// out-of-bounds heap read (Send) or write (Receive) when offset+count exceeded the buffer,
+// instead of a clean ArgumentOutOfRangeException. Verified against Socket.Tasks.cs's
+// ValidateBufferArguments.
+TEST(SocketTests, Send_OffsetCountOutOfRange_Throws) {
+    Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = listener.getLocalEndPointProperty();
+    auto* localIp = dynamic_cast<IPEndPoint*>(local.get());
+    intcs port = localIp->getPortProperty();
+
+    std::shared_ptr<Socket> acceptedSocket;
+    std::thread serverThread([&]() { acceptedSocket = listener.Accept(); });
+    Socket client(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    client.Connect(IPAddress::Loopback, port);
+    serverThread.join();
+
+    std::vector<SharpRuntime::bytecs> buf{'a', 'b', 'c'};
+    EXPECT_THROW(client.Send(buf, 2, 5, SocketFlags::None), System::ArgumentOutOfRangeException); // offset+count > size
+    EXPECT_THROW(client.Send(buf, 10, 1, SocketFlags::None), System::ArgumentOutOfRangeException); // offset > size
+    EXPECT_THROW(client.Send(buf, -1, 1, SocketFlags::None), System::ArgumentOutOfRangeException); // negative offset
+    EXPECT_THROW(client.Send(buf, 0, -1, SocketFlags::None), System::ArgumentOutOfRangeException); // negative count
+
+    client.Close();
+    acceptedSocket->Close();
+}
+
+TEST(SocketTests, Receive_OffsetCountOutOfRange_Throws) {
+    Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = listener.getLocalEndPointProperty();
+    auto* localIp = dynamic_cast<IPEndPoint*>(local.get());
+    intcs port = localIp->getPortProperty();
+
+    std::shared_ptr<Socket> acceptedSocket;
+    std::thread serverThread([&]() { acceptedSocket = listener.Accept(); });
+    Socket client(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    client.Connect(IPAddress::Loopback, port);
+    serverThread.join();
+
+    std::vector<SharpRuntime::bytecs> buf(4);
+    EXPECT_THROW(client.Receive(buf, 2, 5, SocketFlags::None), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.Receive(buf, -1, 1, SocketFlags::None), System::ArgumentOutOfRangeException);
 
     client.Close();
     acceptedSocket->Close();
