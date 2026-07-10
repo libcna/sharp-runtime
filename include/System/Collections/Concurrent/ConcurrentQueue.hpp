@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Concurrent/IProducerConsumerCollection.hpp"
 #include "System/Collections/Generic/IEnumerable.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
@@ -109,12 +111,14 @@ public:
     /**
      * @brief Copies the queue's elements (front-to-back) into @p array starting at @p index.
      * C++ counterpart of .NET ConcurrentQueue&lt;T&gt;.CopyTo(T[], int).
-     * @throws std::out_of_range if @p array is not large enough.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p array is not large enough.
      */
     void CopyTo(std::vector<T>& array, intcs index) override {
         std::lock_guard<std::mutex> lk(mutex_);
-        if (index < 0 || static_cast<size_t>(index) + queue_.size() > array.size())
-            throw std::out_of_range("CopyTo destination is too small.");
+        if (index < 0) throw System::ArgumentOutOfRangeException("index");
+        if (static_cast<size_t>(index) + queue_.size() > array.size())
+            throw System::ArgumentException("Destination array was not long enough.");
         std::queue<T> copy = queue_;
         intcs i = index;
         while (!copy.empty()) { array[static_cast<size_t>(i++)] = copy.front(); copy.pop(); }

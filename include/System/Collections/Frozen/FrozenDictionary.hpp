@@ -7,6 +7,9 @@
 #include <stdexcept>
 #include <functional>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Frozen {
 
@@ -107,11 +110,11 @@ public:
      * C++ counterpart of .NET FrozenDictionary<TKey,TValue> indexer getter (this[TKey]).
      * @param key The key whose value to get.
      * @return A const reference to the value.
-     * @throws std::out_of_range if the key is not found.
+     * @throws System::Collections::Generic::KeyNotFoundException if the key is not found.
      */
     [[nodiscard]] const TValue& getItem(const TKey& key) const {
         auto it = map_.find(key);
-        if (it == map_.end()) throw std::out_of_range("Key not found in FrozenDictionary");
+        if (it == map_.end()) throw System::Collections::Generic::KeyNotFoundException("The given key was not present in the dictionary.");
         return it->second;
     }
 
@@ -147,11 +150,13 @@ public:
      * C++ counterpart of .NET FrozenDictionary<TKey,TValue>.CopyTo(KeyValuePair<TKey,TValue>[], int).
      * @param destination Destination vector; must already have room for index + Count elements.
      * @param index       Zero-based index at which copying begins.
-     * @throws std::out_of_range if @p index is negative or @p destination is not large enough.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p destination is not large enough.
      */
     void CopyTo(std::vector<std::pair<TKey, TValue>>& destination, SharpRuntime::intcs index) const {
-        if (index < 0 || static_cast<std::size_t>(index) + map_.size() > destination.size())
-            throw std::out_of_range("CopyTo destination is too small.");
+        if (index < 0) throw System::ArgumentOutOfRangeException("destinationIndex");
+        if (static_cast<std::size_t>(index) + map_.size() > destination.size())
+            throw System::ArgumentException("Destination too small for the number of elements in the collection.", "destination");
         std::size_t i = static_cast<std::size_t>(index);
         for (const auto& kv : map_) {
             destination[i++] = {kv.first, kv.second};

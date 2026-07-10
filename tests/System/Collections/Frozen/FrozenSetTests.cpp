@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Frozen/FrozenSet.hpp"
 #include <string>
 
@@ -63,7 +64,7 @@ TEST(FrozenSetTest, CopyTo) {
 TEST(FrozenSetTest, CopyTo_TooSmall_Throws) {
     auto s = FrozenSet<int>::Create({1, 2});
     std::vector<int> buf(1);
-    EXPECT_THROW(s.CopyTo(buf, 0), std::out_of_range);
+    EXPECT_THROW(s.CopyTo(buf, 0), System::ArgumentException);
 }
 
 TEST(FrozenSetTest, RangeBasedFor) {

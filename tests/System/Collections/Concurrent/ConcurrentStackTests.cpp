@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Concurrent/ConcurrentStack.hpp"
 
 using System::Collections::Concurrent::ConcurrentStack;
@@ -62,6 +64,25 @@ TEST(ConcurrentStackTest, PushRange) {
     EXPECT_EQ(v, 3);
 }
 
+// .NET ConcurrentStack<T>.PushRange(T[], int, int) validates count/startIndex with
+// ArgumentOutOfRangeException, and the combined startIndex+count-exceeds-length case with
+// ArgumentException (ConcurrentStack.cs's ValidatePushPopRangeInput).
+TEST(ConcurrentStackTest, PushRange_NegativeCount_ThrowsArgumentOutOfRange) {
+    ConcurrentStack<int> s;
+    std::vector<int> items{1, 2, 3};
+    EXPECT_THROW(s.PushRange(items, 0, -1), System::ArgumentOutOfRangeException);
+}
+TEST(ConcurrentStackTest, PushRange_NegativeStartIndex_ThrowsArgumentOutOfRange) {
+    ConcurrentStack<int> s;
+    std::vector<int> items{1, 2, 3};
+    EXPECT_THROW(s.PushRange(items, -1, 1), System::ArgumentOutOfRangeException);
+}
+TEST(ConcurrentStackTest, PushRange_CountExceedsLength_ThrowsArgumentException) {
+    ConcurrentStack<int> s;
+    std::vector<int> items{1, 2, 3};
+    EXPECT_THROW(s.PushRange(items, 1, 5), System::ArgumentException);
+}
+
 TEST(ConcurrentStackTest, TryPopRange) {
     ConcurrentStack<int> s;
     s.Push(1);
@@ -118,7 +139,16 @@ TEST(ConcurrentStackTest, CopyTo_TooSmall_Throws) {
     s.Push(1);
     s.Push(2);
     std::vector<int> dest(1);
-    EXPECT_THROW(s.CopyTo(dest, 0), std::out_of_range);
+    EXPECT_THROW(s.CopyTo(dest, 0), System::ArgumentException);
+}
+
+// .NET ConcurrentStack<T>.CopyTo throws ArgumentOutOfRangeException specifically for a
+// negative index, distinct from the ArgumentException thrown for a too-small array.
+TEST(ConcurrentStackTest, CopyTo_NegativeIndex_ThrowsArgumentOutOfRange) {
+    ConcurrentStack<int> s;
+    s.Push(1);
+    std::vector<int> dest(2);
+    EXPECT_THROW(s.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ConcurrentStackTest, CopyTo_ExactSize_Succeeds) {
