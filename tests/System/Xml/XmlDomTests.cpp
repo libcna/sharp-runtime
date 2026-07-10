@@ -142,6 +142,53 @@ TEST(XmlAttributeTests, SetAttributeNode_AttachesUnattachedAttribute) {
     EXPECT_EQ(attr->getOwnerElementProperty(), el);
 }
 
+TEST(XmlAttributeTests, NamespaceURI_PrefixedAttribute_ResolvesFromAncestorXmlnsDeclaration) {
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns:ns=\"urn:test\"><child ns:attr=\"v\"/></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    auto* attr = child->GetAttributeNode("ns:attr");
+    ASSERT_NE(attr, nullptr);
+    EXPECT_EQ(attr->getNamespaceURIProperty(), "urn:test");
+}
+
+TEST(XmlAttributeTests, NamespaceURI_UnprefixedAttribute_IsEmpty) {
+    // XML Namespaces spec: an element's default `xmlns="..."` declaration does not apply to
+    // its own unprefixed attributes.
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns=\"urn:default\" plain=\"v\"/>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* attr = root->GetAttributeNode("plain");
+    ASSERT_NE(attr, nullptr);
+    EXPECT_EQ(attr->getNamespaceURIProperty(), "");
+}
+
+TEST(XmlAttributeTests, GetAttributesCollection_GetNamedItemByLocalNameAndNamespace_FindsPrefixedAttribute) {
+    // Regression: XmlNamedNodeMap::GetNamedItem(localName, namespaceURI) dispatches virtually
+    // through XmlAttribute::getNamespaceURIProperty() -- previously always "", so this lookup
+    // could never match a prefixed attribute regardless of namespace.
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns:ns=\"urn:test\"><child ns:attr=\"v\"/></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    auto* found = child->getAttributesProperty()->GetNamedItem("attr", "urn:test");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->getValueProperty(), "v");
+}
+
+TEST(XmlAttributeTests, CloneNode_CopiesNameAndValue) {
+    XmlDocument doc;
+    auto* el = doc.CreateElement("book");
+    el->SetAttribute("isbn", "12345");
+    auto* attr = el->GetAttributeNode("isbn");
+    auto* clone = attr->CloneNode(false);
+    ASSERT_NE(clone, nullptr);
+    auto* clonedAttr = static_cast<XmlAttribute*>(clone);
+    EXPECT_EQ(clonedAttr->getNameProperty(), "isbn");
+    EXPECT_EQ(clonedAttr->getValueProperty(), "12345");
+    EXPECT_EQ(clonedAttr->getOwnerElementProperty(), nullptr);
+}
+
 // ===========================================================================
 // InnerText / InnerXml / OuterXml
 // ===========================================================================
