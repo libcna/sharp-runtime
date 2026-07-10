@@ -131,16 +131,24 @@ public:
      * @brief Returns a new dictionary with the specified key/value pair added.
      *
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.Add(TKey, TValue).
+     * Verified against ImmutableSortedDictionary_2.Node.SetOrAdd: if @p key already exists
+     * with a value equal to @p value, this is a silent no-op (returns an equal instance,
+     * not a copy-with-mutation) rather than throwing -- .NET only throws when the existing
+     * value actually differs.
      * @param key   The key to add.
      * @param value The value to add.
-     * @return A new ImmutableSortedDictionary with the pair added.
-     * @throws System::ArgumentException if the key already exists.
+     * @return A new ImmutableSortedDictionary with the pair added, or an equivalent instance
+     *         if @p key already maps to @p value.
+     * @throws System::ArgumentException if the key already exists with a different value.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         Add(const TKey& key, const TValue& value) const {
-        auto m = std::make_shared<MapT>(*data_);
-        if (m->find(key) != m->end())
+        auto it = data_->find(key);
+        if (it != data_->end()) {
+            if (it->second == value) return *this;
             throw System::ArgumentException("An item with the same key has already been added.");
+        }
+        auto m = std::make_shared<MapT>(*data_);
         (*m)[key] = value;
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
     }
@@ -149,16 +157,21 @@ public:
      * @brief Returns a new dictionary with multiple key/value pairs added.
      *
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.AddRange(IEnumerable<KeyValuePair<TKey,TValue>>).
+     * Each pair is applied via the same equal-value-is-a-no-op rule as Add(TKey, TValue);
+     * see that method's doc comment for the verification detail.
      * @param pairs The pairs to add.
      * @return A new ImmutableSortedDictionary with all pairs added.
-     * @throws System::ArgumentException if any key already exists.
+     * @throws System::ArgumentException if any key already exists with a different value.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         AddRange(const std::vector<std::pair<TKey, TValue>>& pairs) const {
         auto m = std::make_shared<MapT>(*data_);
         for (const auto& p : pairs) {
-            if (m->find(p.first) != m->end())
+            auto it = m->find(p.first);
+            if (it != m->end()) {
+                if (it->second == p.second) continue;
                 throw System::ArgumentException("An item with the same key has already been added.");
+            }
             (*m)[p.first] = p.second;
         }
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));

@@ -276,6 +276,32 @@ TEST(ImmutableCollectionTests, DictAddDuplicateKeyThrows) {
     EXPECT_THROW(d.Add("k", 2), System::ArgumentException);
 }
 
+TEST(ImmutableCollectionTests, DictAddDuplicateKeySameValueIsNoOp) {
+    // Verified against ImmutableDictionary_2.cs: Add() uses
+    // KeyCollisionBehavior.ThrowIfValueDifferent -- an equal-value re-add doesn't throw.
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    ImmutableDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.Add("k", 1));
+    EXPECT_EQ(d2.getCountProperty(), 1);
+    EXPECT_EQ(d2["k"], 1);
+}
+
+TEST(ImmutableCollectionTests, DictAddRangeDuplicateKeyDifferentValueThrows) {
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 2}, {"k", 99}};
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
+}
+
+TEST(ImmutableCollectionTests, DictAddRangeDuplicateKeySameValueIsNoOp) {
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 2}, {"k", 1}};
+    ImmutableDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.AddRange(pairs));
+    EXPECT_EQ(d2.getCountProperty(), 2);
+    EXPECT_EQ(d2["k"], 1);
+    EXPECT_EQ(d2["y"], 2);
+}
+
 TEST(ImmutableCollectionTests, DictSetItemReturnsNewInstance) {
     auto a = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
     auto b = a.SetItem("k", 99);

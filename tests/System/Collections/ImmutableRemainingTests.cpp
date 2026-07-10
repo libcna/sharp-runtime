@@ -203,6 +203,32 @@ TEST(ImmutableSortedDictionaryTests, Add_DuplicateKey_Throws) {
     EXPECT_THROW(d.Add("x", 20), System::ArgumentException);
 }
 
+TEST(ImmutableSortedDictionaryTests, Add_DuplicateKeySameValue_IsNoOp) {
+    // Verified against ImmutableSortedDictionary_2.Node.SetOrAdd: re-adding an existing
+    // key with an equal value is a silent no-op, not a thrown ArgumentException.
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    ImmutableSortedDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.Add("x", 10));
+    EXPECT_EQ(d2.getCountProperty(), 1);
+    EXPECT_EQ(d2["x"], 10);
+}
+
+TEST(ImmutableSortedDictionaryTests, AddRange_DuplicateKeyDifferentValue_Throws) {
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 1}, {"x", 99}};
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
+}
+
+TEST(ImmutableSortedDictionaryTests, AddRange_DuplicateKeySameValue_IsNoOp) {
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 1}, {"x", 10}};
+    ImmutableSortedDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.AddRange(pairs));
+    EXPECT_EQ(d2.getCountProperty(), 2);
+    EXPECT_EQ(d2["x"], 10);
+    EXPECT_EQ(d2["y"], 1);
+}
+
 TEST(ImmutableSortedDictionaryTests, ContainsKey_True_False) {
     auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("key", 42);
     EXPECT_TRUE(d.ContainsKey("key"));
