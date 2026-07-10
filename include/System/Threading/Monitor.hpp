@@ -101,10 +101,23 @@ namespace System::Threading {
         }
         /** Attempts to acquire a lock on obj without blocking; sets lockTaken and returns the same value. */
         static void TryEnter(const void* obj, bool& lockTaken) { lockTaken = TryEnter(obj); }
-        /** Attempts to acquire an exclusive lock on obj within the given timeout; returns true on success. */
+        /**
+         * @brief Attempts to acquire an exclusive lock on obj within the given timeout; returns true on success.
+         *
+         * Verified against Lock.cs's doc comment: -1 (Timeout.Infinite) waits indefinitely,
+         * matching every other timed-wait method in this codebase. std::chrono's own
+         * try_lock_for treats a negative duration as already-expired, so -1 must be
+         * special-cased to an untimed lock() rather than passed straight through.
+         */
         static bool TryEnter(const void* obj, intcs millisecondsTimeout) {
             auto s = GetOrCreate(obj);
-            bool ok = s->mutex.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            bool ok;
+            if (millisecondsTimeout == -1) {
+                s->mutex.lock();
+                ok = true;
+            } else {
+                ok = s->mutex.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            }
             if (ok) s->onAcquired();
             return ok;
         }
@@ -139,7 +152,13 @@ namespace System::Threading {
             if (!state->heldByCurrentThread()) throw System::Threading::SynchronizationLockException();
             std::unique_lock<std::recursive_timed_mutex> lock(state->mutex, std::adopt_lock);
             state->onReleasing();
-            bool ok = state->cv.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout)) == std::cv_status::no_timeout;
+            bool ok;
+            if (millisecondsTimeout == -1) {
+                state->cv.wait(lock);
+                ok = true;
+            } else {
+                ok = state->cv.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout)) == std::cv_status::no_timeout;
+            }
             state->onAcquired();
             lock.release();
             return ok;

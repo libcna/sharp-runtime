@@ -532,6 +532,24 @@ TEST(SpinWaitTests, SpinUntil_WithTimeout_NeverTrue_ReturnsFalse) {
     EXPECT_FALSE(SpinWait::SpinUntil([]() { return false; }, 1));
 }
 
+// Regression test for a wave-3 audit finding: SpinUntil(condition, -1) (Timeout.Infinite)
+// used to compute a deadline already in the past (now() + milliseconds(-1)), so it returned
+// false almost immediately instead of spinning until the condition became true, like real
+// .NET (verified against SpinWait.cs: the 0-arg SpinUntil(condition) overload delegates to
+// this one with Timeout.Infinite).
+TEST(SpinWaitTests, SpinUntil_InfiniteTimeout_BlocksUntilConditionTrue) {
+    std::atomic<bool> flag{false};
+    std::atomic<bool> done{false};
+    std::thread t([&] { done = SpinWait::SpinUntil([&] { return flag.load(); }, -1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(done.load()); // still spinning after 100ms -- proves it didn't return immediately
+
+    flag.store(true);
+    t.join();
+    EXPECT_TRUE(done.load());
+}
+
 // ===========================================================================
 // ThreadLocal<T>
 // ===========================================================================

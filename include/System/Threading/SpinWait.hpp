@@ -38,8 +38,20 @@ namespace System::Threading {
             while (!condition()) sw.SpinOnce();
         }
 
-        /** Spins until condition returns true or the timeout elapses; returns true on success. */
+        /**
+         * @brief Spins until condition returns true or the timeout elapses; returns true on success.
+         *
+         * Verified against SpinWait.cs: -1 (Timeout.Infinite) waits indefinitely (the 0-arg
+         * SpinUntil(condition) overload delegates to this one with Timeout.Infinite). A
+         * deadline computed as now()+milliseconds(-1) would already be in the past, so -1
+         * must be special-cased to skip the deadline check entirely.
+         */
         static bool SpinUntil(std::function<bool()> condition, int millisecondsTimeout) {
+            if (millisecondsTimeout == -1) {
+                SpinWait sw;
+                while (!condition()) sw.SpinOnce();
+                return true;
+            }
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millisecondsTimeout);
             SpinWait sw;
             while (!condition()) {

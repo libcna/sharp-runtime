@@ -65,6 +65,12 @@ namespace System::Threading {
             ThrowIfDisposed();
             if (set_.load(std::memory_order_acquire)) return true;
             std::unique_lock<std::mutex> lock(mtx_);
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
+            // negative duration as already-expired, so it must be special-cased.
+            if (millisecondsTimeout == -1) {
+                cv_.wait(lock, [this]{ return set_.load(std::memory_order_acquire); });
+                return true;
+            }
             return cv_.wait_for(lock, std::chrono::milliseconds(millisecondsTimeout),
                 [this]{ return set_.load(std::memory_order_acquire); });
         }

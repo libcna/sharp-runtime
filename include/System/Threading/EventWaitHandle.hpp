@@ -53,8 +53,16 @@ namespace System::Threading {
         bool WaitOne(intcs milliseconds) override {
             ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lock(mtx_);
-            bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
-                [this]{ return set_.load(std::memory_order_acquire); });
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
+            // negative duration as already-expired, so it must be special-cased.
+            bool ok;
+            if (milliseconds == -1) {
+                cv_.wait(lock, [this]{ return set_.load(std::memory_order_acquire); });
+                ok = true;
+            } else {
+                ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
+                    [this]{ return set_.load(std::memory_order_acquire); });
+            }
             if (ok && mode_ == EventResetMode::AutoReset)
                 set_.store(false, std::memory_order_release);
             return ok;

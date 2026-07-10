@@ -230,6 +230,29 @@ TEST(MutexTests, WaitOne_TimeoutLessThanNegativeOne_Throws) {
     EXPECT_THROW(m.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
+// Regression test for a wave-3 audit finding: WaitOne(-1) (Timeout.Infinite) used to feed
+// -1 straight into std::chrono's try_lock_for, which treats a negative duration as
+// already-expired -- so it returned almost immediately instead of blocking forever like
+// real .NET. Verified by holding the mutex on the main thread, releasing it only after the
+// background thread has been blocked in WaitOne(-1) for longer than any "immediately
+// expired" timeout could account for.
+TEST(MutexTests, WaitOne_InfiniteTimeout_BlocksUntilReleased) {
+    Mutex m;
+    m.WaitOne(); // main thread acquires
+    std::atomic<bool> acquired{false};
+    std::thread t([&] {
+        acquired = m.WaitOne(-1); // should block until the main thread releases
+        if (acquired) m.ReleaseMutex(); // release from the thread that actually acquired it
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(acquired.load()); // still blocked after 100ms -- proves it didn't return immediately
+
+    m.ReleaseMutex(); // main thread releases its own hold, letting t proceed
+    t.join();
+    EXPECT_TRUE(acquired.load());
+}
+
 TEST(MutexTests, ReleaseMutex_NotOwned_ThrowsApplicationException) {
     Mutex m;
     EXPECT_THROW(m.ReleaseMutex(), System::ApplicationException);
@@ -345,4 +368,36 @@ TEST(WaitHandleTests, WaitAny_NoneSignaled_TimesOutWithWaitTimeout) {
     Semaphore s1(0, 1), s2(0, 1);
     std::vector<WaitHandle*> handles{&s1, &s2};
     EXPECT_EQ(WaitHandle::WaitAny(handles, 50), WaitHandle::WaitTimeout);
+}
+
+// Regression test for a wave-3 audit finding shared by both Semaphore::WaitOne(int) and
+// WaitHandle::WaitAll(handles, int): passing -1 (Timeout.Infinite) used to compute a
+// deadline already in the past (now() + milliseconds(-1)), so both returned/timed-out
+// almost immediately instead of blocking forever like real .NET.
+TEST(WaitHandleTests, WaitAll_InfiniteTimeout_BlocksUntilAllSignaled) {
+    Semaphore s1(0, 1), s2(0, 1);
+    std::vector<WaitHandle*> handles{&s1, &s2};
+    std::atomic<bool> done{false};
+    std::thread t([&] { done = WaitHandle::WaitAll(handles, -1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(done.load()); // still blocked after 100ms -- neither semaphore is signaled yet
+
+    s1.Release();
+    s2.Release();
+    t.join();
+    EXPECT_TRUE(done.load());
+}
+
+TEST(SemaphoreTests, WaitOne_InfiniteTimeout_BlocksUntilReleased) {
+    Semaphore s(0, 1);
+    std::atomic<bool> acquired{false};
+    std::thread t([&] { acquired = s.WaitOne(-1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(acquired.load());
+
+    s.Release();
+    t.join();
+    EXPECT_TRUE(acquired.load());
 }

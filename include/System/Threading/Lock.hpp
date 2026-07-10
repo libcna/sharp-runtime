@@ -57,9 +57,21 @@ namespace System::Threading {
             return ok;
         }
 
-        /** Attempts to acquire the lock within the given millisecond timeout; returns true if successful. */
+        /**
+         * @brief Attempts to acquire the lock within the given millisecond timeout; returns true if successful.
+         *
+         * Verified against Lock.cs's doc comment: -1 (Timeout.Infinite) waits indefinitely.
+         * std::chrono's try_lock_for treats a negative duration as already-expired, so it
+         * must be special-cased rather than passed straight through.
+         */
         bool TryEnter(intcs millisecondsTimeout) {
-            bool ok = mtx_.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            bool ok;
+            if (millisecondsTimeout == -1) {
+                mtx_.lock();
+                ok = true;
+            } else {
+                ok = mtx_.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            }
             if (ok) onAcquired();
             return ok;
         }

@@ -52,7 +52,15 @@ namespace System::Threading {
          */
         bool WaitOne(intcs milliseconds) {
             std::unique_lock<std::mutex> lk(mutex_);
-            bool ok = cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return signaled_; });
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
+            // negative duration as already-expired, so it must be special-cased.
+            bool ok;
+            if (milliseconds == -1) {
+                cv_.wait(lk, [this]{ return signaled_; });
+                ok = true;
+            } else {
+                ok = cv_.wait_for(lk, std::chrono::milliseconds(milliseconds), [this]{ return signaled_; });
+            }
             if (ok) signaled_ = false;
             return ok;
         }

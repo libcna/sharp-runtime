@@ -55,7 +55,16 @@ namespace System::Threading {
          */
         bool WaitOne(intcs millisecondsTimeout) override {
             ValidateTimeout(millisecondsTimeout);
-            bool acquired = mutex_.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's try_lock_for treats a
+            // negative duration as already-expired, so it must be special-cased rather than
+            // passed straight through.
+            bool acquired;
+            if (millisecondsTimeout == -1) {
+                mutex_.lock();
+                acquired = true;
+            } else {
+                acquired = mutex_.try_lock_for(std::chrono::milliseconds(millisecondsTimeout));
+            }
             if (acquired) onAcquired();
             return acquired;
         }

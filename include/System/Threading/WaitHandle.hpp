@@ -64,8 +64,19 @@ namespace System::Threading {
             return true;
         }
 
-        /** Waits for all the elements of @p handles to receive a signal, or until millisecondsTimeout elapses. */
+        /**
+         * @brief Waits for all the elements of @p handles to receive a signal, or until millisecondsTimeout elapses.
+         *
+         * -1 (Timeout.Infinite) waits indefinitely for each handle in turn. A deadline
+         * computed as now()+milliseconds(-1) would already be in the past, causing every
+         * handle to time out immediately, so -1 must be special-cased.
+         */
         static bool WaitAll(const std::vector<WaitHandle*>& handles, intcs millisecondsTimeout) {
+            if (millisecondsTimeout == -1) {
+                for (WaitHandle* h : handles)
+                    if (h) h->WaitOne();
+                return true;
+            }
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millisecondsTimeout);
             for (WaitHandle* h : handles) {
                 if (!h) continue;
@@ -92,8 +103,23 @@ namespace System::Threading {
             }
         }
 
-        /** Waits for any of the elements of @p handles to receive a signal, or until millisecondsTimeout elapses. */
+        /**
+         * @brief Waits for any of the elements of @p handles to receive a signal, or until millisecondsTimeout elapses.
+         *
+         * -1 (Timeout.Infinite) polls indefinitely with no deadline. A deadline computed as
+         * now()+milliseconds(-1) would already be in the past, causing an immediate
+         * WaitTimeout, so -1 must be special-cased.
+         */
         static intcs WaitAny(const std::vector<WaitHandle*>& handles, intcs millisecondsTimeout) {
+            if (millisecondsTimeout == -1) {
+                for (;;) {
+                    for (std::size_t i = 0; i < handles.size(); ++i) {
+                        if (handles[i] && handles[i]->WaitOne(0))
+                            return static_cast<intcs>(i);
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
             auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millisecondsTimeout);
             for (;;) {
                 for (std::size_t i = 0; i < handles.size(); ++i) {
