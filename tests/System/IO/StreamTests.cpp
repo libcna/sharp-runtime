@@ -281,6 +281,51 @@ TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
     EXPECT_EQ(ms.ReadByte(), -1);
 }
 
+// Regression tests for a wave-3 audit finding: Read() returned 0 (indistinguishable from
+// "stream at EOF") for a null buffer or negative offset/count instead of throwing. Verified
+// against MemoryStream.cs's Read()/ValidateBufferArguments, matching FileStream::Read's
+// existing validation in this codebase.
+TEST(MemoryStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.Read(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    uint8_t buf[4];
+    EXPECT_THROW(ms.Read(buf, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    uint8_t buf[4];
+    EXPECT_THROW(ms.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: Close() cleared the underlying buffer,
+// contradicting its own doc comment ("no-op for MemoryStream") and real .NET's
+// MemoryStream.Dispose(bool), which explicitly leaves the buffer and position untouched
+// ("Don't set buffer to null - allow TryGetBuffer, GetBuffer & ToArray to work").
+TEST(MemoryStreamTests, Close_DoesNotClearBufferOrPosition) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    ms.Write(data, 0, 4);
+    ASSERT_EQ(ms.getLengthProperty(), 4);
+    ASSERT_EQ(ms.getPositionProperty(), 4);
+
+    ms.Close();
+
+    EXPECT_EQ(ms.getLengthProperty(), 4);
+    EXPECT_EQ(ms.getPositionProperty(), 4);
+    auto arr = ms.ToArray();
+    ASSERT_EQ(arr.size(), 4u);
+    EXPECT_EQ(arr[0], 1);
+    EXPECT_EQ(arr[3], 4);
+}
+
 // ---------------------------------------------------------------------------
 // Stream — default Position behavior for non-seekable streams
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ namespace System::IO
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
         /** Writes a single byte to the memory buffer. */
         void  WriteByte(bytecs value) override;
-        /** Resets the stream position (no-op for MemoryStream). */
+        /** No-op: matches MemoryStream.Dispose(), which deliberately leaves the buffer and position untouched so GetBuffer()/ToArray() keep working afterward. */
         void  Close() override;
         /** No-op for MemoryStream; the buffer is always up to date. */
         void  Flush() override {}

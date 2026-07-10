@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/MemoryStream.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include <algorithm>
@@ -14,9 +15,17 @@ namespace System::IO
     MemoryStream::MemoryStream(const bytecs* buffer, intcs size)
         : data_(buffer, buffer + size), position_(0), writable_(false) {}
 
+    // Verified against MemoryStream.cs's Read()/ValidateBufferArguments: real .NET throws
+    // ArgumentNullException for a null buffer and ArgumentOutOfRangeException for a negative
+    // offset/count, matching FileStream::Read's existing validation in this codebase. This
+    // previously returned 0 (indistinguishable from "stream at EOF") for every one of these
+    // cases instead of throwing -- a caller passing a negative count would silently get "0
+    // bytes read" instead of an error.
     intcs MemoryStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
-        if (buffer == nullptr || offset < 0 || count < 0) return 0;
+        if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+        if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
         const intcs remaining = static_cast<intcs>(data_.size()) - position_;
         const intcs toRead = std::min(count, remaining);
         if (toRead <= 0) return 0;
@@ -47,10 +56,13 @@ namespace System::IO
         ++position_;
     }
 
+    // Verified against MemoryStream.cs's Dispose(bool): real .NET explicitly does NOT clear
+    // the underlying buffer on Close/Dispose -- "Don't set buffer to null - allow TryGetBuffer,
+    // GetBuffer & ToArray to work" -- nor does it reset the position. This previously cleared
+    // both, contradicting this method's own doc comment ("no-op for MemoryStream") and
+    // destroying data real .NET deliberately preserves after Close().
     void MemoryStream::Close()
     {
-        data_.clear();
-        position_ = 0;
     }
 
     intcs MemoryStream::getLengthProperty() const
