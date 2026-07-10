@@ -140,9 +140,16 @@ std::vector<std::shared_ptr<NetworkInterface>> NetworkInterface::GetAllNetworkIn
 }
 
 bool NetworkInterface::GetIsNetworkAvailable() {
+    // Verified against NetworkInterfacePal.Linux.cs's GetIsNetworkAvailable: real .NET skips
+    // both Loopback AND Tunnel interfaces, not just Loopback -- a machine whose only "up"
+    // non-loopback interface is a VPN tunnel previously (silently, incorrectly) reported
+    // network availability as true here.
     for (const auto& iface : GetAllNetworkInterfaces()) {
-        if (iface->getNetworkInterfaceTypeProperty() != NetworkInterfaceType::Loopback &&
-            iface->getOperationalStatusProperty() == OperationalStatus::Up) {
+        NetworkInterfaceType type = iface->getNetworkInterfaceTypeProperty();
+        if (type == NetworkInterfaceType::Loopback || type == NetworkInterfaceType::Tunnel) {
+            continue;
+        }
+        if (iface->getOperationalStatusProperty() == OperationalStatus::Up) {
             return true;
         }
     }
