@@ -8,6 +8,7 @@
 // DebuggableAttribute, DebuggerTypeProxyAttribute, DebuggerVisualizerAttribute.
 #include <gtest/gtest.h>
 #include <string>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Diagnostics/DebuggerDisplayAttribute.hpp"
 #include "System/Diagnostics/DebuggerBrowsableAttribute.hpp"
 #include "System/Diagnostics/StackFrame.hpp"
@@ -67,6 +68,22 @@ TEST(DebuggerBrowsableAttributeTests, Collapsed_State) {
     EXPECT_EQ(attr.getStateProperty(), DebuggerBrowsableState::Collapsed);
 }
 
+TEST(DebuggerBrowsableAttributeTests, RootHidden_State) {
+    DebuggerBrowsableAttribute attr(DebuggerBrowsableState::RootHidden);
+    EXPECT_EQ(attr.getStateProperty(), DebuggerBrowsableState::RootHidden);
+}
+
+TEST(DebuggerBrowsableAttributeTests, OutOfRangeState_Throws) {
+    // Verified against DebuggerBrowsableAttribute.cs: the constructor validates
+    // state < Never || state > RootHidden -- a pure min/max range check. Note this does
+    // NOT specially catch the removed Expanded=1 value (1 falls within [Never=0,
+    // RootHidden=3], so real .NET's check silently accepts it too; only genuinely
+    // out-of-range values throw).
+    EXPECT_THROW(DebuggerBrowsableAttribute(static_cast<DebuggerBrowsableState>(4)), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DebuggerBrowsableAttribute(static_cast<DebuggerBrowsableState>(-1)), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(DebuggerBrowsableAttribute(static_cast<DebuggerBrowsableState>(1)));
+}
+
 // ===========================================================================
 // DebuggerDisplayAttribute
 // ===========================================================================
@@ -120,6 +137,13 @@ TEST(StackFrameTests, Constructor_StoresColumnNumber) {
 TEST(StackFrameTests, DefaultILOffset_IsMinusOne) {
     StackFrame sf;
     EXPECT_EQ(sf.getILOffsetProperty(), StackFrame::OFFSET_UNKNOWN);
+}
+
+TEST(StackFrameTests, DefaultNativeOffset_IsOffsetUnknown) {
+    // Verified against StackFrame.cs's InitMembers: both _ilOffset and _nativeOffset
+    // default to OFFSET_UNKNOWN, not 0.
+    StackFrame sf;
+    EXPECT_EQ(sf.getNativeOffsetProperty(), StackFrame::OFFSET_UNKNOWN);
 }
 
 TEST(StackFrameTests, ToString_EmptyFile_ReturnsUnknown) {
@@ -303,6 +327,25 @@ TEST(DebuggableAttributeTests, ModeCtor_StoresMode) {
     using DM = System::Diagnostics::DebuggableAttribute::DebuggingModes;
     System::Diagnostics::DebuggableAttribute attr(DM::DisableOptimizations);
     EXPECT_EQ(attr.getDebuggingFlagsProperty(), DM::DisableOptimizations);
+}
+
+TEST(DebuggableAttributeTests, ModeCtor_DerivedPropertiesReflectFlags) {
+    // Verified against DebuggableAttribute.cs: IsJITTrackingEnabled/IsJITOptimizerDisabled
+    // are computed properties that bit-test DebuggingFlags live, so they must be correct
+    // regardless of which constructor built the instance -- not just the (bool,bool) one.
+    using DM = System::Diagnostics::DebuggableAttribute::DebuggingModes;
+    System::Diagnostics::DebuggableAttribute defaultAttr(DM::Default);
+    EXPECT_TRUE(defaultAttr.getIsJITTrackingEnabledProperty());
+    EXPECT_FALSE(defaultAttr.getIsJITOptimizerDisabledProperty());
+
+    System::Diagnostics::DebuggableAttribute disabledOpt(DM::DisableOptimizations);
+    EXPECT_FALSE(disabledOpt.getIsJITTrackingEnabledProperty());
+    EXPECT_TRUE(disabledOpt.getIsJITOptimizerDisabledProperty());
+
+    System::Diagnostics::DebuggableAttribute both(
+        static_cast<DM>(static_cast<int>(DM::Default) | static_cast<int>(DM::DisableOptimizations)));
+    EXPECT_TRUE(both.getIsJITTrackingEnabledProperty());
+    EXPECT_TRUE(both.getIsJITOptimizerDisabledProperty());
 }
 
 // ===========================================================================

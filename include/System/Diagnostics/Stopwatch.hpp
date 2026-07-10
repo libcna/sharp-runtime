@@ -22,7 +22,13 @@ namespace System::Diagnostics {
      */
     class Stopwatch {
     private:
-        using Clock     = std::chrono::high_resolution_clock;
+        // Must be monotonic: real .NET's GetTimestamp() is backed by clock_gettime(CLOCK_MONOTONIC)
+        // on Unix (Interop.Sys.GetTimestamp), specifically so elapsed-time math is immune to
+        // wall-clock adjustments. std::chrono::high_resolution_clock is implementation-defined and,
+        // on this project's toolchain (libstdc++/GCC), is literally an alias for system_clock (the
+        // wall clock) -- not monotonic. Matches the convention already used by PeriodicTimer,
+        // WaitHandle, SpinWait, and Thread elsewhere in this codebase.
+        using Clock     = std::chrono::steady_clock;
         using TimePoint = Clock::time_point;
 
         TimePoint start_;

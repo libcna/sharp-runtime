@@ -16,7 +16,7 @@ namespace System::Diagnostics {
         int fileLineNumber_ = 0;
         int fileColumnNumber_ = 0;
         std::string methodName_;
-        int nativeOffset_ = 0;
+        int nativeOffset_ = -1; // OFFSET_UNKNOWN (verified against StackFrame.cs's InitMembers: both offsets default to OFFSET_UNKNOWN, not 0)
         int ilOffset_ = -1;
 
     public:
