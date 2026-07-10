@@ -7,6 +7,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/WaitHandle.hpp"
 #include "System/Threading/SemaphoreFullException.hpp"
@@ -22,11 +23,20 @@ namespace System::Threading {
         std::mutex mtx_;
         std::condition_variable cv_;
 
+        // Verified against Semaphore.cs's ValidateArguments: real .NET throws
+        // ArgumentOutOfRangeException for each count individually out of range
+        // (initialCount < 0, maximumCount < 1), but a plain ArgumentException
+        // (Argument_SemaphoreInitialMaximum) when both are individually valid yet
+        // initialCount > maximumCount -- this previously used ArgumentOutOfRangeException for
+        // that case too.
         static void ValidateCounts(intcs initialCount, intcs maximumCount) {
+            if (initialCount < 0)
+                throw System::ArgumentOutOfRangeException("initialCount");
             if (maximumCount < 1)
                 throw System::ArgumentOutOfRangeException("maximumCount");
-            if (initialCount < 0 || initialCount > maximumCount)
-                throw System::ArgumentOutOfRangeException("initialCount");
+            if (initialCount > maximumCount)
+                throw System::ArgumentException(
+                    "The initial count for the semaphore must be greater than or equal to zero and less than the maximum count.");
         }
 
     public:

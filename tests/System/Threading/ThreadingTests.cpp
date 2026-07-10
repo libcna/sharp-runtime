@@ -6,6 +6,7 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
@@ -397,6 +398,24 @@ TEST(ThreadingTests, Semaphore_Release_ReturnsPreviousCount) {
 TEST(ThreadingTests, Semaphore_WaitOne_TimeoutLessThanNegativeOne_Throws) {
     Semaphore s(1, 2);
     EXPECT_THROW(s.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
+// Regression tests for a wave-3 audit finding: the constructor threw
+// ArgumentOutOfRangeException when initialCount > maximumCount (both individually valid).
+// Verified against Semaphore.cs's ValidateArguments: real .NET throws a plain ArgumentException
+// (Argument_SemaphoreInitialMaximum) for exactly this case; ArgumentOutOfRangeException is only
+// for each count being individually out of range (negative initialCount, non-positive
+// maximumCount).
+TEST(ThreadingTests, Semaphore_Ctor_InitialGreaterThanMaximum_ThrowsArgumentException) {
+    EXPECT_THROW(Semaphore(5, 2), System::ArgumentException);
+}
+
+TEST(ThreadingTests, Semaphore_Ctor_NegativeInitialCount_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Semaphore(-1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, Semaphore_Ctor_NonPositiveMaximumCount_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Semaphore(0, 0), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
