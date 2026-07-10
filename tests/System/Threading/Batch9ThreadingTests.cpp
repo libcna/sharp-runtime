@@ -10,7 +10,9 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
+#include "System/AggregateException.hpp"
 #include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/AbandonedMutexException.hpp"
@@ -90,6 +92,22 @@ TEST(CancellationTokenRegisterTests, Registration_IsActiveUntilDisposedOrCancell
     EXPECT_TRUE(reg.getIsActiveProperty());
     cts.Cancel();
     EXPECT_FALSE(reg.getIsActiveProperty());
+}
+
+TEST(CancellationTokenRegisterTests, Cancel_ThrowingCallback_RunsAllCallbacksAndThrowsAggregateException) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    bool secondCalled = false;
+    bool thirdCalled = false;
+    auto reg1 = token.Register([&] { throw std::runtime_error("first"); });
+    auto reg2 = token.Register([&] { secondCalled = true; });
+    auto reg3 = token.Register([&] { thirdCalled = true; throw std::runtime_error("third"); });
+    EXPECT_THROW(cts.Cancel(), System::AggregateException);
+    EXPECT_TRUE(secondCalled);
+    EXPECT_TRUE(thirdCalled);
+    reg1.Dispose();
+    reg2.Dispose();
+    reg3.Dispose();
 }
 
 // ===========================================================================
