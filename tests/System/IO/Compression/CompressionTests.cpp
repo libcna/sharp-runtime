@@ -753,6 +753,17 @@ TEST(GZipEncoderDecoderTests, TryCompress_TryDecompress_Roundtrip) {
     EXPECT_EQ(0, std::memcmp(decompressed.data(), input.data(), input.size()));
 }
 
+TEST(GZipEncoderDecoderTests, GetMaxCompressedLength_ExceedsDeflateBoundByGzipOverhead) {
+    // GZip framing (10-byte header + 8-byte CRC32/size trailer = 18 bytes) is 12 bytes more
+    // than the zlib framing (2-byte header + 4-byte Adler32 trailer = 6 bytes) already
+    // included in DeflateEncoder's compressBound()-derived value.
+    EXPECT_EQ(GZipEncoder::GetMaxCompressedLength(1000), DeflateEncoder::GetMaxCompressedLength(1000) + 12);
+}
+
+TEST(GZipEncoderDecoderTests, GetMaxCompressedLength_NegativeThrows) {
+    EXPECT_THROW(GZipEncoder::GetMaxCompressedLength(-1), System::ArgumentOutOfRangeException);
+}
+
 TEST(GZipEncoderDecoderTests, OutputIsGzipFramed) {
     // A gzip stream starts with the magic bytes 0x1F 0x8B.
     const std::string input = "check gzip framing header bytes";
