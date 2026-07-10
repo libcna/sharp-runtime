@@ -27,8 +27,16 @@ public:
      * @brief Gets an IComparer object that performs structural comparison.
      *
      * C++ counterpart of .NET StructuralComparisons.StructuralComparer.
-     * Delegates to IStructuralComparable::CompareTo when the left operand implements it;
-     * otherwise falls back to pointer ordering.
+     *
+     * @warning Unlike .NET's real StructuralComparer.Compare(object,object) (StructuralComparisons.cs),
+     * which safely tests `x as IStructuralComparable` and falls back to
+     * `Comparer<object>.Default.Compare` when the cast fails, this C++ port has no way to
+     * perform that safe runtime check: IComparer::Compare takes `const void*` (there is no
+     * common polymorphic object root in C++ to safely query), so the returned comparer's
+     * Compare() unconditionally `static_cast`s its non-null arguments to
+     * `const IStructuralComparable*`. Calling Compare() with an @p x that does not actually
+     * point to an IStructuralComparable instance is undefined behavior, not a safe fallback —
+     * only pass pointers to types that genuinely derive from IStructuralComparable.
      */
     static const IComparer& getStructuralComparerProperty();
 
@@ -36,8 +44,14 @@ public:
      * @brief Gets an IEqualityComparer object that performs structural equality comparison.
      *
      * C++ counterpart of .NET StructuralComparisons.StructuralEqualityComparer.
-     * Delegates to IStructuralEquatable::Equals/GetHashCode when the object implements them;
-     * otherwise falls back to pointer equality and address-based hash.
+     *
+     * @warning Same caveat as getStructuralComparerProperty(): .NET's real
+     * StructuralEqualityComparer safely tests `x as IStructuralEquatable` and falls back to
+     * `x.Equals(y)`/`obj.GetHashCode()`; this port has no way to perform that check from a
+     * bare `const void*` and unconditionally `static_cast`s to `const IStructuralEquatable*`.
+     * Calling Equals()/GetHashCode() with an argument that is not actually an
+     * IStructuralEquatable instance is undefined behavior — only pass pointers to types that
+     * genuinely derive from IStructuralEquatable.
      */
     static const IEqualityComparer& getStructuralEqualityComparerProperty();
 };
@@ -53,9 +67,10 @@ public:
     /**
      * @brief Compares two objects structurally.
      *
-     * Delegates to IStructuralComparable::CompareTo if the left object implements
-     * IStructuralComparable; otherwise falls back to pointer ordering.
-     * @param x Left operand (pointer to the object).
+     * Delegates to IStructuralComparable::CompareTo. @p x must actually point to an
+     * IStructuralComparable instance (or be null) — see the @warning on
+     * StructuralComparisons::getStructuralComparerProperty().
+     * @param x Left operand (pointer to an IStructuralComparable instance, or null).
      * @param y Right operand (pointer to the object).
      * @return Negative, zero, or positive.
      */
@@ -73,9 +88,10 @@ public:
     /**
      * @brief Determines structural equality of two objects.
      *
-     * Delegates to IStructuralEquatable::Equals if the left object implements
-     * IStructuralEquatable; otherwise falls back to pointer equality.
-     * @param x Left operand.
+     * Delegates to IStructuralEquatable::Equals. @p x must actually point to an
+     * IStructuralEquatable instance (or be null) — see the @warning on
+     * StructuralComparisons::getStructuralEqualityComparerProperty().
+     * @param x Left operand (pointer to an IStructuralEquatable instance, or null).
      * @param y Right operand.
      * @return true if structurally equal.
      */
@@ -89,9 +105,9 @@ public:
     /**
      * @brief Returns a structural hash code for an object.
      *
-     * Delegates to IStructuralEquatable::GetHashCode if the object implements
-     * IStructuralEquatable; otherwise falls back to address-based hash.
-     * @param obj The object to hash.
+     * Delegates to IStructuralEquatable::GetHashCode. @p obj must actually point to an
+     * IStructuralEquatable instance (or be null).
+     * @param obj The object to hash (pointer to an IStructuralEquatable instance, or null).
      * @return Hash code.
      */
     [[nodiscard]] intcs GetHashCode(const void* obj) const override {
