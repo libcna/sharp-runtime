@@ -256,6 +256,23 @@ TEST(MemoryStreamTests, SetLengthOnReadOnlyThrowsNotSupportedException) {
     EXPECT_THROW(ms.SetLength(1), System::NotSupportedException);
 }
 
+TEST(MemoryStreamTests, WriteOnReadOnlyThrowsNotSupportedException) {
+    // Regression: Write() previously silently no-op'd instead of throwing when !CanWrite,
+    // matching SetLength()'s existing correct behavior (above) rather than being the one
+    // internally-inconsistent silent-drop path.
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    ASSERT_FALSE(ms.getCanWriteProperty());
+    uint8_t buf[] = {9, 9};
+    EXPECT_THROW(ms.Write(buf, 0, 2), System::NotSupportedException);
+}
+
+TEST(MemoryStreamTests, WriteByteOnReadOnlyThrowsNotSupportedException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.WriteByte(9), System::NotSupportedException);
+}
+
 TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
     uint8_t src[] = {0x41, 0x42};
     MemoryStream ms(src, 2);

@@ -27,7 +27,12 @@ namespace System::IO
 
     void MemoryStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
-        if (!writable_ || buffer == nullptr || count <= 0) return;
+        // Verified against MemoryStream.cs's Write()/EnsureWriteable(): real .NET throws
+        // NotSupportedException when !CanWrite, matching this class's own SetLength(). This
+        // port previously just returned, silently dropping every byte the caller thought it
+        // had written.
+        if (!writable_) throw System::NotSupportedException("Stream does not support writing.");
+        if (buffer == nullptr || count <= 0) return;
         if (position_ + count > static_cast<intcs>(data_.size()))
             data_.resize(static_cast<size_t>(position_ + count));
         std::copy(buffer + offset, buffer + offset + count, data_.begin() + position_);
@@ -36,7 +41,7 @@ namespace System::IO
 
     void MemoryStream::WriteByte(bytecs value)
     {
-        if (!writable_) return;
+        if (!writable_) throw System::NotSupportedException("Stream does not support writing.");
         if (position_ >= static_cast<intcs>(data_.size())) data_.push_back(value);
         else data_[static_cast<size_t>(position_)] = value;
         ++position_;
