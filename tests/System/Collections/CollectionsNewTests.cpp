@@ -102,6 +102,27 @@ TEST(AsciiTests, Trim) {
     EXPECT_EQ(System::Text::Ascii::TrimStart("  hello"), "hello");
     EXPECT_EQ(System::Text::Ascii::TrimEnd("hello  "), "hello");
 }
+// `char` is signed on this platform: a byte with the high bit set (e.g. a UTF-8 continuation
+// byte, 0x80-0xFF) becomes negative when read as `char`, and a naive `value[i] <= 32` check
+// would then treat it as "whitespace" and strip it. Real .NET's Ascii.Trim family always
+// treats the byte as unsigned (Ascii.Trimming.cs's `uint.CreateTruncating`), so a high-bit
+// byte is never trimmed.
+TEST(AsciiTests, Trim_DoesNotStripHighBitBytes) {
+    std::string s = "\x80hello\xFF";
+    EXPECT_EQ(System::Text::Ascii::Trim(s), s);
+    EXPECT_EQ(System::Text::Ascii::TrimStart(s), s);
+    EXPECT_EQ(System::Text::Ascii::TrimEnd(s), s);
+}
+// Real .NET's TrimMask covers only TAB/LF/VT/FF/CR/space (0x09,0x0A,0x0B,0x0C,0x0D,0x20) --
+// NOT every byte <= 32. NUL and other C0 controls outside that set must not be trimmed.
+TEST(AsciiTests, Trim_DoesNotStripOtherControlChars) {
+    std::string s = std::string("\x01hello\x1B", 7);
+    EXPECT_EQ(System::Text::Ascii::Trim(s), s);
+}
+TEST(AsciiTests, Trim_StripsAllSixWhitespaceBytes) {
+    std::string s = "\x09\x0A\x0B\x0C\x0D hello";
+    EXPECT_EQ(System::Text::Ascii::Trim(s), "hello");
+}
 TEST(AsciiTests, EqualsIgnoreCase) {
     EXPECT_TRUE(System::Text::Ascii::EqualsIgnoreCase("Hello", "hello"));
     EXPECT_FALSE(System::Text::Ascii::EqualsIgnoreCase("Hello", "world"));
