@@ -7,6 +7,7 @@
 #include <map>
 #include <random>
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -277,6 +278,18 @@ namespace {
         }
     }
 
+    // Verified against WebSocketValidate.cs's ValidateBuffer: negative offset/count and an
+    // offset/count exceeding the buffer are all rejected. Previously SendAsync/ReceiveAsync
+    // did buffer.data() + offset / std::memcpy(..., count) with no bounds check at all -- an
+    // out-of-bounds read (Send) or write (Receive) whenever offset+count exceeded the buffer.
+    template<typename Buf>
+    void validateWebSocketBuffer(const Buf& buffer, intcs offset, intcs count) {
+        if (offset < 0 || static_cast<size_t>(offset) > buffer.size())
+            throw System::ArgumentOutOfRangeException("offset");
+        if (count < 0 || static_cast<size_t>(count) > buffer.size() - static_cast<size_t>(offset))
+            throw System::ArgumentOutOfRangeException("count");
+    }
+
 } // namespace
 
 ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
@@ -333,6 +346,7 @@ void ClientWebSocket::sendCloseFrame(WebSocketCloseStatus closeStatus, const std
 System::Threading::Tasks::Task
 ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intcs count, WebSocketMessageType messageType,
                             bool endOfMessage, System::Threading::CancellationToken /*cancellationToken*/) {
+    validateWebSocketBuffer(buffer, offset, count);
     return System::Threading::Tasks::Task([this, &buffer, offset, count, messageType, endOfMessage]() {
         WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseReceived});
         bytecs opcode;
@@ -349,6 +363,7 @@ ClientWebSocket::SendAsync(const std::vector<bytecs>& buffer, intcs offset, intc
 System::Threading::Tasks::TaskT<WebSocketReceiveResult>
 ClientWebSocket::ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs count,
                                System::Threading::CancellationToken /*cancellationToken*/) {
+    validateWebSocketBuffer(buffer, offset, count);
     return System::Threading::Tasks::TaskT<WebSocketReceiveResult>([this, &buffer, offset, count]() {
         WebSocket::ThrowOnInvalidState(state_, {WebSocketState::Open, WebSocketState::CloseSent});
 

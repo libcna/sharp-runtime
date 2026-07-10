@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
@@ -177,6 +178,30 @@ TEST(ClientWebSocketTests, FullHandshakeSendReceiveClose) {
     EXPECT_EQ(client.getStateProperty(), WebSocketState::Closed);
 
     serverThread.join();
+}
+
+// Regression test for a wave-3 audit finding: SendAsync/ReceiveAsync used to do
+// buffer.data() + offset with no bounds check against buffer.size() -- an out-of-bounds
+// read (Send) or write (Receive) whenever offset+count exceeded the buffer. Verified
+// against WebSocketValidate.cs's ValidateBuffer. Argument validation happens synchronously
+// before any socket I/O (matching real .NET's async-method-validates-synchronously
+// convention, confirmed in ManagedWebSocket.cs), so this doesn't need a live connection.
+TEST(ClientWebSocketTests, SendAsync_OffsetCountOutOfRange_Throws) {
+    ClientWebSocket client;
+    std::vector<SharpRuntime::bytecs> buf{'a', 'b', 'c'};
+    EXPECT_THROW(client.SendAsync(buf, 2, 5, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.SendAsync(buf, -1, 1, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.SendAsync(buf, 0, -1, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ClientWebSocketTests, ReceiveAsync_OffsetCountOutOfRange_Throws) {
+    ClientWebSocket client;
+    std::vector<SharpRuntime::bytecs> buf(4);
+    EXPECT_THROW(client.ReceiveAsync(buf, 2, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.ReceiveAsync(buf, -1, 1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ClientWebSocketTests, WrongSchemeThrows) {
