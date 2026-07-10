@@ -1035,6 +1035,66 @@ TEST(JsonElementTests, GetProperty_Throws_WhenMissing) {
     EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("x"), std::exception);
 }
 
+// ===========================================================================
+// Regression: TryGetProperty/GetProperty previously returned false/threw
+// KeyNotFoundException uniformly for a non-Object element, instead of the
+// InvalidOperationException real .NET throws (verified against
+// JsonDocument.TryGetProperty.cs's TryGetNamedPropertyValue, which checks the token type
+// unconditionally via CheckExpectedType before searching for the property).
+// ===========================================================================
+
+TEST(JsonElementTests, TryGetProperty_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    System::Text::Json::JsonElement out;
+    EXPECT_THROW(doc->getRootElementProperty().TryGetProperty("x", out), System::InvalidOperationException);
+}
+
+TEST(JsonElementTests, GetProperty_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("x"), System::InvalidOperationException);
+}
+
+// ===========================================================================
+// Regression: TryGetInt32/TryGetInt64 previously round-tripped every JSON number through
+// get<double>() before casting to intcs/longcs -- undefined behavior in C++ when casting an
+// out-of-range double to a signed integer, and silently accepted float literals (e.g. "1.0")
+// whose value happened to be integral, where real .NET's Utf8Parser-based text parse rejects
+// them outright. Verified against JsonDocument.cs's TryGetValue(out int)/TryGetValue(out long).
+// ===========================================================================
+
+TEST(JsonElementTests, TryGetInt32_FloatLiteral_ReturnsFalse) {
+    auto doc = System::Text::Json::JsonDocument::Parse("1.0");
+    SharpRuntime::intcs value = 0;
+    EXPECT_FALSE(doc->getRootElementProperty().TryGetInt32(value));
+}
+
+TEST(JsonElementTests, TryGetInt32_OutOfRange_ReturnsFalseWithoutUB) {
+    // 1e18 is far outside int32 range; the old get<double>()-then-cast path was UB here.
+    auto doc = System::Text::Json::JsonDocument::Parse("1000000000000000000");
+    SharpRuntime::intcs value = 0;
+    EXPECT_FALSE(doc->getRootElementProperty().TryGetInt32(value));
+}
+
+TEST(JsonElementTests, TryGetInt64_LargePreciseValue_ExactRoundTrip) {
+    // 2^53 + 1 loses precision through a double intermediate; the fixed implementation must
+    // read the integer directly instead of routing through get<double>().
+    auto doc = System::Text::Json::JsonDocument::Parse("9007199254740993");
+    SharpRuntime::longcs value = 0;
+    ASSERT_TRUE(doc->getRootElementProperty().TryGetInt64(value));
+    EXPECT_EQ(value, 9007199254740993LL);
+}
+
+TEST(JsonElementTests, TryGetInt32_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse(R"("not a number")");
+    SharpRuntime::intcs value = 0;
+    EXPECT_THROW(doc->getRootElementProperty().TryGetInt32(value), System::InvalidOperationException);
+}
+
+TEST(JsonElementTests, GetInt32_FloatLiteral_ThrowsFormatException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("3.0");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetInt32(), System::FormatException);
+}
+
 TEST(JsonElementTests, EnumerateArray_Empty) {
     auto doc = System::Text::Json::JsonDocument::Parse("[]");
     EXPECT_TRUE(doc->getRootElementProperty().EnumerateArray().empty());

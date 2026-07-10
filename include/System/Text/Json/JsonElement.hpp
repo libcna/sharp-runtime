@@ -76,9 +76,19 @@ namespace System::Text::Json {
         /** @return The value as a boolean (true if ValueKind is True, false if False). @throws System::InvalidOperationException otherwise. */
         [[nodiscard]] bool GetBoolean() const;
 
-        /** @brief Tries to get this element's value as a 32-bit integer without throwing on failure. */
+        /**
+         * @brief Tries to get this element's value as a 32-bit integer.
+         * @return false (without throwing) if this is a Number whose value doesn't fit an
+         * intcs, or isn't an integer literal (e.g. has a decimal point/exponent).
+         * @throws System::InvalidOperationException if this element's ValueKind isn't Number.
+         */
         [[nodiscard]] bool TryGetInt32(intcs& value) const;
-        /** @brief Tries to get this element's value as a 64-bit integer without throwing on failure. */
+        /**
+         * @brief Tries to get this element's value as a 64-bit integer.
+         * @return false (without throwing) if this is a Number whose value doesn't fit a
+         * longcs, or isn't an integer literal (e.g. has a decimal point/exponent).
+         * @throws System::InvalidOperationException if this element's ValueKind isn't Number.
+         */
         [[nodiscard]] bool TryGetInt64(longcs& value) const;
         /** @brief Tries to get this element's value as a double without throwing on failure. */
         [[nodiscard]] bool TryGetDouble(double& value) const {
@@ -90,19 +100,33 @@ namespace System::Text::Json {
         /** @return The raw JSON text of this element. */
         [[nodiscard]] std::string GetRawText() const { return node_ ? node_->dump() : std::string(); }
 
-        /** @brief Tries to get a named object property; returns false if not found or this isn't an object. */
+        /**
+         * @brief Tries to get a named object property.
+         * @return false (without throwing) if this is an Object with no such property.
+         * @throws System::InvalidOperationException if this element's ValueKind isn't Object
+         * (verified against JsonDocument.TryGetProperty.cs's TryGetNamedPropertyValue, which
+         * checks the token type unconditionally before searching for the property, even for
+         * the Try-prefixed overload).
+         */
         [[nodiscard]] bool TryGetProperty(const std::string& name, JsonElement& out) const {
-            if (!node_ || !node_->is_object()) return false;
-            auto it = node_->find(name);
-            if (it == node_->end()) return false;
+            const auto& n = require(JsonValueKind::Object, "Object");
+            auto it = n.find(name);
+            if (it == n.end()) return false;
             out = JsonElement(std::shared_ptr<const nlohmann::ordered_json>(node_, &(*it)));
             return true;
         }
 
-        /** @return A named object property. @throws System::Collections::Generic::KeyNotFoundException if not found. */
+        /**
+         * @return A named object property.
+         * @throws System::InvalidOperationException if this element's ValueKind isn't Object.
+         * @throws System::Collections::Generic::KeyNotFoundException if no such property exists.
+         */
         [[nodiscard]] JsonElement GetProperty(const std::string& name) const;
 
-        /** @return true if this element is an object containing a property named @p name. */
+        /**
+         * @return true if this element is an object containing a property named @p name.
+         * @throws System::InvalidOperationException if this element's ValueKind isn't Object.
+         */
         [[nodiscard]] bool HasProperty(const std::string& name) const {
             JsonElement ignored;
             return TryGetProperty(name, ignored);
