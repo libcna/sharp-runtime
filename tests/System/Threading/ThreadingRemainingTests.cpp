@@ -325,6 +325,29 @@ TEST(LazyInitializerTests, EnsureInitialized_WithFactory) {
     EXPECT_EQ(*ptr, 99);
     delete ptr;
 }
+TEST(LazyInitializerTests, EnsureInitialized_NullFactory_ThrowsInvalidOperationException) {
+    int* ptr = nullptr;
+    EXPECT_THROW(
+        LazyInitializer::EnsureInitialized<int>(ptr, []() -> int* { return nullptr; }),
+        System::InvalidOperationException);
+}
+TEST(LazyInitializerTests, EnsureInitialized_ReentrantSameType_DoesNotDeadlock) {
+    // A factory for one `int*` target that itself initializes a second, distinct `int*`
+    // target of the same type T=int on the same thread. The previous per-T-instantiation
+    // static std::mutex would self-deadlock here since std::mutex isn't recursive.
+    int* outer = nullptr;
+    int* inner = nullptr;
+    LazyInitializer::EnsureInitialized<int>(outer, [&]() {
+        LazyInitializer::EnsureInitialized<int>(inner, []() { return new int(7); });
+        return new int(3);
+    });
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(*outer, 3);
+    EXPECT_EQ(*inner, 7);
+    delete outer;
+    delete inner;
+}
 
 // ===========================================================================
 // Lock
