@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Specialized {
 
@@ -58,6 +59,15 @@ class NameValueCollection {
             out += v[i];
         }
         return out;
+    }
+
+    // .NET's index-based accessors (Get(int)/GetValues(int)/GetKey(int)/this[int]) delegate
+    // to NameObjectCollectionBase.BaseGet/BaseGetKey, which index an internal ArrayList --
+    // whose indexer throws ArgumentOutOfRangeException for an out-of-range index, not a
+    // silent empty/default result.
+    void checkIndex(intcs index) const {
+        if (index < 0 || static_cast<size_t>(index) >= keys_.size())
+            throw System::ArgumentOutOfRangeException("index");
     }
 
 public:
@@ -197,12 +207,16 @@ public:
     /**
      * @brief Returns all values for the key at @p index as a comma-joined string.
      *
-     * C++ counterpart of .NET NameValueCollection.Get(int).
+     * C++ counterpart of .NET NameValueCollection.Get(int), which delegates to
+     * NameObjectCollectionBase.BaseGet(int) and, through it, an ArrayList indexer that
+     * throws for an out-of-range index -- verified against NameValueCollection.cs and
+     * NameObjectCollectionBase.cs. This previously returned "" instead.
      * @param index The zero-based index of the key.
-     * @return A comma-joined string of values, or "" if @p index is out of range.
+     * @return A comma-joined string of values.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Count.
      */
     [[nodiscard]] std::string Get(intcs index) const {
-        if (index < 0 || static_cast<size_t>(index) >= keys_.size()) return "";
+        checkIndex(index);
         return Get(keys_[static_cast<size_t>(index)]);
     }
 
@@ -224,10 +238,11 @@ public:
      *
      * C++ counterpart of .NET NameValueCollection.GetValues(int).
      * @param index The zero-based index of the key.
-     * @return A vector of values, or an empty vector if @p index is out of range.
+     * @return A vector of values.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Count.
      */
     [[nodiscard]] std::vector<std::string> GetValues(intcs index) const {
-        if (index < 0 || static_cast<size_t>(index) >= keys_.size()) return {};
+        checkIndex(index);
         return GetValues(keys_[static_cast<size_t>(index)]);
     }
 
@@ -237,10 +252,11 @@ public:
      * C++ counterpart of .NET NameValueCollection.GetKey(int).
      * @param index The zero-based index of the key.
      * @return A const reference to the key string.
-     * @throws std::out_of_range if @p index is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Count.
      */
     [[nodiscard]] const std::string& GetKey(intcs index) const {
-        return keys_.at(static_cast<size_t>(index));
+        checkIndex(index);
+        return keys_[static_cast<size_t>(index)];
     }
 
     /**
@@ -257,7 +273,8 @@ public:
      *
      * C++ counterpart of .NET NameValueCollection.Item[int] getter.
      * @param index The zero-based index of the key.
-     * @return A comma-joined string of values, or "".
+     * @return A comma-joined string of values.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Count.
      */
     [[nodiscard]] std::string operator[](intcs index) const { return Get(index); }
 };

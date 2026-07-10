@@ -7,6 +7,7 @@
 //   NameValueCollection: copy ctors, capacity ctors, all methods
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Specialized/ListDictionary.hpp"
 #include "System/Collections/Specialized/NameValueCollection.hpp"
 #include <any>
@@ -237,7 +238,21 @@ TEST(NameValueCollectionBatch21Test, GetByIndex) {
     c.Add("second", "s");
     EXPECT_EQ(c.Get(0), "f");
     EXPECT_EQ(c.Get(1), "s");
-    EXPECT_EQ(c.Get(99), "");
+}
+
+// .NET's Get(int)/GetValues(int)/GetKey(int)/this[int] delegate through
+// NameObjectCollectionBase's internal ArrayList indexer, which throws
+// ArgumentOutOfRangeException for an out-of-range index -- verified against
+// NameValueCollection.cs/NameObjectCollectionBase.cs. This port previously returned ""/{}
+// silently instead.
+TEST(NameValueCollectionBatch21Test, GetByIndex_OutOfRange_Throws) {
+    NameValueCollection c;
+    c.Add("first", "f");
+    EXPECT_THROW(c.Get(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.Get(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.GetValues(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.GetKey(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c[99], System::ArgumentOutOfRangeException);
 }
 
 TEST(NameValueCollectionBatch21Test, GetKey) {

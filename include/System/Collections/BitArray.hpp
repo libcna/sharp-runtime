@@ -27,6 +27,15 @@ class BitArray {
             throw System::ArgumentException("Array lengths must be the same.");
     }
 
+    // .NET's real bounds check (BitArray.cs: `(uint)index >= (uint)_bitLength`) throws
+    // System::ArgumentOutOfRangeException; using std::vector<bool>::at() here throws raw
+    // std::out_of_range instead, which code catching the .NET-matching exception type won't
+    // catch.
+    void checkIndex(intcs index) const {
+        if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(bits_.size()))
+            throw System::ArgumentOutOfRangeException("index");
+    }
+
 public:
     // -----------------------------------------------------------------------
     // Constructors
@@ -129,15 +138,17 @@ public:
      * @brief Returns the value of the bit at the given index.
      *
      * C++ counterpart of .NET BitArray.Get(int).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Length.
      */
-    [[nodiscard]] bool Get(intcs index) const { return bits_.at(static_cast<size_t>(index)); }
+    [[nodiscard]] bool Get(intcs index) const { checkIndex(index); return bits_[static_cast<size_t>(index)]; }
 
     /**
      * @brief Sets the bit at the given index to the specified value.
      *
      * C++ counterpart of .NET BitArray.Set(int, bool).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or >= Length.
      */
-    void Set(intcs index, bool value)         { bits_.at(static_cast<size_t>(index)) = value; }
+    void Set(intcs index, bool value)         { checkIndex(index); bits_[static_cast<size_t>(index)] = value; }
 
     /**
      * @brief Sets all bits in the BitArray to the specified value.
@@ -150,8 +161,9 @@ public:
      * @brief Returns the value of the bit at index @p i.
      *
      * C++ counterpart of .NET BitArray[int].
+     * @throws System::ArgumentOutOfRangeException if @p i is negative or >= Length.
      */
-    bool operator[](intcs i) const { return bits_.at(static_cast<size_t>(i)); }
+    bool operator[](intcs i) const { checkIndex(i); return bits_[static_cast<size_t>(i)]; }
 
     // -----------------------------------------------------------------------
     // Bitwise operations
