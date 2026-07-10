@@ -33,6 +33,9 @@ namespace System::IO::IsolatedStorage
         /** Returns the full absolute path for a relative path inside the store. */
         [[nodiscard]] std::filesystem::path fullPath(const std::string& relativePath) const;
 
+        /** @throws System::ObjectDisposedException if this store has been Close()d/Remove()d/Dispose()d. */
+        void throwIfDisposed() const;
+
     public:
         /** Constructs an IsolatedStorageFile rooted at @p rootDirectory with the given scope. */
         explicit IsolatedStorageFile(const std::filesystem::path& rootDirectory,
@@ -107,6 +110,9 @@ namespace System::IO::IsolatedStorage
 
         /** Returns the approximate used size of the store in bytes (sum of all file sizes). */
         [[nodiscard]] SharpRuntime::longcs getUsedSizeProperty() const override;
+
+        /** Returns the store's quota in bytes. This runtime does not enforce quotas, so this is always longcs's maximum value. */
+        [[nodiscard]] SharpRuntime::longcs getQuotaProperty() const override;
 
         /** Returns the root directory path for this isolated storage scope. */
         [[nodiscard]] const std::filesystem::path& getRootDirectoryProperty() const;

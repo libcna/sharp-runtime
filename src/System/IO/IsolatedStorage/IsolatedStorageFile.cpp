@@ -7,10 +7,14 @@
 #include <filesystem>
 #include <numeric>
 
+#include <limits>
+
 #include "SharpRuntime/Storage/StoragePaths.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
+#include "System/ObjectDisposedException.hpp"
 
 namespace System::IO::IsolatedStorage
 {
@@ -47,6 +51,16 @@ namespace System::IO::IsolatedStorage
         return rootDirectory_ / relativePath;
     }
 
+    // Verified against IsolatedStorageFile.cs's EnsureStoreIsValid(): real .NET checks this at
+    // the top of every file/directory operation. This port set disposed_ in Close()/Remove()/
+    // Dispose() but never checked it anywhere, so every operation remained silently usable on a
+    // closed/removed store.
+    void IsolatedStorageFile::throwIfDisposed() const
+    {
+        if (disposed_)
+            throw System::ObjectDisposedException("IsolatedStorageFile", "Store must be open for this operation.");
+    }
+
     IsolatedStorageFile IsolatedStorageFile::GetUserStoreForApplication()
     {
         return IsolatedStorageFile(SharpRuntime::Storage::StoragePaths::GetIsolatedStorageRoot(),
@@ -63,6 +77,7 @@ namespace System::IO::IsolatedStorage
 
     bool IsolatedStorageFile::FileExists(const std::string& relativePath) const
     {
+        throwIfDisposed();
         const auto fp = fullPath(relativePath);
         return std::filesystem::exists(fp) && std::filesystem::is_regular_file(fp);
     }
@@ -71,6 +86,7 @@ namespace System::IO::IsolatedStorage
         const std::string& relativePath,
         System::IO::FileMode mode) const
     {
+        throwIfDisposed();
         return IsolatedStorageFileStream(fullPath(relativePath), mode);
     }
 
@@ -81,6 +97,7 @@ namespace System::IO::IsolatedStorage
 
     void IsolatedStorageFile::DeleteFile(const std::string& relativePath) const
     {
+        throwIfDisposed();
         std::error_code ec;
         std::filesystem::remove(fullPath(relativePath), ec);
         if (ec)
@@ -94,6 +111,9 @@ namespace System::IO::IsolatedStorage
 
     void IsolatedStorageFile::CopyFile(const std::string& src, const std::string& dst, bool overwrite) const
     {
+        System::ArgumentException::ThrowIfNullOrEmpty(src, "sourceFileName");
+        System::ArgumentException::ThrowIfNullOrEmpty(dst, "destinationFileName");
+        throwIfDisposed();
         auto opts = overwrite
             ? std::filesystem::copy_options::overwrite_existing
             : std::filesystem::copy_options::none;
@@ -105,6 +125,9 @@ namespace System::IO::IsolatedStorage
 
     void IsolatedStorageFile::MoveFile(const std::string& src, const std::string& dst) const
     {
+        System::ArgumentException::ThrowIfNullOrEmpty(src, "sourceFileName");
+        System::ArgumentException::ThrowIfNullOrEmpty(dst, "destinationFileName");
+        throwIfDisposed();
         std::error_code ec;
         std::filesystem::rename(fullPath(src), fullPath(dst), ec);
         if (ec)
@@ -113,6 +136,7 @@ namespace System::IO::IsolatedStorage
 
     std::vector<std::string> IsolatedStorageFile::GetFileNames(const std::string& searchPattern) const
     {
+        throwIfDisposed();
         std::vector<std::string> names;
         if (!std::filesystem::exists(rootDirectory_)) return names;
         for (const auto& entry : std::filesystem::directory_iterator(rootDirectory_)) {
@@ -129,12 +153,14 @@ namespace System::IO::IsolatedStorage
 
     bool IsolatedStorageFile::DirectoryExists(const std::string& relativePath) const
     {
+        throwIfDisposed();
         const auto fp = fullPath(relativePath);
         return std::filesystem::exists(fp) && std::filesystem::is_directory(fp);
     }
 
     void IsolatedStorageFile::CreateDirectory(const std::string& relativePath) const
     {
+        throwIfDisposed();
         std::error_code ec;
         std::filesystem::create_directories(fullPath(relativePath), ec);
         if (ec)
@@ -143,14 +169,22 @@ namespace System::IO::IsolatedStorage
 
     void IsolatedStorageFile::DeleteDirectory(const std::string& relativePath) const
     {
+        throwIfDisposed();
+        // Verified against IsolatedStorageFile.cs's DeleteDirectory: real .NET calls
+        // Directory.Delete(fullPath, recursive: false) -- non-recursive, fails on a non-empty
+        // directory. This port previously used remove_all (recursive), silently deleting an
+        // entire subtree instead of matching .NET's "must be empty" contract.
         std::error_code ec;
-        std::filesystem::remove_all(fullPath(relativePath), ec);
+        std::filesystem::remove(fullPath(relativePath), ec);
         if (ec)
             throw IsolatedStorageException("Failed to delete isolated storage directory: " + relativePath);
     }
 
     void IsolatedStorageFile::MoveDirectory(const std::string& src, const std::string& dst) const
     {
+        System::ArgumentException::ThrowIfNullOrEmpty(src, "sourceDirectoryName");
+        System::ArgumentException::ThrowIfNullOrEmpty(dst, "destinationDirectoryName");
+        throwIfDisposed();
         std::error_code ec;
         std::filesystem::rename(fullPath(src), fullPath(dst), ec);
         if (ec)
@@ -159,6 +193,7 @@ namespace System::IO::IsolatedStorage
 
     std::vector<std::string> IsolatedStorageFile::GetDirectoryNames(const std::string& searchPattern) const
     {
+        throwIfDisposed();
         std::vector<std::string> names;
         if (!std::filesystem::exists(rootDirectory_)) return names;
         for (const auto& entry : std::filesystem::directory_iterator(rootDirectory_)) {
@@ -211,6 +246,15 @@ namespace System::IO::IsolatedStorage
             }
         }
         return total;
+    }
+
+    SharpRuntime::longcs IsolatedStorageFile::getQuotaProperty() const
+    {
+        // Verified against IsolatedStorageFile.cs's Quota property: real .NET does not enforce
+        // quotas and always returns long.MaxValue. This port previously inherited the
+        // IsolatedStorage base class's default of 0, which any caller checking "is there quota
+        // remaining" against would read as "no space available" instead of "unlimited."
+        return std::numeric_limits<SharpRuntime::longcs>::max();
     }
 
     const std::filesystem::path& IsolatedStorageFile::getRootDirectoryProperty() const

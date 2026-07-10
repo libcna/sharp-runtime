@@ -5,9 +5,10 @@
 // Functional tests for System::IO: Path, File, FileInfo, Directory, DirectoryInfo,
 // BinaryReader/Writer, StreamReader/Writer, BufferedStream, FileStream, IsolatedStorageFile.
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
-#include <cstdint>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -34,6 +35,7 @@
 #include "System/IO/SeekOrigin.hpp"
 #include "System/IO/RandomAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
 
@@ -1386,6 +1388,58 @@ TEST(IsolatedStorageFileTests, UsedSize_AfterWrite_Positive) {
 TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     EXPECT_NO_THROW(store.Dispose());
+}
+
+TEST(IsolatedStorageFileTests, AfterDispose_OperationsThrowObjectDisposedException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    store.Dispose();
+    EXPECT_THROW(store.FileExists("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.DirectoryExists("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.CreateDirectory("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.DeleteFile("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.GetFileNames(), System::ObjectDisposedException);
+    EXPECT_THROW(store.GetDirectoryNames(), System::ObjectDisposedException);
+}
+
+TEST(IsolatedStorageFileTests, DeleteDirectory_NonEmpty_ThrowsInsteadOfRecursivelyDeleting) {
+    // Regression: DeleteDirectory previously used remove_all (recursive), silently deleting an
+    // entire subtree instead of matching real .NET's Directory.Delete(path, recursive: false)
+    // "must be empty" contract.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string dir = "sharp_rt_iso_nonempty_dir";
+    const std::string nested = dir + "/nested.dat";
+    store.CreateDirectory(dir);
+    { auto s = store.CreateFile(nested); s.Close(); }
+
+    EXPECT_THROW(store.DeleteDirectory(dir), System::IO::IsolatedStorage::IsolatedStorageException);
+    EXPECT_TRUE(store.DirectoryExists(dir));
+    EXPECT_TRUE(store.FileExists(nested));
+
+    store.DeleteFile(nested);
+    store.DeleteDirectory(dir);
+}
+
+TEST(IsolatedStorageFileTests, CopyFile_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.CopyFile("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.CopyFile("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, MoveFile_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.MoveFile("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.MoveFile("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, MoveDirectory_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.MoveDirectory("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.MoveDirectory("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, Quota_IsLongMax) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_EQ(store.getQuotaProperty(), std::numeric_limits<SharpRuntime::longcs>::max());
 }
 
 TEST(IsolatedStorageFileTests, GetUserStoreForApplication_HasApplicationAndUserScope) {
