@@ -173,6 +173,41 @@ TEST(MemoryPoolTests, Dispose_ClearsBuffer) {
     EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
 }
 
+TEST(MemoryPoolTests, Rent_DefaultSize_AccountsForSizeofT) {
+    // Regression: the default size used to be a flat 4096 *elements* regardless of T,
+    // matching neither .NET's "~4096 bytes" default (ArrayMemoryPool.cs:
+    // 1 + (4095 / sizeof(T))) nor any documented sharp-runtime behavior. For double
+    // (8 bytes), .NET's default is 512 elements, not 4096.
+    auto owner = MemoryPool<double>::Shared().Rent();
+    auto len = owner->getMemoryProperty().getLengthProperty();
+    EXPECT_EQ(len, 1 + (4095 / static_cast<decltype(len)>(sizeof(double))));
+}
+
+TEST(MemoryPoolTests, Rent_ExactlyMinusOne_UsesDefault) {
+    auto owner = MemoryPool<uint8_t>::Shared().Rent(-1);
+    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 1 + (4095 / 1));
+}
+
+TEST(MemoryPoolTests, Rent_ZeroSize_Allowed) {
+    // Regression: 0 was previously (incorrectly) treated the same as "use default";
+    // .NET only special-cases exactly -1.
+    auto owner = MemoryPool<uint8_t>::Shared().Rent(0);
+    EXPECT_EQ(owner->getMemoryProperty().getLengthProperty(), 0);
+}
+
+TEST(MemoryPoolTests, Rent_NegativeOtherThanMinusOne_Throws) {
+    EXPECT_THROW(MemoryPool<uint8_t>::Shared().Rent(-2), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryPoolTests, Rent_ExceedsMaxBufferSize_Throws) {
+    EXPECT_THROW(MemoryPool<uint8_t>::Shared().Rent(MemoryPool<uint8_t>::MaxArrayLength + 1),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryPoolTests, MaxBufferSize_MatchesArrayMaxLength) {
+    EXPECT_EQ(MemoryPool<uint8_t>::Shared().getMaxBufferSizeProperty(), 0x7FFFFFC7);
+}
+
 // ===========================================================================
 // ReadOnlySequence
 // ===========================================================================
