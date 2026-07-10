@@ -42,12 +42,14 @@ namespace System::IO {
 
         /**
          * @brief Reads up to count bytes into buffer at offset; returns bytes actually read.
+         * @throws System::ObjectDisposedException if the stream has been closed.
          * @throws System::ArgumentNullException if @p buffer is null.
          * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
          */
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
         /**
          * @brief Writes count bytes from buffer at offset into the unmanaged buffer.
+         * @throws System::ObjectDisposedException if the stream has been closed.
          * @throws System::ArgumentNullException if @p buffer is null.
          * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
          * @throws System::NotSupportedException if the write would exceed the stream's fixed capacity.

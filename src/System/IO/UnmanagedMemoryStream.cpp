@@ -5,6 +5,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/IO/IOException.hpp"
 
 #include <algorithm>
@@ -46,8 +47,18 @@ namespace System::IO {
         }
     }
 
+    // Verified against UnmanagedMemoryStream.cs's EnsureNotClosed()/EnsureReadable()/
+    // EnsureWriteable(): real .NET checks isOpen FIRST, throwing ObjectDisposedException
+    // ("Cannot access a closed Stream.") for a closed stream, and only checks CanRead/CanWrite
+    // (throwing NotSupportedException) once it's confirmed still open. This port's
+    // getCanReadProperty()/getCanWriteProperty() fold "is closed" into the same boolean as
+    // "was never readable/writable", so Read()/Write() after Close() previously threw
+    // NotSupportedException instead of ObjectDisposedException -- the wrong exception type for
+    // a closed-object access, indistinguishable from a stream that was simply constructed
+    // read-only or write-only.
     intcs UnmanagedMemoryStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
+        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
         if (!getCanReadProperty()) throw System::NotSupportedException("Stream does not support reading.");
         validateBufferArguments(buffer, offset, count);
 
@@ -62,6 +73,7 @@ namespace System::IO {
 
     void UnmanagedMemoryStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
+        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
         validateBufferArguments(buffer, offset, count);
         if (count == 0) return;
@@ -88,6 +100,7 @@ namespace System::IO {
     void UnmanagedMemoryStream::SetLength(intcs value)
     {
         if (value < 0) throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        if (!isOpen_) throw System::ObjectDisposedException("Cannot access a closed Stream.");
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
         if (value > capacity_) {
             throw IOException("Unable to expand length of this stream beyond its capacity.");

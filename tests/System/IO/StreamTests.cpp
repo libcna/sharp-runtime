@@ -489,6 +489,35 @@ TEST(UnmanagedMemoryStreamTests, ReadOnlyCtor_ReadsBytes) {
     EXPECT_EQ(buf[4], 5u);
 }
 
+// Regression tests for a wave-3 audit finding: Read()/Write()/SetLength() after Close()
+// threw NotSupportedException instead of ObjectDisposedException. Verified against
+// UnmanagedMemoryStream.cs's EnsureNotClosed()/EnsureReadable()/EnsureWriteable(), which check
+// isOpen FIRST (ObjectDisposedException) before CanRead/CanWrite (NotSupportedException) --
+// this port's getCanReadProperty()/getCanWriteProperty() folded "is closed" into the same
+// boolean as "was never readable/writable", losing the distinction.
+TEST(UnmanagedMemoryStreamTests, Read_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[] = {1, 2, 3};
+    UnmanagedMemoryStream ums(data, 3);
+    ums.Close();
+    uint8_t buf[3] = {};
+    EXPECT_THROW(ums.Read(buf, 0, 3), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryStream ums(data, 0, 8, FileAccess::ReadWrite);
+    ums.Close();
+    uint8_t payload[] = {1};
+    EXPECT_THROW(ums.Write(payload, 0, 1), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, SetLength_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryStream ums(data, 0, 8, FileAccess::ReadWrite);
+    ums.Close();
+    EXPECT_THROW(ums.SetLength(4), System::ObjectDisposedException);
+}
+
 TEST(UnmanagedMemoryStreamTests, ReadReturnsZeroAtEnd) {
     uint8_t data[] = {1, 2};
     UnmanagedMemoryStream ums(data, 2);
