@@ -245,6 +245,21 @@ TEST(FileTests, Move_NonExistentSource_ThrowsFileNotFoundException) {
                  System::IO::FileNotFoundException);
 }
 
+TEST(FileTests, Move_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    // Regression: Move previously used std::filesystem::rename() unconditionally, which
+    // silently replaces an existing destination file on POSIX instead of matching real .NET's
+    // non-overwrite Move contract.
+    std::string src = tf("move_noclobber_src.txt");
+    std::string dst = tf("move_noclobber_dst.txt");
+    File::WriteAllText(src, "source content");
+    File::WriteAllText(dst, "original destination content");
+    EXPECT_THROW(File::Move(src, dst), System::IO::IOException);
+    EXPECT_TRUE(File::Exists(src));
+    EXPECT_EQ(File::ReadAllText(dst), "original destination content");
+    File::Delete(src);
+    File::Delete(dst);
+}
+
 TEST(FileTests, Copy_EmptySourcePath_ThrowsArgumentException) {
     EXPECT_THROW(File::Copy("", tf("dst_xyz.txt")), System::ArgumentException);
 }
@@ -335,6 +350,19 @@ TEST(FileInfoTests, CopyTo_EmptyDest_ThrowsArgumentException) {
 TEST(FileInfoTests, MoveTo_NonExistentSource_ThrowsFileNotFoundException) {
     FileInfo fi(tf("fi_no_such_move_src_xyz.txt"));
     EXPECT_THROW(fi.MoveTo(tf("fi_move_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, MoveTo_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("fi_move_noclobber_src.txt");
+    std::string dst = tf("fi_move_noclobber_dst.txt");
+    File::WriteAllText(src, "source content");
+    File::WriteAllText(dst, "original destination content");
+    FileInfo fi(src);
+    EXPECT_THROW(fi.MoveTo(dst), System::IO::IOException);
+    EXPECT_TRUE(File::Exists(src));
+    EXPECT_EQ(File::ReadAllText(dst), "original destination content");
+    File::Delete(src);
+    File::Delete(dst);
 }
 
 TEST(FileInfoTests, CopyTo_Succeeds_DestinationExists) {
@@ -452,6 +480,18 @@ TEST(DirectoryTests, Move_NonExistentSource_ThrowsDirectoryNotFoundException) {
                  System::IO::DirectoryNotFoundException);
 }
 
+TEST(DirectoryTests, Move_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("dir_move_noclobber_src");
+    std::string dst = tf("dir_move_noclobber_dst");
+    Directory::CreateDirectory(src);
+    Directory::CreateDirectory(dst);
+    EXPECT_THROW(Directory::Move(src, dst), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(src));
+    EXPECT_TRUE(Directory::Exists(dst));
+    Directory::Delete(src);
+    Directory::Delete(dst);
+}
+
 TEST(DirectoryTests, Exists_ExistingFileNotDirectory_False) {
     std::string p = tf("exists_file_not_dir.txt");
     File::WriteAllText(p, "x");
@@ -490,6 +530,19 @@ TEST(DirectoryInfoTests, Delete_NonExistent_ThrowsDirectoryNotFoundException) {
 TEST(DirectoryInfoTests, MoveTo_NonExistent_ThrowsDirectoryNotFoundException) {
     DirectoryInfo di(tf("di_no_such_move_xyz"));
     EXPECT_THROW(di.MoveTo(tf("di_move_dst_xyz")), System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryInfoTests, MoveTo_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("di_move_noclobber_src");
+    std::string dst = tf("di_move_noclobber_dst");
+    Directory::CreateDirectory(src);
+    Directory::CreateDirectory(dst);
+    DirectoryInfo di(src);
+    EXPECT_THROW(di.MoveTo(dst), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(src));
+    EXPECT_TRUE(Directory::Exists(dst));
+    Directory::Delete(src);
+    Directory::Delete(dst);
 }
 
 TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) {

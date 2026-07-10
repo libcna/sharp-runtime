@@ -44,6 +44,11 @@ namespace System::IO {
         ThrowIfNullOrEmpty(src, "sourceDirName");
         ThrowIfNullOrEmpty(dst, "destDirName");
         if (!Exists(src)) throw DirectoryNotFoundException("Could not find a part of the path '" + src + "'.");
+        // See File::Move's comment: real .NET's Move does not replace an existing destination.
+        // std::filesystem::rename() would otherwise silently replace an empty destination
+        // directory (or fail less clearly for a non-empty one) on POSIX.
+        if (Exists(dst))
+            throw IOException("Cannot create '" + dst + "' because a file or directory with the same name already exists.");
         std::error_code ec;
         std::filesystem::rename(src, dst, ec);
         if (ec) throw IOException("Failed to move directory: " + ec.message());

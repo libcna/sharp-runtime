@@ -49,6 +49,12 @@ namespace System::IO {
         ThrowIfNullOrEmpty(src, "sourceFileName");
         ThrowIfNullOrEmpty(dst, "destFileName");
         if (!Exists(src)) throw FileNotFoundException("Could not find file '" + src + "'.", src);
+        // Verified against FileSystem.Unix.cs's MoveFile(src, dst, overwrite: false): real
+        // .NET's non-overwrite Move does not replace an existing destination file. This port
+        // previously used std::filesystem::rename() unconditionally, which silently replaces
+        // an existing destination on POSIX.
+        if (Exists(dst))
+            throw IOException("Cannot create '" + dst + "' because a file or directory with the same name already exists.");
         std::error_code ec;
         std::filesystem::rename(src, dst, ec);
         if (ec) throw IOException("Failed to move file '" + src + "' to '" + dst + "': " + ec.message());

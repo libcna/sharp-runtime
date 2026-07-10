@@ -113,6 +113,9 @@ namespace System::IO {
                 throw System::ArgumentException("Path cannot be the empty string.", "destFileName");
             if (!getExistsProperty())
                 throw FileNotFoundException("Could not find file '" + fullPath_.string() + "'.", fullPath_.string());
+            // Real .NET's non-overwrite MoveTo does not replace an existing destination file.
+            if (std::filesystem::exists(destFileName))
+                throw IOException("Cannot create '" + destFileName + "' because a file or directory with the same name already exists.");
             std::error_code ec;
             std::filesystem::rename(fullPath_, destFileName, ec);
             if (ec) throw IOException("Failed to move file '" + fullPath_.string() + "' to '" + destFileName + "': " + ec.message());
