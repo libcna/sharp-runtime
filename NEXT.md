@@ -1,6 +1,55 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `883f3a6`) — 11037 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `79f25bc`) — 11064 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 2
+
+*Branch: `feature/work`, HEAD `79f25bc` — 11064 tests passing (up from 11037 at the top of
+part 1's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Continuation of part 1 immediately below. Two more deferred findings fixed:
+
+- **Globalization — `IdnMapping`**: fixed all 5 gaps in one pass (verified against
+  `IdnMapping.cs`): `UseStd3AsciiRules` was a no-op, now enforced via `validateStd3Char`;
+  `LabelMax` (63) wasn't enforced on input/encoded/raw-ACE label lengths, now is;
+  `decodeLabel()` silently mis-decoded a trailing-hyphen-only ACE label instead of throwing
+  ("Trailing - not allowed" in real .NET), fixed; `GetUnicode()` was missing the mandatory
+  canonical round-trip check (re-encode via `GetAscii` and compare case-insensitively),
+  added; missing `GetAscii(string,int[,int])`/`GetUnicode(string,int[,int])` overloads
+  added, using byte offsets into the UTF-8 string (documented deviation from .NET's
+  UTF-16 code-unit offsets, matching `String::Substring`'s established convention). Two
+  test cases (round-trip-failure, trailing-delimiter) were verified with a compiled scratch
+  reproduction before being committed as permanent tests — naive hand-constructed
+  "non-canonical Punycode" examples turned out to still round-trip correctly (Bootstring's
+  canonical-encoding property), so the actual failing example needed to route through the
+  Std3 check instead. Commit `83fbb3a`.
+- **Collections.Immutable — `ImmutableSortedDictionary`/`ImmutableDictionary`**:
+  `Add`/`AddRange` threw `ArgumentException` on *any* duplicate key, even when the new
+  value equaled the existing one. Verified against
+  `ImmutableSortedDictionary_2.Node.SetOrAdd` and `ImmutableDictionary_2.cs`
+  (`KeyCollisionBehavior.ThrowIfValueDifferent`): real .NET only throws when the value
+  actually differs; an equal-value re-add is a silent no-op. Fixed both types (same bug,
+  same fix). Commit `79f25bc`.
+
+### What remains from the deferred-findings list (not yet touched)
+
+- **PersianCalendar**: fixed 33-year arithmetic leap-year formula vs. real astronomical
+  vernal-equinox algorithm — diverges on ~29% of years. Most involved remaining item,
+  likely a substantial algorithm rewrite. Not started.
+- **CultureInfo**: `CultureInfo(int)` ignores its LCID (always builds "en-US"); missing
+  `EnglishName`/`NativeName`/ISO-name properties, `NumberFormat`/`DateTimeFormat` wiring,
+  `Equals`/`GetHashCode`/`ToString`, all `GetCultureInfo(...)` overloads. Large — would need
+  the same "stub the unsupported-database parts honestly" treatment `RegionInfo` got in
+  part 1.
+- **UTF8Encoding**: `GetBytes`/`GetString` are a byte passthrough with zero
+  well-formedness validation. Ticket already marked `needs_user` — likely skip or seek
+  clarification rather than attempt blind.
+- **Collections.Immutable**: `ImmutableHashSet`/`ImmutableSortedSet`/
+  `ImmutableSortedDictionary` have no custom-comparer support at all (no
+  `IEqualityComparer`/`IComparer` parameter anywhere on any constructor/factory). Not
+  started — would need API additions across 3 types.
+
+---
 
 ## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 1
 
