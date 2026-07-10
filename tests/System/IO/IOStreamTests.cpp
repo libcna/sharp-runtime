@@ -616,6 +616,53 @@ TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) 
 // BinaryWriter + BinaryReader
 // ===========================================================================
 
+namespace {
+    // Test double tracking Flush()/Close() calls, since MemoryStream's Flush() is an
+    // unobservable no-op -- used to verify BinaryWriter's leaveOpen handling actually calls
+    // Flush() on the underlying stream rather than silently doing nothing.
+    class FlushTrackingStream : public System::IO::Stream {
+    public:
+        bool flushCalled = false;
+        bool closeCalled = false;
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Write(const SharpRuntime::bytecs*, intcs, intcs) override {}
+        void Close() override { closeCalled = true; }
+        void Flush() override { flushCalled = true; }
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+    };
+}
+
+// Regression tests for a wave-3 audit finding: BinaryWriter::Close()/~BinaryWriter() with
+// leaveOpen=true did nothing at all to the underlying stream, instead of flushing it. Verified
+// against BinaryWriter.cs's Dispose(bool): "if (_leaveOpen) OutStream.Flush(); else
+// OutStream.Close();" -- leaveOpen=true means "flush what's pending, but don't take ownership
+// of closing it," not "do nothing."
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_LeaveOpenTrue_FlushesUnderlyingStream) {
+    FlushTrackingStream fs;
+    BinaryWriter bw(&fs, true);
+    bw.Close();
+    EXPECT_TRUE(fs.flushCalled);
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Destructor_LeaveOpenTrue_FlushesUnderlyingStream) {
+    FlushTrackingStream fs;
+    {
+        BinaryWriter bw(&fs, true);
+        (void)bw;
+    }
+    EXPECT_TRUE(fs.flushCalled);
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    FlushTrackingStream fs;
+    BinaryWriter bw(&fs, false);
+    bw.Close();
+    EXPECT_TRUE(fs.closeCalled);
+}
+
 TEST(BinaryReaderWriterTests, WriteRead_Int32_Roundtrip) {
     MemoryStream ms;
     BinaryWriter bw(&ms, true);
