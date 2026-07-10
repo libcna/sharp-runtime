@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
-#include "System/FormatException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
 #include "nlohmann/json.hpp"
 
@@ -39,29 +39,35 @@ namespace System::Text::Json::Nodes {
         /** @return true if the underlying value is a JSON boolean. */
         [[nodiscard]] bool IsBoolean() const { return value_.is_boolean(); }
 
-        /** @return The value as a string. @throws System::FormatException if this isn't a JSON string. */
+        /**
+         * @return The value as a string.
+         * @throws System::InvalidOperationException if this isn't a JSON string.
+         * @note Verified against JsonValueOfElement.cs's GetValue<T>: real .NET throws
+         * InvalidOperationException (via ThrowInvalidOperationException_NodeUnableToConvertElement)
+         * when the underlying value can't convert to the requested type, not FormatException.
+         */
         [[nodiscard]] std::string GetString() const {
-            if (!value_.is_string()) throw System::FormatException("The JsonValue is not a string.");
+            if (!value_.is_string()) throw System::InvalidOperationException("The JsonValue is not a string.");
             return value_.get<std::string>();
         }
-        /** @return The value as a 32-bit integer. @throws System::FormatException if this isn't a JSON number. */
+        /** @return The value as a 32-bit integer. @throws System::InvalidOperationException if this isn't a JSON number. */
         [[nodiscard]] intcs GetInt32() const {
-            if (!value_.is_number()) throw System::FormatException("The JsonValue is not a number.");
+            if (!value_.is_number()) throw System::InvalidOperationException("The JsonValue is not a number.");
             return value_.get<intcs>();
         }
-        /** @return The value as a 64-bit integer. @throws System::FormatException if this isn't a JSON number. */
+        /** @return The value as a 64-bit integer. @throws System::InvalidOperationException if this isn't a JSON number. */
         [[nodiscard]] longcs GetInt64() const {
-            if (!value_.is_number()) throw System::FormatException("The JsonValue is not a number.");
+            if (!value_.is_number()) throw System::InvalidOperationException("The JsonValue is not a number.");
             return value_.get<longcs>();
         }
-        /** @return The value as a double. @throws System::FormatException if this isn't a JSON number. */
+        /** @return The value as a double. @throws System::InvalidOperationException if this isn't a JSON number. */
         [[nodiscard]] double GetDouble() const {
-            if (!value_.is_number()) throw System::FormatException("The JsonValue is not a number.");
+            if (!value_.is_number()) throw System::InvalidOperationException("The JsonValue is not a number.");
             return value_.get<double>();
         }
-        /** @return The value as a boolean. @throws System::FormatException if this isn't a JSON boolean. */
+        /** @return The value as a boolean. @throws System::InvalidOperationException if this isn't a JSON boolean. */
         [[nodiscard]] bool GetBoolean() const {
-            if (!value_.is_boolean()) throw System::FormatException("The JsonValue is not a boolean.");
+            if (!value_.is_boolean()) throw System::InvalidOperationException("The JsonValue is not a boolean.");
             return value_.get<bool>();
         }
 

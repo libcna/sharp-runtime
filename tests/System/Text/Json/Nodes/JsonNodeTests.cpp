@@ -34,9 +34,24 @@ TEST(JsonValueTests, Create_Bool_RoundTrips) {
     EXPECT_TRUE(v->GetBoolean());
 }
 
-TEST(JsonValueTests, GetString_WrongKind_Throws) {
+// Regression tests for a wave-3 audit finding: JsonValue's Get*() accessors threw
+// FormatException for a wrong-kind access instead of InvalidOperationException. Verified
+// against JsonValueOfElement.cs's GetValue<T>, which throws InvalidOperationException (via
+// ThrowInvalidOperationException_NodeUnableToConvertElement) when the underlying value can't
+// convert to the requested type.
+TEST(JsonValueTests, GetString_WrongKind_ThrowsInvalidOperationException) {
     auto v = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
-    EXPECT_THROW(v->GetString(), std::exception);
+    EXPECT_THROW(v->GetString(), System::InvalidOperationException);
+}
+
+TEST(JsonValueTests, GetInt32_WrongKind_ThrowsInvalidOperationException) {
+    auto v = JsonValue::Create(std::string("x"));
+    EXPECT_THROW(v->GetInt32(), System::InvalidOperationException);
+}
+
+TEST(JsonValueTests, GetBoolean_WrongKind_ThrowsInvalidOperationException) {
+    auto v = JsonValue::Create(std::string("x"));
+    EXPECT_THROW(v->GetBoolean(), System::InvalidOperationException);
 }
 
 TEST(JsonValueTests, ToJsonString) {
