@@ -245,8 +245,15 @@ public:
      * C++ counterpart of .NET DateTimeFormatInfo.GetDayName(DayOfWeek).
      * @param dayofweek The day of the week.
      * @return The full name of the day.
+     * @throws System::ArgumentOutOfRangeException if @p dayofweek is not a valid DayOfWeek
+     *         value. Without this check, indexing the internal array with an invalid value
+     *         is undefined behavior (std::array::operator[] does not bounds-check), not a
+     *         thrown exception -- verified against DateTimeFormatInfo.cs's
+     *         `(uint)dow >= (uint)names.Length` check.
      */
     [[nodiscard]] std::string GetDayName(System::DayOfWeek dayofweek) const {
+        if (static_cast<size_t>(dayofweek) >= dayNames_.size())
+            throw System::ArgumentOutOfRangeException("dayofweek");
         return dayNames_[static_cast<size_t>(dayofweek)];
     }
 
@@ -256,8 +263,11 @@ public:
      * C++ counterpart of .NET DateTimeFormatInfo.GetAbbreviatedDayName(DayOfWeek).
      * @param dayofweek The day of the week.
      * @return The abbreviated name of the day.
+     * @throws System::ArgumentOutOfRangeException if @p dayofweek is not a valid DayOfWeek value.
      */
     [[nodiscard]] std::string GetAbbreviatedDayName(System::DayOfWeek dayofweek) const {
+        if (static_cast<size_t>(dayofweek) >= abbreviatedDayNames_.size())
+            throw System::ArgumentOutOfRangeException("dayofweek");
         return abbreviatedDayNames_[static_cast<size_t>(dayofweek)];
     }
 
@@ -267,8 +277,11 @@ public:
      * C++ counterpart of .NET DateTimeFormatInfo.GetShortestDayName(DayOfWeek).
      * @param dayOfWeek The day of the week.
      * @return The shortest day name abbreviation.
+     * @throws System::ArgumentOutOfRangeException if @p dayOfWeek is not a valid DayOfWeek value.
      */
     [[nodiscard]] std::string GetShortestDayName(System::DayOfWeek dayOfWeek) const {
+        if (static_cast<size_t>(dayOfWeek) >= shortestDayNames_.size())
+            throw System::ArgumentOutOfRangeException("dayOfWeek");
         return shortestDayNames_[static_cast<size_t>(dayOfWeek)];
     }
 

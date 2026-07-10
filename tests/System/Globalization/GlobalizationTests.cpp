@@ -4,6 +4,7 @@
 //
 // Note: Calendar.hpp, GregorianCalendar.hpp, and ISOWeek.hpp are tested in tests/CalendarTests.cpp.
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
@@ -292,16 +293,26 @@ TEST(StringInfoTests, GetNextTextElement_LastChar) {
     EXPECT_EQ(StringInfo::GetNextTextElement("hello", 4), "o");
 }
 
-TEST(StringInfoTests, GetNextTextElement_PastEnd_ReturnsEmpty) {
-    EXPECT_EQ(StringInfo::GetNextTextElement("hi", 5), "");
+TEST(StringInfoTests, GetNextTextElement_AtEnd_ReturnsEmpty) {
+    EXPECT_EQ(StringInfo::GetNextTextElement("hi", 2), ""); // exactly at end: valid, empty
+}
+
+// .NET's real bound is `(uint)index > (uint)str.Length` (StringInfo.cs): an index strictly
+// past the end throws ArgumentOutOfRangeException rather than silently returning ""/0.
+TEST(StringInfoTests, GetNextTextElement_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElement("hi", 5), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoTests, GetNextTextElementLength_AsciiIsOne) {
     EXPECT_EQ(StringInfo::GetNextTextElementLength("hello", 0), 1);
 }
 
-TEST(StringInfoTests, GetNextTextElementLength_PastEnd_IsZero) {
-    EXPECT_EQ(StringInfo::GetNextTextElementLength("hi", 10), 0);
+TEST(StringInfoTests, GetNextTextElementLength_AtEnd_IsZero) {
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("hi", 2), 0); // exactly at end: valid, zero
+}
+
+TEST(StringInfoTests, GetNextTextElementLength_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("hi", 10), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoTests, ParseCombiningCharacters_SplitsEachByte) {

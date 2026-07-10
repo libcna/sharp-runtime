@@ -73,12 +73,25 @@ TEST(StringInfoBatch33Test, GetTextElementEnumerator_InvalidIndex_ThrowsArgument
 TEST(StringInfoBatch33Test, GetNextTextElement) {
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 0), "a");
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 2), "c");
-    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 5), "");
+    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 3), ""); // exactly at end: valid, empty
+}
+
+// .NET's real bound is `(uint)index > (uint)str.Length` (StringInfo.cs) -- index at or
+// negative from the end is one thing (valid, or negative-throws), but an index strictly
+// past the end throws ArgumentOutOfRangeException; it does not silently return "".
+TEST(StringInfoBatch33Test, GetNextTextElement_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElement("abc", 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetNextTextElement("abc", -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoBatch33Test, GetNextTextElementLength) {
     EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 0), 1);
-    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 9), 0);
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 3), 0); // exactly at end: valid, zero
+}
+
+TEST(StringInfoBatch33Test, GetNextTextElementLength_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("abc", 9), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("abc", -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoBatch33Test, ParseCombiningCharacters) {
