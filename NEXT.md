@@ -1,6 +1,73 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `0cbc2a3`) — 11205 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `fe17b29`) — 11216 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — all 4 IO core criticals now done
+
+*Branch: `feature/work`, HEAD `fe17b29` — 11216 tests passing (up from 11205 at the top of
+the Xml-core-complete checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Finished IO core's 4 listed criticals (the catalogue's "7 critical" count for this slice
+included 3 folded into the moderate-findings prose rather than individually enumerated; only
+4 were itemized and are addressed here).
+
+1. **`MemoryStream::Write()`/`WriteByte()` silently no-op'd instead of throwing
+   `NotSupportedException` when `!CanWrite`** — verified against `MemoryStream.cs`'s
+   `EnsureWriteable()`; `SetLength()` in the same class already got this right (confirming the
+   inconsistency was a bug). Fixed both to throw, matching `SetLength()`'s exact message.
+   2 regression tests. Commit `b73c1e2`.
+2. **`File::Move`/`Directory::Move`/`FileInfo::MoveTo`/`DirectoryInfo::MoveTo` all silently
+   overwrote an existing destination** — verified against `FileSystem.Unix.cs`'s
+   `MoveFile(src, dst, overwrite: false)`: real .NET's non-overwrite Move never replaces an
+   existing destination. This port used `std::filesystem::rename()` unconditionally (silently
+   replaces on POSIX). Added an existence check before the rename in all four, throwing
+   `IOException` with the message convention already established elsewhere in this codebase
+   (`FileStream`'s Create-mode check) — a benign TOCTOU race rather than reproducing .NET's
+   platform-specific atomic link/unlink primitive. 4 regression tests (one per API). Commit
+   `b0cd62f`.
+3. **`FileStream::getLengthProperty()` returned a stale cached length after `Write()`
+   extended the file** — verified against `FileStream.cs`'s `Length` getter (a live query, not
+   a cache). Fixed to flush pending writes then query `std::filesystem::file_size()` live,
+   falling back to the cached value only if the live query fails. 1 regression test proving
+   Length grows correctly across two successive `Write()` calls on the same open instance
+   (the previous cached-at-construction bug specifically didn't manifest in the existing
+   close-then-reopen-style test, since reopening naturally re-queries the size). Commit
+   `04229d8`.
+4. **`StreamReader::Close()`/`StreamWriter::Close()` ignored `leaveOpen`** — verified against
+   `StreamReader.cs`/`StreamWriter.cs`: `Close()` delegates to `Dispose(true)`, which checks
+   `_closable` (`!leaveOpen`). Both types' destructors already had this right; `Close()` itself
+   closed unconditionally. Fixed both to match their own destructors. 4 regression tests (one
+   leaveOpen=true/false pair per type), using `MemoryStream::Close()`'s buffer-clearing as an
+   observable signal of whether the underlying stream was actually closed. Commit `fe17b29`.
+
+### Wave-3 catalogue: what remains
+
+Threading criticals: done. IO.Compression/Hashing criticals+moderates: done (3 minors left).
+Xml core criticals: done (13 moderate + 8 minor left). **IO core criticals: done** (10
+moderate + 5 minor left — `File::Delete` deleting a directory, `RandomAccess::Write` not
+looping on short writes, `MemoryStream::Read()`/`Close()` more silent-wrong-behavior bugs,
+etc.). Still entirely untouched: Net core+Sockets (24 findings, including a critical
+`SocketError` errno-translation gap and a `sscanf`-based `IPAddress` parsing UB critical),
+Net.Http+WebSockets+Security (19 findings), Xml.Linq+XPath (21 findings), and Threading's 29
+moderate + 10 minor findings. See "Full findings catalogue" further down this file for full
+per-namespace detail.
+
+**Recommended next session priority, in order:**
+1. **`System.Net` core + Sockets criticals** (4 items) — `SocketError` never translated from
+   POSIX errno (every `SocketException` carries a meaningless code), `IPAddress` IPv4 parsing
+   via UB-prone `sscanf`, `Socket::Send/Receive` missing bounds validation (**verify this one
+   first** — it may already be fixed, since a memory-safety pass earlier this session added
+   bounds validation to `Socket.cpp`; re-check before assuming it's still open),
+   `WebUtility::UrlDecode` throwing `std::invalid_argument` instead of a `System::` type.
+2. **`System.Net.Http`/WebSockets criticals** (2 items, `HttpClient`/`ClientWebSocket` bounds
+   checks — **also likely already fixed** by the same earlier memory-safety pass; verify
+   before assuming open).
+3. Everything else, same discipline as this whole session: verify against
+   `/rv/tmp/runtime/src/libraries/` before fixing, add regression tests, rebuild/retest clean,
+   commit, push, checkpoint. Given how many "already fixed" findings turned up this session
+   (XmlReader OOB, ZipArchive exception types, both Net/Http memory-safety items likely too),
+   **always re-verify a finding against current source before spending time on it** — the
+   wave-3 catalogue is now several fix-batches stale.
 
 ## Session checkpoint (2026-07-10, continued again) — IO.Compression/Hashing moderates done; all 5 Xml core criticals now done
 
