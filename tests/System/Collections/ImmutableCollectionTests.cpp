@@ -10,6 +10,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Immutable::ImmutableArray;
 using System::Collections::Immutable::ImmutableDictionary;
@@ -24,6 +25,28 @@ TEST(ImmutableCollectionTests, ArrayEmptyIsEmpty) {
     auto arr = ImmutableArray<int>::Empty();
     EXPECT_EQ(arr.getLengthProperty(), 0);
     EXPECT_TRUE(arr.getIsEmptyProperty());
+    EXPECT_FALSE(arr.getIsDefaultProperty());
+}
+
+// The default constructor previously always allocated a live empty vector, so IsDefault
+// could never return true -- breaking the common "uninitialized struct field" idiom real
+// .NET supports (default(ImmutableArray<T>) has a null backing array). Verified against
+// ImmutableArray_1.Minimal.cs: `IsDefault { get { return this.array == null; } }`.
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_IsDefaultTrue) {
+    ImmutableArray<int> arr;
+    EXPECT_TRUE(arr.getIsDefaultProperty());
+}
+
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_LengthThrows) {
+    ImmutableArray<int> arr;
+    EXPECT_THROW(arr.getLengthProperty(), System::InvalidOperationException);
+    EXPECT_THROW(arr.getIsEmptyProperty(), System::InvalidOperationException);
+}
+
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_EqualsAnotherDefault) {
+    ImmutableArray<int> a, b;
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == ImmutableArray<int>::Empty());
 }
 
 TEST(ImmutableCollectionTests, ArrayCreateFromInitList) {
