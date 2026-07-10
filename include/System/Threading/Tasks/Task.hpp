@@ -12,6 +12,7 @@
 #include <thread>
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
+#include "System/Threading/Tasks/TaskCanceledException.hpp"
 #include "System/Threading/Tasks/TaskStatus.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
@@ -134,10 +135,22 @@ namespace System::Threading::Tasks {
             return TaskStatus::RanToCompletion;
         }
 
-        /** Blocks until the task finishes; re-throws any stored exception. */
+        /**
+         * Blocks until the task finishes; re-throws any stored exception, or throws
+         * TaskCanceledException if the task was canceled.
+         *
+         * @note Verified against Task.cs's Wait()/ThrowIfExceptional(true)/GetExceptions(true):
+         * real .NET throws an AggregateException wrapping a TaskCanceledException for a
+         * canceled task with no other exception. This port's Wait() rethrows a faulted task's
+         * stored exception directly rather than wrapping it in an AggregateException (an
+         * established, deliberate simplification throughout this Task port — see the existing
+         * FromException/Wait regression tests), so the canceled case follows the same
+         * convention rather than introducing an inconsistent wrapping just for this path.
+         */
         void Wait() {
             if (future_ && future_->valid()) future_->get();
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
+            if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
         }
 
         /**

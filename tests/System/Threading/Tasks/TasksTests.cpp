@@ -102,6 +102,18 @@ TEST(TaskTests, FromCanceled_IsCanceled) {
     EXPECT_TRUE(t.getIsCompletedProperty());
 }
 
+TEST(TaskTests, FromCanceled_Wait_ThrowsTaskCanceledException) {
+    Task t = Task::FromCanceled(CancellationToken());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskTests, RunWithCanceledToken_Wait_ThrowsTaskCanceledException) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task t = Task::Run([]() {}, cts.getTokenProperty());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
 TEST(TaskTests, Run_ThrowingAction_IsFaulted) {
     Task t = Task::Run([]() { throw std::runtime_error("task error"); });
     EXPECT_THROW(t.Wait(), std::runtime_error);
@@ -434,7 +446,7 @@ TEST(TaskCancellationTests, ActionThrowsOperationCanceled_MatchingToken_ReportsC
         cts.Cancel();
         token.ThrowIfCancellationRequested();
     }, token);
-    t.Wait();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
     EXPECT_TRUE(t.getIsCanceledProperty());
     EXPECT_FALSE(t.getIsFaultedProperty());
 }
