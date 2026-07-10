@@ -1,6 +1,69 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `ee0fefc`) — 11094 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `9492dea`) — 11111 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 4 (PersianCalendar, largest item)
+
+*Branch: `feature/work`, HEAD `9492dea` — 11111 tests passing (up from 11094 at the top of
+part 3's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+The single largest deferred finding from the whole sweep is now fixed:
+
+- **Globalization — `PersianCalendar`**: replaced the fixed 33-year arithmetic leap-year
+  formula (`(year*8+29)%33 < 8`, diverges from real .NET on ~29% of years) with a faithful
+  C++ port of `CalendricalCalculationsHelper.cs`'s full astronomical vernal-equinox
+  algorithm — VSOP-based solar longitude (49 periodic terms), ephemeris correction for
+  Earth's rotation slowdown (6 correction formulas keyed by Gregorian year range), equation
+  of time, and the `PersianNewYearOnOrBefore` search that locates the actual equinox
+  crossing at the Persian observation site (52.5°E). Every constant/coefficient/formula is
+  copied verbatim from the .NET source, including a 0-based-vs-1-based day-numbering
+  mismatch present in the real source (`GetNumberOfDays` vs. `numDays = ticks/TicksPerDay +
+  1`) — preserved as-is rather than "corrected," since the job was a faithful translation,
+  not a redesign. Also fixed in the same pass, all verified against the same reference
+  files: `MaxSupportedDateTime` was `DateTime(9999,12,31)`, real .NET's is
+  `DateTime.MaxValue` verbatim; `GetDayOfYear`/`IsLeapDay` had no overrides so they silently
+  used the `Calendar` base class's Gregorian-specific defaults (wrong day-of-year, wrong
+  Feb-29 leap-day check instead of Persian month-12-day-30); `GetMonthsInYear`/
+  `GetLeapMonth`/`IsLeapMonth`/`GetEra`/`IsLeapYear`/`GetDaysInMonth`/`GetDaysInYear` had no
+  input validation at all (now throw `ArgumentOutOfRangeException` matching the rest of the
+  calendar family, plus the `MaxCalendarYear`(9378)/`Month`(10)/`Day`(13) boundary special
+  cases); `TwoDigitYearMax`'s setter and `AddMonths` accepted any int with no range
+  validation. Verified via a compiled scratch reproduction (not committed) before writing
+  permanent tests: 92572 + 3288 round-trip checks (0 failures) spanning the full supported
+  range plus dense modern-year sampling, cross-checked against public Nowruz dates and the
+  well-documented Iranian Revolution date conversion (1979-02-11 = 1357-11-22, "22 Bahman").
+  Added 17 regression tests. Commit `9492dea`.
+
+### What remains from the deferred-findings list
+
+Only two items, both with their own reason for not being folded into this sweep:
+
+- **UTF8Encoding**: `GetBytes`/`GetString` are a byte passthrough with zero
+  well-formedness validation. Ticket already marked `needs_user` (would need real
+  `DecoderFallback`/`EncoderFallback` infrastructure) — skip or seek clarification rather
+  than attempt blind.
+- **Collections.Immutable**: `ImmutableHashSet`/`ImmutableSortedSet`/
+  `ImmutableSortedDictionary` have no custom-comparer support at all (no
+  `IEqualityComparer`/`IComparer` parameter anywhere on any constructor/factory). This is a
+  real feature addition (new constructor/factory overloads across 3 types), not a bug fix
+  like everything else in this sweep — worth scoping as its own task rather than folding
+  into "deferred findings."
+
+Every other item from the original wave-2 "found but deliberately NOT fixed" list (see the
+part-1 checkpoint far below) has now been addressed across parts 1-4 of this sweep:
+Group.Name, ASCIIEncoding, ImmutableArray.IsDefault, ReadOnlyCollection live-view,
+NotifyCollectionChangedEventArgs validation, HybridDictionary (verified no-op),
+NumberFormatInfo validation, RegionInfo constructor/LCID validation, IdnMapping (5 gaps),
+Immutable{,Sorted}Dictionary duplicate-key-same-value, CultureInfo (LCID/ISO
+names/NumberFormat/DateTimeFormat/Equals/GetHashCode/ToString/GetCultureInfo), and now
+PersianCalendar.
+
+The next session should either scope and implement the `Immutable*` custom-comparer support,
+or move to option (b) from the original sweep instruction: dispatch a wave-3 parallel audit
+covering `System.Net.*`, `System.Diagnostics*`, `System.IO.*`, `System.Text.Json*`,
+`System.Threading.*`, `System.Xml.*`, using the same methodology as waves 1-2.
+
+---
 
 ## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 3
 
