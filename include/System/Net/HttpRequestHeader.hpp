@@ -4,6 +4,7 @@
 #pragma once
 #include <array>
 #include <string>
+#include "System/IndexOutOfRangeException.hpp"
 
 namespace System::Net {
 
@@ -57,7 +58,13 @@ namespace System::Net {
         UserAgent = 40,
     };
 
-    /** @return The wire-format header name for @p header (e.g. "Cache-Control"). */
+    /**
+     * @return The wire-format header name for @p header (e.g. "Cache-Control").
+     *
+     * C++ counterpart of .NET's internal HttpRequestHeader.GetName() extension method,
+     * which indexes a raw array by `(int)header` with no bounds check.
+     * @throws System::IndexOutOfRangeException if @p header is not a defined enumerator.
+     */
     inline const std::string& HttpRequestHeaderGetName(HttpRequestHeader header) {
         static const std::array<std::string, 41> names = {
             "Cache-Control", "Connection", "Date", "Keep-Alive", "Pragma", "Trailer",
@@ -69,7 +76,9 @@ namespace System::Net {
             "If-None-Match", "If-Range", "If-Unmodified-Since", "Max-Forwards",
             "Proxy-Authorization", "Referer", "Range", "Te", "Translate", "User-Agent",
         };
-        return names.at(static_cast<size_t>(header));
+        auto index = static_cast<size_t>(header);
+        if (index >= names.size()) throw System::IndexOutOfRangeException();
+        return names[index];
     }
 
 } // namespace System::Net

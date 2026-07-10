@@ -6,6 +6,7 @@
 #include "System/ObjectDisposedException.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <zlib.h>
 
 namespace System::IO::Compression {
@@ -60,7 +61,16 @@ namespace System::IO::Compression {
     }
 
     longcs GZipEncoder::GetMaxCompressedLength(longcs inputLength) {
-        return DeflateEncoder::GetMaxCompressedLength(inputLength);
+        // Verified against GZipEncoder.cs: compressBound() (used by DeflateEncoder's bound)
+        // returns the upper bound for zlib-wrapped deflate, which includes 6 bytes of zlib
+        // overhead (2-byte header + 4-byte Adler32 trailer). The GZip format uses 18 bytes of
+        // overhead (10-byte header + 8-byte CRC32/size trailer) -- 12 bytes more than zlib's,
+        // which this port previously never added, understating the worst-case buffer size any
+        // caller sizing a destination buffer from this value would allocate.
+        longcs maxCompressedLength = DeflateEncoder::GetMaxCompressedLength(inputLength);
+        if (maxCompressedLength > std::numeric_limits<longcs>::max() - 12)
+            throw System::ArgumentOutOfRangeException("inputLength");
+        return maxCompressedLength + 12;
     }
 
     OperationStatus GZipEncoder::Compress(const bytecs* source, intcs sourceLength,

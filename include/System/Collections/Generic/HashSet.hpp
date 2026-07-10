@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -16,6 +17,12 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Collections.Generic.HashSet<T>.
  * Backed by std::unordered_set; provides O(1) average-case Add, Remove, and Contains.
+ *
+ * @note Unlike .NET's HashSet<T>, iterators do not detect concurrent modification:
+ * .NET throws InvalidOperationException if the set is structurally modified while
+ * an enumerator is active, but sharp-runtime's iterators follow plain
+ * std::unordered_set invalidation rules instead. Do not mutate the set while
+ * iterating it directly.
  *
  * @tparam T The type of elements in the set.
  */
@@ -248,8 +255,13 @@ public:
      *
      * C++ counterpart of .NET HashSet<T>.EnsureCapacity(int).
      * @param capacity The minimum number of elements the set should support.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
-    void EnsureCapacity(intcs capacity) { set_.reserve(static_cast<std::size_t>(capacity)); }
+    void EnsureCapacity(intcs capacity) {
+        if (capacity < 0)
+            throw System::ArgumentOutOfRangeException("capacity");
+        set_.reserve(static_cast<std::size_t>(capacity));
+    }
 
     /**
      * @brief Reduces memory usage by shrinking the bucket array to fit the current element count.

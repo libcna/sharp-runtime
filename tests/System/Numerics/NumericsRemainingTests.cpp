@@ -109,8 +109,9 @@ TEST(BitOperationsTests, IsPow2_Int32) {
     EXPECT_FALSE(BitOperations::IsPow2(int32_t(0)));
     EXPECT_FALSE(BitOperations::IsPow2(int32_t(-4)));
 }
-TEST(BitOperationsTests, RoundUpToPowerOf2_Zero_ReturnsOne) {
-    EXPECT_EQ(BitOperations::RoundUpToPowerOf2(uint32_t(0)), 1u);
+TEST(BitOperationsTests, RoundUpToPowerOf2_Zero_ReturnsZero) {
+    EXPECT_EQ(BitOperations::RoundUpToPowerOf2(uint32_t(0)), 0u);
+    EXPECT_EQ(BitOperations::RoundUpToPowerOf2(uint64_t(0)), 0u);
 }
 TEST(BitOperationsTests, RoundUpToPowerOf2_AlreadyPow2_Unchanged) {
     EXPECT_EQ(BitOperations::RoundUpToPowerOf2(uint32_t(8)), 8u);

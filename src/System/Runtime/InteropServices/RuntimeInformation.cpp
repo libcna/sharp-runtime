@@ -47,6 +47,7 @@ bool RuntimeInformation::IsOSPlatform(const OSPlatform& osPlatform) {
 #elif defined(__linux__)
     return osPlatform == OSPlatform::Linux;
 #else
+    (void)osPlatform;
     return false;
 #endif
 }

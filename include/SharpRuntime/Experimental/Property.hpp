@@ -9,8 +9,9 @@
  * Prop.hpp is preferred because it expands to ordinary members and methods
  * without per-instance std::function-based indirection.
  */
-#include <iostream>
 #include <functional>
+#include <iostream>
+#include <stdexcept>
 
 #define DEF_PROP_AUTO(type, name, init) \
     private: type name##VVVV = init; \

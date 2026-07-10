@@ -40,6 +40,7 @@ namespace System::Net {
         RedirectMethod                = 303,
         NotModified                   = 304,
         UseProxy                      = 305,
+        Unused                        = 306,
         TemporaryRedirect             = 307,
         RedirectKeepVerb              = 307,
         PermanentRedirect             = 308,

@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Concurrent/ConcurrentQueue.hpp"
 
 using System::Collections::Concurrent::ConcurrentQueue;
@@ -91,7 +93,16 @@ TEST(ConcurrentQueueTest, CopyTo_TooSmall_Throws) {
     q.Enqueue(1);
     q.Enqueue(2);
     std::vector<int> dest(1);
-    EXPECT_THROW(q.CopyTo(dest, 0), std::out_of_range);
+    EXPECT_THROW(q.CopyTo(dest, 0), System::ArgumentException);
+}
+
+// .NET ConcurrentQueue<T>.CopyTo throws ArgumentOutOfRangeException specifically for a
+// negative index, distinct from the ArgumentException thrown for a too-small array.
+TEST(ConcurrentQueueTest, CopyTo_NegativeIndex_ThrowsArgumentOutOfRange) {
+    ConcurrentQueue<int> q;
+    q.Enqueue(1);
+    std::vector<int> dest(2);
+    EXPECT_THROW(q.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ConcurrentQueueTest, GetEnumerator_IteratesFrontToBack) {

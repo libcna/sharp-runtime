@@ -20,6 +20,8 @@
 #include "System/Net/Http/MultipartFormDataContent.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/MemoryStream.hpp"
+#include "System/NotSupportedException.hpp"
+#include "System/UriFormatException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/ArgumentException.hpp"
@@ -266,12 +268,26 @@ TEST(HttpClientUrlParseTests, QueryStringPreserved) {
     EXPECT_EQ(p.path, "/search?q=hello");
 }
 
-TEST(HttpClientUrlParseTests, InvalidSchemeThrows) {
-    EXPECT_THROW(HttpClient::parseUrl("https://example.com"), std::invalid_argument);
+// Regression tests for a wave-3 audit finding: parseUrl threw std::invalid_argument (an
+// unrelated std:: exception type) for every failure path instead of a System:: exception,
+// escaping uncaught by code catching System::Exception&. A malformed URI now throws
+// System::UriFormatException (matching real .NET's Uri construction failure); an
+// unsupported-but-well-formed scheme now throws System::NotSupportedException (HTTPS/TLS is
+// out of scope for this runtime, not a format error).
+TEST(HttpClientUrlParseTests, UnsupportedSchemeThrowsNotSupportedException) {
+    EXPECT_THROW(HttpClient::parseUrl("https://example.com"), System::NotSupportedException);
 }
 
-TEST(HttpClientUrlParseTests, MissingSchemeThrows) {
-    EXPECT_THROW(HttpClient::parseUrl("example.com/path"), std::invalid_argument);
+TEST(HttpClientUrlParseTests, MissingSchemeThrowsUriFormatException) {
+    EXPECT_THROW(HttpClient::parseUrl("example.com/path"), System::UriFormatException);
+}
+
+TEST(HttpClientUrlParseTests, InvalidPortThrowsUriFormatException) {
+    EXPECT_THROW(HttpClient::parseUrl("http://example.com:notaport/path"), System::UriFormatException);
+}
+
+TEST(HttpClientUrlParseTests, EmptyHostThrowsUriFormatException) {
+    EXPECT_THROW(HttpClient::parseUrl("http://:8080/path"), System::UriFormatException);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +313,15 @@ TEST(HttpClientTests, BaseAddress) {
     HttpClient client;
     client.setBaseAddressProperty("http://api.example.com");
     EXPECT_EQ(client.getBaseAddressProperty(), "http://api.example.com");
+}
+
+// Verified against HttpClient.cs's CheckRequestBeforeSend: every Send overload validates
+// the request is non-null. Previously this dereferenced a null request immediately (UB/
+// crash) instead of throwing a catchable exception.
+TEST(HttpClientTests, Send_NullRequest_ThrowsArgumentNullException) {
+    HttpClient client;
+    std::shared_ptr<HttpRequestMessage> nullRequest;
+    EXPECT_THROW(client.Send(nullRequest), System::ArgumentNullException);
 }
 
 // ---------------------------------------------------------------------------

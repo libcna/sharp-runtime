@@ -316,6 +316,12 @@ TEST(ComplexTests, Reciprocal_Two_IsHalf) {
     EXPECT_NEAR(r.getRealProperty(), 0.5, 1e-12);
 }
 
+TEST(ComplexTests, Reciprocal_Zero_IsZero) {
+    Complex r = Complex::Reciprocal(Complex::Zero);
+    EXPECT_EQ(r.getRealProperty(), 0.0);
+    EXPECT_EQ(r.getImaginaryProperty(), 0.0);
+}
+
 TEST(ComplexTests, FromPolarCoordinates_UnitAngle) {
     Complex r = Complex::FromPolarCoordinates(1.0, 0.0);
     EXPECT_NEAR(r.getRealProperty(),      1.0, 1e-12);

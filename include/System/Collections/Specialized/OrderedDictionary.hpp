@@ -249,7 +249,13 @@ public:
      * @brief Returns the value for the given key, or "" if not found.
      *
      * C++ counterpart of .NET OrderedDictionary.Item[object] getter, which returns null for a
-     * missing key rather than throwing.
+     * missing key rather than throwing. Serves both const and non-const instances --
+     * deliberately no non-const overload. A prior non-const `std::string&`-returning overload
+     * phantom-inserted an empty entry for a missing key even on what looked like a read, and
+     * returned a reference into `storage_->values` (a std::vector) that dangled after any
+     * later insertion reallocated it -- the same reference-escape bug class fixed in
+     * ConcurrentDictionary (commit 3605260). Use `set(key, value)` for
+     * `dict[key] = value`-style writes.
      * @param key The key whose value to retrieve.
      * @return The associated value, or "" if @p key is not present.
      */
@@ -259,23 +265,23 @@ public:
     }
 
     /**
-     * @brief Returns a mutable reference to the value for the given key, inserting a new entry
-     *        (with an empty value) at the end if @p key is not already present.
+     * @brief Sets the value for the given key, inserting a new entry at the end if absent.
      *
-     * C++ counterpart of .NET OrderedDictionary.Item[object] setter, used as `dict[key] = value`.
-     * @param key The key whose value to access or insert.
-     * @return A reference to the associated value.
+     * C++ counterpart of .NET OrderedDictionary.Item[object] setter.
+     * @param key   The key whose value to set.
+     * @param value The value to associate with @p key.
      * @throws System::NotSupportedException if the dictionary is read-only.
      */
-    std::string& operator[](const std::string& key) {
+    void set(const std::string& key, const std::string& value) {
         checkMutable();
         auto it = storage_->index.find(key);
-        if (it != storage_->index.end())
-            return storage_->values[static_cast<size_t>(it->second)];
+        if (it != storage_->index.end()) {
+            storage_->values[static_cast<size_t>(it->second)] = value;
+            return;
+        }
         storage_->index[key] = static_cast<intcs>(storage_->keys.size());
         storage_->keys.push_back(key);
-        storage_->values.emplace_back();
-        return storage_->values.back();
+        storage_->values.push_back(value);
     }
 
     /**

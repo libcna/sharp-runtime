@@ -34,7 +34,11 @@ namespace System::IO {
         void WriteBytes(const bytecs* buf, intcs count);
 
     public:
-        /** Constructs a BinaryWriter that writes to the given stream. */
+        /**
+         * @brief Constructs a BinaryWriter that writes to the given stream.
+         * @throws System::ArgumentNullException if @p stream is null.
+         * @throws System::ArgumentException if @p stream does not support writing.
+         */
         explicit BinaryWriter(Stream* stream, bool leaveOpen = false);
         /** Destroys the BinaryWriter and closes the stream if not leaveOpen. */
         virtual ~BinaryWriter();

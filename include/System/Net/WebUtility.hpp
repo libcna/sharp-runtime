@@ -121,11 +121,22 @@ namespace System::Net {
         /**
          * Percent-encodes @p value for use in a URL (spaces become '+').
          * @return The URL-encoded string.
+         *
+         * @note Verified against WebUtility.cs's s_safeUrlChars ("Url safe chars as defined by
+         * RFC 1738.4, minus '+'"): the safe set is letters, digits, `-_.!*()` -- notably
+         * including `!*()` and excluding `~`. This previously used `-_.~`, which both
+         * percent-encoded `!*()` that real .NET leaves literal and left `~` literal where real
+         * .NET percent-encodes it -- silently different output for any URL containing those
+         * characters.
          */
         static std::string UrlEncode(const std::string& value) {
+            auto isSafe = [](unsigned char c) {
+                return std::isalnum(c) || c == '-' || c == '_' || c == '.' ||
+                       c == '!' || c == '*' || c == '(' || c == ')';
+            };
             std::ostringstream oss;
             for (unsigned char c : value) {
-                if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+                if (isSafe(c))
                     oss << c;
                 else if (c == ' ')
                     oss << '+';
@@ -138,15 +149,36 @@ namespace System::Net {
         /**
          * Decodes a percent-encoded URL string ('+' becomes space).
          * @return The URL-decoded string.
+         *
+         * @note Verified against WebUtility.cs's UrlDecodeInternal: a malformed percent
+         * sequence (either of the two characters after '%' isn't a valid hex digit, or fewer
+         * than two characters remain) is never an error — real .NET's HexConverter.FromChar-
+         * based check simply leaves '%' as a literal character and continues, decoding nothing.
+         * The previous implementation used std::stoi(..., 16) to parse the two hex characters,
+         * which throws std::invalid_argument (an uncatchable-by-System::-exception-handlers,
+         * uncaught type) when neither of the two characters is a valid hex digit, e.g. on
+         * "100%complete".
          */
         static std::string UrlDecode(const std::string& value) {
+            auto hexVal = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
             std::string out;
             for (std::size_t i = 0; i < value.size(); ++i) {
-                if (value[i] == '+') { out += ' '; }
-                else if (value[i] == '%' && i + 2 < value.size()) {
-                    int hex = std::stoi(value.substr(i + 1, 2), nullptr, 16);
-                    out += static_cast<char>(hex);
-                    i += 2;
+                if (value[i] == '+') {
+                    out += ' ';
+                } else if (value[i] == '%' && i + 2 < value.size()) {
+                    int h1 = hexVal(value[i + 1]);
+                    int h2 = hexVal(value[i + 2]);
+                    if (h1 >= 0 && h2 >= 0) {
+                        out += static_cast<char>((h1 << 4) | h2);
+                        i += 2;
+                    } else {
+                        out += value[i]; // malformed sequence: '%' passes through literally
+                    }
                 } else {
                     out += value[i];
                 }

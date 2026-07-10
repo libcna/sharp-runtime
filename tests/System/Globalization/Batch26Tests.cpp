@@ -231,6 +231,22 @@ TEST(CharUnicodeInfoBatch26Test, GetUnicodeCategory_Digit) {
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'5'), UnicodeCategory::DecimalDigitNumber);
 }
 
+// TAB/LF/VT/FF/CR (U+0009-U+000D) all satisfy iswspace() in the C locale, so checking
+// iswspace() before the C0-control check previously misclassified them as SpaceSeparator
+// instead of Control. Real Unicode category for all of U+0000-U+001F is Cc (Control); only
+// U+0020 (the actual space character) is Zs (SpaceSeparator).
+TEST(CharUnicodeInfoBatch26Test, GetUnicodeCategory_WhitespaceControlChars_AreControl) {
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'\t'), UnicodeCategory::Control);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'\n'), UnicodeCategory::Control);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'\v'), UnicodeCategory::Control);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'\f'), UnicodeCategory::Control);
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u'\r'), UnicodeCategory::Control);
+}
+
+TEST(CharUnicodeInfoBatch26Test, GetUnicodeCategory_ActualSpace_IsSpaceSeparator) {
+    EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(u' '), UnicodeCategory::SpaceSeparator);
+}
+
 TEST(CharUnicodeInfoBatch26Test, GetUnicodeCategory_StringOverload) {
     std::u16string s = u"Hello";
     EXPECT_EQ(CharUnicodeInfo::GetUnicodeCategory(s, 0), UnicodeCategory::UppercaseLetter);

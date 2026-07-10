@@ -38,11 +38,24 @@ namespace System::IO {
             return !ec && isFile;
         }
 
-        /** Returns the file size in bytes, or -1 if an error occurs. */
+        /**
+         * @brief Returns the file size in bytes.
+         *
+         * Matches .NET's Unix FileInfo.Length exactly (FileInfo.cs + FileStatus.Unix.cs's
+         * GetLength): throws FileNotFoundException if the path names a directory; otherwise
+         * returns 0 for a path that doesn't exist or whose size can't be determined (.NET's
+         * real Unix implementation does not throw for a missing file here — only the
+         * directory case throws).
+         */
         [[nodiscard]] longcs getLengthProperty() const {
+            std::error_code statEc;
+            auto status = std::filesystem::status(fullPath_, statEc);
+            if (!statEc && std::filesystem::is_directory(status))
+                throw FileNotFoundException("Could not find file '" + fullPath_.string() + "'.", fullPath_.string());
+
             std::error_code ec;
             auto sz = std::filesystem::file_size(fullPath_, ec);
-            return ec ? -1LL : static_cast<longcs>(sz);
+            return ec ? 0LL : static_cast<longcs>(sz);
         }
 
         /**
@@ -100,6 +113,9 @@ namespace System::IO {
                 throw System::ArgumentException("Path cannot be the empty string.", "destFileName");
             if (!getExistsProperty())
                 throw FileNotFoundException("Could not find file '" + fullPath_.string() + "'.", fullPath_.string());
+            // Real .NET's non-overwrite MoveTo does not replace an existing destination file.
+            if (std::filesystem::exists(destFileName))
+                throw IOException("Cannot create '" + destFileName + "' because a file or directory with the same name already exists.");
             std::error_code ec;
             std::filesystem::rename(fullPath_, destFileName, ec);
             if (ec) throw IOException("Failed to move file '" + fullPath_.string() + "' to '" + destFileName + "': " + ec.message());

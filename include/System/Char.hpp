@@ -4,12 +4,12 @@
 #pragma once
 #include <cctype>
 #include <cwctype>
-#include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Globalization/CharUnicodeInfo.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 
 namespace System {
 
@@ -341,11 +341,10 @@ public:
      * @brief Parses a UTF-8 string that contains exactly one Unicode BMP code point.
      *
      * C++ counterpart of .NET Char.Parse(string).
-     * @throws std::invalid_argument for empty, multi-char, or invalid UTF-8 input.
-     * @throws std::overflow_error for code points above U+FFFF.
+     * @throws System::FormatException for empty, multi-char, invalid UTF-8, or non-BMP input.
      */
     static SharpRuntime::charcs Parse(const std::string& s) {
-        if (s.empty()) throw std::invalid_argument("String must be exactly one character long.");
+        if (s.empty()) throw System::FormatException("String must be exactly one character long.");
         auto b0 = static_cast<unsigned char>(s[0]);
         uint32_t cp;
         size_t   bytes;
@@ -353,13 +352,13 @@ public:
         else if (b0 < 0xE0u) { cp = b0 & 0x1F; bytes = 2; }
         else if (b0 < 0xF0u) { cp = b0 & 0x0F; bytes = 3; }
         else                  { cp = b0 & 0x07; bytes = 4; }
-        if (s.size() != bytes) throw std::invalid_argument("String must be exactly one character long.");
+        if (s.size() != bytes) throw System::FormatException("String must be exactly one character long.");
         for (size_t i = 1; i < bytes; ++i) {
             auto bi = static_cast<unsigned char>(s[i]);
-            if ((bi & 0xC0u) != 0x80u) throw std::invalid_argument("Invalid UTF-8 sequence.");
+            if ((bi & 0xC0u) != 0x80u) throw System::FormatException("Invalid UTF-8 sequence.");
             cp = (cp << 6) | (bi & 0x3Fu);
         }
-        if (cp > 0xFFFFu) throw std::overflow_error("Character is outside BMP; cannot fit in char16_t.");
+        if (cp > 0xFFFFu) throw System::FormatException("Character is outside BMP; cannot fit in char16_t.");
         return static_cast<SharpRuntime::charcs>(cp);
     }
 

@@ -61,12 +61,23 @@ namespace System::Net::Http::Headers {
             return parts;
         }
 
+        // Verified against HeaderUtilities.cs's TryParseInt32, which delegates to
+        // int.TryParse(value, NumberStyles.None, ...): NumberStyles.None requires an unsigned,
+        // sign-free digit string (matching HTTP's delta-seconds grammar, 1*DIGIT) and fails
+        // (returns false, no throw) on overflow rather than wrapping. This previously accepted
+        // a leading '-' (via std::stol) and, on overflow, silently narrowed a `long` down to
+        // `intcs` with no range check at all -- an out-of-range max-age value (e.g.
+        // "99999999999") wrapped to an arbitrary, possibly negative intcs instead of failing
+        // to parse.
         bool tryParseSeconds(const std::string& value, SharpRuntime::intcs& result) {
-            if (value.empty()) return false;
+            if (value.empty() ||
+                !std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
+                return false;
             try {
                 size_t pos = 0;
                 long parsed = std::stol(value, &pos);
                 if (pos != value.size()) return false;
+                if (parsed > static_cast<long>(SharpRuntime::INTCS_MAX)) return false;
                 result = static_cast<SharpRuntime::intcs>(parsed);
                 return true;
             } catch (...) {

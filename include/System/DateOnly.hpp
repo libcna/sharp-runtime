@@ -38,8 +38,9 @@ namespace System {
          * @param year  The year (1–9999).
          * @param month The month (1–12).
          * @param day   The day (1–28/29/30/31 depending on month/year).
+         * @throws System::ArgumentOutOfRangeException if the year/month/day combination is not a valid date.
          */
-        DateOnly(intcs year, intcs month, intcs day) : year_(year), month_(month), day_(day) {}
+        DateOnly(intcs year, intcs month, intcs day);
 
         /** @brief Returns the year component of this date. */
         [[nodiscard]] intcs getYearProperty()  const { return year_; }
@@ -74,6 +75,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << year_ << '-'
                 << std::setw(2) << std::setfill('0') << month_ << '-'
                 << std::setw(2) << std::setfill('0') << day_;
@@ -125,7 +127,7 @@ namespace System {
          *
          * C++ counterpart of .NET DateOnly.AddDays(int).
          */
-        [[nodiscard]] DateOnly AddDays(int n) const;
+        [[nodiscard]] DateOnly AddDays(intcs n) const;
 
         /**
          * @brief Returns a new DateOnly with @p n months added (may be negative).
@@ -133,14 +135,14 @@ namespace System {
          * C++ counterpart of .NET DateOnly.AddMonths(int).
          * Clamps the day to the end of the resulting month when needed.
          */
-        [[nodiscard]] DateOnly AddMonths(int n) const;
+        [[nodiscard]] DateOnly AddMonths(intcs n) const;
 
         /**
          * @brief Returns a new DateOnly with @p n years added (may be negative).
          *
          * C++ counterpart of .NET DateOnly.AddYears(int).
          */
-        [[nodiscard]] DateOnly AddYears(int n) const;
+        [[nodiscard]] DateOnly AddYears(intcs n) const;
 
         /**
          * @brief Extracts the date part from the specified DateTime.

@@ -2,12 +2,62 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/Json/Utf8JsonWriter.hpp"
+#include <cmath>
 #include <cstdio>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "nlohmann/json.hpp"
 
 namespace System::Text::Json {
+
+namespace {
+
+    // Decodes one UTF-8 sequence starting at s[i], validating continuation bytes and
+    // rejecting overlong encodings -- the same conformance logic already applied elsewhere
+    // in this codebase (Rune::TryGetRuneAt/UnicodeEncoding/UTF32Encoding/ASCIIEncoding/
+    // IdnMapping's decode loops). An ill-formed sequence decodes to U+FFFD (length 1).
+    void decodeUtf8(const std::string& s, size_t i, uint32_t& codePoint, size_t& length) {
+        auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
+        unsigned char c0 = static_cast<unsigned char>(s[i]);
+        uint32_t cp; size_t len;
+        if (c0 < 0x80) {
+            cp = c0; len = 1;
+        } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size() &&
+                   isContinuation(static_cast<unsigned char>(s[i + 1]))) {
+            cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
+            len = 2;
+            if (cp < 0x80) { codePoint = 0xFFFD; length = 1; return; }
+        } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size() &&
+                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
+                   isContinuation(static_cast<unsigned char>(s[i + 2]))) {
+            cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
+                 (static_cast<unsigned char>(s[i + 2]) & 0x3F);
+            len = 3;
+            if (cp < 0x800) { codePoint = 0xFFFD; length = 1; return; }
+        } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size() &&
+                   isContinuation(static_cast<unsigned char>(s[i + 1])) &&
+                   isContinuation(static_cast<unsigned char>(s[i + 2])) &&
+                   isContinuation(static_cast<unsigned char>(s[i + 3]))) {
+            cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
+                 ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
+            len = 4;
+            if (cp < 0x10000) { codePoint = 0xFFFD; length = 1; return; }
+        } else {
+            codePoint = 0xFFFD;
+            length = 1;
+            return;
+        }
+        if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            codePoint = 0xFFFD;
+            length = 1;
+            return;
+        }
+        codePoint = cp;
+        length = len;
+    }
+
+} // namespace
 
     void Utf8JsonWriter::writeIndentIfNeeded() {
         if (!options_.Indented) return;
@@ -34,32 +84,64 @@ namespace System::Text::Json {
         }
     }
 
+    // Verified against DefaultJavaScriptEncoder.cs/AllowedBmpCodePointsBitmap.cs: the
+    // default encoder's allow-list is UnicodeRanges.BasicLatin (U+0000-U+007F) with
+    // undefined/control characters (including DEL, U+007F) and HTML-sensitive characters
+    // (< > & ' " +) removed, plus explicit extra escapes for \ and ` -- so effectively
+    // every codepoint outside printable ASCII minus that punctuation set is escaped, and
+    // (per MaxOutputCharactersPerInputCharacter's doc comment) every codepoint >= U+0080
+    // unconditionally, as \uXXXX (or a \uXXXX\uYYYY surrogate pair for astral code points
+    // U+10000+). The previous implementation only escaped control chars, ", \, and
+    // <>&' -- non-ASCII characters (names, i18n text, emoji) passed through completely
+    // unescaped, and +/`/DEL were missed even within the ASCII range.
     void Utf8JsonWriter::appendEscapedString(const std::string& value) {
         buffer_ += '"';
-        for (char c : value) {
-            switch (c) {
-                case '"': buffer_ += "\\\""; break;
-                case '\\': buffer_ += "\\\\"; break;
-                case '\b': buffer_ += "\\b"; break;
-                case '\f': buffer_ += "\\f"; break;
-                case '\n': buffer_ += "\\n"; break;
-                case '\r': buffer_ += "\\r"; break;
-                case '\t': buffer_ += "\\t"; break;
-                case '<': case '>': case '&': case '\'': {
-                    char hex[8];
-                    std::snprintf(hex, sizeof(hex), "\\u%04x", static_cast<unsigned char>(c));
-                    buffer_ += hex;
-                    break;
-                }
-                default:
-                    if (static_cast<unsigned char>(c) < 0x20) {
+        size_t i = 0;
+        while (i < value.size()) {
+            unsigned char c0 = static_cast<unsigned char>(value[i]);
+            if (c0 < 0x80) {
+                char c = static_cast<char>(c0);
+                switch (c) {
+                    case '"': buffer_ += "\\\""; break;
+                    case '\\': buffer_ += "\\\\"; break;
+                    case '\b': buffer_ += "\\b"; break;
+                    case '\f': buffer_ += "\\f"; break;
+                    case '\n': buffer_ += "\\n"; break;
+                    case '\r': buffer_ += "\\r"; break;
+                    case '\t': buffer_ += "\\t"; break;
+                    case '<': case '>': case '&': case '\'': case '+': case '`': {
                         char hex[8];
-                        std::snprintf(hex, sizeof(hex), "\\u%04x", static_cast<unsigned char>(c));
+                        std::snprintf(hex, sizeof(hex), "\\u%04x", c0);
                         buffer_ += hex;
-                    } else {
-                        buffer_ += c;
+                        break;
                     }
-                    break;
+                    default:
+                        if (c0 < 0x20 || c0 == 0x7F) {
+                            char hex[8];
+                            std::snprintf(hex, sizeof(hex), "\\u%04x", c0);
+                            buffer_ += hex;
+                        } else {
+                            buffer_ += c;
+                        }
+                        break;
+                }
+                ++i;
+            } else {
+                uint32_t cp; size_t len;
+                decodeUtf8(value, i, cp, len);
+                i += len;
+                if (cp <= 0xFFFF) {
+                    char hex[8];
+                    std::snprintf(hex, sizeof(hex), "\\u%04x", cp);
+                    buffer_ += hex;
+                } else {
+                    uint32_t v = cp - 0x10000;
+                    uint32_t hi = 0xD800 + (v >> 10);
+                    uint32_t lo = 0xDC00 + (v & 0x3FF);
+                    char hex[16];
+                    std::snprintf(hex, sizeof(hex), "\\u%04x\\u%04x", hi, lo);
+                    buffer_ += hex;
+                }
             }
         }
         buffer_ += '"';
@@ -173,6 +255,14 @@ namespace System::Text::Json {
         WriteNumberValue(value);
     }
     void Utf8JsonWriter::WriteNumber(const std::string& propertyName, double value) {
+        // Verified against Utf8JsonWriter.WriteProperties.Double.cs's WriteNumber: real .NET
+        // calls ValidateDouble(value) before writing anything (property name included), so a
+        // NaN/Infinity value fails atomically rather than leaving a dangling property name
+        // written with no value to follow it.
+        if (!std::isfinite(value)) {
+            throw System::ArgumentException(
+                ".NET number values such as positive and negative infinity cannot be written as valid JSON.", "value");
+        }
         WritePropertyName(propertyName);
         WriteNumberValue(value);
     }
@@ -186,7 +276,16 @@ namespace System::Text::Json {
         markValueWritten();
     }
 
+    // Verified against JsonWriterHelper.cs's ValidateDouble: real .NET throws ArgumentException
+    // ("special number values... cannot be written as valid JSON") for NaN/+-Infinity, since
+    // JSON has no representation for them. nlohmann::json(value).dump() silently serializes any
+    // of the three as the JSON literal "null" instead of throwing -- a genuinely different,
+    // silently-wrong value with no error.
     void Utf8JsonWriter::WriteNumberValue(double value) {
+        if (!std::isfinite(value)) {
+            throw System::ArgumentException(
+                ".NET number values such as positive and negative infinity cannot be written as valid JSON.", "value");
+        }
         validateCanWriteValue();
         if (stack_.empty() || !stack_.back().isObject) beforeWritingElement();
         buffer_ += nlohmann::json(value).dump();

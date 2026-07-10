@@ -7,8 +7,8 @@
 
 #include <memory>
 
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
-#include "System/NotImplementedException.hpp"
 #include "System/Xml/XPath/XPathNodeIterator.hpp"
 #include "System/Xml/XPath/XmlDocumentNavigator.hpp"
 #include "System/Xml/IHasXmlNode.hpp"
@@ -20,6 +20,34 @@
 #include "System/Xml/XmlWriter.hpp"
 
 namespace System::Xml {
+
+    namespace {
+        // Verified against XmlNode.cs's InsertBefore/InsertAfter/AppendChild: real .NET throws
+        // ArgumentException("Cannot insert a node or any ancestor of that node as a child of
+        // itself.") when the node being inserted is `this` itself or one of this's ancestors --
+        // otherwise the reparent creates a cycle. tinyxml2 performs no such check itself: its
+        // InsertChildPreamble() unconditionally unlinks the node from its current parent and
+        // reattaches it, so inserting an ancestor produces a genuine two-node parent/child cycle
+        // (the node ends up as both its own descendant and its own ancestor).
+        void ThrowIfSelfOrAncestor(const tinyxml2::XMLNode* thisNative, const tinyxml2::XMLNode* candidate) {
+            for (const tinyxml2::XMLNode* n = thisNative; n; n = n->Parent()) {
+                if (n == candidate)
+                    throw System::ArgumentException("Cannot insert a node or any ancestor of that node as a child of itself.");
+            }
+        }
+
+        // Verified against XmlNode.cs's InsertBefore/InsertAfter/AppendChild: real .NET throws
+        // ArgumentException("The node to be inserted is from a different document context.")
+        // rather than silently doing nothing. tinyxml2's InsertEndChild/InsertFirstChild/
+        // InsertAfterChild already refuse a cross-document insert internally (comparing
+        // XMLNode::_document), but they do so by silently returning nullptr -- this wrapper
+        // never checked that return value, so a cross-document insert previously reported
+        // success (returning newChild unchanged) while actually doing nothing.
+        void ThrowIfDifferentDocument(const XmlNode* thisNode, const XmlDocument* thisDoc, const XmlDocument* childDoc) {
+            if (childDoc && childDoc != thisDoc && static_cast<const void*>(childDoc) != static_cast<const void*>(thisNode))
+                throw System::ArgumentException("The node to be inserted is from a different document context.");
+        }
+    }
 
     XmlNode::~XmlNode() = default;
 
@@ -82,7 +110,11 @@ namespace System::Xml {
 
     std::string XmlNode::getInnerXmlProperty() const {
         if (!native_) return {};
-        tinyxml2::XMLPrinter printer;
+        // compact=true: real .NET's InnerXml serializes exact markup with no inserted
+        // whitespace between nodes. tinyxml2::XMLPrinter defaults to compact=false (pretty-
+        // printed with inserted newlines/indentation), which this port previously left
+        // unchanged, silently reformatting the tree's own markup instead of reproducing it.
+        tinyxml2::XMLPrinter printer(nullptr, /*compact=*/true);
         for (tinyxml2::XMLNode* child = native_->FirstChild(); child; child = child->NextSibling())
             child->Accept(&printer);
         return printer.CStr() ? printer.CStr() : "";
@@ -105,7 +137,9 @@ namespace System::Xml {
 
     std::string XmlNode::getOuterXmlProperty() const {
         if (!native_) return {};
-        tinyxml2::XMLPrinter printer;
+        // See getInnerXmlProperty()'s comment: compact=true matches real .NET's OuterXml
+        // producing exact markup with no inserted whitespace.
+        tinyxml2::XMLPrinter printer(nullptr, /*compact=*/true);
         native_->Accept(&printer);
         return printer.CStr() ? printer.CStr() : "";
     }
@@ -154,11 +188,14 @@ namespace System::Xml {
 
     XmlNode* XmlNode::PrependChild(XmlNode* newChild) {
         if (!native_ || !newChild) return newChild;
+        ThrowIfSelfOrAncestor(native_, newChild->native_);
+        ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         if (auto* frag = dynamic_cast<XmlDocumentFragment*>(newChild)) {
             XmlNode* firstInserted = nullptr;
             XmlNode* child = frag->getLastChildProperty();
             while (child) {
                 XmlNode* prev = child->getPreviousSiblingProperty();
+                ThrowIfSelfOrAncestor(native_, child->native_);
                 frag->RemoveChild(child);
                 native_->InsertFirstChild(child->native_);
                 firstInserted = child;
@@ -172,11 +209,14 @@ namespace System::Xml {
 
     XmlNode* XmlNode::AppendChild(XmlNode* newChild) {
         if (!native_ || !newChild) return newChild;
+        ThrowIfSelfOrAncestor(native_, newChild->native_);
+        ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         if (auto* frag = dynamic_cast<XmlDocumentFragment*>(newChild)) {
             XmlNode* lastInserted = nullptr;
             XmlNode* child = frag->getFirstChildProperty();
             while (child) {
                 XmlNode* next = child->getNextSiblingProperty();
+                ThrowIfSelfOrAncestor(native_, child->native_);
                 frag->RemoveChild(child);
                 native_->InsertEndChild(child->native_);
                 lastInserted = child;
@@ -191,6 +231,8 @@ namespace System::Xml {
     XmlNode* XmlNode::InsertBefore(XmlNode* newChild, XmlNode* refChild) {
         if (!refChild) return AppendChild(newChild);
         if (!native_ || !newChild) return newChild;
+        ThrowIfSelfOrAncestor(native_, newChild->native_);
+        ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         tinyxml2::XMLNode* prevSibling = refChild->native_ ? refChild->native_->PreviousSibling() : nullptr;
         if (!prevSibling) { native_->InsertFirstChild(newChild->native_); return newChild; }
         native_->InsertAfterChild(prevSibling, newChild->native_);
@@ -200,6 +242,8 @@ namespace System::Xml {
     XmlNode* XmlNode::InsertAfter(XmlNode* newChild, XmlNode* refChild) {
         if (!refChild) return PrependChild(newChild);
         if (!native_ || !newChild) return newChild;
+        ThrowIfSelfOrAncestor(native_, newChild->native_);
+        ThrowIfDifferentDocument(this, GetDocument(), newChild->GetDocument());
         native_->InsertAfterChild(refChild->native_, newChild->native_);
         return newChild;
     }

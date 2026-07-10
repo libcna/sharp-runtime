@@ -81,7 +81,7 @@ if(SHARP_RUNTIME_BUILD_TESTS)
     )
 
     if(NOT MSVC)
-        target_compile_options(SharpRuntimeTests PRIVATE -Wno-unused-result)
+        target_compile_options(SharpRuntimeTests PRIVATE -Wall -Wextra -Werror -Wno-format-truncation -Wno-unused-result)
     endif()
 
     include(GoogleTest)

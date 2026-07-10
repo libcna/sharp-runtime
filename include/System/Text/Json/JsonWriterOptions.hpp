@@ -20,6 +20,9 @@ namespace System::Text::Json {
      * built-in default escaping.
      */
     struct JsonWriterOptions {
+        /** @brief The default maximum nesting depth used when MaxDepth is left at 0. */
+        static constexpr intcs DefaultMaxDepth = 1000;
+
         /** @brief Whether the writer should pretty-print with indentation and new lines. Default false. */
         bool Indented = false;
         /** @brief The indentation character (space or tab only) used when Indented is true. Default space. */

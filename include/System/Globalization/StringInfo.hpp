@@ -103,27 +103,42 @@ public:
      * @brief Returns the text element at the specified index in the given string.
      *
      * C++ counterpart of .NET StringInfo.GetNextTextElement(string, int).
-     * Stub — returns a single character at @p index.
+     * Stub — returns a single character at @p index (byte, not grapheme cluster).
      * @param str   The source string.
      * @param index The zero-based character index (default 0).
-     * @return A single-character string, or an empty string if @p index is out of range.
+     * @return A single-character string, or an empty string if @p index is exactly str.size()
+     *         (the end of the string).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
+     *         str.size(). Previously only checked `index >= size()`, with no negative-index
+     *         check at all, so a negative index fell through to `str[index]` -- an
+     *         out-of-bounds/undefined-behavior read (verified against StringInfo.cs's
+     *         `(uint)index > (uint)str.Length` check, which relies on unsigned wraparound to
+     *         catch negative values too).
      */
     static std::string GetNextTextElement(const std::string& str, int index = 0) {
-        if (index >= static_cast<int>(str.size())) return {};
-        return std::string(1, str[index]);
+        if (index < 0 || index > static_cast<int>(str.size()))
+            throw System::ArgumentOutOfRangeException("index");
+        if (index == static_cast<int>(str.size())) return {};
+        return std::string(1, str[static_cast<size_t>(index)]);
     }
 
     /**
      * @brief Returns the length of the text element at the specified index.
      *
      * C++ counterpart of .NET StringInfo.GetNextTextElementLength(string, int).
-     * Stub — always returns 1 (single-byte elements).
+     * Stub — always returns 1 (single-byte elements, not real grapheme-cluster length).
      * @param str   The source string.
      * @param index The zero-based character index (default 0).
-     * @return 1 if @p index is in range; otherwise 0.
+     * @return 1 if @p index is a valid element position; 0 if @p index is exactly str.size()
+     *         (the end of the string).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
+     *         str.size(). Previously a negative index fell through to `return 1` instead of
+     *         throwing (StringInfo.cs validates the same way as GetNextTextElement).
      */
     static int GetNextTextElementLength(const std::string& str, int index = 0) {
-        if (index >= static_cast<int>(str.size())) return 0;
+        if (index < 0 || index > static_cast<int>(str.size()))
+            throw System::ArgumentOutOfRangeException("index");
+        if (index == static_cast<int>(str.size())) return 0;
         return 1;
     }
 

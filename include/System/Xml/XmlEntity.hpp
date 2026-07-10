@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include "System/InvalidOperationException.hpp"
 #include "System/Xml/XmlNode.hpp"
 
 namespace System::Xml {
@@ -38,6 +39,16 @@ namespace System::Xml {
         [[nodiscard]] const std::string& getSystemIdProperty() const { return systemId_; }
         /** @return The name of the associated notation for an unparsed entity, or "" if none. */
         [[nodiscard]] const std::string& getNotationNameProperty() const { return notationName_; }
+
+        /**
+         * @brief Setting InnerText on an Entity node is not allowed.
+         *
+         * C++ counterpart of .NET XmlEntity.InnerText setter (Dom/XmlEntity.cs), which is read-only.
+         * @throws System::InvalidOperationException always.
+         */
+        void setInnerTextProperty(const std::string& /*text*/) override {
+            throw System::InvalidOperationException("The 'InnerText' of an 'Entity' node is read-only and cannot be set.");
+        }
     };
 
 } // namespace System::Xml

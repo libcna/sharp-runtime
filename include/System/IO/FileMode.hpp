@@ -8,9 +8,9 @@ namespace System::IO
     /**
      * @brief Specifies how the operating system should open a file.
      *
-     * This is a lightweight C++ port of the .NET FileMode enum.
+     * C++ counterpart of .NET System.IO.FileMode.
      *
-     * @note Status: PARTIAL
+     * @note Status: Implemented — all six .NET FileMode values are present.
      */
     enum class FileMode
     {

@@ -532,7 +532,7 @@ namespace System {
          * C++ counterpart of .NET TimeZoneInfo.FindSystemTimeZoneById(string).
          * On Linux: checks /usr/share/zoneinfo/ and probes the offset via setenv("TZ").
          * On Windows: uses the IANA→Windows CLDR mapping table.
-         * @throws std::invalid_argument if the ID is not found.
+         * @throws System::TimeZoneNotFoundException if the ID is not found.
          */
         static std::shared_ptr<TimeZoneInfo> FindSystemTimeZoneById(const std::string& id);
 

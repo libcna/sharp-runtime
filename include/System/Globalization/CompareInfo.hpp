@@ -78,7 +78,7 @@ public:
      */
     intcs Compare(const std::string& s1, const std::string& s2,
                   CompareOptions options = CompareOptions::None) const {
-        if (hasFlag(options, CompareOptions::IgnoreCase))
+        if (isCaseInsensitive(options))
             return compareIgnoreCase(s1, s2);
         if (s1 < s2) return -1;
         if (s1 > s2) return  1;
@@ -151,7 +151,7 @@ public:
      */
     [[nodiscard]] intcs IndexOf(const std::string& source, const std::string& value,
                                 CompareOptions options = CompareOptions::None) const {
-        if (hasFlag(options, CompareOptions::IgnoreCase)) {
+        if (isCaseInsensitive(options)) {
             std::string sl = toLower(source), vl = toLower(value);
             auto pos = sl.find(vl);
             return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
@@ -171,7 +171,7 @@ public:
      */
     [[nodiscard]] intcs LastIndexOf(const std::string& source, const std::string& value,
                                     CompareOptions options = CompareOptions::None) const {
-        if (hasFlag(options, CompareOptions::IgnoreCase)) {
+        if (isCaseInsensitive(options)) {
             std::string sl = toLower(source), vl = toLower(value);
             auto pos = sl.rfind(vl);
             return pos == std::string::npos ? -1 : static_cast<intcs>(pos);
@@ -210,7 +210,7 @@ public:
      */
     [[nodiscard]] SortKey GetSortKey(const std::string& source,
                                      CompareOptions options = CompareOptions::None) const {
-        const std::string& keySource = hasFlag(options, CompareOptions::IgnoreCase) ? toLower(source) : source;
+        const std::string& keySource = isCaseInsensitive(options) ? toLower(source) : source;
         std::vector<bytecs> key(keySource.begin(), keySource.end());
         return SortKey(source, key);
     }
@@ -226,7 +226,7 @@ public:
      * @return A hash code derived from the string value.
      */
     [[nodiscard]] intcs GetHashCode(const std::string& source, CompareOptions options) const {
-        const std::string& hashSource = hasFlag(options, CompareOptions::IgnoreCase) ? toLower(source) : source;
+        const std::string& hashSource = isCaseInsensitive(options) ? toLower(source) : source;
         return static_cast<intcs>(std::hash<std::string>{}(hashSource));
     }
 
@@ -261,6 +261,16 @@ private:
 
     static bool hasFlag(CompareOptions options, CompareOptions flag) {
         return (static_cast<int>(options) & static_cast<int>(flag)) != 0;
+    }
+
+    // .NET's real invariant-mode implementation (CompareInfo.Invariant.cs) treats a
+    // comparison as case-insensitive when EITHER CompareOptions::IgnoreCase OR
+    // CompareOptions::OrdinalIgnoreCase is set: `(options & (CompareOptions.IgnoreCase |
+    // CompareOptions.OrdinalIgnoreCase)) != 0`. IgnoreCase and OrdinalIgnoreCase are
+    // distinct, non-overlapping bits (0x1 vs 0x10000000), so checking only IgnoreCase here
+    // would silently treat OrdinalIgnoreCase-only callers as case-sensitive.
+    static bool isCaseInsensitive(CompareOptions options) {
+        return hasFlag(options, CompareOptions::IgnoreCase) || hasFlag(options, CompareOptions::OrdinalIgnoreCase);
     }
 
     static std::string toLower(const std::string& s) {

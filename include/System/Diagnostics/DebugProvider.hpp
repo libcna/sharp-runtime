@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <cassert>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 
@@ -40,7 +40,11 @@ public:
     /**
      * @brief Reports an assertion failure: emits @p message/@p detailMessage and aborts.
      *
-     * C++ counterpart of .NET DebugProvider.Fail(string, string).
+     * C++ counterpart of .NET DebugProvider.Fail(string, string), which is marked
+     * [DoesNotReturn]. Uses std::abort() unconditionally rather than assert(false) -- the
+     * latter is a standard no-op when built with NDEBUG defined, which would silently let
+     * this method return instead of terminating, breaking its documented never-returns
+     * contract for any release build of this library.
      * @param message       The primary failure message.
      * @param detailMessage Additional detail about the failure.
      */
@@ -48,7 +52,7 @@ public:
         std::cerr << "Assertion failed: " << message;
         if (!detailMessage.empty()) std::cerr << "\n" << detailMessage;
         std::cerr << std::endl;
-        assert(false);
+        std::abort();
     }
 
     /**

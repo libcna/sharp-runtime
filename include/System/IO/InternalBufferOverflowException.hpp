@@ -10,11 +10,19 @@ namespace System::IO {
 
     /** @brief The exception that is thrown when the internal buffer overflows. @note Status: Implemented */
     class InternalBufferOverflowException : public System::SystemException {
+        static constexpr SharpRuntime::intcs InternalBufferOverflowHResult = static_cast<SharpRuntime::intcs>(0x80131905);
     public:
-        InternalBufferOverflowException() : System::SystemException("The internal buffer overflows.") {}
-        explicit InternalBufferOverflowException(const std::string& message) : System::SystemException(message) {}
+        /** Matches .NET's default constructor, which chains to the base SystemException() message ("System error.") rather than a custom string. */
+        InternalBufferOverflowException() : System::SystemException() {
+            setHResultProperty(InternalBufferOverflowHResult);
+        }
+        explicit InternalBufferOverflowException(const std::string& message) : System::SystemException(message) {
+            setHResultProperty(InternalBufferOverflowHResult);
+        }
         InternalBufferOverflowException(const std::string& message, std::exception_ptr inner)
-            : System::SystemException(message, std::move(inner)) {}
+            : System::SystemException(message, std::move(inner)) {
+            setHResultProperty(InternalBufferOverflowHResult);
+        }
     };
 
 } // namespace System::IO

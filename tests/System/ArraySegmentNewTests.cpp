@@ -76,13 +76,13 @@ TEST(ArraySegmentTests, Slice1Arg_FromEnd_EmptySegment) {
 TEST(ArraySegmentTests, Slice1Arg_OutOfRange_Throws) {
     std::vector<int> v{1, 2};
     ArraySegment<int> seg(v);
-    EXPECT_THROW(seg.Slice(5), std::out_of_range);
+    EXPECT_THROW(seg.Slice(5), System::ArgumentOutOfRangeException);
 }
 
 TEST(ArraySegmentTests, Slice1Arg_Negative_Throws) {
     std::vector<int> v{1, 2, 3};
     ArraySegment<int> seg(v);
-    EXPECT_THROW(seg.Slice(-1), std::out_of_range);
+    EXPECT_THROW(seg.Slice(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ArraySegmentTests, Slice1Arg_CorrectElements) {
@@ -161,7 +161,7 @@ TEST(ArraySegmentTests, CopyTo_ArraySegment_TooSmall_Throws) {
     std::vector<int> dst{0, 0};
     ArraySegment<int> srcSeg(src);
     ArraySegment<int> dstSeg(dst);
-    EXPECT_THROW(srcSeg.CopyTo(dstSeg), std::invalid_argument);
+    EXPECT_THROW(srcSeg.CopyTo(dstSeg), System::ArgumentException);
 }
 
 // ---------------------------------------------------------------------------

@@ -143,11 +143,16 @@ namespace System::Diagnostics {
         static void Fail(const std::string&)                          {}
 #else
         /**
-         * @brief Checks @p condition and aborts if false.
+         * @brief Checks @p condition; reports failure via the active DebugProvider if false.
+         *
+         * Routes through the same DebugProvider mechanism as the message-carrying overloads
+         * below, instead of calling the raw assert() macro directly -- a custom provider
+         * installed via SetProvider() must be invoked for this overload too, matching this
+         * class's own doc comment ("output is routed through a pluggable DebugProvider").
          * @param condition The expression that is expected to be true.
          */
         static void Assert(bool condition) {
-            assert(condition);
+            Assert(condition, "");
         }
         /**
          * @brief Checks @p condition; reports failure via the active DebugProvider if false.

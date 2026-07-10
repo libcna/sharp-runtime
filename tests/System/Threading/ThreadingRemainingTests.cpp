@@ -11,9 +11,16 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <future>
+#include <limits>
+#include <new>
 #include <string>
 #include <thread>
+#include "System/ApplicationException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/EventResetMode.hpp"
 #include "System/Threading/LazyThreadSafetyMode.hpp"
@@ -121,6 +128,47 @@ TEST(AsyncLocalTests, ValueChangedHandler_Called) {
     EXPECT_EQ(lastPrevious, 1);
     EXPECT_EQ(lastCurrent, 2);
 }
+TEST(AsyncLocalTests, SetSameValue_IsNoOp) {
+    int callCount = 0;
+    AsyncLocal<int> al([&](const System::Threading::AsyncLocalValueChangedArgs<int>&) { ++callCount; });
+    al.setValueProperty(5);
+    EXPECT_EQ(callCount, 1);
+    al.setValueProperty(5); // same value: must not fire the handler again
+    EXPECT_EQ(callCount, 1);
+}
+TEST(AsyncLocalTests, TwoInstances_SameType_AreIndependent) {
+    AsyncLocal<int> a;
+    AsyncLocal<int> b;
+    a.setValueProperty(1);
+    b.setValueProperty(2);
+    EXPECT_EQ(a.getValueProperty(), 1);
+    EXPECT_EQ(b.getValueProperty(), 2);
+}
+TEST(AsyncLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAddress_DoesNotLeakStaleValue) {
+    // Reproduces the exact scenario the ID-based-keying fix targets: a worker thread's
+    // thread_local map is populated by instance A; A is then destroyed by a *different*
+    // thread (only cleans that other thread's own map), and a new instance B is placement-new'd
+    // at the identical address. The old this-pointer-keyed implementation would have the worker
+    // thread's map lookup for B's address collide with A's still-present stale entry.
+    alignas(AsyncLocal<int>) unsigned char buffer[sizeof(AsyncLocal<int>)];
+    std::promise<void> replaced;
+    std::shared_future<void> replacedFuture = replaced.get_future().share();
+
+    std::thread worker([&] {
+        auto* a = new (buffer) AsyncLocal<int>();
+        a->setValueProperty(111); // populates this worker thread's thread_local map
+        replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
+        auto* b = reinterpret_cast<AsyncLocal<int>*>(buffer);
+        EXPECT_EQ(b->getValueProperty(), 0); // must not see A's leftover 111
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    reinterpret_cast<AsyncLocal<int>*>(buffer)->~AsyncLocal<int>(); // destroyed on the MAIN thread
+    new (buffer) AsyncLocal<int>();                                 // instance B at the identical address
+    replaced.set_value();
+    worker.join();
+    reinterpret_cast<AsyncLocal<int>*>(buffer)->~AsyncLocal<int>();
+}
 
 TEST(AsyncLocalValueChangedArgsTests, PropertiesReflectConstructorArgs) {
     System::Threading::AsyncLocalValueChangedArgs<int> args(10, 20, true);
@@ -173,7 +221,7 @@ TEST(CountdownEventTests, Constructor_StoresInitialCount) {
     EXPECT_EQ(ce.getCurrentCountProperty(), 5);
 }
 TEST(CountdownEventTests, NegativeCount_Throws) {
-    EXPECT_THROW(CountdownEvent(-1), std::invalid_argument);
+    EXPECT_THROW(CountdownEvent(-1), System::ArgumentOutOfRangeException);
 }
 TEST(CountdownEventTests, IsSet_FalseInitially) {
     CountdownEvent ce(2);
@@ -193,7 +241,17 @@ TEST(CountdownEventTests, Signal_ToZero_IsSet) {
 TEST(CountdownEventTests, Signal_AlreadyZero_Throws) {
     CountdownEvent ce(1);
     ce.Signal();
-    EXPECT_THROW(ce.Signal(), std::invalid_argument);
+    EXPECT_THROW(ce.Signal(), System::InvalidOperationException);
+}
+TEST(CountdownEventTests, AddCount_AlreadyZero_Throws) {
+    CountdownEvent ce(1);
+    ce.Signal();
+    EXPECT_THROW(ce.AddCount(), System::InvalidOperationException);
+}
+TEST(CountdownEventTests, AfterDispose_Wait_ThrowsObjectDisposedException) {
+    CountdownEvent ce(1);
+    ce.Dispose();
+    EXPECT_THROW(ce.Wait(), System::ObjectDisposedException);
 }
 TEST(CountdownEventTests, AddCount_IncreasesCount) {
     CountdownEvent ce(2);
@@ -220,6 +278,26 @@ TEST(CountdownEventTests, WaitWithTimeout_AlreadySet_ReturnsTrue) {
     CountdownEvent ce(0);
     EXPECT_TRUE(ce.Wait(100));
 }
+TEST(CountdownEventTests, AddCount_ZeroOrNegativeSignalCount_Throws) {
+    CountdownEvent ce(1);
+    EXPECT_THROW(ce.AddCount(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.AddCount(-1), System::ArgumentOutOfRangeException);
+}
+TEST(CountdownEventTests, Signal_ZeroOrNegativeSignalCount_Throws) {
+    CountdownEvent ce(1);
+    EXPECT_THROW(ce.Signal(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.Signal(-1), System::ArgumentOutOfRangeException);
+}
+TEST(CountdownEventTests, AddCount_WouldOverflow_ThrowsInvalidOperationException) {
+    CountdownEvent ce(std::numeric_limits<intcs>::max() - 1);
+    EXPECT_THROW(ce.AddCount(3), System::InvalidOperationException);
+    EXPECT_EQ(ce.getCurrentCountProperty(), std::numeric_limits<intcs>::max() - 1);
+}
+TEST(CountdownEventTests, AddCount_UpToMax_Succeeds) {
+    CountdownEvent ce(std::numeric_limits<intcs>::max() - 1);
+    EXPECT_NO_THROW(ce.AddCount(1));
+    EXPECT_EQ(ce.getCurrentCountProperty(), std::numeric_limits<intcs>::max());
+}
 
 // ===========================================================================
 // EventWaitHandle
@@ -243,6 +321,10 @@ TEST(EventWaitHandleTests, Set_Then_Reset_NotSet) {
     ewh.Set();
     ewh.Reset();
     EXPECT_FALSE(ewh.WaitOne(1));
+}
+TEST(EventWaitHandleTests, WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    EventWaitHandle ewh(false, EventResetMode::ManualReset);
+    EXPECT_THROW(ewh.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
@@ -269,6 +351,29 @@ TEST(LazyInitializerTests, EnsureInitialized_WithFactory) {
     EXPECT_EQ(*ptr, 99);
     delete ptr;
 }
+TEST(LazyInitializerTests, EnsureInitialized_NullFactory_ThrowsInvalidOperationException) {
+    int* ptr = nullptr;
+    EXPECT_THROW(
+        LazyInitializer::EnsureInitialized<int>(ptr, []() -> int* { return nullptr; }),
+        System::InvalidOperationException);
+}
+TEST(LazyInitializerTests, EnsureInitialized_ReentrantSameType_DoesNotDeadlock) {
+    // A factory for one `int*` target that itself initializes a second, distinct `int*`
+    // target of the same type T=int on the same thread. The previous per-T-instantiation
+    // static std::mutex would self-deadlock here since std::mutex isn't recursive.
+    int* outer = nullptr;
+    int* inner = nullptr;
+    LazyInitializer::EnsureInitialized<int>(outer, [&]() {
+        LazyInitializer::EnsureInitialized<int>(inner, []() { return new int(7); });
+        return new int(3);
+    });
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_EQ(*outer, 3);
+    EXPECT_EQ(*inner, 7);
+    delete outer;
+    delete inner;
+}
 
 // ===========================================================================
 // Lock
@@ -283,6 +388,38 @@ TEST(LockTests, Enter_And_Exit_NoThrow) {
     Lock lk;
     EXPECT_NO_THROW(lk.Enter());
     EXPECT_NO_THROW(lk.Exit());
+}
+TEST(LockTests, Exit_NotHeld_ThrowsSynchronizationLockException) {
+    Lock lk;
+    EXPECT_THROW(lk.Exit(), System::Threading::SynchronizationLockException);
+}
+TEST(LockTests, Exit_FromNonOwningThread_ThrowsSynchronizationLockException) {
+    Lock lk;
+    lk.Enter();
+    bool threw = false;
+    std::thread t([&] {
+        try { lk.Exit(); } catch (const System::Threading::SynchronizationLockException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
+    lk.Exit();
+}
+TEST(LockTests, IsHeldByCurrentThread_ReflectsState) {
+    Lock lk;
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Enter();
+    EXPECT_TRUE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Exit();
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
+}
+TEST(LockTests, Enter_IsReentrant) {
+    Lock lk;
+    lk.Enter();
+    EXPECT_NO_THROW(lk.Enter());
+    lk.Exit();
+    EXPECT_TRUE(lk.getIsHeldByCurrentThreadProperty());
+    lk.Exit();
+    EXPECT_FALSE(lk.getIsHeldByCurrentThreadProperty());
 }
 TEST(LockTests, EnterScope_RAII_ReleasesOnDestruction) {
     Lock lk;
@@ -327,6 +464,20 @@ TEST(ManualResetEventSlimTests, Wait_WithTimeout_AlreadySet_ReturnsTrue) {
     ManualResetEventSlim mre(true);
     EXPECT_TRUE(mre.Wait(100));
 }
+TEST(ManualResetEventSlimTests, Wait_TimeoutLessThanNegativeOne_Throws) {
+    ManualResetEventSlim mre;
+    EXPECT_THROW(mre.Wait(-2), System::ArgumentOutOfRangeException);
+}
+TEST(ManualResetEventSlimTests, AfterDispose_Wait_ThrowsObjectDisposedException) {
+    ManualResetEventSlim mre;
+    mre.Dispose();
+    EXPECT_THROW(mre.Wait(), System::ObjectDisposedException);
+}
+TEST(ManualResetEventSlimTests, AfterDispose_Reset_ThrowsObjectDisposedException) {
+    ManualResetEventSlim mre(true);
+    mre.Dispose();
+    EXPECT_THROW(mre.Reset(), System::ObjectDisposedException);
+}
 
 // ===========================================================================
 // ReaderWriterLockSlim
@@ -358,6 +509,159 @@ TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_Succeeds) {
 TEST(ReaderWriterLockSlimTests, Dispose_NoThrow) {
     ReaderWriterLockSlim rw;
     EXPECT_NO_THROW(rw.Dispose());
+}
+TEST(ReaderWriterLockSlimTests, UpgradeableToWrite_DoesNotDeadlock) {
+    // Previously EnterWriteLock() called mtx_.lock() while the same thread already held
+    // mtx_.lock_shared() via EnterUpgradeableReadLock() -- undefined behavior on
+    // std::shared_mutex, manifesting as a deadlock. Run on a background thread with a
+    // bounded join so a regression hangs the test instead of the whole suite.
+    ReaderWriterLockSlim rw;
+    std::promise<void> upgraded;
+    std::thread t([&] {
+        rw.EnterUpgradeableReadLock();
+        rw.EnterWriteLock();
+        upgraded.set_value();
+        rw.ExitWriteLock();
+        rw.ExitUpgradeableReadLock();
+    });
+    auto fut = upgraded.get_future();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    t.join();
+}
+TEST(ReaderWriterLockSlimTests, UpgradeableToWrite_WaitsForConcurrentReaderToDrain) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    std::promise<void> upgraded;
+    std::thread t([&] {
+        rw.EnterUpgradeableReadLock();
+        rw.EnterWriteLock();
+        upgraded.set_value();
+        rw.ExitWriteLock();
+        rw.ExitUpgradeableReadLock();
+    });
+    auto fut = upgraded.get_future();
+    // The write upgrade must not complete while the concurrent reader is still active.
+    EXPECT_EQ(fut.wait_for(std::chrono::milliseconds(200)), std::future_status::timeout);
+    rw.ExitReadLock();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    t.join();
+}
+TEST(ReaderWriterLockSlimTests, ExitReadLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitReadLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, ExitWriteLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitWriteLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, ExitUpgradeableReadLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitUpgradeableReadLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, EnterReadLock_AfterDispose_Throws) {
+    ReaderWriterLockSlim rw;
+    rw.Dispose();
+    EXPECT_THROW(rw.EnterReadLock(), System::ObjectDisposedException);
+}
+TEST(ReaderWriterLockSlimTests, DefaultRecursionPolicy_IsNoRecursion) {
+    ReaderWriterLockSlim rw;
+    EXPECT_EQ(rw.getRecursionPolicyProperty(), LockRecursionPolicy::NoRecursion);
+}
+TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_HonorsRealTimeout) {
+    // Previously the millisecondsTimeout parameter was discarded entirely (a single
+    // non-blocking attempt regardless of value). A held write lock must now make a contending
+    // TryEnterWriteLock actually block for approximately the requested duration before
+    // returning false, not return immediately.
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    std::atomic<bool> result{true};
+    auto start = std::chrono::steady_clock::now();
+    std::thread t([&] { result = rw.TryEnterWriteLock(100); });
+    t.join();
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_FALSE(result.load());
+    EXPECT_GE(elapsed, std::chrono::milliseconds(80));
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_SucceedsWithinTimeoutOnceReleased) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    std::atomic<bool> result{false};
+    std::thread t([&] {
+        result = rw.TryEnterWriteLock(2000);
+        if (result.load()) rw.ExitWriteLock(); // release on the same thread that acquired it
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    rw.ExitWriteLock();
+    t.join();
+    EXPECT_TRUE(result.load());
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveReadLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterReadLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveWriteLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    EXPECT_THROW(rw.EnterWriteLock(), System::Threading::LockRecursionException);
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveUpgradeableLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterUpgradeableReadLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitUpgradeableReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_WriteAfterRead_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterWriteLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_UpgradeAfterRead_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_UpgradeAfterWrite_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_NestedReadLock_BothExitsSucceed_AndWriterNotStarved) {
+    // Previously reader ownership was tracked via set *membership*, not a count: a second
+    // ExitReadLock() after a legitimately nested EnterReadLock()/EnterReadLock() threw
+    // SynchronizationLockException (membership already removed by the first exit), and the
+    // internal reader tally never reached zero, permanently starving any waiting writer.
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    rw.EnterReadLock();
+    rw.EnterReadLock();
+    EXPECT_TRUE(rw.getIsReadLockHeldProperty());
+    EXPECT_NO_THROW(rw.ExitReadLock());
+    EXPECT_TRUE(rw.getIsReadLockHeldProperty()); // still held once more
+    EXPECT_NO_THROW(rw.ExitReadLock());
+    EXPECT_FALSE(rw.getIsReadLockHeldProperty());
+    // A writer must now be able to acquire the lock -- proves the reader tally actually
+    // reached zero, not left permanently nonzero by the nested acquisition.
+    EXPECT_TRUE(rw.TryEnterWriteLock(2000));
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_NestedWriteLock_BothExitsSucceed) {
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    rw.EnterWriteLock();
+    rw.EnterWriteLock();
+    EXPECT_NO_THROW(rw.ExitWriteLock());
+    EXPECT_TRUE(rw.getIsWriteLockHeldProperty());
+    EXPECT_NO_THROW(rw.ExitWriteLock());
+    EXPECT_FALSE(rw.getIsWriteLockHeldProperty());
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_ExplicitCtor_RoundTripsPolicy) {
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    EXPECT_EQ(rw.getRecursionPolicyProperty(), LockRecursionPolicy::SupportsRecursion);
 }
 
 // ===========================================================================
@@ -398,6 +702,24 @@ TEST(SpinWaitTests, SpinUntil_WithTimeout_NeverTrue_ReturnsFalse) {
     EXPECT_FALSE(SpinWait::SpinUntil([]() { return false; }, 1));
 }
 
+// Regression test for a wave-3 audit finding: SpinUntil(condition, -1) (Timeout.Infinite)
+// used to compute a deadline already in the past (now() + milliseconds(-1)), so it returned
+// false almost immediately instead of spinning until the condition became true, like real
+// .NET (verified against SpinWait.cs: the 0-arg SpinUntil(condition) overload delegates to
+// this one with Timeout.Infinite).
+TEST(SpinWaitTests, SpinUntil_InfiniteTimeout_BlocksUntilConditionTrue) {
+    std::atomic<bool> flag{false};
+    std::atomic<bool> done{false};
+    std::thread t([&] { done = SpinWait::SpinUntil([&] { return flag.load(); }, -1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(done.load()); // still spinning after 100ms -- proves it didn't return immediately
+
+    flag.store(true);
+    t.join();
+    EXPECT_TRUE(done.load());
+}
+
 // ===========================================================================
 // ThreadLocal<T>
 // ===========================================================================
@@ -431,6 +753,53 @@ TEST(ThreadLocalTests, Dispose_NoThrow) {
     tl.getValueProperty();
     EXPECT_NO_THROW(tl.Dispose());
 }
+TEST(ThreadLocalTests, TwoInstances_SameType_AreIndependent) {
+    ThreadLocal<int> a;
+    ThreadLocal<int> b;
+    a.setValueProperty(1);
+    b.setValueProperty(2);
+    EXPECT_EQ(a.getValueProperty(), 1);
+    EXPECT_EQ(b.getValueProperty(), 2);
+}
+TEST(ThreadLocalTests, AfterDispose_GetValue_ThrowsObjectDisposedException) {
+    ThreadLocal<int> tl;
+    tl.Dispose();
+    EXPECT_THROW(tl.getValueProperty(), System::ObjectDisposedException);
+}
+TEST(ThreadLocalTests, AfterDispose_SetValue_ThrowsObjectDisposedException) {
+    ThreadLocal<int> tl;
+    tl.Dispose();
+    EXPECT_THROW(tl.setValueProperty(5), System::ObjectDisposedException);
+}
+TEST(ThreadLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAddress_DoesNotLeakStaleValue) {
+    alignas(ThreadLocal<int>) unsigned char buffer[sizeof(ThreadLocal<int>)];
+    std::promise<void> replaced;
+    std::shared_future<void> replacedFuture = replaced.get_future().share();
+
+    std::thread worker([&] {
+        auto* a = new (buffer) ThreadLocal<int>();
+        a->setValueProperty(222); // populates this worker thread's thread_local map
+        replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
+        auto* b = reinterpret_cast<ThreadLocal<int>*>(buffer);
+        EXPECT_FALSE(b->getIsValueCreatedProperty()); // must not see A's leftover entry at all
+        EXPECT_EQ(b->getValueProperty(), 0);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    reinterpret_cast<ThreadLocal<int>*>(buffer)->~ThreadLocal<int>(); // destroyed on the MAIN thread
+    new (buffer) ThreadLocal<int>();                                  // instance B at the identical address
+    replaced.set_value();
+    worker.join();
+    reinterpret_cast<ThreadLocal<int>*>(buffer)->~ThreadLocal<int>();
+}
+TEST(ThreadLocalTests, Factory_ReentrantAccess_ThrowsInvalidOperationException) {
+    ThreadLocal<int>* self = nullptr;
+    ThreadLocal<int> tl(std::function<int()>([&]() { return self->getValueProperty(); }));
+    self = &tl;
+    EXPECT_THROW(tl.getValueProperty(), System::InvalidOperationException);
+    // Verify the guard was released, not left permanently stuck for this thread/instance.
+    EXPECT_THROW(tl.getValueProperty(), System::InvalidOperationException);
+}
 
 // ===========================================================================
 // ThreadPool
@@ -443,6 +812,19 @@ TEST(ThreadPoolTests, QueueUserWorkItem_ReturnsTrue) {
     // Give the detached thread a moment to run
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_TRUE(ran.load());
+}
+TEST(ThreadPoolTests, QueueUserWorkItem_NullCallback_Throws) {
+    // Regression: an empty std::function invoked inside the detached thread previously
+    // threw std::bad_function_call with no handler, crashing the process via
+    // std::terminate() instead of throwing synchronously before the thread was spawned.
+    EXPECT_THROW(ThreadPool::QueueUserWorkItem(std::function<void()>()), System::ArgumentNullException);
+}
+TEST(ThreadPoolTests, QueueUserWorkItem_WithState_NullCallback_Throws) {
+    int state = 0;
+    EXPECT_THROW(ThreadPool::QueueUserWorkItem(std::function<void(void*)>(), &state), System::ArgumentNullException);
+}
+TEST(ThreadPoolTests, UnsafeQueueUserWorkItem_NullCallback_Throws) {
+    EXPECT_THROW(ThreadPool::UnsafeQueueUserWorkItem(nullptr, false), System::ArgumentNullException);
 }
 TEST(ThreadPoolTests, GetMinThreads_NonNegative) {
     int w = 0, c = 0;
@@ -487,3 +869,7 @@ THREADING_EXCEPT_SIMPLE(ThreadAbortException)
 THREADING_EXCEPT_SIMPLE(ThreadInterruptedException)
 THREADING_EXCEPT_SIMPLE(ThreadStateException)
 THREADING_EXCEPT_SIMPLE(WaitHandleCannotBeOpenedException)
+
+TEST(WaitHandleCannotBeOpenedExceptionTests, IsA_ApplicationException) {
+    EXPECT_THROW(throw WaitHandleCannotBeOpenedException(), System::ApplicationException);
+}

@@ -299,6 +299,7 @@ namespace System {
         magnitude %= static_cast<std::uint64_t>(TicksPerSecond);
 
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         if (negative) {
             oss << '-';
         }

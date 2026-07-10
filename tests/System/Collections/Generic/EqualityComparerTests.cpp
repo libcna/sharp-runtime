@@ -57,5 +57,5 @@ TEST(EqualityComparerTest, CreateNoHashCodeThrows) {
     auto c = EqualityComparer<int>::Create(
         [](const int& x, const int& y){ return x == y; }
     );
-    EXPECT_THROW(c->GetHashCode(1), std::runtime_error);
+    EXPECT_THROW(c->GetHashCode(1), System::NotSupportedException);
 }

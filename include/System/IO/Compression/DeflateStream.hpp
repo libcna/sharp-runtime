@@ -38,7 +38,7 @@ namespace System::IO::Compression {
          * @param mode      @c CompressionMode::Compress or @c ::Decompress.
          * @param leaveOpen When @c true the inner stream is not closed on destruction.
          *
-         * @throws std::runtime_error if zlib initialisation fails.
+         * @throws System::IO::IOException if zlib initialisation fails.
          */
         DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpen = false);
 

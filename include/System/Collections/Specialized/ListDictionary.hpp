@@ -173,27 +173,21 @@ public:
     /**
      * @brief Returns the value for the given key, or an empty std::any if not found.
      *
-     * C++ counterpart of .NET ListDictionary.Item[object] getter.
+     * C++ counterpart of .NET ListDictionary.Item[object] getter. Serves both const and
+     * non-const instances -- there is deliberately no non-const overload. A prior non-const
+     * `std::any&`-returning overload phantom-inserted an empty entry for a missing key even
+     * on what looked like a read (`auto v = d["missing"]` silently grew Count and made
+     * `Contains("missing")` become true) and returned a reference into the backing
+     * `std::vector` that dangled after any later insertion reallocated it -- the same
+     * reference-escape bug class fixed in ConcurrentDictionary (commit 3605260). Real .NET's
+     * getter (ListDictionary.cs) never mutates on a miss; only the setter (`set()` below)
+     * inserts. Use `set(key, value)` for `dict[key] = value`-style writes.
      * @param key The key whose value to retrieve.
      * @return The associated value, or an empty std::any if @p key is not present.
      */
     [[nodiscard]] std::any operator[](const std::string& key) const {
         int idx = findIndex(key);
         return (idx >= 0) ? data_[static_cast<size_t>(idx)].second : std::any{};
-    }
-
-    /**
-     * @brief Returns a reference to the value for the given key, inserting an empty entry if absent.
-     *
-     * C++ counterpart of .NET ListDictionary.Item[object] setter (via subscript).
-     * @param key The key whose value to access or insert.
-     * @return A reference to the associated value.
-     */
-    std::any& operator[](const std::string& key) {
-        int idx = findIndex(key);
-        if (idx >= 0) return data_[static_cast<size_t>(idx)].second;
-        data_.emplace_back(key, std::any{});
-        return data_.back().second;
     }
 
     /** @brief Returns a const iterator to the beginning of the dictionary (STL interop). */

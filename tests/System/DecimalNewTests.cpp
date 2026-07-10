@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Decimal.hpp"
+#include "System/OverflowException.hpp"
 
 using System::Decimal;
 
@@ -241,7 +242,7 @@ TEST(DecimalTests, ToUInt32_Truncates) {
 }
 
 TEST(DecimalTests, ToUInt32_Negative_Throws) {
-    EXPECT_THROW(Decimal(-1).ToUInt32(), std::overflow_error);
+    EXPECT_THROW(Decimal(-1).ToUInt32(), System::OverflowException);
 }
 
 TEST(DecimalTests, ToUInt64_Valid) {
@@ -249,5 +250,5 @@ TEST(DecimalTests, ToUInt64_Valid) {
 }
 
 TEST(DecimalTests, ToUInt64_Negative_Throws) {
-    EXPECT_THROW(Decimal(-1).ToUInt64(), std::overflow_error);
+    EXPECT_THROW(Decimal(-1).ToUInt64(), System::OverflowException);
 }

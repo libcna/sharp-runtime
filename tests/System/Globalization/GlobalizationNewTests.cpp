@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/TextInfo.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
 #include "System/Globalization/SortKey.hpp"
@@ -101,6 +102,18 @@ TEST(DateTimeFormatInfoTests, MonthNames) {
 TEST(DateTimeFormatInfoTests, DayNames) {
     DateTimeFormatInfo dtfi;
     EXPECT_EQ(dtfi.GetDayName(System::DayOfWeek::Monday), "Monday");
+}
+
+// Indexing the internal day-names array with an invalid DayOfWeek was previously undefined
+// behavior (std::array::operator[] does not bounds-check), not a thrown exception; real
+// .NET's base implementation validates first (DateTimeFormatInfo.cs's
+// `(uint)dow >= (uint)names.Length` check).
+TEST(DateTimeFormatInfoTests, GetDayName_InvalidValue_Throws) {
+    DateTimeFormatInfo dtfi;
+    auto invalid = static_cast<System::DayOfWeek>(7);
+    EXPECT_THROW(dtfi.GetDayName(invalid), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dtfi.GetAbbreviatedDayName(invalid), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dtfi.GetShortestDayName(invalid), System::ArgumentOutOfRangeException);
 }
 TEST(DateTimeFormatInfoTests, AbbreviatedMonthNames) {
     DateTimeFormatInfo dtfi;

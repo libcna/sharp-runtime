@@ -33,14 +33,26 @@ namespace System::IO {
             return static_cast<unsigned char>(s_[pos_++]);
         }
 
-        /** Reads the next line, stripping the line terminator. */
+        /**
+         * @brief Reads the next line, stripping the line terminator.
+         * @note Verified against StringReader.cs's ReadLine(): real .NET treats '\r' and '\n'
+         * as interchangeable line terminators -- a lone '\r' (classic Mac line ending) ends
+         * the line on its own, not just as part of "\r\n". If '\r' is immediately followed by
+         * '\n', both are consumed as one terminator (CRLF); a '\r' not followed by '\n' still
+         * terminates the line by itself. This previously only stopped scanning at '\n', so a
+         * lone '\r' was treated as ordinary line content -- silently merging what should be
+         * two separate lines into one, with the '\r' left embedded in the middle of the
+         * result.
+         */
         [[nodiscard]] std::string ReadLine() override {
             if (pos_ >= static_cast<intcs>(s_.size())) return "";
             auto start = pos_;
-            while (pos_ < static_cast<intcs>(s_.size()) && s_[pos_] != '\n') ++pos_;
+            while (pos_ < static_cast<intcs>(s_.size()) && s_[pos_] != '\n' && s_[pos_] != '\r') ++pos_;
             std::string line = s_.substr(start, pos_ - start);
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (pos_ < static_cast<intcs>(s_.size())) ++pos_; // skip '\n'
+            if (pos_ < static_cast<intcs>(s_.size())) {
+                bool isCrLf = s_[pos_] == '\r' && pos_ + 1 < static_cast<intcs>(s_.size()) && s_[pos_ + 1] == '\n';
+                pos_ += isCrLf ? 2 : 1;
+            }
             return line;
         }
 

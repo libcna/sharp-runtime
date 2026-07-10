@@ -59,19 +59,19 @@ TEST(MathTests, AbsIntZero) {
 TEST(MathTests, Abs_IntMinValue_Throws) {
     // .NET's Math.Abs(int) throws OverflowException for int.MinValue, since its
     // magnitude does not fit in a signed 32-bit integer - verified against Math.cs.
-    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::intcs>::min()), std::overflow_error);
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::intcs>::min()), System::OverflowException);
 }
 
 TEST(MathTests, Abs_LongMinValue_Throws) {
-    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::longcs>::min()), std::overflow_error);
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::longcs>::min()), System::OverflowException);
 }
 
 TEST(MathTests, Abs_ShortMinValue_Throws) {
-    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::shortcs>::min()), std::overflow_error);
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::shortcs>::min()), System::OverflowException);
 }
 
 TEST(MathTests, Abs_SByteMinValue_Throws) {
-    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::sbytecs>::min()), std::overflow_error);
+    EXPECT_THROW(Math::Abs(std::numeric_limits<SharpRuntime::sbytecs>::min()), System::OverflowException);
 }
 
 // ---------------------------------------------------------------------------
@@ -128,10 +128,10 @@ TEST(MathTests, ClampDoubleBasic) {
 TEST(MathTests, Clamp_MinGreaterThanMax_Throws) {
     // .NET's Math.Clamp throws ArgumentException if min > max, for every overload -
     // verified against Math.cs.
-    EXPECT_THROW(Math::Clamp(5, 10, 0), std::invalid_argument);
-    EXPECT_THROW(Math::Clamp(5.0, 10.0, 0.0), std::invalid_argument);
-    EXPECT_THROW(Math::Clamp(5.0f, 10.0f, 0.0f), std::invalid_argument);
-    EXPECT_THROW(Math::Clamp(static_cast<SharpRuntime::longcs>(5), static_cast<SharpRuntime::longcs>(10), static_cast<SharpRuntime::longcs>(0)), std::invalid_argument);
+    EXPECT_THROW(Math::Clamp(5, 10, 0), System::ArgumentException);
+    EXPECT_THROW(Math::Clamp(5.0, 10.0, 0.0), System::ArgumentException);
+    EXPECT_THROW(Math::Clamp(5.0f, 10.0f, 0.0f), System::ArgumentException);
+    EXPECT_THROW(Math::Clamp(static_cast<SharpRuntime::longcs>(5), static_cast<SharpRuntime::longcs>(10), static_cast<SharpRuntime::longcs>(0)), System::ArgumentException);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,8 +413,8 @@ TEST(MathTests, Round_ThreeDigits) {
 TEST(MathTests, Round_Digits_OutOfRange_Throws) {
     // .NET's Math.Round(double, int) throws ArgumentOutOfRangeException if digits
     // is outside [0, 15] - verified against Math.cs.
-    EXPECT_THROW(Math::Round(1.5, -1), std::out_of_range);
-    EXPECT_THROW(Math::Round(1.5, 16), std::out_of_range);
+    EXPECT_THROW(Math::Round(1.5, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Math::Round(1.5, 16), System::ArgumentOutOfRangeException);
     EXPECT_NO_THROW(Math::Round(1.5, 0));
     EXPECT_NO_THROW(Math::Round(1.5, 15));
 }

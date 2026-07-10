@@ -3,7 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
-#include <stdexcept>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Index.hpp"
 
 namespace System {
@@ -86,14 +86,14 @@ namespace System {
          * checks, which also reject negative offsets).
          * @param length Total number of elements in the collection.
          * @return Resolved OffsetAndLength value.
-         * @throws std::out_of_range if the resolved range falls outside [0, length].
+         * @throws System::ArgumentOutOfRangeException if the resolved range falls outside [0, length].
          */
         [[nodiscard]] OffsetAndLength GetOffsetAndLength(int length) const {
             int start = start_.GetOffset(length);
             int end   = end_.GetOffset(length);
             if (static_cast<unsigned>(end) > static_cast<unsigned>(length) ||
                 static_cast<unsigned>(start) > static_cast<unsigned>(end)) {
-                throw std::out_of_range("Range: resolved range is outside the bounds of the collection.");
+                throw System::ArgumentOutOfRangeException("length");
             }
             return { start, end - start };
         }

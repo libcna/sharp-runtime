@@ -7,9 +7,11 @@
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/UnixDomainSocketEndPoint.hpp"
+#include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include "System/Net/Dns.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 #if defined(_WIN32)
 #  include <winsock2.h>
@@ -94,6 +96,31 @@ namespace {
         }
     }
 
+    int nativeSocketFlags(SocketFlags flags) {
+#if defined(_WIN32)
+        // Winsock2's MSG_* flag bit values are numerically identical to this port's
+        // System::Net::Sockets::SocketFlags (real .NET's own SocketFlags enum was itself
+        // modeled on Winsock2) -- a direct cast is correct here.
+        return static_cast<int>(flags);
+#else
+        // Verified against pal_networking.c's ConvertSocketFlagsPalToPlatform: real .NET only
+        // ever passes OutOfBand/Peek/DontRoute as *input* flags to Send/Receive/SendTo/
+        // ReceiveFrom -- Truncated/ControlDataTruncated/Broadcast/Multicast/Partial are
+        // receive-*result*-only flags, never meaningful as input -- and translates each
+        // meaningful input flag to its own POSIX MSG_* constant individually rather than
+        // passing the bit pattern through, since .NET's SocketFlags bit positions only match
+        // Linux's MSG_* constants by coincidence for these three flags. A raw
+        // static_cast<int>(flags), this port's previous behavior, silently mapped unrelated
+        // bits onto the wrong native flag whenever a caller passed anything else -- e.g.
+        // SocketFlags::Truncated (0x0100) would have set Linux's MSG_WAITALL (also 0x100).
+        int native = 0;
+        if ((flags & SocketFlags::OutOfBand) != SocketFlags::None) native |= MSG_OOB;
+        if ((flags & SocketFlags::Peek) != SocketFlags::None) native |= MSG_PEEK;
+        if ((flags & SocketFlags::DontRoute) != SocketFlags::None) native |= MSG_DONTROUTE;
+        return native;
+#endif
+    }
+
     // Builds a native sockaddr for `ep` into `storage`, returning the address length.
     // Supports IPEndPoint (v4/v6) and UnixDomainSocketEndPoint.
     socklen_t buildNativeAddress(const System::Net::EndPoint& ep, sockaddr_storage& storage) {
@@ -155,7 +182,31 @@ namespace {
 
     [[noreturn]] void throwSocketError(const char* what) {
         int err = lastError();
+#if defined(_WIN32)
+        // Winsock error codes (WSAGetLastError()) already share SocketError's own numbering
+        // (see SocketError.hpp's doc comment) -- no translation needed here.
         throw SocketException(static_cast<intcs>(err), what);
+#elif defined(__EMSCRIPTEN__)
+        throw SocketException(static_cast<intcs>(err), what);
+#else
+        throw SocketException(SharpRuntimeDetail::Net::Sockets::TranslateErrno(err), what);
+#endif
+    }
+
+    // Verified against Socket.Tasks.cs's ValidateBufferArguments: casting to uint32_t before
+    // comparing catches a negative offset/count as an out-of-range value too (a negative
+    // int becomes a huge unsigned value), matching (uint)offset > (uint)buffer.Length and
+    // (uint)size > (uint)(buffer.Length - offset) in the .NET source. Previously this port
+    // did buffer.data() + offset with no bounds check at all -- a genuine out-of-bounds
+    // heap read (Send/SendTo) or write (Receive/ReceiveFrom) when offset+count exceeded the
+    // buffer, not just a parity gap.
+    template<typename Buf>
+    void validateBufferArgs(const Buf& buffer, intcs offset, intcs count) {
+        uint32_t size = static_cast<uint32_t>(buffer.size());
+        if (static_cast<uint32_t>(offset) > size)
+            throw System::ArgumentOutOfRangeException("offset");
+        if (static_cast<uint32_t>(count) > size - static_cast<uint32_t>(offset))
+            throw System::ArgumentOutOfRangeException("count");
     }
 
 } // namespace
@@ -358,12 +409,14 @@ namespace {
         }
     }
 
+#if !defined(_WIN32)
     timeval millisecondsToTimeval(intcs ms) {
         timeval tv{};
         tv.tv_sec = ms / 1000;
         tv.tv_usec = (ms % 1000) * 1000;
         return tv;
     }
+#endif
 
 } // namespace
 
@@ -493,12 +546,13 @@ std::shared_ptr<Socket> Socket::Accept() {
 }
 
 intcs Socket::Send(const std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags) {
+    validateBufferArgs(buffer, offset, count);
     if (count == 0) return 0;
 #if defined(_WIN32)
     int sent = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
-                       static_cast<int>(flags));
+                       nativeSocketFlags(flags));
 #else
-    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags));
+    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags));
 #endif
     if (sent < 0) {
         throwSocketError("Socket::Send: send() failed");
@@ -511,12 +565,13 @@ intcs Socket::Send(const std::vector<bytecs>& buffer, SocketFlags flags) {
 }
 
 intcs Socket::Receive(std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags) {
+    validateBufferArgs(buffer, offset, count);
     if (count == 0) return 0;
 #if defined(_WIN32)
     int received = ::recv(toSk(fd_), reinterpret_cast<char*>(buffer.data() + offset), count,
-                           static_cast<int>(flags));
+                           nativeSocketFlags(flags));
 #else
-    ssize_t received = ::recv(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags));
+    ssize_t received = ::recv(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags));
 #endif
     if (received < 0) {
         throwSocketError("Socket::Receive: recv() failed");
@@ -530,13 +585,14 @@ intcs Socket::Receive(std::vector<bytecs>& buffer, SocketFlags flags) {
 
 intcs Socket::SendTo(const std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags,
                       const System::Net::EndPoint& remoteEP) {
+    validateBufferArgs(buffer, offset, count);
     sockaddr_storage storage{};
     socklen_t len = buildNativeAddress(remoteEP, storage);
 #if defined(_WIN32)
     int sent = ::sendto(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
-                         static_cast<int>(flags), reinterpret_cast<sockaddr*>(&storage), static_cast<int>(len));
+                         nativeSocketFlags(flags), reinterpret_cast<sockaddr*>(&storage), static_cast<int>(len));
 #else
-    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags),
+    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags),
                              reinterpret_cast<sockaddr*>(&storage), len);
 #endif
     if (sent < 0) {
@@ -551,13 +607,14 @@ intcs Socket::SendTo(const std::vector<bytecs>& buffer, const System::Net::EndPo
 
 SocketReceiveFromResult Socket::ReceiveFrom(std::vector<bytecs>& buffer, intcs offset, intcs count, SocketFlags flags,
                                               const System::Net::EndPoint& /*remoteEPTemplate*/) {
+    validateBufferArgs(buffer, offset, count);
     sockaddr_storage storage{};
     socklen_t len = sizeof(storage);
 #if defined(_WIN32)
     int received = ::recvfrom(toSk(fd_), reinterpret_cast<char*>(buffer.data() + offset), count,
-                               static_cast<int>(flags), reinterpret_cast<sockaddr*>(&storage), &len);
+                               nativeSocketFlags(flags), reinterpret_cast<sockaddr*>(&storage), &len);
 #else
-    ssize_t received = ::recvfrom(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags),
+    ssize_t received = ::recvfrom(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags),
                                    reinterpret_cast<sockaddr*>(&storage), &len);
 #endif
     if (received < 0) {

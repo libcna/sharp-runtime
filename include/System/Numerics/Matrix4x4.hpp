@@ -3,8 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cmath>
+#include <limits>
+#include <numbers>
 #include <sstream>
 #include <string>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector3.hpp"
 #include "System/Numerics/Vector4.hpp"
 #include "System/Numerics/Quaternion.hpp"
@@ -181,7 +184,14 @@ struct Matrix4x4 {
                   - b*(e*(kp_lo)-g*(ip_lm)+h*(io_km))
                   + c*(e*(jp_ln)-f*(ip_lm)+h*(in_jm))
                   - d*(e*(jo_kn)-f*(io_km)+g*(in_jm));
-        if (std::abs(det) < 1e-10f) { result = {}; return false; }
+        if (std::abs(det) < std::numeric_limits<float>::denorm_min()) {
+            constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+            result = Matrix4x4(nan, nan, nan, nan,
+                                nan, nan, nan, nan,
+                                nan, nan, nan, nan,
+                                nan, nan, nan, nan);
+            return false;
+        }
         float inv = 1.0f / det;
         result.M11 = (f*(kp_lo)-g*(jp_ln)+h*(jo_kn))*inv;
         result.M21 = -(e*(kp_lo)-g*(ip_lm)+h*(io_km))*inv;
@@ -309,6 +319,11 @@ struct Matrix4x4 {
      * @param far     Distance to the far clip plane.
      */
     static Matrix4x4 CreatePerspectiveFieldOfView(float fov, float aspect, float near, float far) {
+        System::ArgumentOutOfRangeException::ThrowIfLessThanOrEqual(fov, 0.0f, "fieldOfView");
+        System::ArgumentOutOfRangeException::ThrowIfGreaterThanOrEqual(fov, std::numbers::pi_v<float>, "fieldOfView");
+        System::ArgumentOutOfRangeException::ThrowIfLessThanOrEqual(near, 0.0f, "nearPlaneDistance");
+        System::ArgumentOutOfRangeException::ThrowIfLessThanOrEqual(far, 0.0f, "farPlaneDistance");
+        System::ArgumentOutOfRangeException::ThrowIfGreaterThanOrEqual(near, far, "nearPlaneDistance");
         float ys = 1.0f/std::tan(fov*0.5f);
         float xs = ys/aspect;
         float zn = far/(near-far);
@@ -409,7 +424,7 @@ inline Quaternion Quaternion::CreateFromRotationMatrix(const Matrix4x4& m) {
     if (trace > 0) {
         float s = 0.5f/std::sqrt(trace+1.0f);
         return {(m.M23-m.M32)*s,(m.M31-m.M13)*s,(m.M12-m.M21)*s,0.25f/s};
-    } else if (m.M11>m.M22 && m.M11>m.M33) {
+    } else if (m.M11>=m.M22 && m.M11>=m.M33) {
         float s = 2.0f*std::sqrt(1.0f+m.M11-m.M22-m.M33);
         return {0.25f*s,(m.M12+m.M21)/s,(m.M31+m.M13)/s,(m.M23-m.M32)/s};
     } else if (m.M22>m.M33) {

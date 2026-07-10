@@ -709,10 +709,27 @@ namespace System::Xml::XPath {
         bool CompareValues(const XPathValue& a, const XPathValue& b, BinOp op) {
             bool aNs = a.kind == XPathResultType::NodeSet;
             bool bNs = b.kind == XPathResultType::NodeSet;
+            // Per XPath 1.0 Section 3.4: = and != between node-set-involving operands compare
+            // string-values lexicographically, but <, <=, >, >= ALWAYS convert to numbers
+            // first (the same "neither object is a node-set and the comparison is one of <,
+            // <=, >, >=" numeric-conversion rule applies to the node-set cases too -- this is
+            // a well-known, universally-implemented XPath behavior, not specific to any one
+            // engine). Node-set-vs-boolean and node-set-vs-number below already did this
+            // correctly (via NumCompare); node-set-vs-node-set and node-set-vs-string
+            // previously used StrCompare unconditionally, silently producing lexicographic
+            // instead of numeric results for relational operators, e.g. `@count > 9` where
+            // @count="10" incorrectly evaluated string "10" < "9".
+            bool numeric = !(op == BinOp::Eq || op == BinOp::Ne);
             if (aNs && bNs) {
                 for (auto& na : a.nodes)
-                    for (auto& nb : b.nodes)
-                        if (StrCompare(NodeStringValue(*na), NodeStringValue(*nb), op)) return true;
+                    for (auto& nb : b.nodes) {
+                        if (numeric) {
+                            if (NumCompare(ParseXPathNumberLiteralString(NodeStringValue(*na)),
+                                           ParseXPathNumberLiteralString(NodeStringValue(*nb)), op)) return true;
+                        } else {
+                            if (StrCompare(NodeStringValue(*na), NodeStringValue(*nb), op)) return true;
+                        }
+                    }
                 return false;
             }
             if (aNs || bNs) {
@@ -727,8 +744,14 @@ namespace System::Xml::XPath {
                         if (NumCompare(ParseXPathNumberLiteralString(NodeStringValue(*n)), other.number, effOp)) return true;
                     return false;
                 }
-                for (auto& n : ns.nodes)
-                    if (StrCompare(NodeStringValue(*n), other.text, effOp)) return true;
+                for (auto& n : ns.nodes) {
+                    if (numeric) {
+                        if (NumCompare(ParseXPathNumberLiteralString(NodeStringValue(*n)),
+                                       ParseXPathNumberLiteralString(other.text), effOp)) return true;
+                    } else {
+                        if (StrCompare(NodeStringValue(*n), other.text, effOp)) return true;
+                    }
+                }
                 return false;
             }
             if (op == BinOp::Eq || op == BinOp::Ne) {

@@ -119,6 +119,18 @@ namespace System::Threading::Channels {
             std::exception_ptr closeError;
             SharpRuntime::intcs capacity = -1; // -1 == unbounded
             BoundedChannelFullMode fullMode = BoundedChannelFullMode::Wait;
+
+            // Verified against BoundedChannel.cs's TryWrite: a configured capacity of 0 (a
+            // documented legal "rendezvous channel") is handled there by a queue-transition-from-
+            // 0-to-1 special case that still buffers one item when no reader is synchronously
+            // blocked waiting -- i.e. a capacity-0 channel is observably equivalent to a
+            // capacity-1 channel for every publicly-visible TryWrite/WaitToWriteAsync outcome (the
+            // only difference is an internal direct-handoff-to-a-blocked-reader optimization that
+            // doesn't change any return value this port's simpler mutex/condvar model produces).
+            // Previously this port used `capacity` directly in its "is full" comparisons, so a
+            // capacity-0 channel had queue.size() (0) >= capacity (0) true immediately -- every
+            // write blocked forever, even with a reader concurrently waiting to receive.
+            [[nodiscard]] SharpRuntime::intcs effectiveCapacity() const { return capacity == 0 ? 1 : capacity; }
         };
 
         template<typename T>
@@ -178,7 +190,7 @@ namespace System::Threading::Channels {
                 std::lock_guard<std::mutex> lock(state_->mutex);
                 if (state_->closed) return false;
 
-                if (state_->capacity >= 0 && static_cast<SharpRuntime::intcs>(state_->queue.size()) >= state_->capacity) {
+                if (state_->capacity >= 0 && static_cast<SharpRuntime::intcs>(state_->queue.size()) >= state_->effectiveCapacity()) {
                     switch (state_->fullMode) {
                         case BoundedChannelFullMode::Wait:
                             return false;
@@ -204,7 +216,7 @@ namespace System::Threading::Channels {
                     std::unique_lock<std::mutex> lock(state->mutex);
                     state->notFull.wait(lock, [&] {
                         return state->closed || state->capacity < 0 ||
-                               static_cast<SharpRuntime::intcs>(state->queue.size()) < state->capacity ||
+                               static_cast<SharpRuntime::intcs>(state->queue.size()) < state->effectiveCapacity() ||
                                state->fullMode != BoundedChannelFullMode::Wait;
                     });
                     return !state->closed;

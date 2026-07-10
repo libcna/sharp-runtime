@@ -246,6 +246,22 @@ TEST(XContainerTests, DescendantNodes_IncludesAllLevels) {
     ASSERT_EQ(nodes.size(), 2u); // child element + its text
 }
 
+TEST(XContainerTests, Add_SelfAsChild_ThrowsInsteadOfCreatingCycle) {
+    // Regression: InsertNodeAt previously had no cycle guard -- inserting a node into its own
+    // subtree created a permanent shared_ptr reference cycle (the container ends up holding,
+    // transitively, a shared_ptr back to itself) and would stack-overflow any recursive
+    // traversal (Nodes()/ToString()/etc.).
+    auto root = std::make_shared<XElement>("root");
+    EXPECT_THROW(root->Add(root), System::InvalidOperationException);
+}
+
+TEST(XContainerTests, Add_AncestorAsChild_ThrowsInsteadOfCreatingCycle) {
+    auto root = std::make_shared<XElement>("root");
+    auto child = std::make_shared<XElement>("child");
+    root->Add(child);
+    EXPECT_THROW(child->Add(root), System::InvalidOperationException);
+}
+
 TEST(XContainerTests, RemoveNodes_ClearsChildrenAndParent) {
     auto root = std::make_shared<XElement>("root");
     auto child = std::make_shared<XElement>("child");
@@ -336,6 +352,21 @@ TEST(WriteToTests, XElement_WritesStartAndEndTags) {
     EXPECT_NE(out.find("<root"), std::string::npos);
     EXPECT_NE(out.find("id=\"1\""), std::string::npos);
     EXPECT_NE(out.find("<child"), std::string::npos);
+}
+
+TEST(WriteToTests, XElement_NamespacedAttribute_DoesNotEmitClarkNotation) {
+    // Regression: XElement::WriteTo() previously wrote XName::ToString()'s Clark notation
+    // ("{namespace}local") directly as the attribute *name* -- '{'/'}' are not legal in an XML
+    // Name production, so this produced literally malformed, unparseable XML for any
+    // namespaced attribute instead of just a namespace-fidelity gap.
+    XElement e("root");
+    e.Add(std::make_shared<XAttribute>(XName("http://example.com/ns", "kind"), "rare"));
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    e.WriteTo(*w);
+    std::string out = w->ToString();
+    EXPECT_EQ(out.find('{'), std::string::npos);
+    EXPECT_EQ(out.find('}'), std::string::npos);
+    EXPECT_NE(out.find("kind=\"rare\""), std::string::npos);
 }
 
 TEST(WriteToTests, XComment_WritesComment) {

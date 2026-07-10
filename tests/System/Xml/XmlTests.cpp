@@ -158,6 +158,26 @@ TEST(XmlReaderTests, ReadPastEnd_ReturnsFalse) {
     EXPECT_EQ(r->getReadStateProperty(), ReadState::EndOfFile);
 }
 
+// Regression test for a wave-3 audit finding: most accessors only guarded pos < 0, not
+// pos >= events.size() -- after Read() returns false at EOF, pos sits exactly at
+// events.size(), so every one of these indexed events[pos] out of bounds (UB/crash) instead
+// of returning a safe default. Only getNodeTypeProperty() had the correct upper-bound check.
+TEST(XmlReaderTests, AccessorsAfterEOF_ReturnSafeDefaults_DoNotCrash) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x a=\"1\"><y/></x>"));
+    while (r->Read()) {}
+    ASSERT_EQ(r->getReadStateProperty(), ReadState::EndOfFile);
+
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::None);
+    EXPECT_EQ(r->getNameProperty(), "");
+    EXPECT_EQ(r->getValueProperty(), "");
+    EXPECT_FALSE(r->getIsEmptyElementProperty());
+    EXPECT_FALSE(r->MoveToElement());
+    EXPECT_FALSE(r->MoveToNextAttribute());
+    EXPECT_EQ(r->GetAttribute("a"), "");
+    EXPECT_THROW(r->ReadStartElement(), XmlException);
+    EXPECT_THROW(r->ReadEndElement(), XmlException);
+}
+
 TEST(XmlReaderTests, InitialState_IsInitial) {
     std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x/>"));
     EXPECT_EQ(r->getReadStateProperty(), ReadState::Initial);
@@ -388,6 +408,18 @@ TEST(XAttributeTests, ToString_LocalName) {
     EXPECT_EQ(a.ToString(), "href=\"url\"");
 }
 
+TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
+    // Regression: XAttribute::ToString() previously wrote XName::ToString()'s Clark notation
+    // ("{namespace}local") directly as the attribute *name* -- '{'/'}' are not legal in an XML
+    // Name production, so this produced literally malformed, unparseable XML for any
+    // namespaced attribute instead of just a namespace-fidelity gap.
+    XAttribute a(XName("http://example.com/ns", "kind"), "rare");
+    std::string s = a.ToString();
+    EXPECT_EQ(s.find('{'), std::string::npos);
+    EXPECT_EQ(s.find('}'), std::string::npos);
+    EXPECT_EQ(s, "kind=\"rare\"");
+}
+
 TEST(XAttributeTests, NextAttribute_DefaultNull) {
     XAttribute a("x", "1");
     EXPECT_EQ(a.getNextAttributeProperty(), nullptr);
@@ -492,6 +524,21 @@ TEST(XElementTests, ToString_WithAttribute) {
     e.Add(std::make_shared<XAttribute>("src", "pic.png"));
     std::string s = e.ToString();
     EXPECT_NE(s.find("src=\"pic.png\""), std::string::npos);
+}
+
+TEST(XElementTests, ToString_NamespacedAttribute_ProducesValidXml_RoundTrips) {
+    // Regression: previously ToString() (via SerializeTo -> XAttribute::ToString()) emitted
+    // "{http://example.com/ns}kind=\"rare\"", which is not valid XML and would fail to
+    // reparse. Confirms the fixed output both omits Clark notation and successfully
+    // round-trips through Parse().
+    XElement e("special");
+    e.Add(std::make_shared<XAttribute>(XName("http://example.com/ns", "kind"), "rare"));
+    std::string s = e.ToString();
+    EXPECT_EQ(s.find('{'), std::string::npos);
+
+    auto reloaded = XElement::Parse(s);
+    ASSERT_NE(reloaded, nullptr);
+    EXPECT_EQ(reloaded->Attribute("kind")->getValueProperty(), "rare");
 }
 
 // ===========================================================================

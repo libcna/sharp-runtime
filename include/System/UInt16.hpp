@@ -8,10 +8,11 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -31,16 +32,17 @@ namespace System {
 
         /**
          * @brief Converts the string representation of a number to its UInt16 equivalent.
-         * @throws std::out_of_range if the value exceeds UInt16 range.
-         * @throws std::invalid_argument if the string is not a valid integer.
+         * @throws System::OverflowException if the value exceeds UInt16 range.
+         * @throws System::FormatException if the string is not a valid integer.
          */
         static SharpRuntime::ushortcs Parse(const std::string& s) {
             try {
                 unsigned long v = std::stoul(s);
-                if (v > MaxValue) throw std::out_of_range("Value out of UInt16 range.");
+                if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt16.");
                 return static_cast<uint16_t>(v);
-            } catch (const std::out_of_range&) { throw; }
-              catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            } catch (const System::OverflowException&) { throw; }
+              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a UInt16."); }
+              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
         }
 
         /**
@@ -63,6 +65,7 @@ namespace System {
             int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
             unsigned uv = static_cast<unsigned>(value);
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << uv; return oss.str(); }
             if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << uv; return oss.str(); }
             if (type == 'D' || type == 'd') {

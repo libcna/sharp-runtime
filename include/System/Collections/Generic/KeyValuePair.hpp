@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <sstream>
+#include <string>
 #include <utility>
 
 namespace System::Collections::Generic {
@@ -54,6 +56,31 @@ struct KeyValuePair {
      * @return true if the pairs are not equal; otherwise false.
      */
     bool operator!=(const KeyValuePair& other) const { return !(*this == other); }
+
+    /**
+     * @brief Returns a string representation of the pair in the form "[key, value]".
+     *
+     * C++ counterpart of .NET KeyValuePair<TKey,TValue>.ToString(). Requires TKey and
+     * TValue to support operator<<(std::ostream&).
+     */
+    [[nodiscard]] std::string ToString() const {
+        std::ostringstream ss;
+        ss << "[" << Key << ", " << Value << "]";
+        return ss.str();
+    }
 };
+
+/**
+ * @brief Creates a KeyValuePair<TKey,TValue> with types inferred from the arguments.
+ *
+ * C++ counterpart of .NET's static (non-generic) KeyValuePair.Create<TKey,TValue>(TKey, TValue)
+ * helper class. A free function, not a KeyValuePair<TKey,TValue> static member, since C++ does
+ * not allow a class template and a non-template class to share the same name in one namespace
+ * the way .NET's generic KeyValuePair<TKey,TValue> and non-generic KeyValuePair class do.
+ */
+template<typename TKey, typename TValue>
+[[nodiscard]] KeyValuePair<TKey, TValue> Create(const TKey& key, const TValue& value) {
+    return KeyValuePair<TKey, TValue>(key, value);
+}
 
 } // namespace System::Collections::Generic

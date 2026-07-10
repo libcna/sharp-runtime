@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 
 #include "System/DateTime.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
 #include <chrono>
@@ -10,7 +11,6 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <stdexcept>
 
 namespace System {
 
@@ -44,7 +44,7 @@ namespace System {
                                   int hour, int minute, int second, int millisecond)
     {
         if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1)
-            throw std::out_of_range("DateTime: date component out of range");
+            throw System::ArgumentOutOfRangeException("year", "DateTime: date component out of range");
 
         // Days-to-month tables for non-leap and leap years
         static const int d365[] = {0,31,59,90,120,151,181,212,243,273,304,334,365};
@@ -54,7 +54,7 @@ namespace System {
         const int* d = leap ? d366 : d365;
 
         if (day > d[month] - d[month - 1])
-            throw std::out_of_range("DateTime: day out of range for given month");
+            throw System::ArgumentOutOfRangeException("day", "DateTime: day out of range for given month");
 
         const int y = year - 1;
         const longcs days = static_cast<longcs>(y) * 365
@@ -76,7 +76,10 @@ namespace System {
         : ticks_(0) {}
 
     DateTime::DateTime(longcs ticks)
-        : ticks_(ticks) {}
+        : ticks_(ticks) {
+        if (ticks < 0 || ticks > MaxTicks)
+            throw System::ArgumentOutOfRangeException("ticks", "Ticks must be between DateTime.MinValue.Ticks and DateTime.MaxValue.Ticks.");
+    }
 
     DateTime::DateTime(int year, int month, int day)
         : ticks_(dateToTicks(year, month, day)) {}
@@ -151,13 +154,13 @@ namespace System {
     DateTime DateTime::AddTicks(longcs value) const {
         const longcs newTicks = ticks_ + value;
         if (newTicks < 0 || newTicks > MaxTicks)
-            throw std::out_of_range("DateTime: resulting ticks out of range");
+            throw System::ArgumentOutOfRangeException("value", "DateTime: resulting ticks out of range");
         return DateTime(newTicks);
     }
 
     DateTime DateTime::AddMonths(int months) const {
         if (months < -120000 || months > 120000)
-            throw std::out_of_range("DateTime: months out of range");
+            throw System::ArgumentOutOfRangeException("months", "DateTime: months out of range");
 
         const int year  = getYearProperty();
         const int month = getMonthProperty();
@@ -169,7 +172,7 @@ namespace System {
         m -= q * 12;
 
         if (y < 1 || y > 9999)
-            throw std::out_of_range("DateTime: resulting year out of range");
+            throw System::ArgumentOutOfRangeException("months", "DateTime: resulting year out of range");
 
         const int d = std::min(day, DaysInMonth(y, m));
         const longcs timeOfDay = ticks_ % TicksPerDay;
@@ -178,19 +181,19 @@ namespace System {
 
     DateTime DateTime::AddYears(int value) const {
         if (value < -10000 || value > 10000)
-            throw std::out_of_range("DateTime: years out of range");
+            throw System::ArgumentOutOfRangeException("value", "DateTime: years out of range");
         return AddMonths(value * 12);
     }
 
     bool DateTime::IsLeapYear(int year) {
         if (year < 1 || year > 9999)
-            throw std::out_of_range("DateTime: year out of range");
+            throw System::ArgumentOutOfRangeException("year", "DateTime: year out of range");
         return (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0);
     }
 
     int DateTime::DaysInMonth(int year, int month) {
         if (month < 1 || month > 12)
-            throw std::out_of_range("DateTime: month out of range");
+            throw System::ArgumentOutOfRangeException("month", "DateTime: month out of range");
         static const int dpm365[] = {31,28,31,30,31,30,31,31,30,31,30,31};
         static const int dpm366[] = {31,29,31,30,31,30,31,31,30,31,30,31};
         return (IsLeapYear(year) ? dpm366 : dpm365)[month - 1];

@@ -5,6 +5,7 @@
 #include <set>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -15,6 +16,13 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Collections.Generic.SortedSet<T>.
  * Backed by std::set<T>; provides O(log n) Add, Remove, and Contains.
+ *
+ * @note Unlike .NET's SortedSet<T>, iterators do not detect concurrent modification:
+ * .NET throws InvalidOperationException if the set is structurally modified while
+ * an enumerator is active, but sharp-runtime's iterators follow plain std::set
+ * invalidation rules instead (erasing an element only invalidates that element's
+ * iterator; other iterators remain valid). Do not mutate the set while iterating
+ * it directly.
  *
  * @tparam T The type of elements in the set (must support operator< for ordering).
  */
@@ -220,8 +228,11 @@ public:
      * @param lower The minimum value (inclusive).
      * @param upper The maximum value (inclusive).
      * @return A new SortedSet<T> containing elements in the range.
+     * @throws System::ArgumentException if @p lower is greater than @p upper.
      */
     [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {
+        if (lower > upper)
+            throw System::ArgumentException("lowerValue is greater than upperValue.", "lowerValue");
         SortedSet<T> view;
         for (auto it = data_.lower_bound(lower); it != data_.end() && !(*it > upper); ++it)
             view.Add(*it);

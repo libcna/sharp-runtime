@@ -26,7 +26,6 @@ namespace {
 }
 #elif defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
-namespace { inline void wsaInit() {} }
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -80,6 +79,7 @@ namespace System::Net {
 
     std::vector<IPAddress> Dns::GetHostAddresses(const std::string& hostNameOrAddress, AddressFamily family) {
 #if defined(__EMSCRIPTEN__)
+        (void)hostNameOrAddress;
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostAddresses is not supported on Emscripten.");
 #else
@@ -118,6 +118,7 @@ namespace System::Net {
 
     IPHostEntry Dns::GetHostEntry(const std::string& hostNameOrAddress, AddressFamily family) {
 #if defined(__EMSCRIPTEN__)
+        (void)hostNameOrAddress;
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostEntry is not supported on Emscripten.");
 #else

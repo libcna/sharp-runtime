@@ -25,6 +25,13 @@ using SharpRuntime::intcs;
  * Backed by std::vector<T>; provides O(1) amortized Add, O(1) indexed access,
  * and full IList<T> compliance.
  *
+ * @note Unlike .NET's List<T>, iterators returned by begin()/end() do not detect
+ * concurrent modification: .NET throws InvalidOperationException if the list is
+ * structurally modified (Add/Remove/Clear/etc.) while an enumerator is active,
+ * but sharp-runtime's iterators follow plain std::vector<T> invalidation rules
+ * instead (e.g. Add() may reallocate and invalidate all existing iterators
+ * without warning). Do not mutate the list while iterating it directly.
+ *
  * @tparam T The type of elements in the list.
  */
 template<typename T>
@@ -347,8 +354,11 @@ class List : public IList<T> {
          * @param item       The value to locate.
          * @param startIndex The zero-based index to start searching at.
          * @return The index of the first occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or greater than Count.
          */
         [[nodiscard]] intcs IndexOf(const T& item, intcs startIndex) const {
+            if (startIndex < 0 || startIndex > static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i < static_cast<intcs>(items_.size()); ++i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
@@ -374,8 +384,11 @@ class List : public IList<T> {
          * @param item       The value to locate.
          * @param startIndex The zero-based index to start searching backward from.
          * @return The index of the last occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or >= Count.
          */
         [[nodiscard]] intcs LastIndexOf(const T& item, intcs startIndex) const {
+            if (startIndex < 0 || startIndex >= static_cast<intcs>(items_.size()))
+                throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i >= 0; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
@@ -396,8 +409,11 @@ class List : public IList<T> {
          *
          * C++ counterpart of .NET List<T>.EnsureCapacity(int).
          * @param capacity The minimum capacity to ensure.
+         * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
          */
         void EnsureCapacity(intcs capacity) {
+            if (capacity < 0)
+                throw System::ArgumentOutOfRangeException("capacity");
             if (capacity > static_cast<intcs>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
         }
@@ -429,7 +445,16 @@ class List : public IList<T> {
          * @brief Returns a read-only wrapper around this list.
          *
          * C++ counterpart of .NET List<T>.AsReadOnly().
-         * @return A ReadOnlyCollection<T> wrapping this list's elements.
+         *
+         * @warning Real .NET's AsReadOnly() returns a live *view*: mutations to this List
+         * afterward are visible through the returned wrapper (ReadOnlyCollection.cs stores a
+         * plain reference to the source list, not a copy). This port's List<T> holds its
+         * elements in a plain (non-shared_ptr) std::vector<T>, so achieving that exact live-
+         * view semantic here would require changing List<T>'s internal storage to
+         * shared_ptr-backed -- a broad change to a heavily-used core type, out of scope per
+         * CLAUDE.md rule #10. This returns a ReadOnlyCollection<T> that copies this list's
+         * current elements instead; it will NOT reflect later mutations to this List.
+         * @return A ReadOnlyCollection<T> containing a snapshot copy of this list's elements.
          */
         [[nodiscard]] System::Collections::ObjectModel::ReadOnlyCollection<T> AsReadOnly() const {
             return System::Collections::ObjectModel::ReadOnlyCollection<T>(items_);

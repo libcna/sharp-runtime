@@ -16,6 +16,13 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Comparer.
  * Because C++ has no runtime type system, objects are compared by pointer value.
  * Callers that need value-based comparison should use a typed comparer.
+ *
+ * @warning This is a permanent architectural limitation, not a bug to be fixed locally: real
+ * .NET Comparer.Compare calls IComparable.CompareTo on the actual runtime type via `x as
+ * IComparable`, but C++ has no common object root, so this non-generic, `const void*`-typed
+ * comparer cannot safely determine or invoke the pointee's real comparison logic. Same root
+ * cause as System::Collections::ListDictionaryInternal and
+ * System::Collections::StructuralComparisons.
  */
 class Comparer : public IComparer {
 public:

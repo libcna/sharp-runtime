@@ -5,9 +5,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <stdexcept>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
 
 #if defined(_MSC_VER)
 #  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."
@@ -192,12 +195,12 @@ namespace System {
          * @brief Converts the string representation of a number to its Int128 equivalent.
          * @param s A string containing the number to convert.
          * @return An Int128 equivalent to @p s.
-         * @throws std::invalid_argument if @p s is not a valid integer string.
+         * @throws System::FormatException if @p s is not a valid integer string.
          */
         static Int128 Parse(const std::string& s) {
             Int128 result;
             if (!TryParse(s, result))
-                throw std::invalid_argument("Input string was not in a correct format: " + s);
+                throw System::FormatException("Input string was not in a correct format: " + s);
             return result;
         }
 
@@ -334,10 +337,10 @@ namespace System {
          * @param value The value to clamp.
          * @param min   The inclusive lower bound.
          * @param max   The inclusive upper bound.
-         * @throws std::invalid_argument if @p min is greater than @p max.
+         * @throws System::ArgumentException if @p min is greater than @p max.
          */
         [[nodiscard]] static Int128 Clamp(const Int128& value, const Int128& min, const Int128& max) {
-            if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+            if (min > max) throw System::ArgumentException("min cannot be greater than max.");
             if (value < min) return min;
             if (value > max) return max;
             return value;
@@ -386,10 +389,10 @@ namespace System {
          *
          * C++ counterpart of .NET Int128.Log2(Int128) (IBinaryNumber&lt;TSelf&gt;.Log2).
          * Matches .NET: Log2(0) is 0, not an error.
-         * @throws std::out_of_range if @p value is negative.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
         [[nodiscard]] static intcs Log2(const Int128& value) {
-            if (value.value_ < 0) throw std::out_of_range("value must be non-negative.");
+            if (value.value_ < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
             uint64_t hi = value.getUpperProperty();
             if (hi != 0) return static_cast<intcs>(64 + 63 - __builtin_clzll(hi));
             uint64_t lo = value.getLowerProperty();
@@ -407,10 +410,16 @@ namespace System {
         Int128 operator-(const Int128& o) const noexcept { return Int128(value_ - o.value_); }
         /** @brief Multiplies two Int128 values. */
         Int128 operator*(const Int128& o) const noexcept { return Int128(value_ * o.value_); }
-        /** @brief Divides an Int128 by another. */
-        Int128 operator/(const Int128& o) const { return Int128(value_ / o.value_); }
-        /** @brief Computes the remainder of dividing one Int128 by another. */
-        Int128 operator%(const Int128& o) const { return Int128(value_ % o.value_); }
+        /** @brief Divides an Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        Int128 operator/(const Int128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return Int128(value_ / o.value_);
+        }
+        /** @brief Computes the remainder of dividing one Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        Int128 operator%(const Int128& o) const {
+            if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            return Int128(value_ % o.value_);
+        }
         /** @brief Computes the bitwise AND of two Int128 values. */
         Int128 operator&(const Int128& o) const noexcept { return Int128(value_ & o.value_); }
         /** @brief Computes the bitwise OR of two Int128 values. */

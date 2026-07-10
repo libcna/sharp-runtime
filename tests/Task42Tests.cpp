@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/Timer.hpp"
 #include "System/Object.hpp"
 #include "System/Type.hpp"
@@ -56,6 +57,16 @@
 // ===========================================================================
 // Timer — fixed shared_ptr<State>, no dangling-this
 // ===========================================================================
+
+TEST(TimerTests, Constructor_DueTimeLessThanNegativeOne_Throws) {
+    EXPECT_THROW(System::Threading::Timer(
+        [](void*){}, nullptr, -2, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(TimerTests, Constructor_PeriodLessThanNegativeOne_Throws) {
+    EXPECT_THROW(System::Threading::Timer(
+        [](void*){}, nullptr, 0, -2), System::ArgumentOutOfRangeException);
+}
 
 TEST(TimerTests, FiresCallbackBeforeDispose) {
     std::atomic<int> count{0};
@@ -336,7 +347,7 @@ TEST(ByteTests, Parse_Valid) {
 }
 
 TEST(ByteTests, Parse_OutOfRange) {
-    EXPECT_THROW(System::Byte::Parse("300"), std::out_of_range);
+    EXPECT_THROW(System::Byte::Parse("300"), System::OverflowException);
 }
 
 TEST(ByteTests, TryParse_Success) {
@@ -473,12 +484,12 @@ TEST(AppContextTests, TryGetSwitch_Missing) {
 }
 
 TEST(AppContextTests, SetSwitch_EmptyName_Throws) {
-    EXPECT_THROW(System::AppContext::SetSwitch("", true), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::SetSwitch("", true), System::ArgumentException);
 }
 
 TEST(AppContextTests, TryGetSwitch_EmptyName_Throws) {
     bool e = false;
-    EXPECT_THROW(System::AppContext::TryGetSwitch("", e), std::invalid_argument);
+    EXPECT_THROW(System::AppContext::TryGetSwitch("", e), System::ArgumentException);
 }
 
 // ===========================================================================
@@ -962,6 +973,20 @@ TEST(JsonElementTests, StringElement_GetString) {
     EXPECT_EQ(doc->getRootElementProperty().GetString(), "hello");
 }
 
+TEST(JsonElementTests, NullElement_GetString_DoesNotThrow) {
+    // Regression: .NET's GetString() special-cases Null and returns null before its type
+    // check (JsonDocument.cs); previously this threw InvalidOperationException instead,
+    // breaking optional-string field parsing (a common real-world JSON shape).
+    auto doc = System::Text::Json::JsonDocument::Parse("null");
+    EXPECT_NO_THROW(doc->getRootElementProperty().GetString());
+    EXPECT_EQ(doc->getRootElementProperty().GetString(), "");
+}
+
+TEST(JsonElementTests, NumberElement_GetString_Throws) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    EXPECT_THROW(doc->getRootElementProperty().GetString(), System::InvalidOperationException);
+}
+
 TEST(JsonElementTests, NumberElement_GetInt32) {
     auto doc = System::Text::Json::JsonDocument::Parse("99");
     EXPECT_EQ(doc->getRootElementProperty().GetInt32(), 99);
@@ -1008,6 +1033,66 @@ TEST(JsonElementTests, TryGetProperty_NotFound) {
 TEST(JsonElementTests, GetProperty_Throws_WhenMissing) {
     auto doc = System::Text::Json::JsonDocument::Parse("{}");
     EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("x"), std::exception);
+}
+
+// ===========================================================================
+// Regression: TryGetProperty/GetProperty previously returned false/threw
+// KeyNotFoundException uniformly for a non-Object element, instead of the
+// InvalidOperationException real .NET throws (verified against
+// JsonDocument.TryGetProperty.cs's TryGetNamedPropertyValue, which checks the token type
+// unconditionally via CheckExpectedType before searching for the property).
+// ===========================================================================
+
+TEST(JsonElementTests, TryGetProperty_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    System::Text::Json::JsonElement out;
+    EXPECT_THROW(doc->getRootElementProperty().TryGetProperty("x", out), System::InvalidOperationException);
+}
+
+TEST(JsonElementTests, GetProperty_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetProperty("x"), System::InvalidOperationException);
+}
+
+// ===========================================================================
+// Regression: TryGetInt32/TryGetInt64 previously round-tripped every JSON number through
+// get<double>() before casting to intcs/longcs -- undefined behavior in C++ when casting an
+// out-of-range double to a signed integer, and silently accepted float literals (e.g. "1.0")
+// whose value happened to be integral, where real .NET's Utf8Parser-based text parse rejects
+// them outright. Verified against JsonDocument.cs's TryGetValue(out int)/TryGetValue(out long).
+// ===========================================================================
+
+TEST(JsonElementTests, TryGetInt32_FloatLiteral_ReturnsFalse) {
+    auto doc = System::Text::Json::JsonDocument::Parse("1.0");
+    SharpRuntime::intcs value = 0;
+    EXPECT_FALSE(doc->getRootElementProperty().TryGetInt32(value));
+}
+
+TEST(JsonElementTests, TryGetInt32_OutOfRange_ReturnsFalseWithoutUB) {
+    // 1e18 is far outside int32 range; the old get<double>()-then-cast path was UB here.
+    auto doc = System::Text::Json::JsonDocument::Parse("1000000000000000000");
+    SharpRuntime::intcs value = 0;
+    EXPECT_FALSE(doc->getRootElementProperty().TryGetInt32(value));
+}
+
+TEST(JsonElementTests, TryGetInt64_LargePreciseValue_ExactRoundTrip) {
+    // 2^53 + 1 loses precision through a double intermediate; the fixed implementation must
+    // read the integer directly instead of routing through get<double>().
+    auto doc = System::Text::Json::JsonDocument::Parse("9007199254740993");
+    SharpRuntime::longcs value = 0;
+    ASSERT_TRUE(doc->getRootElementProperty().TryGetInt64(value));
+    EXPECT_EQ(value, 9007199254740993LL);
+}
+
+TEST(JsonElementTests, TryGetInt32_WrongKind_ThrowsInvalidOperationException) {
+    auto doc = System::Text::Json::JsonDocument::Parse(R"("not a number")");
+    SharpRuntime::intcs value = 0;
+    EXPECT_THROW(doc->getRootElementProperty().TryGetInt32(value), System::InvalidOperationException);
+}
+
+TEST(JsonElementTests, GetInt32_FloatLiteral_ThrowsFormatException) {
+    auto doc = System::Text::Json::JsonDocument::Parse("3.0");
+    EXPECT_THROW((void)doc->getRootElementProperty().GetInt32(), System::FormatException);
 }
 
 TEST(JsonElementTests, EnumerateArray_Empty) {

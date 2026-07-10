@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/TimeZoneInfo.hpp"
 
 #include <chrono>
 
@@ -28,7 +29,12 @@ namespace System::IO {
         }
 
         System::DateTime fromFileClock(std::filesystem::file_time_type ft) {
-            auto sysTime = std::chrono::clock_cast<std::chrono::system_clock>(ft);
+            // file_clock::to_sys() may return a finer-grained duration than
+            // system_clock::time_point (e.g. nanoseconds on libc++/Emscripten vs.
+            // microseconds on libstdc++); to_time_t() only accepts the exact
+            // system_clock::time_point type, so cast explicitly.
+            auto sysTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                std::chrono::file_clock::to_sys(ft));
             return fromUnixTime(std::chrono::system_clock::to_time_t(sysTime));
         }
 
@@ -61,8 +67,16 @@ namespace System::IO {
         return fromUnixTime(statTimes(fullPath_).creation);
     }
 
+    // Verified against FileSystemInfo.cs: CreationTime/LastAccessTime/LastWriteTime are all
+    // `Xxx => XxxUtc.ToLocalTime()` (and the LastWriteTime setter is `XxxUtc = value.
+    // ToUniversalTime()`). This port's System::DateTime deliberately doesn't track
+    // DateTimeKind and has no ToLocalTime()/ToUniversalTime() (a documented, separate
+    // limitation -- see DateTime.hpp's doc comment), so these previously returned/consumed the
+    // UTC value verbatim with no conversion at all -- silently wrong by the local UTC offset
+    // whenever it's non-zero. Routed through the already-existing
+    // TimeZoneInfo::ConvertTimeFromUtc/ConvertTimeToUtc using TimeZoneInfo::Local() instead.
     System::DateTime FileSystemInfo::getCreationTimeProperty() const {
-        return getCreationTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getCreationTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeUtcProperty() const {
@@ -70,7 +84,7 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeProperty() const {
-        return getLastAccessTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastAccessTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeUtcProperty() const {
@@ -81,20 +95,20 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeProperty() const {
-        return getLastWriteTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastWriteTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     void FileSystemInfo::setLastWriteTimeUtcProperty(const System::DateTime& value) {
         longcs unixSeconds = (value.getTicksProperty() - System::DateTime::UnixEpochTicks) / System::DateTime::TicksPerSecond;
         auto sysTime = std::chrono::system_clock::from_time_t(static_cast<std::time_t>(unixSeconds));
-        auto fileTime = std::chrono::clock_cast<std::chrono::file_clock>(sysTime);
+        auto fileTime = std::chrono::file_clock::from_sys(sysTime);
         std::error_code ec;
         std::filesystem::last_write_time(fullPath_, fileTime, ec);
         if (ec) throw IOException("Failed to set last write time of '" + fullPath_.string() + "': " + ec.message());
     }
 
     void FileSystemInfo::setLastWriteTimeProperty(const System::DateTime& value) {
-        setLastWriteTimeUtcProperty(value);
+        setLastWriteTimeUtcProperty(System::TimeZoneInfo::ConvertTimeToUtc(value, System::TimeZoneInfo::Local()));
     }
 
 } // namespace System::IO

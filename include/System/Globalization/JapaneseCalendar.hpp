@@ -44,10 +44,11 @@ public:
      * @brief Gets the earliest date supported by JapaneseCalendar.
      *
      * C++ counterpart of .NET JapaneseCalendar.MinSupportedDateTime.
-     * @return DateTime(1868, 9, 8) — the first day of the Meiji era.
+     * @return DateTime(1868, 10, 23), matching real .NET's `s_calendarMinValue`
+     *         (JapaneseCalendar.cs) exactly — not September 8, which is off by 45 days.
      */
     [[nodiscard]] System::DateTime getMinSupportedDateTimeProperty() const override {
-        return System::DateTime(1868, 9, 8);
+        return System::DateTime(1868, 10, 23);
     }
 
     /**

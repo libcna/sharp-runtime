@@ -203,22 +203,34 @@ public:
      * @brief Converts the specified string to title case.
      *
      * C++ counterpart of .NET TextInfo.ToTitleCase(string).
-     * Each word starts with an uppercase letter; remaining letters are lowercased.
+     * Each word starts with an uppercase letter; remaining letters are lowercased --
+     * EXCEPT a word that is entirely uppercase (no lowercase letters at all, e.g. "USA",
+     * "NASA") is left unchanged, matching .NET's real behavior of preserving acronyms
+     * (TextInfo.cs's `hasLowerCase` flag, "in line with Word 2000 behavior of
+     * titlecasing"). A word whose first letter is lowercase is always normally
+     * title-cased even if the rest happens to be uppercase (e.g. "uSA" -> "Usa"), since
+     * .NET's hasLowerCase check covers the first letter too.
      * @param str The string to convert.
      * @return The title-cased string.
      */
     [[nodiscard]] std::string ToTitleCase(const std::string& str) const {
         std::string result = str;
-        bool newWord = true;
-        for (auto& c : result) {
-            if (std::isspace(static_cast<unsigned char>(c))) {
-                newWord = true;
-            } else if (newWord) {
-                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                newWord = false;
-            } else {
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::size_t i = 0;
+        while (i < result.size()) {
+            if (std::isspace(static_cast<unsigned char>(result[i]))) { ++i; continue; }
+            std::size_t wordStart = i;
+            while (i < result.size() && !std::isspace(static_cast<unsigned char>(result[i]))) ++i;
+            std::size_t wordEnd = i;
+            bool hasLower = false;
+            for (std::size_t j = wordStart; j < wordEnd; ++j) {
+                if (std::islower(static_cast<unsigned char>(result[j]))) { hasLower = true; break; }
             }
+            result[wordStart] = static_cast<char>(std::toupper(static_cast<unsigned char>(result[wordStart])));
+            if (hasLower) {
+                for (std::size_t j = wordStart + 1; j < wordEnd; ++j)
+                    result[j] = static_cast<char>(std::tolower(static_cast<unsigned char>(result[j])));
+            }
+            // else: all-uppercase acronym -- leave characters after the first unchanged.
         }
         return result;
     }

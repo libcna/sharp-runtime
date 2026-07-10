@@ -9,9 +9,11 @@
 #include <string>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/ApartmentState.hpp"
 #include "System/Threading/ThreadPriority.hpp"
 #include "System/Threading/ThreadState.hpp"
+#include "System/Threading/ThreadStateException.hpp"
 
 namespace System::Threading {
 
@@ -22,13 +24,23 @@ namespace System::Threading {
      *
      * C++ counterpart of .NET System.Threading.Thread.
      * Wraps std::thread. The thread does NOT start at construction — call Start()
-     * exactly once. Calling Start() a second time throws std::invalid_argument.
+     * exactly once. Calling Start() a second time throws System::Threading::ThreadStateException.
      *
      * Obsolete .NET APIs (Abort, Suspend, Resume, VolatileRead/Write) are omitted.
      * Apartment-state and compressed-stack APIs are stubs.
      */
     class Thread {
-        inline static std::atomic<intcs> nextManagedId_{1};
+        // Managed thread IDs start at 2, matching .NET's convention that the main/first
+        // thread is ID 1 (see currentThread_'s default below) — the first Thread object
+        // constructed by user code must not collide with that.
+        inline static std::atomic<intcs> nextManagedId_{2};
+
+        // Tracks which Thread object (if any) is running on the calling OS thread, so
+        // CurrentThread() can report the correct ManagedThreadId/IsBackground instead of an
+        // unrelated hash of the OS thread handle. Threads not started via this class (the
+        // main thread, or any other externally-created thread) see nullptr and report the
+        // .NET-convention main-thread ID of 1.
+        inline static thread_local Thread* currentThread_ = nullptr;
 
         std::function<void()>  fn_;
         std::thread            thread_;
@@ -62,12 +74,13 @@ namespace System::Threading {
 
         /**
          * @brief Starts the thread.
-         * @throws std::invalid_argument if Start() has already been called.
+         * @throws System::Threading::ThreadStateException if Start() has already been called.
          */
         void Start() {
             if (started_.exchange(true))
-                throw std::invalid_argument("Thread already started");
+                throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
             thread_ = std::thread([this, fn = std::move(fn_)]() mutable {
+                currentThread_ = this;
                 fn();
                 finished_.store(true);
             });
@@ -76,11 +89,13 @@ namespace System::Threading {
         /**
          * @brief Starts the thread, passing @p parameter to a ParameterizedThreadStart function.
          * @param parameter Argument forwarded to the thread function (stored as void*).
+         * @throws System::Threading::ThreadStateException if Start() has already been called.
          */
         void Start(void* parameter) {
             if (started_.exchange(true))
-                throw std::invalid_argument("Thread already started");
+                throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
             thread_ = std::thread([this, fn = std::move(fn_), parameter]() mutable {
+                currentThread_ = this;
                 (void)parameter;
                 fn();
                 finished_.store(true);
@@ -89,17 +104,34 @@ namespace System::Threading {
 
         /**
          * @brief Blocks the calling thread until this thread terminates.
+         * @throws System::Threading::ThreadStateException if this thread has not been started.
          */
-        void Join() { if (thread_.joinable()) thread_.join(); }
+        void Join() {
+            if (!started_.load())
+                throw System::Threading::ThreadStateException("Thread has not been started.");
+            if (thread_.joinable()) thread_.join();
+        }
 
         /**
          * @brief Blocks the calling thread until this thread terminates or
          * @p millisecondsTimeout elapses.
-         * @param millisecondsTimeout Maximum wait time in milliseconds.
+         * @param millisecondsTimeout Maximum wait time in milliseconds, or -1 (Timeout.Infinite)
+         *        to block until the thread terminates.
          * @return true if the thread terminated; false if the timeout elapsed.
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
+         * @throws System::Threading::ThreadStateException if this thread has not been started.
          */
         bool Join(int millisecondsTimeout) {
+            if (millisecondsTimeout < -1)
+                throw System::ArgumentOutOfRangeException("millisecondsTimeout",
+                    "Number must be either non-negative and less than or equal to Int32.MaxValue or -1.");
+            if (!started_.load())
+                throw System::Threading::ThreadStateException("Thread has not been started.");
             if (!thread_.joinable()) return true;
+            if (millisecondsTimeout == -1) {
+                thread_.join();
+                return true;
+            }
             auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::milliseconds(millisecondsTimeout);
             while (!finished_.load()) {
@@ -178,9 +210,19 @@ namespace System::Threading {
 
         /**
          * @brief Suspends the current thread for @p milliseconds.
-         * @param milliseconds Duration in milliseconds (0 yields the scheduler).
+         * @param milliseconds Duration in milliseconds (0 yields the scheduler), or -1
+         *        (Timeout.Infinite) to sleep until the process ends (Interrupt() is a
+         *        no-op stub in this port, so an infinite sleep cannot be woken early).
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
          */
         static void Sleep(intcs milliseconds) {
+            if (milliseconds < -1)
+                throw System::ArgumentOutOfRangeException("millisecondsTimeout",
+                    "Number must be either non-negative and less than or equal to Int32.MaxValue or -1.");
+            if (milliseconds == -1) {
+                std::this_thread::sleep_until(std::chrono::steady_clock::time_point::max());
+                return;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
         }
 
@@ -220,13 +262,7 @@ namespace System::Threading {
          * @brief Returns the ID of the processor on which the current thread is running.
          * @return Processor ID (best-effort; may be stale immediately).
          */
-        [[nodiscard]] static int GetCurrentProcessorId() {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-            return static_cast<int>(sched_getcpu());
-#else
-            return 0;
-#endif
-        }
+        [[nodiscard]] static int GetCurrentProcessorId();
 
         // -----------------------------------------------------------------------
         // CurrentThread proxy
@@ -239,12 +275,21 @@ namespace System::Threading {
          * properties of the calling thread without owning its lifetime.
          */
         struct CurrentThreadProxy {
-            /** @brief Returns the managed thread ID of the calling thread. */
+            /**
+             * @brief Returns the managed thread ID of the calling thread.
+             *
+             * Resolves to the same ManagedThreadId the owning Thread object reports, when the
+             * calling thread was started via Thread::Start(); otherwise (the main thread, or
+             * any thread not created through this class) returns 1, matching .NET's
+             * main-thread convention.
+             */
             [[nodiscard]] intcs getManagedThreadIdProperty() const {
-                return static_cast<intcs>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+                return currentThread_ ? currentThread_->managedThreadId_ : 1;
             }
-            /** @brief Always returns false — the main thread is not a background thread. */
-            [[nodiscard]] bool getIsBackgroundProperty() const { return false; }
+            /** @brief Returns whether the calling thread's owning Thread object is marked background. */
+            [[nodiscard]] bool getIsBackgroundProperty() const {
+                return currentThread_ && currentThread_->isBackground_;
+            }
             /** @brief Suspends the calling thread for @p ms milliseconds. */
             static void Sleep(intcs ms) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(ms));

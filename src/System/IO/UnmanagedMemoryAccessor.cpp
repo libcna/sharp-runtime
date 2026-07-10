@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/UnmanagedMemoryAccessor.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
@@ -13,7 +14,7 @@ namespace System::IO {
 
     UnmanagedMemoryAccessor::UnmanagedMemoryAccessor(bytecs* buffer, longcs capacity)
     {
-        Initialize(buffer, capacity, FileAccess::ReadWrite);
+        Initialize(buffer, capacity, FileAccess::Read);
     }
 
     UnmanagedMemoryAccessor::UnmanagedMemoryAccessor(bytecs* buffer, longcs capacity, FileAccess access)
@@ -38,7 +39,11 @@ namespace System::IO {
         if (!isOpen_) throw System::ObjectDisposedException("UnmanagedMemoryAccessor");
         if (!canRead_) throw System::NotSupportedException("Accessor does not support reading.");
         if (position < 0) throw System::ArgumentOutOfRangeException("position", "Non-negative number required.");
-        if (position > capacity_ - size) throw System::ArgumentOutOfRangeException("position", "Not enough space in the accessor.");
+        if (position > capacity_ - size) {
+            if (position >= capacity_)
+                throw System::ArgumentOutOfRangeException("position", "The position may not be greater or equal to the capacity of the accessor.");
+            throw System::ArgumentException("There are not enough bytes remaining in the accessor to read at this position.", "position");
+        }
     }
 
     void UnmanagedMemoryAccessor::EnsureWritable(longcs position, longcs size) const
@@ -46,7 +51,11 @@ namespace System::IO {
         if (!isOpen_) throw System::ObjectDisposedException("UnmanagedMemoryAccessor");
         if (!canWrite_) throw System::NotSupportedException("Accessor does not support writing.");
         if (position < 0) throw System::ArgumentOutOfRangeException("position", "Non-negative number required.");
-        if (position > capacity_ - size) throw System::ArgumentOutOfRangeException("position", "Not enough space in the accessor.");
+        if (position > capacity_ - size) {
+            if (position >= capacity_)
+                throw System::ArgumentOutOfRangeException("position", "The position may not be greater or equal to the capacity of the accessor.");
+            throw System::ArgumentException("There are not enough bytes remaining in the accessor to write at this position.", "position");
+        }
     }
 
     bytecs UnmanagedMemoryAccessor::ReadByte(longcs position) const

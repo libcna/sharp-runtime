@@ -114,7 +114,7 @@ TEST(BufferTests, GetByte_LittleEndian_FirstByteOfInt32) {
     // On a little-endian system byte 0 is the LSB
     bytecs b0 = Buffer::GetByte(v, 0);
     bytecs b3 = Buffer::GetByte(v, 3);
-    EXPECT_EQ(b0 + (static_cast<int>(b3) << 24), 0x01020304 & 0xFF000000 | b0);
+    EXPECT_EQ(b0 + (static_cast<int>(b3) << 24), (0x01020304 & 0xFF000000) | b0);
     // Just verify the round-trip rather than a platform-specific value:
     EXPECT_EQ(static_cast<int>(b0) | (static_cast<int>(Buffer::GetByte(v, 1)) << 8) |
               (static_cast<int>(Buffer::GetByte(v, 2)) << 16) |

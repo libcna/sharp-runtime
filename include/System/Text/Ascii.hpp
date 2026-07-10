@@ -158,25 +158,34 @@ public:
 
     // --- Trim helpers (return trimmed string) ---
 
+    /**
+     * @brief Returns true if @p c is one of the exact six bytes .NET's Ascii.Trim* family
+     * treats as ASCII whitespace: TAB, LF, VT, FF, CR, or space (Ascii.Trimming.cs's
+     * TrimMask) -- NOT every byte <= 32 (e.g. NUL and other C0 controls are excluded).
+     */
+    static bool isAsciiTrimWhitespace(unsigned char c) {
+        return c == 0x09 || c == 0x0A || c == 0x0B || c == 0x0C || c == 0x0D || c == 0x20;
+    }
+
     /** @return @p value with leading and trailing ASCII whitespace removed. */
     static std::string Trim(const std::string& value) {
         size_t s = 0, e = value.size();
-        while (s < e && value[s] <= 32) ++s;
-        while (e > s && value[e - 1] <= 32) --e;
+        while (s < e && isAsciiTrimWhitespace(static_cast<unsigned char>(value[s]))) ++s;
+        while (e > s && isAsciiTrimWhitespace(static_cast<unsigned char>(value[e - 1]))) --e;
         return value.substr(s, e - s);
     }
 
     /** @return @p value with leading ASCII whitespace removed. */
     static std::string TrimStart(const std::string& value) {
         size_t s = 0;
-        while (s < value.size() && value[s] <= 32) ++s;
+        while (s < value.size() && isAsciiTrimWhitespace(static_cast<unsigned char>(value[s]))) ++s;
         return value.substr(s);
     }
 
     /** @return @p value with trailing ASCII whitespace removed. */
     static std::string TrimEnd(const std::string& value) {
         size_t e = value.size();
-        while (e > 0 && value[e - 1] <= 32) --e;
+        while (e > 0 && isAsciiTrimWhitespace(static_cast<unsigned char>(value[e - 1]))) --e;
         return value.substr(0, e);
     }
 };

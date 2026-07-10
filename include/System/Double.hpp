@@ -10,11 +10,12 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
+#include "System/FormatException.hpp"
 
 namespace System {
 
@@ -32,8 +33,8 @@ public:
     // Constants
     // -----------------------------------------------------------------------
 
-    /** @brief Represents the smallest positive double value greater than zero. */
-    static constexpr double Epsilon          =  std::numeric_limits<double>::min();
+    /** @brief Represents the smallest positive double value greater than zero (the smallest denormal, ~4.94E-324; NOT the smallest normal value). */
+    static constexpr double Epsilon          =  std::numeric_limits<double>::denorm_min();
 
     /** @brief Represents the largest possible value of a double. */
     static constexpr double MaxValue         =  std::numeric_limits<double>::max();
@@ -179,7 +180,7 @@ public:
      */
     static double Clamp(double value, double min, double max)
     {
-        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
         return Min(Max(value, min), max);
     }
 
@@ -589,7 +590,7 @@ public:
     /**
      * @brief Converts the string representation of a number to its double equivalent.
      *
-     * Locale-independent (always uses '.'). Throws std::invalid_argument on failure.
+     * Locale-independent (always uses '.'). Throws System::FormatException on failure.
      */
     static double Parse(const std::string& s) {
         if (s == "NaN")       return std::numeric_limits<double>::quiet_NaN();
@@ -598,7 +599,7 @@ public:
         double result{};
         auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
         if (ec != std::errc{} || ptr != s.data() + s.size())
-            throw std::invalid_argument("Input string was not in a correct format.");
+            throw System::FormatException("Input string was not in a correct format.");
         return result;
     }
 

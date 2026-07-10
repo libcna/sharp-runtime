@@ -20,9 +20,14 @@ namespace System::Collections::Specialized {
 class StringDictionary {
     std::unordered_map<std::string, std::string> data_;
 
+    // ::tolower(int) is UB for a negative argument other than EOF; passing a plain (signed,
+    // on this platform) char directly sign-extends any byte >= 0x80 (e.g. a UTF-8 multi-byte
+    // sequence) to a negative int. Cast through unsigned char first, matching the pattern
+    // already used correctly elsewhere in this codebase's ASCII-casing helpers.
     static std::string lower(const std::string& s) {
         std::string out = s;
-        std::transform(out.begin(), out.end(), out.begin(), ::tolower);
+        std::transform(out.begin(), out.end(), out.begin(),
+                        [](unsigned char c) { return static_cast<char>(::tolower(c)); });
         return out;
     }
 
@@ -81,13 +86,28 @@ public:
     }
 
     /**
-     * @brief Returns a reference to the value for the given key (key is lowercased).
+     * @brief Returns the value for the given key (key is lowercased), or "" if not found.
+     *
+     * C++ counterpart of .NET StringDictionary.Item[string] getter, which returns null for a
+     * missing key rather than inserting one. The previous single non-const overload used
+     * `data_[lower(key)]`, so even a read-only access (e.g. `sd["missing"]` with no
+     * assignment) silently inserted an empty entry, growing Count and making
+     * `ContainsKey("missing")` become true -- the same phantom-insert-on-read bug fixed in
+     * ListDictionary/OrderedDictionary/ConcurrentDictionary (commit 3605260) this session.
+     * Use `set(key, value)` for `dict[key] = value`-style writes.
+     * @param key The key (case-insensitive) whose value to retrieve.
+     * @return The associated value, or "" if @p key is not present.
+     */
+    [[nodiscard]] std::string operator[](const std::string& key) const { return GetValue(key); }
+
+    /**
+     * @brief Sets the value for the given key (key is lowercased), inserting if absent.
      *
      * C++ counterpart of .NET StringDictionary.Item[string] setter.
-     * @param key The key (case-insensitive) whose value to access.
-     * @return A reference to the associated value.
+     * @param key   The key (case-insensitive) to set.
+     * @param value The value to associate with @p key.
      */
-    std::string& operator[](const std::string& key) { return data_[lower(key)]; }
+    void set(const std::string& key, const std::string& value) { data_[lower(key)] = value; }
 
     /**
      * @brief Adds or replaces the value for the given key.

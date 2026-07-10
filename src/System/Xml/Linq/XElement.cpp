@@ -92,7 +92,19 @@ namespace System::Xml::Linq {
     void XElement::WriteTo(System::Xml::XmlWriter& writer) const {
         writer.WriteStartElement(name_.getLocalNameProperty());
         for (auto& a : attributes_) {
-            writer.WriteAttributeString(a->getNameProperty().ToString(), a->getValueProperty());
+            // Verified: XName::ToString() returns Clark notation ("{namespace}local") for a
+            // namespace-qualified name. That string was previously passed directly as the
+            // *attribute name* to WriteAttributeString -- '{'/'}' are not legal in an XML Name
+            // production, so this produced literally malformed, unparseable XML for any
+            // namespaced attribute (not just a fidelity gap: Save()-then-Parse() would fail or
+            // silently corrupt the attribute). This port's XmlWriter has no namespace/prefix-
+            // aware WriteAttributeString overload (matching XElement's own getNameProperty()
+            // write path a few lines up, which already only ever writes the local name and
+            // silently drops the element's own namespace -- a separately-tracked, lower-
+            // severity fidelity gap, not corruption). Using the local name here makes
+            // attributes consistent with that existing, valid-XML-but-namespace-lossy
+            // behavior instead of producing invalid XML.
+            writer.WriteAttributeString(a->getNameProperty().getLocalNameProperty(), a->getValueProperty());
         }
         for (auto& c : children_) {
             c->WriteTo(writer);

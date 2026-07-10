@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/String.hpp"
 
 namespace System::Text
@@ -210,10 +211,28 @@ namespace System::Text
         /** @brief Ensures the internal buffer has at least @p capacity characters reserved. */
         void EnsureCapacity(intcs capacity) { buffer.reserve(static_cast<std::size_t>(capacity)); }
 
-        /** @brief Returns the character at @p index (.NET's indexer). */
-        [[nodiscard]] char operator[](intcs index) const { return buffer[static_cast<std::size_t>(index)]; }
-        /** @brief Returns a mutable reference to the character at @p index (.NET's indexer). */
-        char& operator[](intcs index) { return buffer[static_cast<std::size_t>(index)]; }
+        /**
+         * @brief Returns the character at @p index (.NET's indexer).
+         * @throws System::IndexOutOfRangeException if @p index is negative or not less than
+         *         getLengthProperty() -- matching StringBuilder.cs, whose indexer throws
+         *         IndexOutOfRangeException rather than silently invoking undefined behavior
+         *         the way plain std::string::operator[] does for an out-of-range index.
+         */
+        [[nodiscard]] char operator[](intcs index) const {
+            if (index < 0 || static_cast<std::size_t>(index) >= buffer.size())
+                throw System::IndexOutOfRangeException();
+            return buffer[static_cast<std::size_t>(index)];
+        }
+        /**
+         * @brief Returns a mutable reference to the character at @p index (.NET's indexer).
+         * @throws System::IndexOutOfRangeException if @p index is negative or not less than
+         *         getLengthProperty().
+         */
+        char& operator[](intcs index) {
+            if (index < 0 || static_cast<std::size_t>(index) >= buffer.size())
+                throw System::IndexOutOfRangeException();
+            return buffer[static_cast<std::size_t>(index)];
+        }
 
         /**
          * @brief Enumerates the chunks of characters that make up this instance's content.

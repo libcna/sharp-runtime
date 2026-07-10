@@ -212,3 +212,21 @@ TEST(UmAlQuraCalendarTests, OutOfRangeThrows) {
     EXPECT_THROW(cal.IsLeapYear(1317), System::ArgumentOutOfRangeException);
     EXPECT_THROW(cal.IsLeapYear(1501), System::ArgumentOutOfRangeException);
 }
+
+// ToDateTime was previously missing entirely, so it fell back to Calendar's Gregorian-only
+// base implementation -- UmAlQura year/month/day components were misinterpreted as literal
+// Gregorian ones instead of being converted. Verifies the real conversion round-trips.
+TEST(UmAlQuraCalendarTests, ToDateTime_RoundTripsThroughGetYearMonthDay) {
+    UmAlQuraCalendar cal;
+    DateTime greg(2024, 6, 15);
+    int y = cal.GetYear(greg), m = cal.GetMonth(greg), d = cal.GetDayOfMonth(greg);
+    DateTime back = cal.ToDateTime(y, m, d, 0, 0, 0, 0);
+    EXPECT_EQ(back.getYearProperty(), 2024);
+    EXPECT_EQ(back.getMonthProperty(), 6);
+    EXPECT_EQ(back.getDayProperty(), 15);
+}
+
+TEST(UmAlQuraCalendarTests, ToDateTime_InvalidDay_Throws) {
+    UmAlQuraCalendar cal;
+    EXPECT_THROW(cal.ToDateTime(1445, 1, 31, 0, 0, 0, 0), System::ArgumentOutOfRangeException);
+}

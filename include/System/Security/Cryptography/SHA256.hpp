@@ -27,7 +27,7 @@ namespace System::Security::Cryptography {
         std::vector<bytecs> HashFinal() override;
 
     public:
-        SHA256() { Initialize(); }
+        SHA256() { hashSizeValue_ = 256; Initialize(); }
 
         void Initialize() override;
     };

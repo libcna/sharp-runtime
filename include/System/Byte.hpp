@@ -13,6 +13,8 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -211,22 +213,22 @@ namespace System {
         /**
          * @brief Returns the floor of the base-2 logarithm of @p value.
          *
-         * C++ counterpart of .NET Byte.Log2(byte).
-         * @throws std::domain_error if @p value is 0.
+         * C++ counterpart of .NET Byte.Log2(byte), which delegates to
+         * BitOperations.Log2 — by convention Log2(0) returns 0 rather than throwing,
+         * since byte can never be negative and there is nothing else to signal.
          */
-        [[nodiscard]] static bytecs Log2(bytecs value) {
-            if (value == 0) throw std::domain_error("Log2 of zero is undefined.");
+        [[nodiscard]] static bytecs Log2(bytecs value) noexcept {
+            if (value == 0) return 0;
             return static_cast<bytecs>(std::bit_width(static_cast<uint32_t>(value)) - 1);
         }
 
         /**
          * @brief Returns the base-10 logarithm of @p value, truncated to Byte.
          *
-         * C++ counterpart of .NET Byte.Log10(byte).
-         * @throws std::domain_error if @p value is 0.
+         * C++ counterpart of .NET Byte.Log10(byte), which delegates to uint.Log10 —
+         * by convention Log10(0) returns 0 rather than throwing.
          */
-        [[nodiscard]] static bytecs Log10(bytecs value) {
-            if (value == 0) throw std::domain_error("Log10 of zero is undefined.");
+        [[nodiscard]] static bytecs Log10(bytecs value) noexcept {
             bytecs result = 0;
             unsigned v = static_cast<unsigned>(value);
             while (v >= 10) { v /= 10; ++result; }
@@ -243,8 +245,8 @@ namespace System {
          * C++ counterpart of .NET Byte.Parse(string) with NumberStyles.Integer:
          * leading/trailing whitespace and a leading sign are tolerated, but any
          * trailing non-whitespace character is rejected.
-         * @throws std::invalid_argument on bad format.
-         * @throws std::out_of_range if the value is outside [0, 255].
+         * @throws System::FormatException on bad format.
+         * @throws System::OverflowException if the value is outside [0, 255].
          */
         [[nodiscard]] static bytecs Parse(const std::string& s) {
             std::size_t pos = 0;
@@ -252,17 +254,17 @@ namespace System {
             try {
                 v = std::stoi(s, &pos);
             } catch (const std::out_of_range&) {
-                throw std::out_of_range("Value out of Byte range.");
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             } catch (...) {
-                throw std::invalid_argument("Input string was not in a correct format.");
+                throw System::FormatException("Input string was not in a correct format.");
             }
             // Reject trailing non-whitespace (.NET NumberStyles.Integer parity).
             for (; pos < s.size(); ++pos) {
                 if (!std::isspace(static_cast<unsigned char>(s[pos])))
-                    throw std::invalid_argument("Input string was not in a correct format.");
+                    throw System::FormatException("Input string was not in a correct format.");
             }
             if (v < 0 || v > MaxValue)
-                throw std::out_of_range("Value out of Byte range.");
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             return static_cast<bytecs>(v);
         }
 
@@ -298,6 +300,7 @@ namespace System {
             int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
             unsigned uv = static_cast<unsigned>(value);
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             if (type == 'X') {
                 oss << std::uppercase << std::hex
                     << std::setfill('0') << std::setw(width) << uv;

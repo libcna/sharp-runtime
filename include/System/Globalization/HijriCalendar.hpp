@@ -149,6 +149,25 @@ public:
      */
     [[nodiscard]] System::DateTime AddYears(const System::DateTime& time, int years) const override;
 
+    /**
+     * @brief Returns a DateTime from the Hijri date and time components.
+     *
+     * C++ counterpart of .NET HijriCalendar.ToDateTime(int, int, int, int, int, int, int, int).
+     * @param year        The Hijri year.
+     * @param month       The Hijri month (1-12).
+     * @param day         The day of the Hijri month.
+     * @param hour        Hour (0-23).
+     * @param minute      Minute (0-59).
+     * @param second      Second (0-59).
+     * @param millisecond Millisecond (0-999).
+     * @param era         The era (default CurrentEra; ignored).
+     * @return The Gregorian DateTime corresponding to the given Hijri date components.
+     * @throws System::ArgumentOutOfRangeException if @p day is outside the valid range for
+     *         the given Hijri @p year and @p month.
+     */
+    [[nodiscard]] System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
+                                              int second, int millisecond, int era = CurrentEra) const override;
+
 private:
     // Absolute day 1 = 0001-01-01 Gregorian (= 0001-01-03 Julian proleptic).
     // Hijri epoch absolute day: 227013 (Friday 622-07-16 Julian = 622-07-18 Gregorian proleptic).

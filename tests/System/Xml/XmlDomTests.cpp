@@ -5,8 +5,13 @@
 // Coverage for the classic XmlDocument DOM API (XmlNode/XmlDocument/XmlElement/XmlAttribute/etc.).
 #include <gtest/gtest.h>
 #include <cstdio>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Xml/XmlDocument.hpp"
+#include "System/Xml/XmlEntity.hpp"
 #include "System/Xml/XmlException.hpp"
+#include "System/Xml/XmlImplementation.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
 using namespace System::Xml;
@@ -137,6 +142,53 @@ TEST(XmlAttributeTests, SetAttributeNode_AttachesUnattachedAttribute) {
     EXPECT_EQ(attr->getOwnerElementProperty(), el);
 }
 
+TEST(XmlAttributeTests, NamespaceURI_PrefixedAttribute_ResolvesFromAncestorXmlnsDeclaration) {
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns:ns=\"urn:test\"><child ns:attr=\"v\"/></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    auto* attr = child->GetAttributeNode("ns:attr");
+    ASSERT_NE(attr, nullptr);
+    EXPECT_EQ(attr->getNamespaceURIProperty(), "urn:test");
+}
+
+TEST(XmlAttributeTests, NamespaceURI_UnprefixedAttribute_IsEmpty) {
+    // XML Namespaces spec: an element's default `xmlns="..."` declaration does not apply to
+    // its own unprefixed attributes.
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns=\"urn:default\" plain=\"v\"/>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* attr = root->GetAttributeNode("plain");
+    ASSERT_NE(attr, nullptr);
+    EXPECT_EQ(attr->getNamespaceURIProperty(), "");
+}
+
+TEST(XmlAttributeTests, GetAttributesCollection_GetNamedItemByLocalNameAndNamespace_FindsPrefixedAttribute) {
+    // Regression: XmlNamedNodeMap::GetNamedItem(localName, namespaceURI) dispatches virtually
+    // through XmlAttribute::getNamespaceURIProperty() -- previously always "", so this lookup
+    // could never match a prefixed attribute regardless of namespace.
+    XmlDocument doc;
+    doc.LoadXml("<root xmlns:ns=\"urn:test\"><child ns:attr=\"v\"/></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    auto* found = child->getAttributesProperty()->GetNamedItem("attr", "urn:test");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->getValueProperty(), "v");
+}
+
+TEST(XmlAttributeTests, CloneNode_CopiesNameAndValue) {
+    XmlDocument doc;
+    auto* el = doc.CreateElement("book");
+    el->SetAttribute("isbn", "12345");
+    auto* attr = el->GetAttributeNode("isbn");
+    auto* clone = attr->CloneNode(false);
+    ASSERT_NE(clone, nullptr);
+    auto* clonedAttr = static_cast<XmlAttribute*>(clone);
+    EXPECT_EQ(clonedAttr->getNameProperty(), "isbn");
+    EXPECT_EQ(clonedAttr->getValueProperty(), "12345");
+    EXPECT_EQ(clonedAttr->getOwnerElementProperty(), nullptr);
+}
+
 // ===========================================================================
 // InnerText / InnerXml / OuterXml
 // ===========================================================================
@@ -166,6 +218,23 @@ TEST(XmlElementTests, OuterXml_ContainsTagAndAttributes) {
     EXPECT_NE(xml.find("<book"), std::string::npos);
     EXPECT_NE(xml.find("isbn=\"12345\""), std::string::npos);
     EXPECT_NE(xml.find("Title"), std::string::npos);
+}
+
+TEST(XmlElementTests, OuterXml_NestedElements_ProducesExactMarkupNoInsertedWhitespace) {
+    // Regression: real .NET's OuterXml serializes exact markup with no inserted whitespace
+    // between nodes. tinyxml2::XMLPrinter defaults to pretty-printing (inserted newlines and
+    // indentation), which this port previously left unchanged.
+    XmlDocument doc;
+    doc.LoadXml("<root><a/><b>text</b></root>");
+    auto* root = doc.getDocumentElementProperty();
+    EXPECT_EQ(root->getOuterXmlProperty(), "<root><a/><b>text</b></root>");
+}
+
+TEST(XmlElementTests, InnerXml_NestedElements_ProducesExactMarkupNoInsertedWhitespace) {
+    XmlDocument doc;
+    doc.LoadXml("<root><a/><b>text</b></root>");
+    auto* root = doc.getDocumentElementProperty();
+    EXPECT_EQ(root->getInnerXmlProperty(), "<a/><b>text</b>");
 }
 
 TEST(XmlElementTests, SetInnerXml_ParsesAndAppendsChildren) {
@@ -247,6 +316,82 @@ TEST(XmlNodeTests, InsertBefore_WithRefChild_InsertsInOrder) {
 }
 
 // ===========================================================================
+// Regression: AppendChild/PrependChild/InsertBefore/InsertAfter previously had no
+// ancestor-cycle or cross-document guard (verified against XmlNode.cs's InsertBefore/
+// InsertAfter/AppendChild, which throw ArgumentException for both cases) — inserting a
+// node's own ancestor as its child created a genuine shared_ptr-free but still real
+// tinyxml2 parent/child cycle (UB in traversal/destruction), and cross-document inserts
+// silently no-oped while reporting success.
+// ===========================================================================
+
+TEST(XmlNodeTests, AppendChild_Self_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    EXPECT_THROW(root->AppendChild(root), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, AppendChild_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+
+    EXPECT_THROW(grandchild->AppendChild(root), System::ArgumentException);
+    EXPECT_THROW(grandchild->AppendChild(child), System::ArgumentException);
+    // Tree must be unmodified after the throw.
+    EXPECT_EQ(grandchild->getFirstChildProperty(), nullptr);
+    EXPECT_EQ(child->getParentNodeProperty(), root);
+}
+
+TEST(XmlNodeTests, PrependChild_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    EXPECT_THROW(child->PrependChild(root), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, InsertBefore_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+    EXPECT_THROW(grandchild->InsertBefore(root, nullptr), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, InsertAfter_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+    EXPECT_THROW(grandchild->InsertAfter(root, nullptr), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, AppendChild_CrossDocument_ThrowsArgumentException) {
+    XmlDocument doc1;
+    auto* root1 = doc1.CreateElement("root1");
+    doc1.AppendChild(root1);
+
+    XmlDocument doc2;
+    auto* root2 = doc2.CreateElement("root2");
+    doc2.AppendChild(root2);
+    auto* other = doc2.CreateElement("other");
+
+    EXPECT_THROW(root1->AppendChild(other), System::ArgumentException);
+}
+
+// ===========================================================================
 // Comment / Text / CDATA
 // ===========================================================================
 
@@ -283,6 +428,34 @@ TEST(XmlCharacterDataTests, SplitText_SplitsIntoTwoSiblings) {
     EXPECT_EQ(t->getNextSiblingProperty(), tail);
 }
 
+TEST(XmlCharacterDataTests, SplitText_OffsetGreaterThanLength_ThrowsArgumentOutOfRangeException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* t = doc.CreateTextNode("Hello");
+    root->AppendChild(t);
+    EXPECT_THROW(t->SplitText(10), System::ArgumentOutOfRangeException);
+}
+
+TEST(XmlCharacterDataTests, SplitText_NoParent_ThrowsInvalidOperationException) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("Hello");
+    EXPECT_THROW(t->SplitText(2), System::InvalidOperationException);
+}
+
+TEST(XmlCharacterDataTests, Substring_EmptyData_ReturnsEmptyRegardlessOfOffset) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("");
+    EXPECT_EQ(t->Substring(5, 3), "");
+    EXPECT_EQ(t->Substring(0, 0), "");
+}
+
+TEST(XmlCharacterDataTests, Substring_NonEmptyData_ClampsCountToLength) {
+    XmlDocument doc;
+    auto* t = doc.CreateTextNode("Hello");
+    EXPECT_EQ(t->Substring(2, 100), "llo");
+}
+
 // ===========================================================================
 // XmlDeclaration / XmlProcessingInstruction / XmlDocumentType
 // ===========================================================================
@@ -293,6 +466,22 @@ TEST(XmlDeclarationTests, CreateXmlDeclaration_StoresVersionEncodingStandalone) 
     EXPECT_EQ(decl->getVersionProperty(), "1.0");
     EXPECT_EQ(decl->getEncodingProperty(), "UTF-8");
     EXPECT_EQ(decl->getStandaloneProperty(), "yes");
+}
+
+TEST(XmlDeclarationTests, CreateXmlDeclaration_InvalidVersion_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateXmlDeclaration("9.9", "", ""), System::ArgumentException);
+}
+
+TEST(XmlDeclarationTests, CreateXmlDeclaration_InvalidStandalone_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateXmlDeclaration("1.0", "", "maybe"), System::ArgumentException);
+}
+
+TEST(XmlDeclarationTests, SetStandaloneProperty_InvalidValue_Throws) {
+    XmlDocument doc;
+    auto* decl = doc.CreateXmlDeclaration("1.0", "", "");
+    EXPECT_THROW(decl->setStandaloneProperty("maybe"), System::ArgumentException);
 }
 
 TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_SplitsTargetAndData) {
@@ -387,4 +576,48 @@ TEST(XmlNodeTests, NamespaceURI_ResolvesFromAncestorXmlnsDeclaration) {
     auto* root = doc.getDocumentElementProperty();
     auto* child = root->getFirstChildProperty();
     EXPECT_EQ(child->getNamespaceURIProperty(), "urn:test");
+}
+
+// ===========================================================================
+// XmlImplementation.HasFeature
+// ===========================================================================
+
+TEST(XmlImplementationTests, HasFeature_Xml_EmptyVersion_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_Xml_Version1_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", "1.0"));
+}
+
+TEST(XmlImplementationTests, HasFeature_Xml_Version2_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("XML", "2.0"));
+}
+
+TEST(XmlImplementationTests, HasFeature_CaseInsensitiveFeatureName_ReturnsTrue) {
+    XmlImplementation impl;
+    EXPECT_TRUE(impl.HasFeature("xml", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_UnknownFeature_ReturnsFalse) {
+    XmlImplementation impl;
+    EXPECT_FALSE(impl.HasFeature("HTML", ""));
+}
+
+TEST(XmlImplementationTests, HasFeature_UnknownVersion_ReturnsFalse) {
+    XmlImplementation impl;
+    EXPECT_FALSE(impl.HasFeature("XML", "3.0"));
+}
+
+// ===========================================================================
+// XmlEntity
+// ===========================================================================
+
+TEST(XmlEntityTests, SetInnerTextProperty_Throws) {
+    XmlDocument doc;
+    XmlEntity entity(&doc, "foo", "", "", "");
+    EXPECT_THROW(entity.setInnerTextProperty("bar"), System::InvalidOperationException);
 }

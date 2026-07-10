@@ -11,8 +11,10 @@
 #include <atomic>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include "System/AggregateException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
@@ -100,6 +102,18 @@ TEST(TaskTests, FromCanceled_IsCanceled) {
     EXPECT_TRUE(t.getIsCompletedProperty());
 }
 
+TEST(TaskTests, FromCanceled_Wait_ThrowsTaskCanceledException) {
+    Task t = Task::FromCanceled(CancellationToken());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskTests, RunWithCanceledToken_Wait_ThrowsTaskCanceledException) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task t = Task::Run([]() {}, cts.getTokenProperty());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
 TEST(TaskTests, Run_ThrowingAction_IsFaulted) {
     Task t = Task::Run([]() { throw std::runtime_error("task error"); });
     EXPECT_THROW(t.Wait(), std::runtime_error);
@@ -150,7 +164,19 @@ TEST(TaskCompletionSourceTests, SetResult_GetResult) {
 TEST(TaskCompletionSourceTests, SetResult_Twice_Throws) {
     TaskCompletionSource<int> tcs;
     tcs.SetResult(1);
-    EXPECT_THROW(tcs.SetResult(2), std::invalid_argument);
+    EXPECT_THROW(tcs.SetResult(2), System::InvalidOperationException);
+}
+
+TEST(TaskCompletionSourceTests, ConcurrentTrySetResult_ExactlyOneWinner_NoUncaughtException) {
+    for (int iter = 0; iter < 200; ++iter) {
+        TaskCompletionSource<int> tcs;
+        std::atomic<int> successCount{0};
+        std::thread t1([&] { if (tcs.TrySetResult(1)) ++successCount; });
+        std::thread t2([&] { if (tcs.TrySetResult(2)) ++successCount; });
+        t1.join();
+        t2.join();
+        EXPECT_EQ(successCount.load(), 1);
+    }
 }
 
 TEST(TaskCompletionSourceTests, TrySetResult_FirstTime_True) {
@@ -178,7 +204,7 @@ TEST(TaskCompletionSourceTests, TrySetException_FirstTime_True) {
 TEST(TaskCompletionSourceTests, SetCanceled_GetResult_Throws) {
     TaskCompletionSource<int> tcs;
     tcs.SetCanceled();
-    EXPECT_THROW(tcs.GetResult(), std::runtime_error);
+    EXPECT_THROW(tcs.GetResult(), System::Threading::Tasks::TaskCanceledException);
 }
 
 TEST(TaskCompletionSourceTests, TrySetCanceled_FirstTime_True) {
@@ -222,7 +248,7 @@ TEST(TaskCompletionSourceVoidTests, SetException_Wait_Throws) {
 TEST(TaskCompletionSourceVoidTests, SetCanceled_Wait_Throws) {
     TaskCompletionSource<void> tcs;
     tcs.SetCanceled();
-    EXPECT_THROW(tcs.Wait(), std::runtime_error);
+    EXPECT_THROW(tcs.Wait(), System::Threading::Tasks::TaskCanceledException);
 }
 
 // ===========================================================================
@@ -255,6 +281,28 @@ TEST(ValueTaskTests, FromException_GetAwaiter_Rethrows) {
 TEST(ValueTaskTests, FromTask_CompletedTask_IsCompleted) {
     ValueTask vt(Task::CompletedTask());
     EXPECT_TRUE(vt.getIsCompletedProperty());
+}
+
+TEST(ValueTaskTests, FromTask_AlreadyFaultedTask_GetAwaiter_Rethrows) {
+    auto ex = std::make_exception_ptr(std::runtime_error("already faulted"));
+    ValueTask vt(Task::FromException(ex));
+    EXPECT_TRUE(vt.getIsFaultedProperty());
+    EXPECT_THROW(vt.GetAwaiter(), std::runtime_error);
+}
+
+TEST(ValueTaskTests, FromTask_StillRunning_LaterObservesCompletionAndException) {
+    std::promise<void> release;
+    std::shared_future<void> releaseFuture = release.get_future().share();
+    Task t([releaseFuture]() {
+        releaseFuture.wait();
+        throw std::runtime_error("failed after running");
+    });
+    ValueTask vt(std::move(t));
+    EXPECT_FALSE(vt.getIsCompletedProperty());
+    release.set_value();
+    EXPECT_THROW(vt.GetAwaiter(), std::runtime_error);
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsFaultedProperty());
 }
 
 // ===========================================================================
@@ -420,7 +468,7 @@ TEST(TaskCancellationTests, ActionThrowsOperationCanceled_MatchingToken_ReportsC
         cts.Cancel();
         token.ThrowIfCancellationRequested();
     }, token);
-    t.Wait();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
     EXPECT_TRUE(t.getIsCanceledProperty());
     EXPECT_FALSE(t.getIsFaultedProperty());
 }

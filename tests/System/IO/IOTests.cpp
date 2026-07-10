@@ -342,6 +342,11 @@ TEST(IOExceptionTests, IsA_SystemException) {
     EXPECT_THROW(throw IOException("err"), System::SystemException);
 }
 
+TEST(IOExceptionTests, HResult_MatchesDotNet) {
+    IOException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131620));
+}
+
 // ===========================================================================
 // FileNotFoundException
 // ===========================================================================
@@ -369,6 +374,11 @@ TEST(FileNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw FileNotFoundException("err"), IOException);
 }
 
+TEST(FileNotFoundExceptionTests, HResult_MatchesDotNet) {
+    FileNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070002));
+}
+
 TEST(FileNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(FileNotFoundException("wrapped", std::exception_ptr{}));
 }
@@ -386,6 +396,11 @@ TEST(DirectoryNotFoundExceptionTests, DefaultCtor_NoThrow) {
     EXPECT_NO_THROW(DirectoryNotFoundException{});
 }
 
+TEST(DirectoryNotFoundExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    DirectoryNotFoundException ex;
+    EXPECT_STREQ(ex.what(), "Unable to find the specified directory.");
+}
+
 TEST(DirectoryNotFoundExceptionTests, MessageCtor_WhatContainsMessage) {
     DirectoryNotFoundException ex("no such dir");
     EXPECT_NE(std::string(ex.what()).find("no such dir"), std::string::npos);
@@ -398,6 +413,11 @@ TEST(DirectoryNotFoundExceptionTests, MessageAndPathCtor_StoresDirectoryPath) {
 
 TEST(DirectoryNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(DirectoryNotFoundException("wrapped", std::exception_ptr{}));
+}
+
+TEST(DirectoryNotFoundExceptionTests, HResult_MatchesCorEDirectoryNotFound) {
+    DirectoryNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070003));
 }
 
 // ===========================================================================
@@ -420,6 +440,13 @@ TEST(DriveNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
 
 TEST(DriveNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw DriveNotFoundException(), System::IO::IOException);
+}
+
+TEST(DriveNotFoundExceptionTests, HResult_MatchesCorEDirectoryNotFound) {
+    // .NET's DriveNotFoundException.cs sets COR_E_DIRECTORYNOTFOUND (same as
+    // DirectoryNotFoundException, not a distinct DriveNotFound HResult).
+    DriveNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070003));
 }
 
 // ===========================================================================
@@ -700,6 +727,11 @@ TEST(EndOfStreamExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(EndOfStreamException("wrapped", std::exception_ptr{}));
 }
 
+TEST(EndOfStreamExceptionTests, HResult_MatchesCorEEndOfStream) {
+    EndOfStreamException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070026));
+}
+
 // ===========================================================================
 // PathTooLongException
 // ===========================================================================
@@ -707,6 +739,11 @@ TEST(EndOfStreamExceptionTests, MessageAndInnerCtor_NoThrow) {
 TEST(PathTooLongExceptionTests, DefaultCtor_WhatNotEmpty) {
     PathTooLongException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(PathTooLongExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    PathTooLongException ex;
+    EXPECT_STREQ(ex.what(), "The specified file name or path is too long, or a component of the specified path is too long.");
 }
 
 TEST(PathTooLongExceptionTests, MessageCtor_WhatContainsMessage) {
@@ -721,6 +758,11 @@ TEST(PathTooLongExceptionTests, MessageCtor_WhatContainsMessage) {
 TEST(FileLoadExceptionTests, DefaultCtor_WhatNotEmpty) {
     FileLoadException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(FileLoadExceptionTests, HResult_MatchesDotNet) {
+    FileLoadException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131621));
 }
 
 TEST(FileLoadExceptionTests, MessageCtor_WhatContainsMessage) {
@@ -746,6 +788,11 @@ TEST(InvalidDataExceptionTests, DefaultCtor_NoThrow) {
     EXPECT_NO_THROW(InvalidDataException{});
 }
 
+TEST(InvalidDataExceptionTests, DefaultCtor_MatchesDotNetMessage) {
+    InvalidDataException ex;
+    EXPECT_STREQ(ex.what(), "Found invalid data while decoding.");
+}
+
 TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
     InvalidDataException ex("corrupt data");
     EXPECT_NE(std::string(ex.what()).find("corrupt data"), std::string::npos);
@@ -758,6 +805,11 @@ TEST(InvalidDataExceptionTests, MessageCtor_WhatContainsMessage) {
 TEST(InternalBufferOverflowExceptionTests, DefaultCtor_WhatNotEmpty) {
     InternalBufferOverflowException ex;
     EXPECT_FALSE(std::string(ex.what()).empty());
+}
+
+TEST(InternalBufferOverflowExceptionTests, HResult_MatchesDotNet) {
+    InternalBufferOverflowException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131905));
 }
 
 TEST(InternalBufferOverflowExceptionTests, MessageCtor_WhatContainsMessage) {
@@ -818,6 +870,11 @@ TEST(IsolatedStorageExceptionTests, DefaultCtor_WhatNotEmpty) {
 TEST(IsolatedStorageExceptionTests, MessageAndInnerCtor_WhatContainsMessage) {
     IsolatedStorageException ex("wrapped failure", std::exception_ptr{});
     EXPECT_NE(std::string(ex.what()).find("wrapped failure"), std::string::npos);
+}
+
+TEST(IsolatedStorageExceptionTests, HResult_MatchesCorEIsoStore) {
+    IsolatedStorageException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131450));
 }
 
 // ===========================================================================

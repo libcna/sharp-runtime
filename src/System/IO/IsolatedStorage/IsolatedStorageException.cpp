@@ -13,15 +13,18 @@ namespace System::IO::IsolatedStorage
     IsolatedStorageException::IsolatedStorageException()
         : System::Exception(DefaultMessage)
     {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131450)); // COR_E_ISOSTORE
     }
 
     IsolatedStorageException::IsolatedStorageException(const std::string& message)
         : System::Exception(message)
     {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131450)); // COR_E_ISOSTORE
     }
 
     IsolatedStorageException::IsolatedStorageException(const std::string& message, std::exception_ptr inner)
         : System::Exception(message, std::move(inner))
     {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80131450)); // COR_E_ISOSTORE
     }
 }

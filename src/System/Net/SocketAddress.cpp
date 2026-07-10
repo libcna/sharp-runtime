@@ -4,8 +4,8 @@
 #include "System/Net/SocketAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 #include <array>
-#include <stdexcept>
 
 namespace System::Net {
 
@@ -62,14 +62,14 @@ namespace System::Net {
 
     bytecs SocketAddress::operator[](intcs offset) const {
         if (static_cast<uintcs>(offset) >= static_cast<uintcs>(size_)) {
-            throw std::out_of_range("Index was outside the bounds of the array.");
+            throw System::IndexOutOfRangeException();
         }
         return buffer_[static_cast<size_t>(offset)];
     }
 
     bytecs& SocketAddress::operator[](intcs offset) {
         if (static_cast<uintcs>(offset) >= static_cast<uintcs>(size_)) {
-            throw std::out_of_range("Index was outside the bounds of the array.");
+            throw System::IndexOutOfRangeException();
         }
         return buffer_[static_cast<size_t>(offset)];
     }

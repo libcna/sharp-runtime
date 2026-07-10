@@ -2,10 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <memory>
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Collections/Generic/IList.hpp"
@@ -17,43 +19,68 @@ using SharpRuntime::intcs;
 /**
  * @brief Provides a read-only wrapper around a generic list.
  *
- * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlyCollection<T>.
- * Backed by std::vector<T>; mutation methods throw NotSupportedException, matching .NET.
+ * C++ counterpart of .NET System.Collections.ObjectModel.ReadOnlyCollection<T>. Backed by a
+ * shared_ptr<vector<T>>; mutation methods throw NotSupportedException, matching .NET.
  *
  * @tparam T The type of elements in the collection.
  */
 template<typename T>
 class ReadOnlyCollection : public Generic::IList<T> {
 private:
-    std::vector<T> items_;
+    std::shared_ptr<std::vector<T>> items_;
 
     class Enumerator : public Generic::IEnumerator<T> {
-        const std::vector<T>& items_;
+        std::shared_ptr<std::vector<T>> items_;
         intcs index_ = -1;
     public:
-        explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
+        explicit Enumerator(std::shared_ptr<std::vector<T>> items) : items_(std::move(items)) {}
+        bool MoveNext() override { return ++index_ < static_cast<intcs>(items_->size()); }
         void Reset() override { index_ = -1; }
         [[nodiscard]] const T& Current() const override {
-            return items_[static_cast<size_t>(index_)];
+            return (*items_)[static_cast<size_t>(index_)];
         }
     };
 
 public:
     /** @brief Default-constructs an empty ReadOnlyCollection. */
-    ReadOnlyCollection() = default;
+    ReadOnlyCollection() : items_(std::make_shared<std::vector<T>>()) {}
 
     /**
-     * @brief Constructs a ReadOnlyCollection wrapping a copy of @p source.
+     * @brief Constructs a ReadOnlyCollection wrapping the given shared vector.
+     *
+     * C++ counterpart of .NET ReadOnlyCollection<T>(IList<T>), which stores a reference to
+     * the caller's list rather than copying it -- the wrapper is a live *view*: mutating the
+     * original list through a kept reference to it is visible through the wrapper too
+     * (verified against ReadOnlyCollection.cs: `this.list = list;`, a plain reference
+     * assignment). This overload achieves the same by taking a shared_ptr directly, matching
+     * the convention already established by the sibling ReadOnlySet/ReadOnlyDictionary
+     * fixes: pass the *same* shared_ptr the caller holds to get a genuinely live view.
+     * @param source A shared pointer to the underlying vector.
+     * @throws System::ArgumentNullException if @p source is null.
+     */
+    explicit ReadOnlyCollection(std::shared_ptr<std::vector<T>> source) : items_(std::move(source)) {
+        if (!items_) throw System::ArgumentNullException("source");
+    }
+
+    /**
+     * @brief Constructs a ReadOnlyCollection wrapping a COPY of @p source.
+     *
+     * Convenience overload for a plain (non-shared_ptr) vector. Unlike the shared_ptr
+     * overload above, this does NOT produce a live view -- @p source is copied, so later
+     * mutations to it are not reflected here. Use the shared_ptr overload when a live view
+     * is needed and the source is already shared_ptr-backed.
      * @param source The vector to copy into the collection.
      */
-    explicit ReadOnlyCollection(const std::vector<T>& source) : items_(source) {}
+    explicit ReadOnlyCollection(const std::vector<T>& source) : items_(std::make_shared<std::vector<T>>(source)) {}
 
     /**
-     * @brief Constructs a ReadOnlyCollection by moving @p source.
+     * @brief Constructs a ReadOnlyCollection by moving @p source into new backing storage.
+     *
+     * Convenience overload; like the copying overload, this does not wrap a caller-held
+     * shared_ptr, so it isn't a live view of anything else (the source is consumed/moved-from).
      * @param source The vector to move into the collection.
      */
-    explicit ReadOnlyCollection(std::vector<T>&& source) : items_(std::move(source)) {}
+    explicit ReadOnlyCollection(std::vector<T>&& source) : items_(std::make_shared<std::vector<T>>(std::move(source))) {}
 
     /** @brief Virtual destructor for safe polymorphic destruction. */
     ~ReadOnlyCollection() override = default;
@@ -65,7 +92,7 @@ public:
      * @return The number of elements.
      */
     [[nodiscard]] intcs getCountProperty() const override {
-        return static_cast<intcs>(items_.size());
+        return static_cast<intcs>(items_->size());
     }
 
     /**
@@ -85,9 +112,9 @@ public:
      * @throws std::out_of_range if index is out of range.
      */
     [[nodiscard]] const T& operator[](intcs index) const override {
-        if (index < 0 || index >= static_cast<intcs>(items_.size()))
+        if (index < 0 || index >= static_cast<intcs>(items_->size()))
             throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
-        return items_[static_cast<size_t>(index)];
+        return (*items_)[static_cast<size_t>(index)];
     }
 
     /**
@@ -107,8 +134,8 @@ public:
      * @return The zero-based index, or -1 if not found.
      */
     [[nodiscard]] intcs IndexOf(const T& item) const override {
-        for (intcs i = 0; i < static_cast<intcs>(items_.size()); ++i)
-            if (items_[static_cast<size_t>(i)] == item) return i;
+        for (intcs i = 0; i < static_cast<intcs>(items_->size()); ++i)
+            if ((*items_)[static_cast<size_t>(i)] == item) return i;
         return -1;
     }
 
@@ -137,7 +164,7 @@ public:
         if (index + getCountProperty() > static_cast<intcs>(destination.size()))
             throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
         for (intcs i = 0; i < getCountProperty(); ++i)
-            destination[static_cast<size_t>(index + i)] = items_[static_cast<size_t>(i)];
+            destination[static_cast<size_t>(index + i)] = (*items_)[static_cast<size_t>(i)];
     }
 
     /**
@@ -191,13 +218,13 @@ public:
     }
 
     /** @brief Returns an iterator to the beginning of the collection (STL interop). */
-    auto begin()       { return items_.begin(); }
+    auto begin()       { return items_->begin(); }
     /** @brief Returns an iterator past the end of the collection (STL interop). */
-    auto end()         { return items_.end(); }
+    auto end()         { return items_->end(); }
     /** @brief Returns a const iterator to the beginning of the collection (STL interop). */
-    [[nodiscard]] auto begin() const { return items_.cbegin(); }
+    [[nodiscard]] auto begin() const { return items_->cbegin(); }
     /** @brief Returns a const iterator past the end of the collection (STL interop). */
-    [[nodiscard]] auto end()   const { return items_.cend(); }
+    [[nodiscard]] auto end()   const { return items_->cend(); }
 };
 
 } // namespace System::Collections::ObjectModel

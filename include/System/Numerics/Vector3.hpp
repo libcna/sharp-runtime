@@ -4,8 +4,8 @@
 #pragma once
 #include <cmath>
 #include <sstream>
-#include <stdexcept>
 #include <string>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 
 namespace System::Numerics {
@@ -53,15 +53,19 @@ struct Vector3 {
         ss << "<" << X << ", " << Y << ", " << Z << ">"; return ss.str();
     }
 
-    /** @return The component at @p i (0=X, 1=Y, 2=Z). Throws std::out_of_range on invalid index. */
+    /** @return The component at @p i (0=X, 1=Y, 2=Z). @throws System::ArgumentOutOfRangeException on invalid index. */
     float operator[](int i) const {
-        if (i==0) return X; if (i==1) return Y; if (i==2) return Z;
-        throw std::out_of_range("index");
+        if (i==0) return X;
+        if (i==1) return Y;
+        if (i==2) return Z;
+        throw System::ArgumentOutOfRangeException("index");
     }
-    /** @return A reference to the component at @p i (0=X, 1=Y, 2=Z). Throws std::out_of_range on invalid index. */
+    /** @return A reference to the component at @p i (0=X, 1=Y, 2=Z). @throws System::ArgumentOutOfRangeException on invalid index. */
     float& operator[](int i) {
-        if (i==0) return X; if (i==1) return Y; if (i==2) return Z;
-        throw std::out_of_range("index");
+        if (i==0) return X;
+        if (i==1) return Y;
+        if (i==2) return Z;
+        throw System::ArgumentOutOfRangeException("index");
     }
 
     /** Component-wise addition. */

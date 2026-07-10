@@ -79,6 +79,7 @@ namespace System {
          *
          * @param ticks A date and time expressed in 100-nanosecond ticks since
          *              the .NET epoch (0001-01-01 00:00:00).
+         * @throws System::ArgumentOutOfRangeException if @p ticks is negative or greater than MaxTicks.
          */
         explicit DateTime(longcs ticks);
 

@@ -69,17 +69,17 @@ TEST(MemoryTests, SubrangeCtor_LengthCorrect) {
 
 TEST(MemoryTests, SubrangeCtor_OutOfRange_Throws) {
     std::vector<int> v{1, 2, 3};
-    EXPECT_THROW((Memory<int>(v, 0, 10)), std::out_of_range);
+    EXPECT_THROW((Memory<int>(v, 0, 10)), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryTests, SubrangeCtor_NegativeStart_Throws) {
     std::vector<int> v{1, 2, 3};
-    EXPECT_THROW((Memory<int>(v, -1, 2)), std::out_of_range);
+    EXPECT_THROW((Memory<int>(v, -1, 2)), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryTests, SubrangeCtor_NegativeLength_Throws) {
     std::vector<int> v{1, 2, 3};
-    EXPECT_THROW((Memory<int>(v, 0, -1)), std::out_of_range);
+    EXPECT_THROW((Memory<int>(v, 0, -1)), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryTests, SubrangeCtor_ZeroLength_IsEmpty) {
@@ -140,13 +140,13 @@ TEST(MemoryTests, Slice1_FromEnd_IsEmpty) {
 TEST(MemoryTests, Slice1_OutOfRange_Throws) {
     std::vector<int> v{1, 2};
     Memory<int> m(v);
-    EXPECT_THROW(m.Slice(5), std::out_of_range);
+    EXPECT_THROW(m.Slice(5), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryTests, Slice1_Negative_Throws) {
     std::vector<int> v{1, 2, 3};
     Memory<int> m(v);
-    EXPECT_THROW(m.Slice(-1), std::out_of_range);
+    EXPECT_THROW(m.Slice(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryTests, Slice1_CorrectElements) {
@@ -179,7 +179,7 @@ TEST(MemoryTests, Slice2_CorrectElements) {
 TEST(MemoryTests, Slice2_OutOfRange_Throws) {
     std::vector<int> v{1, 2, 3};
     Memory<int> m(v);
-    EXPECT_THROW(m.Slice(0, 10), std::out_of_range);
+    EXPECT_THROW(m.Slice(0, 10), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ TEST(MemoryTests, CopyTo_DestTooShort_Throws) {
     std::vector<int> dst{0, 0};
     Memory<int> s(src);
     Memory<int> d(dst);
-    EXPECT_THROW(s.CopyTo(d), std::invalid_argument);
+    EXPECT_THROW(s.CopyTo(d), System::ArgumentException);
 }
 
 TEST(MemoryTests, TryCopyTo_Success_ReturnsTrue) {

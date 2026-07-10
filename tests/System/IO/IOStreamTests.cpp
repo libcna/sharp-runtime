@@ -5,9 +5,10 @@
 // Functional tests for System::IO: Path, File, FileInfo, Directory, DirectoryInfo,
 // BinaryReader/Writer, StreamReader/Writer, BufferedStream, FileStream, IsolatedStorageFile.
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
-#include <cstdint>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -15,11 +16,13 @@
 #include "System/NotSupportedException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/DateTime.hpp"
+#include "System/TimeZoneInfo.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/BinaryReader.hpp"
@@ -34,6 +37,7 @@
 #include "System/IO/SeekOrigin.hpp"
 #include "System/IO/RandomAccess.hpp"
 #include "System/IO/FileNotFoundException.hpp"
+#include "System/IO/IsolatedStorage/IsolatedStorageException.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFile.hpp"
 #include "System/IO/IsolatedStorage/IsolatedStorageFileStream.hpp"
 
@@ -196,6 +200,19 @@ TEST(FileTests, Delete_RemovesFile) {
     EXPECT_FALSE(File::Exists(p));
 }
 
+// Regression test for a wave-3 audit finding: File::Delete used std::filesystem::remove(),
+// which is documented to also remove an empty directory (calling the equivalent of rmdir).
+// Real .NET's File.Delete calls unlink() directly, which can never remove a directory --
+// verified against FileSystem.Unix.cs's DeleteFile. Previously this port would silently
+// delete an empty directory passed to File::Delete instead of throwing.
+TEST(FileTests, Delete_OnDirectory_ThrowsIOException) {
+    std::string dir = tf("delete_me_dir");
+    Directory::CreateDirectory(dir);
+    EXPECT_THROW(File::Delete(dir), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(dir));
+    Directory::Delete(dir);
+}
+
 TEST(FileTests, Copy_CreatesDestination) {
     std::string src = tf("copy_src.txt");
     std::string dst = tf("copy_dst.txt");
@@ -243,6 +260,21 @@ TEST(FileTests, Move_NonExistentSource_ThrowsFileNotFoundException) {
                  System::IO::FileNotFoundException);
 }
 
+TEST(FileTests, Move_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    // Regression: Move previously used std::filesystem::rename() unconditionally, which
+    // silently replaces an existing destination file on POSIX instead of matching real .NET's
+    // non-overwrite Move contract.
+    std::string src = tf("move_noclobber_src.txt");
+    std::string dst = tf("move_noclobber_dst.txt");
+    File::WriteAllText(src, "source content");
+    File::WriteAllText(dst, "original destination content");
+    EXPECT_THROW(File::Move(src, dst), System::IO::IOException);
+    EXPECT_TRUE(File::Exists(src));
+    EXPECT_EQ(File::ReadAllText(dst), "original destination content");
+    File::Delete(src);
+    File::Delete(dst);
+}
+
 TEST(FileTests, Copy_EmptySourcePath_ThrowsArgumentException) {
     EXPECT_THROW(File::Copy("", tf("dst_xyz.txt")), System::ArgumentException);
 }
@@ -286,6 +318,21 @@ TEST(FileInfoTests, getLengthProperty_MatchesContent) {
     File::Delete(p);
 }
 
+TEST(FileInfoTests, getLengthProperty_NonExistentFile_ReturnsZero) {
+    // Matches .NET's real Unix FileInfo.Length (FileStatus.Unix.cs's GetLength: "return
+    // EntryExists ? _fileCache.Size : 0") — a missing file returns 0, it does not throw.
+    FileInfo fi(tf("fi_length_nonexistent_xyz123.txt"));
+    EXPECT_EQ(fi.getLengthProperty(), 0LL);
+}
+
+TEST(FileInfoTests, getLengthProperty_Directory_ThrowsFileNotFoundException) {
+    std::string dir = tf("fi_length_dir");
+    Directory::CreateDirectory(dir);
+    FileInfo fi(dir);
+    EXPECT_THROW(fi.getLengthProperty(), System::IO::FileNotFoundException);
+    Directory::Delete(dir);
+}
+
 TEST(FileInfoTests, getFullNameProperty_IsAbsolute) {
     FileInfo fi(tf("fi_fullname.txt"));
     std::string full = fi.getFullNameProperty();
@@ -318,6 +365,19 @@ TEST(FileInfoTests, CopyTo_EmptyDest_ThrowsArgumentException) {
 TEST(FileInfoTests, MoveTo_NonExistentSource_ThrowsFileNotFoundException) {
     FileInfo fi(tf("fi_no_such_move_src_xyz.txt"));
     EXPECT_THROW(fi.MoveTo(tf("fi_move_dst_xyz.txt")), System::IO::FileNotFoundException);
+}
+
+TEST(FileInfoTests, MoveTo_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("fi_move_noclobber_src.txt");
+    std::string dst = tf("fi_move_noclobber_dst.txt");
+    File::WriteAllText(src, "source content");
+    File::WriteAllText(dst, "original destination content");
+    FileInfo fi(src);
+    EXPECT_THROW(fi.MoveTo(dst), System::IO::IOException);
+    EXPECT_TRUE(File::Exists(src));
+    EXPECT_EQ(File::ReadAllText(dst), "original destination content");
+    File::Delete(src);
+    File::Delete(dst);
 }
 
 TEST(FileInfoTests, CopyTo_Succeeds_DestinationExists) {
@@ -374,6 +434,36 @@ TEST(FileSystemInfoTests, LastWriteTime_RoundTrips) {
     File::Delete(path);
 }
 
+// Regression test for a wave-3 audit finding: CreationTime/LastAccessTime/LastWriteTime (the
+// "local" properties) returned the UTC value verbatim with no timezone conversion at all.
+// Verified against FileSystemInfo.cs, where each is `Xxx => XxxUtc.ToLocalTime()`. This
+// asserts the applied offset exactly matches TimeZoneInfo::Local()'s base UTC offset (rather
+// than asserting local != utc, which would be a no-op in a UTC-configured CI environment) --
+// it fails under the old bug whenever the local zone's offset is non-zero, and also catches a
+// wrong-sign conversion.
+TEST(FileSystemInfoTests, CreationTime_AppliesLocalUtcOffset) {
+    std::string path = tf("fsi_localtime.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    System::DateTime utc = fi.getCreationTimeUtcProperty();
+    System::DateTime local = fi.getCreationTimeProperty();
+    SharpRuntime::longcs expectedOffsetTicks = System::TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTicksProperty();
+    EXPECT_EQ(local.getTicksProperty() - utc.getTicksProperty(), expectedOffsetTicks);
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, SetLastWriteTime_ConvertsFromLocalToUtc) {
+    std::string path = tf("fsi_setlocaltime.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    System::DateTime localTarget(System::DateTime(2020, 6, 15, 12, 0, 0));
+    fi.setLastWriteTimeProperty(localTarget);
+    System::DateTime expectedUtc = System::TimeZoneInfo::ConvertTimeToUtc(localTarget, System::TimeZoneInfo::Local());
+    EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getTicksProperty() / System::DateTime::TicksPerSecond,
+              expectedUtc.getTicksProperty() / System::DateTime::TicksPerSecond);
+    File::Delete(path);
+}
+
 TEST(FileSystemInfoTests, CreationAndAccessTime_DoNotThrow_ForExistingFile) {
     std::string path = tf("fsi_times.txt");
     File::WriteAllText(path, "content");
@@ -421,6 +511,23 @@ TEST(DirectoryTests, GetFiles_NonExistentDir_ThrowsDirectoryNotFoundException) {
                  System::IO::DirectoryNotFoundException);
 }
 
+// Regression test for a wave-3 audit finding: GetFiles(path, "*.*") converted the pattern
+// literally to a regex requiring a literal '.' in the filename, silently excluding every
+// extensionless file. Verified against FileSystemName.cs's TranslateWin32Expression, which
+// special-cases "*.*" (legacy DOS 8.3 compatibility) to match every file, with or without an
+// extension.
+TEST(DirectoryTests, GetFiles_StarDotStarPattern_IncludesExtensionlessFiles) {
+    std::string dir = tf("getfiles_stardotstar_dir");
+    Directory::CreateDirectory(dir);
+    File::WriteAllText(dir + "/README", "no extension");
+    File::WriteAllText(dir + "/notes.txt", "has extension");
+
+    auto files = Directory::GetFiles(dir, "*.*");
+    EXPECT_EQ(files.size(), 2u);
+
+    Directory::Delete(dir, true);
+}
+
 TEST(DirectoryTests, GetDirectories_NonExistentDir_ThrowsDirectoryNotFoundException) {
     EXPECT_THROW((void)Directory::GetDirectories(tf("no_such_dir_for_getdirs_xyz")),
                  System::IO::DirectoryNotFoundException);
@@ -433,6 +540,18 @@ TEST(DirectoryTests, CreateDirectory_EmptyPath_ThrowsArgumentException) {
 TEST(DirectoryTests, Move_NonExistentSource_ThrowsDirectoryNotFoundException) {
     EXPECT_THROW(Directory::Move(tf("no_such_src_xyz"), tf("move_dst_xyz")),
                  System::IO::DirectoryNotFoundException);
+}
+
+TEST(DirectoryTests, Move_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("dir_move_noclobber_src");
+    std::string dst = tf("dir_move_noclobber_dst");
+    Directory::CreateDirectory(src);
+    Directory::CreateDirectory(dst);
+    EXPECT_THROW(Directory::Move(src, dst), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(src));
+    EXPECT_TRUE(Directory::Exists(dst));
+    Directory::Delete(src);
+    Directory::Delete(dst);
 }
 
 TEST(DirectoryTests, Exists_ExistingFileNotDirectory_False) {
@@ -475,6 +594,19 @@ TEST(DirectoryInfoTests, MoveTo_NonExistent_ThrowsDirectoryNotFoundException) {
     EXPECT_THROW(di.MoveTo(tf("di_move_dst_xyz")), System::IO::DirectoryNotFoundException);
 }
 
+TEST(DirectoryInfoTests, MoveTo_ExistingDestination_ThrowsIOException_DoesNotOverwrite) {
+    std::string src = tf("di_move_noclobber_src");
+    std::string dst = tf("di_move_noclobber_dst");
+    Directory::CreateDirectory(src);
+    Directory::CreateDirectory(dst);
+    DirectoryInfo di(src);
+    EXPECT_THROW(di.MoveTo(dst), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(src));
+    EXPECT_TRUE(Directory::Exists(dst));
+    Directory::Delete(src);
+    Directory::Delete(dst);
+}
+
 TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) {
     DirectoryInfo di(tf("di_no_such_getfiles_xyz"));
     EXPECT_THROW((void)di.GetFiles(), System::IO::DirectoryNotFoundException);
@@ -483,6 +615,53 @@ TEST(DirectoryInfoTests, GetFiles_NonExistent_ThrowsDirectoryNotFoundException) 
 // ===========================================================================
 // BinaryWriter + BinaryReader
 // ===========================================================================
+
+namespace {
+    // Test double tracking Flush()/Close() calls, since MemoryStream's Flush() is an
+    // unobservable no-op -- used to verify BinaryWriter's leaveOpen handling actually calls
+    // Flush() on the underlying stream rather than silently doing nothing.
+    class FlushTrackingStream : public System::IO::Stream {
+    public:
+        bool flushCalled = false;
+        bool closeCalled = false;
+        intcs Read(SharpRuntime::bytecs*, intcs, intcs) override { return 0; }
+        void Write(const SharpRuntime::bytecs*, intcs, intcs) override {}
+        void Close() override { closeCalled = true; }
+        void Flush() override { flushCalled = true; }
+        [[nodiscard]] intcs getLengthProperty() const override { return 0; }
+        [[nodiscard]] bool getCanWriteProperty() const override { return true; }
+    };
+}
+
+// Regression tests for a wave-3 audit finding: BinaryWriter::Close()/~BinaryWriter() with
+// leaveOpen=true did nothing at all to the underlying stream, instead of flushing it. Verified
+// against BinaryWriter.cs's Dispose(bool): "if (_leaveOpen) OutStream.Flush(); else
+// OutStream.Close();" -- leaveOpen=true means "flush what's pending, but don't take ownership
+// of closing it," not "do nothing."
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_LeaveOpenTrue_FlushesUnderlyingStream) {
+    FlushTrackingStream fs;
+    BinaryWriter bw(&fs, true);
+    bw.Close();
+    EXPECT_TRUE(fs.flushCalled);
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Destructor_LeaveOpenTrue_FlushesUnderlyingStream) {
+    FlushTrackingStream fs;
+    {
+        BinaryWriter bw(&fs, true);
+        (void)bw;
+    }
+    EXPECT_TRUE(fs.flushCalled);
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(BinaryReaderWriterTests, BinaryWriter_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    FlushTrackingStream fs;
+    BinaryWriter bw(&fs, false);
+    bw.Close();
+    EXPECT_TRUE(fs.closeCalled);
+}
 
 TEST(BinaryReaderWriterTests, WriteRead_Int32_Roundtrip) {
     MemoryStream ms;
@@ -814,6 +993,42 @@ TEST(StreamWriterReaderTests, StreamWriter_BaseStreamProperty) {
     EXPECT_EQ(sw.getBaseStreamProperty(), &ms);
 }
 
+// Regression: Close() previously closed the underlying stream unconditionally, ignoring
+// leaveOpen (only the destructor honored it). These use FlushTrackingStream (defined above,
+// near the BinaryWriter tests) rather than MemoryStream: MemoryStream::Close() is itself a
+// no-op against real .NET (see MemoryStreamTests.Close_DoesNotClearBufferOrPosition), so its
+// buffer being cleared or not is no longer a signal of whether Close() was actually called on
+// it.
+TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
+    FlushTrackingStream fs;
+    StreamWriter sw(&fs, true);
+    sw.Write(std::string("data"));
+    sw.Close();
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(StreamWriterReaderTests, StreamWriter_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    FlushTrackingStream fs;
+    StreamWriter sw(&fs, false);
+    sw.Write(std::string("data"));
+    sw.Close();
+    EXPECT_TRUE(fs.closeCalled);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenTrue_DoesNotCloseUnderlyingStream) {
+    FlushTrackingStream fs;
+    StreamReader sr(&fs, true);
+    sr.Close();
+    EXPECT_FALSE(fs.closeCalled);
+}
+
+TEST(StreamWriterReaderTests, StreamReader_Close_LeaveOpenFalse_ClosesUnderlyingStream) {
+    FlushTrackingStream fs;
+    StreamReader sr(&fs, false);
+    sr.Close();
+    EXPECT_TRUE(fs.closeCalled);
+}
+
 TEST(StreamWriterReaderTests, WriteStringLiteral_DoesNotResolveToBoolOverload) {
     // Regression: TextWriter previously had no Write(const char*) overload, so a string
     // literal bound to Write(bool) via a preferred standard pointer-to-bool conversion
@@ -847,6 +1062,23 @@ TEST(StreamWriterReaderTests, StreamReader_ReadLine) {
     MemoryStream ms;
     StreamWriter sw(&ms, true);
     sw.Write("line1\nline2\nline3");
+    sw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
+    StreamReader sr(&ms2);
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+// Regression test for a wave-3 audit finding: ReadLine() only stopped scanning at '\n', so a
+// lone '\r' (classic Mac line ending, not followed by '\n') was treated as ordinary line
+// content instead of a line terminator. Verified against StreamReader.cs's ReadLine(), which
+// treats '\r' and '\n' as interchangeable terminators.
+TEST(StreamWriterReaderTests, StreamReader_ReadLine_LoneCarriageReturn_TerminatesLine) {
+    MemoryStream ms;
+    StreamWriter sw(&ms, true);
+    sw.Write("line1\rline2\nline3");
     sw.Flush();
     auto buf = ms.ToArray();
     MemoryStream ms2(buf.data(), static_cast<int32_t>(buf.size()));
@@ -973,6 +1205,23 @@ TEST(FileStreamTests, getLengthProperty_AfterWrite) {
     File::Delete(p);
 }
 
+TEST(FileStreamTests, getLengthProperty_OnSameOpenInstance_AfterWrite_ReflectsExtension) {
+    // Regression: previously length_ was only cached at construction (0 for FileMode::Create)
+    // and only ever updated by SetLength() -- Write() never touched it, so querying Length on
+    // the SAME still-open FileStream right after a create-then-write returned the stale,
+    // construction-time value (0) instead of the file's actual current size.
+    std::string p = tf("fstream_len_live.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    EXPECT_EQ(fs.getLengthProperty(), 0);
+    uint8_t data[] = {1, 2, 3, 4, 5};
+    fs.Write(data, 0, 5);
+    EXPECT_EQ(fs.getLengthProperty(), 5);
+    fs.Write(data, 0, 3);
+    EXPECT_EQ(fs.getLengthProperty(), 8);
+    fs.Close();
+    File::Delete(p);
+}
+
 TEST(FileStreamTests, WriteByte_Flush_NoThrow) {
     std::string p = tf("fstream_wb.bin");
     FileStream fs(p, FileMode::Create, FileAccess::Write);
@@ -1019,6 +1268,22 @@ TEST(FileStreamTests, Open_NonExistentFile_ThrowsFileNotFoundException) {
 TEST(FileStreamTests, Truncate_NonExistentFile_ThrowsFileNotFoundException) {
     EXPECT_THROW(FileStream(tf("fstream_truncate_missing.bin"), FileMode::Truncate, FileAccess::ReadWrite),
                  System::IO::FileNotFoundException);
+}
+
+// Regression tests for a wave-3 audit finding: opening/creating a file whose *parent*
+// directory doesn't exist threw a generic IOException (or, for FileMode::Open,
+// FileNotFoundException) instead of DirectoryNotFoundException. Verified against
+// Interop.IOErrors.cs's GetExceptionForIoErrno: "For Windows compatibility, throw
+// DirectoryNotFoundException instead of FileNotFoundException when the parent folder does not
+// exist."
+TEST(FileStreamTests, Open_MissingParentDirectory_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(FileStream(tf("no_such_parent_dir_xyz/file.bin"), FileMode::Open, FileAccess::Read),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(FileStreamTests, Create_MissingParentDirectory_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(FileStream(tf("no_such_parent_dir_xyz/file.bin"), FileMode::Create, FileAccess::ReadWrite),
+                 System::IO::DirectoryNotFoundException);
 }
 
 TEST(FileStreamTests, OpenOrCreate_NonExistentFile_CreatesEmpty) {
@@ -1151,6 +1416,67 @@ TEST(FileStreamTests, ReadByte_ReturnsBytesThenMinusOne) {
     EXPECT_EQ(fs.ReadByte(), static_cast<intcs>('A'));
     EXPECT_EQ(fs.ReadByte(), -1);
     fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_AfterClose_ThrowsObjectDisposedException) {
+    std::string p = tf("fstream_read_after_close.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    fs.Close();
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, 0, 3), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Write_AfterClose_ThrowsObjectDisposedException) {
+    std::string p = tf("fstream_write_after_close.bin");
+    FileStream fs(p, FileMode::Create, FileAccess::Write);
+    fs.Close();
+    uint8_t buf[3] = {1, 2, 3};
+    EXPECT_THROW(fs.Write(buf, 0, 3), System::ObjectDisposedException);
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    std::string p = tf("fstream_read_null.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    EXPECT_THROW(fs.Read(nullptr, 0, 3), System::ArgumentNullException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    std::string p = tf("fstream_read_negoffset.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, -1, 3), System::ArgumentOutOfRangeException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    std::string p = tf("fstream_read_negcount.bin");
+    File::WriteAllText(p, "abc");
+    FileStream fs(p, FileMode::Open, FileAccess::Read);
+    uint8_t buf[3] = {};
+    EXPECT_THROW(fs.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+    fs.Close();
+    File::Delete(p);
+}
+
+TEST(FileStreamTests, SetLength_AfterClose_ThrowsObjectDisposedException_DoesNotResizeFile) {
+    // Regression: SetLength() previously checked only canWrite_ (never reset by Close()),
+    // so calling it after Close() silently resized the file on disk despite the stream
+    // claiming to be closed.
+    std::string p = tf("fstream_setlength_after_close.bin");
+    File::WriteAllText(p, "abcdefgh");
+    FileStream fs(p, FileMode::Open, FileAccess::ReadWrite);
+    fs.Close();
+    EXPECT_THROW(fs.SetLength(3), System::ObjectDisposedException);
+    EXPECT_EQ(File::ReadAllText(p), "abcdefgh");
     File::Delete(p);
 }
 
@@ -1312,6 +1638,58 @@ TEST(IsolatedStorageFileTests, Dispose_DoesNotThrow) {
     EXPECT_NO_THROW(store.Dispose());
 }
 
+TEST(IsolatedStorageFileTests, AfterDispose_OperationsThrowObjectDisposedException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    store.Dispose();
+    EXPECT_THROW(store.FileExists("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.DirectoryExists("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.CreateDirectory("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.DeleteFile("x"), System::ObjectDisposedException);
+    EXPECT_THROW(store.GetFileNames(), System::ObjectDisposedException);
+    EXPECT_THROW(store.GetDirectoryNames(), System::ObjectDisposedException);
+}
+
+TEST(IsolatedStorageFileTests, DeleteDirectory_NonEmpty_ThrowsInsteadOfRecursivelyDeleting) {
+    // Regression: DeleteDirectory previously used remove_all (recursive), silently deleting an
+    // entire subtree instead of matching real .NET's Directory.Delete(path, recursive: false)
+    // "must be empty" contract.
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    const std::string dir = "sharp_rt_iso_nonempty_dir";
+    const std::string nested = dir + "/nested.dat";
+    store.CreateDirectory(dir);
+    { auto s = store.CreateFile(nested); s.Close(); }
+
+    EXPECT_THROW(store.DeleteDirectory(dir), System::IO::IsolatedStorage::IsolatedStorageException);
+    EXPECT_TRUE(store.DirectoryExists(dir));
+    EXPECT_TRUE(store.FileExists(nested));
+
+    store.DeleteFile(nested);
+    store.DeleteDirectory(dir);
+}
+
+TEST(IsolatedStorageFileTests, CopyFile_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.CopyFile("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.CopyFile("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, MoveFile_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.MoveFile("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.MoveFile("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, MoveDirectory_EmptyPath_ThrowsArgumentException) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_THROW(store.MoveDirectory("", "dst"), System::ArgumentException);
+    EXPECT_THROW(store.MoveDirectory("src", ""), System::ArgumentException);
+}
+
+TEST(IsolatedStorageFileTests, Quota_IsLongMax) {
+    auto store = IsolatedStorageFile::GetUserStoreForApplication();
+    EXPECT_EQ(store.getQuotaProperty(), std::numeric_limits<SharpRuntime::longcs>::max());
+}
+
 TEST(IsolatedStorageFileTests, GetUserStoreForApplication_HasApplicationAndUserScope) {
     auto store = IsolatedStorageFile::GetUserStoreForApplication();
     EXPECT_EQ(store.getScopeProperty(),
@@ -1359,6 +1737,42 @@ TEST(RandomAccessTests, WriteThenRead_AtOffset_Roundtrip) {
     EXPECT_EQ(n, 4);
     EXPECT_EQ(readback[0], 10u);
     EXPECT_EQ(readback[3], 40u);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
+// Regression test for a wave-3 audit finding: RandomAccess::Write issued a single pwrite()
+// call and silently discarded any bytes it didn't cover on a "short write" (pwrite() can
+// legitimately write fewer bytes than requested), with no error and no way for the
+// void-returning caller to detect the loss. Verified against RandomAccess.Unix.cs's
+// WriteAtOffset, which loops until the whole buffer is written. A single pwrite() call is
+// most likely to write fewer bytes than requested for a large buffer (pwrite() has no
+// mandated minimum below which it must always complete in one call), so this write is
+// intentionally large enough to exercise that path in practice, verifying every byte lands
+// correctly rather than just asserting the total count.
+TEST(RandomAccessTests, Write_LargeBuffer_AllBytesWrittenCorrectly) {
+    std::string p = tf("randomaccess_large.bin");
+    File::Delete(p);
+    int fd = ::open(p.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    ASSERT_GE(fd, 0);
+
+    constexpr size_t size = 8 * 1024 * 1024;
+    std::vector<uint8_t> data(size);
+    for (size_t i = 0; i < size; ++i) data[i] = static_cast<uint8_t>(i);
+    System::IO::RandomAccess::Write(fd, data.data(), static_cast<intcs>(size), 0);
+
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), static_cast<int64_t>(size));
+
+    std::vector<uint8_t> readback(size);
+    intcs totalRead = 0;
+    while (static_cast<size_t>(totalRead) < size) {
+        intcs n = System::IO::RandomAccess::Read(fd, readback.data() + totalRead,
+                                                   static_cast<intcs>(size) - totalRead, totalRead);
+        ASSERT_GT(n, 0);
+        totalRead += n;
+    }
+    EXPECT_EQ(readback, data);
 
     ::close(fd);
     File::Delete(p);

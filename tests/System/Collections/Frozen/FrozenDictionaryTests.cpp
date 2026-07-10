@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/Frozen/FrozenDictionary.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include <string>
 
 using System::Collections::Frozen::FrozenDictionary;
@@ -35,7 +37,7 @@ TEST(FrozenDictionaryTest, GetItemFound) {
 
 TEST(FrozenDictionaryTest, GetItemNotFoundThrows) {
     auto d = FrozenDictionary<std::string, int>::Create({{"k", 42}});
-    EXPECT_THROW(d.getItem("missing"), std::out_of_range);
+    EXPECT_THROW(d.getItem("missing"), System::Collections::Generic::KeyNotFoundException);
 }
 
 TEST(FrozenDictionaryTest, TryGetValueFound) {
@@ -77,7 +79,7 @@ TEST(FrozenDictionaryTest, CopyTo) {
 TEST(FrozenDictionaryTest, CopyTo_TooSmall_Throws) {
     auto d = FrozenDictionary<std::string, int>::Create({{"a", 1}, {"b", 2}});
     std::vector<std::pair<std::string, int>> buf(1);
-    EXPECT_THROW(d.CopyTo(buf, 0), std::out_of_range);
+    EXPECT_THROW(d.CopyTo(buf, 0), System::ArgumentException);
 }
 
 TEST(FrozenDictionaryTest, RangeBasedFor) {

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <cmath>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 #include "System/Numerics/Vector3.hpp"
 #include "System/Numerics/Vector4.hpp"
@@ -74,6 +75,17 @@ TEST(Matrix3x2Tests, CreateRotation) {
     auto m = Matrix3x2::CreateRotation(0.0f);
     EXPECT_TRUE(m.getIsIdentityProperty());
 }
+TEST(Matrix3x2Tests, Invert_SingularMatrix_ReturnsFalseAndNaN) {
+    Matrix3x2 singular{1, 2, 2, 4, 0, 0}; // determinant == 0
+    Matrix3x2 inv;
+    EXPECT_FALSE(Matrix3x2::Invert(singular, inv));
+    EXPECT_TRUE(std::isnan(inv.M11));
+    EXPECT_TRUE(std::isnan(inv.M12));
+    EXPECT_TRUE(std::isnan(inv.M21));
+    EXPECT_TRUE(std::isnan(inv.M22));
+    EXPECT_TRUE(std::isnan(inv.M31));
+    EXPECT_TRUE(std::isnan(inv.M32));
+}
 
 // --- Matrix4x4 ---
 TEST(Matrix4x4Tests, Identity) {
@@ -93,6 +105,30 @@ TEST(Matrix4x4Tests, Invert) {
     EXPECT_TRUE(Matrix4x4::Invert(m, inv));
     auto r = m * inv;
     EXPECT_TRUE(r.getIsIdentityProperty());
+}
+TEST(Matrix4x4Tests, Invert_SingularMatrix_ReturnsFalseAndNaN) {
+    Matrix4x4 singular{}; // all-zero matrix: determinant == 0
+    Matrix4x4 inv;
+    EXPECT_FALSE(Matrix4x4::Invert(singular, inv));
+    EXPECT_TRUE(std::isnan(inv.M11));
+    EXPECT_TRUE(std::isnan(inv.M44));
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NonPositiveFov_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(0.0f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(-1.0f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_FovTooLarge_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(3.2f, 1.0f, 0.1f, 100.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NonPositiveNearOrFar_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.0f, 100.0f), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 0.0f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NearGreaterThanFar_Throws) {
+    EXPECT_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 100.0f, 0.1f), System::ArgumentOutOfRangeException);
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_ValidArgs_NoThrow) {
+    EXPECT_NO_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 100.0f));
 }
 TEST(Matrix4x4Tests, TransformVector3) {
     auto m = Matrix4x4::CreateTranslation(10,0,0);
@@ -133,6 +169,63 @@ TEST(QuaternionTests, RoundtripMatrix) {
     auto m = Matrix4x4::CreateFromQuaternion(q);
     auto q2 = Quaternion::CreateFromRotationMatrix(m);
     EXPECT_TRUE(near(std::abs(Quaternion::Dot(q,q2)), 1.0f, 1e-4f));
+}
+TEST(QuaternionTests, Inverse_ZeroQuaternion_ReturnsZero) {
+    auto q = Quaternion::Inverse(Quaternion::Zero());
+    EXPECT_EQ(q, Quaternion::Zero());
+}
+TEST(QuaternionTests, Inverse_NearZeroLength_ReturnsZero) {
+    // Regression: previously only exact-zero length short-circuited to a safe result;
+    // a near-zero-but-nonzero length blew up to huge/near-infinite components instead of
+    // matching .NET's epsilon-guarded Zero() fallback (Quaternion.cs Inverse).
+    Quaternion q{1e-5f, 0, 0, 0};
+    ASSERT_LE(q.LengthSquared(), 1.192092896e-7f);
+    EXPECT_EQ(Quaternion::Inverse(q), Quaternion::Zero());
+}
+TEST(QuaternionTests, Inverse_UnitQuaternion_MatchesConjugate) {
+    auto q = Quaternion::Normalize({1,2,3,4});
+    auto inv = Quaternion::Inverse(q);
+    auto conj = Quaternion::Conjugate(q);
+    EXPECT_TRUE(near(inv.X, conj.X));
+    EXPECT_TRUE(near(inv.W, conj.W));
+}
+TEST(QuaternionTests, Normalize_ZeroQuaternion_ProducesNaN) {
+    // Matches .NET exactly: Normalize is an unconditional value/Length() with no zero
+    // guard (Quaternion.cs), so a zero-length input propagates NaN rather than being
+    // silently caught.
+    auto q = Quaternion::Normalize(Quaternion::Zero());
+    EXPECT_TRUE(std::isnan(q.X));
+}
+TEST(QuaternionTests, Slerp_TightlyAlignedButNotWithinLooseThreshold_UsesSphericalPath) {
+    // Regression: the old 0.9999f threshold took the linear-interpolation shortcut for
+    // quaternion pairs .NET still slerps via the full spherical formula (SlerpEpsilon is
+    // 1e-6f in Quaternion.cs, i.e. threshold 0.999999f). Construct a pair whose dot product
+    // falls strictly between the two thresholds and confirm the interpolated result still
+    // lands on the unit sphere (both paths preserve this, so instead assert the two
+    // thresholds actually disagree on which branch a nearby-but-not-coincident pair takes).
+    auto a = Quaternion::Identity();
+    auto b = Quaternion::Normalize(Quaternion::CreateFromAxisAngle({0,0,1}, 0.01f));
+    float cosAngle = Quaternion::Dot(a, b);
+    ASSERT_GT(cosAngle, 0.9999f);
+    ASSERT_LE(cosAngle, 1.0f - 1e-6f);
+    auto slerped = Quaternion::Slerp(a, b, 0.5f);
+    EXPECT_TRUE(near(slerped.Length(), 1.0f));
+}
+TEST(QuaternionTests, DivideOperator_MatchesStaticDivide) {
+    auto a = Quaternion::Normalize({1,2,3,4});
+    auto b = Quaternion::Normalize({4,3,2,1});
+    auto viaOperator = a / b;
+    auto viaStatic = Quaternion::Divide(a, b);
+    EXPECT_TRUE(near(viaOperator.X, viaStatic.X));
+    EXPECT_TRUE(near(viaOperator.W, viaStatic.W));
+}
+TEST(QuaternionTests, Concatenate_MatchesReverseMultiplyOrder) {
+    auto a = Quaternion::CreateFromAxisAngle({0,0,1}, 0.3f);
+    auto b = Quaternion::CreateFromAxisAngle({1,0,0}, 0.2f);
+    auto viaConcatenate = Quaternion::Concatenate(a, b);
+    auto viaMultiply = b * a;
+    EXPECT_TRUE(near(viaConcatenate.X, viaMultiply.X));
+    EXPECT_TRUE(near(viaConcatenate.W, viaMultiply.W));
 }
 
 // --- Plane ---

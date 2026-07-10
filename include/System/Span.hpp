@@ -4,11 +4,12 @@
 #pragma once
 #include <algorithm>
 #include <cstddef>
-#include <stdexcept>
 #include <string>
 #include <typeinfo>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
 
@@ -90,20 +91,20 @@ namespace System {
         /**
          * @brief Returns a reference to the element at the specified index.
          * @param i The zero-based index.
-         * @throws std::out_of_range if @p i is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
          */
         T& operator[](intcs i) {
-            if (i < 0 || i >= length_) throw std::out_of_range("Span index out of range");
+            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
             return ptr_[i];
         }
 
         /**
          * @brief Returns a const reference to the element at the specified index.
          * @param i The zero-based index.
-         * @throws std::out_of_range if @p i is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
          */
         const T& operator[](intcs i) const {
-            if (i < 0 || i >= length_) throw std::out_of_range("Span index out of range");
+            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
             return ptr_[i];
         }
 
@@ -130,10 +131,10 @@ namespace System {
          *
          * C++ counterpart of .NET Span&lt;T&gt;.Slice(int).
          * @param start The zero-based index at which to begin the slice.
-         * @throws std::out_of_range if @p start is out of range.
+         * @throws System::ArgumentOutOfRangeException if @p start is out of range.
          */
         [[nodiscard]] Span<T> Slice(intcs start) const {
-            if (start < 0 || start > length_) throw std::out_of_range("Span::Slice start out of range");
+            if (start < 0 || start > length_) throw System::ArgumentOutOfRangeException("start");
             return Span<T>(ptr_ + start, length_ - start);
         }
 
@@ -143,11 +144,11 @@ namespace System {
          * C++ counterpart of .NET Span&lt;T&gt;.Slice(int, int).
          * @param start  The zero-based index at which to begin the slice.
          * @param length The number of elements in the slice.
-         * @throws std::out_of_range if the range is invalid.
+         * @throws System::ArgumentOutOfRangeException if the range is invalid.
          */
         [[nodiscard]] Span<T> Slice(intcs start, intcs length) const {
             if (start < 0 || length < 0 || start + length > length_)
-                throw std::out_of_range("Span::Slice range out of range");
+                throw System::ArgumentOutOfRangeException("start");
             return Span<T>(ptr_ + start, length);
         }
 
@@ -160,11 +161,11 @@ namespace System {
          *
          * C++ counterpart of .NET Span&lt;T&gt;.CopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
-         * @throws std::invalid_argument if the destination is shorter than this span.
+         * @throws System::ArgumentException if the destination is shorter than this span.
          */
         void CopyTo(Span<T> destination) const {
             if (length_ > destination.getLengthProperty())
-                throw std::invalid_argument("Destination is too short.");
+                throw System::ArgumentException("Destination is too short.");
             std::copy(ptr_, ptr_ + length_, destination.getPointer());
         }
 
@@ -336,10 +337,10 @@ namespace System {
         /**
          * @brief Returns a const reference to the element at the specified index.
          * @param i The zero-based index of the element.
-         * @throws std::out_of_range if @p i is out of bounds.
+         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
          */
         const T& operator[](intcs i) const {
-            if (i < 0 || i >= length_) throw std::out_of_range("ReadOnlySpan index out of range");
+            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
             return ptr_[i];
         }
 
@@ -358,10 +359,10 @@ namespace System {
         /**
          * @brief Forms a slice starting at @p start extending to the end of this span.
          * @param start The zero-based index at which to begin the slice.
-         * @throws std::out_of_range if @p start is out of range.
+         * @throws System::ArgumentOutOfRangeException if @p start is out of range.
          */
         [[nodiscard]] ReadOnlySpan<T> Slice(intcs start) const {
-            if (start < 0 || start > length_) throw std::out_of_range("ReadOnlySpan::Slice start out of range");
+            if (start < 0 || start > length_) throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<T>(ptr_ + start, length_ - start);
         }
 
@@ -369,11 +370,11 @@ namespace System {
          * @brief Forms a slice of @p length elements starting at @p start.
          * @param start  The zero-based index at which to begin the slice.
          * @param length The number of elements in the slice.
-         * @throws std::out_of_range if the range is invalid.
+         * @throws System::ArgumentOutOfRangeException if the range is invalid.
          */
         [[nodiscard]] ReadOnlySpan<T> Slice(intcs start, intcs length) const {
             if (start < 0 || length < 0 || start + length > length_)
-                throw std::out_of_range("ReadOnlySpan::Slice range out of range");
+                throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<T>(ptr_ + start, length);
         }
 
@@ -386,11 +387,11 @@ namespace System {
          *
          * C++ counterpart of .NET ReadOnlySpan&lt;T&gt;.CopyTo(Span&lt;T&gt;).
          * @param destination The span to copy items into.
-         * @throws std::invalid_argument if the destination is shorter than this span.
+         * @throws System::ArgumentException if the destination is shorter than this span.
          */
         void CopyTo(Span<T> destination) const {
             if (length_ > destination.getLengthProperty())
-                throw std::invalid_argument("Destination is too short.");
+                throw System::ArgumentException("Destination is too short.");
             std::copy(ptr_, ptr_ + length_, destination.getPointer());
         }
 

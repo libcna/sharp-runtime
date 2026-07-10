@@ -18,7 +18,10 @@ namespace System::Xml::Linq {
             if (const auto* s = std::any_cast<std::string>(&item)) {
                 writer.WriteString(*s);
             } else if (const auto* a = std::any_cast<std::shared_ptr<XAttribute>>(&item)) {
-                if (*a) writer.WriteAttributeString((*a)->getNameProperty().ToString(), (*a)->getValueProperty());
+                // See XElement::WriteTo's comment: the local name only, not XName::ToString()'s
+                // Clark notation, which would otherwise produce malformed XML for a namespaced
+                // attribute ('{'/'}' are not legal in an XML Name production).
+                if (*a) writer.WriteAttributeString((*a)->getNameProperty().getLocalNameProperty(), (*a)->getValueProperty());
             } else if (const auto* n = std::any_cast<std::shared_ptr<XNode>>(&item)) {
                 if (*n) (*n)->WriteTo(writer);
             } else if (const auto* se = std::any_cast<std::shared_ptr<XStreamingElement>>(&item)) {

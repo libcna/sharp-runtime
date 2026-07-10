@@ -27,8 +27,16 @@ namespace System::IO {
 
     void File::Delete(const std::string& path) {
         ThrowIfNullOrEmpty(path, "path");
-        // .NET: deleting a file that doesn't exist is not an error.
+        // Verified against FileSystem.Unix.cs's DeleteFile: real .NET calls unlink() directly,
+        // which can never remove a directory (fails with EISDIR, translated to a plain
+        // IOException) -- File.Delete never falls back to rmdir. std::filesystem::remove() is
+        // documented to call the equivalent of rmdir when the target is a directory, so it
+        // previously let File::Delete silently delete an empty directory instead of failing.
         std::error_code ec;
+        if (std::filesystem::is_directory(path, ec) && !ec) {
+            throw IOException("Could not delete '" + path + "': Is a directory.");
+        }
+        // .NET: deleting a file that doesn't exist is not an error.
         std::filesystem::remove(path, ec);
         if (ec) throw IOException("Failed to delete file '" + path + "': " + ec.message());
     }
@@ -49,6 +57,12 @@ namespace System::IO {
         ThrowIfNullOrEmpty(src, "sourceFileName");
         ThrowIfNullOrEmpty(dst, "destFileName");
         if (!Exists(src)) throw FileNotFoundException("Could not find file '" + src + "'.", src);
+        // Verified against FileSystem.Unix.cs's MoveFile(src, dst, overwrite: false): real
+        // .NET's non-overwrite Move does not replace an existing destination file. This port
+        // previously used std::filesystem::rename() unconditionally, which silently replaces
+        // an existing destination on POSIX.
+        if (Exists(dst))
+            throw IOException("Cannot create '" + dst + "' because a file or directory with the same name already exists.");
         std::error_code ec;
         std::filesystem::rename(src, dst, ec);
         if (ec) throw IOException("Failed to move file '" + src + "' to '" + dst + "': " + ec.message());

@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/HttpStatusCode.hpp"
@@ -12,7 +14,9 @@
 #include "System/Net/HttpVersion.hpp"
 #include "System/Net/IPNetwork.hpp"
 #include "System/FormatException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/Net/ProtocolViolationException.hpp"
+#include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/WebExceptionStatus.hpp"
 #include "System/Net/WebException.hpp"
 
@@ -66,11 +70,59 @@ TEST(IPAddressTests, Parse_ArbitraryAddress) {
 }
 
 TEST(IPAddressTests, Parse_InvalidAddress_Throws) {
-    EXPECT_THROW(IPAddress::Parse("not.an.ip"), std::invalid_argument);
+    EXPECT_THROW(IPAddress::Parse("not.an.ip"), System::FormatException);
 }
 
-TEST(IPAddressTests, Parse_IncompleteOctets_Throws) {
-    EXPECT_THROW(IPAddress::Parse("192.168.1"), std::invalid_argument);
+TEST(IPAddressTests, Parse_ShortForm_ExpandsIntoLastSegment) {
+    // Verified against IPv4AddressHelper.Common.cs's ParseNonCanonical (the algorithm
+    // IPAddress.Parse's IPv4 path actually uses): "fewer than 3 dots" is a legal "short form"
+    // where the final segment absorbs the remaining bytes -- "192.168.1" means
+    // 192.168.0.1 (192 << 24 | 168 << 16 | 1), not an error. The previous
+    // sscanf("%u.%u.%u.%u%c", ...)-based implementation only ever accepted exactly 4 dotted
+    // decimal segments, incorrectly rejecting this real .NET-valid input.
+    IPAddress ip = IPAddress::Parse("192.168.1");
+    EXPECT_EQ(ip.ToString(), "192.168.0.1");
+}
+
+TEST(IPAddressTests, Parse_SingleSegment_IsWholeThirtyTwoBitValue) {
+    // "3232235777" == 0xC0A80101 == 192.168.1.1, with zero dots.
+    IPAddress ip = IPAddress::Parse("3232235777");
+    EXPECT_EQ(ip.ToString(), "192.168.1.1");
+}
+
+TEST(IPAddressTests, Parse_HexAndOctalSegments_Accepted) {
+    // 0xC0 == 192, 0250 (octal) == 168.
+    IPAddress ip = IPAddress::Parse("0xC0.0250.0.1");
+    EXPECT_EQ(ip.ToString(), "192.168.0.1");
+}
+
+TEST(IPAddressTests, Parse_TrailingGarbage_Throws) {
+    EXPECT_THROW(IPAddress::Parse("192.168.1.1extra"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_EmptyTrailingSegment_Throws) {
+    EXPECT_THROW(IPAddress::Parse("192.168.1."), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_TooManyDots_Throws) {
+    EXPECT_THROW(IPAddress::Parse("1.2.3.4.5"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_SegmentOverflowsMaxIPv4Value_Throws) {
+    // A digit run long enough to overflow uint.MaxValue -- previously this invoked undefined
+    // behavior via sscanf's %u conversion (C11 7.21.6.2p10) instead of cleanly failing.
+    EXPECT_THROW(IPAddress::Parse("99999999999999999999"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_LeadingMinusSign_Throws) {
+    // sscanf's %u historically accepts a leading '-' (wrapping to a huge unsigned value on
+    // most libc implementations); real .NET rejects it outright since '-' isn't a valid digit.
+    EXPECT_THROW(IPAddress::Parse("-1.2.3.4"), System::FormatException);
+}
+
+TEST(IPAddressTests, ByteArrayConstructor_WrongLength_ThrowsArgumentException) {
+    std::vector<SharpRuntime::bytecs> bytes{1, 2, 3};
+    EXPECT_THROW(IPAddress ip(bytes), System::ArgumentException);
 }
 
 TEST(IPAddressTests, Equality_SameAddress_True) {
@@ -183,6 +235,29 @@ TEST(IPAddressIPv6Tests, Parse_WithScopeId) {
     EXPECT_EQ(ip.getScopeIdProperty(), 3);
 }
 
+// Regression test for a wave-3 audit finding: the scope-ID numeric parse used std::stoul,
+// which throws std::out_of_range (an unrelated std:: exception type, not a System::
+// exception) for a many-all-digit scope string exceeding unsigned long's range. That
+// exception propagated straight out of TryParse -- which must never throw -- instead of the
+// parse simply failing, matching IPAddressParser.cs's use of uint.TryParse (non-throwing).
+TEST(IPAddressIPv6Tests, TryParse_ScopeIdOverflow_ReturnsFalseWithoutThrowing) {
+    IPAddress ip;
+    bool ok = false;
+    EXPECT_NO_THROW(ok = IPAddress::TryParse("fe80::1%999999999999999999999999999999", ip));
+    EXPECT_FALSE(ok);
+}
+
+TEST(IPAddressIPv6Tests, Parse_ScopeIdOverflow_ThrowsFormatException) {
+    EXPECT_THROW(IPAddress::Parse("fe80::1%999999999999999999999999999999"), System::FormatException);
+}
+
+TEST(IPAddressIPv6Tests, Parse_ScopeIdJustOverUint32Max_ReturnsFalseNotSilentlyTruncated) {
+    // 4294967296 == UINT32_MAX + 1. The old std::stoul-then-narrow path would have wrapped
+    // this to scope 0 instead of failing the parse.
+    IPAddress ip;
+    EXPECT_FALSE(IPAddress::TryParse("fe80::1%4294967296", ip));
+}
+
 TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
     IPAddress ip = IPAddress::Parse("::ffff:192.168.1.1");
     EXPECT_TRUE(ip.getIsIPv4MappedToIPv6Property());
@@ -190,16 +265,21 @@ TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
 }
 
 TEST(IPAddressIPv6Tests, Parse_Invalid_Throws) {
-    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), std::invalid_argument);
+    EXPECT_THROW(IPAddress::Parse("garbage:::too:many:colons"), System::FormatException);
 }
 
 TEST(IPAddressIPv6Tests, GetAddressProperty_Throws) {
     IPAddress ip = IPAddress::Parse("::1");
-    EXPECT_THROW((void)ip.getAddressProperty(), std::logic_error);
+    EXPECT_THROW((void)ip.getAddressProperty(), System::Net::Sockets::SocketException);
 }
 
 TEST(IPAddressIPv6Tests, GetScopeIdProperty_OnIPv4_Throws) {
-    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), std::logic_error);
+    EXPECT_THROW((void)IPAddress::Loopback.getScopeIdProperty(), System::Net::Sockets::SocketException);
+}
+
+TEST(IPAddressIPv6Tests, SetScopeIdProperty_OnIPv4_Throws) {
+    IPAddress ip = IPAddress::Loopback;
+    EXPECT_THROW(ip.setScopeIdProperty(1), System::Net::Sockets::SocketException);
 }
 
 TEST(IPAddressIPv6Tests, MapToIPv6_ThenMapToIPv4_RoundTrips) {
@@ -215,6 +295,14 @@ TEST(IPAddressIPv6Tests, IsLoopback_IPv6) {
     EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("2001:db8::1")));
 }
 
+// Regression test for a wave-3 audit finding: IsLoopback only checked equality against ::1,
+// silently returning false for the IPv4-mapped loopback representation. Verified against
+// IPAddress.cs's IsLoopback, which explicitly also checks
+// s_loopbackMappedToIPv6 (::ffff:127.0.0.1).
+TEST(IPAddressIPv6Tests, IsLoopback_IPv4MappedLoopback_ReturnsTrue) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("::ffff:127.0.0.1")));
+}
+
 TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
     EXPECT_TRUE(IPAddress::Parse("fe80::1").getIsIPv6LinkLocalProperty());
     EXPECT_FALSE(IPAddress::Parse("2001:db8::1").getIsIPv6LinkLocalProperty());
@@ -222,6 +310,23 @@ TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
 
 TEST(IPAddressIPv6Tests, Equality) {
     EXPECT_EQ(IPAddress::Parse("2001:db8::1"), IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001"));
+}
+
+// Regression test for a wave-3 audit finding: GetHashCode() only combined numbers_[0..3] (the
+// first 64 bits), so two IPv6 addresses sharing a /64 prefix but differing only in their host
+// suffix -- the common case for SLAAC/EUI-64-derived addresses -- always hashed identically.
+// Verified against IPAddress.cs's GetHashCode, which combines all 128 bits (via four uint32
+// values spanning all 8 numbers_ groups) plus the scope ID.
+TEST(IPAddressIPv6Tests, GetHashCode_DiffersWhenOnlyLower64BitsDiffer) {
+    IPAddress a = IPAddress::Parse("2001:db8::1");
+    IPAddress b = IPAddress::Parse("2001:db8::2");
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(IPAddressIPv6Tests, GetHashCode_EqualAddresses_SameHash) {
+    IPAddress a = IPAddress::Parse("2001:db8::1");
+    IPAddress b = IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
 // ===========================================================================
@@ -244,6 +349,26 @@ TEST(IPEndPointTests, Constructor_Uint32AndPort) {
     IPEndPoint ep(0x7F000001u, 443);
     EXPECT_EQ(ep.getAddressProperty().getAddressProperty(), 0x7F000001u);
     EXPECT_EQ(ep.getPortProperty(), 443);
+}
+
+TEST(IPEndPointTests, Constructor_LongcsAndPort_InRange) {
+    IPEndPoint ep(static_cast<SharpRuntime::longcs>(0x7F000001), 443);
+    EXPECT_EQ(ep.getAddressProperty().getAddressProperty(), 0x7F000001u);
+}
+
+// Regression test for a wave-3 audit finding: the longcs-taking constructor did
+// static_cast<uint32_t>(address) with no range check, silently truncating any value outside
+// uint32_t range instead of throwing. Verified against IPAddress.cs's IPAddress(long)
+// constructor (which IPEndPoint(long, int) delegates to in real .NET), which throws
+// ArgumentOutOfRangeException via ThrowIfGreaterThan((ulong)newAddress, 0xFFFFFFFF).
+TEST(IPEndPointTests, Constructor_LongcsAndPort_TooLarge_Throws) {
+    EXPECT_THROW(IPEndPoint(static_cast<SharpRuntime::longcs>(0x100000000LL), 443),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(IPEndPointTests, Constructor_LongcsAndPort_Negative_Throws) {
+    EXPECT_THROW(IPEndPoint(static_cast<SharpRuntime::longcs>(-1), 443),
+                 System::ArgumentOutOfRangeException);
 }
 
 TEST(IPEndPointTests, ToString_LoopbackPort80) {
@@ -365,7 +490,7 @@ TEST(IPEndPointTests, TryParse_Invalid_ReturnsFalse) {
 }
 
 TEST(IPEndPointTests, Parse_Invalid_Throws) {
-    EXPECT_THROW(IPEndPoint::Parse("garbage"), std::invalid_argument);
+    EXPECT_THROW(IPEndPoint::Parse("garbage"), System::FormatException);
 }
 
 // ===========================================================================
@@ -390,6 +515,10 @@ TEST(HttpStatusCodeTests, MovedPermanently_Is301) {
 
 TEST(HttpStatusCodeTests, NotModified_Is304) {
     EXPECT_EQ(static_cast<int>(HttpStatusCode::NotModified), 304);
+}
+
+TEST(HttpStatusCodeTests, Unused_Is306) {
+    EXPECT_EQ(static_cast<int>(HttpStatusCode::Unused), 306);
 }
 
 TEST(HttpStatusCodeTests, BadRequest_Is400) {
@@ -532,8 +661,16 @@ TEST(WebUtilityTests, UrlEncode_AlphanumericUnchanged) {
     EXPECT_EQ(WebUtility::UrlEncode("abc123"), "abc123");
 }
 
+// Regression test for a wave-3 audit finding: the safe-character set didn't match real
+// .NET's s_safeUrlChars ("Url safe chars as defined by RFC 1738.4, minus '+'" --
+// letters/digits/-_.!*(), notably including !*() and excluding ~). This test previously
+// asserted "~" stays literal, encoding the old, wrong safe-char-set.
 TEST(WebUtilityTests, UrlEncode_SafeCharsUnchanged) {
-    EXPECT_EQ(WebUtility::UrlEncode("-_.~"), "-_.~");
+    EXPECT_EQ(WebUtility::UrlEncode("-_.!*()"), "-_.!*()");
+}
+
+TEST(WebUtilityTests, UrlEncode_Tilde_IsPercentEncoded) {
+    EXPECT_EQ(WebUtility::UrlEncode("~"), "%7E");
 }
 
 TEST(WebUtilityTests, UrlEncode_SpecialCharsPercent) {
@@ -560,6 +697,24 @@ TEST(WebUtilityTests, UrlDecode_NoEncoding_Unchanged) {
 TEST(WebUtilityTests, UrlEncode_UrlDecode_RoundTrip) {
     std::string original = "key=hello world&other=1+2";
     EXPECT_EQ(WebUtility::UrlDecode(WebUtility::UrlEncode(original)), original);
+}
+
+TEST(WebUtilityTests, UrlDecode_MalformedPercentSequence_LeftUnchanged_DoesNotThrow) {
+    // Regression: previously std::stoi(..., 16) threw an uncaught std::invalid_argument when
+    // neither character after '%' is a valid hex digit. Verified against WebUtility.cs's
+    // UrlDecodeInternal: real .NET never throws here -- a malformed sequence just leaves '%'
+    // as a literal character and continues decoding the rest of the string normally.
+    EXPECT_EQ(WebUtility::UrlDecode("100%complete"), "100%complete");
+}
+
+TEST(WebUtilityTests, UrlDecode_PartiallyValidHexDigit_LeftUnchanged) {
+    // Only one of the two characters after '%' is a valid hex digit -- still malformed.
+    EXPECT_EQ(WebUtility::UrlDecode("100%cZ"), "100%cZ");
+}
+
+TEST(WebUtilityTests, UrlDecode_TrailingIncompletePercentSequence_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::UrlDecode("abc%4"), "abc%4");
+    EXPECT_EQ(WebUtility::UrlDecode("abc%"), "abc%");
 }
 
 // ===========================================================================
@@ -601,6 +756,14 @@ TEST(HttpResponseHeaderTests, GetName_KnownValues) {
     EXPECT_EQ(HttpResponseHeaderGetName(HttpResponseHeader::ETag), "ETag");
 }
 
+TEST(HttpRequestHeaderTests, GetName_OutOfRange_ThrowsIndexOutOfRangeException) {
+    EXPECT_THROW(HttpRequestHeaderGetName(static_cast<HttpRequestHeader>(999)), System::IndexOutOfRangeException);
+}
+
+TEST(HttpResponseHeaderTests, GetName_OutOfRange_ThrowsIndexOutOfRangeException) {
+    EXPECT_THROW(HttpResponseHeaderGetName(static_cast<HttpResponseHeader>(999)), System::IndexOutOfRangeException);
+}
+
 // ===========================================================================
 // HttpVersion
 // ===========================================================================
@@ -631,8 +794,8 @@ TEST(IPNetworkTests, Constructor_NormalizesBaseAddress) {
 }
 
 TEST(IPNetworkTests, Constructor_PrefixOutOfRange_Throws) {
-    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), std::out_of_range);
-    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), std::out_of_range);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, 33), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(IPNetwork(IPAddress::Loopback, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(IPNetworkTests, Contains_AddressInSubnet_True) {

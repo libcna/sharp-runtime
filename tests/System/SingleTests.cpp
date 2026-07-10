@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Single.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
+#include "System/FormatException.hpp"
 #include <cmath>
 
 using System::Single;
@@ -53,7 +55,7 @@ TEST(SingleTest, Sign_NaN_Throws)       { EXPECT_THROW(Single::Sign(Single::NaN)
 TEST(SingleTest, Clamp_Within)          { EXPECT_EQ(Single::Clamp(5.0f, 0.0f, 10.0f), 5.0f); }
 TEST(SingleTest, Clamp_Below)           { EXPECT_EQ(Single::Clamp(-1.0f, 0.0f, 10.0f), 0.0f); }
 TEST(SingleTest, Clamp_Above)           { EXPECT_EQ(Single::Clamp(11.0f, 0.0f, 10.0f), 10.0f); }
-TEST(SingleTest, Clamp_MinGreaterThanMax_Throws) { EXPECT_THROW(Single::Clamp(1.0f, 10.0f, 0.0f), std::invalid_argument); }
+TEST(SingleTest, Clamp_MinGreaterThanMax_Throws) { EXPECT_THROW(Single::Clamp(1.0f, 10.0f, 0.0f), System::ArgumentException); }
 TEST(SingleTest, Max)                   { EXPECT_EQ(Single::Max(3.0f, 7.0f), 7.0f); }
 TEST(SingleTest, Min)                   { EXPECT_EQ(Single::Min(3.0f, 7.0f), 3.0f); }
 TEST(SingleTest, Max_PropagatesNaN)     { EXPECT_TRUE(Single::IsNaN(Single::Max(Single::NaN, 1.0f))); EXPECT_TRUE(Single::IsNaN(Single::Max(1.0f, Single::NaN))); }
@@ -130,7 +132,7 @@ TEST(SingleTest, Parse_Normal)          { EXPECT_NEAR(Single::Parse("3.14"), 3.1
 TEST(SingleTest, Parse_NaN)             { EXPECT_TRUE(std::isnan(Single::Parse("NaN"))); }
 TEST(SingleTest, Parse_PosInf)          { EXPECT_TRUE(std::isinf(Single::Parse("Infinity"))); }
 TEST(SingleTest, Parse_NegInf)          { EXPECT_TRUE(std::isinf(Single::Parse("-Infinity"))); }
-TEST(SingleTest, Parse_Invalid_Throws)  { EXPECT_THROW(Single::Parse("abc"), std::invalid_argument); }
+TEST(SingleTest, Parse_Invalid_Throws)  { EXPECT_THROW(Single::Parse("abc"), System::FormatException); }
 TEST(SingleTest, TryParse_Valid)        { float r = 0; EXPECT_TRUE(Single::TryParse("1.5", r)); EXPECT_NEAR(r, 1.5f, 0.001f); }
 TEST(SingleTest, TryParse_Invalid)      { float r = 0; EXPECT_FALSE(Single::TryParse("xyz", r)); }
 TEST(SingleTest, ToString_Normal)       { EXPECT_EQ(Single::ToString(Single::NaN), "NaN"); }

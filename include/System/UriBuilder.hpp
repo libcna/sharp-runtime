@@ -6,6 +6,7 @@
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Uri.hpp"
 #include "System/UriFormatException.hpp"
@@ -95,7 +96,7 @@ namespace System {
          *
          * C++ counterpart of .NET UriBuilder(string, string, int, string, string).
          * @param extraValue A string starting with '?' (query) or '#' (fragment).
-         * @throws std::invalid_argument if @p extraValue is non-empty and starts with
+         * @throws System::ArgumentException if @p extraValue is non-empty and starts with
          *         neither '?' nor '#'.
          */
         UriBuilder(const std::string& schemeName, const std::string& hostName, intcs portNumber,
@@ -117,7 +118,7 @@ namespace System {
                         fragment_ = f.size() > 1 ? f : std::string();
                     }
                 } else {
-                    throw std::invalid_argument("extraValue must start with '?' or '#'.");
+                    throw System::ArgumentException("extraValue must start with '?' or '#'.");
                 }
             }
         }
@@ -209,7 +210,7 @@ namespace System {
 
         /**
          * @brief Constructs and returns a Uri from the current components.
-         * @throws std::invalid_argument if the resulting string is not a valid URI.
+         * @throws System::UriFormatException if the resulting string is not a valid URI.
          */
         [[nodiscard]] Uri getUriProperty() const { return Uri(ToString()); }
 

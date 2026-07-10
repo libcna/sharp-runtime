@@ -7,7 +7,11 @@
 // ReadOnlyObservableCollection, ReadOnlySet, CollectionExtensions,
 // StoragePaths, Experimental::Property.
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -38,11 +42,21 @@ TEST(SynchronizationContextTests, GetCurrent_ReturnsNullptr) {
     EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
 }
 
-TEST(SynchronizationContextTests, Post_InvokesCallbackSynchronously) {
-    bool called = false;
+TEST(SynchronizationContextTests, Post_InvokesCallbackAsynchronously) {
+    // Regression: Post() previously ran the callback inline/synchronously, identically to
+    // Send() -- defeating the entire purpose of the distinction any caller relies on. Verified
+    // against SynchronizationContext.cs: the default Post() queues to the thread pool.
+    std::promise<void> called;
+    std::future<void> fut = called.get_future();
     SynchronizationContext ctx;
-    ctx.Post([&called](void*) { called = true; }, nullptr);
-    EXPECT_TRUE(called);
+    std::thread::id callingThreadId = std::this_thread::get_id();
+    std::atomic<bool> ranOnDifferentThread{false};
+    ctx.Post([&](void*) {
+        ranOnDifferentThread = (std::this_thread::get_id() != callingThreadId);
+        called.set_value();
+    }, nullptr);
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    EXPECT_TRUE(ranOnDifferentThread.load());
 }
 
 TEST(SynchronizationContextTests, Send_InvokesCallbackSynchronously) {
@@ -60,6 +74,16 @@ TEST(SynchronizationContextTests, Post_NullCallback_NoThrow) {
 
 TEST(SynchronizationContextTests, SetSynchronizationContext_NoThrow) {
     EXPECT_NO_THROW(SynchronizationContext::SetSynchronizationContext(nullptr));
+}
+
+TEST(SynchronizationContextTests, SetSynchronizationContext_RoundTrips) {
+    // Regression: SetSynchronizationContext()/getCurrent() previously didn't round-trip at
+    // all -- getCurrent() always returned nullptr regardless of what had been set.
+    SynchronizationContext ctx;
+    SynchronizationContext::SetSynchronizationContext(&ctx);
+    EXPECT_EQ(SynchronizationContext::getCurrent(), &ctx);
+    SynchronizationContext::SetSynchronizationContext(nullptr); // reset for other tests on this thread
+    EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
 }
 
 // ===========================================================================
@@ -127,6 +151,40 @@ TEST(ASCIIEncodingTests, GetBytes_Empty) {
     ASCIIEncoding enc;
     auto bytes = enc.GetBytes("");
     EXPECT_TRUE(bytes.empty());
+}
+
+// GetBytes previously iterated the UTF-8-encoded input byte-wise, so a single multi-byte
+// non-ASCII character produced one '?' per UTF-8 byte instead of .NET's one per UTF-16 code
+// unit (a BMP character is always exactly one UTF-16 code unit). Verified against
+// ASCIIEncoding.cs, which operates on char[]/UTF-16 code units.
+TEST(ASCIIEncodingTests, GetBytes_NonAsciiBmpChar_ProducesExactlyOneReplacementByte) {
+    ASCIIEncoding enc;
+    // "café" -- 'é' (U+00E9) is 2 UTF-8 bytes but a single BMP character.
+    auto bytes = enc.GetBytes("caf\xC3\xA9");
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(bytes[0], uint8_t('c'));
+    EXPECT_EQ(bytes[1], uint8_t('a'));
+    EXPECT_EQ(bytes[2], uint8_t('f'));
+    EXPECT_EQ(bytes[3], uint8_t('?'));
+}
+
+TEST(ASCIIEncodingTests, GetBytes_ThreeByteUtf8Char_ProducesExactlyOneReplacementByte) {
+    ASCIIEncoding enc;
+    // U+20AC EURO SIGN, 3 UTF-8 bytes, still a single BMP character.
+    auto bytes = enc.GetBytes("\xE2\x82\xAC");
+    ASSERT_EQ(bytes.size(), 1u);
+    EXPECT_EQ(bytes[0], uint8_t('?'));
+}
+
+// A supplementary-plane character (>= U+10000) is two UTF-16 code units (a surrogate pair)
+// in real .NET, so it maps to two '?' bytes, not one.
+TEST(ASCIIEncodingTests, GetBytes_SupplementaryPlaneChar_ProducesTwoReplacementBytes) {
+    ASCIIEncoding enc;
+    // U+1F600 GRINNING FACE, 4 UTF-8 bytes, one supplementary-plane character.
+    auto bytes = enc.GetBytes("\xF0\x9F\x98\x80");
+    ASSERT_EQ(bytes.size(), 2u);
+    EXPECT_EQ(bytes[0], uint8_t('?'));
+    EXPECT_EQ(bytes[1], uint8_t('?'));
 }
 
 // ===========================================================================

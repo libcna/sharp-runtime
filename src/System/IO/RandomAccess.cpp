@@ -83,15 +83,33 @@ void RandomAccess::Write(int fd, const bytecs* buffer, intcs count, int64_t file
     (void)fd; (void)buffer; (void)count; (void)fileOffset;
     throw System::PlatformNotSupportedException("RandomAccess is not supported on Emscripten.");
 #elif defined(_WIN32)
-    OVERLAPPED ov{};
-    ov.Offset     = static_cast<DWORD>(fileOffset & 0xFFFFFFFFLL);
-    ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
-    DWORD nWritten = 0;
-    if (!WriteFile(hOf(fd), buffer, static_cast<DWORD>(count), &nWritten, &ov))
-        throw IOException("RandomAccess::Write failed");
+    // WriteFile can also complete a "short write"; loop the same as the POSIX branch below.
+    while (count > 0) {
+        OVERLAPPED ov{};
+        ov.Offset     = static_cast<DWORD>(fileOffset & 0xFFFFFFFFLL);
+        ov.OffsetHigh = static_cast<DWORD>(fileOffset >> 32);
+        DWORD nWritten = 0;
+        if (!WriteFile(hOf(fd), buffer, static_cast<DWORD>(count), &nWritten, &ov))
+            throw IOException("RandomAccess::Write failed");
+        buffer += nWritten;
+        count -= static_cast<intcs>(nWritten);
+        fileOffset += nWritten;
+    }
 #else
-    ssize_t n = pwrite(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
-    if (n < 0) throw IOException("RandomAccess::Write failed");
+    // Verified against RandomAccess.Unix.cs's WriteAtOffset: real .NET loops "while
+    // (!buffer.IsEmpty)", advancing the buffer and file offset by however many bytes were
+    // actually written each call, until the whole buffer has been written. pwrite() can
+    // legitimately return fewer bytes than requested (a "short write" -- e.g. after a signal
+    // interruption, or writing to certain non-regular files); this previously issued a single
+    // pwrite() call and silently discarded any bytes it didn't cover, with no error and no way
+    // for the void-returning caller to detect the loss.
+    while (count > 0) {
+        ssize_t n = pwrite(fd, buffer, static_cast<size_t>(count), static_cast<off_t>(fileOffset));
+        if (n < 0) throw IOException("RandomAccess::Write failed");
+        buffer += n;
+        count -= static_cast<intcs>(n);
+        fileOffset += n;
+    }
 #endif
 }
 

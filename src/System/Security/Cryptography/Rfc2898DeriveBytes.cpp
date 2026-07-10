@@ -20,7 +20,7 @@ namespace {
         if (n == "SHA256") return 32;
         if (n == "SHA384") return 48;
         if (n == "SHA512") return 64;
-        throw CryptographicException("Unknown or unsupported hash algorithm '" + n.value_or("") + "'.");
+        throw CryptographicException("'" + n.value_or("") + "' is not a known hash algorithm.");
     }
 
 } // namespace
@@ -31,7 +31,7 @@ std::unique_ptr<HMAC> Rfc2898DeriveBytes::createHmac() const {
     if (n == "SHA256") return std::make_unique<HMACSHA256>(password_);
     if (n == "SHA384") return std::make_unique<HMACSHA384>(password_);
     if (n == "SHA512") return std::make_unique<HMACSHA512>(password_);
-    throw CryptographicException("Unknown or unsupported hash algorithm '" + n.value_or("") + "'.");
+    throw CryptographicException("'" + n.value_or("") + "' is not a known hash algorithm.");
 }
 
 Rfc2898DeriveBytes::Rfc2898DeriveBytes(std::vector<bytecs> password, std::vector<bytecs> salt, intcs iterations,
@@ -74,7 +74,7 @@ void Rfc2898DeriveBytes::initialize() {
 
 void Rfc2898DeriveBytes::func() {
     if (block_ == 0xFFFFFFFFu) {
-        throw CryptographicException("The maximum number of blocks for this key derivation function has been exceeded.");
+        throw CryptographicException("The total number of bytes extracted cannot exceed UInt32.MaxValue * hash length.");
     }
 
     uint32_t blockIndex = block_ + 1;

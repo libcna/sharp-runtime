@@ -156,28 +156,37 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
     std::vector<uint8_t> packet;
     if (isIPv6) {
         packet.resize(sizeof(icmp6_hdr) + buffer.size());
-        auto* hdr = reinterpret_cast<icmp6_hdr*>(packet.data());
-        std::memset(hdr, 0, sizeof(icmp6_hdr));
-        hdr->icmp6_type = ICMP6_ECHO_REQUEST;
-        hdr->icmp6_code = 0;
-        hdr->icmp6_id = htons(identifier);
-        hdr->icmp6_seq = htons(sequence);
+        // Build the header in a local, properly-typed object rather than reinterpret_cast'ing
+        // packet.data() (a uint8_t*) to icmp6_hdr* and memset'ing through it -- GCC 14's
+        // -Warray-bounds (enabled by -Werror in Release) cannot prove the vector's dynamic
+        // storage is large enough through that cast and flags it as an out-of-bounds write.
+        icmp6_hdr hdr{};
+        hdr.icmp6_type = ICMP6_ECHO_REQUEST;
+        hdr.icmp6_code = 0;
+        hdr.icmp6_id = htons(identifier);
+        hdr.icmp6_seq = htons(sequence);
+        std::memcpy(packet.data(), &hdr, sizeof(hdr));
         if (!buffer.empty()) {
             std::memcpy(packet.data() + sizeof(icmp6_hdr), buffer.data(), buffer.size());
         }
     } else {
         packet.resize(sizeof(icmphdr) + buffer.size());
-        auto* hdr = reinterpret_cast<icmphdr*>(packet.data());
-        std::memset(hdr, 0, sizeof(icmphdr));
-        hdr->type = ICMP_ECHO;
-        hdr->code = 0;
-        hdr->un.echo.id = htons(identifier);
-        hdr->un.echo.sequence = htons(sequence);
+        // Same rationale as the icmp6_hdr branch above.
+        icmphdr hdr{};
+        hdr.type = ICMP_ECHO;
+        hdr.code = 0;
+        hdr.checksum = 0;
+        hdr.un.echo.id = htons(identifier);
+        hdr.un.echo.sequence = htons(sequence);
+        std::memcpy(packet.data(), &hdr, sizeof(hdr));
         if (!buffer.empty()) {
             std::memcpy(packet.data() + sizeof(icmphdr), buffer.data(), buffer.size());
         }
-        hdr->checksum = 0;
-        hdr->checksum = htons(internetChecksum(packet.data(), packet.size()));
+        // The checksum covers the whole packet (header + payload), so it can only be computed
+        // once the payload has been copied in; patch it into both the local header and the
+        // packet buffer afterward.
+        hdr.checksum = htons(internetChecksum(packet.data(), packet.size()));
+        std::memcpy(packet.data(), &hdr, sizeof(hdr));
     }
 
     sockaddr_storage dest{};

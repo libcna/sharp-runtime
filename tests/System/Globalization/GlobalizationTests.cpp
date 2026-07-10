@@ -4,6 +4,7 @@
 //
 // Note: Calendar.hpp, GregorianCalendar.hpp, and ISOWeek.hpp are tested in tests/CalendarTests.cpp.
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
@@ -25,8 +26,10 @@ TEST(CultureInfoTests, InvariantCulture_NameIsEmpty) {
     EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getNameProperty(), "");
 }
 
-TEST(CultureInfoTests, InvariantCulture_IsNeutral) {
-    EXPECT_TRUE(CultureInfo::getInvariantCultureProperty().getIsNeutralCultureProperty());
+// Real .NET's invariant culture has IsNeutralCulture == false (CultureData.cs:
+// `invariant._bNeutral = false;`).
+TEST(CultureInfoTests, InvariantCulture_IsNotNeutral) {
+    EXPECT_FALSE(CultureInfo::getInvariantCultureProperty().getIsNeutralCultureProperty());
 }
 
 TEST(CultureInfoTests, InvariantCulture_IsReadOnly) {
@@ -99,8 +102,12 @@ TEST(NumberFormatInfoTests, InvariantInfo_CurrencyGroupSeparatorIsComma) {
     EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencyGroupSeparatorProperty(), ",");
 }
 
-TEST(NumberFormatInfoTests, InvariantInfo_CurrencySymbolIsDollar) {
-    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencySymbolProperty(), "$");
+TEST(NumberFormatInfoTests, InvariantInfo_CurrencySymbolIsCurrencySign) {
+    // Regression: was previously (wrongly) "$". .NET's real invariant default is U+00A4
+    // (CURRENCY SIGN), verified against NumberFormatInfo.cs's field initializer
+    // (_currencySymbol = "\x00a4") rather than that file's own stale prose doc-comment
+    // table, which incorrectly says "$".
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencySymbolProperty(), "¤");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_NegativeSignIsMinus) {
@@ -196,9 +203,11 @@ TEST(RegionInfoTests, ISOCurrencySymbol_Default) {
     EXPECT_EQ(r.getISOCurrencySymbolProperty(), "USD");
 }
 
-TEST(RegionInfoTests, IsMetric_DefaultTrue) {
+// The US uses the customary (non-metric) measurement system; real .NET's
+// RegionInfo("US").IsMetric is false (RegionInfo.cs).
+TEST(RegionInfoTests, IsMetric_US_IsFalse) {
     RegionInfo r("US");
-    EXPECT_TRUE(r.getIsMetricProperty());
+    EXPECT_FALSE(r.getIsMetricProperty());
 }
 
 TEST(RegionInfoTests, CurrentRegion_NameIsUS) {
@@ -288,16 +297,26 @@ TEST(StringInfoTests, GetNextTextElement_LastChar) {
     EXPECT_EQ(StringInfo::GetNextTextElement("hello", 4), "o");
 }
 
-TEST(StringInfoTests, GetNextTextElement_PastEnd_ReturnsEmpty) {
-    EXPECT_EQ(StringInfo::GetNextTextElement("hi", 5), "");
+TEST(StringInfoTests, GetNextTextElement_AtEnd_ReturnsEmpty) {
+    EXPECT_EQ(StringInfo::GetNextTextElement("hi", 2), ""); // exactly at end: valid, empty
+}
+
+// .NET's real bound is `(uint)index > (uint)str.Length` (StringInfo.cs): an index strictly
+// past the end throws ArgumentOutOfRangeException rather than silently returning ""/0.
+TEST(StringInfoTests, GetNextTextElement_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElement("hi", 5), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoTests, GetNextTextElementLength_AsciiIsOne) {
     EXPECT_EQ(StringInfo::GetNextTextElementLength("hello", 0), 1);
 }
 
-TEST(StringInfoTests, GetNextTextElementLength_PastEnd_IsZero) {
-    EXPECT_EQ(StringInfo::GetNextTextElementLength("hi", 10), 0);
+TEST(StringInfoTests, GetNextTextElementLength_AtEnd_IsZero) {
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("hi", 2), 0); // exactly at end: valid, zero
+}
+
+TEST(StringInfoTests, GetNextTextElementLength_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("hi", 10), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoTests, ParseCombiningCharacters_SplitsEachByte) {

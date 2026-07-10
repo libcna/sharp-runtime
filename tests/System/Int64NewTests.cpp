@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/Int64.hpp"
+#include "System/OverflowException.hpp"
 
 using System::Int64;
 using SharpRuntime::longcs;
@@ -24,7 +27,11 @@ TEST(Int64NewTests, Abs_Positive) { EXPECT_EQ(Int64::Abs(5LL), 5LL); }
 TEST(Int64NewTests, Abs_Negative) { EXPECT_EQ(Int64::Abs(-5LL), 5LL); }
 TEST(Int64NewTests, Abs_Zero)     { EXPECT_EQ(Int64::Abs(0LL), 0LL); }
 TEST(Int64NewTests, Abs_MinValue_Throws) {
-    EXPECT_THROW(Int64::Abs(Int64::MinValue), std::overflow_error);
+    EXPECT_THROW(Int64::Abs(Int64::MinValue), System::OverflowException);
+}
+
+TEST(Int64NewTests, Parse_TrailingGarbage_ThrowsFormatException) {
+    EXPECT_THROW(Int64::Parse("123abc"), System::FormatException);
 }
 
 TEST(Int64NewTests, Clamp_Within) { EXPECT_EQ(Int64::Clamp(5LL,0LL,10LL), 5LL); }
@@ -76,7 +83,7 @@ TEST(Int64NewTests, Log2_Zero_IsZero) {
     // Matches .NET's actual BitOperations.Log2(0) semantics: 0, not an error.
     EXPECT_EQ(Int64::Log2(0LL), 0);
 }
-TEST(Int64NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int64::Log2(-1LL), std::domain_error); }
+TEST(Int64NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int64::Log2(-1LL), System::ArgumentOutOfRangeException); }
 
 TEST(Int64NewTests, BigMul_SmallValues) {
     System::Int128 result = Int64::BigMul(6LL, 7LL);
@@ -91,7 +98,7 @@ TEST(Int64NewTests, BigMul_OverflowsInto128Bits) {
 TEST(Int64NewTests, CopySign_PositiveSign_ReturnsPositive) { EXPECT_EQ(Int64::CopySign(-5LL, 3LL), 5LL); }
 TEST(Int64NewTests, CopySign_NegativeSign_ReturnsNegative) { EXPECT_EQ(Int64::CopySign(5LL, -3LL), -5LL); }
 TEST(Int64NewTests, CopySign_MinValue_NonNegativeSign_Throws) {
-    EXPECT_THROW(Int64::CopySign(Int64::MinValue, 1LL), std::overflow_error);
+    EXPECT_THROW(Int64::CopySign(Int64::MinValue, 1LL), System::OverflowException);
 }
 
 TEST(Int64NewTests, IsNegative_True)  { EXPECT_TRUE(Int64::IsNegative(-1LL)); }

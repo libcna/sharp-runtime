@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Decimal.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 
 namespace System {
 
@@ -88,7 +91,7 @@ void Decimal::fitMantissa() {
         uint32_t rem = uint32_t(mantissa_ % 10);
         mantissa_ /= 10;
         if (rem >= 5) ++mantissa_;
-        if (scale_ == 0) throw std::overflow_error("Decimal overflow.");
+        if (scale_ == 0) throw System::OverflowException("Decimal overflow.");
         --scale_;
     }
 }
@@ -119,13 +122,13 @@ Decimal::Decimal(long v)
     : mantissa_(v < 0 ? -(u128)v : u128(v)), scale_(0), negative_(v < 0) {}
 
 Decimal::Decimal(double v) {
-    if (std::isnan(v))  throw std::invalid_argument("Cannot convert NaN to Decimal.");
-    if (std::isinf(v))  throw std::overflow_error("Cannot convert Infinity to Decimal.");
+    if (std::isnan(v))  throw System::OverflowException("Cannot convert NaN to Decimal.");
+    if (std::isinf(v))  throw System::OverflowException("Cannot convert Infinity to Decimal.");
     negative_ = std::signbit(v);
     v = std::abs(v);
     scale_ = 0;
     while (v != std::floor(v) && scale_ < 15) { v *= 10.0; ++scale_; }
-    if (v > u128tod(MAX_MANTISSA)) throw std::overflow_error("Value too large for Decimal.");
+    if (v > u128tod(MAX_MANTISSA)) throw System::OverflowException("Value too large for Decimal.");
     mantissa_ = u128(uint64_t(std::llround(v)));
     fitMantissa();
     normalize();
@@ -141,7 +144,7 @@ Decimal::Decimal(ulongcs v)
 
 Decimal::Decimal(intcs lo, intcs mid, intcs hi, bool isNegative, bytecs scale) {
     if (scale > 28)
-        throw std::out_of_range("Decimal scale must be in range 0-28.");
+        throw System::ArgumentOutOfRangeException("scale", "Decimal scale must be in range 0-28.");
     mantissa_ = (u128(uint32_t(hi)) << 64) | (u128(uint32_t(mid)) << 32) | u128(uint32_t(lo));
     scale_    = scale;
     negative_ = isNegative && mantissa_ != 0;
@@ -171,46 +174,46 @@ float     Decimal::ToSingle() const { return float(ToDouble()); }
 intcs Decimal::ToInt32() const {
     Decimal t = Truncate(*this);
     if (t.mantissa_ > u128(UINT32_MAX))
-        throw std::overflow_error("Value was either too large or too small for an Int32.");
+        throw System::OverflowException("Value was either too large or too small for an Int32.");
     uint32_t mag = uint32_t(t.mantissa_);
     int64_t v = t.negative_ ? -int64_t(mag) : int64_t(mag);
     if (v < INT32_MIN || v > INT32_MAX)
-        throw std::overflow_error("Value was either too large or too small for an Int32.");
+        throw System::OverflowException("Value was either too large or too small for an Int32.");
     return intcs(v);
 }
 
 longcs Decimal::ToInt64() const {
     Decimal t = Truncate(*this);
     if (t.mantissa_ > u128(UINT64_MAX))
-        throw std::overflow_error("Value was either too large or too small for an Int64.");
+        throw System::OverflowException("Value was either too large or too small for an Int64.");
     uint64_t mag = uint64_t(t.mantissa_);
     if (t.negative_) {
         if (mag > (uint64_t(1) << 63))
-            throw std::overflow_error("Value was either too large or too small for an Int64.");
+            throw System::OverflowException("Value was either too large or too small for an Int64.");
         return mag == (uint64_t(1) << 63) ? INT64_MIN : -static_cast<longcs>(mag);
     }
     if (mag > uint64_t(INT64_MAX))
-        throw std::overflow_error("Value was either too large or too small for an Int64.");
+        throw System::OverflowException("Value was either too large or too small for an Int64.");
     return static_cast<longcs>(mag);
 }
 
 uintcs Decimal::ToUInt32() const {
     Decimal t = Truncate(*this);
     if (t.mantissa_ > u128(UINT32_MAX))
-        throw std::overflow_error("Value was either too large or too small for a UInt32.");
+        throw System::OverflowException("Value was either too large or too small for a UInt32.");
     uint32_t mag = uint32_t(t.mantissa_);
     if (t.negative_ && mag != 0)
-        throw std::overflow_error("Value was either too large or too small for a UInt32.");
+        throw System::OverflowException("Value was either too large or too small for a UInt32.");
     return mag;
 }
 
 ulongcs Decimal::ToUInt64() const {
     Decimal t = Truncate(*this);
     if (t.mantissa_ > u128(UINT64_MAX))
-        throw std::overflow_error("Value was either too large or too small for a UInt64.");
+        throw System::OverflowException("Value was either too large or too small for a UInt64.");
     uint64_t mag = uint64_t(t.mantissa_);
     if (t.negative_ && mag != 0)
-        throw std::overflow_error("Value was either too large or too small for a UInt64.");
+        throw System::OverflowException("Value was either too large or too small for a UInt64.");
     return mag;
 }
 
@@ -218,11 +221,11 @@ bytecs Decimal::ToByte(const Decimal& value) {
     uintcs temp;
     try {
         temp = value.ToUInt32();
-    } catch (const std::overflow_error&) {
-        throw std::overflow_error("Value was either too large or too small for an unsigned byte.");
+    } catch (const System::OverflowException&) {
+        throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
     }
     if (temp != bytecs(temp))
-        throw std::overflow_error("Value was either too large or too small for an unsigned byte.");
+        throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
     return bytecs(temp);
 }
 
@@ -230,11 +233,11 @@ sbytecs Decimal::ToSByte(const Decimal& value) {
     intcs temp;
     try {
         temp = value.ToInt32();
-    } catch (const std::overflow_error&) {
-        throw std::overflow_error("Value was either too large or too small for a signed byte.");
+    } catch (const System::OverflowException&) {
+        throw System::OverflowException("Value was either too large or too small for a signed byte.");
     }
     if (temp != sbytecs(temp))
-        throw std::overflow_error("Value was either too large or too small for a signed byte.");
+        throw System::OverflowException("Value was either too large or too small for a signed byte.");
     return sbytecs(temp);
 }
 
@@ -242,11 +245,11 @@ shortcs Decimal::ToInt16(const Decimal& value) {
     intcs temp;
     try {
         temp = value.ToInt32();
-    } catch (const std::overflow_error&) {
-        throw std::overflow_error("Value was either too large or too small for an Int16.");
+    } catch (const System::OverflowException&) {
+        throw System::OverflowException("Value was either too large or too small for an Int16.");
     }
     if (temp != shortcs(temp))
-        throw std::overflow_error("Value was either too large or too small for an Int16.");
+        throw System::OverflowException("Value was either too large or too small for an Int16.");
     return shortcs(temp);
 }
 
@@ -254,11 +257,11 @@ ushortcs Decimal::ToUInt16(const Decimal& value) {
     uintcs temp;
     try {
         temp = value.ToUInt32();
-    } catch (const std::overflow_error&) {
-        throw std::overflow_error("Value was either too large or too small for a UInt16.");
+    } catch (const System::OverflowException&) {
+        throw System::OverflowException("Value was either too large or too small for a UInt16.");
     }
     if (temp != ushortcs(temp))
-        throw std::overflow_error("Value was either too large or too small for a UInt16.");
+        throw System::OverflowException("Value was either too large or too small for a UInt16.");
     return ushortcs(temp);
 }
 
@@ -308,7 +311,7 @@ bool Decimal::TryParse(const std::string& s, Decimal& result) {
 Decimal Decimal::Parse(const std::string& s) {
     Decimal r;
     if (!TryParse(s, r))
-        throw std::invalid_argument("Input string was not in a correct format.");
+        throw System::FormatException("Input string was not in a correct format.");
     return r;
 }
 
@@ -355,7 +358,7 @@ Decimal Decimal::operator*(const Decimal& o) const {
     uint192 prod = mul96x96(mantissa_, o.mantissa_);
     int scale = int(scale_) + int(o.scale_);
     while (!fits96(prod) || scale > 28) {
-        if (scale == 0) throw std::overflow_error("Decimal overflow.");
+        if (scale == 0) throw System::OverflowException("Decimal overflow.");
         uint32_t rem = div192by10(prod); --scale;
         if (rem >= 5) {
             if (++prod.lo == 0) if (++prod.mid == 0) ++prod.hi;
@@ -365,7 +368,7 @@ Decimal Decimal::operator*(const Decimal& o) const {
 }
 
 Decimal Decimal::operator/(const Decimal& o) const {
-    if (o.mantissa_ == 0) throw std::overflow_error("Attempted to divide by zero.");
+    if (o.mantissa_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
     if (mantissa_ == 0) return Decimal();
     u128 dividend = mantissa_;
     int scale = int(scale_) - int(o.scale_);
@@ -452,7 +455,7 @@ Decimal Decimal::Ceiling(const Decimal& d) {
 
 Decimal Decimal::Round(const Decimal& d, int decimals, MidpointRounding mode) {
     if (decimals < 0 || decimals > 28)
-        throw std::out_of_range("decimals must be in range 0-28.");
+        throw System::ArgumentOutOfRangeException("decimals", "decimals must be in range 0-28.");
     if (d.scale_ <= uint8_t(decimals)) return d;
 
     int dropCount = int(d.scale_) - decimals;

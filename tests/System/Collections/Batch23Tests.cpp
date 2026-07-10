@@ -67,6 +67,24 @@ TEST(NotifyCollectionChangedEventArgsBatch23Test, Add_MultiItem) {
     EXPECT_EQ(args.NewStartingIndex, 0);
 }
 
+TEST(NotifyCollectionChangedEventArgsBatch23Test, Add_MultiItem_StartingIndexMinus1_Allowed) {
+    std::vector<int> items{1, 2, 3};
+    NotifyCollectionChangedEventArgs<int> args(NotifyCollectionChangedAction::Add, items, -1);
+    EXPECT_EQ(args.NewStartingIndex, -1);
+}
+
+TEST(NotifyCollectionChangedEventArgsBatch23Test, Add_MultiItem_StartingIndexLessThanMinus1_Throws) {
+    std::vector<int> items{1, 2, 3};
+    EXPECT_THROW(NotifyCollectionChangedEventArgs<int>(NotifyCollectionChangedAction::Add, items, -2),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(NotifyCollectionChangedEventArgsBatch23Test, Remove_MultiItem_StartingIndexLessThanMinus1_Throws) {
+    std::vector<int> items{1, 2, 3};
+    EXPECT_THROW(NotifyCollectionChangedEventArgs<int>(NotifyCollectionChangedAction::Remove, items, -5),
+                 System::ArgumentOutOfRangeException);
+}
+
 TEST(NotifyCollectionChangedEventArgsBatch23Test, Replace_Factory_SingleItem) {
     auto args = NotifyCollectionChangedEventArgs<int>::Replace(9, 1, 2);
     EXPECT_EQ(args.Action, NotifyCollectionChangedAction::Replace);

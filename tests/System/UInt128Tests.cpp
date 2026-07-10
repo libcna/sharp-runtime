@@ -48,6 +48,16 @@ TEST(UInt128Test, Modulo) {
     EXPECT_EQ(c.getLowerProperty(), 2ULL);
 }
 
+TEST(UInt128Test, DivisionByZero_Throws) {
+    UInt128 a(0, 42), zero(0, 0);
+    EXPECT_THROW(a / zero, System::DivideByZeroException);
+}
+
+TEST(UInt128Test, ModuloByZero_Throws) {
+    UInt128 a(0, 42), zero(0, 0);
+    EXPECT_THROW(a % zero, System::DivideByZeroException);
+}
+
 TEST(UInt128Test, EqualityTrue) {
     UInt128 a(1, 2), b(1, 2);
     EXPECT_TRUE(a == b);

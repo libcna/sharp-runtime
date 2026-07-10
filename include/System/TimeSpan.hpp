@@ -146,7 +146,7 @@ namespace System {
          *
          * @details The provided values are converted into internal tick units to initialize this instance.
          *
-         * @throws std::out_of_range If the calculated TimeSpan falls outside the acceptable range.
+         * @throws System::ArgumentOutOfRangeException If the calculated TimeSpan falls outside the acceptable range.
          * The acceptable range is between TimeSpan at least MinValue and at most MaxValue.
          */
     public:

@@ -6,6 +6,8 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Concurrent/IProducerConsumerCollection.hpp"
 #include "System/Collections/Generic/IEnumerable.hpp"
 #include "System/Collections/Generic/IEnumerator.hpp"
@@ -129,13 +131,15 @@ public:
      * @param items      Source array of items.
      * @param startIndex Zero-based starting index in items.
      * @param count      Number of elements to push.
-     * @throws std::out_of_range if startIndex or count is out of range.
+     * @throws System::ArgumentOutOfRangeException if @p count or @p startIndex is negative,
+     *         or @p startIndex exceeds the length of @p items.
+     * @throws System::ArgumentException if @p startIndex + @p count exceeds the length of @p items.
      */
     void PushRange(const std::vector<T>& items, intcs startIndex, intcs count) {
-        if (startIndex < 0 || count < 0 ||
-            startIndex + count > static_cast<intcs>(items.size())) {
-            throw std::out_of_range("startIndex or count out of range");
-        }
+        intcs length = static_cast<intcs>(items.size());
+        if (count < 0) throw System::ArgumentOutOfRangeException("count");
+        if (startIndex < 0 || startIndex > length) throw System::ArgumentOutOfRangeException("startIndex");
+        if (length - count < startIndex) throw System::ArgumentException("Invalid startIndex and count for the given items.");
         std::lock_guard<std::mutex> lk(mutex_);
         for (intcs i = startIndex; i < startIndex + count; ++i) {
             data_.push_back(items[static_cast<std::size_t>(i)]);
@@ -213,7 +217,10 @@ public:
      * @return The number of elements actually popped.
      */
     intcs TryPopRange(std::vector<T>& items, intcs startIndex, intcs count) {
-        if (startIndex < 0 || count < 0) throw std::out_of_range("invalid startIndex or count");
+        intcs length = static_cast<intcs>(items.size());
+        if (count < 0) throw System::ArgumentOutOfRangeException("count");
+        if (startIndex < 0 || startIndex > length) throw System::ArgumentOutOfRangeException("startIndex");
+        if (length - count < startIndex) throw System::ArgumentException("Invalid startIndex and count for the given items.");
         std::lock_guard<std::mutex> lk(mutex_);
         intcs popped = 0;
         while (!data_.empty() && popped < count) {
@@ -251,12 +258,14 @@ public:
      * C++ counterpart of .NET ConcurrentStack<T>.CopyTo(T[], int).
      * @param array Destination vector; must already have room for index + Count elements.
      * @param index Zero-based starting index in array.
-     * @throws std::out_of_range if @p index is negative or @p array is not large enough.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p array is not large enough.
      */
     void CopyTo(std::vector<T>& array, intcs index) override {
         std::lock_guard<std::mutex> lk(mutex_);
-        if (index < 0 || static_cast<size_t>(index) + data_.size() > array.size())
-            throw std::out_of_range("CopyTo destination is too small.");
+        if (index < 0) throw System::ArgumentOutOfRangeException("index");
+        if (static_cast<size_t>(index) + data_.size() > array.size())
+            throw System::ArgumentException("Destination array was not long enough.");
         intcs i = index;
         for (auto it = data_.rbegin(); it != data_.rend(); ++it, ++i) {
             array[static_cast<std::size_t>(i)] = *it;

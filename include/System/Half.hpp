@@ -265,7 +265,7 @@ namespace System {
 
         /**
          * @brief Parses a string into a Half. C++ counterpart of .NET Half.Parse(string).
-         * @throws std::invalid_argument if the string is not a valid floating-point literal.
+         * @throws System::FormatException if the string is not a valid floating-point literal.
          */
         [[nodiscard]] static Half Parse(const std::string& s) { return FromSingle(Single::Parse(s)); }
 

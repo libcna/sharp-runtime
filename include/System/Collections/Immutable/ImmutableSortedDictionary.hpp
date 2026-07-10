@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -23,19 +24,45 @@ using System::Collections::Generic::KeyNotFoundException;
  * Backed by std::map; provides O(log n) key access with sorted iteration.
  * All mutating operations return a new instance; the original is unchanged.
  *
- * @tparam TKey   The type of the keys (must support operator<).
+ * The key ordering function is stored as std::function so a custom key comparer
+ * (WithComparers()) can be supplied at runtime without adding a comparer type parameter to
+ * this class template -- matching real .NET, where IComparer<TKey> is a runtime object, not
+ * a compile-time type parameter, and keeping every existing
+ * `ImmutableSortedDictionary<TKey, TValue>` call site (two type arguments) source-compatible.
+ * Real .NET's WithComparers also accepts an optional value equality comparer (used only by
+ * ContainsValue/Equals); this port doesn't support that half -- ContainsValue always uses
+ * TValue's own operator== -- since the key ordering is the load-bearing half of "sorted
+ * dictionary" behavior and the value-comparer half is a much smaller, separable feature.
+ *
+ * @tparam TKey   The type of the keys.
  * @tparam TValue The type of the values.
  */
 template<typename TKey, typename TValue>
 class ImmutableSortedDictionary {
-    using MapT = std::map<TKey, TValue>;
+    using KeyCompareFn = std::function<bool(const TKey&, const TKey&)>;
+    using MapT = std::map<TKey, TValue, KeyCompareFn>;
     std::shared_ptr<const MapT> data_;
 
     explicit ImmutableSortedDictionary(std::shared_ptr<const MapT> data) : data_(std::move(data)) {}
 
+    /**
+     * @brief Constructs an empty backing map using the given key-ordering function.
+     *
+     * Centralizes every "fresh empty map" construction in this class so a comparer is
+     * always supplied explicitly -- std::map's own default-constructed std::function
+     * comparator is empty and throws std::bad_function_call on first use, so no code path
+     * in this class may construct a MapT without going through this helper (or
+     * copy-constructing from an existing MapT, which already carries a valid comparer).
+     */
+    static std::shared_ptr<MapT> makeEmpty(KeyCompareFn less) {
+        return std::make_shared<MapT>(std::move(less));
+    }
+
+    static KeyCompareFn defaultLess() { return KeyCompareFn(std::less<TKey>{}); }
+
 public:
-    /** @brief Default-constructs an empty ImmutableSortedDictionary. */
-    ImmutableSortedDictionary() : data_(std::make_shared<MapT>()) {}
+    /** @brief Default-constructs an empty ImmutableSortedDictionary using operator< key ordering. */
+    ImmutableSortedDictionary() : data_(makeEmpty(defaultLess())) {}
 
     /**
      * @brief Returns an empty ImmutableSortedDictionary.
@@ -45,6 +72,45 @@ public:
      */
     static ImmutableSortedDictionary<TKey, TValue> Empty() {
         return ImmutableSortedDictionary<TKey, TValue>();
+    }
+
+    /**
+     * @brief Creates an empty ImmutableSortedDictionary using a custom key comparer.
+     *
+     * C++ counterpart of .NET ImmutableSortedDictionary.Create<TKey,TValue>(IComparer<TKey>).
+     * @param keyLess A strict-weak-ordering "less than" function for keys.
+     * @return An empty ImmutableSortedDictionary using the given key comparer.
+     */
+    static ImmutableSortedDictionary<TKey, TValue> Create(KeyCompareFn keyLess) {
+        return ImmutableSortedDictionary<TKey, TValue>(makeEmpty(std::move(keyLess)));
+    }
+
+    /**
+     * @brief Creates an ImmutableSortedDictionary from key/value pairs using a custom key comparer.
+     *
+     * C++ counterpart of .NET ImmutableSortedDictionary.CreateRange<TKey,TValue>(IComparer<TKey>, IEnumerable<KeyValuePair<TKey,TValue>>).
+     * @param keyLess A strict-weak-ordering "less than" function for keys.
+     * @param pairs   The initial key/value pairs.
+     * @return A new ImmutableSortedDictionary using the given key comparer, containing @p pairs.
+     */
+    static ImmutableSortedDictionary<TKey, TValue> Create(KeyCompareFn keyLess,
+                                                           const std::vector<std::pair<TKey, TValue>>& pairs) {
+        auto m = makeEmpty(std::move(keyLess));
+        for (const auto& p : pairs) (*m)[p.first] = p.second;
+        return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
+    }
+
+    /**
+     * @brief Returns an equivalent dictionary that uses the specified key comparer instead.
+     *
+     * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.WithComparers(IComparer<TKey>).
+     * @param keyLess A strict-weak-ordering "less than" function for keys.
+     * @return A new ImmutableSortedDictionary with the same entries under the new key comparer.
+     */
+    [[nodiscard]] ImmutableSortedDictionary<TKey, TValue> WithComparers(KeyCompareFn keyLess) const {
+        auto m = makeEmpty(std::move(keyLess));
+        for (const auto& kv : *data_) (*m)[kv.first] = kv.second;
+        return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
     }
 
     /**
@@ -131,16 +197,24 @@ public:
      * @brief Returns a new dictionary with the specified key/value pair added.
      *
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.Add(TKey, TValue).
+     * Verified against ImmutableSortedDictionary_2.Node.SetOrAdd: if @p key already exists
+     * with a value equal to @p value, this is a silent no-op (returns an equal instance,
+     * not a copy-with-mutation) rather than throwing -- .NET only throws when the existing
+     * value actually differs.
      * @param key   The key to add.
      * @param value The value to add.
-     * @return A new ImmutableSortedDictionary with the pair added.
-     * @throws System::ArgumentException if the key already exists.
+     * @return A new ImmutableSortedDictionary with the pair added, or an equivalent instance
+     *         if @p key already maps to @p value.
+     * @throws System::ArgumentException if the key already exists with a different value.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         Add(const TKey& key, const TValue& value) const {
-        auto m = std::make_shared<MapT>(*data_);
-        if (m->find(key) != m->end())
+        auto it = data_->find(key);
+        if (it != data_->end()) {
+            if (it->second == value) return *this;
             throw System::ArgumentException("An item with the same key has already been added.");
+        }
+        auto m = std::make_shared<MapT>(*data_);
         (*m)[key] = value;
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
     }
@@ -149,16 +223,21 @@ public:
      * @brief Returns a new dictionary with multiple key/value pairs added.
      *
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.AddRange(IEnumerable<KeyValuePair<TKey,TValue>>).
+     * Each pair is applied via the same equal-value-is-a-no-op rule as Add(TKey, TValue);
+     * see that method's doc comment for the verification detail.
      * @param pairs The pairs to add.
      * @return A new ImmutableSortedDictionary with all pairs added.
-     * @throws System::ArgumentException if any key already exists.
+     * @throws System::ArgumentException if any key already exists with a different value.
      */
     [[nodiscard]] ImmutableSortedDictionary<TKey, TValue>
         AddRange(const std::vector<std::pair<TKey, TValue>>& pairs) const {
         auto m = std::make_shared<MapT>(*data_);
         for (const auto& p : pairs) {
-            if (m->find(p.first) != m->end())
+            auto it = m->find(p.first);
+            if (it != m->end()) {
+                if (it->second == p.second) continue;
                 throw System::ArgumentException("An item with the same key has already been added.");
+            }
             (*m)[p.first] = p.second;
         }
         return ImmutableSortedDictionary<TKey, TValue>(std::move(m));
@@ -221,12 +300,14 @@ public:
     }
 
     /**
-     * @brief Returns an empty ImmutableSortedDictionary.
+     * @brief Returns an empty ImmutableSortedDictionary using this dictionary's key comparer.
      *
      * C++ counterpart of .NET ImmutableSortedDictionary<TKey,TValue>.Clear().
-     * @return An empty ImmutableSortedDictionary.
+     * @return An empty ImmutableSortedDictionary using the same key comparer as this instance.
      */
-    [[nodiscard]] ImmutableSortedDictionary<TKey, TValue> Clear() const { return Empty(); }
+    [[nodiscard]] ImmutableSortedDictionary<TKey, TValue> Clear() const {
+        return ImmutableSortedDictionary<TKey, TValue>(makeEmpty(data_->key_comp()));
+    }
 
     /**
      * @brief Gets all keys in sorted order.

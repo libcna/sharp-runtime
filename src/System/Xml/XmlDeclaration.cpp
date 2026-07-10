@@ -5,6 +5,8 @@
 
 #include <tinyxml2/tinyxml2.h>
 
+#include "System/ArgumentException.hpp"
+
 namespace System::Xml {
 
     namespace {
@@ -56,6 +58,8 @@ namespace System::Xml {
     }
 
     void XmlDeclaration::setStandaloneProperty(const std::string& standalone) {
+        if (!standalone.empty() && standalone != "yes" && standalone != "no")
+            throw System::ArgumentException("Wrong value for the XML declaration standalone attribute of '" + standalone + "'.");
         Rebuild(getVersionProperty(), getEncodingProperty(), standalone);
     }
 

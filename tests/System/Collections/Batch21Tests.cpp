@@ -7,6 +7,7 @@
 //   NameValueCollection: copy ctors, capacity ctors, all methods
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Specialized/ListDictionary.hpp"
 #include "System/Collections/Specialized/NameValueCollection.hpp"
 #include <any>
@@ -74,9 +75,19 @@ TEST(ListDictionaryBatch21Test, Indexer_Const_NotFound_ReturnsEmpty) {
 
 TEST(ListDictionaryBatch21Test, Indexer_Mutable_Inserts) {
     ListDictionary d;
-    d["newkey"] = std::any(7);
+    // operator[] is read-only (matches .NET's getter, which never inserts on a miss); use
+    // set() for dict[key]=value-style writes.
+    d.set("newkey", std::any(7));
     EXPECT_TRUE(d.Contains("newkey"));
     EXPECT_EQ(std::any_cast<int>(d["newkey"]), 7);
+}
+
+TEST(ListDictionaryBatch21Test, OperatorBracket_MissingKey_DoesNotInsert) {
+    ListDictionary d;
+    auto v = d["missing"];
+    EXPECT_FALSE(v.has_value());
+    EXPECT_FALSE(d.Contains("missing"));
+    EXPECT_EQ(d.getCountProperty(), 0);
 }
 
 TEST(ListDictionaryBatch21Test, Set_InsertsAndOverwrites) {
@@ -227,7 +238,21 @@ TEST(NameValueCollectionBatch21Test, GetByIndex) {
     c.Add("second", "s");
     EXPECT_EQ(c.Get(0), "f");
     EXPECT_EQ(c.Get(1), "s");
-    EXPECT_EQ(c.Get(99), "");
+}
+
+// .NET's Get(int)/GetValues(int)/GetKey(int)/this[int] delegate through
+// NameObjectCollectionBase's internal ArrayList indexer, which throws
+// ArgumentOutOfRangeException for an out-of-range index -- verified against
+// NameValueCollection.cs/NameObjectCollectionBase.cs. This port previously returned ""/{}
+// silently instead.
+TEST(NameValueCollectionBatch21Test, GetByIndex_OutOfRange_Throws) {
+    NameValueCollection c;
+    c.Add("first", "f");
+    EXPECT_THROW(c.Get(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.Get(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.GetValues(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c.GetKey(99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(c[99], System::ArgumentOutOfRangeException);
 }
 
 TEST(NameValueCollectionBatch21Test, GetKey) {

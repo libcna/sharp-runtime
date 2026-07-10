@@ -42,9 +42,26 @@ namespace System::Text::RegularExpressions {
         /** @brief Constructs an empty (unsuccessful) Match. */
         Match() = default;
 
-        /** @brief Constructs a Match from a std::smatch result, optionally with named-group info and a NextMatch() continuation. */
+        /**
+         * @brief Constructs a Match from a std::smatch result, optionally with named-group
+         * info and a NextMatch() continuation.
+         *
+         * @param m            The std::smatch produced by regex_search.
+         * @param groupNames   Name-to-index mapping for named capture groups.
+         * @param nextMatchFunc Continuation invoked by NextMatch().
+         * @param positionOffset Added to every submatch's reported index. `m.position(i)` is
+         *        relative to the sequence that was actually searched -- when that sequence is
+         *        an iterator range starting partway into the real input (as
+         *        Regex::matchFrom does, to search "the rest of the string" for
+         *        Match()/NextMatch() chains and Replace(string, MatchEvaluator)), `m.position(i)`
+         *        is relative to that range's start, not the true start of the original input.
+         *        Without this correction, every match after the first reported the wrong
+         *        Index, corrupting Replace(string, MatchEvaluator)'s output. Callers that
+         *        search the whole original string directly (e.g. Regex::Matches() via
+         *        sregex_iterator) already get absolute positions and pass 0 (the default).
+         */
         explicit Match(const std::smatch& m, std::vector<std::pair<std::string, intcs>> groupNames = {},
-                        std::function<Match()> nextMatchFunc = nullptr)
+                        std::function<Match()> nextMatchFunc = nullptr, intcs positionOffset = 0)
             : success_(m.ready() && !m.empty()), groupNames_(std::move(groupNames)),
               nextMatchFunc_(std::move(nextMatchFunc)) {
             if (success_) {
@@ -53,7 +70,7 @@ namespace System::Text::RegularExpressions {
                     bool matched = m[i].matched;
                     subMatches_.push_back(SubMatchData{
                         matched ? m[i].str() : std::string(),
-                        matched ? static_cast<intcs>(m.position(i)) : 0,
+                        matched ? static_cast<intcs>(m.position(i)) + positionOffset : 0,
                         matched ? static_cast<intcs>(m[i].length()) : 0, matched});
                 }
             }
@@ -74,17 +91,34 @@ namespace System::Text::RegularExpressions {
             return subMatches_[static_cast<size_t>(index)].value;
         }
 
-        /** @return All capture groups from this match, including group 0 (the whole match) and any named groups. */
+        /**
+         * @brief All capture groups from this match, including group 0 (the whole match) and
+         * any named groups.
+         *
+         * Each Group's Name is the parsed `(?<name>...)`/`(?'name'...)` name when the group
+         * was named, or the numeric index as a string otherwise -- matching real .NET, where
+         * e.g. `Regex.Match("a1", "(\d)").Groups[1].Name` is "1". A prior version of this
+         * method always used the numeric index, ignoring groupNames_ entirely, so a named
+         * group's own Group.Name never reflected the name that was parsed (even though the
+         * *value* was already reachable correctly via GroupCollection's string indexer, which
+         * consults groupNames_ directly).
+         */
         [[nodiscard]] GroupCollection Groups() const {
             std::vector<System::Text::RegularExpressions::Group> groups;
             std::unordered_map<std::string, intcs> nameToIndex;
-            for (size_t i = 0; i < subMatches_.size(); ++i) {
-                const auto& sm = subMatches_[i];
-                groups.emplace_back(sm.matched ? sm.value : std::string(), sm.matched ? sm.index : 0,
-                                     sm.matched ? sm.length : 0, sm.matched, std::to_string(i));
-            }
             for (const auto& [name, idx] : groupNames_) {
                 nameToIndex[name] = idx;
+            }
+            std::unordered_map<intcs, std::string> indexToName;
+            for (const auto& [name, idx] : nameToIndex) {
+                indexToName[idx] = name;
+            }
+            for (size_t i = 0; i < subMatches_.size(); ++i) {
+                const auto& sm = subMatches_[i];
+                auto it = indexToName.find(static_cast<intcs>(i));
+                std::string name = (it != indexToName.end()) ? it->second : std::to_string(i);
+                groups.emplace_back(sm.matched ? sm.value : std::string(), sm.matched ? sm.index : 0,
+                                     sm.matched ? sm.length : 0, sm.matched, std::move(name));
             }
             return GroupCollection(std::move(groups), std::move(nameToIndex));
         }

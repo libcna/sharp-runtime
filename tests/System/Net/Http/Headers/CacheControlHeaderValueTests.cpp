@@ -127,6 +127,24 @@ TEST(CacheControlHeaderValueTests, Parse_MaxAgeNonNumeric_Throws) {
     EXPECT_THROW(CacheControlHeaderValue::Parse("max-age=abc"), System::FormatException);
 }
 
+// Regression tests for a wave-3 audit finding: tryParseSeconds used std::stol (accepting a
+// leading '-') then narrowed the result to intcs with no range check, silently wrapping an
+// out-of-range value instead of failing to parse. Verified against HeaderUtilities.cs's
+// TryParseInt32, which delegates to int.TryParse(value, NumberStyles.None, ...) --
+// NumberStyles.None requires an unsigned, sign-free digit string and fails on overflow.
+TEST(CacheControlHeaderValueTests, Parse_MaxAgeOverflowsIntcs_Throws) {
+    EXPECT_THROW(CacheControlHeaderValue::Parse("max-age=99999999999"), System::FormatException);
+}
+
+TEST(CacheControlHeaderValueTests, TryParse_MaxAgeOverflowsIntcs_ReturnsFalse) {
+    CacheControlHeaderValue result;
+    EXPECT_FALSE(CacheControlHeaderValue::TryParse("max-age=99999999999", result));
+}
+
+TEST(CacheControlHeaderValueTests, Parse_MaxAgeNegative_Throws) {
+    EXPECT_THROW(CacheControlHeaderValue::Parse("max-age=-5"), System::FormatException);
+}
+
 TEST(CacheControlHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     CacheControlHeaderValue result;
     EXPECT_FALSE(CacheControlHeaderValue::TryParse("max-age=abc", result));

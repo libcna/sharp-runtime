@@ -219,12 +219,12 @@ TEST(MemoryExtensionsTests, AsSpan_String_StartAndLength) {
 
 TEST(MemoryExtensionsTests, AsSpan_String_StartOutOfRange_Throws) {
     std::string s = "hi";
-    EXPECT_THROW(MemoryExtensions::AsSpan(s, 99), std::out_of_range);
+    EXPECT_THROW(MemoryExtensions::AsSpan(s, 99), System::ArgumentOutOfRangeException);
 }
 
 TEST(MemoryExtensionsTests, AsSpan_String_LengthOutOfRange_Throws) {
     std::string s = "hi";
-    EXPECT_THROW(MemoryExtensions::AsSpan(s, 0, 99), std::out_of_range);
+    EXPECT_THROW(MemoryExtensions::AsSpan(s, 0, 99), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

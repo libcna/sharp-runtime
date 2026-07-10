@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/Int16.hpp"
+#include "System/OverflowException.hpp"
 
 using System::Int16;
 using SharpRuntime::shortcs;
@@ -24,7 +27,11 @@ TEST(Int16NewTests, Abs_Positive) { EXPECT_EQ(Int16::Abs(5), 5); }
 TEST(Int16NewTests, Abs_Negative) { EXPECT_EQ(Int16::Abs(-5), 5); }
 TEST(Int16NewTests, Abs_Zero)     { EXPECT_EQ(Int16::Abs(0), 0); }
 TEST(Int16NewTests, Abs_MinValue_Throws) {
-    EXPECT_THROW(Int16::Abs(Int16::MinValue), std::overflow_error);
+    EXPECT_THROW(Int16::Abs(Int16::MinValue), System::OverflowException);
+}
+
+TEST(Int16NewTests, Parse_TrailingGarbage_ThrowsFormatException) {
+    EXPECT_THROW(Int16::Parse("123abc"), System::FormatException);
 }
 
 TEST(Int16NewTests, Clamp_Within) { EXPECT_EQ(Int16::Clamp(5, 0, 10), 5); }
@@ -76,4 +83,4 @@ TEST(Int16NewTests, Log2_Zero_IsZero) {
     // Matches .NET's actual BitOperations.Log2(0) semantics: 0, not an error.
     EXPECT_EQ(Int16::Log2(0), 0);
 }
-TEST(Int16NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int16::Log2(-1), std::out_of_range); }
+TEST(Int16NewTests, Log2_Negative_Throws){ EXPECT_THROW(Int16::Log2(-1), System::ArgumentOutOfRangeException); }

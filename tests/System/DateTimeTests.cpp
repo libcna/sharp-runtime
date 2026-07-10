@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -35,6 +36,24 @@ TEST(DateTimeTests, ConstructFromKnownTicks) {
     // From .NET DateTimeTests.cs: new DateTime(999999999999999999) is valid
     DateTime dt(999'999'999'999'999'999LL);
     EXPECT_EQ(dt.getTicksProperty(), 999'999'999'999'999'999LL);
+}
+
+TEST(DateTimeTests, ConstructFromNegativeTicks_Throws) {
+    EXPECT_THROW(DateTime(-1LL), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, ConstructFromTicksBeyondMaxValue_Throws) {
+    EXPECT_THROW(DateTime(DateTime::MaxTicks + 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, AddDays_BeyondMaxValue_Throws) {
+    DateTime maxDate(DateTime::MaxTicks);
+    EXPECT_THROW(maxDate.AddDays(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, AddDays_BeforeMinValue_Throws) {
+    DateTime minDate(0);
+    EXPECT_THROW(minDate.AddDays(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, EqualityBasedOnTicks) {
@@ -414,8 +433,8 @@ TEST(DateTimeTests, IsLeapYear_DivisibleBy400IsLeap) {
 }
 
 TEST(DateTimeTests, IsLeapYear_OutOfRangeThrows) {
-    EXPECT_THROW(DateTime::IsLeapYear(0), std::out_of_range);
-    EXPECT_THROW(DateTime::IsLeapYear(10000), std::out_of_range);
+    EXPECT_THROW(DateTime::IsLeapYear(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime::IsLeapYear(10000), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, DaysInMonth_February_LeapYear) {
@@ -431,8 +450,8 @@ TEST(DateTimeTests, DaysInMonth_January) {
 }
 
 TEST(DateTimeTests, DaysInMonth_OutOfRangeThrows) {
-    EXPECT_THROW(DateTime::DaysInMonth(2024, 0), std::out_of_range);
-    EXPECT_THROW(DateTime::DaysInMonth(2024, 13), std::out_of_range);
+    EXPECT_THROW(DateTime::DaysInMonth(2024, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(DateTime::DaysInMonth(2024, 13), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +495,7 @@ TEST(DateTimeTests, AddMonths_PreservesTimeOfDay) {
 
 TEST(DateTimeTests, AddMonths_OutOfRangeThrows) {
     DateTime dt(2024, 1, 15);
-    EXPECT_THROW(dt.AddMonths(-200000), std::out_of_range);
+    EXPECT_THROW(dt.AddMonths(-200000), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, AddYears_LeapDayClamps) {
@@ -489,7 +508,7 @@ TEST(DateTimeTests, AddYears_LeapDayClamps) {
 
 TEST(DateTimeTests, AddYears_OutOfRangeThrows) {
     DateTime dt(2024, 1, 15);
-    EXPECT_THROW(dt.AddYears(-20000), std::out_of_range);
+    EXPECT_THROW(dt.AddYears(-20000), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, AddTicks_Simple) {
@@ -500,12 +519,12 @@ TEST(DateTimeTests, AddTicks_Simple) {
 
 TEST(DateTimeTests, AddTicks_BelowMinThrows) {
     DateTime dt(0LL);
-    EXPECT_THROW(dt.AddTicks(-1LL), std::out_of_range);
+    EXPECT_THROW(dt.AddTicks(-1LL), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, AddTicks_AboveMaxThrows) {
     DateTime dt(DateTime::MaxValue);
-    EXPECT_THROW(dt.AddTicks(1LL), std::out_of_range);
+    EXPECT_THROW(dt.AddTicks(1LL), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

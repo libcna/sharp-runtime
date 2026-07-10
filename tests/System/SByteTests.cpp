@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/OverflowException.hpp"
 #include "System/SByte.hpp"
 
 using System::SByte;
@@ -12,7 +14,7 @@ TEST(SByteTest, MinValue) { EXPECT_EQ(SByte::MinValue, sbytecs(-128)); }
 
 TEST(SByteTest, Parse_Valid) { EXPECT_EQ(SByte::Parse("42"), sbytecs(42)); }
 TEST(SByteTest, Parse_Negative) { EXPECT_EQ(SByte::Parse("-10"), sbytecs(-10)); }
-TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), std::out_of_range); }
+TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), System::OverflowException); }
 
 TEST(SByteTest, TryParse_Valid) {
     sbytecs r = 0;
@@ -31,12 +33,12 @@ TEST(SByteTest, ToString_Hex) { EXPECT_EQ(SByte::ToString(sbytecs(255), "X2"), "
 TEST(SByteTest, Abs_Positive) { EXPECT_EQ(SByte::Abs(sbytecs(5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Negative) { EXPECT_EQ(SByte::Abs(sbytecs(-5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Zero) { EXPECT_EQ(SByte::Abs(sbytecs(0)), sbytecs(0)); }
-TEST(SByteTest, Abs_MinValue_Throws) { EXPECT_THROW(SByte::Abs(SByte::MinValue), std::overflow_error); }
+TEST(SByteTest, Abs_MinValue_Throws) { EXPECT_THROW(SByte::Abs(SByte::MinValue), System::OverflowException); }
 
 TEST(SByteTest, CopySign_PositiveSign) { EXPECT_EQ(SByte::CopySign(sbytecs(-3), sbytecs(1)), sbytecs(3)); }
 TEST(SByteTest, CopySign_NegativeSign) { EXPECT_EQ(SByte::CopySign(sbytecs(3), sbytecs(-1)), sbytecs(-3)); }
 TEST(SByteTest, CopySign_MinValue_NonNegativeSign_Throws) {
-    EXPECT_THROW(SByte::CopySign(SByte::MinValue, sbytecs(1)), std::overflow_error);
+    EXPECT_THROW(SByte::CopySign(SByte::MinValue, sbytecs(1)), System::OverflowException);
 }
 TEST(SByteTest, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
     // Matches .NET: the negation double-wraps back to MinValue without throwing
@@ -52,7 +54,10 @@ TEST(SByteTest, IsPositive_False) { EXPECT_FALSE(SByte::IsPositive(sbytecs(0)));
 
 TEST(SByteTest, Log10_One)     { EXPECT_EQ(SByte::Log10(sbytecs(1)), sbytecs(0)); }
 TEST(SByteTest, Log10_Ten)     { EXPECT_EQ(SByte::Log10(sbytecs(10)), sbytecs(1)); }
-TEST(SByteTest, Log10_Zero_Throws) { EXPECT_THROW(SByte::Log10(sbytecs(0)), std::domain_error); }
+// .NET SByte.Log10(0) returns 0 (uint.Log10 convention), it does not throw; only a
+// negative value throws (ArgumentOutOfRangeException, per SByte.cs).
+TEST(SByteTest, Log10_Zero_IsZero) { EXPECT_EQ(SByte::Log10(sbytecs(0)), sbytecs(0)); }
+TEST(SByteTest, Log10_Negative_Throws) { EXPECT_THROW(SByte::Log10(sbytecs(-1)), System::ArgumentOutOfRangeException); }
 
 TEST(SByteTest, MaxMagnitude_Larger)   { EXPECT_EQ(SByte::MaxMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(-10)); }
 TEST(SByteTest, MinMagnitude_Smaller)  { EXPECT_EQ(SByte::MinMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(5)); }
@@ -86,3 +91,10 @@ TEST(SByteTest, RotateRight_ByEight_Identity) {
 TEST(SByteTest, LeadingZeroCount_One)  { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(1)), sbytecs(7)); }
 TEST(SByteTest, TrailingZeroCount_Two) { EXPECT_EQ(SByte::TrailingZeroCount(sbytecs(4)), sbytecs(2)); }
 TEST(SByteTest, PopCount_Seven)        { EXPECT_EQ(SByte::PopCount(sbytecs(127)), sbytecs(7)); }
+
+// Negative values are reinterpreted as their raw 8-bit pattern (SByte.cs:
+// `(sbyte)(BitOperations.LeadingZeroCount((byte)value) - 24)`), not special-cased to 8 --
+// e.g. -1's bit pattern is 0xFF, which has zero leading zero bits.
+TEST(SByteTest, LeadingZeroCount_NegOne_IsZero) { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(-1)), sbytecs(0)); }
+TEST(SByteTest, LeadingZeroCount_MinValue_IsZero) { EXPECT_EQ(SByte::LeadingZeroCount(SByte::MinValue), sbytecs(0)); }
+TEST(SByteTest, LeadingZeroCount_Zero_IsEight) { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(0)), sbytecs(8)); }

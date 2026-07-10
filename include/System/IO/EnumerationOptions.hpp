@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <climits>
+#include "System/IO/FileAttributes.hpp"
 #include "System/IO/MatchCasing.hpp"
 #include "System/IO/MatchType.hpp"
 #include "System/IO/SearchTarget.hpp"

@@ -72,6 +72,9 @@ namespace System::IO {
         void MoveTo(const std::string& destDirName) {
             if (!getExistsProperty())
                 throw DirectoryNotFoundException("Could not find a part of the path '" + fullPath_.string() + "'.");
+            // Real .NET's MoveTo does not replace an existing destination directory.
+            if (std::filesystem::exists(destDirName))
+                throw IOException("Cannot create '" + destDirName + "' because a file or directory with the same name already exists.");
             std::error_code ec;
             std::filesystem::rename(fullPath_, destDirName, ec);
             if (ec) throw IOException("Failed to move directory: " + ec.message());

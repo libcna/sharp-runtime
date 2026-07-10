@@ -3,8 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileStream.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 
@@ -15,6 +18,19 @@ namespace System::IO
     namespace {
         bool HasFlag(FileAccess access, FileAccess flag) {
             return (access & flag) == flag;
+        }
+
+        // Verified against Interop.IOErrors.cs's GetExceptionForIoErrno: real .NET throws
+        // DirectoryNotFoundException (not FileNotFoundException, and not a generic IOException)
+        // whenever the *parent* directory of the target path doesn't exist -- "For Windows
+        // compatibility, throw DirectoryNotFoundException instead of FileNotFoundException when
+        // the parent folder does not exist."
+        bool ParentDirectoryExists(const std::string& path) {
+            std::filesystem::path parent = std::filesystem::path(path).parent_path();
+            if (parent.empty()) return true; // relative path with no directory component
+            std::error_code ec;
+            bool isDir = std::filesystem::is_directory(parent, ec);
+            return !ec && isDir;
         }
 
         // .NET: FileStream(path, mode) defaults access to Write for Append, ReadWrite otherwise.
@@ -44,7 +60,7 @@ namespace System::IO
         : FileStream(path, mode, DefaultAccessFor(mode)) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
-        : path_(path), mode_(mode), length_(0), canRead_(false), canWrite_(false)
+        : path_(path), length_(0), canRead_(false), canWrite_(false)
     {
         ValidateModeAndAccess(mode, access);
 
@@ -56,6 +72,9 @@ namespace System::IO
             throw IOException("Cannot create '" + path + "' because a file or directory with the same name already exists.");
         }
         if ((mode == FileMode::Open || mode == FileMode::Truncate) && !exists) {
+            if (!ParentDirectoryExists(path)) {
+                throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+            }
             throw FileNotFoundException("Unable to find the specified file.", path);
         }
 
@@ -87,6 +106,9 @@ namespace System::IO
 
         file_.open(path, iosMode);
         if (!file_.is_open()) {
+            if (!ParentDirectoryExists(path)) {
+                throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+            }
             throw IOException("Failed to open file '" + path + "'.");
         }
 
@@ -104,14 +126,30 @@ namespace System::IO
 
     intcs FileStream::Read(bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open() || buffer == nullptr || offset < 0 || count < 0) return 0;
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (buffer == nullptr)
+            throw System::ArgumentNullException("buffer");
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count == 0) return 0;
         file_.read(reinterpret_cast<char*>(buffer + offset), count);
         return static_cast<intcs>(file_.gcount());
     }
 
     void FileStream::Write(const bytecs buffer[], intcs offset, intcs count)
     {
-        if (!file_.is_open() || buffer == nullptr || count <= 0) return;
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
+        if (buffer == nullptr)
+            throw System::ArgumentNullException("buffer");
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count == 0) return;
         file_.write(reinterpret_cast<const char*>(buffer + offset),
                     static_cast<std::streamsize>(count));
     }
@@ -131,7 +169,21 @@ namespace System::IO
         if (file_.is_open()) file_.close();
     }
 
-    intcs FileStream::getLengthProperty() const { return length_; }
+    intcs FileStream::getLengthProperty() const {
+        // Verified against FileStream.cs's Length getter: real .NET queries the underlying
+        // file's current length live (accounting for any writes made so far through this
+        // stream), not a value cached once and only ever updated by SetLength(). This port
+        // previously only updated length_ from SetLength(), so a Write() that extended the
+        // file left getLengthProperty() returning the stale construction-time length (often 0
+        // for a freshly created file) until the stream was closed and reopened.
+        if (file_.is_open() && canWrite_) {
+            auto& f = const_cast<std::fstream&>(file_);
+            f.flush();
+        }
+        std::error_code ec;
+        auto size = std::filesystem::file_size(path_, ec);
+        return ec ? length_ : static_cast<intcs>(size);
+    }
 
     bool FileStream::IsOpen() const { return file_.is_open(); }
 
@@ -155,6 +207,12 @@ namespace System::IO
     {
         if (value < 0)
             throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
+        // Check open state before canWrite_: canWrite_ reflects the access mode requested at
+        // construction and is never reset by Close(), so without this check SetLength() after
+        // Close() would still resize the file on disk via path_ below despite the stream
+        // claiming to be closed.
+        if (!file_.is_open())
+            throw System::ObjectDisposedException("Cannot access a closed file.");
         if (!canWrite_)
             throw System::NotSupportedException("Stream does not support writing.");
 

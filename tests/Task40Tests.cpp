@@ -66,7 +66,7 @@ TEST(SpanTests, IndexOperator_ReadsAndWrites) {
 TEST(SpanTests, IndexOperator_OutOfRange_Throws) {
     int arr[] = {1};
     Span<int> s(arr, 1);
-    EXPECT_THROW(s[1], std::out_of_range);
+    EXPECT_THROW(s[1], System::ArgumentOutOfRangeException);
 }
 
 TEST(SpanTests, Slice_SubRange) {
@@ -352,7 +352,7 @@ TEST(Int128Tests, Parse_Negative) {
 }
 
 TEST(Int128Tests, Parse_Invalid_Throws) {
-    EXPECT_THROW(System::Int128::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(System::Int128::Parse("abc"), System::FormatException);
 }
 
 TEST(Int128Tests, TryParse_Success) {
@@ -381,6 +381,16 @@ TEST(Int128Tests, DivRem) {
     System::Int128 quotient = System::Int128::DivRem(dividend, divisor, remainder);
     EXPECT_EQ(static_cast<long long>(quotient),  3LL);
     EXPECT_EQ(static_cast<long long>(remainder), 2LL);
+}
+
+TEST(Int128Tests, DivisionByZero_Throws) {
+    System::Int128 a(42), zero(0);
+    EXPECT_THROW(a / zero, System::DivideByZeroException);
+}
+
+TEST(Int128Tests, ModuloByZero_Throws) {
+    System::Int128 a(42), zero(0);
+    EXPECT_THROW(a % zero, System::DivideByZeroException);
 }
 
 TEST(Int128Tests, LeadingZeroCount_One) {
@@ -494,7 +504,7 @@ TEST(Int128Tests, Clamp_AboveMax_ReturnsMax) {
 }
 
 TEST(Int128Tests, Clamp_MinGreaterThanMax_Throws) {
-    EXPECT_THROW(System::Int128::Clamp(System::Int128(5), System::Int128(10), System::Int128(0)), std::invalid_argument);
+    EXPECT_THROW(System::Int128::Clamp(System::Int128(5), System::Int128(10), System::Int128(0)), System::ArgumentException);
 }
 
 TEST(Int128Tests, Max_ReturnsLarger) {
@@ -555,7 +565,7 @@ TEST(Int128Tests, Log2_CrossesUpperHalf) {
 }
 
 TEST(Int128Tests, Log2_Negative_Throws) {
-    EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), std::out_of_range);
+    EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
@@ -897,7 +907,7 @@ TEST(FormattableStringTests, CurrentCulture_ReturnsToString) {
 
 TEST(FormattableStringTests, GetArgument_OutOfRange_Throws) {
     System::FormattableString fs("{0}", {"x"});
-    EXPECT_THROW(fs.GetArgument(5), std::out_of_range);
+    EXPECT_THROW(fs.GetArgument(5), System::IndexOutOfRangeException);
 }
 
 // ===========================================================================
@@ -1054,6 +1064,22 @@ TEST(BFloat16Tests, IsNaN_NaN) {
 
 TEST(BFloat16Tests, IsNaN_NonNaN) {
     EXPECT_FALSE(BFloat16::IsNaN(BFloat16::One()));
+}
+
+TEST(BFloat16Tests, NaN_UsesNegativeSignBit) {
+    EXPECT_EQ(BFloat16::NaN().getBitsProperty(), uint16_t(0xFFC0u));
+}
+
+TEST(BFloat16Tests, Equality_NaNIsNeverEqualToItself) {
+    EXPECT_FALSE(BFloat16::NaN() == BFloat16::NaN());
+    EXPECT_TRUE(BFloat16::NaN() != BFloat16::NaN());
+}
+
+TEST(BFloat16Tests, Equality_PositiveAndNegativeZeroAreEqual) {
+    BFloat16 posZero(uint16_t(0x0000u));
+    BFloat16 negZero(uint16_t(0x8000u));
+    EXPECT_TRUE(posZero == negZero);
+    EXPECT_FALSE(posZero != negZero);
 }
 
 TEST(BFloat16Tests, IsInfinity_PosInf) {

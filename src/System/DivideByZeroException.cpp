@@ -10,16 +10,24 @@ namespace System {
     }
 
     DivideByZeroException::DivideByZeroException()
-        : ArithmeticException(DefaultMsg) {}
+        : ArithmeticException(DefaultMsg) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80020012)); // COR_E_DIVIDEBYZERO
+    }
 
     DivideByZeroException::DivideByZeroException(const char* message)
-        : ArithmeticException(message) {}
+        : ArithmeticException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80020012)); // COR_E_DIVIDEBYZERO
+    }
 
     DivideByZeroException::DivideByZeroException(const std::string& message)
-        : ArithmeticException(message) {}
+        : ArithmeticException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80020012)); // COR_E_DIVIDEBYZERO
+    }
 
     DivideByZeroException::DivideByZeroException(
         const std::string& message, std::exception_ptr innerException)
-        : ArithmeticException(message, std::move(innerException)) {}
+        : ArithmeticException(message, std::move(innerException)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80020012)); // COR_E_DIVIDEBYZERO
+    }
 
 } // namespace System

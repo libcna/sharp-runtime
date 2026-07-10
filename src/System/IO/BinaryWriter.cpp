@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ObjectDisposedException.hpp"
 
@@ -14,10 +15,20 @@ namespace System::IO {
         : stream_(stream), leaveOpen_(leaveOpen) {
         if (!stream_)
             throw System::ArgumentNullException("stream");
+        if (!stream_->getCanWriteProperty())
+            throw System::ArgumentException("Stream was not writable.");
     }
 
+    // Verified against BinaryWriter.cs's Dispose(bool): real .NET calls OutStream.Flush()
+    // when leaveOpen is true, and OutStream.Close() otherwise -- leaveOpen=true does NOT mean
+    // "do nothing," it means "flush what's pending, but don't take ownership of closing it."
+    // This previously did nothing at all when leaveOpen_ was true, silently leaving any data
+    // buffered by the underlying stream (e.g. a BufferedStream) unflushed.
     BinaryWriter::~BinaryWriter() {
-        if (!disposed_ && !leaveOpen_ && stream_) stream_->Close();
+        if (!disposed_ && stream_) {
+            if (leaveOpen_) stream_->Flush();
+            else stream_->Close();
+        }
     }
 
     void BinaryWriter::ThrowIfDisposed() const {
@@ -112,7 +123,10 @@ namespace System::IO {
 
     void BinaryWriter::Close() {
         if (!disposed_) {
-            if (!leaveOpen_ && stream_) stream_->Close();
+            if (stream_) {
+                if (leaveOpen_) stream_->Flush();
+                else stream_->Close();
+            }
             disposed_ = true;
         }
     }

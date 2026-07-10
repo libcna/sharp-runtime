@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/Threading/IThreadPoolWorkItem.hpp"
 #include "System/Threading/RegisteredWaitHandle.hpp"
 #include "System/Threading/WaitCallback.hpp"
@@ -28,8 +29,9 @@ namespace System::Threading {
 
         /** Queues the callback for execution on a detached thread; returns true on success. */
         static bool QueueUserWorkItem(std::function<void()> callBack) {
+            if (!callBack)
+                throw System::ArgumentNullException("callBack");
 #if defined(__EMSCRIPTEN__)
-            (void)callBack;
             throw System::PlatformNotSupportedException("ThreadPool::QueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
             std::thread(std::move(callBack)).detach();
@@ -39,8 +41,10 @@ namespace System::Threading {
 
         /** Queues the callback with a state argument for execution on a detached thread; returns true on success. */
         static bool QueueUserWorkItem(std::function<void(void*)> callBack, void* state) {
+            if (!callBack)
+                throw System::ArgumentNullException("callBack");
 #if defined(__EMSCRIPTEN__)
-            (void)callBack; (void)state;
+            (void)state;
             throw System::PlatformNotSupportedException("ThreadPool::QueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
             std::thread([callBack, state]{ callBack(state); }).detach();
@@ -72,11 +76,12 @@ namespace System::Threading {
 
         /** Queues an IThreadPoolWorkItem's Execute() for execution on a detached thread; returns true on success. */
         static bool UnsafeQueueUserWorkItem(IThreadPoolWorkItem* callBack, bool /*preferLocal*/) {
+            if (!callBack)
+                throw System::ArgumentNullException("callBack");
 #if defined(__EMSCRIPTEN__)
-            (void)callBack;
             throw System::PlatformNotSupportedException("ThreadPool::UnsafeQueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
-            std::thread([callBack]{ if (callBack) callBack->Execute(); }).detach();
+            std::thread([callBack]{ callBack->Execute(); }).detach();
             return true;
 #endif
         }

@@ -73,12 +73,25 @@ TEST(StringInfoBatch33Test, GetTextElementEnumerator_InvalidIndex_ThrowsArgument
 TEST(StringInfoBatch33Test, GetNextTextElement) {
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 0), "a");
     EXPECT_EQ(StringInfo::GetNextTextElement("abc", 2), "c");
-    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 5), "");
+    EXPECT_EQ(StringInfo::GetNextTextElement("abc", 3), ""); // exactly at end: valid, empty
+}
+
+// .NET's real bound is `(uint)index > (uint)str.Length` (StringInfo.cs) -- index at or
+// negative from the end is one thing (valid, or negative-throws), but an index strictly
+// past the end throws ArgumentOutOfRangeException; it does not silently return "".
+TEST(StringInfoBatch33Test, GetNextTextElement_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElement("abc", 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetNextTextElement("abc", -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoBatch33Test, GetNextTextElementLength) {
     EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 0), 1);
-    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 9), 0);
+    EXPECT_EQ(StringInfo::GetNextTextElementLength("abc", 3), 0); // exactly at end: valid, zero
+}
+
+TEST(StringInfoBatch33Test, GetNextTextElementLength_PastEnd_Throws) {
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("abc", 9), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringInfo::GetNextTextElementLength("abc", -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringInfoBatch33Test, ParseCombiningCharacters) {
@@ -223,6 +236,22 @@ TEST(TextInfoBatch33Test, ToUpper_String) {
 TEST(TextInfoBatch33Test, ToTitleCase) {
     TextInfo ti;
     EXPECT_EQ(ti.ToTitleCase("hello world"), "Hello World");
+}
+
+// .NET preserves all-uppercase words (acronyms) unchanged instead of lowercasing them --
+// TextInfo.cs's own comment: "Use hasLowerCase flag to prevent from lowercasing acronyms
+// (like URT, USA, etc). This is in line with Word 2000 behavior of titlecasing."
+TEST(TextInfoBatch33Test, ToTitleCase_PreservesAllUppercaseAcronym) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("USA"), "USA");
+    EXPECT_EQ(ti.ToTitleCase("visit the USA today"), "Visit The USA Today");
+}
+
+// A word whose first letter is lowercase is still normally title-cased even if the rest
+// happens to be uppercase, since .NET's hasLowerCase check covers the first letter too.
+TEST(TextInfoBatch33Test, ToTitleCase_LowercaseFirstLetter_NotTreatedAsAcronym) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("uSA"), "Usa");
 }
 
 TEST(TextInfoBatch33Test, Clone_IsMutable) {

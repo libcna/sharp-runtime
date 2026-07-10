@@ -37,6 +37,7 @@ namespace detail {
     std::string tupleItemStr(const T& val)
     {
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         oss << val;
         return oss.str();
     }

@@ -16,6 +16,9 @@ namespace System::Text::Json {
      * C++ counterpart of .NET System.Text.Json.JsonDocumentOptions.
      */
     struct JsonDocumentOptions {
+        /** @brief The default maximum nesting depth used when MaxDepth is left at 0. */
+        static constexpr intcs DefaultMaxDepth = 64;
+
         /** @brief How comments are handled (JsonDocument only supports Disallow/Skip, not Allow). Default Disallow. */
         JsonCommentHandling CommentHandling = JsonCommentHandling::Disallow;
         /** @brief The maximum allowed nesting depth, or 0 for the default of 64. */

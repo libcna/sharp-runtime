@@ -16,6 +16,13 @@ TEST(ArgumentExceptionTests, IsA_SystemException) {
     EXPECT_THROW(throw ArgumentException(), System::SystemException);
 }
 
+TEST(ArgumentExceptionTests, HResult_MatchesCorEArgument) {
+    // Regression: previously never set, so it kept the base Exception's default
+    // (COR_E_EXCEPTION) instead of .NET's HResults.COR_E_ARGUMENT (ArgumentException.cs).
+    ArgumentException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070057));
+}
+
 TEST(ArgumentExceptionTests, MessageCtor_WhatContainsMessage) {
     ArgumentException ex("bad argument");
     EXPECT_NE(std::string(ex.what()).find("bad argument"), std::string::npos);

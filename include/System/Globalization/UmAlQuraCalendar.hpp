@@ -53,6 +53,16 @@ public:
     /** @return A new DateTime offset by @p years Um Al Qura years. */
     [[nodiscard]] System::DateTime AddYears (const System::DateTime& time, int years)  const override;
 
+    /**
+     * @brief Returns a DateTime from the Um Al Qura date and time components.
+     *
+     * C++ counterpart of .NET UmAlQuraCalendar.ToDateTime(int, int, int, int, int, int, int, int).
+     * @throws System::ArgumentOutOfRangeException if @p day is outside the valid range for
+     *         the given Um Al Qura @p year and @p month.
+     */
+    [[nodiscard]] System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
+                                              int second, int millisecond, int era = CurrentEra) const override;
+
 private:
     struct DateMapping {
         int  flags;       // bit i set → month (i+1) has 30 days; else 29 days

@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Span.hpp"
 
 namespace System {
@@ -42,7 +43,7 @@ namespace System {
          * @param format           Optional format string (may be empty).
          * @return true if formatting succeeded and the output fits; false otherwise.
          */
-        virtual bool TryFormatUtf8(Span<uint8_t> utf8Destination, int& bytesWritten,
+        virtual bool TryFormatUtf8(Span<uint8_t> utf8Destination, SharpRuntime::intcs& bytesWritten,
                                     const std::string& format) const = 0;
 
         /**
@@ -59,7 +60,7 @@ namespace System {
          * @param provider         Culture-specific format information, or nullptr for invariant.
          * @return true if formatting succeeded and the output fits; false otherwise.
          */
-        virtual bool TryFormatUtf8(Span<uint8_t> utf8Destination, int& bytesWritten,
+        virtual bool TryFormatUtf8(Span<uint8_t> utf8Destination, SharpRuntime::intcs& bytesWritten,
                                     const std::string& format,
                                     const IFormatProvider* provider) const {
             (void)provider;

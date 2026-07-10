@@ -12,6 +12,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -31,17 +32,36 @@ class ImmutableArray {
 
     explicit ImmutableArray(std::shared_ptr<const std::vector<T>> data) : data_(std::move(data)) {}
 
+    // Real .NET throws NullReferenceException for most member access on a default(never-
+    // initialized) ImmutableArray<T> -- an intentional, documented perf choice (no null
+    // check so the JIT can optimize away bounds checking). A raw null-pointer dereference of
+    // data_ in C++ would be undefined behavior, which is strictly worse than .NET's
+    // well-defined (if perf-motivated) crash, so this throws a catchable
+    // System::InvalidOperationException instead -- matching the exception type real .NET's
+    // own explicit-interface members (e.g. IList<T> members) throw for the same condition.
+    void ensureNotDefault() const {
+        if (!data_) throw System::InvalidOperationException("This operation cannot be performed on a default instance of ImmutableArray<T>.");
+    }
+
 public:
-    /** @brief Default-constructs an empty ImmutableArray. */
-    ImmutableArray() : data_(std::make_shared<std::vector<T>>()) {}
+    /**
+     * @brief Default-constructs an uninitialized ("default") ImmutableArray.
+     *
+     * C++ counterpart of .NET default(ImmutableArray<T>). Leaves the backing storage
+     * unallocated (IsDefault == true) rather than allocating an empty vector -- matching
+     * real .NET, where a default-constructed ImmutableArray<T>'s backing array field is
+     * null. Use Empty() for a valid, empty, non-default instance.
+     */
+    ImmutableArray() = default;
 
     /**
      * @brief Returns an empty ImmutableArray.
      *
-     * C++ counterpart of .NET ImmutableArray<T>.Empty.
+     * C++ counterpart of .NET ImmutableArray<T>.Empty. Unlike the default constructor, this
+     * is NOT a default instance (IsDefault == false, IsEmpty == true).
      * @return An empty ImmutableArray<T>.
      */
-    static ImmutableArray<T> Empty() { return ImmutableArray<T>(); }
+    static ImmutableArray<T> Empty() { return ImmutableArray<T>(std::make_shared<std::vector<T>>()); }
 
     /**
      * @brief Creates an ImmutableArray from an initializer list.
@@ -70,16 +90,18 @@ public:
      *
      * C++ counterpart of .NET ImmutableArray<T>.Length.
      * @return The number of elements.
+     * @throws System::InvalidOperationException if this is a default instance (IsDefault).
      */
-    [[nodiscard]] intcs getLengthProperty() const { return static_cast<intcs>(data_->size()); }
+    [[nodiscard]] intcs getLengthProperty() const { ensureNotDefault(); return static_cast<intcs>(data_->size()); }
 
     /**
      * @brief Gets a value indicating whether the array is empty.
      *
      * C++ counterpart of .NET ImmutableArray<T>.IsEmpty.
      * @return true if the array contains no elements; otherwise false.
+     * @throws System::InvalidOperationException if this is a default instance (IsDefault).
      */
-    [[nodiscard]] bool getIsEmptyProperty() const { return data_->empty(); }
+    [[nodiscard]] bool getIsEmptyProperty() const { ensureNotDefault(); return data_->empty(); }
 
     /**
      * @brief Gets a value indicating whether this array was created with the default constructor.
@@ -112,6 +134,7 @@ public:
      * @return A new ImmutableArray with the element added.
      */
     [[nodiscard]] ImmutableArray<T> Add(const T& item) const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->push_back(item);
         return ImmutableArray<T>(std::move(v));
@@ -125,6 +148,7 @@ public:
      * @return A new ImmutableArray with the elements added.
      */
     [[nodiscard]] ImmutableArray<T> AddRange(const std::vector<T>& items) const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
         for (const auto& i : items) v->push_back(i);
         return ImmutableArray<T>(std::move(v));
@@ -187,6 +211,7 @@ public:
      * @return A new ImmutableArray with the first occurrence replaced.
      */
     [[nodiscard]] ImmutableArray<T> Replace(const T& oldValue, const T& newValue) const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
         auto it = std::find(v->begin(), v->end(), oldValue);
         if (it != v->end()) *it = newValue;
@@ -201,6 +226,7 @@ public:
      * @return A new ImmutableArray with the first matching element removed.
      */
     [[nodiscard]] ImmutableArray<T> Remove(const T& item) const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>();
         bool removed = false;
         for (const auto& x : *data_) {
@@ -233,6 +259,7 @@ public:
      * @return A new ImmutableArray with all matching elements removed.
      */
     [[nodiscard]] ImmutableArray<T> RemoveAll(std::function<bool(const T&)> match) const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>();
         for (const auto& x : *data_) if (!match(x)) v->push_back(x);
         return ImmutableArray<T>(std::move(v));
@@ -245,6 +272,7 @@ public:
      * @return A new ImmutableArray sorted in ascending order.
      */
     [[nodiscard]] ImmutableArray<T> Sort() const {
+        ensureNotDefault();
         auto v = std::make_shared<std::vector<T>>(*data_);
         std::sort(v->begin(), v->end());
         return ImmutableArray<T>(std::move(v));
@@ -258,6 +286,7 @@ public:
      * @return true if found; otherwise false.
      */
     [[nodiscard]] bool Contains(const T& item) const {
+        ensureNotDefault();
         return std::find(data_->begin(), data_->end(), item) != data_->end();
     }
 
@@ -269,6 +298,7 @@ public:
      * @return The zero-based index, or -1 if not found.
      */
     [[nodiscard]] intcs IndexOf(const T& item) const {
+        ensureNotDefault();
         auto it = std::find(data_->begin(), data_->end(), item);
         return it == data_->end() ? -1 : static_cast<intcs>(it - data_->begin());
     }
@@ -292,20 +322,33 @@ public:
      * C++ counterpart of .NET ImmutableArray<T>.ToArray() (returns vector here).
      * @return A std::vector<T> containing all elements.
      */
-    [[nodiscard]] std::vector<T> ToVector() const { return *data_; }
+    [[nodiscard]] std::vector<T> ToVector() const { ensureNotDefault(); return *data_; }
 
-    /** @brief Returns a const iterator to the beginning of the array (STL interop). */
-    auto begin() const { return data_->begin(); }
-    /** @brief Returns a const iterator past the end of the array (STL interop). */
-    auto end()   const { return data_->end(); }
+    /**
+     * @brief Returns a const iterator to the beginning of the array (STL interop).
+     * @throws System::InvalidOperationException if this is a default instance (IsDefault).
+     */
+    auto begin() const { ensureNotDefault(); return data_->begin(); }
+    /**
+     * @brief Returns a const iterator past the end of the array (STL interop).
+     * @throws System::InvalidOperationException if this is a default instance (IsDefault).
+     */
+    auto end()   const { ensureNotDefault(); return data_->end(); }
 
     /**
      * @brief Returns true if both arrays contain the same elements in the same order.
+     *
+     * Two default instances are equal to each other; a default and a non-default instance
+     * are never equal (matches the previous null-safe short-circuit for the both-null case,
+     * but fixes the case of one default/one not, which previously fell through to
+     * dereferencing a possibly-null data_).
      * @param o The other array to compare.
      * @return true if equal; otherwise false.
      */
     bool operator==(const ImmutableArray<T>& o) const {
-        return data_ == o.data_ || *data_ == *o.data_;
+        if (data_ == o.data_) return true; // covers both-null (both default) and same-instance
+        if (!data_ || !o.data_) return false;
+        return *data_ == *o.data_;
     }
     /**
      * @brief Returns true if the arrays are not equal.

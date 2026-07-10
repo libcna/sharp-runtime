@@ -31,7 +31,10 @@ namespace System::Xml {
         void setEncodingProperty(const std::string& encoding);
         /** @return The standalone attribute value ("yes", "no", or "" if absent). */
         [[nodiscard]] std::string getStandaloneProperty() const;
-        /** @brief Sets the standalone attribute ("yes" or "no"). */
+        /**
+         * @brief Sets the standalone attribute ("yes" or "no").
+         * @throws System::ArgumentException if @p standalone is non-empty and not "yes" or "no".
+         */
         void setStandaloneProperty(const std::string& standalone);
 
         [[nodiscard]] std::string getValueProperty() const override;

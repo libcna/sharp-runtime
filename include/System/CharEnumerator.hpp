@@ -2,7 +2,6 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
-#include <stdexcept>
 #include <string>
 #include "System/InvalidOperationException.hpp"
 
@@ -52,7 +51,7 @@ namespace System {
          * @brief Gets the character at the current position of the enumerator.
          *
          * C++ counterpart of .NET CharEnumerator.Current.
-         * @throws std::invalid_argument if the enumerator is positioned before the
+         * @throws System::InvalidOperationException if the enumerator is positioned before the
          *         first element or after the last element.
          */
         [[nodiscard]] char getCurrentProperty() const {

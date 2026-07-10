@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Collections/Concurrent/ConcurrentDictionary.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include <string>
 
 using System::Collections::Concurrent::ConcurrentDictionary;
@@ -103,4 +104,35 @@ TEST(ConcurrentDictionaryTest, AddOrUpdate_WithAddFactory_ExistingKey_Updates) {
     int result = d.AddOrUpdate("a", [](const std::string&) { return 100; },
                                 [](const std::string&, int v) { return v + 1; });
     EXPECT_EQ(result, 6);
+}
+
+// .NET's ConcurrentDictionary<TKey,TValue> indexer getter throws KeyNotFoundException for
+// an absent key (ConcurrentDictionary.cs:1069-1072) -- it does NOT insert a default value,
+// unlike std::unordered_map::operator[] or this type's own prior (buggy) implementation.
+TEST(ConcurrentDictionaryTest, Indexer_MissingKey_Throws) {
+    ConcurrentDictionary<std::string, int> d;
+    EXPECT_THROW({ int v = d["missing"]; (void)v; }, System::Collections::Generic::KeyNotFoundException);
+    EXPECT_TRUE(d.getIsEmptyProperty());
+}
+
+TEST(ConcurrentDictionaryTest, Indexer_Get_ExistingKey_ReturnsValue) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("a", 42);
+    int v = d["a"];
+    EXPECT_EQ(v, 42);
+}
+
+TEST(ConcurrentDictionaryTest, Indexer_Set_NewKey_Inserts) {
+    ConcurrentDictionary<std::string, int> d;
+    d["a"] = 7;
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_EQ(static_cast<int>(d["a"]), 7);
+}
+
+TEST(ConcurrentDictionaryTest, Indexer_Set_ExistingKey_Overwrites) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("a", 1);
+    d["a"] = 2;
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_EQ(static_cast<int>(d["a"]), 2);
 }

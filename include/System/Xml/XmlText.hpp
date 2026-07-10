@@ -21,6 +21,8 @@ namespace System::Xml {
          * @brief Splits this text node into two nodes at @p offset, keeping [0, offset) in this
          * node and inserting a new sibling text node holding [offset, end).
          * @return The newly created sibling node containing the remainder.
+         * @throws System::ArgumentOutOfRangeException if @p offset is greater than the node's length.
+         * @throws System::InvalidOperationException if this node has no parent (is not in a live DOM tree).
          */
         virtual XmlText* SplitText(SharpRuntime::intcs offset);
     };

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/Linq/XContainer.hpp"
 #include <algorithm>
+#include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 
 namespace System::Xml::Linq {
@@ -20,6 +21,21 @@ namespace System::Xml::Linq {
     void XContainer::InsertNodeAt(size_t index, const std::shared_ptr<XNode>& n) {
         if (!n) return;
         ValidateNode(*n);
+        // Verified against XContainer.cs's AddNode(): real .NET detects "n is this or an
+        // ancestor of this" and clones n instead of inserting the original (Add() has
+        // copy-on-attach semantics whenever the node being added is already attached
+        // somewhere). This port instead reparents nodes in place (moves rather than clones) as
+        // its established, simpler design for the common case, so replicating .NET's full
+        // clone-based Add() would be a much larger behavioral change than this specific bug
+        // warrants. This guards against the one genuinely broken outcome instead: inserting a
+        // node into its own subtree, which previously created a permanent shared_ptr reference
+        // cycle (the container ends up holding, transitively, a shared_ptr back to itself) and
+        // a stack overflow in any recursive traversal (Nodes()/ToString()/etc.).
+        for (XContainer* ancestorOrSelf = this; ancestorOrSelf; ancestorOrSelf = ancestorOrSelf->parent_) {
+            if (ancestorOrSelf == n.get()) {
+                throw System::InvalidOperationException("Cannot add a node as a child of itself or of one of its own descendants.");
+            }
+        }
         if (n->parent_ != nullptr) {
             n->parent_->RemoveNode(n.get());
         }

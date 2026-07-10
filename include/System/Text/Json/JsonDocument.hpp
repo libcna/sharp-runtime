@@ -25,6 +25,21 @@ namespace System::Text::Json {
 
         explicit JsonDocument(std::shared_ptr<const nlohmann::ordered_json> root) : root_(std::move(root)) {}
 
+        // Verified against Utf8JsonReader.cs (ReadFirstToken/ConsumeNextTokenOrRollback): real .NET
+        // throws when about to open a container while already at the configured MaxDepth -- i.e. at
+        // most MaxDepth levels of nested containers are allowed. currentDepth here is the nesting
+        // level of the container being examined (1 for a root-level object/array).
+        static void checkMaxDepth(const nlohmann::ordered_json& node, SharpRuntime::intcs currentDepth,
+                                   SharpRuntime::intcs maxDepth) {
+            if (!node.is_object() && !node.is_array()) return;
+            if (currentDepth > maxDepth) {
+                throw JsonException("The maximum configured depth of " + std::to_string(maxDepth) +
+                    " has been exceeded. Cannot read next JSON " + (node.is_object() ? "object" : "array") + ".");
+            }
+            for (const auto& child : node)
+                checkMaxDepth(child, currentDepth + 1, maxDepth);
+        }
+
     public:
         ~JsonDocument() override = default;
 
@@ -50,6 +65,8 @@ namespace System::Text::Json {
                 auto parsed = std::make_shared<const nlohmann::ordered_json>(
                     nlohmann::ordered_json::parse(json, /*callback=*/nullptr, /*allow_exceptions=*/true,
                                           /*ignore_comments=*/options.CommentHandling != JsonCommentHandling::Disallow));
+                auto effectiveMaxDepth = options.MaxDepth == 0 ? JsonDocumentOptions::DefaultMaxDepth : options.MaxDepth;
+                checkMaxDepth(*parsed, 1, effectiveMaxDepth);
                 return std::shared_ptr<JsonDocument>(new JsonDocument(std::move(parsed)));
             } catch (const nlohmann::ordered_json::parse_error& e) {
                 throw JsonException(std::string("'") + e.what() + "'.");

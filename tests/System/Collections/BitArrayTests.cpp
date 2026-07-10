@@ -139,3 +139,23 @@ TEST(BitArrayTest, Xor_DifferentLengths_Throws) {
     BitArray a(4), b(5);
     EXPECT_THROW(a.Xor(b), System::ArgumentException);
 }
+
+// Get/Set/operator[] used std::vector<bool>::at(), which throws raw std::out_of_range
+// instead of the System::ArgumentOutOfRangeException real .NET throws (BitArray.cs's
+// `(uint)index >= (uint)_bitLength` check) -- code catching the .NET-matching exception
+// type wouldn't catch it.
+TEST(BitArrayTest, Get_OutOfRange_ThrowsArgumentOutOfRange) {
+    BitArray a(4);
+    EXPECT_THROW(a.Get(4), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(a.Get(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitArrayTest, Set_OutOfRange_ThrowsArgumentOutOfRange) {
+    BitArray a(4);
+    EXPECT_THROW(a.Set(4, true), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitArrayTest, OperatorBracket_OutOfRange_ThrowsArgumentOutOfRange) {
+    const BitArray a(4);
+    EXPECT_THROW(a[4], System::ArgumentOutOfRangeException);
+}

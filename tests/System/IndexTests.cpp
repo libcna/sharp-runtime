@@ -2,7 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
-#include <stdexcept>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Index.hpp"
 
 using System::Index;
@@ -36,7 +36,7 @@ TEST(IndexTests2, End_IsZeroFromEnd) {
 }
 
 TEST(IndexTests2, NegativeValue_Throws) {
-    EXPECT_THROW(Index(-1), std::out_of_range);
+    EXPECT_THROW(Index(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(IndexTests2, GetOffset_OutOfRange_DoesNotThrow_MatchesDotNet) {

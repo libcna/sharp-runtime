@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -12,6 +13,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -31,16 +35,25 @@ public:
      * @brief Converts the string representation of a number to its 16-bit signed integer equivalent.
      * @param s String to parse.
      * @return Parsed int16 value.
-     * @throws std::out_of_range if the value exceeds Int16 range.
-     * @throws std::invalid_argument if the string is not a valid integer.
+     * @throws System::OverflowException if the value exceeds Int16 range.
+     * @throws System::FormatException if the string is not a valid integer.
      */
     static SharpRuntime::shortcs Parse(const std::string& s) {
+        std::size_t pos = 0;
+        int v;
         try {
-            int v = std::stoi(s);
-            if (v < MinValue || v > MaxValue) throw std::out_of_range("Value out of Int16 range.");
-            return static_cast<int16_t>(v);
-        } catch (const std::out_of_range&) { throw; }
-          catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            v = std::stoi(s, &pos);
+        } catch (const std::out_of_range&) {
+            throw System::OverflowException("Value out of Int16 range.");
+        } catch (...) {
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+        for (; pos < s.size(); ++pos) {
+            if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                throw System::FormatException("Input string was not in a correct format.");
+        }
+        if (v < MinValue || v > MaxValue) throw System::OverflowException("Value out of Int16 range.");
+        return static_cast<int16_t>(v);
     }
 
     /**
@@ -63,6 +76,7 @@ public:
         char type = format[0];
         int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
         if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
         if (type == 'D' || type == 'd') {
@@ -92,10 +106,10 @@ public:
     /**
      * @brief Returns the absolute value of @p value.
      * C++ counterpart of .NET Math.Abs(short).
-     * @throws std::overflow_error if @p value is MinValue (its magnitude does not fit in Int16).
+     * @throws System::OverflowException if @p value is MinValue (its magnitude does not fit in Int16).
      */
     [[nodiscard]] static SharpRuntime::shortcs Abs(SharpRuntime::shortcs value) {
-        if (value == MinValue) throw std::overflow_error("Abs of Int16.MinValue overflows.");
+        if (value == MinValue) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return value < 0 ? static_cast<SharpRuntime::shortcs>(-value) : value;
     }
 
@@ -165,10 +179,10 @@ public:
     /**
      * @brief Returns the floor of the base-2 logarithm of @p value.
      * C++ counterpart of .NET Int16.Log2(short). Matches .NET: Log2(0) is 0, not an error.
-     * @throws std::out_of_range if @p value is negative.
+     * @throws System::ArgumentOutOfRangeException if @p value is negative.
      */
     [[nodiscard]] static int Log2(SharpRuntime::shortcs value) {
-        if (value < 0) throw std::out_of_range("value must be non-negative.");
+        if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         if (value == 0) return 0;
         return std::bit_width(static_cast<uint16_t>(value)) - 1;
     }

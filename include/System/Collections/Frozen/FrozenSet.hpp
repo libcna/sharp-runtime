@@ -6,6 +6,8 @@
 #include <vector>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Frozen {
 
@@ -114,11 +116,13 @@ public:
      * C++ counterpart of .NET FrozenSet<T>.CopyTo(T[], int).
      * @param destination Destination vector; must already have room for index + Count elements.
      * @param index       Zero-based index at which copying begins.
-     * @throws std::out_of_range if @p index is negative or @p destination is not large enough.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException if @p destination is not large enough.
      */
     void CopyTo(std::vector<T>& destination, SharpRuntime::intcs index) const {
-        if (index < 0 || static_cast<std::size_t>(index) + set_.size() > destination.size())
-            throw std::out_of_range("CopyTo destination is too small.");
+        if (index < 0) throw System::ArgumentOutOfRangeException("destinationIndex");
+        if (static_cast<std::size_t>(index) + set_.size() > destination.size())
+            throw System::ArgumentException("Destination too small for the number of elements in the collection.", "destination");
         std::size_t i = static_cast<std::size_t>(index);
         for (const auto& item : set_) {
             destination[i++] = item;

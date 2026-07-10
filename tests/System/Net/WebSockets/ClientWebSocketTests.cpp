@@ -5,6 +5,8 @@
 #include <array>
 #include <cstring>
 #include <thread>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/Socket.hpp"
@@ -179,8 +181,42 @@ TEST(ClientWebSocketTests, FullHandshakeSendReceiveClose) {
     serverThread.join();
 }
 
+// Regression test for a wave-3 audit finding: SendAsync/ReceiveAsync used to do
+// buffer.data() + offset with no bounds check against buffer.size() -- an out-of-bounds
+// read (Send) or write (Receive) whenever offset+count exceeded the buffer. Verified
+// against WebSocketValidate.cs's ValidateBuffer. Argument validation happens synchronously
+// before any socket I/O (matching real .NET's async-method-validates-synchronously
+// convention, confirmed in ManagedWebSocket.cs), so this doesn't need a live connection.
+TEST(ClientWebSocketTests, SendAsync_OffsetCountOutOfRange_Throws) {
+    ClientWebSocket client;
+    std::vector<SharpRuntime::bytecs> buf{'a', 'b', 'c'};
+    EXPECT_THROW(client.SendAsync(buf, 2, 5, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.SendAsync(buf, -1, 1, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.SendAsync(buf, 0, -1, WebSocketMessageType::Text, true),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(ClientWebSocketTests, ReceiveAsync_OffsetCountOutOfRange_Throws) {
+    ClientWebSocket client;
+    std::vector<SharpRuntime::bytecs> buf(4);
+    EXPECT_THROW(client.ReceiveAsync(buf, 2, 5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(client.ReceiveAsync(buf, -1, 1), System::ArgumentOutOfRangeException);
+}
+
 TEST(ClientWebSocketTests, WrongSchemeThrows) {
     ClientWebSocket client;
     System::Uri uri("wss://127.0.0.1:1/");
     EXPECT_THROW(client.ConnectAsync(uri).Wait(), System::PlatformNotSupportedException);
+}
+
+// Regression test for a wave-3 audit finding: AddSubProtocol's duplicate check compared
+// case-sensitively, silently allowing "chat" and "Chat" to both be added as if they were
+// distinct protocols. Verified against ClientWebSocketOptions.cs's AddSubProtocol, which
+// compares via StringComparison.OrdinalIgnoreCase.
+TEST(ClientWebSocketTests, AddSubProtocol_DuplicateDifferingOnlyByCase_Throws) {
+    ClientWebSocket client;
+    client.getOptionsProperty().AddSubProtocol("chat");
+    EXPECT_THROW(client.getOptionsProperty().AddSubProtocol("Chat"), System::ArgumentException);
 }

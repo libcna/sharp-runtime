@@ -15,6 +15,7 @@
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
@@ -71,18 +72,25 @@ TEST(MemoryStreamTests, WriteBufferWithOffset) {
     EXPECT_EQ(ms.ToArray()[2], 101u);
 }
 
-TEST(MemoryStreamTests, GetBufferReturnsCopy) {
+TEST(MemoryStreamTests, GetBufferReturnsLiveReference) {
     MemoryStream ms;
     ms.WriteByte(7);
-    auto copy = ms.GetBuffer();
-    EXPECT_EQ(copy.size(), 1u);
-    EXPECT_EQ(copy[0], 7u);
+    const auto& buf1 = ms.GetBuffer();
+    const auto& buf2 = ms.GetBuffer();
+    EXPECT_EQ(&buf1, &buf2);
+    EXPECT_EQ(buf1.size(), 1u);
+    EXPECT_EQ(buf1[0], 7u);
 }
 
-TEST(MemoryStreamTests, ToArrayReturnsRef) {
+TEST(MemoryStreamTests, ToArrayReturnsIndependentCopy) {
     MemoryStream ms;
     ms.WriteByte(42);
-    EXPECT_EQ(ms.ToArray().size(), 1u);
+    auto snapshot = ms.ToArray();
+    EXPECT_EQ(snapshot.size(), 1u);
+    ms.WriteByte(43);
+    // snapshot must be unaffected by writes that happen after it was taken.
+    EXPECT_EQ(snapshot.size(), 1u);
+    EXPECT_EQ(snapshot[0], 42u);
 }
 
 TEST(MemoryStreamTests, CanWriteIsTrue) {
@@ -248,12 +256,74 @@ TEST(MemoryStreamTests, SetLengthOnReadOnlyThrowsNotSupportedException) {
     EXPECT_THROW(ms.SetLength(1), System::NotSupportedException);
 }
 
+TEST(MemoryStreamTests, WriteOnReadOnlyThrowsNotSupportedException) {
+    // Regression: Write() previously silently no-op'd instead of throwing when !CanWrite,
+    // matching SetLength()'s existing correct behavior (above) rather than being the one
+    // internally-inconsistent silent-drop path.
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    ASSERT_FALSE(ms.getCanWriteProperty());
+    uint8_t buf[] = {9, 9};
+    EXPECT_THROW(ms.Write(buf, 0, 2), System::NotSupportedException);
+}
+
+TEST(MemoryStreamTests, WriteByteOnReadOnlyThrowsNotSupportedException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.WriteByte(9), System::NotSupportedException);
+}
+
 TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
     uint8_t src[] = {0x41, 0x42};
     MemoryStream ms(src, 2);
     EXPECT_EQ(ms.ReadByte(), 0x41);
     EXPECT_EQ(ms.ReadByte(), 0x42);
     EXPECT_EQ(ms.ReadByte(), -1);
+}
+
+// Regression tests for a wave-3 audit finding: Read() returned 0 (indistinguishable from
+// "stream at EOF") for a null buffer or negative offset/count instead of throwing. Verified
+// against MemoryStream.cs's Read()/ValidateBufferArguments, matching FileStream::Read's
+// existing validation in this codebase.
+TEST(MemoryStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    EXPECT_THROW(ms.Read(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    uint8_t buf[4];
+    EXPECT_THROW(ms.Read(buf, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3);
+    uint8_t buf[4];
+    EXPECT_THROW(ms.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: Close() cleared the underlying buffer,
+// contradicting its own doc comment ("no-op for MemoryStream") and real .NET's
+// MemoryStream.Dispose(bool), which explicitly leaves the buffer and position untouched
+// ("Don't set buffer to null - allow TryGetBuffer, GetBuffer & ToArray to work").
+TEST(MemoryStreamTests, Close_DoesNotClearBufferOrPosition) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    ms.Write(data, 0, 4);
+    ASSERT_EQ(ms.getLengthProperty(), 4);
+    ASSERT_EQ(ms.getPositionProperty(), 4);
+
+    ms.Close();
+
+    EXPECT_EQ(ms.getLengthProperty(), 4);
+    EXPECT_EQ(ms.getPositionProperty(), 4);
+    auto arr = ms.ToArray();
+    ASSERT_EQ(arr.size(), 4u);
+    EXPECT_EQ(arr[0], 1);
+    EXPECT_EQ(arr[3], 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +416,24 @@ TEST(StringReaderTests, ReadLineStripsCarriageReturn) {
     EXPECT_EQ(sr.ReadLine(), "line2");
 }
 
+// Regression test for a wave-3 audit finding: ReadLine() only stopped scanning at '\n', so a
+// lone '\r' (classic Mac line ending, not followed by '\n') was treated as ordinary line
+// content instead of a line terminator -- merging "line1\rline2\nline3" into two lines
+// ("line1\rline2", "line3") instead of three. Verified against StringReader.cs's ReadLine(),
+// which treats '\r' and '\n' as interchangeable terminators.
+TEST(StringReaderTests, ReadLine_LoneCarriageReturn_TerminatesLine) {
+    StringReader sr("line1\rline2\nline3");
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+    EXPECT_EQ(sr.ReadLine(), "line3");
+}
+
+TEST(StringReaderTests, ReadLine_TrailingLoneCarriageReturn_TerminatesFinalLine) {
+    StringReader sr("line1\rline2");
+    EXPECT_EQ(sr.ReadLine(), "line1");
+    EXPECT_EQ(sr.ReadLine(), "line2");
+}
+
 TEST(StringReaderTests, ReadLineAtEndReturnsEmpty) {
     StringReader sr("only");
     sr.ReadLine(); // consume "only"
@@ -419,6 +507,35 @@ TEST(UnmanagedMemoryStreamTests, ReadOnlyCtor_ReadsBytes) {
     EXPECT_EQ(buf[4], 5u);
 }
 
+// Regression tests for a wave-3 audit finding: Read()/Write()/SetLength() after Close()
+// threw NotSupportedException instead of ObjectDisposedException. Verified against
+// UnmanagedMemoryStream.cs's EnsureNotClosed()/EnsureReadable()/EnsureWriteable(), which check
+// isOpen FIRST (ObjectDisposedException) before CanRead/CanWrite (NotSupportedException) --
+// this port's getCanReadProperty()/getCanWriteProperty() folded "is closed" into the same
+// boolean as "was never readable/writable", losing the distinction.
+TEST(UnmanagedMemoryStreamTests, Read_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[] = {1, 2, 3};
+    UnmanagedMemoryStream ums(data, 3);
+    ums.Close();
+    uint8_t buf[3] = {};
+    EXPECT_THROW(ums.Read(buf, 0, 3), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryStream ums(data, 0, 8, FileAccess::ReadWrite);
+    ums.Close();
+    uint8_t payload[] = {1};
+    EXPECT_THROW(ums.Write(payload, 0, 1), System::ObjectDisposedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, SetLength_AfterClose_ThrowsObjectDisposedException) {
+    uint8_t data[8] = {};
+    UnmanagedMemoryStream ums(data, 0, 8, FileAccess::ReadWrite);
+    ums.Close();
+    EXPECT_THROW(ums.SetLength(4), System::ObjectDisposedException);
+}
+
 TEST(UnmanagedMemoryStreamTests, ReadReturnsZeroAtEnd) {
     uint8_t data[] = {1, 2};
     UnmanagedMemoryStream ums(data, 2);
@@ -440,7 +557,33 @@ TEST(UnmanagedMemoryStreamTests, WriteBeyondCapacity_Throws) {
     uint8_t data[2] = {};
     UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
     uint8_t payload[] = {1, 2, 3};
-    EXPECT_THROW(ums.Write(payload, 0, 3), System::IO::IOException);
+    EXPECT_THROW(ums.Write(payload, 0, 3), System::NotSupportedException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    EXPECT_THROW(ums.Write(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Write_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    uint8_t payload[] = {1};
+    EXPECT_THROW(ums.Write(payload, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    EXPECT_THROW(ums.Read(nullptr, 0, 1), System::ArgumentNullException);
+}
+
+TEST(UnmanagedMemoryStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    uint8_t data[] = {1, 2};
+    UnmanagedMemoryStream ums(data, 2);
+    uint8_t out[2];
+    EXPECT_THROW(ums.Read(out, 0, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(UnmanagedMemoryStreamTests, WriteWhenReadOnly_ThrowsNotSupportedException) {
@@ -486,28 +629,28 @@ TEST(UnmanagedMemoryStreamTests, LengthGreaterThanCapacity_Throws) {
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteByte_Roundtrip) {
     uint8_t data[4] = {};
-    UnmanagedMemoryAccessor acc(data, 4);
+    UnmanagedMemoryAccessor acc(data, 4, FileAccess::ReadWrite);
     acc.Write(0, static_cast<uint8_t>(0xAB));
     EXPECT_EQ(acc.ReadByte(0), 0xABu);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteInt32_Roundtrip) {
     uint8_t data[4] = {};
-    UnmanagedMemoryAccessor acc(data, 4);
+    UnmanagedMemoryAccessor acc(data, 4, FileAccess::ReadWrite);
     acc.Write(0, static_cast<int32_t>(-12345));
     EXPECT_EQ(acc.ReadInt32(0), -12345);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteDouble_Roundtrip) {
     uint8_t data[8] = {};
-    UnmanagedMemoryAccessor acc(data, 8);
+    UnmanagedMemoryAccessor acc(data, 8, FileAccess::ReadWrite);
     acc.Write(0, 3.14159);
     EXPECT_DOUBLE_EQ(acc.ReadDouble(0), 3.14159);
 }
 
 TEST(UnmanagedMemoryAccessorTests, ReadWriteBoolean_Roundtrip) {
     uint8_t data[1] = {};
-    UnmanagedMemoryAccessor acc(data, 1);
+    UnmanagedMemoryAccessor acc(data, 1, FileAccess::ReadWrite);
     acc.Write(0, true);
     EXPECT_TRUE(acc.ReadBoolean(0));
 }
@@ -518,6 +661,14 @@ TEST(UnmanagedMemoryAccessorTests, CapacityProperty) {
     EXPECT_EQ(acc.getCapacityProperty(), 16);
 }
 
+TEST(UnmanagedMemoryAccessorTests, TwoArgCtor_DefaultsToReadOnly) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    EXPECT_TRUE(acc.getCanReadProperty());
+    EXPECT_FALSE(acc.getCanWriteProperty());
+    EXPECT_THROW(acc.Write(0, static_cast<uint8_t>(1)), System::NotSupportedException);
+}
+
 TEST(UnmanagedMemoryAccessorTests, ReadOnly_WriteThrowsNotSupportedException) {
     uint8_t data[4] = {};
     UnmanagedMemoryAccessor acc(data, 4, FileAccess::Read);
@@ -526,10 +677,18 @@ TEST(UnmanagedMemoryAccessorTests, ReadOnly_WriteThrowsNotSupportedException) {
     EXPECT_THROW(acc.Write(0, static_cast<uint8_t>(1)), System::NotSupportedException);
 }
 
-TEST(UnmanagedMemoryAccessorTests, OutOfRangePosition_ThrowsArgumentOutOfRangeException) {
+TEST(UnmanagedMemoryAccessorTests, PositionBeyondCapacity_ThrowsArgumentOutOfRangeException) {
     uint8_t data[4] = {};
     UnmanagedMemoryAccessor acc(data, 4);
-    EXPECT_THROW(acc.ReadInt32(1), System::ArgumentOutOfRangeException); // needs 4 bytes at position 1, only 3 available
+    EXPECT_THROW(acc.ReadByte(4), System::ArgumentOutOfRangeException); // position >= capacity
+}
+
+TEST(UnmanagedMemoryAccessorTests, PositionWithinCapacityButNotEnoughBytes_ThrowsArgumentException) {
+    uint8_t data[4] = {};
+    UnmanagedMemoryAccessor acc(data, 4);
+    // needs 4 bytes at position 1, but position(1) < capacity(4), so this is
+    // "not enough remaining bytes" (ArgumentException), not "out of range" (ArgumentOutOfRangeException).
+    EXPECT_THROW(acc.ReadInt32(1), System::ArgumentException);
 }
 
 TEST(UnmanagedMemoryAccessorTests, AfterDispose_ThrowsObjectDisposedException) {

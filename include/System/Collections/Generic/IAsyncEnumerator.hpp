@@ -34,7 +34,7 @@ public:
      * C++ counterpart of .NET IAsyncEnumerator<T>.Current.
      * @return A const reference to the current element.
      */
-    [[nodiscard]] virtual const T& getCurrent() const = 0;
+    [[nodiscard]] virtual const T& getCurrentProperty() const = 0;
 
     /**
      * @brief Performs application-defined tasks associated with freeing resources asynchronously.

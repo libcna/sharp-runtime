@@ -22,13 +22,13 @@ TEST(ByteTests, Parse_Zero) { EXPECT_EQ(Byte::Parse("0"), bytecs(0)); }
 TEST(ByteTests, Parse_MaxValue) { EXPECT_EQ(Byte::Parse("255"), bytecs(255)); }
 TEST(ByteTests, Parse_Midrange) { EXPECT_EQ(Byte::Parse("128"), bytecs(128)); }
 TEST(ByteTests, Parse_Negative_Throws) {
-    EXPECT_THROW(Byte::Parse("-1"), std::out_of_range);
+    EXPECT_THROW(Byte::Parse("-1"), System::OverflowException);
 }
 TEST(ByteTests, Parse_TooLarge_Throws) {
-    EXPECT_THROW(Byte::Parse("256"), std::out_of_range);
+    EXPECT_THROW(Byte::Parse("256"), System::OverflowException);
 }
 TEST(ByteTests, Parse_Invalid_Throws) {
-    EXPECT_THROW(Byte::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(Byte::Parse("abc"), System::FormatException);
 }
 
 TEST(ByteTests, TryParse_Valid_ReturnsTrue) {
@@ -46,7 +46,7 @@ TEST(ByteTests, TryParse_Overflow_ReturnsFalse) {
     EXPECT_FALSE(Byte::TryParse("256", r));
 }
 TEST(ByteTests, Parse_TrailingGarbage_Throws) {
-    EXPECT_THROW(Byte::Parse("128abc"), std::invalid_argument);
+    EXPECT_THROW(Byte::Parse("128abc"), System::FormatException);
 }
 TEST(ByteTests, Parse_TrailingWhitespace_Ok) {
     EXPECT_EQ(Byte::Parse("128 "), bytecs(128));
@@ -251,8 +251,10 @@ TEST(ByteTests, Log2_One_IsZero) { EXPECT_EQ(Byte::Log2(bytecs(1)), bytecs(0)); 
 TEST(ByteTests, Log2_Two_IsOne) { EXPECT_EQ(Byte::Log2(bytecs(2)), bytecs(1)); }
 TEST(ByteTests, Log2_128_IsSeven) { EXPECT_EQ(Byte::Log2(bytecs(128)), bytecs(7)); }
 TEST(ByteTests, Log2_255_IsSeven) { EXPECT_EQ(Byte::Log2(bytecs(255)), bytecs(7)); }
-TEST(ByteTests, Log2_Zero_Throws) {
-    EXPECT_THROW(Byte::Log2(bytecs(0)), std::domain_error);
+// .NET Byte.Log2(0) returns 0 (BitOperations.Log2 convention); byte can never be
+// negative, so there is nothing for it to throw for.
+TEST(ByteTests, Log2_Zero_IsZero) {
+    EXPECT_EQ(Byte::Log2(bytecs(0)), bytecs(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +267,8 @@ TEST(ByteTests, Log10_Ten_IsOne) { EXPECT_EQ(Byte::Log10(bytecs(10)), bytecs(1))
 TEST(ByteTests, Log10_99_IsOne) { EXPECT_EQ(Byte::Log10(bytecs(99)), bytecs(1)); }
 TEST(ByteTests, Log10_100_IsTwo) { EXPECT_EQ(Byte::Log10(bytecs(100)), bytecs(2)); }
 TEST(ByteTests, Log10_255_IsTwo) { EXPECT_EQ(Byte::Log10(bytecs(255)), bytecs(2)); }
-TEST(ByteTests, Log10_Zero_Throws) {
-    EXPECT_THROW(Byte::Log10(bytecs(0)), std::domain_error);
+// .NET Byte.Log10(0) returns 0 (uint.Log10 convention); byte can never be negative,
+// so there is nothing for it to throw for.
+TEST(ByteTests, Log10_Zero_IsZero) {
+    EXPECT_EQ(Byte::Log10(bytecs(0)), bytecs(0));
 }

@@ -12,6 +12,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -37,17 +40,18 @@ namespace System {
         /**
          * @brief Parses @p s as a decimal SByte value.
          * C++ counterpart of .NET SByte.Parse(string).
-         * @throws std::out_of_range if the value exceeds SByte range.
-         * @throws std::invalid_argument if the string is not a valid integer.
+         * @throws System::OverflowException if the value exceeds SByte range.
+         * @throws System::FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static sbytecs Parse(const std::string& s) {
             try {
                 int v = std::stoi(s);
                 if (v < MinValue || v > MaxValue)
-                    throw std::out_of_range("Value out of SByte range.");
+                    throw System::OverflowException("Value was either too large or too small for a signed byte.");
                 return static_cast<int8_t>(v);
-            } catch (const std::out_of_range&) { throw; }
-              catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+            } catch (const System::OverflowException&) { throw; }
+              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a signed byte."); }
+              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
         }
 
         /**
@@ -70,6 +74,7 @@ namespace System {
             char type = format[0];
             int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             if (type == 'X') {
                 oss << std::uppercase << std::hex
                     << std::setfill('0') << std::setw(width)
@@ -121,20 +126,20 @@ namespace System {
         /** @brief Returns the absolute value of @p value. C++ counterpart of .NET SByte.Abs(sbyte). */
         [[nodiscard]] static sbytecs Abs(sbytecs value) {
             if (value == MinValue)
-                throw std::overflow_error("Negating SByte.MinValue would overflow.");
+                throw System::OverflowException("Negating SByte.MinValue would overflow.");
             return value < 0 ? static_cast<sbytecs>(-value) : value;
         }
 
         /**
          * @brief Returns a value with the magnitude of @p value and the sign of @p sign.
          * C++ counterpart of .NET SByte.CopySign(sbyte, sbyte).
-         * @throws std::overflow_error if @p value is MinValue and @p sign is non-negative
+         * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
          *         (its magnitude does not fit in a signed SByte).
          */
         [[nodiscard]] static sbytecs CopySign(sbytecs value, sbytecs sign) {
             sbytecs abs = value < 0 ? (value == MinValue ? value : static_cast<sbytecs>(-value)) : value;
             if (sign >= 0) {
-                if (abs < 0) throw std::overflow_error("Negating MinValue is not representable.");
+                if (abs < 0) throw System::OverflowException("Negating MinValue is not representable.");
                 return abs;
             }
             return static_cast<sbytecs>(-abs);
@@ -148,11 +153,15 @@ namespace System {
 
         /**
          * @brief Returns the base-10 logarithm of @p value, truncated to sbyte.
-         * C++ counterpart of .NET SByte.Log10(sbyte).
-         * @throws std::domain_error if value is <= 0.
+         *
+         * C++ counterpart of .NET SByte.Log10(sbyte). .NET throws only for a negative
+         * @p value (ArgumentOutOfRangeException — "Non-negative number required.");
+         * value == 0 is valid and returns 0 (SByte.cs delegates to uint.Log10, whose
+         * documented convention is Log10(0) == 0), not an error.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
         [[nodiscard]] static sbytecs Log10(sbytecs value) {
-            if (value <= 0) throw std::domain_error("Log10 requires a positive value.");
+            if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
             sbytecs result = 0;
             while (value >= 10) { value /= 10; ++result; }
             return result;
@@ -228,9 +237,15 @@ namespace System {
             return value > 0 && (value & (value - 1)) == 0;
         }
 
-        /** @brief Returns the number of leading zero bits (treating value as 8-bit). C++ counterpart of .NET SByte.LeadingZeroCount(sbyte). */
+        /**
+         * @brief Returns the number of leading zero bits, treating @p value as its raw 8-bit pattern.
+         *
+         * C++ counterpart of .NET SByte.LeadingZeroCount(sbyte) —
+         * `(sbyte)(BitOperations.LeadingZeroCount((byte)value) - 24)`. Negative values are
+         * reinterpreted as their unsigned 8-bit bit pattern, not treated as a "value <= 0"
+         * special case: e.g. value == -1 (bit pattern 0xFF) has 0 leading zero bits, not 8.
+         */
         [[nodiscard]] static sbytecs LeadingZeroCount(sbytecs value) noexcept {
-            if (value <= 0) return 8;
             return static_cast<sbytecs>(
                 std::countl_zero(static_cast<uint32_t>(static_cast<uint8_t>(value))) - 24);
         }
@@ -250,11 +265,16 @@ namespace System {
 
         /**
          * @brief Returns the floor of the base-2 logarithm of @p value.
-         * C++ counterpart of .NET SByte.Log2(sbyte).
-         * @throws std::domain_error if @p value is <= 0.
+         *
+         * C++ counterpart of .NET SByte.Log2(sbyte). .NET throws only for a negative
+         * @p value (ArgumentOutOfRangeException — "Non-negative number required.");
+         * value == 0 is valid and returns 0 (SByte.cs delegates to BitOperations.Log2,
+         * whose documented convention is Log2(0) == 0), not an error.
+         * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
         [[nodiscard]] static sbytecs Log2(sbytecs value) {
-            if (value <= 0) throw std::domain_error("Log2 requires a positive value.");
+            if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
+            if (value == 0) return 0;
             return static_cast<sbytecs>(
                 std::bit_width(static_cast<uint32_t>(static_cast<uint8_t>(value))) - 1);
         }

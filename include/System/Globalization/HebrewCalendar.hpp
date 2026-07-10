@@ -154,6 +154,25 @@ public:
      */
     [[nodiscard]] System::DateTime AddYears(const System::DateTime& time, int years) const override;
 
+    /**
+     * @brief Returns a DateTime from the Hebrew date and time components.
+     *
+     * C++ counterpart of .NET HebrewCalendar.ToDateTime(int, int, int, int, int, int, int, int).
+     * @param year        The Hebrew year.
+     * @param month       The Hebrew month (1-12, or 1-13 in a leap year).
+     * @param day         The day of the Hebrew month.
+     * @param hour        Hour (0-23).
+     * @param minute      Minute (0-59).
+     * @param second      Second (0-59).
+     * @param millisecond Millisecond (0-999).
+     * @param era         The era (default CurrentEra; ignored).
+     * @return The Gregorian DateTime corresponding to the given Hebrew date components.
+     * @throws System::ArgumentOutOfRangeException if @p day is outside the valid range for
+     *         the given Hebrew @p year and @p month.
+     */
+    [[nodiscard]] System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
+                                              int second, int millisecond, int era = CurrentEra) const override;
+
 private:
     static constexpr int HebrewYearOf1AD        = 3760;
     static constexpr int FirstGregorianTableYear = 1583;

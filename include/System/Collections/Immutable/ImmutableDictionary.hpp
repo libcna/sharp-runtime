@@ -130,15 +130,22 @@ public:
      * @brief Returns a new dictionary with the specified key/value pair added.
      *
      * C++ counterpart of .NET ImmutableDictionary<TKey,TValue>.Add(TKey, TValue).
+     * Verified against ImmutableDictionary_2.cs: Add uses
+     * KeyCollisionBehavior.ThrowIfValueDifferent -- if @p key already exists with a value
+     * equal to @p value, this is a silent no-op rather than throwing.
      * @param key   The key to add.
      * @param value The value to add.
-     * @return A new ImmutableDictionary with the pair added.
-     * @throws System::ArgumentException if the key already exists.
+     * @return A new ImmutableDictionary with the pair added, or an equivalent instance if
+     *         @p key already maps to @p value.
+     * @throws System::ArgumentException if the key already exists with a different value.
      */
     [[nodiscard]] ImmutableDictionary<TKey, TValue> Add(const TKey& key, const TValue& value) const {
-        auto m = std::make_shared<MapT>(*data_);
-        if (m->find(key) != m->end())
+        auto it = data_->find(key);
+        if (it != data_->end()) {
+            if (it->second == value) return *this;
             throw System::ArgumentException("An item with the same key has already been added.");
+        }
+        auto m = std::make_shared<MapT>(*data_);
         (*m)[key] = value;
         return ImmutableDictionary<TKey, TValue>(std::move(m));
     }
@@ -147,16 +154,21 @@ public:
      * @brief Returns a new dictionary with multiple key/value pairs added.
      *
      * C++ counterpart of .NET ImmutableDictionary<TKey,TValue>.AddRange(IEnumerable<KeyValuePair<TKey,TValue>>).
+     * Each pair is applied via the same equal-value-is-a-no-op rule as Add(TKey, TValue);
+     * see that method's doc comment for the verification detail.
      * @param pairs The pairs to add.
      * @return A new ImmutableDictionary with all pairs added.
-     * @throws System::ArgumentException if any key already exists.
+     * @throws System::ArgumentException if any key already exists with a different value.
      */
     [[nodiscard]] ImmutableDictionary<TKey, TValue>
         AddRange(const std::vector<std::pair<TKey, TValue>>& pairs) const {
         auto m = std::make_shared<MapT>(*data_);
         for (const auto& p : pairs) {
-            if (m->find(p.first) != m->end())
+            auto it = m->find(p.first);
+            if (it != m->end()) {
+                if (it->second == p.second) continue;
                 throw System::ArgumentException("An item with the same key has already been added.");
+            }
             (*m)[p.first] = p.second;
         }
         return ImmutableDictionary<TKey, TValue>(std::move(m));

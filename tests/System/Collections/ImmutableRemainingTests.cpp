@@ -6,6 +6,8 @@
 // ImmutableHashSet, ImmutableQueue, ImmutableSortedDictionary,
 // ImmutableSortedSet, ImmutableStack.
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 #include "System/Collections/Immutable/ImmutableHashSet.hpp"
@@ -203,6 +205,32 @@ TEST(ImmutableSortedDictionaryTests, Add_DuplicateKey_Throws) {
     EXPECT_THROW(d.Add("x", 20), System::ArgumentException);
 }
 
+TEST(ImmutableSortedDictionaryTests, Add_DuplicateKeySameValue_IsNoOp) {
+    // Verified against ImmutableSortedDictionary_2.Node.SetOrAdd: re-adding an existing
+    // key with an equal value is a silent no-op, not a thrown ArgumentException.
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    ImmutableSortedDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.Add("x", 10));
+    EXPECT_EQ(d2.getCountProperty(), 1);
+    EXPECT_EQ(d2["x"], 10);
+}
+
+TEST(ImmutableSortedDictionaryTests, AddRange_DuplicateKeyDifferentValue_Throws) {
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 1}, {"x", 99}};
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
+}
+
+TEST(ImmutableSortedDictionaryTests, AddRange_DuplicateKeySameValue_IsNoOp) {
+    auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("x", 10);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 1}, {"x", 10}};
+    ImmutableSortedDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.AddRange(pairs));
+    EXPECT_EQ(d2.getCountProperty(), 2);
+    EXPECT_EQ(d2["x"], 10);
+    EXPECT_EQ(d2["y"], 1);
+}
+
 TEST(ImmutableSortedDictionaryTests, ContainsKey_True_False) {
     auto d = ImmutableSortedDictionary<std::string, int>::Empty().Add("key", 42);
     EXPECT_TRUE(d.ContainsKey("key"));
@@ -253,6 +281,41 @@ TEST(ImmutableSortedDictionaryTests, Clear_ReturnsEmpty) {
                  .Add("a", 1).Add("b", 2);
     auto empty = d.Clear();
     EXPECT_EQ(empty.getCountProperty(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Custom key comparer support (verified against ImmutableSortedDictionary.cs's
+// Create(IComparer<TKey>)/WithComparers)
+// ---------------------------------------------------------------------------
+
+TEST(ImmutableSortedDictionaryTests, CustomComparer_ReverseKeyOrder) {
+    auto d = ImmutableSortedDictionary<int, std::string>::Create(
+        [](const int& a, const int& b) { return a > b; },
+        {{1, "one"}, {2, "two"}, {3, "three"}});
+    std::vector<int> keys = d.getKeysProperty();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0], 3);
+    EXPECT_EQ(keys[2], 1);
+}
+
+TEST(ImmutableSortedDictionaryTests, WithComparers_ReSortsExistingEntries) {
+    auto d = ImmutableSortedDictionary<int, std::string>::Empty().Add(1, "one").Add(2, "two").Add(3, "three");
+    auto reversed = d.WithComparers([](const int& a, const int& b) { return a > b; });
+    std::vector<int> keys = reversed.getKeysProperty();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0], 3);
+    EXPECT_EQ(keys[2], 1);
+    EXPECT_EQ(reversed[2], "two"); // entries themselves are unchanged, only the order
+}
+
+TEST(ImmutableSortedDictionaryTests, Clear_PreservesCustomComparer) {
+    auto d = ImmutableSortedDictionary<int, std::string>::Create(
+        [](const int& a, const int& b) { return a > b; }, {{1, "one"}, {2, "two"}});
+    auto cleared = d.Clear();
+    auto readded = cleared.Add(1, "one").Add(2, "two").Add(3, "three");
+    std::vector<int> keys = readded.getKeysProperty();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0], 3); // reverse order survived Clear()
 }
 
 TEST(ImmutableSortedDictionaryTests, Keys_AreSorted) {
@@ -371,6 +434,138 @@ TEST(ImmutableSortedSetTests, Iteration_IsSorted) {
     ASSERT_EQ(items.size(), 5u);
     for (int i = 0; i < 4; ++i)
         EXPECT_LT(items[i], items[i + 1]);
+}
+
+// ===========================================================================
+// ImmutableHashSet<T> -- custom comparer support (verified against ImmutableHashSet.cs's
+// Create(IEqualityComparer<T>)/WithComparer)
+// ===========================================================================
+
+namespace {
+    size_t caseInsensitiveHash(const std::string& s) {
+        std::string lower = s;
+        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return std::hash<std::string>{}(lower);
+    }
+    bool caseInsensitiveEqual(const std::string& a, const std::string& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+            return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+        });
+    }
+}
+
+TEST(ImmutableHashSetTests, CustomComparer_CollapsesCaseInsensitiveDuplicates) {
+    auto s = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual,
+                                                     {"Hello", "HELLO", "world"});
+    EXPECT_EQ(s.getCountProperty(), 2);
+    EXPECT_TRUE(s.Contains("hello"));
+    EXPECT_TRUE(s.Contains("WORLD"));
+}
+
+TEST(ImmutableHashSetTests, WithComparer_RehashesAndCollapsesExistingDuplicates) {
+    auto s = ImmutableHashSet<std::string>::Create({"Hello", "HELLO", "world"});
+    EXPECT_EQ(s.getCountProperty(), 3); // distinct under default (case-sensitive) equality
+    auto ci = s.WithComparer(caseInsensitiveHash, caseInsensitiveEqual);
+    EXPECT_EQ(ci.getCountProperty(), 2);
+}
+
+TEST(ImmutableHashSetTests, Intersect_UsesThisSetsComparerNotOthers) {
+    // Verified against ImmutableHashSet_1.cs's private Intersect: membership is tested via
+    // *this* set's Contains (this set's comparer), not `other`'s -- an earlier draft of
+    // this fix tested `other.Contains(x)` instead, which is wrong whenever the two sets use
+    // different comparers (caught by this exact test: `b` uses the default case-sensitive
+    // comparer, so "HELLO" wouldn't match "Hello" via `b`'s own lookup, even though it
+    // should intersect successfully under `a`'s case-insensitive comparer).
+    auto a = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {"Hello", "World"});
+    auto b = ImmutableHashSet<std::string>::Create({"HELLO", "there"});
+    auto result = a.Intersect(b);
+    EXPECT_EQ(result.getCountProperty(), 1);
+    EXPECT_TRUE(result.Contains("hello")); // still case-insensitive after Intersect
+}
+
+TEST(ImmutableHashSetTests, Except_UsesThisSetsComparerNotOthers) {
+    // See Intersect_UsesThisSetsComparerNotOthers's comment -- same verified-against-.NET
+    // comparer-precedence rule applies to Except.
+    auto a = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual,
+                                                     {"Hello", "World"});
+    auto b = ImmutableHashSet<std::string>::Create({"HELLO"});
+    auto result = a.Except(b);
+    EXPECT_EQ(result.getCountProperty(), 1);
+    EXPECT_TRUE(result.Contains("world"));
+    EXPECT_FALSE(result.Contains("hello"));
+}
+
+TEST(ImmutableHashSetTests, Clear_PreservesCustomComparer) {
+    auto s = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {"Hello"});
+    auto cleared = s.Clear();
+    EXPECT_TRUE(cleared.getIsEmptyProperty());
+    auto readded = cleared.Add("Hello").Add("HELLO");
+    EXPECT_EQ(readded.getCountProperty(), 1); // comparer survived Clear()
+}
+
+// ===========================================================================
+// ImmutableSortedSet<T> -- custom comparer support (verified against
+// ImmutableSortedSet.cs's Create(IComparer<T>)/WithComparer)
+// ===========================================================================
+
+TEST(ImmutableSortedSetTests, CustomComparer_ReverseOrder) {
+    auto s = ImmutableSortedSet<int>::Create(
+        [](const int& a, const int& b) { return a > b; }, {1, 2, 3, 4, 5});
+    std::vector<int> items(s.begin(), s.end());
+    ASSERT_EQ(items.size(), 5u);
+    for (int i = 0; i < 4; ++i)
+        EXPECT_GT(items[i], items[i + 1]);
+    EXPECT_EQ(s.getMinProperty(), 5); // "smallest" under reverse order is numerically largest
+    EXPECT_EQ(s.getMaxProperty(), 1);
+}
+
+TEST(ImmutableSortedSetTests, WithComparer_ReSortsExistingElements) {
+    auto s = ImmutableSortedSet<int>::Create({3, 1, 2});
+    auto reversed = s.WithComparer([](const int& a, const int& b) { return a > b; });
+    std::vector<int> items(reversed.begin(), reversed.end());
+    ASSERT_EQ(items.size(), 3u);
+    EXPECT_EQ(items[0], 3);
+    EXPECT_EQ(items[2], 1);
+}
+
+TEST(ImmutableSortedSetTests, Intersect_UsesThisSetsComparer) {
+    // Verified against ImmutableSortedSet_1.cs's Intersect: membership is tested via *this*
+    // set's Contains (this set's comparer/ordering), and the result is built under this
+    // set's comparer -- so its iteration order reflects `a`'s reverse ordering, not `b`'s
+    // default ordering.
+    auto a = ImmutableSortedSet<int>::Create([](const int& x, const int& y) { return x > y; }, {1, 2, 3});
+    auto b = ImmutableSortedSet<int>::Create({2, 3, 4});
+    auto result = a.Intersect(b);
+    std::vector<int> items(result.begin(), result.end());
+    ASSERT_EQ(items.size(), 2u);
+    EXPECT_EQ(items[0], 3); // reverse order preserved: 3 before 2
+    EXPECT_EQ(items[1], 2);
+}
+
+TEST(ImmutableHashSetTests, IsSubsetOf_UsesThisSetsComparer) {
+    // Verified against ImmutableHashSet_1.cs's private IsSubsetOf: `other` is rehashed
+    // under *this* set's comparer before the subset check, so "Hello" (in `sub`, case-
+    // insensitive) correctly matches "HELLO" (in `sup`, default case-sensitive) even though
+    // `sup` itself would not consider them equal under its own comparer.
+    auto sub = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {"Hello"});
+    auto sup = ImmutableHashSet<std::string>::Create({"HELLO", "World"});
+    EXPECT_TRUE(sub.IsSubsetOf(sup));
+}
+
+TEST(ImmutableHashSetTests, IsSupersetOf_UsesThisSetsComparer) {
+    auto sup = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual,
+                                                       {"Hello", "World"});
+    auto sub = ImmutableHashSet<std::string>::Create({"HELLO"});
+    EXPECT_TRUE(sup.IsSupersetOf(sub));
+}
+
+TEST(ImmutableSortedSetTests, Clear_PreservesCustomComparer) {
+    auto s = ImmutableSortedSet<int>::Create([](const int& a, const int& b) { return a > b; }, {1, 2, 3});
+    auto cleared = s.Clear();
+    auto readded = cleared.Add(1).Add(2).Add(3);
+    std::vector<int> items(readded.begin(), readded.end());
+    ASSERT_EQ(items.size(), 3u);
+    EXPECT_EQ(items[0], 3); // reverse order survived Clear()
 }
 
 // ===========================================================================

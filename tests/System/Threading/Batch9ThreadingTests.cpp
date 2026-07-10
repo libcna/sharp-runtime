@@ -10,8 +10,12 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
+#include "System/AggregateException.hpp"
+#include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Threading/AbandonedMutexException.hpp"
 #include "System/Threading/Barrier.hpp"
 #include "System/Threading/BarrierPostPhaseException.hpp"
@@ -91,6 +95,22 @@ TEST(CancellationTokenRegisterTests, Registration_IsActiveUntilDisposedOrCancell
     EXPECT_FALSE(reg.getIsActiveProperty());
 }
 
+TEST(CancellationTokenRegisterTests, Cancel_ThrowingCallback_RunsAllCallbacksAndThrowsAggregateException) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    bool secondCalled = false;
+    bool thirdCalled = false;
+    auto reg1 = token.Register([&] { throw std::runtime_error("first"); });
+    auto reg2 = token.Register([&] { secondCalled = true; });
+    auto reg3 = token.Register([&] { thirdCalled = true; throw std::runtime_error("third"); });
+    EXPECT_THROW(cts.Cancel(), System::AggregateException);
+    EXPECT_TRUE(secondCalled);
+    EXPECT_TRUE(thirdCalled);
+    reg1.Dispose();
+    reg2.Dispose();
+    reg3.Dispose();
+}
+
 // ===========================================================================
 // LockCookie
 // ===========================================================================
@@ -168,6 +188,39 @@ TEST(ReaderWriterLockTests, AcquireReaderLock_NegativeTimeoutBelowMinusOne_Throw
     EXPECT_THROW(lock.AcquireReaderLock(-2), System::ArgumentOutOfRangeException);
 }
 
+TEST(ReaderWriterLockTests, AcquireWriterLock_TimesOut_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    lock.AcquireWriterLock(-1);
+    std::atomic<bool> threw{false};
+    std::thread t([&] {
+        try {
+            lock.AcquireWriterLock(50);
+        } catch (const System::ApplicationException&) {
+            threw = true;
+        }
+    });
+    t.join();
+    EXPECT_TRUE(threw.load());
+    EXPECT_TRUE(lock.getIsWriterLockHeldProperty());
+    lock.ReleaseWriterLock();
+}
+
+TEST(ReaderWriterLockTests, AcquireReaderLock_TimesOut_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    lock.AcquireWriterLock(-1);
+    std::atomic<bool> threw{false};
+    std::thread t([&] {
+        try {
+            lock.AcquireReaderLock(50);
+        } catch (const System::ApplicationException&) {
+            threw = true;
+        }
+    });
+    t.join();
+    EXPECT_TRUE(threw.load());
+    lock.ReleaseWriterLock();
+}
+
 // ===========================================================================
 // ReaderWriterLockSlim held-state tracking
 // ===========================================================================
@@ -224,6 +277,51 @@ TEST(MutexTests, WaitOne_Timeout_WhenHeldByAnotherThread_WaitsFullDuration) {
     m.ReleaseMutex();
 }
 
+TEST(MutexTests, WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    Mutex m;
+    EXPECT_THROW(m.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: WaitOne(-1) (Timeout.Infinite) used to feed
+// -1 straight into std::chrono's try_lock_for, which treats a negative duration as
+// already-expired -- so it returned almost immediately instead of blocking forever like
+// real .NET. Verified by holding the mutex on the main thread, releasing it only after the
+// background thread has been blocked in WaitOne(-1) for longer than any "immediately
+// expired" timeout could account for.
+TEST(MutexTests, WaitOne_InfiniteTimeout_BlocksUntilReleased) {
+    Mutex m;
+    m.WaitOne(); // main thread acquires
+    std::atomic<bool> acquired{false};
+    std::thread t([&] {
+        acquired = m.WaitOne(-1); // should block until the main thread releases
+        if (acquired) m.ReleaseMutex(); // release from the thread that actually acquired it
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(acquired.load()); // still blocked after 100ms -- proves it didn't return immediately
+
+    m.ReleaseMutex(); // main thread releases its own hold, letting t proceed
+    t.join();
+    EXPECT_TRUE(acquired.load());
+}
+
+TEST(MutexTests, ReleaseMutex_NotOwned_ThrowsApplicationException) {
+    Mutex m;
+    EXPECT_THROW(m.ReleaseMutex(), System::ApplicationException);
+}
+
+TEST(MutexTests, ReleaseMutex_FromNonOwningThread_ThrowsApplicationException) {
+    Mutex m;
+    m.WaitOne();
+    bool threw = false;
+    std::thread t([&] {
+        try { m.ReleaseMutex(); } catch (const System::ApplicationException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
+    m.ReleaseMutex();
+}
+
 // ===========================================================================
 // Barrier: post-phase exception wrapping
 // ===========================================================================
@@ -236,6 +334,40 @@ TEST(BarrierTests, PostPhaseActionThrows_WrappedInBarrierPostPhaseException) {
 TEST(BarrierTests, RemoveParticipant_ToZero_Throws) {
     Barrier b(0);
     EXPECT_THROW(b.RemoveParticipant(), System::ArgumentOutOfRangeException);
+}
+
+TEST(BarrierTests, PostPhaseActionThrows_AllParticipantsObserveException) {
+    Barrier b(3, [](Barrier&) { throw std::runtime_error("boom"); });
+    std::atomic<int> exceptionCount{0};
+    std::thread t1([&] {
+        try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    });
+    std::thread t2([&] {
+        try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    });
+    try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    t1.join();
+    t2.join();
+    EXPECT_EQ(exceptionCount.load(), 3);
+}
+
+TEST(BarrierTests, CalledFromPostPhaseAction_ThrowsInsteadOfDeadlocking) {
+    // A reentrant call from within the post-phase action throws (matching real .NET's
+    // Barrier.cs, which rejects such calls with InvalidOperationException) rather than
+    // self-deadlocking on the non-recursive mutex the previous implementation held throughout
+    // the action's execution. Since the throw happens inside FinishPhase's own try/catch
+    // (matching real .NET's finally-block rethrow), it surfaces wrapped in
+    // BarrierPostPhaseException, whose inner exception is the InvalidOperationException.
+    Barrier* barrier = nullptr;
+    Barrier b(1, [&](Barrier&) { barrier->AddParticipant(); });
+    barrier = &b;
+    try {
+        b.SignalAndWait();
+        FAIL() << "expected BarrierPostPhaseException";
+    } catch (const BarrierPostPhaseException& ex) {
+        ASSERT_TRUE(ex.getInnerExceptionProperty() != nullptr);
+        EXPECT_THROW(std::rethrow_exception(ex.getInnerExceptionProperty()), System::InvalidOperationException);
+    }
 }
 
 // ===========================================================================
@@ -254,6 +386,11 @@ TEST(ExecutionContextTests, Run_InvokesCallbackSynchronously) {
 
 TEST(ExecutionContextTests, IsFlowSuppressed_DefaultsFalse) {
     EXPECT_FALSE(ExecutionContext::IsFlowSuppressed());
+}
+
+TEST(ExecutionContextTests, SuppressFlow_ReturnsUndoableHandle) {
+    auto flowControl = ExecutionContext::SuppressFlow();
+    EXPECT_NO_THROW(flowControl.Undo());
 }
 
 // ===========================================================================
@@ -317,4 +454,36 @@ TEST(WaitHandleTests, WaitAny_NoneSignaled_TimesOutWithWaitTimeout) {
     Semaphore s1(0, 1), s2(0, 1);
     std::vector<WaitHandle*> handles{&s1, &s2};
     EXPECT_EQ(WaitHandle::WaitAny(handles, 50), WaitHandle::WaitTimeout);
+}
+
+// Regression test for a wave-3 audit finding shared by both Semaphore::WaitOne(int) and
+// WaitHandle::WaitAll(handles, int): passing -1 (Timeout.Infinite) used to compute a
+// deadline already in the past (now() + milliseconds(-1)), so both returned/timed-out
+// almost immediately instead of blocking forever like real .NET.
+TEST(WaitHandleTests, WaitAll_InfiniteTimeout_BlocksUntilAllSignaled) {
+    Semaphore s1(0, 1), s2(0, 1);
+    std::vector<WaitHandle*> handles{&s1, &s2};
+    std::atomic<bool> done{false};
+    std::thread t([&] { done = WaitHandle::WaitAll(handles, -1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(done.load()); // still blocked after 100ms -- neither semaphore is signaled yet
+
+    s1.Release();
+    s2.Release();
+    t.join();
+    EXPECT_TRUE(done.load());
+}
+
+TEST(SemaphoreTests, WaitOne_InfiniteTimeout_BlocksUntilReleased) {
+    Semaphore s(0, 1);
+    std::atomic<bool> acquired{false};
+    std::thread t([&] { acquired = s.WaitOne(-1); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(acquired.load());
+
+    s.Release();
+    t.join();
+    EXPECT_TRUE(acquired.load());
 }

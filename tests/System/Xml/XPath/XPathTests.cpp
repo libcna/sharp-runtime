@@ -537,6 +537,29 @@ TEST(XPathOperatorTests, RelationalAndEqualityOperators) {
     EXPECT_TRUE(nav->Evaluate("2 != 3").getBooleanProperty());
 }
 
+TEST(XPathOperatorTests, RelationalOperator_NodeSetVsString_ComparesNumerically) {
+    // Regression: per XPath 1.0 Section 3.4, <, <=, >, >= always convert to numbers, even when
+    // one side is a node-set compared against a string literal -- lexicographically "44.95" <
+    // "9" (since '4' < '9'), but numerically 44.95 > 9. The previous implementation used
+    // lexicographic string comparison here, so //book[price > '9'] incorrectly matched zero
+    // books instead of the one (bk101, price 44.95) that is numerically greater than 9.
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    std::unique_ptr<XPathNodeIterator> it(nav->Select("//book[price > '9']"));
+    ASSERT_EQ(it->getCountProperty(), 1);
+    it->MoveNext();
+    EXPECT_EQ(it->getCurrentProperty()->GetAttribute("id", ""), "bk101");
+}
+
+TEST(XPathOperatorTests, RelationalOperator_NodeSetVsNodeSet_ComparesNumerically) {
+    // Regression: node-set vs node-set relational comparison must also be numeric, not
+    // lexicographic -- "44.95" > "5.95" lexicographically is false ('4' < '5'), but numerically
+    // 44.95 > 5.95 is true.
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    EXPECT_TRUE(nav->Evaluate("//book[@id='bk101']/price > //book[@id='bk102']/price").getBooleanProperty());
+}
+
 TEST(XPathOperatorTests, OrAndOperators) {
     auto doc = LoadCatalog();
     std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());

@@ -105,6 +105,8 @@ TEST(ContentTypeTests, GetHashCode_ConsistentWithEquals) {
 
 TEST(ContentTypeTests, Parameters_MutableAccess) {
     ContentType ct("text/plain");
-    ct.getParametersProperty()["custom"] = "value";
+    // operator[] is read-only (matches .NET's getter, which never inserts on a miss); use
+    // set() for dict[key]=value-style writes.
+    ct.getParametersProperty().set("custom", "value");
     EXPECT_EQ(ct.getParametersProperty().GetValue("custom"), "value");
 }

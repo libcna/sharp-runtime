@@ -22,7 +22,6 @@ namespace System::IO
     private:
         std::fstream file_;
         std::string  path_;
-        FileMode     mode_;
         intcs        length_;
         bool         canRead_;
         bool         canWrite_;

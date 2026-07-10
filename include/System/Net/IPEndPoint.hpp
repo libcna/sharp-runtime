@@ -59,7 +59,7 @@ namespace System::Net {
         [[nodiscard]] intcs getPortProperty() const { return port_; }
         /**
          * Sets the port number.
-         * @throws std::out_of_range if @p p is outside [MinPort, MaxPort].
+         * @throws System::ArgumentOutOfRangeException if @p p is outside [MinPort, MaxPort].
          */
         void setPortProperty(intcs p);
 
@@ -88,7 +88,7 @@ namespace System::Net {
 
         /**
          * Parses "address:port" (IPv4) or "[address]:port" (IPv6) into an IPEndPoint.
-         * @throws std::invalid_argument if @p s is not a valid endpoint string.
+         * @throws System::FormatException if @p s is not a valid endpoint string.
          */
         [[nodiscard]] static IPEndPoint Parse(const std::string& s);
 

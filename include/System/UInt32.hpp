@@ -6,10 +6,11 @@
 #include <bit>
 #include <cstdint>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -36,19 +37,23 @@ namespace System {
         /**
          * @brief Parses @p s as a decimal UInt32 value.
          * C++ counterpart of .NET UInt32.Parse(string).
-         * @throws std::invalid_argument on bad format or overflow.
+         * @throws System::FormatException on bad format.
+         * @throws System::OverflowException on overflow.
          */
         [[nodiscard]] static uintcs Parse(const std::string& s) {
             try {
                 unsigned long v = std::stoul(s);
-                if (v > MaxValue) throw std::out_of_range("overflow");
+                if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt32.");
                 return static_cast<uint32_t>(v);
             }
-            catch (const std::invalid_argument&) {
-                throw std::invalid_argument("Input string was not in a correct format.");
+            catch (const System::OverflowException&) {
+                throw;
             }
             catch (const std::out_of_range&) {
-                throw std::invalid_argument("Input string was not in a correct format.");
+                throw System::OverflowException("Value was either too large or too small for a UInt32.");
+            }
+            catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
             }
         }
 

@@ -302,6 +302,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::setw(2) << std::setfill('0') << hour_ << ':'
                 << std::setw(2) << std::setfill('0') << minute_ << ':'
                 << std::setw(2) << std::setfill('0') << second_;
@@ -322,6 +323,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToLongTimeString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::setw(2) << std::setfill('0') << hour_   << ':'
                 << std::setw(2) << std::setfill('0') << minute_ << ':'
                 << std::setw(2) << std::setfill('0') << second_ << '.'
@@ -367,13 +369,16 @@ namespace System {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Returns the elapsed time from @p t2 to @p t1 (may be negative).
+         * @brief Returns the elapsed time from @p t2 to @p t1, wrapped to always be
+         * non-negative ("circular clock" semantics — e.g. 01:00 - 23:00 = 02:00, not -22:00).
          *
          * C++ counterpart of .NET TimeOnly.operator-(TimeOnly, TimeOnly).
          */
         friend TimeSpan operator-(const TimeOnly& t1, const TimeOnly& t2) {
-            return TimeSpan::FromMilliseconds(
-                static_cast<double>(t1.toMs() - t2.toMs()));
+            constexpr intcs msPerDay = 24 * 60 * 60 * 1000;
+            intcs diff = t1.toMs() - t2.toMs();
+            if (diff < 0) diff += msPerDay;
+            return TimeSpan::FromMilliseconds(static_cast<double>(diff));
         }
 
         /** @brief Returns true if @p a and @p b represent the same time. */

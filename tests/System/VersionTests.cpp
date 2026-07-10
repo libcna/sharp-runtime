@@ -87,19 +87,19 @@ TEST(VersionTests, ParseString_RoundTrip) {
 
 TEST(VersionTests, ParseString_SingleComponent_Throws) {
     // .NET requires at least "major.minor" - a bare "5" is invalid.
-    EXPECT_THROW(Version("5"), std::invalid_argument);
+    EXPECT_THROW(Version("5"), System::ArgumentException);
 }
 
 TEST(VersionTests, ParseString_Empty_Throws) {
-    EXPECT_THROW(Version(""), std::invalid_argument);
+    EXPECT_THROW(Version(""), System::ArgumentException);
 }
 
 TEST(VersionTests, ParseString_FiveComponents_Throws) {
-    EXPECT_THROW(Version("1.2.3.4.5"), std::invalid_argument);
+    EXPECT_THROW(Version("1.2.3.4.5"), System::ArgumentException);
 }
 
 TEST(VersionTests, ParseString_NegativeComponent_Throws) {
-    EXPECT_THROW(Version("1.-2"), std::invalid_argument);
+    EXPECT_THROW(Version("1.-2"), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -195,22 +195,22 @@ TEST(VersionTests, CompareTo_ExtremeValues_NoOverflow) {
 }
 
 TEST(VersionTests, Ctor_NegativeMajor_Throws) {
-    EXPECT_THROW(Version(-1, 0), std::invalid_argument);
+    EXPECT_THROW(Version(-1, 0), System::ArgumentOutOfRangeException);
 }
 
 TEST(VersionTests, Ctor_NegativeMinor_Throws) {
-    EXPECT_THROW(Version(0, -1), std::invalid_argument);
+    EXPECT_THROW(Version(0, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(VersionTests, Ctor_NegativeBuild_Throws) {
-    EXPECT_THROW(Version(1, 2, -1), std::invalid_argument);
+    EXPECT_THROW(Version(1, 2, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(VersionTests, Ctor_FourArg_NegativeRevision_Throws) {
     // Unlike the 2-/3-arg overloads (where Build/Revision default to -1
     // internally), the 4-arg overload validates revision too, since it's
     // explicitly user-supplied here.
-    EXPECT_THROW(Version(1, 2, 3, -1), std::invalid_argument);
+    EXPECT_THROW(Version(1, 2, 3, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(VersionTests, Equals_Same_True) {
@@ -285,9 +285,9 @@ TEST(VersionTests, ToString_FieldCount4_All) {
 }
 
 TEST(VersionTests, ToString_FieldCountNegative_Throws) {
-    EXPECT_THROW(Version(1, 2, 3, 4).ToString(-1), std::invalid_argument);
+    EXPECT_THROW(Version(1, 2, 3, 4).ToString(-1), System::ArgumentException);
 }
 
 TEST(VersionTests, ToString_FieldCount5_Throws) {
-    EXPECT_THROW(Version(1, 2, 3, 4).ToString(5), std::invalid_argument);
+    EXPECT_THROW(Version(1, 2, 3, 4).ToString(5), System::ArgumentException);
 }

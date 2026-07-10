@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 #include "System/UInt64.hpp"
 
 using System::UInt64;
@@ -27,7 +29,7 @@ TEST(UInt64Test, ParseLarge) {
 }
 
 TEST(UInt64Test, ParseInvalidThrows) {
-    EXPECT_THROW(UInt64::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(UInt64::Parse("abc"), System::FormatException);
 }
 
 TEST(UInt64Test, TryParseSuccess) {
@@ -39,6 +41,21 @@ TEST(UInt64Test, TryParseSuccess) {
 TEST(UInt64Test, TryParseFailure) {
     uint64_t result = 0;
     EXPECT_FALSE(UInt64::TryParse("xyz", result));
+}
+
+TEST(UInt64Test, Parse_NegativeSign_ThrowsOverflowException) {
+    // Unsigned Parse must reject any leading '-' (even "-0") rather than
+    // silently wrapping to a huge value.
+    EXPECT_THROW(UInt64::Parse("-5"), System::OverflowException);
+    EXPECT_THROW(UInt64::Parse("-0"), System::OverflowException);
+}
+
+TEST(UInt64Test, Parse_TrailingGarbage_ThrowsFormatException) {
+    EXPECT_THROW(UInt64::Parse("123abc"), System::FormatException);
+}
+
+TEST(UInt64Test, Parse_OverflowsRange_ThrowsOverflowException) {
+    EXPECT_THROW(UInt64::Parse("99999999999999999999"), System::OverflowException);
 }
 
 TEST(UInt64Test, ToStringDecimal) {

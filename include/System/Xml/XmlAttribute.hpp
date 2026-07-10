@@ -38,6 +38,17 @@ namespace System::Xml {
         [[nodiscard]] std::string getInnerTextProperty() const override { return getValueProperty(); }
         void setInnerTextProperty(const std::string& text) override { setValueProperty(text); }
 
+        /**
+         * @return The namespace URI declared for this attribute's prefix via the nearest
+         * xmlns:prefix declaration on the owning element or one of its ancestors, or "" for an
+         * unprefixed attribute (per the XML Namespaces spec, an element's default `xmlns`
+         * declaration does not apply to its own unprefixed attributes).
+         */
+        [[nodiscard]] std::string getNamespaceURIProperty() const override;
+
+        /** @brief Creates a duplicate of this attribute (always a full/"deep" copy, matching .NET — the deep parameter is ignored since an attribute's value has no meaningful shallow form). */
+        [[nodiscard]] XmlNode* CloneNode(bool deep) const override;
+
         /** @return Always nullptr; attributes are not children in the DOM tree sense. */
         [[nodiscard]] XmlNode* getParentNodeProperty() const { return nullptr; }
         /** @return The element that owns this attribute, or nullptr if unattached. */

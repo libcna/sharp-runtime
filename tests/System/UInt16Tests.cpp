@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/OverflowException.hpp"
 #include "System/UInt16.hpp"
 
 using System::UInt16;
@@ -27,7 +28,7 @@ TEST(UInt16Test, ParseMaxValue) {
 }
 
 TEST(UInt16Test, ParseOverflowThrows) {
-    EXPECT_THROW(UInt16::Parse("65536"), std::out_of_range);
+    EXPECT_THROW(UInt16::Parse("65536"), System::OverflowException);
 }
 
 TEST(UInt16Test, TryParseSuccess) {

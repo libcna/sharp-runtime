@@ -118,7 +118,7 @@ namespace System::Net {
     }
 
     void WebHeaderCollection::Add(const std::string& name, const std::string& value) {
-        if (name.empty()) throw System::ArgumentNullException("name");
+        if (name.empty()) throw System::ArgumentException("The value cannot be an empty string.", "name");
         std::string checkedName = CheckBadHeaderNameChars(name);
         std::string checkedValue = CheckBadHeaderValueChars(value);
         inner_.Add(checkedName, checkedValue);

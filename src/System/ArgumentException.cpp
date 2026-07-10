@@ -13,32 +13,46 @@ namespace System {
     }
 
     ArgumentException::ArgumentException()
-        : SystemException("Value does not fall within the expected range.") {}
+        : SystemException("Value does not fall within the expected range.") {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const char* message)
-        : SystemException(message ? message : "") {}
+        : SystemException(message ? message : "") {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const std::string& message)
-        : SystemException(message) {}
+        : SystemException(message) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const std::string& message,
                                          std::exception_ptr innerException)
-        : SystemException(message, std::move(innerException)) {}
+        : SystemException(message, std::move(innerException)) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const char* message, const char* paramName)
         : SystemException(appendParamName(message ? message : "", paramName ? paramName : "")),
-          paramName_(paramName ? paramName : "") {}
+          paramName_(paramName ? paramName : "") {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const std::string& message,
                                          const std::string& paramName)
         : SystemException(appendParamName(message, paramName)),
-          paramName_(paramName) {}
+          paramName_(paramName) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     ArgumentException::ArgumentException(const std::string& message,
                                          const std::string& paramName,
                                          std::exception_ptr innerException)
         : SystemException(appendParamName(message, paramName), std::move(innerException)),
-          paramName_(paramName) {}
+          paramName_(paramName) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
 
     void ArgumentException::ThrowIfNullOrEmpty(const std::string& argument,
                                                const std::string& paramName) {

@@ -5,7 +5,9 @@
 #include <cmath>
 #include <limits>
 #include "System/Double.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
+#include "System/FormatException.hpp"
 
 using System::Double;
 using System::ArithmeticException;
@@ -24,6 +26,12 @@ TEST(DoubleTests, MinValue_IsNegative) {
 
 TEST(DoubleTests, Epsilon_IsPositive) {
     EXPECT_GT(Double::Epsilon, 0.0);
+}
+
+TEST(DoubleTests, Epsilon_MatchesDotNetValue) {
+    // .NET Double.Epsilon = 4.9406564584124654E-324 (smallest denormal, not the smallest normal value).
+    EXPECT_EQ(Double::Epsilon, std::numeric_limits<double>::denorm_min());
+    EXPECT_LT(Double::Epsilon, std::numeric_limits<double>::min());
 }
 
 TEST(DoubleTests, NaN_IsNaN) {
@@ -266,7 +274,7 @@ TEST(DoubleTests, Sign_NaN_Throws) {
 }
 
 TEST(DoubleTests, Clamp_MinGreaterThanMax_Throws) {
-    EXPECT_THROW(Double::Clamp(1.0, 10.0, 0.0), std::invalid_argument);
+    EXPECT_THROW(Double::Clamp(1.0, 10.0, 0.0), System::ArgumentException);
 }
 
 TEST(DoubleTests, Max_PropagatesNaN) {
@@ -316,7 +324,7 @@ TEST(DoubleTests, Parse_NegativeInfinity) {
 }
 
 TEST(DoubleTests, Parse_Invalid_Throws) {
-    EXPECT_THROW(Double::Parse("abc"), std::invalid_argument);
+    EXPECT_THROW(Double::Parse("abc"), System::FormatException);
 }
 
 TEST(DoubleTests, TryParse_Valid_ReturnsTrue) {

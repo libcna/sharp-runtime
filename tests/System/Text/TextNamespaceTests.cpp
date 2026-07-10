@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <vector>
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/Text/DecoderFallback.hpp"
 #include "System/Text/Encoding.hpp"
 #include "System/Text/EncoderFallback.hpp"
@@ -156,6 +157,52 @@ TEST(UnicodeEncodingTests, BigEndianRoundTrip) {
     EXPECT_EQ(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())), original);
 }
 
+// GetBytes' internal UTF-8 decode loop used to accept ill-formed input (no continuation-byte
+// validation, no overlong-encoding rejection) and silently produce a wrong-but-plausible code
+// point. Verified with a compiled reproduction before fixing: an overlong encoding of U+0000,
+// "\xC0\x80", decoded straight through to real U+0000 instead of being replaced with U+FFFD.
+TEST(UnicodeEncodingTests, GetBytes_OverlongUtf8Input_ReplacesWithFFFD) {
+    UnicodeEncoding enc(false, false);
+    auto bytes = enc.GetBytes(std::string("\xC0\x80"));
+    // Rejecting the overlong sequence resyncs one byte at a time, so both input bytes (each
+    // individually ill-formed once the 2-byte overlong reading is rejected) become their own
+    // U+FFFD: two replacement characters, not one.
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[0]), 0xFD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[1]), 0xFF);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[2]), 0xFD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[3]), 0xFF);
+}
+
+TEST(UnicodeEncodingTests, GetBytes_BadContinuationByte_ReplacesWithFFFD) {
+    UnicodeEncoding enc(false, false);
+    auto bytes = enc.GetBytes(std::string("\xC2\x41")); // 'A' is not a continuation byte
+    ASSERT_EQ(bytes.size(), 4u); // U+FFFD (2 bytes) + 'A' (2 bytes), resuming after the bad lead byte
+    EXPECT_EQ(static_cast<uint8_t>(bytes[0]), 0xFD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[1]), 0xFF);
+}
+
+// An unpaired surrogate in the UTF-16 byte stream must be replaced with U+FFFD, not encoded
+// directly as a "surrogate in UTF-8" (which is CESU-8/WTF-8, not valid UTF-8).
+TEST(UnicodeEncodingTests, GetString_UnpairedHighSurrogate_ReplacesWithFFFD) {
+    UnicodeEncoding enc(false, false);
+    std::vector<SharpRuntime::bytecs> bytes = {
+        static_cast<SharpRuntime::bytecs>(0x00), static_cast<SharpRuntime::bytecs>(0xD8), // lone high surrogate, LE
+        static_cast<SharpRuntime::bytecs>('A'), static_cast<SharpRuntime::bytecs>(0x00),
+    };
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD" "A"); // U+FFFD followed by 'A'
+}
+
+TEST(UnicodeEncodingTests, GetString_LoneLowSurrogate_ReplacesWithFFFD) {
+    UnicodeEncoding enc(false, false);
+    std::vector<SharpRuntime::bytecs> bytes = {
+        static_cast<SharpRuntime::bytecs>(0x00), static_cast<SharpRuntime::bytecs>(0xDC), // lone low surrogate, LE
+    };
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD"); // U+FFFD
+}
+
 // --- UTF32Encoding (now full Unicode range) ---------------------------------------------------
 
 TEST(UTF32EncodingTests, RoundTrip_NonAscii) {
@@ -171,6 +218,45 @@ TEST(UTF32EncodingTests, RoundTrip_SupplementaryPlane) {
     auto bytes = enc.GetBytes(original);
     ASSERT_EQ(bytes.size(), 4u);
     EXPECT_EQ(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())), original);
+}
+
+// Same ill-formed-UTF-8-input gap as UnicodeEncoding, verified independently since
+// UTF32Encoding has its own copy of the decode loop.
+TEST(UTF32EncodingTests, GetBytes_OverlongUtf8Input_ReplacesWithFFFD) {
+    UTF32Encoding enc(false, false);
+    auto bytes = enc.GetBytes(std::string("\xC0\x80"));
+    // Rejecting the overlong sequence resyncs one byte at a time, so both input bytes become
+    // their own U+FFFD 4-byte code unit: two replacement characters, not one.
+    ASSERT_EQ(bytes.size(), 8u);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[0]), 0xFD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[1]), 0xFF);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[2]), 0x00);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[3]), 0x00);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[4]), 0xFD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[5]), 0xFF);
+}
+
+// An out-of-range or surrogate 32-bit code unit must be replaced with U+FFFD, not passed
+// straight to the UTF-8 encoder -- which would previously produce a structurally invalid
+// byte sequence, not just the wrong code point.
+TEST(UTF32EncodingTests, GetString_OutOfRangeCodeUnit_ReplacesWithFFFD) {
+    UTF32Encoding enc(false, false);
+    std::vector<SharpRuntime::bytecs> bytes = {
+        static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0xFF),
+        static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0xFF),
+    };
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD"); // U+FFFD
+}
+
+TEST(UTF32EncodingTests, GetString_SurrogateCodeUnit_ReplacesWithFFFD) {
+    UTF32Encoding enc(false, false);
+    std::vector<SharpRuntime::bytecs> bytes = {
+        static_cast<SharpRuntime::bytecs>(0x00), static_cast<SharpRuntime::bytecs>(0xD8),
+        static_cast<SharpRuntime::bytecs>(0x00), static_cast<SharpRuntime::bytecs>(0x00),
+    };
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD"); // U+FFFD
 }
 
 // --- StringRuneEnumerator / RunePosition / StringBuilderRuneEnumerator ------------------------
@@ -238,4 +324,15 @@ TEST(StringBuilderTests, Indexer_ReadAndWrite) {
     EXPECT_EQ(sb[0], 'h');
     sb[0] = 'H';
     EXPECT_EQ(sb.ToString(), "Hello");
+}
+
+// .NET's StringBuilder indexer throws IndexOutOfRangeException for an out-of-range index
+// (StringBuilder.cs); plain std::string::operator[] is undefined behavior in that case, so
+// this must bounds-check explicitly rather than delegating straight through.
+TEST(StringBuilderTests, Indexer_OutOfRange_Throws) {
+    StringBuilder sb("hello");
+    EXPECT_THROW((void)sb[5], System::IndexOutOfRangeException);
+    EXPECT_THROW((void)sb[-1], System::IndexOutOfRangeException);
+    const StringBuilder& csb = sb;
+    EXPECT_THROW((void)csb[5], System::IndexOutOfRangeException);
 }

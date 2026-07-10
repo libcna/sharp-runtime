@@ -9,11 +9,12 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
+#include "System/FormatException.hpp"
 
 namespace System {
 
@@ -145,10 +146,10 @@ public:
 
     /**
      * @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Single.Clamp(float,float,float).
-     * @throws std::invalid_argument if @p min is greater than @p max.
+     * @throws System::ArgumentException if @p min is greater than @p max.
      */
     [[nodiscard]] static float Clamp(float value, float min, float max) {
-        if (min > max) throw std::invalid_argument("min cannot be greater than max.");
+        if (min > max) throw System::ArgumentException("min cannot be greater than max.");
         return Min(Max(value, min), max);
     }
 
@@ -518,7 +519,7 @@ public:
     /**
      * @brief Converts the string representation of a number to its float equivalent.
      * C++ counterpart of .NET Single.Parse(string).
-     * @throws std::invalid_argument if the string is not a valid floating-point literal.
+     * @throws System::FormatException if the string is not a valid floating-point literal.
      */
     [[nodiscard]] static float Parse(const std::string& s) {
         if (s == "NaN")       return std::numeric_limits<float>::quiet_NaN();
@@ -527,7 +528,7 @@ public:
         float result{};
         auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
         if (ec != std::errc{} || ptr != s.data() + s.size())
-            throw std::invalid_argument("Input string was not in a correct format.");
+            throw System::FormatException("Input string was not in a correct format.");
         return result;
     }
 

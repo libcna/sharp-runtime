@@ -69,7 +69,7 @@ namespace System::IO::Compression {
         /**
          * @brief Removes this entry from the archive (update mode only).
          *
-         * @throws std::runtime_error if the archive is not in update mode.
+         * @throws System::NotSupportedException if the archive is not in update mode.
          */
         void Delete();
     };
@@ -98,7 +98,7 @@ namespace System::IO::Compression {
          *
          * @param stream     Source or destination stream.
          * @param mode       Read, Create, or Update.
-         * @throws std::runtime_error on initialisation failure.
+         * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */
         ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode = ZipArchiveMode::Read);
 
@@ -107,7 +107,7 @@ namespace System::IO::Compression {
          *
          * @param archivePath  File-system path.
          * @param mode         Read, Create, or Update.
-         * @throws std::runtime_error on initialisation failure.
+         * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */
         ZipArchive(const std::string& archivePath, ZipArchiveMode mode = ZipArchiveMode::Read);
 

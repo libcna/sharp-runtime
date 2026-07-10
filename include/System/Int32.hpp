@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
@@ -13,6 +14,9 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 namespace System {
 
@@ -38,14 +42,31 @@ public:
      * @brief Converts the string representation of a number to its 32-bit
      * signed integer equivalent.
      *
-     * C++ counterpart of .NET Int32.Parse(string).
+     * C++ counterpart of .NET Int32.Parse(string) with NumberStyles.Integer:
+     * leading/trailing whitespace and a leading sign are tolerated, but any
+     * trailing non-whitespace character is rejected.
      * @param s String to parse.
      * @return Parsed int32 value.
-     * @throws std::invalid_argument if the string is not a valid integer.
+     * @throws System::FormatException if the string is not a valid integer.
+     * @throws System::OverflowException if the value exceeds Int32 range.
      */
     static SharpRuntime::intcs Parse(const std::string& s) {
-        try { return static_cast<int32_t>(std::stoi(s)); }
-        catch (...) { throw std::invalid_argument("Input string was not in a correct format."); }
+        std::size_t pos = 0;
+        long v;
+        try {
+            v = std::stol(s, &pos);
+        } catch (const std::out_of_range&) {
+            throw System::OverflowException("Value was either too large or too small for an Int32.");
+        } catch (...) {
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+        for (; pos < s.size(); ++pos) {
+            if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                throw System::FormatException("Input string was not in a correct format.");
+        }
+        if (v < MinValue || v > MaxValue)
+            throw System::OverflowException("Value was either too large or too small for an Int32.");
+        return static_cast<SharpRuntime::intcs>(v);
     }
 
     /**
@@ -58,7 +79,7 @@ public:
      * @return True if parsing succeeded; false otherwise.
      */
     static bool TryParse(const std::string& s, SharpRuntime::intcs& result) {
-        try { result = static_cast<int32_t>(std::stoi(s)); return true; }
+        try { result = Parse(s); return true; }
         catch (...) { result = 0; return false; }
     }
 
@@ -91,6 +112,7 @@ public:
         char type = format[0];
         int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         if (type == 'X') {
             oss << std::uppercase << std::hex;
             if (width > 0) oss << std::setfill('0') << std::setw(width);
@@ -180,9 +202,14 @@ public:
      * @param left  The dividend.
      * @param right The divisor.
      * @return A pair {Quotient, Remainder}.
+     * @throws System::OverflowException if @p left is MinValue and @p right is -1
+     *         (the mathematical result does not fit in Int32; the CLR's div
+     *         instruction traps on this input and .NET surfaces it as OverflowException).
      */
     [[nodiscard]] static std::pair<SharpRuntime::intcs, SharpRuntime::intcs>
-    DivRem(SharpRuntime::intcs left, SharpRuntime::intcs right) noexcept {
+    DivRem(SharpRuntime::intcs left, SharpRuntime::intcs right) {
+        if (left == MinValue && right == -1)
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return { left / right, left % right };
     }
 
@@ -193,7 +220,7 @@ public:
      */
     [[nodiscard]] static SharpRuntime::intcs Abs(SharpRuntime::intcs value) {
         if (value == MinValue)
-            throw std::overflow_error("Negating MinValue is not representable.");
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return value < 0 ? -value : value;
     }
 
@@ -219,7 +246,7 @@ public:
         int32_t absValue = value < 0 ? (value == MinValue ? value : -value) : value;
         if (sign >= 0) {
             if (absValue < 0)
-                throw std::overflow_error("Negating MinValue is not representable.");
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return absValue;
         }
         return -absValue;
@@ -368,11 +395,11 @@ public:
      * @brief Returns the integer base-2 logarithm of a 32-bit integer.
      *
      * C++ counterpart of .NET Int32.Log2(int).
-     * @throws std::invalid_argument if @p value is negative.
+     * @throws System::ArgumentOutOfRangeException if @p value is negative.
      */
     [[nodiscard]] static SharpRuntime::intcs Log2(SharpRuntime::intcs value) {
         if (value < 0)
-            throw std::invalid_argument("value must be non-negative.");
+            throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         if (value == 0) return 0;
         return static_cast<SharpRuntime::intcs>(std::bit_width(static_cast<uint32_t>(value)) - 1);
     }

@@ -10,6 +10,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Immutable::ImmutableArray;
 using System::Collections::Immutable::ImmutableDictionary;
@@ -24,6 +25,28 @@ TEST(ImmutableCollectionTests, ArrayEmptyIsEmpty) {
     auto arr = ImmutableArray<int>::Empty();
     EXPECT_EQ(arr.getLengthProperty(), 0);
     EXPECT_TRUE(arr.getIsEmptyProperty());
+    EXPECT_FALSE(arr.getIsDefaultProperty());
+}
+
+// The default constructor previously always allocated a live empty vector, so IsDefault
+// could never return true -- breaking the common "uninitialized struct field" idiom real
+// .NET supports (default(ImmutableArray<T>) has a null backing array). Verified against
+// ImmutableArray_1.Minimal.cs: `IsDefault { get { return this.array == null; } }`.
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_IsDefaultTrue) {
+    ImmutableArray<int> arr;
+    EXPECT_TRUE(arr.getIsDefaultProperty());
+}
+
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_LengthThrows) {
+    ImmutableArray<int> arr;
+    EXPECT_THROW(arr.getLengthProperty(), System::InvalidOperationException);
+    EXPECT_THROW(arr.getIsEmptyProperty(), System::InvalidOperationException);
+}
+
+TEST(ImmutableCollectionTests, ArrayDefaultConstructed_EqualsAnotherDefault) {
+    ImmutableArray<int> a, b;
+    EXPECT_TRUE(a == b);
+    EXPECT_FALSE(a == ImmutableArray<int>::Empty());
 }
 
 TEST(ImmutableCollectionTests, ArrayCreateFromInitList) {
@@ -251,6 +274,32 @@ TEST(ImmutableCollectionTests, DictAddReturnsNewInstance) {
 TEST(ImmutableCollectionTests, DictAddDuplicateKeyThrows) {
     auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
     EXPECT_THROW(d.Add("k", 2), System::ArgumentException);
+}
+
+TEST(ImmutableCollectionTests, DictAddDuplicateKeySameValueIsNoOp) {
+    // Verified against ImmutableDictionary_2.cs: Add() uses
+    // KeyCollisionBehavior.ThrowIfValueDifferent -- an equal-value re-add doesn't throw.
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    ImmutableDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.Add("k", 1));
+    EXPECT_EQ(d2.getCountProperty(), 1);
+    EXPECT_EQ(d2["k"], 1);
+}
+
+TEST(ImmutableCollectionTests, DictAddRangeDuplicateKeyDifferentValueThrows) {
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 2}, {"k", 99}};
+    EXPECT_THROW(d.AddRange(pairs), System::ArgumentException);
+}
+
+TEST(ImmutableCollectionTests, DictAddRangeDuplicateKeySameValueIsNoOp) {
+    auto d = ImmutableDictionary<std::string, int>::Empty().Add("k", 1);
+    std::vector<std::pair<std::string, int>> pairs{{"y", 2}, {"k", 1}};
+    ImmutableDictionary<std::string, int> d2;
+    EXPECT_NO_THROW(d2 = d.AddRange(pairs));
+    EXPECT_EQ(d2.getCountProperty(), 2);
+    EXPECT_EQ(d2["k"], 1);
+    EXPECT_EQ(d2["y"], 2);
 }
 
 TEST(ImmutableCollectionTests, DictSetItemReturnsNewInstance) {

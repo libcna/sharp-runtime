@@ -5,19 +5,25 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
 #include "System/Threading/Monitor.hpp"
+#include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/Mutex.hpp"
 #include "System/Threading/Semaphore.hpp"
 #include "System/Threading/SemaphoreSlim.hpp"
 #include "System/Threading/ManualResetEvent.hpp"
 #include "System/Threading/AutoResetEvent.hpp"
 #include "System/Threading/CancellationToken.hpp"
+#include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
 #include "System/Threading/SpinLock.hpp"
 #include "System/Threading/Volatile.hpp"
 #include "System/Threading/Timeout.hpp"
+#include "System/Threading/ThreadStateException.hpp"
 
 using namespace System::Threading;
 
@@ -73,8 +79,59 @@ TEST(ThreadingTests, Thread_IsBackground_RoundTrip) {
 TEST(ThreadingTests, Thread_Start_StartsOnce_SecondThrows) {
     Thread t([]{ Thread::Sleep(0); });
     EXPECT_NO_THROW(t.Start());
-    EXPECT_THROW(t.Start(), std::invalid_argument);
+    EXPECT_THROW(t.Start(), System::Threading::ThreadStateException);
     t.Join();
+}
+
+TEST(ThreadingTests, Thread_Sleep_LessThanNegativeOne_Throws) {
+    EXPECT_THROW(Thread::Sleep(-2), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, Thread_Join_LessThanNegativeOne_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    t.Start();
+    EXPECT_THROW(t.Join(-2), System::ArgumentOutOfRangeException);
+    t.Join();
+}
+
+TEST(ThreadingTests, Thread_Join_InfiniteTimeout_BlocksUntilCompletion) {
+    // Regression: Join(-1) previously computed a deadline in the past and returned
+    // almost immediately instead of blocking forever (Timeout.Infinite semantics).
+    std::atomic<bool> finished{false};
+    Thread t([&finished]{
+        Thread::Sleep(50);
+        finished.store(true);
+    });
+    t.Start();
+    EXPECT_TRUE(t.Join(-1));
+    EXPECT_TRUE(finished.load());
+}
+
+TEST(ThreadingTests, Thread_Join_NoArg_OnUnstartedThread_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_THROW(t.Join(), System::Threading::ThreadStateException);
+}
+
+TEST(ThreadingTests, Thread_Join_WithTimeout_OnUnstartedThread_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_THROW(t.Join(100), System::Threading::ThreadStateException);
+}
+
+TEST(ThreadingTests, Thread_CurrentThread_InsideStartedThread_MatchesOwnManagedThreadId) {
+    intcs idSeenFromInside = -1;
+    Thread worker([&]{ idSeenFromInside = Thread::CurrentThread().getManagedThreadIdProperty(); });
+    worker.Start();
+    worker.Join();
+    EXPECT_EQ(idSeenFromInside, worker.getManagedThreadIdProperty());
+}
+
+TEST(ThreadingTests, Thread_CurrentThread_InsideBackgroundThread_ReportsBackground) {
+    bool sawBackground = false;
+    Thread worker([&]{ sawBackground = Thread::CurrentThread().getIsBackgroundProperty(); });
+    worker.setIsBackgroundProperty(true);
+    worker.Start();
+    worker.Join();
+    EXPECT_TRUE(sawBackground);
 }
 
 TEST(ThreadingTests, Thread_ManagedThreadId_IsPositive) {
@@ -227,6 +284,54 @@ TEST(ThreadingTests, Monitor_TryEnter_WhileHeldByAnotherThread_ReturnsFalse) {
     Monitor::Exit(&obj);
 }
 
+TEST(ThreadingTests, Monitor_Exit_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Exit(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Wait_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Wait(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Pulse_NotHeld_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    EXPECT_THROW(Monitor::Pulse(&obj), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, Monitor_Exit_FromNonOwningThread_ThrowsSynchronizationLockException) {
+    int obj = 0;
+    Monitor::Enter(&obj);
+    bool threw = false;
+    std::thread t([&] {
+        try { Monitor::Exit(&obj); } catch (const System::Threading::SynchronizationLockException&) { threw = true; }
+    });
+    t.join();
+    EXPECT_TRUE(threw);
+    Monitor::Exit(&obj);
+}
+
+TEST(ThreadingTests, Monitor_AnotherThread_CanEnter_WhileFirstThreadIsWaiting) {
+    // Verifies owner/depth tracking is correctly transferred during Wait()'s internal
+    // unlock/relock window: while the waiter is blocked inside Wait(), a second thread
+    // must be able to Enter() and later Exit() without a spurious SynchronizationLockException.
+    int obj = 0;
+    std::atomic<bool> waiterEntered{false};
+    std::atomic<bool> signaled{false};
+    std::thread waiter([&] {
+        Monitor::Enter(&obj);
+        waiterEntered = true;
+        Monitor::Wait(&obj);
+        Monitor::Exit(&obj);
+    });
+    while (!waiterEntered.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // let waiter reach cv.wait()
+    EXPECT_NO_THROW(Monitor::Enter(&obj));
+    Monitor::PulseAll(&obj);
+    EXPECT_NO_THROW(Monitor::Exit(&obj));
+    waiter.join();
+}
+
 TEST(ThreadingTests, Monitor_PulseAll_WakesWaitingThread) {
     // Classic monitor predicate-loop pattern: `signaled` is only ever read/written while
     // holding the monitor lock, so there is no lost-wakeup window regardless of whether the
@@ -289,6 +394,11 @@ TEST(ThreadingTests, Semaphore_Release_ReturnsPreviousCount) {
     EXPECT_EQ(prev, 0);
 }
 
+TEST(ThreadingTests, Semaphore_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    Semaphore s(1, 2);
+    EXPECT_THROW(s.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // SemaphoreSlim
 // ---------------------------------------------------------------------------
@@ -315,6 +425,11 @@ TEST(ThreadingTests, SemaphoreSlim_Release_Multiple_IncreasesCount) {
     SemaphoreSlim ss(0, 10);
     ss.Release(4);
     EXPECT_EQ(ss.getCurrentCountProperty(), 4);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Wait_TimeoutLessThanNegativeOne_Throws) {
+    SemaphoreSlim ss(1, 2);
+    EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +463,11 @@ TEST(ThreadingTests, ManualResetEvent_StaysSignaledAfterMultipleWaits) {
     ManualResetEvent e(true);
     EXPECT_TRUE(e.WaitOne(0));
     EXPECT_TRUE(e.WaitOne(0)); // still signaled
+}
+
+TEST(ThreadingTests, ManualResetEvent_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    ManualResetEvent e(false);
+    EXPECT_THROW(e.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +516,56 @@ TEST(ThreadingTests, CancellationTokenSource_Cancel_PropagatesToken) {
     cts.Cancel();
     EXPECT_TRUE(cts.getIsCancellationRequestedProperty());
     EXPECT_TRUE(tok.getIsCancellationRequestedProperty());
+}
+
+TEST(ThreadingTests, CancellationTokenSource_AfterDispose_Cancel_ThrowsObjectDisposedException) {
+    CancellationTokenSource cts;
+    cts.Dispose();
+    EXPECT_THROW(cts.Cancel(), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, CancellationTokenSource_AfterDispose_GetToken_ThrowsObjectDisposedException) {
+    CancellationTokenSource cts;
+    cts.Dispose();
+    EXPECT_THROW(cts.getTokenProperty(), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, CancellationTokenSource_ConcurrentDisposeAndAccess_NoDataRace) {
+    // Regression: disposed_ was previously a plain (non-atomic) bool read by getTokenProperty/
+    // Cancel's ThrowIfDisposed() check and written by Dispose() with no synchronization -- a
+    // genuine data race (undefined behavior) under concurrent access, e.g. under a thread
+    // sanitizer. This test doesn't assert a specific outcome (either "still valid" or
+    // "ObjectDisposedException" are both acceptable depending on timing) -- it only exercises
+    // the concurrent access pattern so a race would be caught by TSan/ASan if reintroduced.
+    for (int iter = 0; iter < 200; ++iter) {
+        CancellationTokenSource cts;
+        std::thread disposer([&] { cts.Dispose(); });
+        std::thread accessor([&] {
+            try { cts.getTokenProperty(); } catch (const System::ObjectDisposedException&) {}
+            try { (void)cts.getIsCancellationRequestedProperty(); } catch (...) {}
+        });
+        disposer.join();
+        accessor.join();
+    }
+}
+
+TEST(ThreadingTests, CancellationTokenSource_Cancel_RunsCallbacksInLifoOrder) {
+    // Regression: callbacks were stored in a std::unordered_map, so Cancel()'s collection loop
+    // iterated in arbitrary bucket order unrelated to registration order. Verified against
+    // CancellationTokenSource.cs's ExecuteCallbackHandlers: real .NET fires callbacks in LIFO
+    // order (most-recently-registered first, "deepest first") so nested/child registrations run
+    // before their parents'.
+    CancellationTokenSource cts;
+    CancellationToken tok = cts.getTokenProperty();
+    std::vector<int> order;
+    tok.Register([&] { order.push_back(1); });
+    tok.Register([&] { order.push_back(2); });
+    tok.Register([&] { order.push_back(3); });
+    cts.Cancel();
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(order[0], 3);
+    EXPECT_EQ(order[1], 2);
+    EXPECT_EQ(order[2], 1);
 }
 
 // ---------------------------------------------------------------------------

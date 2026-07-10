@@ -9,6 +9,7 @@ namespace System {
 
     std::string BitConverter::ToString(const bytecs* value, intcs startIndex, intcs length) {
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         for (intcs i = 0; i < length; ++i) {
             if (i > 0) oss << '-';
             oss << std::uppercase << std::hex << std::setw(2) << std::setfill('0')

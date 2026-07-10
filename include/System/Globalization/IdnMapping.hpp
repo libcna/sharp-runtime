@@ -4,7 +4,9 @@
 #pragma once
 #include <string>
 #include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Globalization {
 
@@ -69,6 +71,34 @@ public:
     [[nodiscard]] std::string GetAscii(const std::string& unicode) const;
 
     /**
+     * @brief Converts a Unicode (UTF-8) domain name, starting at a byte offset, to Punycode.
+     *
+     * C++ counterpart of .NET IdnMapping.GetAscii(string, int). .NET's @p index is a UTF-16
+     * code-unit offset; this port has no UTF-16 representation, so @p index/@p count are byte
+     * offsets into the UTF-8-encoded @p unicode string instead (matching the convention
+     * already established by System::String::Substring(string, intcs)).
+     * @param unicode The Unicode domain name to encode.
+     * @param index   The zero-based byte offset at which to start.
+     * @return The ACE (xn--) ASCII representation of the substring.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than @p unicode's length.
+     */
+    [[nodiscard]] std::string GetAscii(const std::string& unicode, SharpRuntime::intcs index) const;
+
+    /**
+     * @brief Converts a byte-offset substring of a Unicode (UTF-8) domain name to Punycode.
+     *
+     * C++ counterpart of .NET IdnMapping.GetAscii(string, int, int). See the (string, int)
+     * overload for the byte-offset-vs-UTF-16-code-unit deviation.
+     * @param unicode The Unicode domain name to encode.
+     * @param index   The zero-based byte offset at which to start.
+     * @param count   The number of bytes to encode.
+     * @return The ACE (xn--) ASCII representation of the substring.
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative, or the
+     *         range they describe falls outside @p unicode.
+     */
+    [[nodiscard]] std::string GetAscii(const std::string& unicode, SharpRuntime::intcs index, SharpRuntime::intcs count) const;
+
+    /**
      * @brief Converts a Punycode ASCII domain name back to Unicode (UTF-8).
      *
      * C++ counterpart of .NET IdnMapping.GetUnicode(string).
@@ -76,6 +106,32 @@ public:
      * @return The decoded Unicode domain name.
      */
     [[nodiscard]] std::string GetUnicode(const std::string& ascii) const;
+
+    /**
+     * @brief Converts a Punycode ASCII domain name, starting at a byte offset, back to Unicode.
+     *
+     * C++ counterpart of .NET IdnMapping.GetUnicode(string, int). See GetAscii(string, int)'s
+     * doc comment for the byte-offset-vs-UTF-16-code-unit deviation.
+     * @param ascii The ACE-encoded ASCII domain name to decode.
+     * @param index The zero-based byte offset at which to start.
+     * @return The decoded Unicode domain name.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than @p ascii's length.
+     */
+    [[nodiscard]] std::string GetUnicode(const std::string& ascii, SharpRuntime::intcs index) const;
+
+    /**
+     * @brief Converts a byte-offset substring of a Punycode ASCII domain name back to Unicode.
+     *
+     * C++ counterpart of .NET IdnMapping.GetUnicode(string, int, int). See
+     * GetAscii(string, int)'s doc comment for the byte-offset-vs-UTF-16-code-unit deviation.
+     * @param ascii The ACE-encoded ASCII domain name to decode.
+     * @param index The zero-based byte offset at which to start.
+     * @param count The number of bytes to decode.
+     * @return The decoded Unicode domain name.
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative, or the
+     *         range they describe falls outside @p ascii.
+     */
+    [[nodiscard]] std::string GetUnicode(const std::string& ascii, SharpRuntime::intcs index, SharpRuntime::intcs count) const;
 
     /**
      * @brief Returns true if both IdnMapping instances have the same settings.
@@ -125,6 +181,10 @@ private:
 
     static std::string    encodeLabel(const std::u32string& label);
     static std::u32string decodeLabel(const std::string& label);
+
+    // ---- Validation helpers ----
+    /** @brief Throws ArgumentException if @p c violates the Std3 ASCII naming rules. */
+    static void validateStd3Char(char32_t c, bool nextToLabelBoundary);
 };
 
 } // namespace System::Globalization

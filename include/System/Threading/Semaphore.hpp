@@ -49,11 +49,23 @@ namespace System::Threading {
             return true;
         }
 
-        /** Blocks until the count is greater than zero or the timeout elapses; returns true on success. */
+        /**
+         * @brief Blocks until the count is greater than zero or the timeout elapses; returns true on success.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         */
         bool WaitOne(intcs milliseconds) override {
+            ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lock(mtx_);
-            bool ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
-                [this]{ return count_ > 0; });
+            // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
+            // negative duration as already-expired, so it must be special-cased.
+            bool ok;
+            if (milliseconds == -1) {
+                cv_.wait(lock, [this]{ return count_ > 0; });
+                ok = true;
+            } else {
+                ok = cv_.wait_for(lock, std::chrono::milliseconds(milliseconds),
+                    [this]{ return count_ > 0; });
+            }
             if (ok) --count_;
             return ok;
         }

@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
@@ -43,10 +44,15 @@ namespace System::Threading {
         std::thread            thread_;
 
     public:
-        /** Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds). */
+        /**
+         * @brief Initializes the timer with the given callback, state, initial delay, and repeat period (in milliseconds).
+         * @throws System::ArgumentOutOfRangeException if @p dueTime or @p period is less than -1.
+         */
         Timer(std::function<void(void*)> callback, void* state, intcs dueTime, intcs period)
             : state_(std::make_shared<State>())
         {
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(dueTime, static_cast<intcs>(-1), "dueTime");
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(period, static_cast<intcs>(-1), "period");
 #if defined(__EMSCRIPTEN__)
             (void)callback; (void)state; (void)dueTime; (void)period;
             throw System::PlatformNotSupportedException("Timer requires pthreads (not available in Emscripten single-threaded build)");

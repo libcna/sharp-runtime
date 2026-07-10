@@ -177,6 +177,11 @@ TEST(ThreadAbortExceptionTests, IsA_SystemException) {
     EXPECT_NE(dynamic_cast<System::SystemException*>(&ex), nullptr);
 }
 
+TEST(ThreadAbortExceptionTests, ExceptionState_IsAlwaysNull) {
+    ThreadAbortException ex;
+    EXPECT_EQ(ex.getExceptionStateProperty(), nullptr);
+}
+
 // ===========================================================================
 // ThreadInterruptedException
 // ===========================================================================

@@ -18,7 +18,11 @@
 
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/Http/ByteArrayContent.hpp"
+#include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/StringContent.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/NotSupportedException.hpp"
+#include "System/UriFormatException.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -48,19 +52,26 @@ static void platformClose(SocketFd fd) { ::close(fd); }
 // URL parser
 // ---------------------------------------------------------------------------
 
+// Verified against real .NET: a malformed request URI fails Uri construction with
+// System.UriFormatException (a FormatException); requesting a scheme HttpClient can't
+// dispatch (here, anything but "http" -- HTTPS/TLS is out of scope for this runtime, see
+// CLAUDE.md's documented deviations) is a System.NotSupportedException-shaped failure, not a
+// format error. Previously every failure path here threw std::invalid_argument -- an
+// unrelated std:: exception type invisible to code catching System::Exception&/
+// System::FormatException&, escaping straight out of a public API.
 HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     ParsedUrl result;
 
     size_t schemeEnd = url.find("://");
     if (schemeEnd == std::string::npos)
-        throw std::invalid_argument("HttpClient: missing scheme in URL: " + url);
+        throw System::UriFormatException("HttpClient: missing scheme in URL: " + url);
 
     result.scheme = url.substr(0, schemeEnd);
     for (char& c : result.scheme)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     if (result.scheme != "http")
-        throw std::invalid_argument(
+        throw System::NotSupportedException(
             "HttpClient: only HTTP is supported (not '" + result.scheme + "'). "
             "HTTPS requires TLS which is not yet implemented.");
 
@@ -84,7 +95,7 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
         try {
             result.port = std::stoi(hostPort.substr(colonPos + 1));
         } catch (...) {
-            throw std::invalid_argument("HttpClient: invalid port in URL: " + url);
+            throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
         }
     } else {
         result.host = hostPort;
@@ -92,7 +103,7 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     }
 
     if (result.host.empty())
-        throw std::invalid_argument("HttpClient: empty host in URL: " + url);
+        throw System::UriFormatException("HttpClient: empty host in URL: " + url);
 
     return result;
 }
@@ -112,7 +123,7 @@ static SocketFd connectToHost(const std::string& host, int port) {
     std::string portStr  = std::to_string(port);
     int rv = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &res);
     if (rv != 0)
-        throw std::runtime_error("HttpClient: DNS resolution failed for '" + host + "'.");
+        throw HttpRequestException("HttpClient: DNS resolution failed for '" + host + "'.");
 
     SocketFd fd = kInvalidSocket;
     for (auto* p = res; p != nullptr; p = p->ai_next) {
@@ -125,7 +136,7 @@ static SocketFd connectToHost(const std::string& host, int port) {
     freeaddrinfo(res);
 
     if (fd == kInvalidSocket)
-        throw std::runtime_error(
+        throw HttpRequestException(
             "HttpClient: could not connect to " + host + ":" + std::to_string(port));
     return fd;
 }
@@ -136,7 +147,7 @@ static void sendAll(SocketFd fd, const std::string& data) {
         int n = static_cast<int>(
             ::send(fd, data.c_str() + sent,
                    static_cast<int>(data.size() - sent), 0));
-        if (n <= 0) throw std::runtime_error("HttpClient: send() failed.");
+        if (n <= 0) throw HttpRequestException("HttpClient: send() failed.");
         sent += static_cast<size_t>(n);
     }
 }
@@ -346,6 +357,11 @@ HttpClient::~HttpClient() {
 std::shared_ptr<HttpResponseMessage> HttpClient::Send(
     std::shared_ptr<HttpRequestMessage> request)
 {
+    // Verified against HttpClient.cs's CheckRequestBeforeSend: every Send/SendAsync overload
+    // validates the request is non-null before touching it. Previously this dereferenced
+    // request immediately with no check -- a null-pointer dereference (UB/crash) instead of
+    // a catchable exception.
+    System::ArgumentNullException::ThrowIfNull(request.get(), "request");
 #if defined(__EMSCRIPTEN__)
     (void)request;
     throw System::PlatformNotSupportedException(
