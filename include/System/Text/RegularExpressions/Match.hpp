@@ -91,17 +91,34 @@ namespace System::Text::RegularExpressions {
             return subMatches_[static_cast<size_t>(index)].value;
         }
 
-        /** @return All capture groups from this match, including group 0 (the whole match) and any named groups. */
+        /**
+         * @brief All capture groups from this match, including group 0 (the whole match) and
+         * any named groups.
+         *
+         * Each Group's Name is the parsed `(?<name>...)`/`(?'name'...)` name when the group
+         * was named, or the numeric index as a string otherwise -- matching real .NET, where
+         * e.g. `Regex.Match("a1", "(\d)").Groups[1].Name` is "1". A prior version of this
+         * method always used the numeric index, ignoring groupNames_ entirely, so a named
+         * group's own Group.Name never reflected the name that was parsed (even though the
+         * *value* was already reachable correctly via GroupCollection's string indexer, which
+         * consults groupNames_ directly).
+         */
         [[nodiscard]] GroupCollection Groups() const {
             std::vector<System::Text::RegularExpressions::Group> groups;
             std::unordered_map<std::string, intcs> nameToIndex;
-            for (size_t i = 0; i < subMatches_.size(); ++i) {
-                const auto& sm = subMatches_[i];
-                groups.emplace_back(sm.matched ? sm.value : std::string(), sm.matched ? sm.index : 0,
-                                     sm.matched ? sm.length : 0, sm.matched, std::to_string(i));
-            }
             for (const auto& [name, idx] : groupNames_) {
                 nameToIndex[name] = idx;
+            }
+            std::unordered_map<intcs, std::string> indexToName;
+            for (const auto& [name, idx] : nameToIndex) {
+                indexToName[idx] = name;
+            }
+            for (size_t i = 0; i < subMatches_.size(); ++i) {
+                const auto& sm = subMatches_[i];
+                auto it = indexToName.find(static_cast<intcs>(i));
+                std::string name = (it != indexToName.end()) ? it->second : std::to_string(i);
+                groups.emplace_back(sm.matched ? sm.value : std::string(), sm.matched ? sm.index : 0,
+                                     sm.matched ? sm.length : 0, sm.matched, std::move(name));
             }
             return GroupCollection(std::move(groups), std::move(nameToIndex));
         }

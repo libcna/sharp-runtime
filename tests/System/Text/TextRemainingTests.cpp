@@ -34,6 +34,8 @@ using System::Text::Encoding;
 using System::Text::RegularExpressions::Regex;
 using System::Text::RegularExpressions::Match;
 using System::Text::RegularExpressions::MatchCollection;
+using System::Text::RegularExpressions::RegexParseException;
+using System::Text::RegularExpressions::RegexParseError;
 
 // ===========================================================================
 // NormalizationForm
@@ -460,6 +462,24 @@ TEST(RegexTests, NextMatch_AnchorDoesNotFalsePositiveOnResumedSearch) {
     EXPECT_EQ(count, 1);
 }
 
+// RegexParseException previously had no Offset property, unlike real .NET's
+// RegexParseException.Offset (the zero-based character offset in the pattern where parsing
+// failed). std::regex_error doesn't expose a comparable position, so it defaults to 0.
+TEST(RegexParseExceptionTests, Offset_DefaultsToZero) {
+    RegexParseException ex(RegexParseError::Unknown, "bad pattern");
+    EXPECT_EQ(ex.getOffsetProperty(), 0);
+    EXPECT_EQ(ex.getErrorProperty(), RegexParseError::Unknown);
+}
+
+TEST(RegexParseExceptionTests, Offset_ExplicitValue_IsStored) {
+    RegexParseException ex(RegexParseError::Unknown, "bad pattern", 7);
+    EXPECT_EQ(ex.getOffsetProperty(), 7);
+}
+
+TEST(RegexTests, InvalidPattern_Throws) {
+    EXPECT_THROW(Regex("["), RegexParseException);
+}
+
 // ===========================================================================
 // Match
 // ===========================================================================
@@ -478,6 +498,32 @@ TEST(MatchTests, FromRegex_IndexAndLength) {
     EXPECT_TRUE(m.getSuccessProperty());
     EXPECT_EQ(m.getIndexProperty(), 3);
     EXPECT_EQ(m.getLengthProperty(), 3);
+}
+
+// Groups()'s per-Group Name previously always used the numeric index as a string, even for
+// named groups -- the name-based indexer (Groups()["name"]) already correctly resolved by
+// name, but Group.Name itself never reflected the parsed (?<name>...) name. Real .NET's
+// convention: named groups report their parsed name; unnamed groups report the numeric
+// index as a string (e.g. Regex.Match("a1","(\d)").Groups[1].Name == "1").
+TEST(MatchTests, Groups_NamedGroup_ReportsParsedName) {
+    Regex r(R"((?<year>\d{4})-(?<month>\d{2}))");
+    Match m = r.Match("2024-06");
+    ASSERT_TRUE(m.getSuccessProperty());
+    auto groups = m.Groups();
+    EXPECT_EQ(groups[0].getNameProperty(), "0");
+    EXPECT_EQ(groups[1].getNameProperty(), "year");
+    EXPECT_EQ(groups[2].getNameProperty(), "month");
+    EXPECT_EQ(groups["year"].getValueProperty(), "2024");
+    EXPECT_EQ(groups["month"].getValueProperty(), "06");
+}
+
+TEST(MatchTests, Groups_UnnamedGroup_ReportsNumericIndexAsName) {
+    Regex r(R"((\d+)-(\w+))");
+    Match m = r.Match("42-abc");
+    ASSERT_TRUE(m.getSuccessProperty());
+    auto groups = m.Groups();
+    EXPECT_EQ(groups[1].getNameProperty(), "1");
+    EXPECT_EQ(groups[2].getNameProperty(), "2");
 }
 
 // ===========================================================================
