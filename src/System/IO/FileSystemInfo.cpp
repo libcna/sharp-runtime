@@ -28,7 +28,12 @@ namespace System::IO {
         }
 
         System::DateTime fromFileClock(std::filesystem::file_time_type ft) {
-            auto sysTime = std::chrono::clock_cast<std::chrono::system_clock>(ft);
+            // file_clock::to_sys() may return a finer-grained duration than
+            // system_clock::time_point (e.g. nanoseconds on libc++/Emscripten vs.
+            // microseconds on libstdc++); to_time_t() only accepts the exact
+            // system_clock::time_point type, so cast explicitly.
+            auto sysTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                std::chrono::file_clock::to_sys(ft));
             return fromUnixTime(std::chrono::system_clock::to_time_t(sysTime));
         }
 
@@ -87,7 +92,7 @@ namespace System::IO {
     void FileSystemInfo::setLastWriteTimeUtcProperty(const System::DateTime& value) {
         longcs unixSeconds = (value.getTicksProperty() - System::DateTime::UnixEpochTicks) / System::DateTime::TicksPerSecond;
         auto sysTime = std::chrono::system_clock::from_time_t(static_cast<std::time_t>(unixSeconds));
-        auto fileTime = std::chrono::clock_cast<std::chrono::file_clock>(sysTime);
+        auto fileTime = std::chrono::file_clock::from_sys(sysTime);
         std::error_code ec;
         std::filesystem::last_write_time(fullPath_, fileTime, ec);
         if (ec) throw IOException("Failed to set last write time of '" + fullPath_.string() + "': " + ec.message());

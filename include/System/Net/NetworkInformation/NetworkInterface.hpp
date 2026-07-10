@@ -35,8 +35,11 @@ namespace System::Net::NetworkInformation {
         SharpRuntime::longcs speed_ = -1;
         bool isReceiveOnly_ = false;
         bool supportsMulticast_ = false;
-        bool supportsIPv4_ = false;
-        bool supportsIPv6_ = false;
+        // Only read by Supports() on the Linux PAL (NetworkInterface.cpp); on other
+        // platforms Supports() is a PlatformNotSupportedException stub that never
+        // reads them, so they'd otherwise trip -Wunused-private-field there.
+        [[maybe_unused]] bool supportsIPv4_ = false;
+        [[maybe_unused]] bool supportsIPv6_ = false;
         PhysicalAddress physicalAddress_ = PhysicalAddress::None;
 
         NetworkInterface(std::string name, NetworkInterfaceType type, OperationalStatus status,

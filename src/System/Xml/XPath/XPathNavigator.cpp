@@ -34,7 +34,7 @@ namespace System::Xml::XPath {
             do {
                 if (localName == getLocalNameProperty() && namespaceURI == getNamespaceURIProperty()) return true;
             } while (MoveToNextAttribute());
-            MoveToParent();
+            (void)MoveToParent();
         }
         return false;
     }
@@ -44,7 +44,7 @@ namespace System::Xml::XPath {
             do {
                 if (name == getLocalNameProperty()) return true;
             } while (MoveToNextNamespace(XPathNamespaceScope::All));
-            MoveToParent();
+            (void)MoveToParent();
         }
         return false;
     }
@@ -132,11 +132,11 @@ namespace System::Xml::XPath {
         SharpRuntime::intcs depth2 = GetDepth(*std::unique_ptr<XPathNavigator>(n2->Clone()));
 
         if (depth1 > depth2) {
-            while (depth1 > depth2) { n1->MoveToParent(); --depth1; }
+            while (depth1 > depth2) { (void)n1->MoveToParent(); --depth1; }
             if (n1->IsSamePosition(*n2)) return System::Xml::XmlNodeOrder::After;
         }
         if (depth2 > depth1) {
-            while (depth2 > depth1) { n2->MoveToParent(); --depth2; }
+            while (depth2 > depth1) { (void)n2->MoveToParent(); --depth2; }
             if (n1->IsSamePosition(*n2)) return System::Xml::XmlNodeOrder::Before;
         }
 
@@ -145,8 +145,8 @@ namespace System::Xml::XPath {
         for (;;) {
             if (!parent1->MoveToParent() || !parent2->MoveToParent()) return System::Xml::XmlNodeOrder::Unknown;
             if (parent1->IsSamePosition(*parent2)) return CompareSiblings(*n1, *n2);
-            n1->MoveToParent();
-            n2->MoveToParent();
+            (void)n1->MoveToParent();
+            (void)n2->MoveToParent();
         }
     }
 

@@ -44,7 +44,7 @@ namespace System::IO
         : FileStream(path, mode, DefaultAccessFor(mode)) {}
 
     FileStream::FileStream(const std::string& path, FileMode mode, FileAccess access)
-        : path_(path), mode_(mode), length_(0), canRead_(false), canWrite_(false)
+        : path_(path), length_(0), canRead_(false), canWrite_(false)
     {
         ValidateModeAndAccess(mode, access);
 

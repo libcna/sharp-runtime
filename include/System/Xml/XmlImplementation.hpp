@@ -24,6 +24,10 @@ namespace System::Xml {
     public:
         XmlImplementation();
         explicit XmlImplementation(std::shared_ptr<XmlNameTable> nt);
+        // CreateDocument() is virtual, so deleting a derived instance through a
+        // std::unique_ptr<XmlImplementation> (as XmlDocument does) requires a virtual
+        // destructor to avoid undefined behavior.
+        virtual ~XmlImplementation() = default;
 
         /**
          * @brief Tests whether the DOM implementation supports a specific feature.

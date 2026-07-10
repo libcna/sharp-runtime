@@ -17,13 +17,11 @@
 
 namespace System::Net::Sockets {
 
-namespace {
 #if !defined(__EMSCRIPTEN__)
+namespace {
     constexpr size_t kNativePathLength = sizeof(sockaddr_un::sun_path); // 108 on Linux
-#else
-    constexpr size_t kNativePathLength = 0;
-#endif
 } // namespace
+#endif
 
 UnixDomainSocketEndPoint::UnixDomainSocketEndPoint(const std::string& path) : path_(path) {
 #if defined(__EMSCRIPTEN__)

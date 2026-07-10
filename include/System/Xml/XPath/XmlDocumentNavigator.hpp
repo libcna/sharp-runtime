@@ -40,7 +40,9 @@ namespace System::Xml::XPath {
     class XmlDocumentNavigator final : public XPathNavigator, public System::Xml::IHasXmlNode {
         enum class Pos { Node, Attribute, Namespace };
 
-        System::Xml::XmlDocument* doc_ = nullptr;
+        // Owning document, mirroring .NET's DocumentXPathNavigator; not read by the currently
+        // implemented (read-only, tree-navigation) subset of XPathNavigator.
+        [[maybe_unused]] System::Xml::XmlDocument* doc_ = nullptr;
         Pos pos_ = Pos::Node;
         System::Xml::XmlNode* node_ = nullptr;         // Pos::Node: current node. Pos::Attribute/Namespace: owning element.
         System::Xml::XmlAttribute* attr_ = nullptr;    // Pos::Attribute: current attribute (stable identity).
