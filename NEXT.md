@@ -1,6 +1,40 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `367357e`) — 11136 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `8a440a2`) — 11142 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 priority item 3 fixed (all 4 memory-safety criticals)
+
+*Branch: `feature/work`, HEAD `8a440a2` — 11142 tests passing (up from 11136 at the top of
+the "top 2 priority items" checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Fixed all four memory-safety criticals from the wave-3 "suggested processing priority" list's
+item 3, each verified against the corresponding real .NET source before fixing:
+
+- **`HttpClient::Send()` null-pointer dereference** — added
+  `ArgumentNullException::ThrowIfNull(request)`, matching `HttpClient.cs`'s
+  `CheckRequestBeforeSend`. Commit `dc02094`.
+- **`Socket::Send/Receive/SendTo/ReceiveFrom` missing bounds validation** — added a
+  `validateBufferArgs()` helper matching `Socket.Tasks.cs`'s `ValidateBufferArguments`
+  exactly (casts offset/count to `uint32_t` before comparing, so a negative value is caught
+  by the same range check as a too-large one). Commit `ab60037`.
+- **`ClientWebSocket::SendAsync`/`ReceiveAsync` missing bounds validation** — added the
+  equivalent `validateWebSocketBuffer()` helper, matching `WebSocketValidate.cs`'s
+  `ValidateBuffer`; validated synchronously before the returned `Task` is constructed,
+  matching real .NET's async-method-validates-synchronously convention (confirmed against
+  `ManagedWebSocket.cs`). Commit `ed80e24`.
+- **`XmlReader` post-EOF out-of-bounds `events[pos]` access** — 8 methods
+  (`getNameProperty`, `getValueProperty`, `getIsEmptyElementProperty`, `MoveToElement`,
+  `MoveToNextAttribute`, `GetAttribute`, `ReadStartElement`, `ReadEndElement`) only checked
+  `pos < 0`, not the upper bound `pos >= events.size()` that `getNodeTypeProperty()` already
+  had — after `Read()` returns false at EOF, `pos` sits exactly at `events.size()`, so any of
+  these called after an ordinary "read until EOF" loop indexed out of bounds. Fixed all 8 to
+  match `getNodeTypeProperty()`'s existing correct check. Commit `8a440a2`.
+
+Each fix has a regression test exercising exactly the previously-broken path. All four items
+from the "suggested processing priority" list's items 1-3 are now done. **Item 4
+(`Utf8JsonWriter` non-ASCII escaping + `MaxDepth`/`JsonDocument` depth-limit enforcement) is
+next**, followed by the remaining ~180 catalogued findings (item 5: "everything else,
+namespace by namespace").
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: top 2 priority items fixed
 
