@@ -109,7 +109,7 @@ namespace System::Net::Mime {
                     throw System::FormatException("The specified content type is invalid.");
                 }
             }
-            parsedParams[name] = value;
+            parsedParams.set(name, value);
         }
 
         mediaType_ = media;
@@ -135,17 +135,17 @@ namespace System::Net::Mime {
 
     void ContentType::setBoundaryProperty(const std::string& value) {
         if (value.empty()) parameters_.Remove("boundary");
-        else parameters_["boundary"] = value;
+        else parameters_.set("boundary", value);
     }
 
     void ContentType::setCharSetProperty(const std::string& value) {
         if (value.empty()) parameters_.Remove("charset");
-        else parameters_["charset"] = value;
+        else parameters_.set("charset", value);
     }
 
     void ContentType::setNameProperty(const std::string& value) {
         if (value.empty()) parameters_.Remove("name");
-        else parameters_["name"] = value;
+        else parameters_.set("name", value);
     }
 
     std::string ContentType::ToString() const {

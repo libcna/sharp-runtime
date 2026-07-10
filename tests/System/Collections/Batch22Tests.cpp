@@ -81,10 +81,19 @@ TEST(OrderedDictionaryBatch22Test, Indexer_Missing_ReturnsEmpty) {
 
 TEST(OrderedDictionaryBatch22Test, Indexer_Mutable_InsertsNewKey) {
     OrderedDictionary d;
-    d["newkey"] = "value";
+    // operator[] is read-only (matches .NET's getter, which never inserts on a miss); use
+    // set() for dict[key]=value-style writes.
+    d.set("newkey", "value");
     EXPECT_TRUE(d.Contains("newkey"));
     EXPECT_EQ(d["newkey"], "value");
     EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+TEST(OrderedDictionaryBatch22Test, Indexer_MissingKey_DoesNotInsert) {
+    OrderedDictionary d;
+    EXPECT_EQ(d["missing"], "");
+    EXPECT_FALSE(d.Contains("missing"));
+    EXPECT_EQ(d.getCountProperty(), 0);
 }
 
 TEST(OrderedDictionaryBatch22Test, GetByIndex) {
@@ -332,6 +341,36 @@ TEST(StringDictionaryBatch22Test, GetValue_MissingReturnsEmpty) {
     EXPECT_EQ(sd.GetValue("missing"), "");
     sd.Add("present", "found");
     EXPECT_EQ(sd.GetValue("PRESENT"), "found");
+}
+
+// operator[] used to be a single non-const `data_[lower(key)]` overload, so even a read-only
+// access via operator[] silently inserted an empty entry, growing Count -- the same
+// phantom-insert-on-read bug fixed in ListDictionary/OrderedDictionary/ConcurrentDictionary.
+TEST(StringDictionaryBatch22Test, OperatorBracket_MissingKey_DoesNotInsert) {
+    StringDictionary sd;
+    EXPECT_EQ(sd["missing"], "");
+    EXPECT_FALSE(sd.ContainsKey("missing"));
+    EXPECT_EQ(sd.getCountProperty(), 0);
+}
+
+TEST(StringDictionaryBatch22Test, Set_InsertsAndOverwrites) {
+    StringDictionary sd;
+    sd.set("k", "v1");
+    EXPECT_EQ(sd["k"], "v1");
+    sd.set("K", "v2"); // case-insensitive key
+    EXPECT_EQ(sd["k"], "v2");
+    EXPECT_EQ(sd.getCountProperty(), 1);
+}
+
+// A key with a UTF-8 multi-byte sequence (high-bit bytes) must not crash or behave as UB.
+// ::tolower(int) is UB for a negative argument other than EOF; passing a signed char with the
+// high bit set previously sign-extended to a negative int before this fix.
+TEST(StringDictionaryBatch22Test, Key_WithHighBitBytes_DoesNotCrash) {
+    StringDictionary sd;
+    std::string key = "caf\xC3\xA9"; // "café"
+    sd.set(key, "value");
+    EXPECT_EQ(sd[key], "value");
+    EXPECT_TRUE(sd.ContainsKey(key));
 }
 
 TEST(StringDictionaryBatch22Test, Remove_Clear) {

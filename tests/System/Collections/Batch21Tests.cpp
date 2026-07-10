@@ -74,9 +74,19 @@ TEST(ListDictionaryBatch21Test, Indexer_Const_NotFound_ReturnsEmpty) {
 
 TEST(ListDictionaryBatch21Test, Indexer_Mutable_Inserts) {
     ListDictionary d;
-    d["newkey"] = std::any(7);
+    // operator[] is read-only (matches .NET's getter, which never inserts on a miss); use
+    // set() for dict[key]=value-style writes.
+    d.set("newkey", std::any(7));
     EXPECT_TRUE(d.Contains("newkey"));
     EXPECT_EQ(std::any_cast<int>(d["newkey"]), 7);
+}
+
+TEST(ListDictionaryBatch21Test, OperatorBracket_MissingKey_DoesNotInsert) {
+    ListDictionary d;
+    auto v = d["missing"];
+    EXPECT_FALSE(v.has_value());
+    EXPECT_FALSE(d.Contains("missing"));
+    EXPECT_EQ(d.getCountProperty(), 0);
 }
 
 TEST(ListDictionaryBatch21Test, Set_InsertsAndOverwrites) {
