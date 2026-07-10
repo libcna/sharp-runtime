@@ -16,6 +16,7 @@
 #include "System/NotSupportedException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/IO/Path.hpp"
 #include "System/IO/File.hpp"
 #include "System/IO/FileInfo.hpp"
@@ -196,6 +197,19 @@ TEST(FileTests, Delete_RemovesFile) {
     File::WriteAllText(p, "temp");
     File::Delete(p);
     EXPECT_FALSE(File::Exists(p));
+}
+
+// Regression test for a wave-3 audit finding: File::Delete used std::filesystem::remove(),
+// which is documented to also remove an empty directory (calling the equivalent of rmdir).
+// Real .NET's File.Delete calls unlink() directly, which can never remove a directory --
+// verified against FileSystem.Unix.cs's DeleteFile. Previously this port would silently
+// delete an empty directory passed to File::Delete instead of throwing.
+TEST(FileTests, Delete_OnDirectory_ThrowsIOException) {
+    std::string dir = tf("delete_me_dir");
+    Directory::CreateDirectory(dir);
+    EXPECT_THROW(File::Delete(dir), System::IO::IOException);
+    EXPECT_TRUE(Directory::Exists(dir));
+    Directory::Delete(dir);
 }
 
 TEST(FileTests, Copy_CreatesDestination) {

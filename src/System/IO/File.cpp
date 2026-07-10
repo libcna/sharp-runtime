@@ -27,8 +27,16 @@ namespace System::IO {
 
     void File::Delete(const std::string& path) {
         ThrowIfNullOrEmpty(path, "path");
-        // .NET: deleting a file that doesn't exist is not an error.
+        // Verified against FileSystem.Unix.cs's DeleteFile: real .NET calls unlink() directly,
+        // which can never remove a directory (fails with EISDIR, translated to a plain
+        // IOException) -- File.Delete never falls back to rmdir. std::filesystem::remove() is
+        // documented to call the equivalent of rmdir when the target is a directory, so it
+        // previously let File::Delete silently delete an empty directory instead of failing.
         std::error_code ec;
+        if (std::filesystem::is_directory(path, ec) && !ec) {
+            throw IOException("Could not delete '" + path + "': Is a directory.");
+        }
+        // .NET: deleting a file that doesn't exist is not an error.
         std::filesystem::remove(path, ec);
         if (ec) throw IOException("Failed to delete file '" + path + "': " + ec.message());
     }
