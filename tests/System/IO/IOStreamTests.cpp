@@ -1615,6 +1615,42 @@ TEST(RandomAccessTests, WriteThenRead_AtOffset_Roundtrip) {
     File::Delete(p);
 }
 
+// Regression test for a wave-3 audit finding: RandomAccess::Write issued a single pwrite()
+// call and silently discarded any bytes it didn't cover on a "short write" (pwrite() can
+// legitimately write fewer bytes than requested), with no error and no way for the
+// void-returning caller to detect the loss. Verified against RandomAccess.Unix.cs's
+// WriteAtOffset, which loops until the whole buffer is written. A single pwrite() call is
+// most likely to write fewer bytes than requested for a large buffer (pwrite() has no
+// mandated minimum below which it must always complete in one call), so this write is
+// intentionally large enough to exercise that path in practice, verifying every byte lands
+// correctly rather than just asserting the total count.
+TEST(RandomAccessTests, Write_LargeBuffer_AllBytesWrittenCorrectly) {
+    std::string p = tf("randomaccess_large.bin");
+    File::Delete(p);
+    int fd = ::open(p.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+    ASSERT_GE(fd, 0);
+
+    constexpr size_t size = 8 * 1024 * 1024;
+    std::vector<uint8_t> data(size);
+    for (size_t i = 0; i < size; ++i) data[i] = static_cast<uint8_t>(i);
+    System::IO::RandomAccess::Write(fd, data.data(), static_cast<intcs>(size), 0);
+
+    EXPECT_EQ(System::IO::RandomAccess::GetLength(fd), static_cast<int64_t>(size));
+
+    std::vector<uint8_t> readback(size);
+    intcs totalRead = 0;
+    while (static_cast<size_t>(totalRead) < size) {
+        intcs n = System::IO::RandomAccess::Read(fd, readback.data() + totalRead,
+                                                   static_cast<intcs>(size) - totalRead, totalRead);
+        ASSERT_GT(n, 0);
+        totalRead += n;
+    }
+    EXPECT_EQ(readback, data);
+
+    ::close(fd);
+    File::Delete(p);
+}
+
 TEST(RandomAccessTests, GetLength_ReflectsFileSize) {
     std::string p = tf("randomaccess_len.bin");
     File::WriteAllText(p, "abcde");
