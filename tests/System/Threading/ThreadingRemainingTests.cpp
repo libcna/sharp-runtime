@@ -622,6 +622,14 @@ TEST(ThreadLocalTests, AfterDispose_SetValue_ThrowsObjectDisposedException) {
     tl.Dispose();
     EXPECT_THROW(tl.setValueProperty(5), System::ObjectDisposedException);
 }
+TEST(ThreadLocalTests, Factory_ReentrantAccess_ThrowsInvalidOperationException) {
+    ThreadLocal<int>* self = nullptr;
+    ThreadLocal<int> tl(std::function<int()>([&]() { return self->getValueProperty(); }));
+    self = &tl;
+    EXPECT_THROW(tl.getValueProperty(), System::InvalidOperationException);
+    // Verify the guard was released, not left permanently stuck for this thread/instance.
+    EXPECT_THROW(tl.getValueProperty(), System::InvalidOperationException);
+}
 
 // ===========================================================================
 // ThreadPool

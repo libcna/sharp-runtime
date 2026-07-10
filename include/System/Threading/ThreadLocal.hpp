@@ -5,7 +5,9 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include "System/IDisposable.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
 
 namespace System::Threading {
@@ -22,6 +24,18 @@ namespace System::Threading {
         static std::unordered_map<const ThreadLocal*, std::unique_ptr<T>>& storageMap() {
             static thread_local std::unordered_map<const ThreadLocal*, std::unique_ptr<T>> map;
             return map;
+        }
+
+        // Verified against ThreadLocal.cs's GetValueSlow()/ThreadLocal_Value_RecursiveCallsToValue:
+        // real .NET detects a value factory that reentrantly ends up accessing this same
+        // instance's Value while the factory is still running and throws
+        // InvalidOperationException rather than let it recurse. This port previously had no such
+        // guard: factory_() ran before the map entry was inserted, so a reentrant
+        // getValueProperty() call on the same thread would find no entry, invoke factory_() again,
+        // and recurse until a (uncatchable) stack overflow.
+        static std::unordered_set<const ThreadLocal*>& inProgress() {
+            static thread_local std::unordered_set<const ThreadLocal*> set;
+            return set;
         }
 
         std::function<T()> factory_;
@@ -55,13 +69,28 @@ namespace System::Threading {
         /**
          * @brief Returns the value for the current thread, initialising it on first access.
          * @throws System::ObjectDisposedException if this instance has been disposed.
+         * @throws System::InvalidOperationException if the value factory reentrantly accesses
+         * this instance's value while still running.
          */
         [[nodiscard]] T& getValueProperty() {
             ThrowIfDisposed();
             auto& map = storageMap();
             auto it = map.find(this);
-            if (it == map.end())
-                it = map.emplace(this, std::make_unique<T>(factory_ ? factory_() : T{})).first;
+            if (it == map.end()) {
+                auto& active = inProgress();
+                if (!active.insert(this).second)
+                    throw System::InvalidOperationException(
+                        "ValueFactory attempted to access the Value property of this instance.");
+                std::unique_ptr<T> value;
+                try {
+                    value = std::make_unique<T>(factory_ ? factory_() : T{});
+                } catch (...) {
+                    active.erase(this);
+                    throw;
+                }
+                active.erase(this);
+                it = map.emplace(this, std::move(value)).first;
+            }
             return *it->second;
         }
 
