@@ -528,6 +528,25 @@ TEST(ThreadingTests, CancellationTokenSource_AfterDispose_GetToken_ThrowsObjectD
     EXPECT_THROW(cts.getTokenProperty(), System::ObjectDisposedException);
 }
 
+TEST(ThreadingTests, CancellationTokenSource_ConcurrentDisposeAndAccess_NoDataRace) {
+    // Regression: disposed_ was previously a plain (non-atomic) bool read by getTokenProperty/
+    // Cancel's ThrowIfDisposed() check and written by Dispose() with no synchronization -- a
+    // genuine data race (undefined behavior) under concurrent access, e.g. under a thread
+    // sanitizer. This test doesn't assert a specific outcome (either "still valid" or
+    // "ObjectDisposedException" are both acceptable depending on timing) -- it only exercises
+    // the concurrent access pattern so a race would be caught by TSan/ASan if reintroduced.
+    for (int iter = 0; iter < 200; ++iter) {
+        CancellationTokenSource cts;
+        std::thread disposer([&] { cts.Dispose(); });
+        std::thread accessor([&] {
+            try { cts.getTokenProperty(); } catch (const System::ObjectDisposedException&) {}
+            try { (void)cts.getIsCancellationRequestedProperty(); } catch (...) {}
+        });
+        disposer.join();
+        accessor.join();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SpinLock
 // ---------------------------------------------------------------------------

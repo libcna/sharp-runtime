@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <exception>
 #include <memory>
 #include <vector>
@@ -22,7 +23,12 @@ namespace System::Threading {
      */
     class CancellationTokenSource {
         std::shared_ptr<Detail::CancellationState> state_ = std::make_shared<Detail::CancellationState>();
-        bool disposed_ = false;
+        // Verified data race: disposed_ was a plain bool read by getTokenProperty()/Cancel()'s
+        // ThrowIfDisposed() check and written by Dispose() with no synchronization -- a genuine
+        // data race (undefined behavior per the C++ memory model) if Dispose() is called
+        // concurrently with any other method from a different thread, a realistic pattern for
+        // a cancellation primitive (e.g. one thread disposing while another checks/cancels).
+        std::atomic<bool> disposed_{false};
 
         void ThrowIfDisposed() const {
             if (disposed_) throw System::ObjectDisposedException("CancellationTokenSource", "The CancellationTokenSource has been disposed.");
