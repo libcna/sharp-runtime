@@ -9,6 +9,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Threading/SynchronizationLockException.hpp"
+#include "System/Threading/Timeout.hpp"
 
 namespace System::Threading {
 
@@ -76,9 +77,24 @@ namespace System::Threading {
             return ok;
         }
 
-        /** Attempts to acquire the lock within the given timeout; returns true if successful. */
+        /**
+         * @brief Attempts to acquire the lock within the given timeout; returns true if successful.
+         *
+         * Verified against Lock.cs's doc comment: Timeout.InfiniteTimeSpan (-1ms) waits
+         * indefinitely, the same as the intcs overload above. This previously passed
+         * Timeout::InfiniteTimeSpan straight through as a negative std::chrono duration, which
+         * try_lock_for treats like a non-blocking try_lock() -- returning almost instantly
+         * instead of blocking indefinitely -- the one call site the session's -1/Infinite fix
+         * pattern (already applied to the intcs overload) had missed.
+         */
         bool TryEnter(const System::TimeSpan& timeout) {
-            bool ok = mtx_.try_lock_for(std::chrono::microseconds(timeout.getTicksProperty() / 10));
+            bool ok;
+            if (timeout.getTicksProperty() == System::Threading::Timeout::InfiniteTimeSpan) {
+                mtx_.lock();
+                ok = true;
+            } else {
+                ok = mtx_.try_lock_for(std::chrono::microseconds(timeout.getTicksProperty() / 10));
+            }
             if (ok) onAcquired();
             return ok;
         }

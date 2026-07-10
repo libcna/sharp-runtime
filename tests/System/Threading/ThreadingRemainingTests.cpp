@@ -458,6 +458,32 @@ TEST(LockTests, EnterScope_RAII_ReleasesOnDestruction) {
     lk.Exit();
 }
 
+// Regression test for a wave-3 audit finding: TryEnter(TimeSpan) didn't special-case
+// Timeout::InfiniteTimeSpan the way the intcs overload above does -- it fell through to
+// try_lock_for with a negative duration, which behaves like a non-blocking try_lock() (returns
+// almost instantly) instead of blocking indefinitely. Verified against Lock.cs's doc comment.
+// This blocks a contending thread on an already-held lock and confirms TryEnter only succeeds
+// once the lock is actually released, rather than returning early.
+TEST(LockTests, TryEnter_InfiniteTimeSpan_BlocksUntilReleased) {
+    Lock lk;
+    lk.Enter();
+    std::atomic<bool> acquired{false};
+    std::atomic<bool> started{false};
+    // The acquiring thread must also be the one to Exit() -- Lock's ownership tracking (like
+    // the underlying std::recursive_timed_mutex) is thread-affine, matching real .NET's Lock.
+    std::thread t([&] {
+        started = true;
+        acquired = lk.TryEnter(System::TimeSpan(System::Threading::Timeout::InfiniteTimeSpan));
+        if (acquired.load()) lk.Exit();
+    });
+    while (!started.load()) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_FALSE(acquired.load()); // still blocked -- lock hasn't been released yet
+    lk.Exit();
+    t.join();
+    EXPECT_TRUE(acquired.load());
+}
+
 // ===========================================================================
 // ManualResetEventSlim
 // ===========================================================================
