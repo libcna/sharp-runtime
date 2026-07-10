@@ -623,6 +623,24 @@ TEST(WebUtilityTests, UrlEncode_UrlDecode_RoundTrip) {
     EXPECT_EQ(WebUtility::UrlDecode(WebUtility::UrlEncode(original)), original);
 }
 
+TEST(WebUtilityTests, UrlDecode_MalformedPercentSequence_LeftUnchanged_DoesNotThrow) {
+    // Regression: previously std::stoi(..., 16) threw an uncaught std::invalid_argument when
+    // neither character after '%' is a valid hex digit. Verified against WebUtility.cs's
+    // UrlDecodeInternal: real .NET never throws here -- a malformed sequence just leaves '%'
+    // as a literal character and continues decoding the rest of the string normally.
+    EXPECT_EQ(WebUtility::UrlDecode("100%complete"), "100%complete");
+}
+
+TEST(WebUtilityTests, UrlDecode_PartiallyValidHexDigit_LeftUnchanged) {
+    // Only one of the two characters after '%' is a valid hex digit -- still malformed.
+    EXPECT_EQ(WebUtility::UrlDecode("100%cZ"), "100%cZ");
+}
+
+TEST(WebUtilityTests, UrlDecode_TrailingIncompletePercentSequence_LeftUnchanged) {
+    EXPECT_EQ(WebUtility::UrlDecode("abc%4"), "abc%4");
+    EXPECT_EQ(WebUtility::UrlDecode("abc%"), "abc%");
+}
+
 // ===========================================================================
 // DecompressionMethods
 // ===========================================================================
