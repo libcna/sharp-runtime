@@ -118,6 +118,42 @@ TEST(TimerTests, ChangeUpdatesInterval) {
     EXPECT_LE(count.load(), snapshot + 1);
 }
 
+// Regression tests for a wave-3 audit finding: constructing with dueTime == Timeout.Infinite
+// (-1) fired the callback immediately instead of never firing until a later Change() call sets
+// a real due time. Verified against TimerQueueTimer.Change()/TimerQueue.UpdateTimer: a timer
+// whose dueTime is UnsignedInfinite is never linked into the firing list.
+TEST(TimerTests, DueTimeInfinite_DoesNotFireUntilChanged) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, -1, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    EXPECT_EQ(count.load(), 0);
+    t.Change(0, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    EXPECT_EQ(count.load(), 1);
+}
+
+TEST(TimerTests, ChangeToInfinite_PausesActivelyRepeatingTimer_ThenResumes) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, 0, 10);
+    std::this_thread::sleep_for(std::chrono::milliseconds(35));
+    ASSERT_GE(count.load(), 2);
+    t.Change(-1, -1);
+    int paused = count.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_LE(count.load(), paused + 1); // allow one in-flight firing at the moment of pausing
+
+    // A single-shot timer (period <= 0) must also be re-armable via a later Change() call,
+    // not permanently dead after its one fire -- verified against TimerQueueTimer.Change(),
+    // which always re-links the timer regardless of its previous state.
+    t.Change(0, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_GT(count.load(), paused);
+}
+
 // ===========================================================================
 // Object — abstract base: concrete stub for testing
 // ===========================================================================

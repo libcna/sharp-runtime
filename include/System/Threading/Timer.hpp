@@ -4,8 +4,10 @@
 #pragma once
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -36,8 +38,13 @@ namespace System::Threading {
             std::atomic<bool>          running{false};
             std::function<void(void*)> callback;
             void*                      arg     = nullptr;
-            std::atomic<intcs>         dueTime{0};
-            std::atomic<intcs>         period{0};
+            // dueTime/period are protected by mtx (not atomic): run() needs to atomically
+            // check-and-wait on them together via cv, which a pair of independent atomics can't
+            // express without a race between the check and the wait.
+            std::mutex                 mtx;
+            std::condition_variable    cv;
+            intcs                      dueTime = 0;
+            intcs                      period  = 0;
         };
 
         std::shared_ptr<State> state_;
@@ -74,26 +81,63 @@ namespace System::Threading {
         /** Copy assignment is not allowed. */
         Timer& operator=(const Timer&) = delete;
 
-        /** @brief Changes the timer's due time and period. Pass -1 to disable. */
+        /**
+         * @brief Changes the timer's due time and period. Pass -1 to disable.
+         * @throws System::ArgumentOutOfRangeException if @p dueTime or @p period is less than -1.
+         */
         void Change(intcs dueTime, intcs period) {
-            state_->dueTime = dueTime;
-            state_->period  = period;
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(dueTime, static_cast<intcs>(-1), "dueTime");
+            System::ArgumentOutOfRangeException::ThrowIfLessThan(period, static_cast<intcs>(-1), "period");
+            {
+                std::lock_guard<std::mutex> lock(state_->mtx);
+                state_->dueTime = dueTime;
+                state_->period  = period;
+            }
+            state_->cv.notify_all();
         }
 
         /** Stops the timer and releases the background thread. */
         void Dispose() {
-            if (state_) state_->running = false;
+            if (state_) {
+                state_->running = false;
+                state_->cv.notify_all();
+            }
             if (thread_.joinable()) thread_.detach();
         }
 
     private:
+        // Verified against TimerQueueTimer.Change()/TimerQueue.UpdateTimer: a timer whose
+        // dueTime is Timeout.Infinite (-1) is never scheduled to fire -- not just when never
+        // started, but also when Change(-1, ...) pauses an already-active timer
+        // (TimerQueueTimer.Change() removes the timer from the queue whenever the new dueTime
+        // is UnsignedInfinite). This port previously only special-cased "dueTime > 0" before
+        // the very first wait, so -1 fell through and fired on the first loop iteration just
+        // like 0 does, and had no way to represent "paused" once past the first fire.
         static void run(std::shared_ptr<State> s) {
-            if (s->dueTime > 0)
-                std::this_thread::sleep_for(std::chrono::milliseconds(s->dueTime.load()));
+            std::unique_lock<std::mutex> lock(s->mtx);
             while (s->running) {
-                if (s->callback) s->callback(s->arg);
-                if (s->period <= 0) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(s->period.load()));
+                while (s->running && s->dueTime == -1) {
+                    s->cv.wait(lock);
+                }
+                if (!s->running) break;
+                intcs due = s->dueTime;
+                lock.unlock();
+                if (due > 0) std::this_thread::sleep_for(std::chrono::milliseconds(due));
+                lock.lock();
+                if (!s->running || s->dueTime == -1) continue; // paused/disposed while sleeping
+                if (s->callback) {
+                    lock.unlock();
+                    s->callback(s->arg);
+                    lock.lock();
+                }
+                if (s->period <= 0) {
+                    // Single-shot: disable further firing until a future Change() re-arms it
+                    // (rather than exiting the loop/thread entirely, so a later Change() call
+                    // can still bring this timer back to life, matching real .NET).
+                    s->dueTime = -1;
+                } else {
+                    s->dueTime = s->period; // schedule the next cycle using the period
+                }
             }
         }
     };
