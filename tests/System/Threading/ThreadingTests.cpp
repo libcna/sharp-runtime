@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
@@ -17,6 +18,7 @@
 #include "System/Threading/ManualResetEvent.hpp"
 #include "System/Threading/AutoResetEvent.hpp"
 #include "System/Threading/CancellationToken.hpp"
+#include "System/Threading/CancellationTokenRegistration.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
 #include "System/Threading/SpinLock.hpp"
 #include "System/Threading/Volatile.hpp"
@@ -545,6 +547,25 @@ TEST(ThreadingTests, CancellationTokenSource_ConcurrentDisposeAndAccess_NoDataRa
         disposer.join();
         accessor.join();
     }
+}
+
+TEST(ThreadingTests, CancellationTokenSource_Cancel_RunsCallbacksInLifoOrder) {
+    // Regression: callbacks were stored in a std::unordered_map, so Cancel()'s collection loop
+    // iterated in arbitrary bucket order unrelated to registration order. Verified against
+    // CancellationTokenSource.cs's ExecuteCallbackHandlers: real .NET fires callbacks in LIFO
+    // order (most-recently-registered first, "deepest first") so nested/child registrations run
+    // before their parents'.
+    CancellationTokenSource cts;
+    CancellationToken tok = cts.getTokenProperty();
+    std::vector<int> order;
+    tok.Register([&] { order.push_back(1); });
+    tok.Register([&] { order.push_back(2); });
+    tok.Register([&] { order.push_back(3); });
+    cts.Cancel();
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(order[0], 3);
+    EXPECT_EQ(order[1], 2);
+    EXPECT_EQ(order[2], 1);
 }
 
 // ---------------------------------------------------------------------------

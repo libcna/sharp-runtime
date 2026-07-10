@@ -66,7 +66,12 @@ namespace System::Threading {
                 std::lock_guard<std::mutex> lock(state_->mutex);
                 if (state_->cancelled.exchange(true)) return;
                 callbacksToRun.reserve(state_->callbacks.size());
-                for (auto& [id, callback] : state_->callbacks) callbacksToRun.push_back(callback);
+                // Verified against CancellationTokenSource.cs's ExecuteCallbackHandlers: real .NET
+                // invokes callbacks in LIFO order (most-recently-registered first, "deepest first")
+                // so nested/child registrations fire before their parents'. state_->callbacks is a
+                // std::map keyed by a monotonically increasing registration id, so a reverse walk
+                // yields exactly that order.
+                for (auto it = state_->callbacks.rbegin(); it != state_->callbacks.rend(); ++it) callbacksToRun.push_back(it->second);
                 state_->callbacks.clear();
             }
             std::vector<std::exception_ptr> exceptions;

@@ -4,9 +4,9 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -19,7 +19,11 @@ namespace System::Threading {
         struct CancellationState {
             std::atomic<bool> cancelled{false};
             std::mutex mutex;
-            std::unordered_map<intcs, std::function<void()>> callbacks;
+            // Ordered (not unordered_map) so Cancel() can walk callbacks in reverse key order.
+            // nextId is monotonically increasing per Register() call, so key order == registration
+            // order and reverse key order == LIFO (most-recently-registered fires first), matching
+            // CancellationTokenSource.cs's ExecuteCallbackHandlers.
+            std::map<intcs, std::function<void()>> callbacks;
             intcs nextId = 0;
         };
     }
