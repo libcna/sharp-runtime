@@ -29,6 +29,19 @@ Specifically:
 
 The dotnet/runtime source is available at https://github.com/dotnet/runtime under the MIT License.
 
+## Third-party components
+
+This project vendors a small number of third-party libraries under `vendor/`, each under its
+own permissive license (embedded in the vendored source itself, plus a standalone `LICENSE`
+file where the upstream project provides one):
+
+- [GoogleTest](https://github.com/google/googletest) (`vendor/googletest`) — BSD 3-Clause, `LICENSE` included.
+- [nlohmann/json](https://github.com/nlohmann/json) (`vendor/nlohmann`) — MIT License, embedded in `json.hpp`.
+- [tinyxml2](https://github.com/leethomason/tinyxml2) (`vendor/tinyxml2`) — zlib License, embedded in `tinyxml2.h`.
+- [miniz](https://github.com/richgel999/miniz) (`vendor/miniz`) — MIT License, embedded in `miniz.c`.
+
+None of these licenses are modified or removed from the vendored source.
+
 ## Permanent deviations from .NET
 
 Some .NET features are intentionally out of scope and will never be ported — reflection
