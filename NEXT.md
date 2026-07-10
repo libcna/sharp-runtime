@@ -1,6 +1,78 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `fe17b29`) — 11216 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `d551656`) — 11227 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — all System.Net core + Sockets criticals now done
+
+*Branch: `feature/work`, HEAD `d551656` — 11227 tests passing (up from 11216 at the top of
+the IO-core-complete checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Finished `System.Net` core + Sockets' 4 listed criticals. As flagged in the previous
+checkpoint, 2 of the original wave-3 findings turned out to already be fixed — verified
+against current source before starting, per the standing "always re-verify, the catalogue is
+stale" discipline established last checkpoint:
+
+- **`Socket::Send/Receive/SendTo/ReceiveFrom` missing bounds validation** — already fixed
+  (the earlier memory-safety pass, commit `ab60037`). No action needed.
+- **`HttpClient`/`ClientWebSocket` bounds-check criticals** (Net.Http/WebSockets slice) —
+  already fixed (same earlier pass, commits `dc02094`/`ed80e24`). No action needed.
+
+Fixed the 2 that were genuinely still open, plus a related finding in the WebUtility slice:
+
+- **`SocketError` never translated from POSIX errno** — verified against
+  `SocketErrorPal.Unix.cs`'s `GetSocketErrorForNativeError`: real .NET translates POSIX errno
+  into the WSA-numbered `SocketError` space before constructing a `SocketException`. This bug
+  was duplicated across **four** separate files (`Socket.cpp`, `TcpClient.cpp` — covering both
+  `TcpClient` and `TcpListener`, `UdpClient.cpp`, `NetworkStream.cpp`), each with its own
+  raw-errno-to-`intcs`-cast socket-syscall error handling. Added a shared internal header
+  (`include/System/Net/Sockets/detail/ErrnoTranslation.hpp`, following the existing `detail/`
+  convention for internal-only logic shared across files) with the full translation table, and
+  wired all four files to use it (Windows path unchanged — WSA codes already match
+  `SocketError`'s numbering). Regression test: `TcpClient::Connect` to a refused port now
+  correctly reports `SocketError::ConnectionRefused` (was observed as the raw errno value 111).
+  Commit `c54b4de`.
+- **`IPAddress` IPv4 parsing via UB-prone `sscanf`** — verified against
+  `IPv4AddressHelper.Common.cs`'s `ParseNonCanonical` (what `IPAddress.Parse`'s IPv4 path
+  actually uses). The old `sscanf("%u.%u.%u.%u%c", ...)` had undefined behavior on segment
+  overflow, accepted a leading `-` via `%u`'s implementation-defined sign handling, and
+  rejected real .NET-valid input (octal/hex segments, "short forms" with fewer than 3 dots
+  where the last segment absorbs the remaining bytes, e.g. `"192.168.1"` == `192.168.0.1`).
+  Replaced with a direct port of the real algorithm (base-detection per segment, an overflow-
+  checked `uint64_t` accumulator, dot-count-dependent combination). One existing test had
+  encoded the old (incorrect) "exactly 4 dotted segments" behavior and was updated; 7 new
+  regression tests cover short forms, single-segment whole-value parsing, hex/octal segments,
+  and all the new rejection cases (trailing garbage, empty segment, too many dots, overflow,
+  leading minus). Commit `297c9a6`.
+- **`WebUtility::UrlDecode` throws `std::invalid_argument` on malformed percent-encoding** —
+  verified against `WebUtility.cs`'s `UrlDecodeInternal`: real .NET never throws here: a
+  malformed `%XX` sequence (invalid hex digit(s), or too few characters remaining) just leaves
+  `%` as a literal character and continues. Replaced `std::stoi(..., 16)` (which throws
+  `std::invalid_argument` when neither hex digit is valid) with a manual, non-throwing hex-
+  digit check. 3 regression tests (fully malformed, partially-valid, and truncated-at-end-of-
+  string percent sequences). Commit `d551656`.
+
+### Wave-3 catalogue: what remains
+
+Threading criticals: done. IO.Compression/Hashing criticals+moderates: done (3 minors left).
+Xml core criticals: done (13 moderate + 8 minor left). IO core criticals: done (10 moderate +
+5 minor left). **`System.Net` core+Sockets criticals: done** (12 moderate + 8 minor left —
+Socket setter validation gaps, IPv6-only-client limitations, `SocketFlags` translation,
+`IPAddress::GetHashCode()` IPv6 truncation, etc.). **Net.Http/WebSockets criticals: done**
+(13 moderate + 4 minor left). Still entirely untouched: Xml.Linq+XPath (21 findings) and
+Threading's 29 moderate + 10 minor findings (lowest priority — do last per the original plan).
+
+**Recommended next session priority:** the wave-3 catalogue's remaining criticals are
+exhausted — every namespace slice's criticals are now fixed. What's left is exclusively
+moderate/minor findings across Net core+Sockets, Net.Http/WebSockets, IO core,
+IO.Compression/Hashing, Xml core, Xml.Linq+XPath, and Threading, plus Xml.Linq+XPath's
+findings entirely untouched (criticals AND moderates AND minors — verify its severity
+breakdown against the "Full findings catalogue" section before assuming only moderates/minors
+remain there). Given the volume, prioritize by real-world impact within each namespace rather
+than strictly by catalogue order — e.g. Threading's remaining moderates include some
+genuinely dangerous items (`SynchronizationContext` fully broken, `CancellationTokenSource.
+disposed_` data race) worth pulling forward despite being labeled "moderate." **Always
+re-verify each finding against current source before fixing — this session repeatedly found
+findings already resolved as side effects of other fixes.**
 
 ## Session checkpoint (2026-07-10, continued again) — all 4 IO core criticals now done
 
