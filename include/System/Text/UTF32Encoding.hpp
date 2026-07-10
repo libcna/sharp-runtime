@@ -59,7 +59,16 @@ namespace System::Text {
             return result;
         }
 
-        /** Decodes a UTF-32 byte range to a UTF-8-encoded string. */
+        /**
+         * @brief Decodes a UTF-32 byte range to a UTF-8-encoded string.
+         *
+         * A 4-byte unit that isn't a valid Unicode scalar value (> U+10FFFF, or a surrogate
+         * value U+D800-U+DFFF) is replaced with U+FFFD, matching .NET's default
+         * DecoderFallback behavior. Without this check, an arbitrary/corrupt 32-bit value
+         * (e.g. 0xFFFFFFFF) would previously reach encodeUtf8() unvalidated and produce a
+         * byte sequence that isn't even structurally valid UTF-8, not just the wrong code
+         * point.
+         */
         [[nodiscard]] std::string GetString(const SharpRuntime::bytecs* data,
                                              SharpRuntime::intcs index,
                                              SharpRuntime::intcs count) const override {
@@ -74,6 +83,7 @@ namespace System::Text {
             }
             for (SharpRuntime::intcs i = start; i + 3 < start + count; i += 4) {
                 uint32_t cp = readUnit(data, i);
+                if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
                 encodeUtf8(cp, result);
             }
             return result;
@@ -104,26 +114,51 @@ namespace System::Text {
                    static_cast<uint32_t>(b3);
         }
 
+        // Validates and decodes one UTF-8 sequence starting at s[i]. Rejects ill-formed input
+        // (bad continuation bytes, overlong encodings, surrogate/out-of-range code points) by
+        // substituting U+FFFD for a single byte and resuming there, matching .NET's default
+        // DecoderFallback replacement behavior, instead of the previous code's silent
+        // acceptance of invalid sequences (verified with a compiled reproduction: a bad
+        // continuation byte, "\xC2\x41", used to decode into a bogus code point instead of
+        // being rejected).
         static void decodeUtf8(const std::string& s, size_t i, uint32_t& codePoint, size_t& length) {
+            auto isContinuation = [](unsigned char b) { return (b & 0xC0) == 0x80; };
             unsigned char c0 = static_cast<unsigned char>(s[i]);
+            uint32_t cp; size_t len;
             if (c0 < 0x80) {
-                codePoint = c0;
-                length = 1;
-            } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size()) {
-                codePoint = ((c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
-                length = 2;
-            } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size()) {
-                codePoint = ((c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
-                            (static_cast<unsigned char>(s[i + 2]) & 0x3F);
-                length = 3;
-            } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size()) {
-                codePoint = ((c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
-                            ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
-                length = 4;
+                cp = c0; len = 1;
+            } else if ((c0 & 0xE0) == 0xC0 && i + 1 < s.size() &&
+                       isContinuation(static_cast<unsigned char>(s[i + 1]))) {
+                cp = (static_cast<uint32_t>(c0 & 0x1F) << 6) | (static_cast<unsigned char>(s[i + 1]) & 0x3F);
+                len = 2;
+                if (cp < 0x80) { codePoint = 0xFFFD; length = 1; return; }
+            } else if ((c0 & 0xF0) == 0xE0 && i + 2 < s.size() &&
+                       isContinuation(static_cast<unsigned char>(s[i + 1])) &&
+                       isContinuation(static_cast<unsigned char>(s[i + 2]))) {
+                cp = (static_cast<uint32_t>(c0 & 0x0F) << 12) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 6) |
+                     (static_cast<unsigned char>(s[i + 2]) & 0x3F);
+                len = 3;
+                if (cp < 0x800) { codePoint = 0xFFFD; length = 1; return; }
+            } else if ((c0 & 0xF8) == 0xF0 && i + 3 < s.size() &&
+                       isContinuation(static_cast<unsigned char>(s[i + 1])) &&
+                       isContinuation(static_cast<unsigned char>(s[i + 2])) &&
+                       isContinuation(static_cast<unsigned char>(s[i + 3]))) {
+                cp = (static_cast<uint32_t>(c0 & 0x07) << 18) | ((static_cast<unsigned char>(s[i + 1]) & 0x3F) << 12) |
+                     ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
+                len = 4;
+                if (cp < 0x10000) { codePoint = 0xFFFD; length = 1; return; }
             } else {
                 codePoint = 0xFFFD;
                 length = 1;
+                return;
             }
+            if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+                codePoint = 0xFFFD;
+                length = 1;
+                return;
+            }
+            codePoint = cp;
+            length = len;
         }
 
         static void encodeUtf8(uint32_t cp, std::string& out) {
