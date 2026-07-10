@@ -302,6 +302,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::setw(2) << std::setfill('0') << hour_ << ':'
                 << std::setw(2) << std::setfill('0') << minute_ << ':'
                 << std::setw(2) << std::setfill('0') << second_;
@@ -322,6 +323,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToLongTimeString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::setw(2) << std::setfill('0') << hour_   << ':'
                 << std::setw(2) << std::setfill('0') << minute_ << ':'
                 << std::setw(2) << std::setfill('0') << second_ << '.'

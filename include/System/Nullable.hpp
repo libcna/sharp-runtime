@@ -147,6 +147,7 @@ namespace System {
                 return value_->ToString();
             } else {
                 std::ostringstream oss;
+                oss.imbue(std::locale::classic());
                 oss << *value_;
                 return oss.str();
             }

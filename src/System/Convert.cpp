@@ -131,6 +131,7 @@ namespace System {
         if (toBase == 10) return std::to_string(value);
         if (toBase == 16) {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::hex << value;
             return oss.str();
         }
@@ -143,6 +144,7 @@ namespace System {
         }
         if (toBase == 8) {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << std::oct << value;
             return oss.str();
         }

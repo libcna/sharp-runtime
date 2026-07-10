@@ -75,6 +75,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << year_ << '-'
                 << std::setw(2) << std::setfill('0') << month_ << '-'
                 << std::setw(2) << std::setfill('0') << day_;

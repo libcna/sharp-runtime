@@ -73,6 +73,7 @@ namespace System {
             char type = format[0];
             int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             if (type == 'X') {
                 oss << std::uppercase << std::hex
                     << std::setfill('0') << std::setw(width)

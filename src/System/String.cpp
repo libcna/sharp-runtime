@@ -111,6 +111,7 @@ namespace System
             int width = spec.size() > 1 ? std::abs(std::stoi(spec.substr(1))) : 0;
             if (sc == 'X' || sc == 'x') {
                 std::ostringstream oss;
+                oss.imbue(std::locale::classic());
                 if (sc == 'X') oss << std::uppercase;
                 oss << std::hex;
                 if (width > 0) oss << std::setw(width) << std::setfill('0');
@@ -136,6 +137,7 @@ namespace System
             char sc = spec[0];
             int prec = spec.size() > 1 ? std::stoi(spec.substr(1)) : 2;
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             if (sc == 'F' || sc == 'f') {
                 oss << std::fixed << std::setprecision(prec) << value;
             } else if (sc == 'G' || sc == 'g') {

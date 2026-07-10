@@ -76,6 +76,7 @@ public:
         char type = format[0];
         int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
         if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
         if (type == 'D' || type == 'd') {

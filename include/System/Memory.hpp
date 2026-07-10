@@ -276,6 +276,7 @@ namespace System {
         [[nodiscard]] std::string ToString() const
         {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << "System.Memory<T>[" << length_ << "]";
             return oss.str();
         }

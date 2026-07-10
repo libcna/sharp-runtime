@@ -22,6 +22,7 @@ namespace detail {
     template<typename T>
     std::string vtItemStr(const T& v) {
         std::ostringstream oss;
+        oss.imbue(std::locale::classic());
         oss << v;
         return oss.str();
     }

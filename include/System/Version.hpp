@@ -127,6 +127,7 @@ namespace System {
          */
         [[nodiscard]] std::string ToString() const {
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << Major << '.' << Minor;
             if (Build    >= 0) oss << '.' << Build;
             if (Revision >= 0) oss << '.' << Revision;
@@ -143,6 +144,7 @@ namespace System {
                 throw System::ArgumentException("fieldCount must be 0-4", "fieldCount");
             if (fieldCount == 0) return "";
             std::ostringstream oss;
+            oss.imbue(std::locale::classic());
             oss << Major;
             if (fieldCount >= 2) oss << '.' << Minor;
             if (fieldCount >= 3) oss << '.' << Build;
