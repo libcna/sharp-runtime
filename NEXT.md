@@ -1,6 +1,112 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `ca0cd96`) — 11160 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `e09c4fb`) — 11173 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: Threading critical findings, batch 2 — 11 of 13 done, only ReaderWriterLockSlim remains
+
+*Branch: `feature/work`, HEAD `e09c4fb` — 11173 tests passing (up from 11160 at the top of
+the batch-1 checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Continued straight through the rest of the wave-3 Threading "Other critical findings" list.
+**11 of 13 are now fixed; only `ReaderWriterLockSlim` remains** (explicitly flagged by the
+original audit as the largest/most invasive item, needing its own session — see below).
+
+- **`ReaderWriterLock::AcquireReaderLock`/`AcquireWriterLock` silently returned on timeout** —
+  verified against `ReaderWriterLock.cs`'s `GetTimeoutException()`: real .NET throws
+  (a private `ReaderWriterLockApplicationException : ApplicationException`, invisible outside
+  the assembly — callers realistically catch the public `ApplicationException` base) rather
+  than returning as if the lock had been acquired. Fixed both methods to throw
+  `System::ApplicationException("The operation has timed out.")` on timeout. 2 regression
+  tests (background thread times out while main thread holds the lock). Commit `e27d591`.
+- **`ValueTask(Task)` only snapshotted `IsCompleted` at construction** — the Task was then
+  discarded entirely, so a still-running task's later completion/fault was never observed, and
+  even an *already*-faulted task's exception was silently dropped (only the completed-ness
+  bool was ever captured). Fixed by storing the wrapped `Task` (`std::optional<Task>`) and
+  delegating all completion/fault queries and `GetAwaiter()` to it live. 2 regression tests
+  (already-faulted task rethrows; still-running task later observes both completion and
+  fault). Commit `719845a`.
+- **Bounded `Channel` with `capacity == 0` permanently deadlocked every write** — verified
+  against `BoundedChannel.cs`'s `TryWrite`: real .NET's queue-transition-from-0-to-1 special
+  case means a capacity-0 channel is observably equivalent to a capacity-1 channel for every
+  publicly-visible `TryWrite`/`WaitToWriteAsync` outcome. Added `effectiveCapacity()`
+  (`capacity == 0 ? 1 : capacity`) used in both "is full" checks. 2 regression tests. Commit
+  `1353024`.
+- **`ThreadLocal<T>::getValueProperty()` had no reentrancy guard** — a factory that
+  (directly or indirectly) called back into the same instance recursed until an uncatchable
+  stack overflow. Verified against `ThreadLocal.cs`'s
+  `ThreadLocal_Value_RecursiveCallsToValue`: added a thread_local in-progress marker set that
+  throws `System::InvalidOperationException` on reentry instead of recursing. 1 regression
+  test. Commit `39d5b4a`.
+- **`LazyInitializer::EnsureInitialized<T>` used a `static std::mutex` scoped per template
+  instantiation of T** — shared across every unrelated call site initializing a different
+  target of the same T; a factory that reentrantly initialized a *different* target of the
+  same type on the same thread self-deadlocked (non-recursive mutex). Verified against
+  `LazyInitializer.cs`: real .NET takes **no lock at all** — it publishes via
+  `Interlocked.CompareExchange`, and racing threads may transiently construct duplicate
+  instances with the loser simply discarded. Switched to the same lock-free CAS approach via
+  `std::atomic_ref<T*>` (deleting the losing candidate, since this runtime has no GC); added
+  the missing null-factory-result → `InvalidOperationException` check. 2 regression tests
+  (null factory throws; reentrant same-type initialization no longer deadlocks). Commit
+  `d83f7f2`.
+- **`AsyncLocal<T>`/`ThreadLocal<T>` destructors only cleaned up the destroying thread's own
+  `thread_local` map entry** — every *other* thread that had touched the instance retained a
+  stale entry keyed by the now-dangling `this` pointer forever; a new instance later allocated
+  at the same address (routine with heap/stack reuse) would silently collide with that stale
+  entry, corrupting data across two logically-unrelated instances (not just leaking). Fixed
+  both types to key their thread_local maps by a monotonically-increasing per-instance ID
+  (`std::atomic<uint64_t>` counter, never reused) instead of by `this` — a new instance can
+  never collide with a stale entry left by a destroyed one, regardless of address reuse (the
+  trade-off, matching this port's existing simplified single-thread-registry design: another
+  thread's stale entry for a destroyed instance is a bounded per-ID leak until that thread
+  exits, not proactively reclaimed). 2 regression tests (one per type) that deterministically
+  reproduce the exact address-reuse scenario via placement-new into a fixed buffer. Commit
+  `a2c76e6`.
+- **`Barrier::SignalAndWait`: post-phase exception only seen by the triggering thread;
+  `FinishPhase` invoked the action while still holding its mutex — reentrant calls deadlocked**
+  — verified against `Barrier.cs`'s `FinishPhase()`/`SignalAndWait()`: real .NET has *every*
+  participant thread check and rethrow `BarrierPostPhaseException` (not just the trigger), and
+  rejects (`InvalidOperationException`) a reentrant call from within the post-phase action via
+  an `_actionCallerID` thread-id check performed *before* attempting any lock. Fixed both:
+  added `lastPostPhaseException_` checked by every waiter after `cv_.wait()` returns, and an
+  `atomic<thread::id> actionCallerId_` checked before acquiring `mutex_` in
+  `SignalAndWait`/`AddParticipant`/`RemoveParticipant`. 2 regression tests (3-participant
+  barrier: all three observe the exception; reentrant call from the action throws instead of
+  hanging). Commit `e09c4fb`.
+
+### `ReaderWriterLockSlim` — the one remaining Threading critical, needs its own session
+
+Explicitly flagged by the original wave-3 audit as "largest/most invasive item on this list —
+likely needs its own session." Three compounding issues, not a quick fix:
+
+1. `TryEnterReadLock/WriteLock/UpgradeableReadLock(intcs millisecondsTimeout)` discard the
+   timeout parameter entirely — always a single non-blocking attempt regardless of what the
+   caller passed.
+2. `LockRecursionPolicy` is ignored entirely — same-thread recursive acquisition **deadlocks**
+   instead of throwing `LockRecursionException` (when the policy is `NoRecursion`, the .NET
+   default) or being allowed (when `SupportsRecursion`).
+3. Recursive `EnterReadLock()` has a bug where the *second* matching `ExitReadLock()` throws
+   (the held-state tracking is `unordered_set` membership-only, not a count) — this
+   **permanently starves all future writers** since the reader count never actually reaches
+   zero from the lock's internal perspective.
+
+Fixing this properly requires: (a) real timed waits per call (not a single non-blocking
+attempt) using the existing `std::chrono` + condition-variable patterns established elsewhere
+in this session's Timeout.Infinite fixes, (b) a per-thread recursion-count map (mirroring this
+session's `ThreadLocal`/`AsyncLocal` ID-keyed pattern, not `this`-pointer-keyed) checked against
+the configured `LockRecursionPolicy`, and (c) switching the reader-held-state tracking from a
+membership set to a count. Verify against `ReaderWriterLockSlim.cs`'s actual bit-packed
+`_lockState` field before implementing — do not guess the semantics.
+
+### Wave-3 catalogue: what remains after this batch
+
+All 13 Threading criticals are done except `ReaderWriterLockSlim` (above). Still entirely
+untouched: the 29 moderate + 10 minor Threading findings, and every other namespace slice —
+Net core+Sockets (24 findings), Net.Http+WebSockets+Security (19), IO core (22),
+IO.Compression+Hashing (13), Xml core (26), Xml.Linq+XPath (21). See "Full findings catalogue"
+further down this file for full per-namespace detail. Recommended next steps, in order:
+`ReaderWriterLockSlim` (finish Threading cleanly) → IO.Compression/Hashing moderates (small,
+same file already touched this session) → Xml core (5 criticals, file already touched this
+session for the memory-safety fix) → Net/IO/Xml remainder.
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: Threading critical findings, batch 1 (5 fixed)
 
