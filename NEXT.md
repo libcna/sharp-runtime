@@ -1,6 +1,84 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `241f881`) — 11185 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `0cbc2a3`) — 11205 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — IO.Compression/Hashing moderates done; all 5 Xml core criticals now done
+
+*Branch: `feature/work`, HEAD `0cbc2a3` — 11205 tests passing (up from 11185 at the top of
+the Threading-complete checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Continued the wave-3 catalogue per the recommended order: IO.Compression/Hashing moderates,
+then Xml core criticals (both namespaces this session had already touched files in).
+
+### IO.Compression + Hashing + IsolatedStorage
+
+- **Critical #3 (`DeflateStream`/`GZipStream` bare `std::runtime_error`) and the matching
+  "rest of `ZipArchive`'s failure paths" moderate finding were already resolved** — verified
+  all three files now consistently throw `System::IO::IOException`/`InvalidDataException`,
+  not `std::runtime_error`. No fix needed; likely already addressed as a side effect of the
+  earlier ZipArchive data-loss commit (`568323a`) or the finding was already stale when audited.
+- **`GZipEncoder::GetMaxCompressedLength()` omitted the `+12` gzip framing overhead** — GZip's
+  18-byte overhead (10-byte header + 8-byte CRC32/size trailer) is 12 bytes more than the
+  6-byte zlib overhead already included in `DeflateEncoder`'s `compressBound()`-derived bound.
+  Verified against `GZipEncoder.cs`; added the `+12` adjustment and matching overflow guard.
+  Commit `a5c1fbe`.
+- **`IsolatedStorageFile`: disposed state never checked, `DeleteDirectory` always recursive,
+  `Quota` inherited the base's `0`** — verified against `IsolatedStorageFile.cs`'s
+  `EnsureStoreIsValid()`/`DeleteDirectory`/`Quota`. Added `throwIfDisposed()` to all
+  file/directory operations (every operation remained silently usable after `Close()`);
+  switched `DeleteDirectory` from `remove_all` (recursive) to `remove` (non-recursive, fails
+  on non-empty — matches `Directory.Delete(path, false)`; `Remove()`'s whole-store teardown
+  correctly stays recursive); added the `getQuotaProperty()` override returning
+  `longcs::max()`. Also found and fixed a related, more precise version of the "path
+  null/empty validation" finding: real .NET's `CopyFile`/`MoveFile`/`MoveDirectory` (but *not*
+  `DeleteFile`/`CreateDirectory`/etc.) use `ArgumentException.ThrowIfNullOrEmpty` — added that
+  validation only to those three methods, matching the real per-method distinction rather than
+  applying it blanket. Commit `6da3e2d`.
+- **"IsolatedStorageFile methods skip path-null/empty validation" (the blanket framing) does
+  not hold once checked**: most of those methods use `ArgumentNullException.ThrowIfNull` in
+  real .NET (null-only), which has no C++ translation since `std::string` cannot be null —
+  nothing to fix there. Not a stale finding overall (the 3 methods above genuinely needed it),
+  just imprecisely scoped in the original catalogue entry.
+- Not yet touched: the 3 minor findings (`DeflateEncoder::GetMaxCompressedLength()` 32-bit
+  truncation on >4GiB input, Application/Assembly-scope isolated storage sharing a root,
+  `IsolatedStorageException` never setting its HResult).
+
+### Xml core: all 5 criticals now done
+
+1. **`XmlReader.cpp` OOB access** — already fixed earlier this session (wave-3 priority item 3,
+   commit `8a440a2`).
+2. **`XmlConvert` `"Infinity"`/`"INF"` token mismatch** — verified against `XmlConvert.cs`:
+   real `XmlConvert.ToString(float/double)` uses the XML Schema lexical-space tokens
+   `"INF"`/`"-INF"`, and `ToSingle`/`ToDouble` trim XML whitespace then recognize those tokens
+   before falling through to ordinary parsing. Added the special-casing directly in
+   `XmlConvert`'s four methods (not in `System::Single`/`Double`, which are correct for
+   .NET's own general-purpose `ToString()`/`Parse()` contract). Commit `dc715e4`.
+3. **`XmlNode::getInnerXmlProperty()`/`getOuterXmlProperty()` pretty-printed instead of
+   producing exact markup** — `tinyxml2::XMLPrinter` defaults to `compact=false`. Fixed both
+   to construct with `compact=true`. Commit `0cbc2a3`.
+4. **`XmlAttribute::getNamespaceURIProperty()` always `""`** and **5. `CloneNode()` always
+   `nullptr`** — both inherited from `XmlNode`'s defaults, which key off `native_`, a field
+   `XmlAttribute` never sets (tinyxml2 ties attributes directly to their owner element, so
+   this port tracks the owner separately via `ownerElementNative_`). Added `XmlAttribute`-
+   specific overrides: `getNamespaceURIProperty()` walks ancestors from `ownerElementNative_`
+   for the nearest `xmlns:prefix` declaration, correctly returning `""` for unprefixed
+   attributes (default `xmlns` does not apply to attributes, verified against the XML
+   Namespaces spec and `XmlAttribute.cs`); `CloneNode()` creates a new unattached attribute via
+   `doc->CreateAttribute()` and copies the value (always a full clone, matching real .NET
+   ignoring the `deep` parameter for attributes). This also fixes
+   `XmlNamedNodeMap::GetNamedItem(localName, namespaceURI)` for prefixed attributes, since it
+   dispatches virtually through the now-fixed property. Commit `4322912`.
+
+### Wave-3 catalogue: what remains
+
+Threading criticals: done. IO.Compression/Hashing criticals+moderates: done (3 minors left).
+Xml core criticals: done (13 moderate + 8 minor Xml-core findings remain). Still entirely
+untouched: Net core+Sockets (24 findings), Net.Http+WebSockets+Security (19), IO core (22
+findings — `MemoryStream::Write` silent no-op and 3 other criticals await), Xml.Linq+XPath
+(21), and Threading's 29 moderate + 10 minor findings. See "Full findings catalogue" further
+down this file. Recommended next: **IO core's 7 criticals** (real, common-path bugs — silent
+write no-ops, unconditional file overwrite on Move, stale cached FileStream.Length,
+`leaveOpen` ignored) — same severity tier as what's just been cleared, not yet started.
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: all 13 Threading criticals now done (ReaderWriterLockSlim finished)
 
