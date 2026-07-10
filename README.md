@@ -113,6 +113,15 @@ cmake --build build-no-tests --parallel 4
   g++ -fsyntax-only -std=c++23 -Iinclude -Ivendor /tmp/tc.cpp
   ```
   (or run `scripts/source_header_inventory.py`, which reports the same class of issue at scale).
+- **Generating API documentation**: `Doxyfile` at the repo root is configured to scan `include/`
+  and `README.md` recursively (excluding `include/vendor`) and write HTML output to
+  `docs/generated/html` (git-ignored — it's build output, not checked in):
+  ```bash
+  mkdir -p docs/generated && doxygen Doxyfile
+  ```
+  Open `docs/generated/html/index.html` in a browser. A clean run produces no warnings in
+  Doxygen's own log; if it does, that's a real doc-comment issue (e.g. a `@param` name that
+  doesn't match the function signature) and should be fixed, not ignored.
 
 ---
 
