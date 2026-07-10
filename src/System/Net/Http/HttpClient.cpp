@@ -21,6 +21,8 @@
 #include "System/Net/Http/HttpRequestException.hpp"
 #include "System/Net/Http/StringContent.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/NotSupportedException.hpp"
+#include "System/UriFormatException.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -50,19 +52,26 @@ static void platformClose(SocketFd fd) { ::close(fd); }
 // URL parser
 // ---------------------------------------------------------------------------
 
+// Verified against real .NET: a malformed request URI fails Uri construction with
+// System.UriFormatException (a FormatException); requesting a scheme HttpClient can't
+// dispatch (here, anything but "http" -- HTTPS/TLS is out of scope for this runtime, see
+// CLAUDE.md's documented deviations) is a System.NotSupportedException-shaped failure, not a
+// format error. Previously every failure path here threw std::invalid_argument -- an
+// unrelated std:: exception type invisible to code catching System::Exception&/
+// System::FormatException&, escaping straight out of a public API.
 HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     ParsedUrl result;
 
     size_t schemeEnd = url.find("://");
     if (schemeEnd == std::string::npos)
-        throw std::invalid_argument("HttpClient: missing scheme in URL: " + url);
+        throw System::UriFormatException("HttpClient: missing scheme in URL: " + url);
 
     result.scheme = url.substr(0, schemeEnd);
     for (char& c : result.scheme)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     if (result.scheme != "http")
-        throw std::invalid_argument(
+        throw System::NotSupportedException(
             "HttpClient: only HTTP is supported (not '" + result.scheme + "'). "
             "HTTPS requires TLS which is not yet implemented.");
 
@@ -86,7 +95,7 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
         try {
             result.port = std::stoi(hostPort.substr(colonPos + 1));
         } catch (...) {
-            throw std::invalid_argument("HttpClient: invalid port in URL: " + url);
+            throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
         }
     } else {
         result.host = hostPort;
@@ -94,7 +103,7 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     }
 
     if (result.host.empty())
-        throw std::invalid_argument("HttpClient: empty host in URL: " + url);
+        throw System::UriFormatException("HttpClient: empty host in URL: " + url);
 
     return result;
 }
