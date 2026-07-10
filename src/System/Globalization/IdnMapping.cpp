@@ -90,6 +90,18 @@ int IdnMapping::decodeDigit(char c) {
     throw System::ArgumentException("IdnMapping: invalid Punycode digit.");
 }
 
+// Verified against IdnMapping.cs's ValidateStd3: only alphanumerics and a hyphen not
+// adjacent to a label boundary are allowed; codepoints above 0x7F are unrestricted here
+// (Std3 only constrains the ASCII subset -- non-ASCII chars go through Nameprep instead,
+// which this port does not implement).
+void IdnMapping::validateStd3Char(char32_t c, bool nextToLabelBoundary) {
+    if (c > 0x7F) return;
+    if (c <= ',' || c == '/' || (c >= ':' && c <= '@') ||
+        (c >= '[' && c <= '`') || (c >= '{' && c <= 0x7F) ||
+        (c == '-' && nextToLabelBoundary))
+        throw System::ArgumentException("IdnMapping: character is not allowed under UseStd3AsciiRules.");
+}
+
 // Encode one label (no dots) to Punycode without the "xn--" prefix.
 // Returns the empty string if the label is already pure ASCII.
 std::string IdnMapping::encodeLabel(const std::u32string& label) {
@@ -156,6 +168,12 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
         if (label[i] == '-') { delimPos = i; break; }
     }
 
+    // A delimiter as the very last character means zero extended code points followed it --
+    // never produced by encodeLabel() and rejected by real .NET (IdnMapping.cs's
+    // PunycodeDecode: "Trailing - not allowed").
+    if (delimPos == static_cast<int>(label.size()) - 1)
+        throw System::ArgumentException("IdnMapping: malformed Punycode (trailing delimiter).");
+
     // Copy basic code points
     int asciiStart = 0;
     if (delimPos > 0) {
@@ -198,6 +216,16 @@ std::u32string IdnMapping::decodeLabel(const std::string& label) {
 // Public API
 // ---------------------------------------------------------------------------
 
+namespace {
+    bool equalsIgnoreCaseAscii(const std::string& a, const std::string& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    }
+}
+
 std::string IdnMapping::GetAscii(const std::string& unicode) const {
     if (unicode.empty()) throw System::ArgumentException("IdnMapping: empty input.");
 
@@ -222,9 +250,17 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
         std::u32string label(input.begin() + static_cast<long>(start),
                               input.begin() + static_cast<long>(end));
 
+        if (label.size() > static_cast<size_t>(LabelMax))
+            throw System::ArgumentException("IdnMapping: label exceeds 63 characters.");
+
         // Check if label is all ASCII
         bool allAscii = true;
         for (char32_t c : label) if (!isBasic(c)) { allAscii = false; break; }
+
+        if (useStd3_) {
+            for (size_t i = 0; i < label.size(); ++i)
+                validateStd3Char(label[i], i == 0 || i == label.size() - 1);
+        }
 
         if (allAscii) {
             // Pass through lowercased
@@ -232,8 +268,11 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
                 result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         } else {
             // Encode as Punycode
-            result += "xn--";
-            result += encodeLabel(label);
+            std::string encoded = "xn--";
+            encoded += encodeLabel(label);
+            if (encoded.size() > static_cast<size_t>(LabelMax))
+                throw System::ArgumentException("IdnMapping: encoded label exceeds 63 characters.");
+            result += encoded;
         }
 
         if (end < input.size()) result += '.'; // keep dot separator
@@ -246,6 +285,21 @@ std::string IdnMapping::GetAscii(const std::string& unicode) const {
         throw System::ArgumentException("IdnMapping: encoded name exceeds 255 characters.");
 
     return result;
+}
+
+std::string IdnMapping::GetAscii(const std::string& unicode, SharpRuntime::intcs index) const {
+    if (index < 0) throw System::ArgumentOutOfRangeException("index");
+    if (static_cast<size_t>(index) > unicode.size()) throw System::ArgumentOutOfRangeException("index");
+    return GetAscii(unicode.substr(static_cast<size_t>(index)));
+}
+
+std::string IdnMapping::GetAscii(const std::string& unicode, SharpRuntime::intcs index, SharpRuntime::intcs count) const {
+    if (index < 0) throw System::ArgumentOutOfRangeException("index");
+    if (count < 0) throw System::ArgumentOutOfRangeException("count");
+    if (static_cast<size_t>(index) > unicode.size()) throw System::ArgumentOutOfRangeException("index");
+    if (static_cast<size_t>(index) + static_cast<size_t>(count) > unicode.size())
+        throw System::ArgumentOutOfRangeException("unicode");
+    return GetAscii(unicode.substr(static_cast<size_t>(index), static_cast<size_t>(count)));
 }
 
 std::string IdnMapping::GetUnicode(const std::string& ascii) const {
@@ -266,6 +320,9 @@ std::string IdnMapping::GetUnicode(const std::string& ascii) const {
 
         std::string label = ascii.substr(start, end - start);
 
+        if (label.size() > static_cast<size_t>(LabelMax))
+            throw System::ArgumentException("IdnMapping: label exceeds 63 characters.");
+
         // Case-insensitive check for "xn--" prefix
         bool isPunycode = label.size() >= 4 &&
             (label[0] == 'x' || label[0] == 'X') &&
@@ -285,7 +342,28 @@ std::string IdnMapping::GetUnicode(const std::string& ascii) const {
         start = end + 1;
     }
 
+    // Output name MUST obey IDNA rules & round-trip through GetAscii (casing differences
+    // allowed) -- verified against IdnMapping.cs's GetUnicodeInvariant.
+    std::string roundtrip = GetAscii(result);
+    if (!equalsIgnoreCaseAscii(roundtrip, ascii))
+        throw System::ArgumentException("IdnMapping: decoded name does not round-trip through GetAscii.");
+
     return result;
+}
+
+std::string IdnMapping::GetUnicode(const std::string& ascii, SharpRuntime::intcs index) const {
+    if (index < 0) throw System::ArgumentOutOfRangeException("index");
+    if (static_cast<size_t>(index) > ascii.size()) throw System::ArgumentOutOfRangeException("index");
+    return GetUnicode(ascii.substr(static_cast<size_t>(index)));
+}
+
+std::string IdnMapping::GetUnicode(const std::string& ascii, SharpRuntime::intcs index, SharpRuntime::intcs count) const {
+    if (index < 0) throw System::ArgumentOutOfRangeException("index");
+    if (count < 0) throw System::ArgumentOutOfRangeException("count");
+    if (static_cast<size_t>(index) > ascii.size()) throw System::ArgumentOutOfRangeException("index");
+    if (static_cast<size_t>(index) + static_cast<size_t>(count) > ascii.size())
+        throw System::ArgumentOutOfRangeException("ascii");
+    return GetUnicode(ascii.substr(static_cast<size_t>(index), static_cast<size_t>(count)));
 }
 
 } // namespace System::Globalization
