@@ -81,6 +81,39 @@ cmake -S . -B build-no-tests -DSHARP_RUNTIME_BUILD_TESTS=OFF
 cmake --build build-no-tests --parallel 4
 ```
 
+## Build troubleshooting
+
+- **`vendor/googletest is missing` (`FATAL_ERROR` from CMake)** — the git submodule wasn't
+  initialized. Run `git submodule update --init --recursive` from the repo root.
+- **A new `.cpp`/`.hpp` file doesn't seem to be picked up** — `src/*.cpp` and `tests/*.cpp` are
+  auto-discovered via `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)`, so a plain `cmake --build`
+  re-runs CMake's configure step automatically when the file list changes (you'll see
+  `-- GLOB mismatch!` in the build output). If a build still doesn't pick up a new file, force a
+  reconfigure: `cmake -S . -B build` before building.
+- **Isolating warnings from a large build log**:
+  ```bash
+  cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
+  ```
+  The build must produce zero output from this command before any commit (CLAUDE.md rule #1).
+- **Running one test suite instead of the full ~10 900+ suite**: `./build/SharpRuntimeTests
+  --gtest_filter="SuiteName.*"` (standard GoogleTest filter syntax — see
+  `scripts/local_ci_check.sh` for a full build+test gate you can run locally before pushing).
+- **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
+  and neither has been wired into CI, but both are real, working, verified targets (not
+  aspirational): `x86_64-w64-mingw32-g++` and `emcmake cmake` both build the `SHARP_RUNTIME`
+  library target cleanly as of the fixes tracked under stabilization tickets #40 (Windows) and
+  #41 (Emscripten) — see those tickets' notes in `plan.sqlite3` for the exact blockers found and
+  fixed, and for what wasn't verified (the test binary itself is not built under either
+  cross-compilation target — GoogleTest isn't cross-compiled for wasm/MinGW in this repo).
+- **A header fails to compile when included on its own but works in the full build** — this
+  usually means the header is relying on a transitive `#include` pulled in by whatever included
+  it first, rather than including everything it uses itself. Check with:
+  ```bash
+  echo '#include "System/Some/Header.hpp"' > /tmp/tc.cpp
+  g++ -fsyntax-only -std=c++23 -Iinclude -Ivendor /tmp/tc.cpp
+  ```
+  (or run `scripts/source_header_inventory.py`, which reports the same class of issue at scale).
+
 ---
 
 # 🗂️ Tracking: `plan.sqlite3`
@@ -126,6 +159,39 @@ sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE status
 # Overall progress
 sqlite3 plan.sqlite3 "SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;"
 ```
+
+### Ticket completion checklist
+
+A ticket may be marked `done` only when **all** of the following hold (this is the pattern
+every stabilization ticket in this repo's history has actually followed — not aspirational):
+
+1. **Claim verified against the real .NET source, not memory or an audit finding taken on
+   faith.** If the ticket concerns behavior that should match .NET, the relevant file(s) under
+   `/rv/tmp/runtime/src/libraries/` were actually read for this ticket — an audit agent's or a
+   prior session's finding is a lead to verify, not a fact to act on directly (audit findings in
+   this repo's history have been stale/wrong more than once; always re-check against current
+   source before fixing).
+2. **Real bugs fixed, not papered over.** If a genuine behavioral gap was found, either fix it or
+   explicitly document *why not* (disproportionate scope, needs a user decision, permanent
+   deviation) — never silently narrow the ticket's scope to avoid the harder part.
+3. **Clean build.** `cmake --build build --parallel 4` — zero errors, zero warnings
+   (`scripts/local_ci_check.sh` automates this check).
+4. **Tests updated and passing.** Any test that encoded the *old* (buggy) behavior as expected is
+   fixed, not left red or deleted. New regression tests exist for anything that was actually
+   fixed — a test that would have caught the bug before the fix, not just a test that happens to
+   pass after it. `./build/SharpRuntimeTests` — zero failures.
+5. **Committed and pushed to `feature/work`** (never `develop`/`master` without explicit
+   per-action approval) with a commit message that states what was wrong, how it was verified,
+   and the ticket number.
+6. **`plan.sqlite3` updated**: `status='done'`, `updated_at=datetime('now')`, and `notes` filled
+   in with enough detail (what was checked, what was found, commit hash, what — if anything —
+   was deliberately deferred and why) that a future session doesn't have to redo the
+   investigation to know whether the ticket is *actually* resolved.
+
+If any of 1–4 can't be satisfied safely (e.g. the fix needs a user decision per CLAUDE.md rule
+#10, or the "bug" turns out to be a documented permanent deviation), the ticket should be
+`blocked`, `needs_user`, or `wontfix` instead of `done` — never `done` with an unresolved caveat
+buried in the notes.
 
 ---
 
