@@ -67,7 +67,12 @@ namespace System::IO {
                                                   const std::string& searchPattern) {
         if (!Exists(path)) throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
         // Convert glob pattern (*.txt) to regex
-        std::string pat = searchPattern;
+        // Verified against FileSystemName.cs's TranslateWin32Expression: real .NET
+        // special-cases "*.*" (legacy DOS 8.3 compatibility) to match every file, with or
+        // without an extension -- a literal glob-to-regex translation of "*.*" instead demands
+        // a literal '.' character in the filename, silently excluding every extensionless file
+        // from the result.
+        std::string pat = (searchPattern == "*.*") ? "*" : searchPattern;
         // Escape regex special chars except * and ?
         std::string regexPat;
         for (char c : pat) {

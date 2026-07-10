@@ -480,6 +480,23 @@ TEST(DirectoryTests, GetFiles_NonExistentDir_ThrowsDirectoryNotFoundException) {
                  System::IO::DirectoryNotFoundException);
 }
 
+// Regression test for a wave-3 audit finding: GetFiles(path, "*.*") converted the pattern
+// literally to a regex requiring a literal '.' in the filename, silently excluding every
+// extensionless file. Verified against FileSystemName.cs's TranslateWin32Expression, which
+// special-cases "*.*" (legacy DOS 8.3 compatibility) to match every file, with or without an
+// extension.
+TEST(DirectoryTests, GetFiles_StarDotStarPattern_IncludesExtensionlessFiles) {
+    std::string dir = tf("getfiles_stardotstar_dir");
+    Directory::CreateDirectory(dir);
+    File::WriteAllText(dir + "/README", "no extension");
+    File::WriteAllText(dir + "/notes.txt", "has extension");
+
+    auto files = Directory::GetFiles(dir, "*.*");
+    EXPECT_EQ(files.size(), 2u);
+
+    Directory::Delete(dir, true);
+}
+
 TEST(DirectoryTests, GetDirectories_NonExistentDir_ThrowsDirectoryNotFoundException) {
     EXPECT_THROW((void)Directory::GetDirectories(tf("no_such_dir_for_getdirs_xyz")),
                  System::IO::DirectoryNotFoundException);
