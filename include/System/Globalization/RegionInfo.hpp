@@ -22,7 +22,11 @@ class RegionInfo {
     std::string threeLetterISORegionName_;
     std::string currencySymbol_;
     std::string isoCurrencySymbol_;
-    bool isMetric_ = true;
+    // This class only fully initializes the US region (see class doc comment), and the US
+    // uses the customary (non-metric) measurement system -- real .NET's
+    // RegionInfo("US").IsMetric is false (RegionInfo.cs's IsMetric derives from
+    // CultureData.MeasurementSystem, which is non-metric for en-US).
+    bool isMetric_ = false;
 
 public:
     /**

@@ -203,9 +203,11 @@ TEST(RegionInfoTests, ISOCurrencySymbol_Default) {
     EXPECT_EQ(r.getISOCurrencySymbolProperty(), "USD");
 }
 
-TEST(RegionInfoTests, IsMetric_DefaultTrue) {
+// The US uses the customary (non-metric) measurement system; real .NET's
+// RegionInfo("US").IsMetric is false (RegionInfo.cs).
+TEST(RegionInfoTests, IsMetric_US_IsFalse) {
     RegionInfo r("US");
-    EXPECT_TRUE(r.getIsMetricProperty());
+    EXPECT_FALSE(r.getIsMetricProperty());
 }
 
 TEST(RegionInfoTests, CurrentRegion_NameIsUS) {
