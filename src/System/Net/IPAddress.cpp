@@ -398,14 +398,30 @@ namespace System::Net {
 
     intcs IPAddress::GetHashCode() const {
         if (isIPv6_) {
-            return System::HashCode::Combine(numbers_[0], numbers_[1], numbers_[2], numbers_[3], addressOrScopeId_);
+            // Verified against IPAddress.cs's GetHashCode: real .NET combines all 128 bits of
+            // the address (packed as four uint32 values spanning all 8 numbers_ groups) plus
+            // the scope ID. This previously combined only numbers_[0..3] (the first 64 bits),
+            // ignoring numbers_[4..7] entirely -- two different IPv6 addresses sharing the same
+            // /64 prefix but differing only in their host suffix (the common case for
+            // SLAAC/EUI-64-derived addresses) always hashed identically.
+            uint32_t p0 = (static_cast<uint32_t>(numbers_[0]) << 16) | numbers_[1];
+            uint32_t p1 = (static_cast<uint32_t>(numbers_[2]) << 16) | numbers_[3];
+            uint32_t p2 = (static_cast<uint32_t>(numbers_[4]) << 16) | numbers_[5];
+            uint32_t p3 = (static_cast<uint32_t>(numbers_[6]) << 16) | numbers_[7];
+            return System::HashCode::Combine(p0, p1, p2, p3, addressOrScopeId_);
         }
         return System::HashCode::Combine(addressOrScopeId_);
     }
 
     bool IPAddress::IsLoopback(const IPAddress& address) {
         if (address.isIPv6_) {
-            return address == IPv6Loopback;
+            // Verified against IPAddress.cs's IsLoopback: real .NET also treats the IPv4-mapped
+            // representation of 127.0.0.1 (::ffff:127.0.0.1, s_loopbackMappedToIPv6) as
+            // loopback, not just the canonical ::1 -- this port previously checked only
+            // IPv6Loopback, silently reporting false for a real loopback address.
+            static const IPAddress loopbackMappedToIPv6(
+                std::array<bytecs, 16>{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 127, 0, 0, 1}, 0);
+            return address == IPv6Loopback || address == loopbackMappedToIPv6;
         }
         uint32_t loopbackMask = LoopbackMaskHostOrder;
         return (address.addressOrScopeId_ & loopbackMask) == (Loopback.addressOrScopeId_ & loopbackMask);

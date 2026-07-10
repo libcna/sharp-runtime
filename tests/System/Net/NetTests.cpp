@@ -295,6 +295,14 @@ TEST(IPAddressIPv6Tests, IsLoopback_IPv6) {
     EXPECT_FALSE(IPAddress::IsLoopback(IPAddress::Parse("2001:db8::1")));
 }
 
+// Regression test for a wave-3 audit finding: IsLoopback only checked equality against ::1,
+// silently returning false for the IPv4-mapped loopback representation. Verified against
+// IPAddress.cs's IsLoopback, which explicitly also checks
+// s_loopbackMappedToIPv6 (::ffff:127.0.0.1).
+TEST(IPAddressIPv6Tests, IsLoopback_IPv4MappedLoopback_ReturnsTrue) {
+    EXPECT_TRUE(IPAddress::IsLoopback(IPAddress::Parse("::ffff:127.0.0.1")));
+}
+
 TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
     EXPECT_TRUE(IPAddress::Parse("fe80::1").getIsIPv6LinkLocalProperty());
     EXPECT_FALSE(IPAddress::Parse("2001:db8::1").getIsIPv6LinkLocalProperty());
@@ -302,6 +310,23 @@ TEST(IPAddressIPv6Tests, IsIPv6LinkLocal) {
 
 TEST(IPAddressIPv6Tests, Equality) {
     EXPECT_EQ(IPAddress::Parse("2001:db8::1"), IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001"));
+}
+
+// Regression test for a wave-3 audit finding: GetHashCode() only combined numbers_[0..3] (the
+// first 64 bits), so two IPv6 addresses sharing a /64 prefix but differing only in their host
+// suffix -- the common case for SLAAC/EUI-64-derived addresses -- always hashed identically.
+// Verified against IPAddress.cs's GetHashCode, which combines all 128 bits (via four uint32
+// values spanning all 8 numbers_ groups) plus the scope ID.
+TEST(IPAddressIPv6Tests, GetHashCode_DiffersWhenOnlyLower64BitsDiffer) {
+    IPAddress a = IPAddress::Parse("2001:db8::1");
+    IPAddress b = IPAddress::Parse("2001:db8::2");
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(IPAddressIPv6Tests, GetHashCode_EqualAddresses_SameHash) {
+    IPAddress a = IPAddress::Parse("2001:db8::1");
+    IPAddress b = IPAddress::Parse("2001:0db8:0000:0000:0000:0000:0000:0001");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
 // ===========================================================================
