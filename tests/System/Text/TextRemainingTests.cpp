@@ -191,6 +191,43 @@ TEST(RuneTests, ReplacementChar_ValueIsFFFD) {
     EXPECT_EQ(Rune::ReplacementChar.getValueProperty(), 0xFFFDu);
 }
 
+TEST(RuneTests, TryGetRuneAt_ValidSequences) {
+    Rune r(static_cast<uint32_t>(0)); std::size_t consumed = 0;
+    EXPECT_TRUE(Rune::TryGetRuneAt(std::string("A"), 0, r, consumed));
+    EXPECT_EQ(r.getValueProperty(), 0x41u);
+    EXPECT_EQ(consumed, 1u);
+
+    EXPECT_TRUE(Rune::TryGetRuneAt(std::string("\xC2\xA9"), 0, r, consumed)); // U+00A9 COPYRIGHT SIGN
+    EXPECT_EQ(r.getValueProperty(), 0xA9u);
+    EXPECT_EQ(consumed, 2u);
+
+    EXPECT_TRUE(Rune::TryGetRuneAt(std::string("\xE2\x82\xAC"), 0, r, consumed)); // U+20AC EURO SIGN
+    EXPECT_EQ(r.getValueProperty(), 0x20ACu);
+    EXPECT_EQ(consumed, 3u);
+
+    EXPECT_TRUE(Rune::TryGetRuneAt(std::string("\xF0\x9F\x98\x80"), 0, r, consumed)); // U+1F600 GRINNING FACE
+    EXPECT_EQ(r.getValueProperty(), 0x1F600u);
+    EXPECT_EQ(consumed, 4u);
+}
+
+// RFC 3629 requires the shortest possible encoding; a longer-than-necessary sequence for a
+// code point is "overlong" and must be rejected as ill-formed, not silently decoded.
+TEST(RuneTests, TryGetRuneAt_RejectsOverlongEncodings) {
+    Rune r(static_cast<uint32_t>(0)); std::size_t consumed = 0;
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xC0\x80"), 0, r, consumed));       // overlong U+0000 (2 bytes)
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xE0\x80\x80"), 0, r, consumed));   // overlong U+0000 (3 bytes)
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xF0\x80\x80\x80"), 0, r, consumed)); // overlong U+0000 (4 bytes)
+}
+
+// Every continuation byte must match the 10xxxxxx bit pattern; a lead byte followed by
+// something else (e.g. an ASCII byte) is ill-formed UTF-8, not a valid sequence to decode.
+TEST(RuneTests, TryGetRuneAt_RejectsInvalidContinuationByte) {
+    Rune r(static_cast<uint32_t>(0)); std::size_t consumed = 0;
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xC2\x41"), 0, r, consumed));         // 'A' is not a continuation byte
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xE2\x82\x41"), 0, r, consumed));
+    EXPECT_FALSE(Rune::TryGetRuneAt(std::string("\xF0\x9F\x98\x41"), 0, r, consumed));
+}
+
 // ===========================================================================
 // UTF7Encoding
 // ===========================================================================
