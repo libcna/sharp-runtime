@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include <vector>
+#include "System/IndexOutOfRangeException.hpp"
 #include "System/Text/DecoderFallback.hpp"
 #include "System/Text/Encoding.hpp"
 #include "System/Text/EncoderFallback.hpp"
@@ -238,4 +239,15 @@ TEST(StringBuilderTests, Indexer_ReadAndWrite) {
     EXPECT_EQ(sb[0], 'h');
     sb[0] = 'H';
     EXPECT_EQ(sb.ToString(), "Hello");
+}
+
+// .NET's StringBuilder indexer throws IndexOutOfRangeException for an out-of-range index
+// (StringBuilder.cs); plain std::string::operator[] is undefined behavior in that case, so
+// this must bounds-check explicitly rather than delegating straight through.
+TEST(StringBuilderTests, Indexer_OutOfRange_Throws) {
+    StringBuilder sb("hello");
+    EXPECT_THROW((void)sb[5], System::IndexOutOfRangeException);
+    EXPECT_THROW((void)sb[-1], System::IndexOutOfRangeException);
+    const StringBuilder& csb = sb;
+    EXPECT_THROW((void)csb[5], System::IndexOutOfRangeException);
 }
