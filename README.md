@@ -193,6 +193,29 @@ If any of 1–4 can't be satisfied safely (e.g. the fix needs a user decision pe
 `blocked`, `needs_user`, or `wontfix` instead of `done` — never `done` with an unresolved caveat
 buried in the notes.
 
+### More `plan.sqlite3` queries
+
+```bash
+# Ticket counts broken down by status, priority, category, and area
+sqlite3 plan.sqlite3 "SELECT status, priority, category, area, COUNT(*) FROM ticket
+  GROUP BY status, priority, category, area ORDER BY priority, status, category;"
+
+# Blocked / needs-user tickets, with the exact reason and file each is about
+sqlite3 plan.sqlite3 "SELECT ticket_no, status, source_path, notes FROM ticket
+  WHERE status IN ('blocked', 'needs_user') ORDER BY priority, ticket_no;"
+
+# Completed tickets missing a validation_command or an updated_at timestamp
+# (a hygiene check — every ticket marked done should have both; see the
+# Ticket completion checklist above)
+sqlite3 plan.sqlite3 "SELECT ticket_no, title FROM ticket
+  WHERE status = 'done' AND (validation_command IS NULL OR validation_command = ''
+  OR updated_at IS NULL) ORDER BY ticket_no;"
+```
+
+`plan.sqlite3` itself is a plain SQLite3 database file (rollback journal mode, no WAL
+sidecar files, no virtual tables/extensions) — copying/backing it up is always safe as a
+single-file copy, and it's readable with any standard SQLite client.
+
 ---
 
 # 📊 Implementation Status Convention
