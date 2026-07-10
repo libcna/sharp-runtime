@@ -8,9 +8,11 @@
 #include <vector>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
+#include "System/Threading/LockRecursionException.hpp"
 #include "System/Threading/Monitor.hpp"
 #include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/Mutex.hpp"
@@ -619,6 +621,91 @@ TEST(ThreadingTests, SpinLock_TryEnter_WhenFree_ReturnsTrue) {
 
 TEST(ThreadingTests, SpinLock_Exit_DoesNotThrow) {
     SpinLock sl;
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_NO_THROW(sl.Exit());
+}
+
+// Regression tests for a wave-3 audit finding: SpinLock was a bare atomic_flag with no thread
+// ownership tracking at all -- getIsHeldProperty() always returned false (a hard-coded stub),
+// Exit() never validated ownership, and there was no re-entrancy or IsHeldByCurrentThread
+// support, unlike real SpinLock.cs. Verified against SpinLock.cs's default constructor (thread
+// ownership tracking enabled), Enter()'s LockRecursionException on same-thread re-entry, and
+// ExitSlowPath()'s SynchronizationLockException when the calling thread doesn't own the lock.
+
+TEST(ThreadingTests, SpinLock_IsHeld_ReflectsActualState) {
+    SpinLock sl;
+    EXPECT_FALSE(sl.getIsHeldProperty());
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_TRUE(sl.getIsHeldProperty());
+    sl.Exit();
+    EXPECT_FALSE(sl.getIsHeldProperty());
+}
+
+TEST(ThreadingTests, SpinLock_IsHeldByCurrentThread_TracksOwner) {
+    SpinLock sl;
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_TRUE(sl.getIsHeldByCurrentThreadProperty());
+    sl.Exit();
+    EXPECT_FALSE(sl.getIsHeldByCurrentThreadProperty());
+}
+
+TEST(ThreadingTests, SpinLock_IsHeldByCurrentThread_ThrowsWhenTrackingDisabled) {
+    SpinLock sl(false);
+    EXPECT_THROW(sl.getIsHeldByCurrentThreadProperty(), System::InvalidOperationException);
+}
+
+TEST(ThreadingTests, SpinLock_Enter_SameThreadReentry_ThrowsLockRecursionException) {
+    SpinLock sl;
+    bool taken1 = false;
+    sl.Enter(taken1);
+    bool taken2 = false;
+    EXPECT_THROW(sl.Enter(taken2), System::Threading::LockRecursionException);
+    sl.Exit();
+}
+
+TEST(ThreadingTests, SpinLock_Enter_LockTakenAlreadyTrue_ThrowsArgumentException) {
+    SpinLock sl;
+    bool taken = true;
+    EXPECT_THROW(sl.Enter(taken), System::ArgumentException);
+}
+
+TEST(ThreadingTests, SpinLock_Exit_WithoutOwnership_ThrowsSynchronizationLockException) {
+    SpinLock sl;
+    std::thread other([&sl]() {
+        bool taken = false;
+        sl.Enter(taken);
+    });
+    other.join();
+    // sl is now held by the (finished) "other" thread; this thread never entered it.
+    EXPECT_THROW(sl.Exit(), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, SpinLock_TryEnter_WhenHeldByAnotherThread_TimesOutAndReturnsFalse) {
+    SpinLock sl;
+    bool taken1 = false;
+    sl.Enter(taken1);
+    std::atomic<bool> ok{true};
+    std::thread other([&]() {
+        bool taken2 = false;
+        ok = sl.TryEnter(20, taken2);
+    });
+    other.join();
+    EXPECT_FALSE(ok.load());
+    sl.Exit();
+}
+
+TEST(ThreadingTests, SpinLock_TryEnter_NegativeTimeoutOtherThanInfinite_ThrowsArgumentOutOfRangeException) {
+    SpinLock sl;
+    bool taken = false;
+    EXPECT_THROW(sl.TryEnter(-2, taken), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, SpinLock_ThreadOwnerTrackingDisabled_ExitNeverThrows) {
+    SpinLock sl(false);
+    EXPECT_FALSE(sl.getIsThreadOwnerTrackingEnabledProperty());
     bool taken = false;
     sl.Enter(taken);
     EXPECT_NO_THROW(sl.Exit());
