@@ -13,6 +13,7 @@
 #include <chrono>
 #include <future>
 #include <limits>
+#include <new>
 #include <string>
 #include <thread>
 #include "System/ApplicationException.hpp"
@@ -142,6 +143,31 @@ TEST(AsyncLocalTests, TwoInstances_SameType_AreIndependent) {
     b.setValueProperty(2);
     EXPECT_EQ(a.getValueProperty(), 1);
     EXPECT_EQ(b.getValueProperty(), 2);
+}
+TEST(AsyncLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAddress_DoesNotLeakStaleValue) {
+    // Reproduces the exact scenario the ID-based-keying fix targets: a worker thread's
+    // thread_local map is populated by instance A; A is then destroyed by a *different*
+    // thread (only cleans that other thread's own map), and a new instance B is placement-new'd
+    // at the identical address. The old this-pointer-keyed implementation would have the worker
+    // thread's map lookup for B's address collide with A's still-present stale entry.
+    alignas(AsyncLocal<int>) unsigned char buffer[sizeof(AsyncLocal<int>)];
+    std::promise<void> replaced;
+    std::shared_future<void> replacedFuture = replaced.get_future().share();
+
+    std::thread worker([&] {
+        auto* a = new (buffer) AsyncLocal<int>();
+        a->setValueProperty(111); // populates this worker thread's thread_local map
+        replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
+        auto* b = reinterpret_cast<AsyncLocal<int>*>(buffer);
+        EXPECT_EQ(b->getValueProperty(), 0); // must not see A's leftover 111
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    reinterpret_cast<AsyncLocal<int>*>(buffer)->~AsyncLocal<int>(); // destroyed on the MAIN thread
+    new (buffer) AsyncLocal<int>();                                 // instance B at the identical address
+    replaced.set_value();
+    worker.join();
+    reinterpret_cast<AsyncLocal<int>*>(buffer)->~AsyncLocal<int>();
 }
 
 TEST(AsyncLocalValueChangedArgsTests, PropertiesReflectConstructorArgs) {
@@ -644,6 +670,27 @@ TEST(ThreadLocalTests, AfterDispose_SetValue_ThrowsObjectDisposedException) {
     ThreadLocal<int> tl;
     tl.Dispose();
     EXPECT_THROW(tl.setValueProperty(5), System::ObjectDisposedException);
+}
+TEST(ThreadLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAddress_DoesNotLeakStaleValue) {
+    alignas(ThreadLocal<int>) unsigned char buffer[sizeof(ThreadLocal<int>)];
+    std::promise<void> replaced;
+    std::shared_future<void> replacedFuture = replaced.get_future().share();
+
+    std::thread worker([&] {
+        auto* a = new (buffer) ThreadLocal<int>();
+        a->setValueProperty(222); // populates this worker thread's thread_local map
+        replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
+        auto* b = reinterpret_cast<ThreadLocal<int>*>(buffer);
+        EXPECT_FALSE(b->getIsValueCreatedProperty()); // must not see A's leftover entry at all
+        EXPECT_EQ(b->getValueProperty(), 0);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    reinterpret_cast<ThreadLocal<int>*>(buffer)->~ThreadLocal<int>(); // destroyed on the MAIN thread
+    new (buffer) ThreadLocal<int>();                                  // instance B at the identical address
+    replaced.set_value();
+    worker.join();
+    reinterpret_cast<ThreadLocal<int>*>(buffer)->~ThreadLocal<int>();
 }
 TEST(ThreadLocalTests, Factory_ReentrantAccess_ThrowsInvalidOperationException) {
     ThreadLocal<int>* self = nullptr;

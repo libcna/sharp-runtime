@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -16,13 +18,30 @@ namespace System::Threading {
      * @brief Provides thread-local storage of data.
      *
      * C++ counterpart of .NET System.Threading.ThreadLocal<T>. Each instance owns an
-     * independent per-thread slot; storage is keyed by instance identity (this pointer)
-     * within a thread_local map, so distinct ThreadLocal<T> instances never share state.
+     * independent per-thread slot, keyed by a monotonically-increasing per-instance ID (not
+     * `this`) within a thread_local map, so distinct ThreadLocal<T> instances never share state.
+     *
+     * @note Keying by `this` (the previous implementation) meant that once an instance was
+     * destroyed, every *other* thread's thread_local map retained a stale entry under that
+     * now-dangling pointer value forever (a destructor can only clean up the destroying thread's
+     * own map) -- if a new ThreadLocal<T> was later allocated at the same address (routine with
+     * heap reuse), other threads would silently read/write the old, unrelated instance's stale
+     * entry instead of the new instance's, corrupting data across two logically-unrelated
+     * ThreadLocal<T> objects. IDs are never reused, so a new instance can never collide with a
+     * stale entry left by a destroyed one; the trade-off is that another thread's stale entry
+     * for a destroyed instance is not proactively cleaned up (a bounded per-ID leak until that
+     * thread exits or next touches its own map) rather than corrupting future reads.
      */
     template<typename T>
     class ThreadLocal : public System::IDisposable {
-        static std::unordered_map<const ThreadLocal*, std::unique_ptr<T>>& storageMap() {
-            static thread_local std::unordered_map<const ThreadLocal*, std::unique_ptr<T>> map;
+        static std::atomic<std::uint64_t>& nextId() {
+            static std::atomic<std::uint64_t> id{0};
+            return id;
+        }
+        std::uint64_t id_ = nextId().fetch_add(1, std::memory_order_relaxed);
+
+        static std::unordered_map<std::uint64_t, std::unique_ptr<T>>& storageMap() {
+            static thread_local std::unordered_map<std::uint64_t, std::unique_ptr<T>> map;
             return map;
         }
 
@@ -33,8 +52,8 @@ namespace System::Threading {
         // guard: factory_() ran before the map entry was inserted, so a reentrant
         // getValueProperty() call on the same thread would find no entry, invoke factory_() again,
         // and recurse until a (uncatchable) stack overflow.
-        static std::unordered_set<const ThreadLocal*>& inProgress() {
-            static thread_local std::unordered_set<const ThreadLocal*> set;
+        static std::unordered_set<std::uint64_t>& inProgress() {
+            static thread_local std::unordered_set<std::uint64_t> set;
             return set;
         }
 
@@ -59,11 +78,11 @@ namespace System::Threading {
             : factory_(std::move(valueFactory)), trackAllValues_(trackAllValues) {}
 
         /** Releases this instance's slot in the current thread's storage on destruction. */
-        ~ThreadLocal() override { storageMap().erase(this); }
+        ~ThreadLocal() override { storageMap().erase(id_); }
 
         /** Returns true if the value has been initialised for the current thread. */
         [[nodiscard]] bool getIsValueCreatedProperty() const {
-            return storageMap().find(this) != storageMap().end();
+            return storageMap().find(id_) != storageMap().end();
         }
 
         /**
@@ -75,21 +94,21 @@ namespace System::Threading {
         [[nodiscard]] T& getValueProperty() {
             ThrowIfDisposed();
             auto& map = storageMap();
-            auto it = map.find(this);
+            auto it = map.find(id_);
             if (it == map.end()) {
                 auto& active = inProgress();
-                if (!active.insert(this).second)
+                if (!active.insert(id_).second)
                     throw System::InvalidOperationException(
                         "ValueFactory attempted to access the Value property of this instance.");
                 std::unique_ptr<T> value;
                 try {
                     value = std::make_unique<T>(factory_ ? factory_() : T{});
                 } catch (...) {
-                    active.erase(this);
+                    active.erase(id_);
                     throw;
                 }
-                active.erase(this);
-                it = map.emplace(this, std::move(value)).first;
+                active.erase(id_);
+                it = map.emplace(id_, std::move(value)).first;
             }
             return *it->second;
         }
@@ -101,8 +120,8 @@ namespace System::Threading {
         void setValueProperty(const T& v) {
             ThrowIfDisposed();
             auto& map = storageMap();
-            auto it = map.find(this);
-            if (it == map.end()) map.emplace(this, std::make_unique<T>(v));
+            auto it = map.find(id_);
+            if (it == map.end()) map.emplace(id_, std::make_unique<T>(v));
             else *it->second = v;
         }
 
@@ -112,7 +131,7 @@ namespace System::Threading {
         /** Releases resources for the current thread's value. */
         void Dispose() override {
             disposed_ = true;
-            storageMap().erase(this);
+            storageMap().erase(id_);
         }
     };
 
