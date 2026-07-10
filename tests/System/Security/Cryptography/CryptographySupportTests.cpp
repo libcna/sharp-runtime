@@ -144,6 +144,33 @@ TEST(OidCollectionTests, IndexOutOfRange_Throws) {
     EXPECT_THROW(collection[0], System::ArgumentOutOfRangeException);
 }
 
+// CopyTo was previously missing entirely from this port (OidCollection.cs's CopyTo(Oid[], int)).
+TEST(OidCollectionTests, CopyTo_CopiesElementsAtIndex) {
+    OidCollection collection;
+    collection.Add(Oid(std::string("1.2.3"), std::string("a")));
+    collection.Add(Oid(std::string("4.5.6"), std::string("b")));
+    std::vector<Oid> dest(3, Oid(std::string("0"), std::string("placeholder")));
+    collection.CopyTo(dest, 1);
+    EXPECT_EQ(*dest[1].getValueProperty(), "1.2.3");
+    EXPECT_EQ(*dest[2].getValueProperty(), "4.5.6");
+}
+
+// .NET's own check is deliberately `index >= array.Length` (not `>`), matching
+// OidCollection.cs exactly -- so even index 0 on an empty destination throws.
+TEST(OidCollectionTests, CopyTo_IndexAtOrPastArrayLength_ThrowsArgumentOutOfRange) {
+    OidCollection collection;
+    std::vector<Oid> emptyDest;
+    EXPECT_THROW(collection.CopyTo(emptyDest, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(OidCollectionTests, CopyTo_DestinationTooSmall_ThrowsArgumentException) {
+    OidCollection collection;
+    collection.Add(Oid(std::string("1.2.3"), std::string("a")));
+    collection.Add(Oid(std::string("4.5.6"), std::string("b")));
+    std::vector<Oid> dest(1, Oid(std::string("0"), std::string("placeholder")));
+    EXPECT_THROW(collection.CopyTo(dest, 0), System::ArgumentException);
+}
+
 // --- Legacy wrapper classes ------------------------------------------------------------------
 
 TEST(LegacyHashWrapperTests, MD5CryptoServiceProvider_MatchesMD5) {

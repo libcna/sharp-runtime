@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "System/ArgumentNullException.hpp"
 #include "System/Security/Principal/IPrincipal.hpp"
 
 namespace System::Security::Principal {
@@ -34,9 +35,18 @@ namespace System::Security::Principal {
         }
 
     public:
-        /** @brief Constructs from @p identity and the list of role names it belongs to. */
+        /**
+         * @brief Constructs from @p identity and the list of role names it belongs to.
+         * @throws System::ArgumentNullException if @p identity is null, matching .NET's
+         *         `ArgumentNullException.ThrowIfNull(identity)` (GenericPrincipal.cs) --
+         *         without this check, a null identity_ would silently propagate into
+         *         getIdentityProperty() and crash a later, unrelated caller instead of
+         *         failing fast here at construction.
+         */
         GenericPrincipal(std::shared_ptr<IIdentity> identity, const std::vector<std::string>& roles)
-            : identity_(std::move(identity)), roles_(roles) {}
+            : identity_(std::move(identity)), roles_(roles) {
+            if (!identity_) throw System::ArgumentNullException("identity");
+        }
 
         [[nodiscard]] std::shared_ptr<IIdentity> getIdentityProperty() const override { return identity_; }
 
