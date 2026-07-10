@@ -1,6 +1,74 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `208c674`) — 11243 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `e1f3d9d`) — 11262 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: genuinely EVERY critical now fixed, including Text.Json (56/56)
+
+*Branch: `feature/work`, HEAD `e1f3d9d` — 11262 tests passing (up from 11243 at the top of the
+XmlNode checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+A status review at the start of this phase caught that the "every namespace's criticals are
+fixed" claim from two checkpoints ago (search this file for "genuinely complete for criticals
+now") **silently excluded `System.Text.Json`** — only 3 of its 7 catalogued criticals had
+actually been fixed (writer escaping, `Utf8JsonWriter`/`JsonDocument` `MaxDepth`, done earlier
+as "wave-3 priority item 4"). The other 4 were still open. Fixed all 4 this phase:
+
+1. **`JsonElement::TryGetInt32`/`TryGetInt64` UB via `double` round-trip** — verified against
+   `JsonDocument.cs`'s `TryGetValue(out int)`/`TryGetValue(out long)`: real .NET parses the
+   original number *text* directly as an integer, never through a floating-point intermediate.
+   This port called `get<double>()` unconditionally then `static_cast` to `intcs`/`longcs` — UB
+   when casting an out-of-range double to a signed integer, and silently accepted float
+   literals (`"1.0"`, `"2e1"`) whose value happened to be integral, where real .NET's
+   text-based parser rejects them outright. Rewrote both to use nlohmann's native
+   integer/unsigned accessors, rejecting `number_float` nodes and range-checking before the
+   narrowing cast. `GetInt32`/`GetInt64` now delegate to the `Try*` variants (matching
+   `GetInt32.cs`'s own delegation), which also fixed the separately-catalogued moderate
+   "`GetInt32`/`GetInt64` too lenient" finding as a side effect. 5 regression tests. Commit
+   `0cb6a73`.
+2. **`JsonElement::GetProperty`/`TryGetProperty` always threw `KeyNotFoundException`, even on a
+   non-object element** — verified against `JsonDocument.TryGetProperty.cs`'s
+   `TryGetNamedPropertyValue`: real .NET throws `InvalidOperationException` when the element's
+   `ValueKind` isn't `Object`, even for the `Try`-prefixed overload; only a genuinely-missing
+   key returns `false` without throwing. Fixed `TryGetProperty` to check kind first via the
+   existing `require()` helper. 3 regression tests. Commit `0cb6a73`.
+3. **`JsonObject`/`JsonArray` `Add`/`SetItem`/`Insert` had no "already has a parent" or cycle
+   check** — verified against `JsonNode.cs`'s internal `AssignParent`/`DetachParent`: real .NET
+   throws `InvalidOperationException` both when a node being attached already has a parent
+   (would silently orphan whichever container actually still holds it — dangling `parent_`
+   pointer there) and when attaching would create a cycle. Replaced the unconditional
+   `setParentProperty()` calls with a new `AssignParent()` (validates, throws) /
+   `DetachParent()` (wired into `Remove`/`RemoveAt`/`Clear`, and into `SetItem` when replacing
+   an existing value) pair on `JsonNode`, matching each type's real .NET method-by-method
+   detach/assign ordering. 8 regression tests. Commit `e1f3d9d`.
+4. **`JsonObject::operator[]` threw `KeyNotFoundException` for a missing key** — verified
+   against `JsonNode.cs`'s string indexer doc comment ("If the property is not found, null is
+   returned"); `GetProperty` is the actual throwing counterpart in this port's design. Changed
+   the return type from `const shared_ptr<JsonNode>&` to `shared_ptr<JsonNode>` (no missing-key
+   slot to reference) and return `nullptr` instead of throwing. Fixed one pre-existing test that
+   had encoded the old throwing behavior (`Indexer_Missing_Throws` → `Indexer_Missing_ReturnsNull`).
+   4 more regression tests. Commit `e1f3d9d`.
+
+### Wave-3 catalogue: ALL 56 criticals now genuinely fixed across all 8 namespace slices
+
+Net core+Sockets (4), Net.Http/WebSockets (2), IO core (7, itemized as 4 fixes), IO.Compression/
+Hashing (3-4, itemized/already-fixed), Text.Json (7), Threading (24, itemized as 13 fixes), Xml
+core (5), Xml.Linq+XPath (3). Plus Diagnostics (7 findings, 0 critical), fixed earlier. **Before
+declaring a category complete, recheck its own catalogue section header count against what's
+actually itemized/fixed** — this exact Text.Json omission is the second time in this session a
+premature "all criticals fixed" claim needed correcting (the first was Xml.Linq+XPath, two
+checkpoints prior). Grep this file for namespace names against fix commits before trusting a
+"done" claim inherited from an earlier checkpoint.
+
+### What remains: moderate + minor findings only, everywhere
+
+Moderate/minor status per the wave-3 audit's original severity counts (99 moderate + 66 minor
+total): Threading has 3/29 moderate done (`SynchronizationContext`, `CancellationTokenSource`
+disposed-race + LIFO ordering); IO.Compression/Hashing has ~6/6 moderate done (folded into the
+criticals-adjacent IsolatedStorageFile/GZipEncoder fixes); Xml core has 1/13 moderate done
+(`XmlNode` ancestor-cycle/cross-document guard). Every other slice's moderates and every slice's
+minors are untouched. Recommended next: continue picking off genuinely dangerous-despite-labeled
+moderate items first (re-verify against current source, the catalogue is many fix-batches
+stale), then work through the rest namespace by namespace.
 
 ## Session checkpoint (2026-07-10, continued again) — XmlNode ancestor-cycle + cross-document guard added
 
