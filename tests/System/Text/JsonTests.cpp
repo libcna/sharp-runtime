@@ -7,6 +7,7 @@
 #include "System/Text/Json/JsonProperty.hpp"
 
 using System::Text::Json::JsonDocument;
+using System::Text::Json::JsonDocumentOptions;
 using System::Text::Json::JsonValueKind;
 
 // ---------------------------------------------------------------------------
@@ -226,4 +227,36 @@ TEST(JsonTests, ParseValueSameAsParse) {
     auto d2 = JsonDocument::ParseValue(R"({"k":1})");
     EXPECT_EQ(d1->getRootElementProperty().GetProperty("k").GetInt32(),
               d2->getRootElementProperty().GetProperty("k").GetInt32());
+}
+
+// ---------------------------------------------------------------------------
+// MaxDepth enforcement
+// ---------------------------------------------------------------------------
+
+static std::string makeNestedArrayJson(int depth) {
+    std::string json;
+    for (int i = 0; i < depth; ++i) json += "[";
+    json += "0";
+    for (int i = 0; i < depth; ++i) json += "]";
+    return json;
+}
+
+TEST(JsonTests, ParseWithinDefaultMaxDepth_Succeeds) {
+    EXPECT_NO_THROW(JsonDocument::Parse(makeNestedArrayJson(64)));
+}
+
+TEST(JsonTests, ParseExceedingDefaultMaxDepth_Throws) {
+    EXPECT_THROW(JsonDocument::Parse(makeNestedArrayJson(65)), std::exception);
+}
+
+TEST(JsonTests, ParseExceedingCustomMaxDepth_Throws) {
+    JsonDocumentOptions options;
+    options.MaxDepth = 3;
+    EXPECT_THROW(JsonDocument::Parse(makeNestedArrayJson(4), options), std::exception);
+}
+
+TEST(JsonTests, ParseWithinCustomMaxDepth_Succeeds) {
+    JsonDocumentOptions options;
+    options.MaxDepth = 3;
+    EXPECT_NO_THROW(JsonDocument::Parse(makeNestedArrayJson(3), options));
 }
