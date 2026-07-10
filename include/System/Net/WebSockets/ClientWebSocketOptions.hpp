@@ -10,6 +10,8 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/String.hpp"
+#include "System/StringComparison.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Threading/Timeout.hpp"
 
@@ -71,12 +73,18 @@ namespace System::Net::WebSockets {
         /** @return The headers set via SetRequestHeader(), keyed by header name. */
         [[nodiscard]] const std::map<std::string, std::string>& getRequestHeadersProperty() const { return requestHeaders_; }
 
-        /** @brief Adds a sub-protocol to request during the handshake. */
+        /**
+         * @brief Adds a sub-protocol to request during the handshake.
+         * @note Verified against ClientWebSocketOptions.cs's AddSubProtocol: the duplicate
+         * check compares via StringComparison.OrdinalIgnoreCase, not an exact match -- this
+         * previously used a case-sensitive comparison, silently allowing e.g. "chat" and
+         * "Chat" to both be added as if they were distinct protocols.
+         */
         void AddSubProtocol(const std::string& subProtocol) {
             throwIfReadOnly();
             validateSubprotocol(subProtocol);
             for (const auto& existing : requestedSubProtocols_) {
-                if (existing == subProtocol) {
+                if (System::String::Equals(existing, subProtocol, System::StringComparison::OrdinalIgnoreCase)) {
                     throw System::ArgumentException("Duplicate protocols are not allowed: " + subProtocol, "subProtocol");
                 }
             }

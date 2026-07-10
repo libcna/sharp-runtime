@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <thread>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Convert.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -208,4 +209,14 @@ TEST(ClientWebSocketTests, WrongSchemeThrows) {
     ClientWebSocket client;
     System::Uri uri("wss://127.0.0.1:1/");
     EXPECT_THROW(client.ConnectAsync(uri).Wait(), System::PlatformNotSupportedException);
+}
+
+// Regression test for a wave-3 audit finding: AddSubProtocol's duplicate check compared
+// case-sensitively, silently allowing "chat" and "Chat" to both be added as if they were
+// distinct protocols. Verified against ClientWebSocketOptions.cs's AddSubProtocol, which
+// compares via StringComparison.OrdinalIgnoreCase.
+TEST(ClientWebSocketTests, AddSubProtocol_DuplicateDifferingOnlyByCase_Throws) {
+    ClientWebSocket client;
+    client.getOptionsProperty().AddSubProtocol("chat");
+    EXPECT_THROW(client.getOptionsProperty().AddSubProtocol("Chat"), System::ArgumentException);
 }
