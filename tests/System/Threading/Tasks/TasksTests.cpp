@@ -283,6 +283,28 @@ TEST(ValueTaskTests, FromTask_CompletedTask_IsCompleted) {
     EXPECT_TRUE(vt.getIsCompletedProperty());
 }
 
+TEST(ValueTaskTests, FromTask_AlreadyFaultedTask_GetAwaiter_Rethrows) {
+    auto ex = std::make_exception_ptr(std::runtime_error("already faulted"));
+    ValueTask vt(Task::FromException(ex));
+    EXPECT_TRUE(vt.getIsFaultedProperty());
+    EXPECT_THROW(vt.GetAwaiter(), std::runtime_error);
+}
+
+TEST(ValueTaskTests, FromTask_StillRunning_LaterObservesCompletionAndException) {
+    std::promise<void> release;
+    std::shared_future<void> releaseFuture = release.get_future().share();
+    Task t([releaseFuture]() {
+        releaseFuture.wait();
+        throw std::runtime_error("failed after running");
+    });
+    ValueTask vt(std::move(t));
+    EXPECT_FALSE(vt.getIsCompletedProperty());
+    release.set_value();
+    EXPECT_THROW(vt.GetAwaiter(), std::runtime_error);
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsFaultedProperty());
+}
+
 // ===========================================================================
 // ValueTaskT<TResult>
 // ===========================================================================
