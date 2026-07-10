@@ -99,8 +99,12 @@ TEST(NumberFormatInfoTests, InvariantInfo_CurrencyGroupSeparatorIsComma) {
     EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencyGroupSeparatorProperty(), ",");
 }
 
-TEST(NumberFormatInfoTests, InvariantInfo_CurrencySymbolIsDollar) {
-    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencySymbolProperty(), "$");
+TEST(NumberFormatInfoTests, InvariantInfo_CurrencySymbolIsCurrencySign) {
+    // Regression: was previously (wrongly) "$". .NET's real invariant default is U+00A4
+    // (CURRENCY SIGN), verified against NumberFormatInfo.cs's field initializer
+    // (_currencySymbol = "\x00a4") rather than that file's own stale prose doc-comment
+    // table, which incorrectly says "$".
+    EXPECT_EQ(NumberFormatInfo::getInvariantInfoProperty().getCurrencySymbolProperty(), "¤");
 }
 
 TEST(NumberFormatInfoTests, InvariantInfo_NegativeSignIsMinus) {

@@ -28,7 +28,10 @@ class NumberFormatInfo {
 
     std::string currencyDecimalSeparator_ = ".";
     std::string currencyGroupSeparator_   = ",";
-    std::string currencySymbol_           = "$";
+    // U+00A4 (CURRENCY SIGN), matching .NET's real invariant default
+    // (NumberFormatInfo.cs: `_currencySymbol = "\x00a4"`) -- not "$", despite what that
+    // file's own prose doc-comment table says; the field initializer is ground truth.
+    std::string currencySymbol_           = "¤";
     int currencyDecimalDigits_            = 2;
     int currencyNegativePattern_          = 0;
     int currencyPositivePattern_          = 0;

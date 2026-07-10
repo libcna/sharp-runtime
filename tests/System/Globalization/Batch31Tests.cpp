@@ -145,7 +145,7 @@ TEST(NumberFormatInfoBatch31Test, DefaultCurrencyFields) {
     NumberFormatInfo nfi;
     EXPECT_EQ(nfi.getCurrencyDecimalSeparatorProperty(), ".");
     EXPECT_EQ(nfi.getCurrencyGroupSeparatorProperty(),   ",");
-    EXPECT_EQ(nfi.getCurrencySymbolProperty(),           "$");
+    EXPECT_EQ(nfi.getCurrencySymbolProperty(),           "¤");
     EXPECT_EQ(nfi.getCurrencyDecimalDigitsProperty(),    2);
 }
 
