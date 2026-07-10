@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Threading/LockCookie.hpp"
@@ -64,7 +65,10 @@ namespace System::Threading {
             return static_cast<SharpRuntime::uintcs>(writerSeqNum_) > static_cast<SharpRuntime::uintcs>(seqNum);
         }
 
-        /** Acquires a reader lock, blocking up to millisecondsTimeout milliseconds (-1 = infinite). */
+        /**
+         * @brief Acquires a reader lock, blocking up to millisecondsTimeout milliseconds (-1 = infinite).
+         * @throws System::ApplicationException if the timeout elapses before the lock is acquired.
+         */
         void AcquireReaderLock(intcs millisecondsTimeout) {
             if (millisecondsTimeout < -1)
                 throw System::ArgumentOutOfRangeException("millisecondsTimeout");
@@ -72,8 +76,11 @@ namespace System::Threading {
             if (level > 0) { ++level; return; }
             if (writerThreadId_.load() == CurrentThreadId()) { AcquireWriterLock(millisecondsTimeout); return; }
             if (millisecondsTimeout < 0) mtx_.lock_shared();
+            // Verified against ReaderWriterLock.cs's GetTimeoutException(): real .NET throws on
+            // timeout instead of returning as if the lock had been acquired. This port previously
+            // just returned, leaving the caller to proceed without holding the lock it asked for.
             else if (!mtx_.try_lock_shared_for(std::chrono::milliseconds(millisecondsTimeout)))
-                return;
+                throw System::ApplicationException("The operation has timed out.");
             level = 1;
         }
         /** Acquires a reader lock, blocking up to @p timeout. */
@@ -88,14 +95,19 @@ namespace System::Threading {
             if (--level == 0) mtx_.unlock_shared();
         }
 
-        /** Acquires the writer lock, blocking up to millisecondsTimeout milliseconds (-1 = infinite). */
+        /**
+         * @brief Acquires the writer lock, blocking up to millisecondsTimeout milliseconds (-1 = infinite).
+         * @throws System::ApplicationException if the timeout elapses before the lock is acquired.
+         */
         void AcquireWriterLock(intcs millisecondsTimeout) {
             if (millisecondsTimeout < -1)
                 throw System::ArgumentOutOfRangeException("millisecondsTimeout");
             if (writerThreadId_.load() == CurrentThreadId()) { ++writerLevel_; return; }
             if (millisecondsTimeout < 0) mtx_.lock();
+            // Verified against ReaderWriterLock.cs's GetTimeoutException(): real .NET throws on
+            // timeout instead of returning as if the lock had been acquired.
             else if (!mtx_.try_lock_for(std::chrono::milliseconds(millisecondsTimeout)))
-                return;
+                throw System::ApplicationException("The operation has timed out.");
             writerThreadId_.store(CurrentThreadId());
             writerLevel_ = 1;
         }

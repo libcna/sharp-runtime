@@ -187,6 +187,39 @@ TEST(ReaderWriterLockTests, AcquireReaderLock_NegativeTimeoutBelowMinusOne_Throw
     EXPECT_THROW(lock.AcquireReaderLock(-2), System::ArgumentOutOfRangeException);
 }
 
+TEST(ReaderWriterLockTests, AcquireWriterLock_TimesOut_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    lock.AcquireWriterLock(-1);
+    std::atomic<bool> threw{false};
+    std::thread t([&] {
+        try {
+            lock.AcquireWriterLock(50);
+        } catch (const System::ApplicationException&) {
+            threw = true;
+        }
+    });
+    t.join();
+    EXPECT_TRUE(threw.load());
+    EXPECT_TRUE(lock.getIsWriterLockHeldProperty());
+    lock.ReleaseWriterLock();
+}
+
+TEST(ReaderWriterLockTests, AcquireReaderLock_TimesOut_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    lock.AcquireWriterLock(-1);
+    std::atomic<bool> threw{false};
+    std::thread t([&] {
+        try {
+            lock.AcquireReaderLock(50);
+        } catch (const System::ApplicationException&) {
+            threw = true;
+        }
+    });
+    t.join();
+    EXPECT_TRUE(threw.load());
+    lock.ReleaseWriterLock();
+}
+
 // ===========================================================================
 // ReaderWriterLockSlim held-state tracking
 // ===========================================================================
