@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <condition_variable>
+#include <limits>
 #include <mutex>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -45,10 +46,12 @@ namespace System::Threading {
 
         /**
          * @brief Decrements the current count; returns true when the count reaches zero.
+         * @throws System::ArgumentOutOfRangeException if @p signalCount is not positive.
          * @throws System::InvalidOperationException if the count is already zero.
          * @throws System::ObjectDisposedException if this instance has been disposed.
          */
         bool Signal(intcs signalCount = 1) {
+            System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(signalCount, "signalCount");
             ThrowIfDisposed();
             std::unique_lock lock(mutex_);
             if (currentCount_ == 0 || currentCount_ < signalCount)
@@ -61,14 +64,22 @@ namespace System::Threading {
 
         /**
          * @brief Increments the current count by signalCount.
-         * @throws System::InvalidOperationException if the count is already zero.
+         * @throws System::ArgumentOutOfRangeException if @p signalCount is not positive.
+         * @throws System::InvalidOperationException if the count is already zero, or if
+         * incrementing would overflow intcs::max().
          * @throws System::ObjectDisposedException if this instance has been disposed.
          */
         void AddCount(intcs signalCount = 1) {
+            System::ArgumentOutOfRangeException::ThrowIfNegativeOrZero(signalCount, "signalCount");
             ThrowIfDisposed();
             std::unique_lock lock(mutex_);
             if (currentCount_ == 0)
                 throw System::InvalidOperationException("The event is already signaled and cannot be incremented.");
+            // Verified against CountdownEvent.cs's TryAddCount: real .NET checks
+            // observedCount > (int.MaxValue - signalCount) before adding, to avoid signed
+            // overflow (UB in C++, and .NET itself treats it as an error rather than wrapping).
+            if (currentCount_ > std::numeric_limits<intcs>::max() - signalCount)
+                throw System::InvalidOperationException("The increment operation would cause the CurrentCount to overflow.");
             currentCount_ += signalCount;
         }
 

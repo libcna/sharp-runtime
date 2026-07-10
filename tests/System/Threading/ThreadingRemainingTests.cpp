@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <limits>
 #include <string>
 #include <thread>
 #include "System/ApplicationException.hpp"
@@ -250,6 +251,26 @@ TEST(CountdownEventTests, Wait_AlreadySet_ReturnsImmediately) {
 TEST(CountdownEventTests, WaitWithTimeout_AlreadySet_ReturnsTrue) {
     CountdownEvent ce(0);
     EXPECT_TRUE(ce.Wait(100));
+}
+TEST(CountdownEventTests, AddCount_ZeroOrNegativeSignalCount_Throws) {
+    CountdownEvent ce(1);
+    EXPECT_THROW(ce.AddCount(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.AddCount(-1), System::ArgumentOutOfRangeException);
+}
+TEST(CountdownEventTests, Signal_ZeroOrNegativeSignalCount_Throws) {
+    CountdownEvent ce(1);
+    EXPECT_THROW(ce.Signal(0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.Signal(-1), System::ArgumentOutOfRangeException);
+}
+TEST(CountdownEventTests, AddCount_WouldOverflow_ThrowsInvalidOperationException) {
+    CountdownEvent ce(std::numeric_limits<intcs>::max() - 1);
+    EXPECT_THROW(ce.AddCount(3), System::InvalidOperationException);
+    EXPECT_EQ(ce.getCurrentCountProperty(), std::numeric_limits<intcs>::max() - 1);
+}
+TEST(CountdownEventTests, AddCount_UpToMax_Succeeds) {
+    CountdownEvent ce(std::numeric_limits<intcs>::max() - 1);
+    EXPECT_NO_THROW(ce.AddCount(1));
+    EXPECT_EQ(ce.getCurrentCountProperty(), std::numeric_limits<intcs>::max());
 }
 
 // ===========================================================================
