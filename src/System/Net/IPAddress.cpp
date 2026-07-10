@@ -20,13 +20,97 @@ namespace System::Net {
     using System::Net::Sockets::SocketException;
 
     namespace {
+        // Returns the numeric value of a hex digit (0-9/a-f/A-F), or a sentinel >= any
+        // supported base (8/10/16) for a character that isn't a valid digit in any of them.
+        int hexDigitValue(char ch) {
+            if (ch >= '0' && ch <= '9') return ch - '0';
+            if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+            if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+            return 255;
+        }
+
+        // Verified against IPv4AddressHelper.Common.cs's ParseNonCanonical, which
+        // IPAddressParser.cs's IPAddress.TryParse delegates to (requiring the entire string be
+        // consumed, matching this function's semantics). Parses any canonical (4-part decimal)
+        // or non-canonical (octal/hex-prefixed segments, "short forms" with fewer than 3 dots
+        // where the last segment absorbs the remaining bytes, e.g. "0xFF.0xFFFFFF" or a single
+        // "3232235777") IPv4 literal into a 32-bit host-order value.
+        //
+        // Replaces the previous sscanf("%u.%u.%u.%u%c", ...) implementation, which: (1) invoked
+        // undefined behavior per C11 7.21.6.2p10 on a %u conversion whose value doesn't fit in
+        // unsigned int (a long enough digit run); (2) accepted a leading '-' via %u's
+        // implementation-defined sign handling, which real .NET rejects; (3) rejected octal/hex
+        // segments and short forms that real .NET accepts.
         bool tryParseIPv4Groups(const std::string& s, uint32_t& outAddr) {
-            unsigned a, b, c, d;
-            char extra;
-            if (std::sscanf(s.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4) return false;
-            if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-            outAddr = (a << 24) | (b << 16) | (c << 8) | d;
-            return true;
+            uint32_t parts[3] = {0, 0, 0};
+            uint64_t currentValue = 0;
+            bool atLeastOneChar = false;
+            int dotCount = 0;
+            size_t current = 0;
+            char ch = 0;
+
+            while (current < s.size()) {
+                ch = s[current];
+                currentValue = 0;
+                int numberBase = 10;
+
+                if (ch == '0') {
+                    ++current;
+                    atLeastOneChar = true;
+                    if (current < s.size()) {
+                        ch = s[current];
+                        if (ch == 'x' || ch == 'X') {
+                            numberBase = 16;
+                            ++current;
+                            atLeastOneChar = false;
+                        } else {
+                            numberBase = 8;
+                        }
+                    }
+                }
+
+                for (; current < s.size(); ++current) {
+                    ch = s[current];
+                    int digitValue = hexDigitValue(ch);
+                    if (digitValue >= numberBase) break;
+                    currentValue = currentValue * static_cast<uint64_t>(numberBase) + static_cast<uint64_t>(digitValue);
+                    if (currentValue > 0xFFFFFFFFULL) return false; // overflow past uint.MaxValue
+                    atLeastOneChar = true;
+                }
+
+                if (current < s.size() && ch == '.') {
+                    if (dotCount >= 3 || !atLeastOneChar || currentValue > 0xFF) return false;
+                    parts[dotCount] = static_cast<uint32_t>(currentValue);
+                    ++dotCount;
+                    atLeastOneChar = false;
+                    ++current; // consume the dot
+                    continue;
+                }
+                break;
+            }
+
+            if (!atLeastOneChar) return false;      // empty segment, e.g. "1.1.1." or ""
+            if (current != s.size()) return false;   // trailing garbage (IPAddress.Parse requires full consumption)
+
+            switch (dotCount) {
+                case 0: // e.g. "3232235777" -- the whole 32-bit value in one segment
+                    outAddr = static_cast<uint32_t>(currentValue);
+                    return true;
+                case 1: // e.g. "192.11534091" -- parts[0].rest
+                    if (currentValue > 0xFFFFFFULL) return false;
+                    outAddr = (parts[0] << 24) | static_cast<uint32_t>(currentValue);
+                    return true;
+                case 2: // e.g. "192.168.257" -- parts[0].parts[1].rest
+                    if (currentValue > 0xFFFFULL) return false;
+                    outAddr = (parts[0] << 24) | (parts[1] << 16) | static_cast<uint32_t>(currentValue);
+                    return true;
+                case 3: // standard four-octet form
+                    if (currentValue > 0xFFULL) return false;
+                    outAddr = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | static_cast<uint32_t>(currentValue);
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         std::vector<std::string> splitOn(const std::string& s, char sep) {

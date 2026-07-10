@@ -73,8 +73,51 @@ TEST(IPAddressTests, Parse_InvalidAddress_Throws) {
     EXPECT_THROW(IPAddress::Parse("not.an.ip"), System::FormatException);
 }
 
-TEST(IPAddressTests, Parse_IncompleteOctets_Throws) {
-    EXPECT_THROW(IPAddress::Parse("192.168.1"), System::FormatException);
+TEST(IPAddressTests, Parse_ShortForm_ExpandsIntoLastSegment) {
+    // Verified against IPv4AddressHelper.Common.cs's ParseNonCanonical (the algorithm
+    // IPAddress.Parse's IPv4 path actually uses): "fewer than 3 dots" is a legal "short form"
+    // where the final segment absorbs the remaining bytes -- "192.168.1" means
+    // 192.168.0.1 (192 << 24 | 168 << 16 | 1), not an error. The previous
+    // sscanf("%u.%u.%u.%u%c", ...)-based implementation only ever accepted exactly 4 dotted
+    // decimal segments, incorrectly rejecting this real .NET-valid input.
+    IPAddress ip = IPAddress::Parse("192.168.1");
+    EXPECT_EQ(ip.ToString(), "192.168.0.1");
+}
+
+TEST(IPAddressTests, Parse_SingleSegment_IsWholeThirtyTwoBitValue) {
+    // "3232235777" == 0xC0A80101 == 192.168.1.1, with zero dots.
+    IPAddress ip = IPAddress::Parse("3232235777");
+    EXPECT_EQ(ip.ToString(), "192.168.1.1");
+}
+
+TEST(IPAddressTests, Parse_HexAndOctalSegments_Accepted) {
+    // 0xC0 == 192, 0250 (octal) == 168.
+    IPAddress ip = IPAddress::Parse("0xC0.0250.0.1");
+    EXPECT_EQ(ip.ToString(), "192.168.0.1");
+}
+
+TEST(IPAddressTests, Parse_TrailingGarbage_Throws) {
+    EXPECT_THROW(IPAddress::Parse("192.168.1.1extra"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_EmptyTrailingSegment_Throws) {
+    EXPECT_THROW(IPAddress::Parse("192.168.1."), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_TooManyDots_Throws) {
+    EXPECT_THROW(IPAddress::Parse("1.2.3.4.5"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_SegmentOverflowsMaxIPv4Value_Throws) {
+    // A digit run long enough to overflow uint.MaxValue -- previously this invoked undefined
+    // behavior via sscanf's %u conversion (C11 7.21.6.2p10) instead of cleanly failing.
+    EXPECT_THROW(IPAddress::Parse("99999999999999999999"), System::FormatException);
+}
+
+TEST(IPAddressTests, Parse_LeadingMinusSign_Throws) {
+    // sscanf's %u historically accepts a leading '-' (wrapping to a huge unsigned value on
+    // most libc implementations); real .NET rejects it outright since '-' isn't a valid digit.
+    EXPECT_THROW(IPAddress::Parse("-1.2.3.4"), System::FormatException);
 }
 
 TEST(IPAddressTests, ByteArrayConstructor_WrongLength_ThrowsArgumentException) {
