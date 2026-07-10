@@ -70,6 +70,68 @@ TEST(JulianCalendarBatch31Test, GetDaysInMonth_OtherMonths) {
     EXPECT_EQ(jc.GetDaysInMonth(2024, 12), 31);
 }
 
+// Real date-conversion regression tests: prior to this fix, GetYear/GetMonth/GetDayOfMonth/
+// ToDateTime/AddMonths/AddYears/GetDaysInYear were all inherited unmodified from the
+// Gregorian-only Calendar base class, so JulianCalendar never actually applied the
+// Julian<->Gregorian day-number offset -- it just relabeled Gregorian dates. .NET's own doc
+// comment on JulianCalendar.cs states the reference point verified here: "Gregorian 1/1/0001
+// is Julian 1/3/0001".
+TEST(JulianCalendarBatch31Test, GetYear_GetMonth_GetDayOfMonth_AppliesTwoDayOffset) {
+    JulianCalendar jc;
+    System::DateTime gregorian(1, 1, 1);
+    EXPECT_EQ(jc.GetYear(gregorian), 1);
+    EXPECT_EQ(jc.GetMonth(gregorian), 1);
+    EXPECT_EQ(jc.GetDayOfMonth(gregorian), 3);
+}
+
+TEST(JulianCalendarBatch31Test, ToDateTime_RoundTripsThroughGregorianOffset) {
+    JulianCalendar jc;
+    System::DateTime back = jc.ToDateTime(1, 1, 3, 0, 0, 0, 0);
+    EXPECT_EQ(back.getYearProperty(), 1);
+    EXPECT_EQ(back.getMonthProperty(), 1);
+    EXPECT_EQ(back.getDayProperty(), 1);
+}
+
+TEST(JulianCalendarBatch31Test, GetDayOfYear_JanuaryFirst_IsOne) {
+    JulianCalendar jc;
+    // Julian 1/1/3 == day-of-year 3 (the Julian calendar's own 3rd day).
+    System::DateTime julianDay3 = jc.ToDateTime(1, 1, 3, 0, 0, 0, 0);
+    EXPECT_EQ(jc.GetDayOfYear(julianDay3), 3);
+}
+
+TEST(JulianCalendarBatch31Test, AddYears_PreservesJulianMonthAndDay) {
+    JulianCalendar jc;
+    System::DateTime start = jc.ToDateTime(1, 1, 3, 0, 0, 0, 0);
+    System::DateTime plusOneYear = jc.AddYears(start, 1);
+    EXPECT_EQ(jc.GetYear(plusOneYear), 2);
+    EXPECT_EQ(jc.GetMonth(plusOneYear), 1);
+    EXPECT_EQ(jc.GetDayOfMonth(plusOneYear), 3);
+}
+
+TEST(JulianCalendarBatch31Test, AddMonths_RollsOverYearBoundary) {
+    JulianCalendar jc;
+    System::DateTime dec = jc.ToDateTime(1, 12, 1, 0, 0, 0, 0);
+    System::DateTime plusTwoMonths = jc.AddMonths(dec, 2);
+    EXPECT_EQ(jc.GetYear(plusTwoMonths), 2);
+    EXPECT_EQ(jc.GetMonth(plusTwoMonths), 2);
+    EXPECT_EQ(jc.GetDayOfMonth(plusTwoMonths), 1);
+}
+
+TEST(JulianCalendarBatch31Test, GetDaysInYear_MatchesLeapRule) {
+    JulianCalendar jc;
+    EXPECT_EQ(jc.GetDaysInYear(2000), 366);
+    // Julian leap rule has no century exception, unlike Gregorian: 1900 is a Julian leap year.
+    EXPECT_EQ(jc.GetDaysInYear(1900), 366);
+    EXPECT_EQ(jc.GetDaysInYear(2023), 365);
+}
+
+TEST(JulianCalendarBatch31Test, TwoDigitYearMax_DefaultIs2049) {
+    JulianCalendar jc;
+    // .NET JulianCalendar's constructor sets _twoDigitYearMax = 2049 (not the 2029 this port
+    // previously used), matching JulianCalendar.cs's `_twoDigitYearMax = 2049;`.
+    EXPECT_EQ(jc.getTwoDigitYearMaxProperty(), 2049);
+}
+
 // ===========================================================================
 // KoreanCalendar
 // ===========================================================================
