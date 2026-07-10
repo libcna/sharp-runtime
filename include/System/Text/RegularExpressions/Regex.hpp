@@ -99,15 +99,33 @@ namespace System::Text::RegularExpressions {
         // "Match" inside any inline member function body (a complete-class context, resolved only
         // after the whole class is seen) resolves to that member function, not the sibling Match
         // class, which would break constructor-style calls like "Match(m, ...)".
+        //
+        // Searches input[offset..] using an iterator range into the ORIGINAL string, not a
+        // re-materialized substring (input.substr(offset)) -- two bugs that fix, both
+        // confirmed with a compiled reproduction before this change:
+        //  1. m.position(i) is relative to whatever sequence was searched. Searching a fresh
+        //     substr() made every reported index relative to that substring's start, not the
+        //     true start of input; Match's positionOffset parameter corrects this back to an
+        //     absolute index (previously uncorrected, corrupting Replace(string,
+        //     MatchEvaluator)'s output and every NextMatch() chain's Index after the first).
+        //  2. '^' (and any beginning-of-sequence assertion) was evaluated against the fresh
+        //     substring's start, so it incorrectly matched at every resumption offset instead
+        //     of only the true start of input. match_prev_avail tells the engine the position
+        //     right before `first` is a real, readable character (since first genuinely points
+        //     into input, not a separate string), so '^' correctly stops matching once
+        //     offset > 0.
         RegularExpressions::Match matchFrom(const std::string& input, size_t offset) const {
             if (offset > input.size()) return RegularExpressions::Match();
             std::smatch m;
-            std::string remaining = input.substr(offset);
-            if (!std::regex_search(remaining, m, re_)) return RegularExpressions::Match();
+            auto flags = offset > 0 ? std::regex_constants::match_prev_avail
+                                    : std::regex_constants::match_default;
+            if (!std::regex_search(input.cbegin() + static_cast<std::ptrdiff_t>(offset), input.cend(), m, re_, flags))
+                return RegularExpressions::Match();
 
             size_t matchStart = offset + static_cast<size_t>(m.position(0));
             size_t nextOffset = matchStart + std::max<size_t>(m[0].length(), 1);
-            return RegularExpressions::Match(m, groupNames_, [this, input, nextOffset]() { return matchFrom(input, nextOffset); });
+            return RegularExpressions::Match(m, groupNames_, [this, input, nextOffset]() { return matchFrom(input, nextOffset); },
+                                             static_cast<intcs>(offset));
         }
 
     public:

@@ -432,6 +432,34 @@ TEST(RegexTests, Static_Split) {
     EXPECT_EQ(parts[2], "c");
 }
 
+// matchFrom() (used by Match()/NextMatch() chains and this MatchEvaluator overload) used to
+// search a fresh substr(offset) each call, so std::smatch::position() was relative to that
+// substring's start rather than the true start of the original input -- corrupting every
+// reported Index after the first match. Confirmed with a compiled reproduction before fixing:
+// "abc 123 def 456" produced "abc [123] def 456[456]def 456" instead of "abc [123] def [456]".
+TEST(RegexTests, Replace_WithMatchEvaluator_ReportsCorrectIndices) {
+    Regex re("\\d+");
+    std::string result = re.Replace("abc 123 def 456", [](const Match& m) {
+        return "[" + m.getValueProperty() + "]";
+    });
+    EXPECT_EQ(result, "abc [123] def [456]");
+}
+
+// Same root cause as above: searching a fresh substring each call also made '^' incorrectly
+// match at every resumption offset, not just the true start of input. Fixed by searching an
+// iterator range into the original string with match_prev_avail instead of a re-materialized
+// substring, so '^' correctly evaluates against the real preceding character.
+TEST(RegexTests, NextMatch_AnchorDoesNotFalsePositiveOnResumedSearch) {
+    Regex re("^\\d");
+    Match m = re.Match("123456");
+    int count = 0;
+    while (m.getSuccessProperty()) {
+        ++count;
+        m = m.NextMatch();
+    }
+    EXPECT_EQ(count, 1);
+}
+
 // ===========================================================================
 // Match
 // ===========================================================================
@@ -467,4 +495,14 @@ TEST(MatchCollectionTests, OperatorBracket_ReturnsMatch) {
     EXPECT_EQ(mc.getCountProperty(), 2);
     EXPECT_EQ(mc[0].getValueProperty(), "a");
     EXPECT_EQ(mc[1].getValueProperty(), "b");
+}
+
+// operator[] used raw vector::operator[] with no bounds check (UB for out-of-range index);
+// real .NET's indexer throws ArgumentOutOfRangeException (MatchCollection.cs), matching the
+// already-correct behavior of the sibling GroupCollection/CaptureCollection indexers.
+TEST(MatchCollectionTests, OperatorBracket_OutOfRange_Throws) {
+    Regex r("[a-z]");
+    MatchCollection mc = r.Matches("a1b2");
+    EXPECT_THROW(mc[100], System::ArgumentOutOfRangeException);
+    EXPECT_THROW(mc[-1], System::ArgumentOutOfRangeException);
 }

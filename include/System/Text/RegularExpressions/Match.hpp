@@ -42,9 +42,26 @@ namespace System::Text::RegularExpressions {
         /** @brief Constructs an empty (unsuccessful) Match. */
         Match() = default;
 
-        /** @brief Constructs a Match from a std::smatch result, optionally with named-group info and a NextMatch() continuation. */
+        /**
+         * @brief Constructs a Match from a std::smatch result, optionally with named-group
+         * info and a NextMatch() continuation.
+         *
+         * @param m            The std::smatch produced by regex_search.
+         * @param groupNames   Name-to-index mapping for named capture groups.
+         * @param nextMatchFunc Continuation invoked by NextMatch().
+         * @param positionOffset Added to every submatch's reported index. `m.position(i)` is
+         *        relative to the sequence that was actually searched -- when that sequence is
+         *        an iterator range starting partway into the real input (as
+         *        Regex::matchFrom does, to search "the rest of the string" for
+         *        Match()/NextMatch() chains and Replace(string, MatchEvaluator)), `m.position(i)`
+         *        is relative to that range's start, not the true start of the original input.
+         *        Without this correction, every match after the first reported the wrong
+         *        Index, corrupting Replace(string, MatchEvaluator)'s output. Callers that
+         *        search the whole original string directly (e.g. Regex::Matches() via
+         *        sregex_iterator) already get absolute positions and pass 0 (the default).
+         */
         explicit Match(const std::smatch& m, std::vector<std::pair<std::string, intcs>> groupNames = {},
-                        std::function<Match()> nextMatchFunc = nullptr)
+                        std::function<Match()> nextMatchFunc = nullptr, intcs positionOffset = 0)
             : success_(m.ready() && !m.empty()), groupNames_(std::move(groupNames)),
               nextMatchFunc_(std::move(nextMatchFunc)) {
             if (success_) {
@@ -53,7 +70,7 @@ namespace System::Text::RegularExpressions {
                     bool matched = m[i].matched;
                     subMatches_.push_back(SubMatchData{
                         matched ? m[i].str() : std::string(),
-                        matched ? static_cast<intcs>(m.position(i)) : 0,
+                        matched ? static_cast<intcs>(m.position(i)) + positionOffset : 0,
                         matched ? static_cast<intcs>(m[i].length()) : 0, matched});
                 }
             }
