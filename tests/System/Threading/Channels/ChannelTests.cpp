@@ -96,6 +96,24 @@ TEST(ChannelTests, WaitToReadAsync_ReturnsFalse_WhenClosedEmpty) {
     EXPECT_FALSE(channel.Reader->WaitToReadAsync().getResultProperty());
 }
 
+// Regression test for a wave-3 audit finding: WaitToReadAsync() never inspected closeError, so
+// completing the channel with an exception and an empty queue made it return false (as if
+// gracefully closed) instead of faulting -- the real error was only observable via the
+// separate getCompletionProperty() task, not the primary read path. Verified against
+// UnboundedChannel.cs's WaitToReadAsync, which returns Task.FromException when the channel
+// completed with a non-null error.
+TEST(ChannelTests, WaitToReadAsync_ThrowsCompletionError_WhenClosedWithException) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->TryComplete(std::make_exception_ptr(std::runtime_error("boom")));
+    EXPECT_THROW(channel.Reader->WaitToReadAsync().getResultProperty(), std::runtime_error);
+}
+
+TEST(ChannelTests, WaitToWriteAsync_ThrowsCompletionError_WhenClosedWithException) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->TryComplete(std::make_exception_ptr(std::runtime_error("boom")));
+    EXPECT_THROW(channel.Writer->WaitToWriteAsync().getResultProperty(), std::runtime_error);
+}
+
 TEST(ChannelTests, ReadAsync_ThrowsChannelClosedException_WhenClosedEmpty) {
     auto channel = Channel<int>::CreateUnbounded();
     channel.Writer->TryComplete();

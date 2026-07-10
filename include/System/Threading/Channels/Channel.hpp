@@ -160,12 +160,20 @@ namespace System::Threading::Channels {
                 return static_cast<SharpRuntime::intcs>(state_->queue.size());
             }
 
+            // Verified against UnboundedChannel.cs's WaitToReadAsync: when there are no items
+            // left and writing is done, the returned task faults with the completion exception
+            // (if any) rather than resolving to false. This previously always returned false
+            // once closed, silently discarding a real completion error -- it was only
+            // observable via the separate getCompletionProperty() task, not through the
+            // primary WaitToReadAsync/ReadAsync read path.
             System::Threading::Tasks::TaskT<bool> WaitToReadAsync() override {
                 auto state = state_;
-                return System::Threading::Tasks::TaskT<bool>([state]() {
+                return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
                     std::unique_lock<std::mutex> lock(state->mutex);
                     state->notEmpty.wait(lock, [&] { return !state->queue.empty() || state->closed; });
-                    return !state->queue.empty();
+                    if (!state->queue.empty()) return true;
+                    if (state->closeError) std::rethrow_exception(state->closeError);
+                    return false;
                 });
             }
 
@@ -210,16 +218,21 @@ namespace System::Threading::Channels {
                 return true;
             }
 
+            // Verified against UnboundedChannel.cs's WaitToWriteAsync: once the channel is
+            // closed, the returned task faults with the completion exception (if any) rather
+            // than resolving to false. Same rationale as WaitToReadAsync's fix above.
             System::Threading::Tasks::TaskT<bool> WaitToWriteAsync() override {
                 auto state = state_;
-                return System::Threading::Tasks::TaskT<bool>([state]() {
+                return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
                     std::unique_lock<std::mutex> lock(state->mutex);
                     state->notFull.wait(lock, [&] {
                         return state->closed || state->capacity < 0 ||
                                static_cast<SharpRuntime::intcs>(state->queue.size()) < state->effectiveCapacity() ||
                                state->fullMode != BoundedChannelFullMode::Wait;
                     });
-                    return !state->closed;
+                    if (!state->closed) return true;
+                    if (state->closeError) std::rethrow_exception(state->closeError);
+                    return false;
                 });
             }
 
