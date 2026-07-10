@@ -299,14 +299,20 @@ public:
     /**
      * @brief Returns the number of days in the specified month, year, and era.
      *
-     * C++ counterpart of .NET Calendar.GetDaysInMonth(int, int, int).
+     * C++ counterpart of .NET Calendar.GetDaysInMonth(int, int, int), whose base
+     * implementation delegates to DateTime.DaysInMonth(year, month), which validates month
+     * before indexing (DateTime.cs: `if (month < 1 || month > 12) Throw...`).
      * @param year  The year.
      * @param month The month (1–12).
      * @param era   The era (default CurrentEra).
      * @return The number of days in the specified month.
+     * @throws System::ArgumentOutOfRangeException if @p month is not in [1, 12]. Without this
+     *         check, indexing the internal days-per-month table with an out-of-range month is
+     *         undefined behavior, not a thrown exception.
      */
     [[nodiscard]] virtual int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
         if (month == 2 && IsLeapYear(year)) return 29;
         return days[month];
     }
@@ -424,15 +430,19 @@ public:
     /**
      * @brief Returns a DateTime that is the specified number of years from the given DateTime.
      *
-     * C++ counterpart of .NET Calendar.AddYears(DateTime, int).
+     * C++ counterpart of .NET Calendar.AddYears(DateTime, int). Real .NET's GregorianCalendar
+     * implements this as `AddMonths(time, years * 12)` (GregorianCalendar.cs) specifically so
+     * that a Feb 29 source date lands on Feb 28 in a non-leap target year, via AddMonths'
+     * `if (d > days) d = days;` clamp -- constructing the result year/month/day directly, as
+     * this method previously did, skips that clamp and throws instead (DateTime's constructor
+     * rejects Feb 29 in a non-leap year) where .NET clamps silently.
      * @param time  The starting DateTime.
      * @param years The number of years to add.
-     * @return A new DateTime offset by @p years.
+     * @return A new DateTime offset by @p years, with the day clamped if the target month is
+     *         shorter than the source day (e.g. Feb 29 -> Feb 28 in a non-leap year).
      */
     virtual System::DateTime AddYears(const System::DateTime& time, int years) const {
-        return System::DateTime(time.getYearProperty() + years,
-                                time.getMonthProperty(),
-                                time.getDayProperty());
+        return AddMonths(time, years * 12);
     }
 
     /**

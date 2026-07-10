@@ -204,6 +204,16 @@ TEST(CalendarTests, GetDaysInMonth_April_30) {
     EXPECT_EQ(cal.GetDaysInMonth(2021, 4), 30);
 }
 
+// Indexing the internal days-per-month table with an out-of-range month was previously
+// undefined behavior (no bounds check), not a thrown exception; real .NET's base
+// implementation (via DateTime.DaysInMonth) validates month first.
+TEST(CalendarTests, GetDaysInMonth_OutOfRangeMonth_Throws) {
+    Calendar cal;
+    EXPECT_THROW(cal.GetDaysInMonth(2021, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.GetDaysInMonth(2021, 13), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.GetDaysInMonth(2021, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(CalendarTests, GetDaysInYear_Leap_366) {
     Calendar cal;
     EXPECT_EQ(cal.GetDaysInYear(2000), 366);
@@ -223,6 +233,20 @@ TEST(CalendarTests, AddYears_Simple) {
     EXPECT_EQ(r.getYearProperty(),  2023);
     EXPECT_EQ(r.getMonthProperty(), 6);
     EXPECT_EQ(r.getDayProperty(),   15);
+}
+
+// AddYears previously constructed the result year/month/day directly with no clamping, so a
+// Feb 29 source date landing on a non-leap target year would throw (DateTime's constructor
+// rejects Feb 29 in a non-leap year) instead of clamping to Feb 28 like real .NET
+// (GregorianCalendar.cs: AddYears delegates to AddMonths, which clamps `if (d > days) d =
+// days;`).
+TEST(CalendarTests, AddYears_Feb29_ClampsToFeb28InNonLeapYear) {
+    Calendar cal;
+    DateTime d(2024, 2, 29); // 2024 is a leap year
+    DateTime r = cal.AddYears(d, 1); // 2025 is not a leap year
+    EXPECT_EQ(r.getYearProperty(),  2025);
+    EXPECT_EQ(r.getMonthProperty(), 2);
+    EXPECT_EQ(r.getDayProperty(),   28);
 }
 
 TEST(CalendarTests, AddMonths_CrossesYear) {

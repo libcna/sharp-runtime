@@ -150,9 +150,11 @@ public:
      * @param month Month (1–12).
      * @param era   Era (unused).
      * @return Number of days in the specified month.
+     * @throws System::ArgumentOutOfRangeException if @p month is not in [1, 12].
      */
     [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
         return (month == 2 && IsLeapYear(year)) ? 29 : days[month];
     }
 
