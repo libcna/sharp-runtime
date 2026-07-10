@@ -21,6 +21,7 @@
 #include "System/Threading/SpinLock.hpp"
 #include "System/Threading/Volatile.hpp"
 #include "System/Threading/Timeout.hpp"
+#include "System/Threading/ThreadStateException.hpp"
 
 using namespace System::Threading;
 
@@ -76,8 +77,59 @@ TEST(ThreadingTests, Thread_IsBackground_RoundTrip) {
 TEST(ThreadingTests, Thread_Start_StartsOnce_SecondThrows) {
     Thread t([]{ Thread::Sleep(0); });
     EXPECT_NO_THROW(t.Start());
-    EXPECT_THROW(t.Start(), std::invalid_argument);
+    EXPECT_THROW(t.Start(), System::Threading::ThreadStateException);
     t.Join();
+}
+
+TEST(ThreadingTests, Thread_Sleep_LessThanNegativeOne_Throws) {
+    EXPECT_THROW(Thread::Sleep(-2), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, Thread_Join_LessThanNegativeOne_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    t.Start();
+    EXPECT_THROW(t.Join(-2), System::ArgumentOutOfRangeException);
+    t.Join();
+}
+
+TEST(ThreadingTests, Thread_Join_InfiniteTimeout_BlocksUntilCompletion) {
+    // Regression: Join(-1) previously computed a deadline in the past and returned
+    // almost immediately instead of blocking forever (Timeout.Infinite semantics).
+    std::atomic<bool> finished{false};
+    Thread t([&finished]{
+        Thread::Sleep(50);
+        finished.store(true);
+    });
+    t.Start();
+    EXPECT_TRUE(t.Join(-1));
+    EXPECT_TRUE(finished.load());
+}
+
+TEST(ThreadingTests, Thread_Join_NoArg_OnUnstartedThread_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_THROW(t.Join(), System::Threading::ThreadStateException);
+}
+
+TEST(ThreadingTests, Thread_Join_WithTimeout_OnUnstartedThread_Throws) {
+    Thread t([]{ Thread::Sleep(0); });
+    EXPECT_THROW(t.Join(100), System::Threading::ThreadStateException);
+}
+
+TEST(ThreadingTests, Thread_CurrentThread_InsideStartedThread_MatchesOwnManagedThreadId) {
+    intcs idSeenFromInside = -1;
+    Thread worker([&]{ idSeenFromInside = Thread::CurrentThread().getManagedThreadIdProperty(); });
+    worker.Start();
+    worker.Join();
+    EXPECT_EQ(idSeenFromInside, worker.getManagedThreadIdProperty());
+}
+
+TEST(ThreadingTests, Thread_CurrentThread_InsideBackgroundThread_ReportsBackground) {
+    bool sawBackground = false;
+    Thread worker([&]{ sawBackground = Thread::CurrentThread().getIsBackgroundProperty(); });
+    worker.setIsBackgroundProperty(true);
+    worker.Start();
+    worker.Join();
+    EXPECT_TRUE(sawBackground);
 }
 
 TEST(ThreadingTests, Thread_ManagedThreadId_IsPositive) {

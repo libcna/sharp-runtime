@@ -11,9 +11,11 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <string>
 #include <thread>
 #include "System/ApplicationException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
@@ -438,6 +440,59 @@ TEST(ReaderWriterLockSlimTests, Dispose_NoThrow) {
     ReaderWriterLockSlim rw;
     EXPECT_NO_THROW(rw.Dispose());
 }
+TEST(ReaderWriterLockSlimTests, UpgradeableToWrite_DoesNotDeadlock) {
+    // Previously EnterWriteLock() called mtx_.lock() while the same thread already held
+    // mtx_.lock_shared() via EnterUpgradeableReadLock() -- undefined behavior on
+    // std::shared_mutex, manifesting as a deadlock. Run on a background thread with a
+    // bounded join so a regression hangs the test instead of the whole suite.
+    ReaderWriterLockSlim rw;
+    std::promise<void> upgraded;
+    std::thread t([&] {
+        rw.EnterUpgradeableReadLock();
+        rw.EnterWriteLock();
+        upgraded.set_value();
+        rw.ExitWriteLock();
+        rw.ExitUpgradeableReadLock();
+    });
+    auto fut = upgraded.get_future();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    t.join();
+}
+TEST(ReaderWriterLockSlimTests, UpgradeableToWrite_WaitsForConcurrentReaderToDrain) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    std::promise<void> upgraded;
+    std::thread t([&] {
+        rw.EnterUpgradeableReadLock();
+        rw.EnterWriteLock();
+        upgraded.set_value();
+        rw.ExitWriteLock();
+        rw.ExitUpgradeableReadLock();
+    });
+    auto fut = upgraded.get_future();
+    // The write upgrade must not complete while the concurrent reader is still active.
+    EXPECT_EQ(fut.wait_for(std::chrono::milliseconds(200)), std::future_status::timeout);
+    rw.ExitReadLock();
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    t.join();
+}
+TEST(ReaderWriterLockSlimTests, ExitReadLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitReadLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, ExitWriteLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitWriteLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, ExitUpgradeableReadLock_NotHeld_Throws) {
+    ReaderWriterLockSlim rw;
+    EXPECT_THROW(rw.ExitUpgradeableReadLock(), System::Threading::SynchronizationLockException);
+}
+TEST(ReaderWriterLockSlimTests, EnterReadLock_AfterDispose_Throws) {
+    ReaderWriterLockSlim rw;
+    rw.Dispose();
+    EXPECT_THROW(rw.EnterReadLock(), System::ObjectDisposedException);
+}
 
 // ===========================================================================
 // SpinWait
@@ -540,6 +595,19 @@ TEST(ThreadPoolTests, QueueUserWorkItem_ReturnsTrue) {
     // Give the detached thread a moment to run
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     EXPECT_TRUE(ran.load());
+}
+TEST(ThreadPoolTests, QueueUserWorkItem_NullCallback_Throws) {
+    // Regression: an empty std::function invoked inside the detached thread previously
+    // threw std::bad_function_call with no handler, crashing the process via
+    // std::terminate() instead of throwing synchronously before the thread was spawned.
+    EXPECT_THROW(ThreadPool::QueueUserWorkItem(std::function<void()>()), System::ArgumentNullException);
+}
+TEST(ThreadPoolTests, QueueUserWorkItem_WithState_NullCallback_Throws) {
+    int state = 0;
+    EXPECT_THROW(ThreadPool::QueueUserWorkItem(std::function<void(void*)>(), &state), System::ArgumentNullException);
+}
+TEST(ThreadPoolTests, UnsafeQueueUserWorkItem_NullCallback_Throws) {
+    EXPECT_THROW(ThreadPool::UnsafeQueueUserWorkItem(nullptr, false), System::ArgumentNullException);
 }
 TEST(ThreadPoolTests, GetMinThreads_NonNegative) {
     int w = 0, c = 0;
