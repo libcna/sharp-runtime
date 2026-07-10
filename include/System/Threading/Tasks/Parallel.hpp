@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/AggregateException.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
@@ -68,6 +69,26 @@ namespace System::Threading::Tasks {
 
     /** @brief Provides support for parallel loops and regions. */
     class Parallel {
+    private:
+        // Verified against Parallel.cs: when one or more iterations/actions throw, the loop
+        // does not propagate only the first exception it happens to observe -- it collects every
+        // exception raised and throws them together as a single AggregateException. This port
+        // previously called f.get() per future with no try/catch, so the first exception
+        // encountered escaped immediately (unwrapped) and every other future's exception was
+        // silently discarded when its std::future was destroyed. This waits for and collects
+        // from every future in the batch, regardless of exceptions, so exceptions.empty() is a
+        // reliable "no errors occurred" check even after a mid-batch throw.
+        static void waitAllCollectingExceptions(std::vector<std::future<void>>& futures,
+                                                  std::vector<std::exception_ptr>& exceptions) {
+            for (auto& f : futures) {
+                try {
+                    f.get();
+                } catch (...) {
+                    exceptions.push_back(std::current_exception());
+                }
+            }
+        }
+
     public:
         /** Executes a for loop from fromInclusive to toExclusive in parallel. */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, std::function<void(intcs)> body) {
@@ -87,14 +108,16 @@ namespace System::Threading::Tasks {
             if (maxDeg < 1) maxDeg = 1;
 
             std::vector<std::future<void>> futures;
+            std::vector<std::exception_ptr> exceptions;
             for (intcs i = fromInclusive; i < toExclusive; ++i) {
                 futures.push_back(std::async(std::launch::async, [body, i]{ body(i); }));
                 if (static_cast<intcs>(futures.size()) >= maxDeg) {
-                    for (auto& f : futures) f.get();
+                    waitAllCollectingExceptions(futures, exceptions);
                     futures.clear();
                 }
             }
-            for (auto& f : futures) f.get();
+            waitAllCollectingExceptions(futures, exceptions);
+            if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = true;
             return result;
@@ -115,11 +138,13 @@ namespace System::Threading::Tasks {
 #else
             ParallelLoopState state;
             std::vector<std::future<void>> futures;
+            std::vector<std::exception_ptr> exceptions;
             for (intcs i = fromInclusive; i < toExclusive; ++i) {
                 if (state.getShouldExitCurrentIterationProperty()) break;
                 futures.push_back(std::async(std::launch::async, [body, i, state]() mutable { body(i, state); }));
             }
-            for (auto& f : futures) f.get();
+            waitAllCollectingExceptions(futures, exceptions);
+            if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = !state.getIsStoppedProperty();
             return result;
@@ -138,7 +163,9 @@ namespace System::Threading::Tasks {
             for (TSource item : source) {
                 futures.push_back(std::async(std::launch::async, [body, item]{ body(item); }));
             }
-            for (auto& f : futures) f.get();
+            std::vector<std::exception_ptr> exceptions;
+            waitAllCollectingExceptions(futures, exceptions);
+            if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = true;
             return result;
@@ -159,7 +186,9 @@ namespace System::Threading::Tasks {
                 if (state.getShouldExitCurrentIterationProperty()) break;
                 futures.push_back(std::async(std::launch::async, [body, item, state]() mutable { body(item, state); }));
             }
-            for (auto& f : futures) f.get();
+            std::vector<std::exception_ptr> exceptions;
+            waitAllCollectingExceptions(futures, exceptions);
+            if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = !state.getIsStoppedProperty();
             return result;
@@ -175,7 +204,9 @@ namespace System::Threading::Tasks {
             std::vector<std::future<void>> futures;
             for (auto& a : actions)
                 futures.push_back(std::async(std::launch::async, a));
-            for (auto& f : futures) f.get();
+            std::vector<std::exception_ptr> exceptions;
+            waitAllCollectingExceptions(futures, exceptions);
+            if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
 #endif
         }
     };

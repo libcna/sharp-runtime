@@ -382,6 +382,50 @@ TEST(ParallelTests, Invoke_ExecutesAllActions) {
     EXPECT_EQ(count.load(), 3);
 }
 
+// Regression tests for a wave-3 audit finding: For/ForEach/Invoke called f.get() on each future
+// with no try/catch, so the first exception observed escaped unwrapped and every other future's
+// exception was silently discarded when its std::future was destroyed. Verified against
+// Parallel.cs, which always aggregates every exception raised by any iteration/action into a
+// single AggregateException, even when only one iteration actually throws.
+TEST(ParallelTests, For_IterationThrows_ThrowsAggregateException) {
+    EXPECT_THROW(
+        Parallel::For(0, 10, [](int i) {
+            if (i % 2 == 0) throw std::runtime_error("even");
+        }),
+        System::AggregateException);
+}
+
+TEST(ParallelTests, For_MultipleIterationsThrow_AggregatesAllExceptions) {
+    try {
+        Parallel::For(0, 10, [](int i) {
+            if (i % 2 == 0) throw std::runtime_error("even");
+        });
+        FAIL() << "expected AggregateException";
+    } catch (const System::AggregateException& agg) {
+        // Iterations 0,2,4,6,8 all throw -- every one of them must be collected, not just the first.
+        EXPECT_EQ(agg.getInnerExceptionCountProperty(), 5u);
+    }
+}
+
+TEST(ParallelTests, ForEach_ItemThrows_ThrowsAggregateException) {
+    std::vector<int> items = {1, 2, 3};
+    EXPECT_THROW(
+        Parallel::ForEach<int>(items, [](int v) {
+            if (v == 2) throw std::runtime_error("bad item");
+        }),
+        System::AggregateException);
+}
+
+TEST(ParallelTests, Invoke_ActionThrows_ThrowsAggregateException) {
+    EXPECT_THROW(
+        Parallel::Invoke({
+            []() {},
+            []() { throw std::runtime_error("boom"); },
+            []() {}
+        }),
+        System::AggregateException);
+}
+
 // ===========================================================================
 // ParallelLoopState
 // ===========================================================================
