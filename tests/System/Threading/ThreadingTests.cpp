@@ -498,6 +498,15 @@ TEST(ThreadingTests, AutoResetEvent_InitiallyNotSignaled_WaitTimesOut) {
     EXPECT_FALSE(e.WaitOne(0));
 }
 
+// Regression test for a wave-3 audit finding: WaitOne(intcs) was missing the
+// WaitHandle::ValidateTimeout(...) call present on every sibling wait-handle type in this
+// codebase (ManualResetEvent, EventWaitHandle, Mutex, Semaphore, etc.) -- a timeout below -1
+// silently reached cv_.wait_for with a negative duration instead of throwing.
+TEST(ThreadingTests, AutoResetEvent_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    AutoResetEvent e(false);
+    EXPECT_THROW(e.WaitOne(-2), System::ArgumentOutOfRangeException);
+}
+
 TEST(ThreadingTests, AutoResetEvent_InitiallySignaled_WaitSucceeds) {
     AutoResetEvent e(true);
     EXPECT_TRUE(e.WaitOne(0));
