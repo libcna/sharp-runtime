@@ -17,6 +17,19 @@ namespace System::Net {
         System::ArgumentOutOfRangeException::ThrowIfGreaterThan(port, MaxPort, "port");
     }
 
+    namespace {
+        // Verified against IPAddress.cs's IPAddress(long) constructor (which IPEndPoint(long,
+        // int) delegates to in real .NET): throws ArgumentOutOfRangeException if the value
+        // doesn't fit in 32 bits, rather than silently truncating. Comparing as uint64_t (not
+        // int64_t) means a negative address is correctly rejected too, matching .NET's own
+        // (ulong)newAddress cast before the range check.
+        uint32_t validatedNarrow(longcs address) {
+            System::ArgumentOutOfRangeException::ThrowIfGreaterThan(
+                static_cast<uint64_t>(address), static_cast<uint64_t>(0xFFFFFFFFULL), "address");
+            return static_cast<uint32_t>(address);
+        }
+    }
+
     IPEndPoint::IPEndPoint(const IPAddress& address, intcs port) : address_(address), port_(port) {
         validatePort(port);
     }
@@ -25,7 +38,7 @@ namespace System::Net {
         validatePort(port);
     }
 
-    IPEndPoint::IPEndPoint(longcs address, intcs port) : address_(static_cast<uint32_t>(address)), port_(port) {
+    IPEndPoint::IPEndPoint(longcs address, intcs port) : address_(validatedNarrow(address)), port_(port) {
         validatePort(port);
     }
 

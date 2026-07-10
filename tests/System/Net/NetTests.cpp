@@ -351,6 +351,26 @@ TEST(IPEndPointTests, Constructor_Uint32AndPort) {
     EXPECT_EQ(ep.getPortProperty(), 443);
 }
 
+TEST(IPEndPointTests, Constructor_LongcsAndPort_InRange) {
+    IPEndPoint ep(static_cast<SharpRuntime::longcs>(0x7F000001), 443);
+    EXPECT_EQ(ep.getAddressProperty().getAddressProperty(), 0x7F000001u);
+}
+
+// Regression test for a wave-3 audit finding: the longcs-taking constructor did
+// static_cast<uint32_t>(address) with no range check, silently truncating any value outside
+// uint32_t range instead of throwing. Verified against IPAddress.cs's IPAddress(long)
+// constructor (which IPEndPoint(long, int) delegates to in real .NET), which throws
+// ArgumentOutOfRangeException via ThrowIfGreaterThan((ulong)newAddress, 0xFFFFFFFF).
+TEST(IPEndPointTests, Constructor_LongcsAndPort_TooLarge_Throws) {
+    EXPECT_THROW(IPEndPoint(static_cast<SharpRuntime::longcs>(0x100000000LL), 443),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(IPEndPointTests, Constructor_LongcsAndPort_Negative_Throws) {
+    EXPECT_THROW(IPEndPoint(static_cast<SharpRuntime::longcs>(-1), 443),
+                 System::ArgumentOutOfRangeException);
+}
+
 TEST(IPEndPointTests, ToString_LoopbackPort80) {
     IPEndPoint ep(IPAddress::Loopback, 80);
     EXPECT_EQ(ep.ToString(), "127.0.0.1:80");
