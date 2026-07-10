@@ -6,6 +6,7 @@
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include <cstdio>
+#include <limits>
 
 #if defined(_WIN32)
 #  include <winsock2.h>
@@ -232,7 +233,13 @@ void TcpListener::Start() {
         closeSk(toFd(sock));
         throw SocketException(toSocketError(code), "TcpListener::Start: bind() failed: " + err);
     }
-    if (::listen(toSk(sock), 5) < 0) {
+    // Verified against TCPListener.cs's parameterless Start(), which delegates to
+    // Start((int)SocketOptionName.MaxConnections) -- MaxConnections == 0x7fffffff (INT32_MAX).
+    // Real .NET always requests the platform's maximum backlog by default (the OS clamps it
+    // to e.g. /proc/sys/net/core/somaxconn on Linux internally); this port previously
+    // hardcoded a backlog of 5, which could silently start dropping incoming connections
+    // under any real concurrent load far below what the OS would otherwise allow.
+    if (::listen(toSk(sock), std::numeric_limits<int>::max()) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));
