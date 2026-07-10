@@ -1,6 +1,106 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `8c4073c`) — 11006 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `883f3a6`) — 11037 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 1
+
+*Branch: `feature/work`, HEAD `883f3a6` — 11037 tests passing (up from 11006 at the top of
+the wave-2 checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+### Context
+
+Continuation per user instruction: pick off items from wave-2's "What was found but
+deliberately NOT fixed this session" list below (option a), each verified against real .NET
+source in `/rv/tmp/runtime/src/libraries/` before fixing, following the full Ticket
+completion checklist (verify → fix → clean build → tests → commit → push → update
+plan.sqlite3) for each. This checkpoint covers 5 items from that list; the rest remain for a
+future session (see updated list below).
+
+### What was fixed this pass
+
+- **RegularExpressions — `Match.Groups()`/`Group.Name`**: always returned the numeric index
+  as the name, even for named groups (`(?<name>...)`). Fixed by building an index→name
+  reverse lookup from the parsed `groupNames_` map. Also added `RegexParseException.Offset`
+  (defaults to 0 — `std::regex_error` has no comparable position to report; documented as an
+  honest limitation, not silently wrong). Commit `7cf5ebe`.
+- **ASCIIEncoding::GetBytes**: iterated the UTF-8-encoded input byte-wise, so a multi-byte
+  non-ASCII character produced 2-4 `'?'` replacement bytes instead of .NET's one (which
+  operates per UTF-16 code unit, including the 2-per-supplementary-plane-character nuance).
+  Fixed via UTF-8 decode-then-encode, reusing the continuation-byte-validated,
+  overlong-rejecting decode pattern already established for `UnicodeEncoding`/
+  `UTF32Encoding` in wave 1. Commit `f1c2dbc`.
+- **Collections.Immutable — `ImmutableArray<T>.IsDefault`**: the default constructor always
+  allocated a live empty vector, so `IsDefault` could never return `true`. This exposed a
+  second, more serious issue: nearly every other method (`Length`, indexer, `Add`, etc.)
+  would then have a raw null-pointer-dereference (UB) risk on a genuinely-default instance.
+  Fixed both together: default ctor now leaves the internal pointer null; every method that
+  touches it calls a new `ensureNotDefault()` guard that throws
+  `System::InvalidOperationException` — a deliberate deviation from real .NET (which lets a
+  default instance NullReferenceException via unchecked "for perf" access,
+  `ImmutableArray.cs`) since raw UB is worse than a managed, catchable exception in a C++
+  port. Commit `f706d2e`.
+- **Collections.ObjectModel — `ReadOnlyCollection<T>`**: constructors copied the source
+  vector instead of wrapping it, unlike real .NET (`ReadOnlyCollection.cs`: `this.list =
+  list;`, a plain reference assignment) and inconsistent with the sibling
+  `ReadOnlySet`/`ReadOnlyDictionary` fixes from an earlier session. Rewrote internal storage
+  to `shared_ptr<vector<T>>` and added a shared_ptr-taking constructor for a true live view;
+  the existing vector-ref/rvalue constructors remain as documented copying overloads.
+  `List<T>::AsReadOnly()` cannot get the same live-view guarantee without making `List<T>`
+  itself shared_ptr-backed internally — out of scope per CLAUDE.md rule #10 (broad refactor
+  of a heavily-used core type) — documented honestly via an `@warning` doc comment instead of
+  silently deviating. Commit `62abc25`.
+- **Collections.Specialized — `NotifyCollectionChangedEventArgs`**: the vector-based
+  Add/Remove constructor didn't validate `startingIndex >= -1`
+  (`ArgumentOutOfRangeException.ThrowIfLessThan(startingIndex, -1)` in real .NET), silently
+  accepting nonsensical negative indices. Fixed. Commit `981b2e0`.
+- **Collections.Specialized — `HybridDictionary`**: re-verified against `HybridDictionary.cs`
+  — the list/hashtable internal-representation switch is purely a performance optimization;
+  every public member (`Keys`/`Values`/`Add`/`Remove`/`Contains`/`Count`) delegates
+  identically regardless of which backing store is active, and no publicly observable
+  behavior differs (the one edge case, `ArgumentNullException` on a null-key lookup against
+  an empty dict, doesn't apply since this port's keys are `std::string`, not nullable).
+  Verified-no-op — no code change needed; ticket closed as done. plan.sqlite3 ticket 723.
+- **Globalization — `NumberFormatInfo`**: every setter (decimal-digit counts, negative/
+  positive patterns, group sizes, decimal separators, native digits, digit substitution) was
+  missing the range/shape validation real .NET performs before storing
+  (`NumberFormatInfo.cs`), silently accepting garbage like negative digit counts or
+  out-of-range enum values cast into `DigitShapes`. Added the full set of checks: `[0,99]`
+  digit-count ranges, per-property pattern ranges (`[0,4]`/`[0,16]`/`[0,3]`/`[0,11]`),
+  `CheckGroupSize` (elements in `[1,9]`, last may be 0), non-empty decimal separators,
+  10-entry/single-codepoint `NativeDigits`, and `DigitShapes` enum-membership. Commit
+  `b936560`.
+- **Globalization — `RegionInfo`**: constructor never validated `name` (accepted `""`
+  silently); `RegionInfo(int)` ignored its LCID entirely. Added an empty-name check (.NET
+  rejects this unconditionally, independent of any locale-database lookup) and a
+  `ValidateLcidStub` helper that rejects the four LCIDs .NET rejects unconditionally
+  (`LOCALE_INVARIANT`/`NEUTRAL`/`CUSTOM_DEFAULT`/`CUSTOM_UNSPECIFIED`) before stubbing
+  through to "US" for any other LCID — the deeper locale-database-backed validation remains
+  out of scope (no real culture/region database in this port), documented honestly. Commit
+  `883f3a6`.
+
+### What remains from the deferred-findings list (not yet touched this pass)
+
+- **PersianCalendar**: fixed 33-year arithmetic leap-year formula vs. real astronomical
+  vernal-equinox algorithm — diverges on ~29% of years. Flagged as the most involved
+  remaining item, likely a substantial algorithm rewrite. Not started.
+- **CultureInfo**: `CultureInfo(int)` ignores its LCID (always builds "en-US"); missing
+  `EnglishName`/`NativeName`/ISO-name properties, `NumberFormat`/`DateTimeFormat` wiring,
+  `Equals`/`GetHashCode`/`ToString`, all `GetCultureInfo(...)` overloads. Not started —
+  large, would need the same "stub the unsupported-database parts honestly" treatment as
+  `RegionInfo` got this pass.
+- **IdnMapping**: `GetUnicode()` skips the mandatory canonical round-trip check;
+  `UseStd3AsciiRules` is a no-op; `LabelMax`/63-octet limit not enforced; `decodeLabel()`
+  mis-decodes a trailing-hyphen-only ACE label instead of throwing; missing
+  `(string,int)`/`(string,int,int)` overloads. Not started.
+- **UTF8Encoding**: `GetBytes`/`GetString` are a byte passthrough with zero well-formedness
+  validation. Ticket already marked `needs_user` (would need real
+  `DecoderFallback`/`EncoderFallback` infrastructure) — likely skip or seek clarification
+  rather than attempt blind.
+- **Collections.Immutable**: `ImmutableSortedDictionary::Add`/`AddRange` throw on *any*
+  duplicate key instead of only when values differ; `ImmutableHashSet`/`ImmutableSortedSet`/
+  `ImmutableSortedDictionary` have no custom-comparer support at all. Not started.
+
+---
 
 ## Session checkpoint (2026-07-10, continued) — P2 wave-2 audit dispatched and processed
 
