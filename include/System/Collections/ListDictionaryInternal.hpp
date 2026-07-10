@@ -19,7 +19,15 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Collections.ListDictionaryInternal.
  * Recommended for collections that typically include fewer than 10 items.
- * Keys are compared by pointer identity.
+ *
+ * @warning Keys are compared by pointer identity (`==` on `const void*`), not by value.
+ * Real .NET compares keys with `key.Equals(other)` (ListDictionaryInternal.cs), so e.g. two
+ * distinct `string` objects with equal contents are the same key in .NET but distinct keys
+ * here. This is a permanent architectural limitation, not a bug to be fixed locally: C++ has
+ * no common object root, so this non-generic, `const void*`-keyed type cannot call a virtual
+ * `Equals` on an arbitrary key without knowing its concrete type (same root cause as
+ * System::Collections::Comparer and System::Collections::StructuralComparisons). Callers
+ * needing value-based key comparison should use a generic, typed dictionary instead.
  */
 class ListDictionaryInternal : public IDictionary {
     struct Node {
