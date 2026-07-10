@@ -286,6 +286,21 @@ TEST(FileInfoTests, getLengthProperty_MatchesContent) {
     File::Delete(p);
 }
 
+TEST(FileInfoTests, getLengthProperty_NonExistentFile_ReturnsZero) {
+    // Matches .NET's real Unix FileInfo.Length (FileStatus.Unix.cs's GetLength: "return
+    // EntryExists ? _fileCache.Size : 0") — a missing file returns 0, it does not throw.
+    FileInfo fi(tf("fi_length_nonexistent_xyz123.txt"));
+    EXPECT_EQ(fi.getLengthProperty(), 0LL);
+}
+
+TEST(FileInfoTests, getLengthProperty_Directory_ThrowsFileNotFoundException) {
+    std::string dir = tf("fi_length_dir");
+    Directory::CreateDirectory(dir);
+    FileInfo fi(dir);
+    EXPECT_THROW(fi.getLengthProperty(), System::IO::FileNotFoundException);
+    Directory::Delete(dir);
+}
+
 TEST(FileInfoTests, getFullNameProperty_IsAbsolute) {
     FileInfo fi(tf("fi_fullname.txt"));
     std::string full = fi.getFullNameProperty();

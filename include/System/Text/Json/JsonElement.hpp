@@ -53,8 +53,19 @@ namespace System::Text::Json {
             return JsonValueKind::Undefined;
         }
 
-        /** @return The value as a string. @throws System::InvalidOperationException if this element is not a JSON string. */
-        [[nodiscard]] std::string GetString() const { return require(JsonValueKind::String, "String").get<std::string>(); }
+        /**
+         * @return The value as a string, or "" if this element's ValueKind is Null.
+         * @throws System::InvalidOperationException if this element is any other non-string kind.
+         * @note .NET's GetString() returns `string?` and special-cases Null to return null
+         * before the type check (JsonDocument.cs's GetString); this port's GetString() keeps
+         * the non-nullable std::string signature every other caller already relies on, so Null
+         * maps to "" instead. Check getValueKindProperty() == JsonValueKind::Null first if the
+         * null/empty-string distinction matters.
+         */
+        [[nodiscard]] std::string GetString() const {
+            if (node_ && node_->is_null()) return {};
+            return require(JsonValueKind::String, "String").get<std::string>();
+        }
 
         /** @return The value as a 32-bit integer. @throws System::InvalidOperationException/System::FormatException. */
         [[nodiscard]] intcs GetInt32() const;

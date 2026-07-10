@@ -973,6 +973,20 @@ TEST(JsonElementTests, StringElement_GetString) {
     EXPECT_EQ(doc->getRootElementProperty().GetString(), "hello");
 }
 
+TEST(JsonElementTests, NullElement_GetString_DoesNotThrow) {
+    // Regression: .NET's GetString() special-cases Null and returns null before its type
+    // check (JsonDocument.cs); previously this threw InvalidOperationException instead,
+    // breaking optional-string field parsing (a common real-world JSON shape).
+    auto doc = System::Text::Json::JsonDocument::Parse("null");
+    EXPECT_NO_THROW(doc->getRootElementProperty().GetString());
+    EXPECT_EQ(doc->getRootElementProperty().GetString(), "");
+}
+
+TEST(JsonElementTests, NumberElement_GetString_Throws) {
+    auto doc = System::Text::Json::JsonDocument::Parse("42");
+    EXPECT_THROW(doc->getRootElementProperty().GetString(), System::InvalidOperationException);
+}
+
 TEST(JsonElementTests, NumberElement_GetInt32) {
     auto doc = System::Text::Json::JsonDocument::Parse("99");
     EXPECT_EQ(doc->getRootElementProperty().GetInt32(), 99);
