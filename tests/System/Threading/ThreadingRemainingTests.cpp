@@ -563,6 +563,106 @@ TEST(ReaderWriterLockSlimTests, EnterReadLock_AfterDispose_Throws) {
     rw.Dispose();
     EXPECT_THROW(rw.EnterReadLock(), System::ObjectDisposedException);
 }
+TEST(ReaderWriterLockSlimTests, DefaultRecursionPolicy_IsNoRecursion) {
+    ReaderWriterLockSlim rw;
+    EXPECT_EQ(rw.getRecursionPolicyProperty(), LockRecursionPolicy::NoRecursion);
+}
+TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_HonorsRealTimeout) {
+    // Previously the millisecondsTimeout parameter was discarded entirely (a single
+    // non-blocking attempt regardless of value). A held write lock must now make a contending
+    // TryEnterWriteLock actually block for approximately the requested duration before
+    // returning false, not return immediately.
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    std::atomic<bool> result{true};
+    auto start = std::chrono::steady_clock::now();
+    std::thread t([&] { result = rw.TryEnterWriteLock(100); });
+    t.join();
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_FALSE(result.load());
+    EXPECT_GE(elapsed, std::chrono::milliseconds(80));
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, TryEnterWriteLock_SucceedsWithinTimeoutOnceReleased) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    std::atomic<bool> result{false};
+    std::thread t([&] {
+        result = rw.TryEnterWriteLock(2000);
+        if (result.load()) rw.ExitWriteLock(); // release on the same thread that acquired it
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    rw.ExitWriteLock();
+    t.join();
+    EXPECT_TRUE(result.load());
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveReadLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterReadLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveWriteLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    EXPECT_THROW(rw.EnterWriteLock(), System::Threading::LockRecursionException);
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_RecursiveUpgradeableLock_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterUpgradeableReadLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitUpgradeableReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_WriteAfterRead_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterWriteLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_UpgradeAfterRead_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterReadLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitReadLock();
+}
+TEST(ReaderWriterLockSlimTests, NoRecursion_UpgradeAfterWrite_ThrowsInsteadOfDeadlocking) {
+    ReaderWriterLockSlim rw;
+    rw.EnterWriteLock();
+    EXPECT_THROW(rw.EnterUpgradeableReadLock(), System::Threading::LockRecursionException);
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_NestedReadLock_BothExitsSucceed_AndWriterNotStarved) {
+    // Previously reader ownership was tracked via set *membership*, not a count: a second
+    // ExitReadLock() after a legitimately nested EnterReadLock()/EnterReadLock() threw
+    // SynchronizationLockException (membership already removed by the first exit), and the
+    // internal reader tally never reached zero, permanently starving any waiting writer.
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    rw.EnterReadLock();
+    rw.EnterReadLock();
+    EXPECT_TRUE(rw.getIsReadLockHeldProperty());
+    EXPECT_NO_THROW(rw.ExitReadLock());
+    EXPECT_TRUE(rw.getIsReadLockHeldProperty()); // still held once more
+    EXPECT_NO_THROW(rw.ExitReadLock());
+    EXPECT_FALSE(rw.getIsReadLockHeldProperty());
+    // A writer must now be able to acquire the lock -- proves the reader tally actually
+    // reached zero, not left permanently nonzero by the nested acquisition.
+    EXPECT_TRUE(rw.TryEnterWriteLock(2000));
+    rw.ExitWriteLock();
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_NestedWriteLock_BothExitsSucceed) {
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    rw.EnterWriteLock();
+    rw.EnterWriteLock();
+    EXPECT_NO_THROW(rw.ExitWriteLock());
+    EXPECT_TRUE(rw.getIsWriteLockHeldProperty());
+    EXPECT_NO_THROW(rw.ExitWriteLock());
+    EXPECT_FALSE(rw.getIsWriteLockHeldProperty());
+}
+TEST(ReaderWriterLockSlimTests, SupportsRecursion_ExplicitCtor_RoundTripsPolicy) {
+    ReaderWriterLockSlim rw(LockRecursionPolicy::SupportsRecursion);
+    EXPECT_EQ(rw.getRecursionPolicyProperty(), LockRecursionPolicy::SupportsRecursion);
+}
 
 // ===========================================================================
 // SpinWait
