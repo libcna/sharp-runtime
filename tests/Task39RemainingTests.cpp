@@ -7,7 +7,11 @@
 // ReadOnlyObservableCollection, ReadOnlySet, CollectionExtensions,
 // StoragePaths, Experimental::Property.
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -38,11 +42,21 @@ TEST(SynchronizationContextTests, GetCurrent_ReturnsNullptr) {
     EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
 }
 
-TEST(SynchronizationContextTests, Post_InvokesCallbackSynchronously) {
-    bool called = false;
+TEST(SynchronizationContextTests, Post_InvokesCallbackAsynchronously) {
+    // Regression: Post() previously ran the callback inline/synchronously, identically to
+    // Send() -- defeating the entire purpose of the distinction any caller relies on. Verified
+    // against SynchronizationContext.cs: the default Post() queues to the thread pool.
+    std::promise<void> called;
+    std::future<void> fut = called.get_future();
     SynchronizationContext ctx;
-    ctx.Post([&called](void*) { called = true; }, nullptr);
-    EXPECT_TRUE(called);
+    std::thread::id callingThreadId = std::this_thread::get_id();
+    std::atomic<bool> ranOnDifferentThread{false};
+    ctx.Post([&](void*) {
+        ranOnDifferentThread = (std::this_thread::get_id() != callingThreadId);
+        called.set_value();
+    }, nullptr);
+    ASSERT_EQ(fut.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    EXPECT_TRUE(ranOnDifferentThread.load());
 }
 
 TEST(SynchronizationContextTests, Send_InvokesCallbackSynchronously) {
@@ -60,6 +74,16 @@ TEST(SynchronizationContextTests, Post_NullCallback_NoThrow) {
 
 TEST(SynchronizationContextTests, SetSynchronizationContext_NoThrow) {
     EXPECT_NO_THROW(SynchronizationContext::SetSynchronizationContext(nullptr));
+}
+
+TEST(SynchronizationContextTests, SetSynchronizationContext_RoundTrips) {
+    // Regression: SetSynchronizationContext()/getCurrent() previously didn't round-trip at
+    // all -- getCurrent() always returned nullptr regardless of what had been set.
+    SynchronizationContext ctx;
+    SynchronizationContext::SetSynchronizationContext(&ctx);
+    EXPECT_EQ(SynchronizationContext::getCurrent(), &ctx);
+    SynchronizationContext::SetSynchronizationContext(nullptr); // reset for other tests on this thread
+    EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
 }
 
 // ===========================================================================
