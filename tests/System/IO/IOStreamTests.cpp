@@ -22,6 +22,7 @@
 #include "System/IO/FileInfo.hpp"
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/DateTime.hpp"
+#include "System/TimeZoneInfo.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/DirectoryInfo.hpp"
 #include "System/IO/BinaryReader.hpp"
@@ -430,6 +431,36 @@ TEST(FileSystemInfoTests, LastWriteTime_RoundTrips) {
     fi.setLastWriteTimeUtcProperty(target);
     EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getTicksProperty() / System::DateTime::TicksPerSecond,
               target.getTicksProperty() / System::DateTime::TicksPerSecond);
+    File::Delete(path);
+}
+
+// Regression test for a wave-3 audit finding: CreationTime/LastAccessTime/LastWriteTime (the
+// "local" properties) returned the UTC value verbatim with no timezone conversion at all.
+// Verified against FileSystemInfo.cs, where each is `Xxx => XxxUtc.ToLocalTime()`. This
+// asserts the applied offset exactly matches TimeZoneInfo::Local()'s base UTC offset (rather
+// than asserting local != utc, which would be a no-op in a UTC-configured CI environment) --
+// it fails under the old bug whenever the local zone's offset is non-zero, and also catches a
+// wrong-sign conversion.
+TEST(FileSystemInfoTests, CreationTime_AppliesLocalUtcOffset) {
+    std::string path = tf("fsi_localtime.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    System::DateTime utc = fi.getCreationTimeUtcProperty();
+    System::DateTime local = fi.getCreationTimeProperty();
+    SharpRuntime::longcs expectedOffsetTicks = System::TimeZoneInfo::Local().getBaseUtcOffsetProperty().getTicksProperty();
+    EXPECT_EQ(local.getTicksProperty() - utc.getTicksProperty(), expectedOffsetTicks);
+    File::Delete(path);
+}
+
+TEST(FileSystemInfoTests, SetLastWriteTime_ConvertsFromLocalToUtc) {
+    std::string path = tf("fsi_setlocaltime.txt");
+    File::WriteAllText(path, "content");
+    FileInfo fi(path);
+    System::DateTime localTarget(System::DateTime(2020, 6, 15, 12, 0, 0));
+    fi.setLastWriteTimeProperty(localTarget);
+    System::DateTime expectedUtc = System::TimeZoneInfo::ConvertTimeToUtc(localTarget, System::TimeZoneInfo::Local());
+    EXPECT_EQ(fi.getLastWriteTimeUtcProperty().getTicksProperty() / System::DateTime::TicksPerSecond,
+              expectedUtc.getTicksProperty() / System::DateTime::TicksPerSecond);
     File::Delete(path);
 }
 

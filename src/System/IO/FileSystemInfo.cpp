@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/FileSystemInfo.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/TimeZoneInfo.hpp"
 
 #include <chrono>
 
@@ -66,8 +67,16 @@ namespace System::IO {
         return fromUnixTime(statTimes(fullPath_).creation);
     }
 
+    // Verified against FileSystemInfo.cs: CreationTime/LastAccessTime/LastWriteTime are all
+    // `Xxx => XxxUtc.ToLocalTime()` (and the LastWriteTime setter is `XxxUtc = value.
+    // ToUniversalTime()`). This port's System::DateTime deliberately doesn't track
+    // DateTimeKind and has no ToLocalTime()/ToUniversalTime() (a documented, separate
+    // limitation -- see DateTime.hpp's doc comment), so these previously returned/consumed the
+    // UTC value verbatim with no conversion at all -- silently wrong by the local UTC offset
+    // whenever it's non-zero. Routed through the already-existing
+    // TimeZoneInfo::ConvertTimeFromUtc/ConvertTimeToUtc using TimeZoneInfo::Local() instead.
     System::DateTime FileSystemInfo::getCreationTimeProperty() const {
-        return getCreationTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getCreationTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeUtcProperty() const {
@@ -75,7 +84,7 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastAccessTimeProperty() const {
-        return getLastAccessTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastAccessTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeUtcProperty() const {
@@ -86,7 +95,7 @@ namespace System::IO {
     }
 
     System::DateTime FileSystemInfo::getLastWriteTimeProperty() const {
-        return getLastWriteTimeUtcProperty();
+        return System::TimeZoneInfo::ConvertTimeFromUtc(getLastWriteTimeUtcProperty(), System::TimeZoneInfo::Local());
     }
 
     void FileSystemInfo::setLastWriteTimeUtcProperty(const System::DateTime& value) {
@@ -99,7 +108,7 @@ namespace System::IO {
     }
 
     void FileSystemInfo::setLastWriteTimeProperty(const System::DateTime& value) {
-        setLastWriteTimeUtcProperty(value);
+        setLastWriteTimeUtcProperty(System::TimeZoneInfo::ConvertTimeToUtc(value, System::TimeZoneInfo::Local()));
     }
 
 } // namespace System::IO
