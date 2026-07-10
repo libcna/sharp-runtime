@@ -121,11 +121,22 @@ namespace System::Net {
         /**
          * Percent-encodes @p value for use in a URL (spaces become '+').
          * @return The URL-encoded string.
+         *
+         * @note Verified against WebUtility.cs's s_safeUrlChars ("Url safe chars as defined by
+         * RFC 1738.4, minus '+'"): the safe set is letters, digits, `-_.!*()` -- notably
+         * including `!*()` and excluding `~`. This previously used `-_.~`, which both
+         * percent-encoded `!*()` that real .NET leaves literal and left `~` literal where real
+         * .NET percent-encodes it -- silently different output for any URL containing those
+         * characters.
          */
         static std::string UrlEncode(const std::string& value) {
+            auto isSafe = [](unsigned char c) {
+                return std::isalnum(c) || c == '-' || c == '_' || c == '.' ||
+                       c == '!' || c == '*' || c == '(' || c == ')';
+            };
             std::ostringstream oss;
             for (unsigned char c : value) {
-                if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+                if (isSafe(c))
                     oss << c;
                 else if (c == ' ')
                     oss << '+';

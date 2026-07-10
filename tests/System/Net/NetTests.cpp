@@ -661,8 +661,16 @@ TEST(WebUtilityTests, UrlEncode_AlphanumericUnchanged) {
     EXPECT_EQ(WebUtility::UrlEncode("abc123"), "abc123");
 }
 
+// Regression test for a wave-3 audit finding: the safe-character set didn't match real
+// .NET's s_safeUrlChars ("Url safe chars as defined by RFC 1738.4, minus '+'" --
+// letters/digits/-_.!*(), notably including !*() and excluding ~). This test previously
+// asserted "~" stays literal, encoding the old, wrong safe-char-set.
 TEST(WebUtilityTests, UrlEncode_SafeCharsUnchanged) {
-    EXPECT_EQ(WebUtility::UrlEncode("-_.~"), "-_.~");
+    EXPECT_EQ(WebUtility::UrlEncode("-_.!*()"), "-_.!*()");
+}
+
+TEST(WebUtilityTests, UrlEncode_Tilde_IsPercentEncoded) {
+    EXPECT_EQ(WebUtility::UrlEncode("~"), "%7E");
 }
 
 TEST(WebUtilityTests, UrlEncode_SpecialCharsPercent) {
