@@ -9,10 +9,13 @@
 //   CultureNotFoundException: all ctors, getInvalidCultureIdProperty
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Globalization/CompareInfo.hpp"
 #include "System/Globalization/CompareOptions.hpp"
 #include "System/Globalization/CultureInfo.hpp"
 #include "System/Globalization/CultureNotFoundException.hpp"
+#include "System/Globalization/DateTimeFormatInfo.hpp"
+#include "System/Globalization/NumberFormatInfo.hpp"
 #include <string>
 
 using System::Globalization::CompareInfo;
@@ -232,6 +235,181 @@ TEST(CultureInfoBatch27Test, SetCurrentUICulture_ChangesGetter) {
     CultureInfo::setCurrentUICultureProperty(CultureInfo("ja-JP"));
     EXPECT_EQ(CultureInfo::getCurrentUICultureProperty().getNameProperty(), "ja-JP");
     CultureInfo::setCurrentUICultureProperty(previous); // restore for other tests
+}
+
+// ---------------------------------------------------------------------------
+// CultureInfo(int) validation (verified against CultureInfo.cs)
+// ---------------------------------------------------------------------------
+
+TEST(CultureInfoBatch27Test, IntCtor_Negative_Throws) {
+    EXPECT_THROW(CultureInfo ci(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(CultureInfoBatch27Test, IntCtor_LocaleNeutral_Throws) {
+    EXPECT_THROW(CultureInfo ci(0x0000), System::Globalization::CultureNotFoundException);
+}
+
+TEST(CultureInfoBatch27Test, IntCtor_LocaleUserDefault_Throws) {
+    EXPECT_THROW(CultureInfo ci(0x0400), System::Globalization::CultureNotFoundException);
+}
+
+TEST(CultureInfoBatch27Test, IntCtor_LocaleSystemDefault_Throws) {
+    EXPECT_THROW(CultureInfo ci(0x0800), System::Globalization::CultureNotFoundException);
+}
+
+TEST(CultureInfoBatch27Test, IntCtor_LocaleCustomDefault_Throws) {
+    EXPECT_THROW(CultureInfo ci(0x0C00), System::Globalization::CultureNotFoundException);
+}
+
+TEST(CultureInfoBatch27Test, IntCtor_LocaleCustomUnspecified_Throws) {
+    EXPECT_THROW(CultureInfo ci(0x1000), System::Globalization::CultureNotFoundException);
+}
+
+// ---------------------------------------------------------------------------
+// EnglishName / NativeName / DisplayName / ISO names
+// ---------------------------------------------------------------------------
+
+TEST(CultureInfoBatch27Test, EnglishName_Invariant) {
+    EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getEnglishNameProperty(),
+              "Invariant Language (Invariant Country)");
+}
+
+TEST(CultureInfoBatch27Test, EnglishName_EnUS) {
+    CultureInfo ci(1033);
+    EXPECT_EQ(ci.getEnglishNameProperty(), "English (United States)");
+}
+
+TEST(CultureInfoBatch27Test, EnglishName_UnknownCulture_FallsBackToName) {
+    CultureInfo ci("de-DE");
+    EXPECT_EQ(ci.getEnglishNameProperty(), "de-DE");
+}
+
+TEST(CultureInfoBatch27Test, NativeName_MatchesEnglishName) {
+    CultureInfo ci(1033);
+    EXPECT_EQ(ci.getNativeNameProperty(), ci.getEnglishNameProperty());
+}
+
+TEST(CultureInfoBatch27Test, DisplayName_MatchesEnglishName) {
+    CultureInfo ci(1033);
+    EXPECT_EQ(ci.getDisplayNameProperty(), ci.getEnglishNameProperty());
+}
+
+TEST(CultureInfoBatch27Test, TwoLetterISOLanguageName_Invariant) {
+    EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getTwoLetterISOLanguageNameProperty(), "iv");
+}
+
+TEST(CultureInfoBatch27Test, TwoLetterISOLanguageName_EnUS) {
+    CultureInfo ci(1033);
+    EXPECT_EQ(ci.getTwoLetterISOLanguageNameProperty(), "en");
+}
+
+TEST(CultureInfoBatch27Test, TwoLetterISOLanguageName_DerivedFromSubtag) {
+    CultureInfo ci("de-DE");
+    EXPECT_EQ(ci.getTwoLetterISOLanguageNameProperty(), "de");
+}
+
+TEST(CultureInfoBatch27Test, ThreeLetterISOLanguageName_Invariant) {
+    EXPECT_EQ(CultureInfo::getInvariantCultureProperty().getThreeLetterISOLanguageNameProperty(), "ivl");
+}
+
+TEST(CultureInfoBatch27Test, ThreeLetterISOLanguageName_EnUS) {
+    CultureInfo ci(1033);
+    EXPECT_EQ(ci.getThreeLetterISOLanguageNameProperty(), "eng");
+}
+
+TEST(CultureInfoBatch27Test, ThreeLetterISOLanguageName_UnknownCulture_IsEmpty) {
+    CultureInfo ci("de-DE");
+    EXPECT_EQ(ci.getThreeLetterISOLanguageNameProperty(), "");
+}
+
+// ---------------------------------------------------------------------------
+// NumberFormat / DateTimeFormat wiring
+// ---------------------------------------------------------------------------
+
+TEST(CultureInfoBatch27Test, NumberFormat_DefaultsToInvariantContent) {
+    CultureInfo ci("de-DE");
+    EXPECT_EQ(ci.getNumberFormatProperty().getNumberDecimalSeparatorProperty(), ".");
+}
+
+TEST(CultureInfoBatch27Test, NumberFormat_Settable) {
+    CultureInfo ci("de-DE");
+    System::Globalization::NumberFormatInfo nfi;
+    nfi.setNumberDecimalSeparatorProperty(",");
+    ci.setNumberFormatProperty(nfi);
+    EXPECT_EQ(ci.getNumberFormatProperty().getNumberDecimalSeparatorProperty(), ",");
+}
+
+TEST(CultureInfoBatch27Test, NumberFormat_SetOnReadOnly_Throws) {
+    CultureInfo ci = CultureInfo::getInvariantCultureProperty();
+    System::Globalization::NumberFormatInfo nfi;
+    EXPECT_THROW(ci.setNumberFormatProperty(nfi), System::InvalidOperationException);
+}
+
+TEST(CultureInfoBatch27Test, DateTimeFormat_Settable) {
+    CultureInfo ci("de-DE");
+    System::Globalization::DateTimeFormatInfo dtfi;
+    EXPECT_NO_THROW(ci.setDateTimeFormatProperty(dtfi));
+}
+
+TEST(CultureInfoBatch27Test, DateTimeFormat_SetOnReadOnly_Throws) {
+    CultureInfo ci = CultureInfo::getInvariantCultureProperty();
+    System::Globalization::DateTimeFormatInfo dtfi;
+    EXPECT_THROW(ci.setDateTimeFormatProperty(dtfi), System::InvalidOperationException);
+}
+
+// ---------------------------------------------------------------------------
+// Equals / GetHashCode / ToString
+// ---------------------------------------------------------------------------
+
+TEST(CultureInfoBatch27Test, Equals_SameName_True) {
+    CultureInfo a("en-US");
+    CultureInfo b("en-US");
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_TRUE(a == b);
+}
+
+TEST(CultureInfoBatch27Test, Equals_DifferentName_False) {
+    CultureInfo a("en-US");
+    CultureInfo b("de-DE");
+    EXPECT_FALSE(a.Equals(b));
+    EXPECT_FALSE(a == b);
+}
+
+TEST(CultureInfoBatch27Test, GetHashCode_MatchesForEqualNames) {
+    CultureInfo a("en-US");
+    CultureInfo b("en-US");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(CultureInfoBatch27Test, ToString_ReturnsName) {
+    CultureInfo ci("fr-FR");
+    EXPECT_EQ(ci.ToString(), "fr-FR");
+}
+
+// ---------------------------------------------------------------------------
+// GetCultureInfo overloads
+// ---------------------------------------------------------------------------
+
+TEST(CultureInfoBatch27Test, GetCultureInfo_ByName_IsReadOnly) {
+    CultureInfo ci = CultureInfo::GetCultureInfo("de-DE");
+    EXPECT_EQ(ci.getNameProperty(), "de-DE");
+    EXPECT_TRUE(ci.getIsReadOnlyProperty());
+}
+
+TEST(CultureInfoBatch27Test, GetCultureInfo_ByLcid_IsReadOnly) {
+    CultureInfo ci = CultureInfo::GetCultureInfo(1033);
+    EXPECT_EQ(ci.getNameProperty(), "en-US");
+    EXPECT_TRUE(ci.getIsReadOnlyProperty());
+}
+
+TEST(CultureInfoBatch27Test, GetCultureInfo_ByLcid_InvalidLcid_Throws) {
+    EXPECT_THROW(CultureInfo::GetCultureInfo(0x0000), System::Globalization::CultureNotFoundException);
+}
+
+TEST(CultureInfoBatch27Test, GetCultureInfo_ByNamePredefinedOnly_IsReadOnly) {
+    CultureInfo ci = CultureInfo::GetCultureInfo("ja-JP", true);
+    EXPECT_EQ(ci.getNameProperty(), "ja-JP");
+    EXPECT_TRUE(ci.getIsReadOnlyProperty());
 }
 
 // ===========================================================================
