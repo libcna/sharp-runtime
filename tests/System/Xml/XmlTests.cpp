@@ -158,6 +158,26 @@ TEST(XmlReaderTests, ReadPastEnd_ReturnsFalse) {
     EXPECT_EQ(r->getReadStateProperty(), ReadState::EndOfFile);
 }
 
+// Regression test for a wave-3 audit finding: most accessors only guarded pos < 0, not
+// pos >= events.size() -- after Read() returns false at EOF, pos sits exactly at
+// events.size(), so every one of these indexed events[pos] out of bounds (UB/crash) instead
+// of returning a safe default. Only getNodeTypeProperty() had the correct upper-bound check.
+TEST(XmlReaderTests, AccessorsAfterEOF_ReturnSafeDefaults_DoNotCrash) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x a=\"1\"><y/></x>"));
+    while (r->Read()) {}
+    ASSERT_EQ(r->getReadStateProperty(), ReadState::EndOfFile);
+
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::None);
+    EXPECT_EQ(r->getNameProperty(), "");
+    EXPECT_EQ(r->getValueProperty(), "");
+    EXPECT_FALSE(r->getIsEmptyElementProperty());
+    EXPECT_FALSE(r->MoveToElement());
+    EXPECT_FALSE(r->MoveToNextAttribute());
+    EXPECT_EQ(r->GetAttribute("a"), "");
+    EXPECT_THROW(r->ReadStartElement(), XmlException);
+    EXPECT_THROW(r->ReadEndElement(), XmlException);
+}
+
 TEST(XmlReaderTests, InitialState_IsInitial) {
     std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<x/>"));
     EXPECT_EQ(r->getReadStateProperty(), ReadState::Initial);

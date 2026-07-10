@@ -103,7 +103,9 @@ XmlNodeType XmlReader::getNodeTypeProperty() const {
 }
 
 std::string XmlReader::getNameProperty() const {
-    if (!state_ || state_->pos < 0) return {};
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (state_->attrIndex >= 0 &&
         state_->attrIndex < static_cast<int>(ev.attributes.size()))
@@ -112,7 +114,9 @@ std::string XmlReader::getNameProperty() const {
 }
 
 std::string XmlReader::getValueProperty() const {
-    if (!state_ || state_->pos < 0) return {};
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (state_->attrIndex >= 0 &&
         state_->attrIndex < static_cast<int>(ev.attributes.size()))
@@ -121,7 +125,9 @@ std::string XmlReader::getValueProperty() const {
 }
 
 bool XmlReader::getIsEmptyElementProperty() const {
-    if (!state_ || state_->pos < 0) return false;
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return false;
     return state_->events[static_cast<size_t>(state_->pos)].isEmptyElement;
 }
 
@@ -146,13 +152,17 @@ bool XmlReader::Read() {
 }
 
 bool XmlReader::MoveToElement() {
-    if (!state_ || state_->pos < 0) return false;
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return false;
     state_->attrIndex = -1;
     return state_->events[static_cast<size_t>(state_->pos)].type == XmlNodeType::Element;
 }
 
 bool XmlReader::MoveToNextAttribute() {
-    if (!state_ || state_->pos < 0) return false;
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return false;
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     if (ev.type != XmlNodeType::Element) return false;
     int next = state_->attrIndex + 1;
@@ -162,7 +172,9 @@ bool XmlReader::MoveToNextAttribute() {
 }
 
 std::string XmlReader::GetAttribute(const std::string& name) const {
-    if (!state_ || state_->pos < 0) return {};
+    if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()))
+        return {};
     const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
     for (const auto& [k, v] : ev.attributes)
         if (k == name) return v;
@@ -190,6 +202,7 @@ std::string XmlReader::ReadElementContentAsString() {
 
 void XmlReader::ReadStartElement() {
     if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()) ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::Element)
         throw XmlException("ReadStartElement: not on an element node");
     Read();
@@ -197,6 +210,7 @@ void XmlReader::ReadStartElement() {
 
 void XmlReader::ReadEndElement() {
     if (!state_ || state_->pos < 0 ||
+        state_->pos >= static_cast<int>(state_->events.size()) ||
         state_->events[static_cast<size_t>(state_->pos)].type != XmlNodeType::EndElement)
         throw XmlException("ReadEndElement: not on an end-element node");
     Read();
