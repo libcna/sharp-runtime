@@ -1,6 +1,58 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `9492dea`) — 11111 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `364787f`) — 11125 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 5 (custom-comparer support, sweep complete)
+
+*Branch: `feature/work`, HEAD `364787f` — 11125 tests passing (up from 11111 at the top of
+part 4's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+The last deferred-findings item is now fixed, closing out the entire wave-2 "found but
+deliberately NOT fixed" list from parts 1-4 below:
+
+- **Collections.Immutable — `ImmutableHashSet`/`ImmutableSortedSet`/`ImmutableSortedDictionary`
+  custom-comparer support**: added, verified against `ImmutableHashSet_1.cs`/
+  `ImmutableSortedSet_1.cs`/`ImmutableSortedDictionary_2.cs`. The comparer is stored as
+  `std::function` per-instance rather than as a template parameter (matches .NET's
+  runtime-object `IEqualityComparer<T>`/`IComparer<T>`, keeps every existing call site
+  source-compatible). Added `Create(comparer[, items])` and `WithComparer(s)(...)` to all
+  three types. Centralized every "fresh empty container" construction through a
+  `makeEmpty()` helper per type — `std::unordered_set`/`std::set`/`std::map`'s own
+  default-constructed `std::function` comparator is empty and throws
+  `std::bad_function_call` on first use, so any skipped path would compile fine and crash
+  at runtime. **While writing tests with a genuinely discriminating comparer
+  (case-insensitive strings — a reverse-order int comparator doesn't actually change
+  equivalence classes, so it can't catch this class of bug), found and fixed a real
+  comparer-precedence bug**: `Intersect`/`Except`/`IsSubsetOf`/`IsSupersetOf` on both
+  `ImmutableHashSet` and `ImmutableSortedSet` tested membership via `other`'s comparer
+  instead of `this`'s — verified wrong against the actual .NET source for all 4 methods on
+  both types (.NET consistently rehashes/tests `other`'s raw elements under *this* set's
+  comparer). `Union`/`SymmetricExcept`/`Overlaps` were already correct (verified against the
+  same source, no fix needed). Added 20 regression tests. Commit `364787f`.
+
+### Deferred-findings sweep: complete
+
+Every item from the wave-2 audit's "found but deliberately NOT fixed" list (see the part-1
+checkpoint far below) has now been addressed across parts 1-5: Group.Name, ASCIIEncoding,
+ImmutableArray.IsDefault, ReadOnlyCollection live-view, NotifyCollectionChangedEventArgs
+validation, HybridDictionary (verified no-op), NumberFormatInfo validation, RegionInfo
+constructor/LCID validation, IdnMapping (5 gaps), Immutable{,Sorted}Dictionary
+duplicate-key-same-value, CultureInfo (LCID/ISO names/NumberFormat/DateTimeFormat/Equals/
+GetHashCode/ToString/GetCultureInfo), PersianCalendar (astronomical algorithm — the largest
+item), and now Immutable{HashSet,SortedSet,SortedDictionary} custom-comparer support.
+
+Only **UTF8Encoding** remains untouched, and it stays that way deliberately: its ticket is
+marked `needs_user` (real fix needs `DecoderFallback`/`EncoderFallback` infrastructure) —
+seek clarification rather than attempt blind.
+
+### Next session: option (b) from the original sweep instruction
+
+Dispatch a wave-3 parallel audit covering `System.Net.*`, `System.Diagnostics*`,
+`System.IO.*`, `System.Text.Json*`, `System.Threading.*`, `System.Xml.*`, using the same
+methodology as waves 1-2 (parallel read-only audit agents, then verify-against-.NET-source-
+before-fixing for each finding).
+
+---
 
 ## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 4 (PersianCalendar, largest item)
 
