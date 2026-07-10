@@ -75,6 +75,34 @@ TEST(CompareInfoBatch27Test, Compare_IgnoreCase) {
     EXPECT_NE(ci.Compare("Hello", "hello"), 0);
 }
 
+TEST(CompareInfoBatch27Test, Compare_OrdinalIgnoreCase) {
+    // Regression: OrdinalIgnoreCase (0x10000000) and IgnoreCase (0x1) are distinct,
+    // non-overlapping bits; a prior implementation only checked the IgnoreCase bit, so
+    // passing OrdinalIgnoreCase alone silently fell through to case-sensitive comparison.
+    // .NET's real invariant-mode CompareInfo treats both as case-insensitive
+    // (CompareInfo.Invariant.cs: `(options & (IgnoreCase | OrdinalIgnoreCase)) != 0`).
+    CompareInfo ci("en-US");
+    EXPECT_EQ(ci.Compare("Hello", "hello", CompareOptions::OrdinalIgnoreCase), 0);
+}
+
+TEST(CompareInfoBatch27Test, IndexOf_OrdinalIgnoreCase) {
+    CompareInfo ci("en-US");
+    EXPECT_EQ(ci.IndexOf("Hello World", "WORLD", CompareOptions::OrdinalIgnoreCase), 6);
+}
+
+TEST(CompareInfoBatch27Test, GetSortKey_OrdinalIgnoreCase_ProducesEqualKeys) {
+    CompareInfo ci("en-US");
+    auto k1 = ci.GetSortKey("HELLO", CompareOptions::OrdinalIgnoreCase);
+    auto k2 = ci.GetSortKey("hello", CompareOptions::OrdinalIgnoreCase);
+    EXPECT_TRUE(k1 == k2);
+}
+
+TEST(CompareInfoBatch27Test, GetHashCode_OrdinalIgnoreCase_MatchesAcrossCase) {
+    CompareInfo ci("en-US");
+    EXPECT_EQ(ci.GetHashCode("HELLO", CompareOptions::OrdinalIgnoreCase),
+              ci.GetHashCode("hello", CompareOptions::OrdinalIgnoreCase));
+}
+
 TEST(CompareInfoBatch27Test, Compare_SubstringOverload) {
     CompareInfo ci("en-US");
     EXPECT_EQ(ci.Compare("hello world", 6, 5, "world", 0, 5), 0);

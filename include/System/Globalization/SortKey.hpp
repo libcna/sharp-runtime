@@ -68,14 +68,18 @@ public:
     }
 
     /**
-     * @brief Returns true if both SortKey instances have identical original strings and key data.
+     * @brief Returns true if both SortKey instances have identical key data.
      *
-     * C++ counterpart of .NET SortKey.Equals(object).
+     * C++ counterpart of .NET SortKey.Equals(object). Matches .NET exactly: only the key
+     * byte sequence is compared (SortKey.cs's Equals uses
+     * `_keyData.SequenceEqual(other._keyData)`), not the original source string — two
+     * different strings that produce the same sort key (e.g. "HELLO"/"hello" under an
+     * ignore-case comparison) are equal SortKeys.
      * @param other The SortKey to compare.
      * @return true if equal; otherwise false.
      */
     bool operator==(const SortKey& other) const {
-        return string_ == other.string_ && keyData_ == other.keyData_;
+        return keyData_ == other.keyData_;
     }
 
     /**

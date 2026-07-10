@@ -235,6 +235,17 @@ TEST(SortKeyBatch32Test, EqualityOperator) {
     EXPECT_FALSE(a == c);
 }
 
+// .NET's real SortKey.Equals (SortKey.cs) compares ONLY the _keyData byte sequence via
+// ReadOnlySpan<byte>.SequenceEqual — never the original source string. Two SortKeys built
+// from different original strings but identical key bytes (e.g. produced by an
+// ignore-case comparison) must compare equal.
+TEST(SortKeyBatch32Test, EqualityOperator_IgnoresOriginalString) {
+    using SharpRuntime::bytecs;
+    std::vector<bytecs> d = {5, 6, 7};
+    SortKey a("HELLO", d), b("hello", d);
+    EXPECT_TRUE(a == b);
+}
+
 TEST(SortKeyBatch32Test, ToString) {
     using SharpRuntime::bytecs;
     SortKey sk("hello", {});
