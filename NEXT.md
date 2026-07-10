@@ -1,6 +1,84 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `a5c34ec`) — 11152 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `ca0cd96`) — 11160 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: Threading critical findings, batch 1 (5 fixed)
+
+*Branch: `feature/work`, HEAD `ca0cd96` — 11160 tests passing (up from 11152 at the top of
+the item-4 checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Started item 5 ("everything else, namespace by namespace") with `System.Threading`'s "Other
+critical findings (13, non-Timeout.Infinite)" list, since that slice was explicitly flagged
+by the wave-3 audit as "by far the largest and most severe... recommended top priority for
+the next processing session." Fixed 5 of the 13, each verified against real .NET source:
+
+- **`TaskCompletionSource<T>`/`TaskCompletionSource<void>` double-completion race + wrong
+  exception type** — restructured to match `TaskCompletionSource_T.cs`'s actual shape:
+  `TrySet*` is the atomic primitive (now backed by `std::atomic<bool>` +
+  `compare_exchange_strong`, was a non-atomic check-then-set), and `Set*` calls `TrySet*` and
+  throws `System::InvalidOperationException` (was `std::invalid_argument` — the wrong type)
+  on failure. Previously, two threads racing `TrySetResult` could both pass the check and
+  both call `promise_.set_value()`; the loser threw an uncaught `std::future_error` instead
+  of `TrySetResult` returning `false`. Added a 200-iteration concurrent-race stress test.
+  Commit `35d8a3d`.
+- **`CountdownEvent::AddCount` unchecked signed-integer overflow (UB)** — verified against
+  `CountdownEvent.cs`'s `TryAddCount`: added the `observedCount > (max - signalCount)`
+  overflow guard (throws `InvalidOperationException`, matching
+  `CountdownEvent_Increment_AlreadyMax`) before the addition, plus the missing
+  `ArgumentOutOfRangeException` validation for non-positive `signalCount` on both `Signal`
+  and `AddCount`. Commit `404e2b0`.
+- **`Task::Wait()` never checked `isCanceled`** — a canceled task's `Wait()` returned
+  silently as if it had succeeded. Verified against `Task.cs`'s
+  `Wait()`/`ThrowIfExceptional(true)`/`GetExceptions(true)`: real .NET throws for a canceled
+  task. Fixed to throw `TaskCanceledException` (not wrapped in `AggregateException`, matching
+  this port's existing established convention of rethrowing the raw exception for the
+  `isFaulted` path rather than wrapping — see `FromException_Wait_Rethrows`). One existing
+  test had encoded the old silent-success behavior and needed updating. Commit `47f7908`.
+- **`CancellationTokenSource::Cancel()` no try/catch around callback invocation** — verified
+  against `CancellationTokenSource.cs`'s `ExecuteCallbackHandlers(throwOnFirstException:
+  false)`: real .NET catches each callback's exception, runs every remaining callback
+  regardless, then throws `AggregateException` at the end if any occurred. This port's
+  `Cancel()` had no try/catch at all — a throwing callback aborted the loop, silently
+  skipping every callback registered after it. Fixed to match; added a 3-callback regression
+  test (1st and 3rd throw) proving all three still run and the exceptions aggregate. Commit
+  `ca0cd96`.
+- (`TaskCompletionSource`/`CountdownEvent`/`Task`/`CancellationTokenSource` above are 4 of the
+  5; the 5th — `Utf8JsonWriter`/`JsonDocument` `MaxDepth` — was actually wave-3 priority item
+  4, completed just before this batch; see the checkpoint below for full detail.)
+
+### What remains from the Threading critical list (8 of 13, not yet touched)
+
+- `ReaderWriterLock::AcquireReaderLock`/`AcquireWriterLock` silently `return` on timeout
+  instead of throwing `ReaderWriterLockApplicationException`.
+- `ReaderWriterLockSlim::TryEnterReadLock/WriteLock/UpgradeableReadLock(intcs)` discard the
+  timeout parameter (always a single non-blocking attempt), ignores `LockRecursionPolicy`
+  entirely (same-thread recursion **deadlocks** instead of throwing
+  `LockRecursionException`), and has a double-`ExitReadLock()` bug that **permanently
+  starves all future writers**. Largest/most invasive item on this list — likely needs its
+  own session.
+- `Barrier::SignalAndWait`: post-phase-action exception only seen by the triggering thread;
+  `FinishPhase` invokes the post-phase action while still holding its mutex — reentrant calls
+  **deadlock**.
+- `TaskCompletionSource<T>` — done, see above.
+- `Task::Wait()` — done, see above.
+- `ValueTask(Task)` only snapshots `IsCompleted` at construction — a still-running or
+  later-faulting task's exception is silently swallowed forever.
+- Bounded `Channel` with `capacity == 0` (a documented legal .NET "rendezvous channel"
+  configuration) **permanently deadlocks** every write instead of working.
+- `AsyncLocal<T>`/`ThreadLocal<T>` destructors only clean up the destroying thread's
+  `thread_local` map entry — other threads retain stale entries keyed by the (potentially
+  reused) pointer.
+- `LazyInitializer::EnsureInitialized<T>` uses a `static std::mutex` scoped **per template
+  type**, shared across every unrelated call site initializing a different target of the
+  same type — reentrant same-thread initialization of a different target **self-deadlocks**.
+- `CancellationTokenSource::Cancel()` — done, see above.
+- `ThreadLocal<T>::getValueProperty()` has no reentrancy guard — a factory that reentrantly
+  calls it recurses unboundedly (stack overflow) instead of throwing.
+
+Plus the 29 moderate + 10 minor Threading findings, and the remaining namespace slices
+(Net core+Sockets, Net.Http+WebSockets+Security, IO core, IO.Compression+Hashing, Xml core,
+Xml.Linq+XPath) entirely untouched. See the full catalogue further down this file (search for
+"Full findings catalogue").
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 priority item 4 fixed (Utf8JsonWriter escaping/MaxDepth + JsonDocument MaxDepth)
 
