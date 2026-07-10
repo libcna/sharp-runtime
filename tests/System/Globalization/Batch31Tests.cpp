@@ -8,11 +8,15 @@
 //   NumberFormatInfo:  default values, IsReadOnly, InvariantInfo, ReadOnly, Clone,
 //                      missing fields (CurrencyDecimalDigits, NativeDigits, PerMilleSymbol, etc.)
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/JulianCalendar.hpp"
 #include "System/Globalization/KoreanCalendar.hpp"
 #include "System/Globalization/NumberFormatInfo.hpp"
+#include "System/Globalization/DigitShapes.hpp"
 #include "System/DateTime.hpp"
 
+using System::Globalization::DigitShapes;
 using System::Globalization::JulianCalendar;
 using System::Globalization::KoreanCalendar;
 using System::Globalization::NumberFormatInfo;
@@ -240,4 +244,70 @@ TEST(NumberFormatInfoBatch31Test, NativeDigits) {
 TEST(NumberFormatInfoBatch31Test, DigitSubstitution_Default) {
     NumberFormatInfo nfi;
     EXPECT_EQ(nfi.getDigitSubstitutionProperty(), System::Globalization::DigitShapes::None);
+}
+
+// ===========================================================================
+// NumberFormatInfo -- setter validation (verified against NumberFormatInfo.cs)
+// ===========================================================================
+
+TEST(NumberFormatInfoBatch31Test, DecimalDigits_OutOfRange_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setNumberDecimalDigitsProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setNumberDecimalDigitsProperty(100), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setCurrencyDecimalDigitsProperty(100), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setPercentDecimalDigitsProperty(-1), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(nfi.setNumberDecimalDigitsProperty(0));
+    EXPECT_NO_THROW(nfi.setNumberDecimalDigitsProperty(99));
+}
+
+TEST(NumberFormatInfoBatch31Test, NegativePositivePatterns_OutOfRange_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setNumberNegativePatternProperty(5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setCurrencyNegativePatternProperty(17), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setCurrencyPositivePatternProperty(4), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setPercentNegativePatternProperty(12), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(nfi.setPercentPositivePatternProperty(4), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(nfi.setNumberNegativePatternProperty(4));
+    EXPECT_NO_THROW(nfi.setCurrencyNegativePatternProperty(16));
+}
+
+TEST(NumberFormatInfoBatch31Test, GroupSizes_InvalidElement_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setNumberGroupSizesProperty({10}), System::ArgumentException);
+    EXPECT_THROW(nfi.setNumberGroupSizesProperty({3, 0, 2}), System::ArgumentException);
+    EXPECT_NO_THROW(nfi.setNumberGroupSizesProperty({3, 2, 0}));
+    EXPECT_NO_THROW(nfi.setCurrencyGroupSizesProperty({9}));
+}
+
+TEST(NumberFormatInfoBatch31Test, DecimalSeparators_Empty_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setNumberDecimalSeparatorProperty(""), System::ArgumentException);
+    EXPECT_THROW(nfi.setCurrencyDecimalSeparatorProperty(""), System::ArgumentException);
+    EXPECT_THROW(nfi.setPercentDecimalSeparatorProperty(""), System::ArgumentException);
+    EXPECT_NO_THROW(nfi.setNumberDecimalSeparatorProperty(","));
+}
+
+TEST(NumberFormatInfoBatch31Test, NativeDigits_WrongCount_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setNativeDigitsProperty({"0","1","2"}), System::ArgumentException);
+}
+
+TEST(NumberFormatInfoBatch31Test, NativeDigits_MultiCodepointEntry_Throws) {
+    NumberFormatInfo nfi;
+    std::vector<std::string> bad = {"0","1","2","3","4","5","6","7","8","ab"};
+    EXPECT_THROW(nfi.setNativeDigitsProperty(bad), System::ArgumentException);
+}
+
+TEST(NumberFormatInfoBatch31Test, NativeDigits_ValidReplacement_Succeeds) {
+    NumberFormatInfo nfi;
+    std::vector<std::string> arabicIndic = {"٠","١","٢","٣","٤",
+                                             "٥","٦","٧","٨","٩"};
+    EXPECT_NO_THROW(nfi.setNativeDigitsProperty(arabicIndic));
+    EXPECT_EQ(nfi.getNativeDigitsProperty()[0], "٠");
+}
+
+TEST(NumberFormatInfoBatch31Test, DigitSubstitution_InvalidValue_Throws) {
+    NumberFormatInfo nfi;
+    EXPECT_THROW(nfi.setDigitSubstitutionProperty(static_cast<DigitShapes>(99)), System::ArgumentException);
+    EXPECT_NO_THROW(nfi.setDigitSubstitutionProperty(DigitShapes::NativeNational));
 }
