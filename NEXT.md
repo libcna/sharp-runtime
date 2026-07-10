@@ -1,6 +1,78 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `d551656`) — 11227 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `7b58bcb`) — 11234 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: EVERY critical finding now fixed (Xml.Linq+XPath's 3 were missed earlier, now done too)
+
+*Branch: `feature/work`, HEAD `7b58bcb` — 11234 tests passing (up from 11227 at the top of
+the Net-core-complete checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+The previous checkpoint's claim that "every namespace slice's criticals are now fixed" was
+**premature** — `System.Xml.Linq + XPath`'s own "3 critical" count (visible in its own
+catalogue section header) had been overlooked while working through namespaces in a specific
+order. Caught and fixed this session:
+
+1. **XPath relational operators (`<`,`<=`,`>`,`>=`) used lexicographic string comparison
+   instead of numeric whenever a node-set operand was involved** — verified against XPath 1.0
+   §3.4: relational operators always convert to numbers, even for node-set operands (unlike
+   `=`/`!=`, which do compare string-values lexicographically). The node-set-vs-boolean and
+   node-set-vs-number branches in `CompareValues` already did this correctly; node-set-vs-
+   node-set and node-set-vs-string used `StrCompare` unconditionally for every operator. Fixed
+   both remaining branches to use numeric comparison for relational (non-equality) operators.
+   2 regression tests using the existing bookstore-catalog fixture's price elements (`price >
+   '9'` and a node-set-vs-node-set price comparison), both previously silently wrong. Commit
+   `ba9379c`.
+2. **`XContainer::InsertNodeAt` had no cycle/self-containment guard** — verified against
+   `XContainer.cs`'s `AddNode()`: real .NET clones a node being added if it's already attached
+   anywhere (copy-on-attach semantics), which incidentally also prevents cycles. This port
+   uses move semantics instead (an established, simpler design, not itself a bug) but had no
+   guard at all against the one genuinely broken outcome: inserting a node into its own
+   subtree, creating a permanent `shared_ptr` reference cycle and stack-overflowing any
+   recursive traversal. Added a walk up `parent_` checking for self/ancestor before
+   reparenting; throws `InvalidOperationException` instead of creating the cycle. 2 regression
+   tests (self-as-child, ancestor-as-child-of-descendant). Commit `fd05688`.
+3. **Namespaced `XAttribute`/`XElement` serialized as malformed Clark-notation XML** — `XName`
+   `{namespace}local`) was written directly as the XML attribute *name* in three call sites
+   (`XAttribute::ToString()`, `XElement::WriteTo()`, `XStreamingElement::WriteContent()`) —
+   `{`/`}` aren't legal in an XML Name production, so this was genuinely malformed, unparseable
+   output, not just a fidelity gap. Verified real .NET's `XAttribute.ToString()` resolves an
+   actual namespace prefix via a real `XmlWriter`; since this port's `XmlWriter` has no
+   namespace/prefix-aware `WriteAttributeString` overload, implementing full prefix resolution
+   was judged too large a feature addition for this specific bug (there's a separately-tracked
+   moderate finding for `XElement::WriteTo` already dropping the *element's own* namespace for
+   the same underlying reason). Fixed all three sites to use the local name only — converts the
+   critical "malformed XML" outcome into the same already-acknowledged "namespace fidelity
+   loss" class the element-name path already has. 3 regression tests, including a full
+   `ToString()`-then-`Parse()` round trip that previously would have thrown/corrupted. Commit
+   `7b58bcb`.
+
+### Wave-3 catalogue: genuinely complete for criticals now
+
+Every namespace slice's critical-severity findings are fixed: Threading (13), IO.Compression/
+Hashing (3, +1 already-fixed), Xml core (5, 1 already-fixed), IO core (4), `System.Net` core+
+Sockets (4, 2 already-fixed), Net.Http/WebSockets (2, already-fixed), and now Xml.Linq+XPath
+(3). **Before starting the next namespace's moderates, re-verify its own catalogue section's
+severity counts against what's actually been touched** — this is exactly the mistake that
+caused Xml.Linq+XPath's criticals to be missed for two checkpoints in a row.
+
+### What remains
+
+Exclusively moderate/minor findings now, across every namespace: Net core+Sockets (12
+moderate + 8 minor), Net.Http/WebSockets (13 moderate + 4 minor), IO core (10 moderate + 5
+minor), IO.Compression/Hashing (6 moderate + 3 minor, minus what's already fixed), Xml core
+(13 moderate + 8 minor), Xml.Linq+XPath (12 moderate + 6 minor), Threading (29 moderate + 10
+minor). See "Full findings catalogue" further down this file for full per-namespace detail —
+re-verify each finding against current source before fixing, since several turned out to
+already be resolved as side effects of other work this session.
+
+**Recommended next session priority:** per the earlier-established guidance, prioritize by
+real-world impact within each namespace rather than strictly by catalogue order.
+Threading's moderates include some genuinely dangerous items worth pulling forward despite the
+"moderate" label: `SynchronizationContext` fully broken, `CancellationTokenSource.disposed_`
+data race, non-LIFO callback ordering. Xml.Linq+XPath's moderates include a real tree-
+corruption risk (`RemoveChild`/`AppendChild`/etc. skip .NET's ancestor-cycle/cross-document/
+legal-child-type validation) that's a closer cousin to the critical just fixed there than a
+typical "moderate" gap — consider pulling that forward too.
 
 ## Session checkpoint (2026-07-10, continued again) — all System.Net core + Sockets criticals now done
 
