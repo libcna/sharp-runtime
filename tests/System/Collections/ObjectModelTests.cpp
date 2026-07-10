@@ -161,6 +161,29 @@ TEST(ReadOnlyCollectionTests, DefaultCtor_CountZero) {
     EXPECT_EQ(rc.getCountProperty(), 0);
 }
 
+TEST(ReadOnlyCollectionTests, SharedPtrCtor_IsLiveView_ReflectsMutationsToSource) {
+    auto source = std::make_shared<std::vector<int>>(std::vector<int>{1, 2, 3});
+    const ReadOnlyCollection<int> rc(source);
+    EXPECT_EQ(rc.getCountProperty(), 3);
+    source->push_back(4);
+    EXPECT_EQ(rc.getCountProperty(), 4);
+    EXPECT_EQ(rc[3], 4);
+    (*source)[0] = 99;
+    EXPECT_EQ(rc[0], 99);
+}
+
+TEST(ReadOnlyCollectionTests, SharedPtrCtor_NullSource_ThrowsArgumentNullException) {
+    std::shared_ptr<std::vector<int>> null_source;
+    EXPECT_THROW(ReadOnlyCollection<int> rc(null_source), System::ArgumentNullException);
+}
+
+TEST(ReadOnlyCollectionTests, VectorCtor_IsCopy_DoesNotReflectMutationsToSource) {
+    std::vector<int> source{1, 2, 3};
+    ReadOnlyCollection<int> rc(source);
+    source.push_back(4);
+    EXPECT_EQ(rc.getCountProperty(), 3);
+}
+
 // ===========================================================================
 // ReadOnlyDictionary<K,V>
 // ===========================================================================

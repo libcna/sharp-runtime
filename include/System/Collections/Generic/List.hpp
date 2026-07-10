@@ -445,7 +445,16 @@ class List : public IList<T> {
          * @brief Returns a read-only wrapper around this list.
          *
          * C++ counterpart of .NET List<T>.AsReadOnly().
-         * @return A ReadOnlyCollection<T> wrapping this list's elements.
+         *
+         * @warning Real .NET's AsReadOnly() returns a live *view*: mutations to this List
+         * afterward are visible through the returned wrapper (ReadOnlyCollection.cs stores a
+         * plain reference to the source list, not a copy). This port's List<T> holds its
+         * elements in a plain (non-shared_ptr) std::vector<T>, so achieving that exact live-
+         * view semantic here would require changing List<T>'s internal storage to
+         * shared_ptr-backed -- a broad change to a heavily-used core type, out of scope per
+         * CLAUDE.md rule #10. This returns a ReadOnlyCollection<T> that copies this list's
+         * current elements instead; it will NOT reflect later mutations to this List.
+         * @return A ReadOnlyCollection<T> containing a snapshot copy of this list's elements.
          */
         [[nodiscard]] System::Collections::ObjectModel::ReadOnlyCollection<T> AsReadOnly() const {
             return System::Collections::ObjectModel::ReadOnlyCollection<T>(items_);
