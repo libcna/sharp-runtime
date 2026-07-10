@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/StringBuilder.hpp"
+#include "System/ArgumentException.hpp"
 
 #include <array>
 #include <charconv>
@@ -133,6 +134,14 @@ namespace System::Text
 
     StringBuilder& StringBuilder::Replace(const std::string& oldValue, const std::string& newValue)
     {
+        // .NET throws for a null/empty oldValue (ArgumentException.ThrowIfNullOrEmpty,
+        // StringBuilder.cs) rather than looping. Without this check, buffer.find("", pos)
+        // always succeeds at pos: if newValue is also empty, pos never advances and this
+        // loops forever; if newValue is non-empty, each iteration inserts newValue.size()
+        // characters and advances pos by exactly that much, so buffer.size() - pos never
+        // shrinks and the loop still never terminates (runs until OOM).
+        if (oldValue.empty())
+            throw System::ArgumentException("The value cannot be an empty string.", "oldValue");
         size_t pos = 0;
         while ((pos = buffer.find(oldValue, pos)) != std::string::npos) {
             buffer.replace(pos, oldValue.size(), newValue);

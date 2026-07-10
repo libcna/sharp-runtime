@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/ArgumentException.hpp"
 #include "System/Text/StringBuilder.hpp"
 
 using System::Text::StringBuilder;
@@ -315,6 +316,21 @@ TEST(StringBuilderTests, Replace_WithEmptyString_RemovesAll) {
     StringBuilder sb("abcabc");
     sb.Replace("b", "");
     EXPECT_EQ(sb.ToString(), "acac");
+}
+
+TEST(StringBuilderTests, Replace_EmptyOldValue_Throws) {
+    // Regression: previously hung forever (or ran until OOM if newValue was non-empty) --
+    // buffer.find("", pos) always matches at pos, so pos+=newValue.size() would leave
+    // buffer.size()-pos constant, and the loop's std::string::npos exit condition was
+    // never reached. .NET throws ArgumentException for an empty oldValue
+    // (StringBuilder.Replace -> ArgumentException.ThrowIfNullOrEmpty).
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Replace("", "x"), System::ArgumentException);
+}
+
+TEST(StringBuilderTests, Replace_EmptyOldValueAndEmptyNewValue_Throws) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Replace("", ""), System::ArgumentException);
 }
 
 TEST(StringBuilderTests, Replace_ChainedWithAppend) {
