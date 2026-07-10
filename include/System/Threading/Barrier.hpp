@@ -2,11 +2,13 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -18,7 +20,22 @@ namespace System::Threading {
     using SharpRuntime::intcs;
     using SharpRuntime::longcs;
 
-    /** Enables multiple tasks to cooperatively work on an algorithm in parallel through multiple phases. */
+    /**
+     * @brief Enables multiple tasks to cooperatively work on an algorithm in parallel through
+     * multiple phases.
+     *
+     * @note Two behaviors verified against Barrier.cs's FinishPhase()/SignalAndWait():
+     * (1) real .NET rejects (InvalidOperationException) a call to SignalAndWait/
+     * AddParticipant(s)/RemoveParticipant(s) made from within the post-phase action on the same
+     * thread, rather than allowing it to reenter; (2) every participant thread -- not just the
+     * one that happened to trigger the phase transition -- observes and rethrows a
+     * BarrierPostPhaseException if the post-phase action faulted. This port previously had
+     * neither: FinishPhase() ran the action while still holding `mutex_` with no reentrancy
+     * check, so a reentrant call from within the action self-deadlocked on the non-recursive
+     * std::mutex instead of throwing; and only the triggering thread's FinishPhase() call ever
+     * saw the caught exception, so every other participant silently resumed as if the phase had
+     * completed successfully.
+     */
     class Barrier {
         intcs participantCount_;
         intcs remainingCount_;
@@ -26,6 +43,14 @@ namespace System::Threading {
         std::function<void(Barrier&)> postPhaseAction_;
         mutable std::mutex mutex_;
         std::condition_variable cv_;
+        std::exception_ptr lastPostPhaseException_;
+        std::atomic<std::thread::id> actionCallerId_;
+
+        void ThrowIfCalledFromPostPhaseAction() const {
+            if (actionCallerId_.load() == std::this_thread::get_id())
+                throw System::InvalidOperationException(
+                    "This method may not be called from within the postPhaseAction.");
+        }
 
     public:
         /** Constructs a Barrier with the specified number of participants and an optional post-phase action. */
@@ -41,22 +66,33 @@ namespace System::Threading {
         /** Returns the current phase number. */
         [[nodiscard]] longcs getCurrentPhaseNumberProperty() const { std::unique_lock lock(mutex_); return phaseCount_; }
 
-        /** Signals that a participant has reached the barrier and blocks until all participants have arrived. */
+        /**
+         * @brief Signals that a participant has reached the barrier and blocks until all participants have arrived.
+         * @throws System::InvalidOperationException if called from within the post-phase action.
+         * @throws BarrierPostPhaseException if the post-phase action threw during this phase.
+         */
         void SignalAndWait() {
+            ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ == 0)
                 throw System::InvalidOperationException("The barrier has no registered participants.");
             --remainingCount_;
             if (remainingCount_ == 0) {
-                FinishPhase(lock);
+                FinishPhase(lock); // throws directly if the post-phase action faulted
             } else {
                 longcs myPhase = phaseCount_;
                 cv_.wait(lock, [this, myPhase]{ return phaseCount_ > myPhase; });
+                if (lastPostPhaseException_)
+                    throw BarrierPostPhaseException(lastPostPhaseException_);
             }
         }
 
-        /** Notifies the barrier that there will be one additional participant; returns new participant count. */
+        /**
+         * @brief Notifies the barrier that there will be one additional participant; returns new participant count.
+         * @throws System::InvalidOperationException if called from within the post-phase action.
+         */
         intcs AddParticipant() {
+            ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ >= 32767)
                 throw System::InvalidOperationException("Adding the specified number of participants would cause the Barrier's participants count to exceed the maximum allowed.");
@@ -65,8 +101,12 @@ namespace System::Threading {
             return participantCount_;
         }
 
-        /** Notifies the barrier that there will be one fewer participant. */
+        /**
+         * @brief Notifies the barrier that there will be one fewer participant.
+         * @throws System::InvalidOperationException if called from within the post-phase action.
+         */
         void RemoveParticipant() {
+            ThrowIfCalledFromPostPhaseAction();
             std::unique_lock lock(mutex_);
             if (participantCount_ == 0)
                 throw System::ArgumentOutOfRangeException("participantCount");
@@ -82,22 +122,31 @@ namespace System::Threading {
         void Dispose() {}
 
     private:
-        /** Advances to the next phase, invoking the post-phase action and wrapping any exception it throws. */
+        /**
+         * @brief Advances to the next phase, invoking the post-phase action.
+         * @throws BarrierPostPhaseException on the calling (triggering) thread if the action
+         * threw; other participants blocked in SignalAndWait() observe the same failure via
+         * lastPostPhaseException_ once they wake.
+         */
         void FinishPhase(std::unique_lock<std::mutex>& lock) {
             ++phaseCount_;
             remainingCount_ = participantCount_;
-            std::exception_ptr caught;
             if (postPhaseAction_) {
+                actionCallerId_.store(std::this_thread::get_id());
                 try {
                     postPhaseAction_(*this);
+                    lastPostPhaseException_ = nullptr;
                 } catch (...) {
-                    caught = std::current_exception();
+                    lastPostPhaseException_ = std::current_exception();
                 }
+                actionCallerId_.store(std::thread::id());
+            } else {
+                lastPostPhaseException_ = nullptr;
             }
             cv_.notify_all();
             (void)lock;
-            if (caught)
-                throw BarrierPostPhaseException(caught);
+            if (lastPostPhaseException_)
+                throw BarrierPostPhaseException(lastPostPhaseException_);
         }
     };
 

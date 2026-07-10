@@ -15,6 +15,7 @@
 #include "System/AggregateException.hpp"
 #include "System/ApplicationException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Threading/AbandonedMutexException.hpp"
 #include "System/Threading/Barrier.hpp"
 #include "System/Threading/BarrierPostPhaseException.hpp"
@@ -333,6 +334,40 @@ TEST(BarrierTests, PostPhaseActionThrows_WrappedInBarrierPostPhaseException) {
 TEST(BarrierTests, RemoveParticipant_ToZero_Throws) {
     Barrier b(0);
     EXPECT_THROW(b.RemoveParticipant(), System::ArgumentOutOfRangeException);
+}
+
+TEST(BarrierTests, PostPhaseActionThrows_AllParticipantsObserveException) {
+    Barrier b(3, [](Barrier&) { throw std::runtime_error("boom"); });
+    std::atomic<int> exceptionCount{0};
+    std::thread t1([&] {
+        try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    });
+    std::thread t2([&] {
+        try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    });
+    try { b.SignalAndWait(); } catch (const BarrierPostPhaseException&) { ++exceptionCount; }
+    t1.join();
+    t2.join();
+    EXPECT_EQ(exceptionCount.load(), 3);
+}
+
+TEST(BarrierTests, CalledFromPostPhaseAction_ThrowsInsteadOfDeadlocking) {
+    // A reentrant call from within the post-phase action throws (matching real .NET's
+    // Barrier.cs, which rejects such calls with InvalidOperationException) rather than
+    // self-deadlocking on the non-recursive mutex the previous implementation held throughout
+    // the action's execution. Since the throw happens inside FinishPhase's own try/catch
+    // (matching real .NET's finally-block rethrow), it surfaces wrapped in
+    // BarrierPostPhaseException, whose inner exception is the InvalidOperationException.
+    Barrier* barrier = nullptr;
+    Barrier b(1, [&](Barrier&) { barrier->AddParticipant(); });
+    barrier = &b;
+    try {
+        b.SignalAndWait();
+        FAIL() << "expected BarrierPostPhaseException";
+    } catch (const BarrierPostPhaseException& ex) {
+        ASSERT_TRUE(ex.getInnerExceptionProperty() != nullptr);
+        EXPECT_THROW(std::rethrow_exception(ex.getInnerExceptionProperty()), System::InvalidOperationException);
+    }
 }
 
 // ===========================================================================
