@@ -11,8 +11,10 @@
 #include <atomic>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include "System/AggregateException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/CancellationTokenSource.hpp"
@@ -150,7 +152,19 @@ TEST(TaskCompletionSourceTests, SetResult_GetResult) {
 TEST(TaskCompletionSourceTests, SetResult_Twice_Throws) {
     TaskCompletionSource<int> tcs;
     tcs.SetResult(1);
-    EXPECT_THROW(tcs.SetResult(2), std::invalid_argument);
+    EXPECT_THROW(tcs.SetResult(2), System::InvalidOperationException);
+}
+
+TEST(TaskCompletionSourceTests, ConcurrentTrySetResult_ExactlyOneWinner_NoUncaughtException) {
+    for (int iter = 0; iter < 200; ++iter) {
+        TaskCompletionSource<int> tcs;
+        std::atomic<int> successCount{0};
+        std::thread t1([&] { if (tcs.TrySetResult(1)) ++successCount; });
+        std::thread t2([&] { if (tcs.TrySetResult(2)) ++successCount; });
+        t1.join();
+        t2.join();
+        EXPECT_EQ(successCount.load(), 1);
+    }
 }
 
 TEST(TaskCompletionSourceTests, TrySetResult_FirstTime_True) {
