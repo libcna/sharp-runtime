@@ -1,6 +1,35 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `2701f60`) — 11129 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `367357e`) — 11136 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: top 2 priority items fixed
+
+*Branch: `feature/work`, HEAD `367357e` — 11136 tests passing (up from 11129 at the top of
+the wave-3-dispatch checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Picked off the top two items from the wave-3 "suggested processing priority" list below:
+
+- **`ZipArchive` Update-mode data loss + `ZipArchiveEntry::Delete()` no-op** (IO.Compression
+  criticals #1-2) — fixed. `flushWriter()` now extracts every pre-existing, non-deleted
+  entry into memory before opening the writer (the reader must be fully drained/closed
+  first, since the writer may truncate the same backing file/buffer), then writes those
+  entries alongside the pending ones. Added a `deletedEntries` set so `Delete()` actually
+  excludes an entry instead of doing nothing. 3 regression tests. Commit `568323a`.
+- **Threading's `Timeout.Infinite` (-1) systemic mishandling** (found independently ~11
+  times across `Monitor`/`Mutex`/`Semaphore`/`SemaphoreSlim`/`Lock`/`SpinWait`/
+  `AutoResetEvent`/`ManualResetEvent`/`EventWaitHandle`/`ManualResetEventSlim`/
+  `CountdownEvent`/`WaitHandle.WaitAll`/`WaitAny`) — fixed uniformly: every site now
+  special-cases `millisecondsTimeout == -1` to call the underlying untimed blocking
+  primitive instead of computing a timed wait that std::chrono treats as already-expired.
+  5 regression tests (one per underlying primitive shape: mutex-like, semaphore-like,
+  event-like, spin-based, multi-handle), each proving the fix by asserting the wait is
+  still blocked after 100ms before signaling it to complete. Commit `367357e`.
+
+The IO.Compression and Threading sections of the wave-3 catalogue below are otherwise
+unchanged (all their other findings remain open) — only the two specific items above are
+resolved. The "suggested processing priority" list's items 1-2 are done; **item 3 (memory-
+safety criticals: Socket bounds validation, XmlReader post-EOF OOB access, ClientWebSocket
+buffer bounds, HttpClient null deref) is next.**
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 audit dispatched, 221 findings (56 critical)
 
