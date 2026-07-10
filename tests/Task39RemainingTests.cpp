@@ -129,6 +129,40 @@ TEST(ASCIIEncodingTests, GetBytes_Empty) {
     EXPECT_TRUE(bytes.empty());
 }
 
+// GetBytes previously iterated the UTF-8-encoded input byte-wise, so a single multi-byte
+// non-ASCII character produced one '?' per UTF-8 byte instead of .NET's one per UTF-16 code
+// unit (a BMP character is always exactly one UTF-16 code unit). Verified against
+// ASCIIEncoding.cs, which operates on char[]/UTF-16 code units.
+TEST(ASCIIEncodingTests, GetBytes_NonAsciiBmpChar_ProducesExactlyOneReplacementByte) {
+    ASCIIEncoding enc;
+    // "café" -- 'é' (U+00E9) is 2 UTF-8 bytes but a single BMP character.
+    auto bytes = enc.GetBytes("caf\xC3\xA9");
+    ASSERT_EQ(bytes.size(), 4u);
+    EXPECT_EQ(bytes[0], uint8_t('c'));
+    EXPECT_EQ(bytes[1], uint8_t('a'));
+    EXPECT_EQ(bytes[2], uint8_t('f'));
+    EXPECT_EQ(bytes[3], uint8_t('?'));
+}
+
+TEST(ASCIIEncodingTests, GetBytes_ThreeByteUtf8Char_ProducesExactlyOneReplacementByte) {
+    ASCIIEncoding enc;
+    // U+20AC EURO SIGN, 3 UTF-8 bytes, still a single BMP character.
+    auto bytes = enc.GetBytes("\xE2\x82\xAC");
+    ASSERT_EQ(bytes.size(), 1u);
+    EXPECT_EQ(bytes[0], uint8_t('?'));
+}
+
+// A supplementary-plane character (>= U+10000) is two UTF-16 code units (a surrogate pair)
+// in real .NET, so it maps to two '?' bytes, not one.
+TEST(ASCIIEncodingTests, GetBytes_SupplementaryPlaneChar_ProducesTwoReplacementBytes) {
+    ASCIIEncoding enc;
+    // U+1F600 GRINNING FACE, 4 UTF-8 bytes, one supplementary-plane character.
+    auto bytes = enc.GetBytes("\xF0\x9F\x98\x80");
+    ASSERT_EQ(bytes.size(), 2u);
+    EXPECT_EQ(bytes[0], uint8_t('?'));
+    EXPECT_EQ(bytes[1], uint8_t('?'));
+}
+
 // ===========================================================================
 // UnicodeEncoding
 // ===========================================================================
