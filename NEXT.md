@@ -1,6 +1,55 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `79f25bc`) — 11064 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `ee0fefc`) — 11094 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 3
+
+*Branch: `feature/work`, HEAD `ee0fefc` — 11094 tests passing (up from 11064 at the top of
+part 2's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+One large item fixed this pass:
+
+- **Globalization — `CultureInfo`**: this was the largest remaining deferred finding
+  (ticket 786). Added, all verified against `CultureInfo.cs`: `CultureInfo(int)` LCID
+  validation via a `ValidateLcidStub` helper (rejects the 5 LCIDs .NET rejects
+  unconditionally -- `CultureNotFoundException` was previously dead code, never thrown
+  anywhere in the codebase); `EnglishName`/`NativeName`/`DisplayName` (real values for the
+  two cultures this port meaningfully models -- invariant and "en-US" -- documented
+  best-effort fallback to `Name` for any other culture); `TwoLetterISOLanguageName` (real
+  values for invariant/en-US, heuristic BCP-47-subtag derivation otherwise, documented as
+  not a real ISO-639 lookup); `ThreeLetterISOLanguageName` (real values for invariant/en-US
+  only -- no derivable value for any other name, since the three-letter form isn't a
+  transform of the culture name); `NumberFormat`/`DateTimeFormat` instance properties
+  backed by a per-instance copy of the invariant info, with `VerifyWritable()`-guarded
+  setters; `Equals`/`GetHashCode`/`ToString` (Name-based; documented CompareInfo deviation,
+  since this port doesn't model per-culture CompareInfo data); and
+  `GetCultureInfo(string)`/`GetCultureInfo(int)`/`GetCultureInfo(string, bool)` (return a
+  read-only instance -- the real behavioral difference from the public constructors; no
+  object-identity caching, since this port uses value semantics throughout -- documented
+  deviation from .NET's cached-singleton behavior). Added 30 regression tests. Commit
+  `ee0fefc`.
+
+### What remains from the deferred-findings list (not yet touched)
+
+- **PersianCalendar**: fixed 33-year arithmetic leap-year formula vs. real astronomical
+  vernal-equinox algorithm — diverges on ~29% of years. The single most involved remaining
+  item across all three parts of this sweep; likely needs a substantial algorithm rewrite.
+  Not started.
+- **UTF8Encoding**: `GetBytes`/`GetString` are a byte passthrough with zero
+  well-formedness validation. Ticket already marked `needs_user` — skip or seek
+  clarification rather than attempt blind.
+- **Collections.Immutable**: `ImmutableHashSet`/`ImmutableSortedSet`/
+  `ImmutableSortedDictionary` have no custom-comparer support at all (no
+  `IEqualityComparer`/`IComparer` parameter anywhere on any constructor/factory). Not
+  started — would need API additions across 3 types.
+
+At this point every deferred finding from the wave-2 audit checkpoint has been addressed
+except the three items above. The next session should either finish those three (PersianCalendar
+is the only genuinely large one left) or move to option (b): dispatch a wave-3 parallel audit
+covering `System.Net.*`, `System.Diagnostics*`, `System.IO.*`, `System.Text.Json*`,
+`System.Threading.*`, `System.Xml.*`, using the same methodology as waves 1-2.
+
+---
 
 ## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 2
 
