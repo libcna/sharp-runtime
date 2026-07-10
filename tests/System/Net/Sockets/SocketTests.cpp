@@ -59,6 +59,53 @@ TEST(SocketTests, TcpBindListenAcceptConnectSendReceive) {
     acceptedSocket->Close();
 }
 
+// Regression test for a wave-3 audit finding: Send/Receive/SendTo/ReceiveFrom cast
+// SocketFlags directly to the native int flags argument with no translation. On Linux the
+// only flag whose bit position coincidentally matches .NET's SocketFlags is exercised here
+// (SocketFlags::Peek == MSG_PEEK); a raw cast would have worked for this specific flag by
+// coincidence too, so this mainly guards against a future refactor reintroducing the raw
+// cast for flags whose bit positions do NOT coincide (e.g. Truncated/0x0100, which collides
+// with Linux's unrelated MSG_WAITALL). Verified against pal_networking.c's
+// ConvertSocketFlagsPalToPlatform.
+TEST(SocketTests, Receive_PeekFlag_DoesNotConsumeData) {
+    Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+
+    auto local = listener.getLocalEndPointProperty();
+    auto* localIp = dynamic_cast<IPEndPoint*>(local.get());
+    intcs port = localIp->getPortProperty();
+
+    std::shared_ptr<Socket> acceptedSocket;
+    std::thread serverThread([&]() { acceptedSocket = listener.Accept(); });
+
+    Socket client(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    client.Connect(IPAddress::Loopback, port);
+    serverThread.join();
+
+    std::vector<SharpRuntime::bytecs> sendBuf{'p', 'e', 'e', 'k'};
+    client.Send(sendBuf);
+
+    std::vector<SharpRuntime::bytecs> peekBuf(16);
+    intcs peeked = acceptedSocket->Receive(peekBuf, 0, 4, SocketFlags::Peek);
+    ASSERT_EQ(peeked, 4);
+    EXPECT_EQ(peekBuf[0], 'p');
+
+    // A normal Receive afterward must still see the same bytes -- Peek must not have
+    // consumed them. If SocketFlags::Peek's bit (0x0002) were misrouted to an unrelated
+    // native flag, this would either block (data actually consumed) or read garbage.
+    std::vector<SharpRuntime::bytecs> recvBuf(16);
+    intcs received = acceptedSocket->Receive(recvBuf, 0, 4, SocketFlags::None);
+    ASSERT_EQ(received, 4);
+    EXPECT_EQ(recvBuf[0], 'p');
+    EXPECT_EQ(recvBuf[1], 'e');
+    EXPECT_EQ(recvBuf[2], 'e');
+    EXPECT_EQ(recvBuf[3], 'k');
+
+    client.Close();
+    acceptedSocket->Close();
+}
+
 // Regression test for a wave-3 audit finding: Send/Receive/SendTo/ReceiveFrom used to do
 // buffer.data() + offset with no bounds check against buffer.size() -- a genuine
 // out-of-bounds heap read (Send) or write (Receive) when offset+count exceeded the buffer,

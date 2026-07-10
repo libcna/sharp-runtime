@@ -96,6 +96,31 @@ namespace {
         }
     }
 
+    int nativeSocketFlags(SocketFlags flags) {
+#if defined(_WIN32)
+        // Winsock2's MSG_* flag bit values are numerically identical to this port's
+        // System::Net::Sockets::SocketFlags (real .NET's own SocketFlags enum was itself
+        // modeled on Winsock2) -- a direct cast is correct here.
+        return static_cast<int>(flags);
+#else
+        // Verified against pal_networking.c's ConvertSocketFlagsPalToPlatform: real .NET only
+        // ever passes OutOfBand/Peek/DontRoute as *input* flags to Send/Receive/SendTo/
+        // ReceiveFrom -- Truncated/ControlDataTruncated/Broadcast/Multicast/Partial are
+        // receive-*result*-only flags, never meaningful as input -- and translates each
+        // meaningful input flag to its own POSIX MSG_* constant individually rather than
+        // passing the bit pattern through, since .NET's SocketFlags bit positions only match
+        // Linux's MSG_* constants by coincidence for these three flags. A raw
+        // static_cast<int>(flags), this port's previous behavior, silently mapped unrelated
+        // bits onto the wrong native flag whenever a caller passed anything else -- e.g.
+        // SocketFlags::Truncated (0x0100) would have set Linux's MSG_WAITALL (also 0x100).
+        int native = 0;
+        if ((flags & SocketFlags::OutOfBand) != SocketFlags::None) native |= MSG_OOB;
+        if ((flags & SocketFlags::Peek) != SocketFlags::None) native |= MSG_PEEK;
+        if ((flags & SocketFlags::DontRoute) != SocketFlags::None) native |= MSG_DONTROUTE;
+        return native;
+#endif
+    }
+
     // Builds a native sockaddr for `ep` into `storage`, returning the address length.
     // Supports IPEndPoint (v4/v6) and UnixDomainSocketEndPoint.
     socklen_t buildNativeAddress(const System::Net::EndPoint& ep, sockaddr_storage& storage) {
@@ -525,9 +550,9 @@ intcs Socket::Send(const std::vector<bytecs>& buffer, intcs offset, intcs count,
     if (count == 0) return 0;
 #if defined(_WIN32)
     int sent = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
-                       static_cast<int>(flags));
+                       nativeSocketFlags(flags));
 #else
-    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags));
+    ssize_t sent = ::send(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags));
 #endif
     if (sent < 0) {
         throwSocketError("Socket::Send: send() failed");
@@ -544,9 +569,9 @@ intcs Socket::Receive(std::vector<bytecs>& buffer, intcs offset, intcs count, So
     if (count == 0) return 0;
 #if defined(_WIN32)
     int received = ::recv(toSk(fd_), reinterpret_cast<char*>(buffer.data() + offset), count,
-                           static_cast<int>(flags));
+                           nativeSocketFlags(flags));
 #else
-    ssize_t received = ::recv(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags));
+    ssize_t received = ::recv(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags));
 #endif
     if (received < 0) {
         throwSocketError("Socket::Receive: recv() failed");
@@ -565,9 +590,9 @@ intcs Socket::SendTo(const std::vector<bytecs>& buffer, intcs offset, intcs coun
     socklen_t len = buildNativeAddress(remoteEP, storage);
 #if defined(_WIN32)
     int sent = ::sendto(toSk(fd_), reinterpret_cast<const char*>(buffer.data() + offset), count,
-                         static_cast<int>(flags), reinterpret_cast<sockaddr*>(&storage), static_cast<int>(len));
+                         nativeSocketFlags(flags), reinterpret_cast<sockaddr*>(&storage), static_cast<int>(len));
 #else
-    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags),
+    ssize_t sent = ::sendto(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags),
                              reinterpret_cast<sockaddr*>(&storage), len);
 #endif
     if (sent < 0) {
@@ -587,9 +612,9 @@ SocketReceiveFromResult Socket::ReceiveFrom(std::vector<bytecs>& buffer, intcs o
     socklen_t len = sizeof(storage);
 #if defined(_WIN32)
     int received = ::recvfrom(toSk(fd_), reinterpret_cast<char*>(buffer.data() + offset), count,
-                               static_cast<int>(flags), reinterpret_cast<sockaddr*>(&storage), &len);
+                               nativeSocketFlags(flags), reinterpret_cast<sockaddr*>(&storage), &len);
 #else
-    ssize_t received = ::recvfrom(fd_, buffer.data() + offset, static_cast<size_t>(count), static_cast<int>(flags),
+    ssize_t received = ::recvfrom(fd_, buffer.data() + offset, static_cast<size_t>(count), nativeSocketFlags(flags),
                                    reinterpret_cast<sockaddr*>(&storage), &len);
 #endif
     if (received < 0) {
