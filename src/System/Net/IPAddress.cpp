@@ -9,6 +9,7 @@
 #include "System/Net/Sockets/SocketException.hpp"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <exception>
 #include <sstream>
@@ -171,7 +172,19 @@ namespace System::Net {
                 std::string scopeStr = s.substr(pctPos + 1);
                 if (scopeStr.empty() || !std::all_of(scopeStr.begin(), scopeStr.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
                     return false;
-                scopeId = static_cast<uint32_t>(std::stoul(scopeStr));
+                // Verified against IPAddressParser.cs: real .NET parses the numeric scope ID
+                // with uint.TryParse (non-throwing) and fails the whole address parse on
+                // overflow. std::stoul here previously threw std::out_of_range -- an unrelated
+                // std:: exception type, uncaught anywhere in this call chain -- for a
+                // many-all-digit scope string exceeding unsigned long's range, violating
+                // tryParseIPv6's (and TryParse's) "never throws" contract; it would also have
+                // silently truncated any value between UINT32_MAX and ULONG_MAX when narrowed
+                // to uint32_t instead of failing the parse.
+                uint32_t parsedScope = 0;
+                auto scopeResult = std::from_chars(scopeStr.data(), scopeStr.data() + scopeStr.size(), parsedScope);
+                if (scopeResult.ec != std::errc() || scopeResult.ptr != scopeStr.data() + scopeStr.size())
+                    return false;
+                scopeId = parsedScope;
                 s = s.substr(0, pctPos);
             }
 

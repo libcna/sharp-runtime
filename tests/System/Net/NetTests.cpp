@@ -235,6 +235,29 @@ TEST(IPAddressIPv6Tests, Parse_WithScopeId) {
     EXPECT_EQ(ip.getScopeIdProperty(), 3);
 }
 
+// Regression test for a wave-3 audit finding: the scope-ID numeric parse used std::stoul,
+// which throws std::out_of_range (an unrelated std:: exception type, not a System::
+// exception) for a many-all-digit scope string exceeding unsigned long's range. That
+// exception propagated straight out of TryParse -- which must never throw -- instead of the
+// parse simply failing, matching IPAddressParser.cs's use of uint.TryParse (non-throwing).
+TEST(IPAddressIPv6Tests, TryParse_ScopeIdOverflow_ReturnsFalseWithoutThrowing) {
+    IPAddress ip;
+    bool ok = false;
+    EXPECT_NO_THROW(ok = IPAddress::TryParse("fe80::1%999999999999999999999999999999", ip));
+    EXPECT_FALSE(ok);
+}
+
+TEST(IPAddressIPv6Tests, Parse_ScopeIdOverflow_ThrowsFormatException) {
+    EXPECT_THROW(IPAddress::Parse("fe80::1%999999999999999999999999999999"), System::FormatException);
+}
+
+TEST(IPAddressIPv6Tests, Parse_ScopeIdJustOverUint32Max_ReturnsFalseNotSilentlyTruncated) {
+    // 4294967296 == UINT32_MAX + 1. The old std::stoul-then-narrow path would have wrapped
+    // this to scope 0 instead of failing the parse.
+    IPAddress ip;
+    EXPECT_FALSE(IPAddress::TryParse("fe80::1%4294967296", ip));
+}
+
 TEST(IPAddressIPv6Tests, Parse_EmbeddedIPv4) {
     IPAddress ip = IPAddress::Parse("::ffff:192.168.1.1");
     EXPECT_TRUE(ip.getIsIPv4MappedToIPv6Property());
