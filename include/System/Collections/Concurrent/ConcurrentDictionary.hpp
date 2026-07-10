@@ -8,6 +8,7 @@
 #include <functional>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Concurrent {
 
@@ -74,10 +75,52 @@ namespace System::Collections::Concurrent {
             return true;
         }
 
-        /** Returns a reference to the value for key, inserting a default if not present (thread-safe). */
-        TValue& operator[](const TKey& key) {
-            std::lock_guard<std::mutex> lk(mutex_);
-            return map_[key];
+        /**
+         * @brief A proxy for `dict[key]` that performs each read or write atomically under the
+         * dictionary's lock, instead of exposing a reference into the internal map.
+         *
+         * C++ counterpart of .NET ConcurrentDictionary<TKey,TValue>'s indexer property
+         * (ConcurrentDictionary.cs:1065). Returning `TValue&` directly (the prior
+         * implementation) let a reference escape the lock scope, so a concurrent TryRemove
+         * on the same key could erase the underlying map node while another thread still
+         * held and used that reference -- a dangling-reference bug that cannot occur in
+         * real .NET, where the getter returns a copy and the setter is a single locked
+         * operation. This proxy restores that guarantee: reading converts to a locked
+         * TryGetValue-style copy, assigning performs a single locked upsert.
+         */
+        class ValueProxy {
+            ConcurrentDictionary* owner_;
+            TKey key_;
+        public:
+            ValueProxy(ConcurrentDictionary* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+            /** Reads the current value under lock; throws KeyNotFoundException if @p key is absent. */
+            operator TValue() const {
+                std::lock_guard<std::mutex> lk(owner_->mutex_);
+                auto it = owner_->map_.find(key_);
+                if (it == owner_->map_.end())
+                    throw System::Collections::Generic::KeyNotFoundException("The given key was not present in the dictionary.");
+                return it->second;
+            }
+
+            /** Atomically inserts or overwrites the value for this key under lock. */
+            ValueProxy& operator=(const TValue& value) {
+                std::lock_guard<std::mutex> lk(owner_->mutex_);
+                owner_->map_[key_] = value;
+                return *this;
+            }
+        };
+
+        /**
+         * @brief Gets or sets the value associated with @p key.
+         *
+         * C++ counterpart of .NET ConcurrentDictionary<TKey,TValue> indexer. The getter throws
+         * System::Collections::Generic::KeyNotFoundException if @p key is absent (it does NOT
+         * insert a default, unlike std::unordered_map::operator[]); the setter inserts or
+         * overwrites atomically. See ValueProxy for why this isn't a plain `TValue&`.
+         */
+        ValueProxy operator[](const TKey& key) {
+            return ValueProxy(this, key);
         }
 
         /** Thread-safely returns the value for key if present, otherwise inserts and returns defaultValue. */
