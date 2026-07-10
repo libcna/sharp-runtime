@@ -129,6 +129,32 @@ TEST(ChannelTests, WriteAsync_BlocksUntilSpaceAvailable) {
     EXPECT_EQ(second, 2);
 }
 
+TEST(ChannelTests, ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne) {
+    auto channel = Channel<int>::CreateBounded(0);
+    EXPECT_TRUE(channel.Writer->TryWrite(1));
+    EXPECT_FALSE(channel.Writer->TryWrite(2)); // full, Wait mode rejects synchronous TryWrite
+    int value = 0;
+    EXPECT_TRUE(channel.Reader->TryRead(value));
+    EXPECT_EQ(value, 1);
+    EXPECT_TRUE(channel.Writer->TryWrite(3)); // slot freed, write succeeds again
+}
+
+TEST(ChannelTests, ZeroCapacityChannel_WriteAsync_UnblocksOnceReaderDrains) {
+    auto channel = Channel<int>::CreateBounded(0);
+    channel.Writer->TryWrite(1);
+    auto writeTask = channel.Writer->WriteAsync(2);
+
+    int value = 0;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    channel.Reader->TryRead(value); // frees the slot, allowing the pending WriteAsync to complete
+    writeTask.Wait();
+    EXPECT_EQ(value, 1);
+
+    int second = 0;
+    EXPECT_TRUE(channel.Reader->TryRead(second));
+    EXPECT_EQ(second, 2);
+}
+
 TEST(ChannelTests, Completion_CompletesOnceClosedAndDrained) {
     auto channel = Channel<int>::CreateUnbounded();
     channel.Writer->TryWrite(1);
