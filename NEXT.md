@@ -1,6 +1,63 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `e09c4fb`) — 11173 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `241f881`) — 11185 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: all 13 Threading criticals now done (ReaderWriterLockSlim finished)
+
+*Branch: `feature/work`, HEAD `241f881` — 11185 tests passing (up from 11173 at the top of
+the batch-2 checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Finished `ReaderWriterLockSlim`, the one Threading critical left open at the previous
+checkpoint (previously flagged as needing its own session — tackled anyway given the momentum
+and full context already loaded). **All 13 Threading criticals from the wave-3 catalogue are
+now fixed.**
+
+Verified against `ReaderWriterLockSlim.cs`'s `TryEnterReadLockCore`/`TryEnterWriteLockCore`/
+`TryEnterUpgradeableReadLockCore`/`Exit*`. Fixed all three compounding issues:
+
+1. **Timeout discarded** — `TryEnterReadLock/WriteLock/UpgradeableReadLock(millisecondsTimeout)`
+   now use real timed condition-variable waits (the established Timeout.Infinite-aware pattern
+   from earlier this session) instead of a single non-blocking attempt.
+2. **`LockRecursionPolicy` ignored** — same-thread recursive acquisition now throws
+   `LockRecursionException` under the default `NoRecursion` policy instead of deadlocking.
+   Verified the exact rule split against the real source: write-after-read/
+   upgrade-after-read/upgrade-after-write always throw regardless of policy (real .NET checks
+   these identically in both branches); same-type recursion (read-after-read etc.) only
+   throws under `NoRecursion` and is a tracked, counted recursion under `SupportsRecursion`.
+3. **Double-`ExitReadLock()` bug** — reader/writer/upgrade ownership switched from set
+   *membership* to per-thread *counts* (ID-keyed, not `this`-pointer-keyed, matching the
+   `AsyncLocal`/`ThreadLocal` address-reuse fix earlier this session), so nested
+   `EnterReadLock()`/`EnterReadLock()`/`ExitReadLock()`/`ExitReadLock()` now correctly balances
+   instead of the second exit throwing — and, critically, the reader tally actually reaches
+   zero afterward instead of permanently starving a waiting writer.
+
+Added the previously-inaccessible `RecursionPolicy` property. 12 new regression tests (real
+timeout blocks ~the requested duration then succeeds once released; all 6 NoRecursion
+cross/same-type combinations throw instead of hanging; nested acquisition under
+`SupportsRecursion` balances and a writer can still acquire afterward). All existing tests
+(including the pre-existing upgrade-to-write deadlock-avoidance tests) still pass; full suite
+run 3x to rule out flakiness in this concurrency-heavy rewrite. Commit `241f881`.
+
+### Threading: fully done for criticals; what remains
+
+All 13 criticals fixed across this session's two Threading batches (see the batch-1/batch-2
+checkpoints below for full per-fix detail: `TaskCompletionSource`, `CountdownEvent`,
+`Task::Wait`, `CancellationTokenSource.Cancel`, `ReaderWriterLock` timeout, `ValueTask`,
+`Channel` capacity-0, `ThreadLocal` reentrancy, `LazyInitializer`, `AsyncLocal`/`ThreadLocal`
+ID-keying, `Barrier`, and now `ReaderWriterLockSlim`). Still untouched: the 29 moderate + 10
+minor Threading findings from the original wave-3 catalogue (see "Full findings catalogue"
+further down this file, `System.Threading + Tasks + Channels` section).
+
+### Wave-3 catalogue: what remains overall
+
+Threading criticals: **done**. Still entirely untouched: Threading's 29 moderate + 10 minor
+findings, and every other namespace slice — Net core+Sockets (24 findings), Net.Http+
+WebSockets+Security (19), IO core (22), IO.Compression+Hashing (13), Xml core (26),
+Xml.Linq+XPath (21). See "Full findings catalogue" further down this file for full
+per-namespace detail. Recommended next steps, in order: IO.Compression/Hashing moderates
+(small, `ZipArchive.cpp` already touched this session) → Xml core (5 criticals, `XmlReader.cpp`
+already touched this session for the memory-safety fix) → Net/IO/Xml remainder → Threading
+moderates/minors (lowest severity, do last).
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 item 5: Threading critical findings, batch 2 — 11 of 13 done, only ReaderWriterLockSlim remains
 
