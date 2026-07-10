@@ -1,6 +1,85 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `7b58bcb`) — 11234 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD pending) — 11243 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — XmlNode ancestor-cycle + cross-document guard added
+
+*Branch: `feature/work`, HEAD pending — 11243 tests passing (up from 11237 at the top of the
+Threading-dangerous-moderates checkpoint below), full clean rebuild verified (0 errors/0
+warnings)*
+
+Fixed the tree-corruption-risk finding flagged in the previous checkpoint, after correcting its
+namespace attribution (it's **System.Xml core**'s `XmlNode`, not `System.Xml.Linq`'s
+`XContainer` — see the correction note preserved below):
+
+- **`XmlNode::AppendChild`/`PrependChild`/`InsertBefore`/`InsertAfter` had no ancestor-cycle or
+  cross-document guard** — verified against `XmlNode.cs`: real .NET throws `ArgumentException`
+  both when the node being inserted is `this` itself or one of `this`'s ancestors (would create
+  a cycle) and when the node belongs to a different `XmlDocument` (would corrupt cross-document
+  invariants real .NET otherwise requires `ImportNode` for — not implemented in this port, so
+  previously a cross-document insert silently reported success while doing nothing, since
+  tinyxml2's own `InsertEndChild`/`InsertFirstChild`/`InsertAfterChild` already internally
+  refuse cross-document inserts by returning `nullptr`, unchecked by this port's wrapper).
+  tinyxml2 has no self/ancestor-cycle guard at all: its `InsertChildPreamble` unconditionally
+  unlinks the node from its current parent before reattaching, so inserting an ancestor produces
+  a genuine two-node parent/child cycle. Added `ThrowIfSelfOrAncestor`/`ThrowIfDifferentDocument`
+  helpers in `XmlNode.cpp`, called at the top of all four insertion methods (and per-child inside
+  the existing `XmlDocumentFragment`-flattening loops in `AppendChild`/`PrependChild`) before any
+  mutation happens. Scoped to the two checks that are genuine memory-safety/correctness risks;
+  did not port `IsValidChildType`'s full per-node-type legality table (a much larger, separate
+  validation-completeness surface, not a corruption risk — .NET's own default is "false" and
+  each subclass overrides it with its own allowed-type set). 6 regression tests (self-insert,
+  ancestor-insert on all 4 methods, cross-document insert), including verifying the tree is left
+  unmodified after the throw.
+
+Only remaining "tree corruption risk"-tier item from the earlier checkpoints is closed. Next
+priority per the established recommended-order: Threading's ordinary moderate/minor findings, or
+whichever namespace's moderates offer the next-highest real-world-impact fix — re-verify against
+current source before starting, per the standing discipline (several catalogued items have
+turned out to be already fixed as side effects of other work this session).
+
+## Session checkpoint (2026-07-10, continued again) — Threading's 3 "genuinely dangerous moderate" items now all fixed
+
+*Branch: `feature/work`, HEAD `c09c596` — 11237 tests passing (up from 11234 at the top of the
+criticals-complete checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Pulled forward and fixed all 3 items the previous checkpoint flagged as "genuinely dangerous
+despite the moderate label":
+
+1. **`SynchronizationContext` fully broken** — verified against `SynchronizationContext.cs`:
+   `Post()` must queue asynchronously (thread pool) while `Send()` runs synchronously; this
+   port's `Post()` ran the callback inline, identical to `Send()`, defeating the entire
+   purpose of the distinction. Separately, `getCurrent()`/`SetSynchronizationContext()` never
+   round-tripped at all — `getCurrent()` always returned `nullptr` regardless of what had been
+   set. Fixed `Post()` to call `ThreadPool::QueueUserWorkItem`; added a `thread_local` current-
+   context slot backing `getCurrent()`/`SetSynchronizationContext()`. Commit `3f64080`.
+2. **`CancellationTokenSource.disposed_` data race** — plain (non-atomic) `bool` read by
+   `getTokenProperty()`/`Cancel()`'s `ThrowIfDisposed()` check and written by `Dispose()` with
+   no synchronization: genuine UB under concurrent access, a realistic pattern for a
+   cancellation primitive. Changed to `std::atomic<bool>`. Commit `3a32380`.
+3. **`CancellationTokenSource::Cancel()` non-LIFO callback ordering** — verified against
+   `CancellationTokenSource.cs`'s `ExecuteCallbackHandlers`: real .NET fires callbacks in LIFO
+   order (most-recently-registered first) so nested/child registrations cancel before their
+   parents'. `Detail::CancellationState::callbacks` was a `std::unordered_map`, whose iteration
+   order (used by `Cancel()`'s collection loop) has no relationship to registration order.
+   Switched to `std::map` (ordered by the existing monotonic `nextId` registration counter) and
+   walk it in reverse (`rbegin()`/`rend()`) for descending-id == LIFO order.
+   `CancellationTokenRegistration`'s `erase()`/`count()` calls needed no changes (same API on
+   `std::map`). Added `CancellationTokenSource_Cancel_RunsCallbacksInLifoOrder` regression test.
+   Commit `c09c596`.
+
+Threading now has 26 moderate + 10 minor findings remaining (all "ordinary" severity — no more
+flagged-as-actually-dangerous items). Xml.Linq+XPath's tree-corruption-risk moderate finding
+(next paragraph) is the next flagged pull-forward candidate.
+
+**Correction while investigating that item:** the previous checkpoint's text describing it as
+an "Xml.Linq+XPath" finding was wrong — re-checking the catalogue itself (search this file for
+`RemoveChild`/`AppendChild` skip .NET's ancestor-cycle/cross-document/legal-child-type
+validation), that finding is listed under **System.Xml core** (the `XmlNode`-based DOM,
+`XmlNode::RemoveChild`/`AppendChild`/etc.), not `System.Xml.Linq` (the `XContainer`/`XElement`-
+based API, which already got its own analogous cycle-guard fix in `XContainer::InsertNodeAt`
+during the criticals pass). Re-verifying against current source before fixing, per the standing
+discipline.
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 catalogue: EVERY critical finding now fixed (Xml.Linq+XPath's 3 were missed earlier, now done too)
 

@@ -316,6 +316,82 @@ TEST(XmlNodeTests, InsertBefore_WithRefChild_InsertsInOrder) {
 }
 
 // ===========================================================================
+// Regression: AppendChild/PrependChild/InsertBefore/InsertAfter previously had no
+// ancestor-cycle or cross-document guard (verified against XmlNode.cs's InsertBefore/
+// InsertAfter/AppendChild, which throw ArgumentException for both cases) — inserting a
+// node's own ancestor as its child created a genuine shared_ptr-free but still real
+// tinyxml2 parent/child cycle (UB in traversal/destruction), and cross-document inserts
+// silently no-oped while reporting success.
+// ===========================================================================
+
+TEST(XmlNodeTests, AppendChild_Self_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    EXPECT_THROW(root->AppendChild(root), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, AppendChild_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+
+    EXPECT_THROW(grandchild->AppendChild(root), System::ArgumentException);
+    EXPECT_THROW(grandchild->AppendChild(child), System::ArgumentException);
+    // Tree must be unmodified after the throw.
+    EXPECT_EQ(grandchild->getFirstChildProperty(), nullptr);
+    EXPECT_EQ(child->getParentNodeProperty(), root);
+}
+
+TEST(XmlNodeTests, PrependChild_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    EXPECT_THROW(child->PrependChild(root), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, InsertBefore_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+    EXPECT_THROW(grandchild->InsertBefore(root, nullptr), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, InsertAfter_Ancestor_ThrowsArgumentException) {
+    XmlDocument doc;
+    auto* root = doc.CreateElement("root");
+    doc.AppendChild(root);
+    auto* child = doc.CreateElement("child");
+    root->AppendChild(child);
+    auto* grandchild = doc.CreateElement("grandchild");
+    child->AppendChild(grandchild);
+    EXPECT_THROW(grandchild->InsertAfter(root, nullptr), System::ArgumentException);
+}
+
+TEST(XmlNodeTests, AppendChild_CrossDocument_ThrowsArgumentException) {
+    XmlDocument doc1;
+    auto* root1 = doc1.CreateElement("root1");
+    doc1.AppendChild(root1);
+
+    XmlDocument doc2;
+    auto* root2 = doc2.CreateElement("root2");
+    doc2.AppendChild(root2);
+    auto* other = doc2.CreateElement("other");
+
+    EXPECT_THROW(root1->AppendChild(other), System::ArgumentException);
+}
+
+// ===========================================================================
 // Comment / Text / CDATA
 // ===========================================================================
 
