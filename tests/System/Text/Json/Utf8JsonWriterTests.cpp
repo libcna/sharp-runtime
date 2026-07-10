@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/Utf8JsonWriter.hpp"
@@ -33,6 +35,35 @@ TEST(Utf8JsonWriterTests, WriteObjectWithProperties) {
     w.WriteNull("nothing");
     w.WriteEndObject();
     EXPECT_EQ(w.GetString(), R"({"name":"Robert","age":42,"active":true,"nothing":null})");
+}
+
+// Regression tests for a wave-3 audit finding: WriteNumberValue(double) silently serialized
+// NaN/+-Infinity as the JSON literal "null" (nlohmann::json's documented behavior for
+// non-finite doubles) instead of throwing. Verified against JsonWriterHelper.cs's
+// ValidateDouble, which throws ArgumentException for any non-finite double, since JSON has no
+// representation for them.
+TEST(Utf8JsonWriterTests, WriteNumberValueDouble_NaN_ThrowsArgumentException) {
+    Utf8JsonWriter w;
+    EXPECT_THROW(w.WriteNumberValue(std::numeric_limits<double>::quiet_NaN()), System::ArgumentException);
+}
+
+TEST(Utf8JsonWriterTests, WriteNumberValueDouble_PositiveInfinity_ThrowsArgumentException) {
+    Utf8JsonWriter w;
+    EXPECT_THROW(w.WriteNumberValue(std::numeric_limits<double>::infinity()), System::ArgumentException);
+}
+
+TEST(Utf8JsonWriterTests, WriteNumberValueDouble_NegativeInfinity_ThrowsArgumentException) {
+    Utf8JsonWriter w;
+    EXPECT_THROW(w.WriteNumberValue(-std::numeric_limits<double>::infinity()), System::ArgumentException);
+}
+
+TEST(Utf8JsonWriterTests, WriteNumberDouble_NaN_ThrowsBeforeWritingPropertyName) {
+    Utf8JsonWriter w;
+    w.WriteStartObject();
+    EXPECT_THROW(w.WriteNumber("x", std::numeric_limits<double>::quiet_NaN()), System::ArgumentException);
+    w.WriteEndObject();
+    // No dangling "x" property name should have been written before the exception.
+    EXPECT_EQ(w.GetString(), "{}");
 }
 
 TEST(Utf8JsonWriterTests, WriteArrayOfNumbers) {

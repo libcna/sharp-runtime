@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/Json/Utf8JsonWriter.hpp"
+#include <cmath>
 #include <cstdio>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Text/Json/JsonException.hpp"
 #include "nlohmann/json.hpp"
@@ -253,6 +255,14 @@ namespace {
         WriteNumberValue(value);
     }
     void Utf8JsonWriter::WriteNumber(const std::string& propertyName, double value) {
+        // Verified against Utf8JsonWriter.WriteProperties.Double.cs's WriteNumber: real .NET
+        // calls ValidateDouble(value) before writing anything (property name included), so a
+        // NaN/Infinity value fails atomically rather than leaving a dangling property name
+        // written with no value to follow it.
+        if (!std::isfinite(value)) {
+            throw System::ArgumentException(
+                ".NET number values such as positive and negative infinity cannot be written as valid JSON.", "value");
+        }
         WritePropertyName(propertyName);
         WriteNumberValue(value);
     }
@@ -266,7 +276,16 @@ namespace {
         markValueWritten();
     }
 
+    // Verified against JsonWriterHelper.cs's ValidateDouble: real .NET throws ArgumentException
+    // ("special number values... cannot be written as valid JSON") for NaN/+-Infinity, since
+    // JSON has no representation for them. nlohmann::json(value).dump() silently serializes any
+    // of the three as the JSON literal "null" instead of throwing -- a genuinely different,
+    // silently-wrong value with no error.
     void Utf8JsonWriter::WriteNumberValue(double value) {
+        if (!std::isfinite(value)) {
+            throw System::ArgumentException(
+                ".NET number values such as positive and negative infinity cannot be written as valid JSON.", "value");
+        }
         validateCanWriteValue();
         if (stack_.empty() || !stack_.back().isObject) beforeWritingElement();
         buffer_ += nlohmann::json(value).dump();
