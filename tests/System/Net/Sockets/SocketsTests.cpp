@@ -9,6 +9,7 @@
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/NetworkStream.hpp"
+#include "System/Net/Sockets/SocketError.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/Net/Sockets/UdpClient.hpp"
@@ -47,6 +48,20 @@ TEST(TcpClientTests, Connect_ConnectionRefused_Throws) {
     // Port 1 on loopback is almost certainly not listening.
     TcpClient client;
     EXPECT_THROW(client.Connect("127.0.0.1", 1), System::Net::Sockets::SocketException);
+}
+
+TEST(TcpClientTests, Connect_ConnectionRefused_SocketErrorCodeIsConnectionRefused) {
+    // Regression: SocketException previously carried the raw POSIX errno (Linux's
+    // ECONNREFUSED=111) reinterpreted directly as a SocketError value instead of being
+    // translated into the WSA-numbered SocketError space (SocketError::ConnectionRefused =
+    // 10061), so SocketErrorCode never matched any real SocketError constant.
+    TcpClient client;
+    try {
+        client.Connect("127.0.0.1", 1);
+        FAIL() << "expected SocketException";
+    } catch (const System::Net::Sockets::SocketException& ex) {
+        EXPECT_EQ(ex.getSocketErrorCodeProperty(), System::Net::Sockets::SocketError::ConnectionRefused);
+    }
 }
 
 TEST(TcpClientTests, Connect_EndPoint_ConnectionRefused_Throws) {

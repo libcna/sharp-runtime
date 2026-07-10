@@ -5,6 +5,7 @@
 #include "System/IO/IOException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
+#include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include <exception>
 
 #if defined(_WIN32)
@@ -20,6 +21,11 @@ namespace {
     inline int lastErrorCode() { return WSAGetLastError(); }
     inline std::string netErr() {
         char buf[32]; snprintf(buf, sizeof(buf), "WSA error %d", WSAGetLastError()); return buf;
+    }
+    // Winsock error codes already share SocketError's own numbering (see SocketError.hpp's
+    // doc comment) -- no translation needed here.
+    inline System::Net::Sockets::SocketError toSocketError(int code) {
+        return static_cast<System::Net::Sockets::SocketError>(code);
     }
 }
 #elif defined(__EMSCRIPTEN__)
@@ -40,6 +46,14 @@ namespace {
     inline void   closeSk(int fd) { ::close(fd); }
     inline int lastErrorCode()    { return errno; }
     inline std::string netErr()   { return std::strerror(errno); }
+    // Verified against SocketErrorPal.Unix.cs's GetSocketErrorForNativeError: real .NET
+    // translates POSIX errno into the WSA-numbered SocketError space before constructing a
+    // SocketException. This port previously cast the raw POSIX errno straight into
+    // SocketException's "errorCode" parameter unchanged, so SocketErrorCode never matched any
+    // real SocketError value.
+    inline System::Net::Sockets::SocketError toSocketError(int code) {
+        return SharpRuntimeDetail::Net::Sockets::TranslateErrno(code);
+    }
 }
 #endif
 
@@ -60,7 +74,7 @@ intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
     if (n < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
-        auto inner = std::make_exception_ptr(SocketException(static_cast<SharpRuntime::intcs>(code), err));
+        auto inner = std::make_exception_ptr(SocketException(toSocketError(code), err));
         throw System::IO::IOException("Unable to read data from the transport connection: " + err + ".", inner);
     }
     return static_cast<intcs>(n);
@@ -78,7 +92,7 @@ void NetworkStream::Write(const bytecs buffer[], intcs offset, intcs count) {
     if (n < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
-        auto inner = std::make_exception_ptr(SocketException(static_cast<SharpRuntime::intcs>(code), err));
+        auto inner = std::make_exception_ptr(SocketException(toSocketError(code), err));
         throw System::IO::IOException("Unable to write data to the transport connection: " + err + ".", inner);
     }
 #endif

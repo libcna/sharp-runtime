@@ -7,6 +7,7 @@
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/UnixDomainSocketEndPoint.hpp"
+#include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include "System/Net/Dns.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 #include "System/ArgumentException.hpp"
@@ -156,7 +157,15 @@ namespace {
 
     [[noreturn]] void throwSocketError(const char* what) {
         int err = lastError();
+#if defined(_WIN32)
+        // Winsock error codes (WSAGetLastError()) already share SocketError's own numbering
+        // (see SocketError.hpp's doc comment) -- no translation needed here.
         throw SocketException(static_cast<intcs>(err), what);
+#elif defined(__EMSCRIPTEN__)
+        throw SocketException(static_cast<intcs>(err), what);
+#else
+        throw SocketException(SharpRuntimeDetail::Net::Sockets::TranslateErrno(err), what);
+#endif
     }
 
     // Verified against Socket.Tasks.cs's ValidateBufferArguments: casting to uint32_t before

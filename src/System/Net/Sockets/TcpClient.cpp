@@ -4,6 +4,7 @@
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
+#include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include <cstdio>
 
 #if defined(_WIN32)
@@ -25,6 +26,11 @@ namespace {
         char buf[32]; snprintf(buf, sizeof(buf), "WSA error %d", WSAGetLastError()); return buf;
     }
     inline std::string gaErr(int /*rc*/) { return netErr(); }
+    // Winsock error codes already share SocketError's own numbering (see SocketError.hpp's
+    // doc comment) -- no translation needed here.
+    inline System::Net::Sockets::SocketError toSocketError(int code) {
+        return static_cast<System::Net::Sockets::SocketError>(code);
+    }
     void wsaInit() {
         static std::once_flag f;
         std::call_once(f, []{ WSADATA d; WSAStartup(MAKEWORD(2,2), &d); });
@@ -53,6 +59,15 @@ namespace {
     inline std::string netErr()              { return std::strerror(errno); }
     inline std::string gaErr(int rc)         { return ::gai_strerror(rc); }
     inline void wsaInit() {}
+    // Verified against SocketErrorPal.Unix.cs's GetSocketErrorForNativeError: real .NET
+    // translates POSIX errno into the WSA-numbered SocketError space before constructing a
+    // SocketException. This port previously cast the raw POSIX errno straight into
+    // SocketException's "errorCode" parameter unchanged (e.g. Linux's ECONNREFUSED=111 doesn't
+    // remotely resemble SocketError::ConnectionRefused=10061), so SocketErrorCode never
+    // matched any real SocketError value.
+    inline System::Net::Sockets::SocketError toSocketError(int code) {
+        return SharpRuntimeDetail::Net::Sockets::TranslateErrno(code);
+    }
 }
 #endif
 
@@ -85,13 +100,13 @@ void TcpClient::Connect(const std::string& hostname, int port) {
         throw SocketException(SocketError::HostNotFound, "TcpClient::Connect: DNS failed: " + gaErr(rc));
 
     SockFd sock = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sock == kBad) { auto code = lastErrorCode(); ::freeaddrinfo(res); throw SocketException(static_cast<SharpRuntime::intcs>(code), "socket(): " + netErr()); }
+    if (sock == kBad) { auto code = lastErrorCode(); ::freeaddrinfo(res); throw SocketException(toSocketError(code), "socket(): " + netErr()); }
     if (::connect(sock, res->ai_addr, static_cast<int>(res->ai_addrlen)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         ::freeaddrinfo(res);
         closeSk(toFd(sock));
-        throw SocketException(static_cast<SharpRuntime::intcs>(code), "TcpClient::Connect: connect() failed: " + err);
+        throw SocketException(toSocketError(code), "TcpClient::Connect: connect() failed: " + err);
     }
     ::freeaddrinfo(res);
     if (validFd(fd_)) closeSk(fd_);
@@ -108,7 +123,7 @@ void TcpClient::Connect(const IPEndPoint& remoteEP) {
     wsaInit();
     SockFd sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock == kBad)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpClient::Connect: socket() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpClient::Connect: socket() failed: " + netErr());
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
@@ -119,7 +134,7 @@ void TcpClient::Connect(const IPEndPoint& remoteEP) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));
-        throw SocketException(static_cast<SharpRuntime::intcs>(code), "TcpClient::Connect: connect() failed: " + err);
+        throw SocketException(toSocketError(code), "TcpClient::Connect: connect() failed: " + err);
     }
     if (validFd(fd_)) closeSk(fd_);
     fd_        = toFd(sock);
@@ -144,13 +159,13 @@ int TcpClient::Available() const {
     if (!validFd(fd_)) return 0;
     u_long n = 0;
     if (::ioctlsocket(toSk(fd_), FIONREAD, &n) < 0)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpClient::Available: ioctlsocket() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpClient::Available: ioctlsocket() failed: " + netErr());
     return static_cast<int>(n);
 #else
     if (!validFd(fd_)) return 0;
     int n = 0;
     if (::ioctl(fd_, FIONREAD, &n) < 0)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpClient::Available: ioctl() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpClient::Available: ioctl() failed: " + netErr());
     return n;
 #endif
 }
@@ -170,7 +185,7 @@ std::shared_ptr<NetworkStream> TcpClient::GetStream() const {
 #  else
     int dupfd = ::dup(fd_);
     if (dupfd < 0)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpClient::GetStream: dup() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpClient::GetStream: dup() failed: " + netErr());
     return std::make_shared<NetworkStream>(dupfd);
 #  endif
 #endif
@@ -196,7 +211,7 @@ void TcpListener::Start() {
 
     SockFd sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock == kBad)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpListener::Start: socket() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpListener::Start: socket() failed: " + netErr());
 
 #  if defined(_WIN32)
     BOOL opt = TRUE;
@@ -215,13 +230,13 @@ void TcpListener::Start() {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));
-        throw SocketException(static_cast<SharpRuntime::intcs>(code), "TcpListener::Start: bind() failed: " + err);
+        throw SocketException(toSocketError(code), "TcpListener::Start: bind() failed: " + err);
     }
     if (::listen(toSk(sock), 5) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
         closeSk(toFd(sock));
-        throw SocketException(static_cast<SharpRuntime::intcs>(code), "TcpListener::Start: listen() failed: " + err);
+        throw SocketException(toSocketError(code), "TcpListener::Start: listen() failed: " + err);
     }
 
     fd_ = toFd(sock);
@@ -254,7 +269,7 @@ TcpClient TcpListener::AcceptTcpClient() {
     socklen_t len = sizeof(clientAddr);
     SockFd clientSock = ::accept(toSk(fd_), reinterpret_cast<struct sockaddr*>(&clientAddr), &len);
     if (clientSock == kBad)
-        throw SocketException(static_cast<SharpRuntime::intcs>(lastErrorCode()), "TcpListener::AcceptTcpClient: accept() failed: " + netErr());
+        throw SocketException(toSocketError(lastErrorCode()), "TcpListener::AcceptTcpClient: accept() failed: " + netErr());
     return TcpClient(toFd(clientSock));
 #endif
 }
