@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include "System/Boolean.hpp"
 #include "System/Byte.hpp"
@@ -24,6 +26,18 @@
 #include "System/Xml/XmlException.hpp"
 
 namespace System::Xml {
+
+    namespace {
+        // Matches XmlConvert.cs's private WhitespaceChars array exactly.
+        constexpr const char* WhitespaceChars = " \t\n\r";
+
+        std::string TrimXmlWhitespace(const std::string& s) {
+            auto begin = s.find_first_not_of(WhitespaceChars);
+            if (begin == std::string::npos) return "";
+            auto end = s.find_last_not_of(WhitespaceChars);
+            return s.substr(begin, end - begin + 1);
+        }
+    } // namespace
 
     // --- Character classification (practical ASCII-range subset; see class doc-comment) ------
 
@@ -199,8 +213,18 @@ namespace System::Xml {
     std::string XmlConvert::ToString(SharpRuntime::ushortcs value) { return System::UInt16::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::uintcs value) { return System::UInt32::ToString(value); }
     std::string XmlConvert::ToString(SharpRuntime::ulongcs value) { return System::UInt64::ToString(value); }
-    std::string XmlConvert::ToString(float value) { return System::Single::ToString(value); }
-    std::string XmlConvert::ToString(double value) { return System::Double::ToString(value); }
+    // Verified against XmlConvert.cs's ToString(float)/ToString(double): real XmlConvert uses
+    // the XML Schema lexical-space tokens "INF"/"-INF" for infinity, not .NET Double/Single's
+    // general-purpose ToString() tokens "Infinity"/"-Infinity" -- output using the latter is
+    // invalid per the XML Schema `double`/`float` lexical space.
+    std::string XmlConvert::ToString(float value) {
+        if (std::isinf(value)) return value < 0 ? "-INF" : "INF";
+        return System::Single::ToString(value);
+    }
+    std::string XmlConvert::ToString(double value) {
+        if (std::isinf(value)) return value < 0 ? "-INF" : "INF";
+        return System::Double::ToString(value);
+    }
     std::string XmlConvert::ToString(const System::TimeSpan& value) { return value.ToString(); }
     std::string XmlConvert::ToString(const System::DateTime& value) { return value.ToString(); }
     std::string XmlConvert::ToString(const System::DateTime& value, const std::string& format) { return value.ToString(format); }
@@ -237,8 +261,23 @@ namespace System::Xml {
     SharpRuntime::ushortcs XmlConvert::ToUInt16(const std::string& s) { return System::UInt16::Parse(s); }
     SharpRuntime::uintcs XmlConvert::ToUInt32(const std::string& s) { return System::UInt32::Parse(s); }
     SharpRuntime::ulongcs XmlConvert::ToUInt64(const std::string& s) { return System::UInt64::Parse(s); }
-    float XmlConvert::ToSingle(const std::string& s) { return System::Single::Parse(s); }
-    double XmlConvert::ToDouble(const std::string& s) { return System::Double::Parse(s); }
+    // Verified against XmlConvert.cs's ToSingle(string)/ToDouble(string): real XmlConvert trims
+    // XML whitespace, then recognizes "-INF"/"INF" as the XML Schema lexical-space infinity
+    // tokens before falling through to ordinary numeric parsing -- valid schema input like
+    // "INF" previously failed to parse (Single::Parse/Double::Parse only recognize .NET's own
+    // "Infinity"/"-Infinity" spelling).
+    float XmlConvert::ToSingle(const std::string& s) {
+        std::string trimmed = TrimXmlWhitespace(s);
+        if (trimmed == "-INF") return -std::numeric_limits<float>::infinity();
+        if (trimmed == "INF") return std::numeric_limits<float>::infinity();
+        return System::Single::Parse(s);
+    }
+    double XmlConvert::ToDouble(const std::string& s) {
+        std::string trimmed = TrimXmlWhitespace(s);
+        if (trimmed == "-INF") return -std::numeric_limits<double>::infinity();
+        if (trimmed == "INF") return std::numeric_limits<double>::infinity();
+        return System::Double::Parse(s);
+    }
     System::TimeSpan XmlConvert::ToTimeSpan(const std::string& s) { return System::TimeSpan::Parse(s); }
     System::DateTime XmlConvert::ToDateTime(const std::string& s) { return System::DateTime::Parse(s); }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& /*format*/) { return System::DateTime::Parse(s); }
