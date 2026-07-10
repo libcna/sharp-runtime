@@ -41,17 +41,27 @@ namespace System::Text {
         /** @return true if GetBytes() prepends a byte-order mark. */
         [[nodiscard]] bool getByteOrderMarkProperty() const { return byteOrderMark_; }
 
-        /** Encodes a string (decoded from UTF-8) to UTF-16 bytes, in the configured endianness. */
+        /**
+         * @brief Encodes a string (decoded from UTF-8) to UTF-16 bytes, in the configured endianness.
+         * @note Pre-sizes the output buffer to its exact worst case (2 output bytes per input
+         * UTF-8 byte -- every decode path here emits at most 2 output bytes per byte consumed,
+         * so `s.size() * 2 + 2` is a provable upper bound) and writes through indexing rather
+         * than `reserve()` + `push_back()`. GCC 14's `-Wfree-nonheap-object`/`-Warray-bounds`
+         * (both fatal under `-Werror` in a Release build) misanalyze the inlined
+         * reserve-then-push_back reallocation path here as a real bug even though the
+         * reallocation branch is unreachable in practice; indexed writes into a pre-sized
+         * buffer sidestep that code shape entirely.
+         */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
-            std::vector<SharpRuntime::bytecs> out;
-            out.reserve(s.size() * 2 + 2);
+            std::vector<SharpRuntime::bytecs> out(s.size() * 2 + 2);
+            size_t pos = 0;
             auto writeUnit = [&](uint16_t unit) {
                 if (bigEndian_) {
-                    out.push_back(static_cast<SharpRuntime::bytecs>((unit >> 8) & 0xFF));
-                    out.push_back(static_cast<SharpRuntime::bytecs>(unit & 0xFF));
+                    out[pos++] = static_cast<SharpRuntime::bytecs>((unit >> 8) & 0xFF);
+                    out[pos++] = static_cast<SharpRuntime::bytecs>(unit & 0xFF);
                 } else {
-                    out.push_back(static_cast<SharpRuntime::bytecs>(unit & 0xFF));
-                    out.push_back(static_cast<SharpRuntime::bytecs>((unit >> 8) & 0xFF));
+                    out[pos++] = static_cast<SharpRuntime::bytecs>(unit & 0xFF);
+                    out[pos++] = static_cast<SharpRuntime::bytecs>((unit >> 8) & 0xFF);
                 }
             };
             if (byteOrderMark_) writeUnit(0xFEFF);
@@ -70,6 +80,7 @@ namespace System::Text {
                     writeUnit(static_cast<uint16_t>(0xDC00 + (v & 0x3FF)));
                 }
             }
+            out.resize(pos);
             return out;
         }
 

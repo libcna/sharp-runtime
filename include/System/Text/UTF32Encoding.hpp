@@ -40,12 +40,22 @@ namespace System::Text {
         /** @return true if GetBytes() prepends a byte-order mark. */
         [[nodiscard]] bool getByteOrderMarkProperty() const { return byteOrderMark_; }
 
-        /** Encodes a string (decoded from UTF-8) to a UTF-32 byte sequence. */
+        /**
+         * @brief Encodes a string (decoded from UTF-8) to a UTF-32 byte sequence.
+         * @note Pre-sizes the output buffer to its exact worst case (every decoded code point
+         * emits exactly 4 bytes, and there are at most `s.size()` code points, so
+         * `s.size() * 4 + 4` is a provable upper bound) and writes through indexing rather than
+         * `reserve()` + `push_back()`. GCC 14's `-Wfree-nonheap-object`/`-Warray-bounds` (both
+         * fatal under `-Werror` in a Release build) misanalyze the inlined
+         * reserve-then-push_back reallocation path here as a real bug even though the
+         * reallocation branch is unreachable in practice; indexed writes into a pre-sized
+         * buffer sidestep that code shape entirely.
+         */
         [[nodiscard]] std::vector<SharpRuntime::bytecs> GetBytes(const std::string& s) const override {
-            std::vector<SharpRuntime::bytecs> result;
-            result.reserve(s.size() * 4 + 4);
+            std::vector<SharpRuntime::bytecs> result(s.size() * 4 + 4);
+            size_t pos = 0;
             if (byteOrderMark_) {
-                writeUnit(result, 0x0000FEFF);
+                writeUnit(result, pos, 0x0000FEFF);
             }
 
             size_t i = 0;
@@ -54,8 +64,9 @@ namespace System::Text {
                 size_t len;
                 decodeUtf8(s, i, cp, len);
                 i += len;
-                writeUnit(result, cp);
+                writeUnit(result, pos, cp);
             }
+            result.resize(pos);
             return result;
         }
 
@@ -90,17 +101,17 @@ namespace System::Text {
         }
 
     private:
-        void writeUnit(std::vector<SharpRuntime::bytecs>& out, uint32_t cp) const {
+        void writeUnit(std::vector<SharpRuntime::bytecs>& out, size_t& pos, uint32_t cp) const {
             if (!bigEndian_) {
-                out.push_back(static_cast<SharpRuntime::bytecs>(cp & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 8) & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 16) & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 24) & 0xFF));
+                out[pos++] = static_cast<SharpRuntime::bytecs>(cp & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 8) & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 16) & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 24) & 0xFF);
             } else {
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 24) & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 16) & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>((cp >> 8) & 0xFF));
-                out.push_back(static_cast<SharpRuntime::bytecs>(cp & 0xFF));
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 24) & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 16) & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>((cp >> 8) & 0xFF);
+                out[pos++] = static_cast<SharpRuntime::bytecs>(cp & 0xFF);
             }
         }
 
