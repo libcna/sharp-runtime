@@ -1,8 +1,409 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `364787f`) — 11125 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `2701f60`) — 11129 tests passing, full clean rebuild verified (0 errors/0 warnings)*
 
-## Session checkpoint (2026-07-10, continued again) — deferred-findings sweep, part 5 (custom-comparer support, sweep complete)
+## Session checkpoint (2026-07-10, continued again) — wave-3 audit dispatched, 221 findings (56 critical)
+
+*Branch: `feature/work`, HEAD `2701f60` — 11129 tests passing (up from 11125 at the top of
+part 5's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+### What happened
+
+Per option (b) of the original sweep instruction, dispatched a wave-3 parallel audit — 9
+read-only general-purpose agents, same methodology as waves 1-2 (compare each ported type's
+actual logic against real .NET source in `/rv/tmp/runtime/src/libraries/`, not just its
+public signature) — covering `System.Net.*` (2 agents), `System.Diagnostics*`, `System.IO.*`
+(2 agents), `System.Text.Json*`, `System.Threading.*`, and `System.Xml.*` (2 agents). ~450
+files audited.
+
+**Result: 221 findings, 56 critical, 99 moderate, 66 minor.** This is far more than waves 1-2
+combined and reflects that `System.Net.*`/`System.IO.*`/`System.Threading.*`/`System.Xml.*`
+had never been systematically audited before (unlike `System.Globalization`/
+`System.Collections`, which waves 1-2 already covered). **This volume cannot be safely
+processed in one sitting** — each finding needs the same verify-against-.NET-source →
+fix → build → test → commit discipline used all session, and rushing 200+ fixes risks
+regressions. Only the Diagnostics slice (7 findings, 0 critical) was fixed this pass; see
+below. The rest are catalogued here for systematic processing across future sessions,
+exactly like waves 1-2's findings were.
+
+### Fixed this pass: System.Diagnostics (7/7 findings)
+
+All verified against `Stopwatch.cs`/`Stopwatch.Unix.cs`, `DebuggableAttribute.cs`,
+`DebuggerBrowsableAttribute.cs`, `DebugProvider.cs`, `StackFrame.cs`. Commit `2701f60`.
+
+- **Stopwatch**: backing clock was `std::chrono::high_resolution_clock`, which on this
+  project's toolchain (libstdc++/GCC) is an alias for `system_clock` (wall clock, not
+  monotonic) — real .NET's `GetTimestamp()` is `clock_gettime(CLOCK_MONOTONIC)`. Switched to
+  `std::chrono::steady_clock`, matching `PeriodicTimer`/`WaitHandle`/`SpinWait`/`Thread`'s
+  existing convention.
+- **DebuggableAttribute**: `IsJITTrackingEnabled`/`IsJITOptimizerDisabled` were stored bools
+  only populated by the `(bool,bool)` constructor, leaving them wrong (always false) when
+  built via the `DebuggingModes`-flags constructor. Fixed by deriving both from
+  `debuggingModes_` live (bit-test), matching .NET's computed-property design.
+- **DebuggerBrowsableAttribute**: added the missing `state < Never || state > RootHidden`
+  range validation (note: this does NOT specially reject the removed `Expanded=1` — it falls
+  within range, so real .NET's check silently accepts it too; a candidate test asserting
+  otherwise was corrected after failing against the actual verified behavior).
+- **Debug::Assert(bool)**: called the raw `assert()` macro instead of routing through
+  `Fail()`/the active `DebugProvider` like the message-carrying overloads — fixed to
+  delegate to `Assert(condition, "")`.
+- **DebugProvider::Fail()**: used `assert(false)` (a no-op under `NDEBUG`), contradicting its
+  own doc comment and .NET's `[DoesNotReturn]` contract — switched to `std::abort()`
+  unconditionally (kept as a plain virtual, not `[[noreturn]]`, since it's legitimately
+  overridable by a non-aborting custom provider).
+- **StackFrame**: `nativeOffset_` defaulted to `0` instead of `OFFSET_UNKNOWN` (`-1`);
+  `ilOffset_` two lines below already correctly defaulted to `-1`. Fixed.
+- (Not fixed — deferred) `Debugger::getIsAttachedProperty()` is hardcoded `false`; a real fix
+  needs a new `.cpp` parsing `/proc/self/status`'s `TracerPid` on Linux (POSIX-only, per
+  CLAUDE.md's platform-abstraction rule) plus a cmake reconfigure for the new file. Low
+  priority (minor severity), noted here as an easy follow-up.
+
+### Full findings catalogue (not yet fixed) — 214 findings, 56 critical
+
+Organized by audited slice. File paths are relative to the repo root. Severity counts are
+per-slice as reported by each audit agent.
+
+#### System.Net core + Sockets (24 findings: 4 critical, 12 moderate, 8 minor)
+
+**Critical:**
+1. `SocketError` is never translated from POSIX `errno` — every `SocketException` carries a
+   meaningless error code on Linux (raw errno reinterpreted as the enum, e.g. `ECONNREFUSED`
+   =111 read as if it were the Winsock-numbered `SocketError` value). Standard idioms like
+   `catch (e) { if (e.SocketErrorCode == SocketError::WouldBlock) ... }` never match. Needs
+   an errno→`SocketError` translation table; keep raw errno as a separate native-code field.
+2. `Socket::Send/Receive/SendTo/ReceiveFrom` have no offset/count bounds validation — real
+   OOB heap read/write when `offset+count > buffer.size()` (`src/System/Net/Sockets/Socket.cpp:497-576`).
+3. `IPAddress` IPv4 parsing uses `sscanf("%u.%u.%u.%u%c")` — UB on segment overflow (a
+   sufficiently long digit run is UB per C11 7.21.6.2p10), and accepts input real .NET
+   rejects (`sscanf`'s optional sign) while rejecting input .NET accepts (octal/hex segments,
+   short forms). `src/System/Net/IPAddress.cpp:23-30`.
+4. `WebUtility::UrlDecode` throws an uncaught `std::invalid_argument` (not a `System::`
+   exception) on malformed percent-encoding, e.g. `"100%complete"`.
+   `include/System/Net/WebUtility.hpp:147`.
+
+**Moderate (12) and minor (8)**: Socket setters skip .NET's validation (`ExclusiveAddressUse`
+after bind, negative timeouts, negative buffer sizes); `TcpClient`/`TcpListener`/`UdpClient`
+are effectively IPv4-only (IPv6 throws, hostname resolution doesn't fall back);
+`SocketFlags` cast directly to native flags with no translation (bit patterns don't match
+Linux, e.g. .NET's `Truncated` coincides with Linux `MSG_WAITALL`); IPv6 scope-ID parsing can
+throw uncaught `std::out_of_range`; `IsLoopback` misses `::ffff:127.0.0.1`; `IPEndPoint`
+integer constructors silently truncate instead of throwing; `Dns` doesn't reject
+`0.0.0.0`/`::`; `WebUtility::HtmlDecode`/`UrlEncode` have wrong entity-scan/safe-char-set
+logic; `TcpListener::Start()` hardcodes backlog 5 instead of `int.MaxValue`;
+`Socket::Accept()` skips bound/listening validation; `IPAddress::GetHashCode()` only hashes
+the first 64 bits of IPv6 (hash-table degradation for same-`/64`-prefix addresses); plus 8
+minor items (embedded-IPv4 formatting, scope-ID range validation, bracketed-IPv6 parsing,
+hostname length check, `NetworkStream` post-close silent no-op, etc.) — see the full
+per-finding detail in the agent's original report (not preserved verbatim here; re-run a
+similar audit prompt on `include/System/Net/*.hpp` + `Sockets/*.hpp` to regenerate if needed).
+
+#### System.Net.Http + WebSockets + Security + Mime + NetworkInformation (19 findings: 2 critical, 13 moderate, 4 minor)
+
+**Critical:**
+1. `HttpClient::Send()` dereferences a null `request` immediately with no
+   `ArgumentNullException` check — null-pointer dereference (UB/crash) instead of a catchable
+   exception. `src/System/Net/Http/HttpClient.cpp`.
+2. `ClientWebSocket::SendAsync`/`ReceiveAsync` do `buffer.data() + offset` with no
+   offset/count bounds validation against `buffer.size()` — out-of-bounds read/write.
+   `src/System/Net/WebSockets/ClientWebSocket.cpp:334-411`.
+
+**Moderate (13) highlights**: `HttpClient::parseUrl` throws `std::invalid_argument` instead
+of a `System::` exception (same systemic std::/System:: bug noted elsewhere in this
+project's history); `HttpResponseMessage` skips status-code range validation; quality
+(`q=`) header parsing accepts NaN/malformed values via unguarded `std::stod`;
+`CacheControlHeaderValue` seconds parsing can silently overflow-wrap; several header getters
+accept negative values .NET rejects; `ClientWebSocketOptions` subprotocol validation is too
+permissive and case-sensitive where .NET is case-insensitive; `ClientWebSocket` doesn't
+validate message type or close-status codes before sending; `NetworkInterface.GetIsNetworkAvailable()`
+misses the Tunnel-interface exclusion.
+
+**Minor (4)**: `Content-Length` accepts a leading `+`; `SslApplicationProtocol.ToString()`
+doesn't implement its documented hex-dump fallback; `ValueWebSocketReceiveResult` skips
+`messageType` range validation; `Ping::Send` throws `ArgumentException` instead of
+`ArgumentNullException` for a null/empty host.
+
+#### System.IO core (22 findings: 7 critical, 10 moderate, 5 minor)
+
+**Critical:**
+1. `MemoryStream::Write()`/`WriteByte()` silently no-op instead of throwing
+   `NotSupportedException` when `!CanWrite` — writes are silently dropped.
+   `src/System/IO/MemoryStream.cpp:28-43`. (`SetLength()` in the same file gets this right —
+   internal inconsistency confirms it's a bug.)
+2. `File::Move`/`Directory::Move`/`DirectoryInfo::MoveTo`/`FileInfo::MoveTo` all silently
+   overwrite an existing destination via unconditional `std::filesystem::rename()`; real
+   .NET's non-overwrite `Move` throws `IOException` if the destination exists.
+3. `FileStream::getLengthProperty()` returns a stale cached length after `Write()` extends
+   the file — only `SetLength()` updates the cache. Common create-then-write pattern returns
+   wrong (often 0) `Length`. `src/System/IO/FileStream.cpp:49,102,152`.
+4. `StreamReader::Close()`/`StreamWriter::Close()` ignore `leaveOpen` and unconditionally
+   close the underlying stream, defeating the flag's entire purpose. (Their destructors and
+   `BinaryReader`/`BinaryWriter::Close()` get this right.)
+
+**Moderate (10) highlights**: `File::Delete` can delete a directory (uses
+`std::filesystem::remove()`, which dispatches to `rmdir()`); `RandomAccess::Write` doesn't
+loop on short/partial writes; `Directory::GetFiles(path, "*.*")` wildcard excludes
+extensionless files (wrong DOS_DOT compatibility); `FileSystemInfo`'s local-time properties
+return UTC verbatim instead of converting; generic `IOException` instead of
+`DirectoryNotFoundException` on missing parent directory; `MemoryStream::Read()`/`Close()`
+have more silent-wrong-behavior bugs (returns 0 on invalid args instead of throwing;
+`Close()` destroys the buffer, contradicting its own doc comment and .NET's `Dispose`);
+`UnmanagedMemoryStream` throws the wrong exception type on a closed stream;
+`StreamReader`/`StreamWriter` constructors skip null/`CanRead`/`CanWrite` validation;
+`BinaryWriter` doesn't flush on Close when `leaveOpen=true`; `StreamReader::ReadLine()`/
+`StringReader::ReadLine()` don't treat a lone `'\r'` as a line terminator.
+
+**Minor (5)**: `Path::IsPathRooted` Windows-build inconsistency (not exercised on Linux);
+`FileSystemWatcher` filter normalization; `FileSystemEventArgs::Combine()` alt-separator
+handling; `PathTooLongException` missing HResult; `BinaryReader::Read` missing a null check.
+
+#### System.IO.Compression + Hashing + IsolatedStorage (13 findings: 4 critical, 6 moderate, 3 minor)
+
+**Critical — this is the highest-value fix in the entire wave-3 catalogue (real, silent data loss):**
+1. `ZipArchive::flushWriter()` (Update-mode `Dispose()`) only writes newly-`CreateEntry`'d
+   entries — for a file-backed archive it re-inits the writer on the same path opened for
+   reading, so **disposing an Update-mode archive after even one `CreateEntry()` call
+   overwrites the file, discarding every pre-existing entry**. `src/System/IO/Compression/ZipArchive.cpp:154-186,280-291`.
+2. `ZipArchiveEntry::Delete()` does `state_ = nullptr;` only — never marks anything for
+   exclusion, so the "deleted" entry is fully intact in the persisted output regardless.
+   `src/System/IO/Compression/ZipArchive.cpp:123-129`.
+3. `DeflateStream`/`GZipStream` constructors/`Read()`/`Write()` throw bare
+   `std::runtime_error` on zlib failures instead of `System::` exception types — uncatchable
+   by code catching `System::Exception&`/`IOException&`. Sibling `ZLibStream.cpp` already
+   does this correctly, confirming it's a bug not a design choice.
+
+**Moderate (6)**: rest of `ZipArchive`'s failure paths also throw bare `std::runtime_error`;
+`GZipEncoder::GetMaxCompressedLength()` omits the `+12` gzip header/trailer overhead
+(understates worst-case buffer size); `IsolatedStorageFile` methods skip path-null/empty
+validation; `DeleteDirectory()` is always recursive (`remove_all`) where .NET's non-recursive
+default throws `IOException` on a non-empty directory; disposed-state (`disposed_`) is set
+but never checked anywhere, so all operations remain usable after `Close()`/`Remove()`;
+`IsolatedStorageFile::getQuotaProperty()` isn't overridden, so it inherits the base's `0`
+instead of real .NET's `long.MaxValue`.
+
+**Minor (3)**: `DeflateEncoder::GetMaxCompressedLength()` truncates on >4GiB input (32-bit
+`compressBound`); Application-scope and Assembly-scope isolated storage share the same root
+(not actually isolated from each other, though documented); `IsolatedStorageException`
+never sets its HResult.
+
+**Hashing: 0 findings.** CRC32/CRC32C/CRC64-ECMA182/XxHash32/64/3/128 constants, polynomials,
+seeds, bit/byte order, and output-endianness convention were all independently verified
+against `Crc32ParameterSet.WellKnown.cs`/`Crc64ParameterSet.WellKnown.cs` and found correct.
+
+#### System.Text.Json (26 findings: 7 critical, 12 moderate, 7 minor)
+
+**Critical:**
+1. `Utf8JsonWriter`'s string escaping never escapes non-ASCII characters (only control
+   chars, `"`, `\`, `<>&'`) — real .NET's default encoder escapes every codepoint ≥U+0080 as
+   `\uXXXX`. Any non-ASCII string (names, i18n text, emoji) round-trips unescaped instead of
+   matching .NET's byte-for-byte output. `src/System/Text/Json/Utf8JsonWriter.cpp:37-66`.
+2. `Utf8JsonWriter`'s `MaxDepth` default of `0` enforces no limit at all (`options_.MaxDepth
+   > 0 && ...` guards are always skipped at the default) — real .NET resolves `0` to 1000.
+   Unbounded native recursion / stack-overflow risk on deeply-nested writes with default
+   options.
+3. `JsonDocument::Parse` never enforces `MaxDepth` at all — arbitrarily deep/malicious input
+   parses with no bound (verified: 5000-level nesting parses fine) instead of throwing
+   `JsonException`, risking a native stack overflow.
+4. `JsonElement::TryGetInt32`/`TryGetInt64` round-trip through `double` — UB when casting an
+   out-of-range double to a signed integer, plus precision loss for large int64 values
+   (doubles only exactly represent integers up to 2^53). The non-`Try` `GetInt64()` sibling
+   already does this correctly.
+5. `JsonElement::GetProperty` always throws `KeyNotFoundException`, even when called on a
+   non-object element, where real .NET throws `InvalidOperationException` — breaks
+   catch-block discrimination between "wrong shape" and "missing key".
+6. `JsonObject`/`JsonArray` `Add`/`SetItem`/`Insert` have no "already has a parent" or cycle
+   check — a node can be silently attached to two containers at once (dangling non-owning
+   `parent_` pointer → use-after-free risk) or become its own ancestor (unbounded recursion
+   in `ToJsonString`/`DeepClone`/etc.).
+7. `JsonObject::operator[]` throws `KeyNotFoundException` for a missing key; real .NET
+   returns `null` — breaks the single most common .NET JSON-node idiom (`obj["maybe"]`
+   null-check pattern).
+
+**Moderate (12) highlights**: `WriteNumberValue(double)` doesn't reject NaN/Infinity (nlohmann
+silently emits `null` instead); missing ASCII escapes for `+`, backtick, DEL;
+`AllowTrailingCommas`/`AllowDuplicateProperties` (JsonDocumentOptions) are validated but
+never actually enforced by the underlying nlohmann parse; `GetRawText()` reformats numbers
+instead of returning exact source text; `GetInt32`/`GetInt64` too lenient (accepts `3.0`/`2e1`
+where .NET's strict digit parser throws); `JsonSerializerOptions.AllowDuplicateProperties`
+defaults `false` where .NET defaults `true` (and the sibling `JsonDocumentOptions` version in
+the *same codebase* correctly defaults `true` — confirms this is an oversight);
+`JsonSerializerOptions(Strict)` is a silent no-op (falls through to `General` behavior);
+`JsonEncodedText::Encode` doesn't validate/pre-escape its input, defeating its whole purpose;
+`JsonNodeOptions.PropertyNameCaseInsensitive` is stored but never consulted;
+`JsonValue` accessors throw `FormatException` instead of `InvalidOperationException`;
+`JsonPolymorphicAttribute.UnknownDerivedTypeHandling` is typed `bool` instead of the
+3-valued enum that already exists elsewhere in the same directory.
+
+**Minor (7)**: double formatting/hex-escape casing cosmetically diverges from .NET (valid
+JSON either way); `JsonWriterOptions.NewLine` hardcoded `"\n"` (only observable on Windows);
+`JsonException` doesn't append position info to its message text; `WriteRawValue` validates
+in the wrong order; several `JsonElement` temporal/numeric getters (`GetGuid`, `GetDateTime`,
+`GetDecimal`, etc.) don't exist yet (API-surface gap, not a wrong-value bug);
+`GetString()` on JSON `null` returns `""` (self-documented as an intentional deviation).
+
+#### System.Threading + Tasks + Channels (63 findings: 24 critical, 29 moderate, 10 minor)
+
+**By far the largest and most severe slice — a systemic bug pattern plus several real
+deadlocks/data races/UB. Recommended top priority for the next processing session.**
+
+**Systemic critical pattern (found independently ~11 times): `Timeout.Infinite` (`-1`) is
+never special-cased before being fed into `std::chrono::milliseconds(-1)`/`wait_for`, which
+the standard treats as an already-expired deadline** — these return almost immediately
+instead of blocking forever, unlike .NET where `-1` means infinite wait:
+`Monitor::TryEnter`, `Mutex::WaitOne`, `Semaphore::WaitOne`, `SemaphoreSlim::Wait`,
+`Lock::TryEnter`, `SpinWait::SpinUntil`, `AutoResetEvent::WaitOne(intcs)`,
+`ManualResetEvent::WaitOne(intcs)`, `EventWaitHandle::WaitOne(intcs)`,
+`ManualResetEventSlim::Wait(intcs)`, `CountdownEvent::Wait(intcs)`,
+`WaitHandle::WaitAll`/`WaitAny`. `ReaderWriterLock::AcquireReaderLock/WriterLock` in the same
+file correctly special-cases `<0`, proving this is an inconsistency bug, not a design
+choice. **Fix direction: a single shared helper (`WaitInfinite`-aware) used by all of these
+would likely fix most of the pattern in one well-scoped pass** — worth tackling as a batch
+given how mechanically similar each site is, rather than 11 separate one-off fixes.
+
+**Other critical findings (13, non-Timeout.Infinite):**
+- `ReaderWriterLock::AcquireReaderLock`/`AcquireWriterLock` silently `return` on timeout
+  instead of throwing `ReaderWriterLockApplicationException` — callers proceed without
+  holding the lock.
+- `ReaderWriterLockSlim::TryEnterReadLock/WriteLock/UpgradeableReadLock(intcs)` discard the
+  timeout parameter entirely (always a single non-blocking attempt); also ignores
+  `LockRecursionPolicy` entirely, so same-thread recursion **deadlocks** instead of throwing
+  `LockRecursionException`; recursive `EnterReadLock()` has a bug where the second matching
+  `ExitReadLock()` throws (`unordered_set` membership-only tracking, not a count) and
+  **permanently starves all future writers**.
+- `Barrier::SignalAndWait`: when the post-phase action throws, only the triggering thread
+  sees `BarrierPostPhaseException` — every other participant of that phase silently proceeds
+  as if it succeeded. `Barrier::FinishPhase` invokes the post-phase action while still
+  holding its mutex — reentrant calls **deadlock** instead of throwing
+  `InvalidOperationException`.
+- `CountdownEvent::AddCount` has unchecked signed integer overflow (UB) — same bug class as
+  the already-fixed TimeSpan copy_count/move_count race from earlier this session, but for
+  overflow rather than a data race.
+- `TaskCompletionSource<T>` completion flag is a plain non-atomic `bool` — concurrent
+  `TrySet*` calls race (UB); the loser throws an uncaught `std::future_error` instead of
+  returning `false` as .NET guarantees.
+- `Task::Wait()` never checks `isCanceled` — a canceled task's `Wait()` returns silently as
+  if it succeeded.
+- `ValueTask(Task)` only snapshots `IsCompleted` at construction — a still-running or
+  later-faulting task's exception is silently swallowed forever.
+- Bounded `Channel` with `capacity == 0` (a documented legal .NET "rendezvous channel"
+  configuration) **permanently deadlocks** every write instead of working.
+- `AsyncLocal<T>`/`ThreadLocal<T>` destructors only clean up the destroying thread's
+  `thread_local` map entry — other threads retain stale entries keyed by the (potentially
+  reused) pointer, risking data corruption from a heap-allocated instance at the same
+  address.
+- `LazyInitializer::EnsureInitialized<T>` uses a `static std::mutex` scoped **per template
+  type**, shared across every unrelated call site initializing a different target of the
+  same type — unnecessary serialization, and reentrant same-thread initialization of a
+  different target **self-deadlocks**.
+- `CancellationTokenSource::Cancel()` has no try/catch around callback invocation — a
+  throwing callback silently skips all remaining callbacks instead of running all of them
+  with exceptions aggregated into `AggregateException` (`AggregateException` already exists
+  in this codebase).
+- `ThreadLocal<T>::getValueProperty()` has no reentrancy guard — a factory that reentrantly
+  calls it recurses unboundedly (stack overflow) instead of throwing.
+
+**Moderate (29) and minor (10)**: extensive list covering `Monitor`/`SpinLock` validation
+gaps, `Semaphore` constructor argument-order/exception-type mismatches,
+`ReaderWriterLock(Slim)` exception-type mismatches, `CountdownEvent`/`Barrier` validation and
+`Dispose()` no-ops, `Timer`/`PeriodicTimer` range validation, `Task`/`TaskCompletionSource`
+exception-wrapping gaps (`AggregateException` not used where .NET wraps), `Channel`/`Parallel`
+exception-swallowing during concurrent failures, `CancellationTokenSource.disposed_` data
+race, non-LIFO callback ordering, `SynchronizationContext` being a fully broken no-op
+round-trip, and more. See the original agent transcript (session `c84efd8a-...`, task
+`a058cd3c7809221ea`) for the complete per-item detail if reprocessing without a fresh audit.
+
+#### System.Xml core (26 findings: 5 critical, 13 moderate, 8 minor)
+
+**Critical:**
+1. `XmlReader.cpp` — most accessors (`getNameProperty`, `getValueProperty`,
+   `MoveToElement`, `ReadStartElement`, `ReadEndElement`, etc.) only guard `pos < 0`, not
+   `pos >= events.size()` — out-of-bounds `std::vector` access (UB/crash) after `Read()`
+   returns `false` (EOF). Only `getNodeTypeProperty()` has the upper-bound check.
+2. `XmlConvert::ToString`/`ToDouble`/`ToSingle` use .NET `Double`'s `"Infinity"`/`"-Infinity"`
+   tokens instead of the XML Schema lexical-space `"INF"`/`"-INF"` real `XmlConvert` uses —
+   produces invalid-per-schema output and fails to parse valid schema input.
+3. `XmlNode::getInnerXmlProperty()`/`getOuterXmlProperty()` inject pretty-print whitespace
+   (tinyxml2 `XMLPrinter` defaults to `compact=false`) where real .NET's `InnerXml`/`OuterXml`
+   serialize exact markup with no inserted whitespace.
+4. `XmlAttribute::getNamespaceURIProperty()` always returns `""` — never sets `native_`, and
+   the base class's namespace-resolution walk (`native_->Parent()`) is always null for
+   attributes with no override. Breaks any prefixed attribute and
+   `XmlNamedNodeMap::GetNamedItem(localName, namespaceURI)`.
+5. `XmlAttribute::CloneNode()` always returns `nullptr` (inherits the base's null-`native_`
+   early-return, never overridden) — cloning any attribute silently fails.
+
+**Moderate (13) highlights**: CDATA reported as plain Text; Processing Instructions and
+DOCTYPE silently vanish during reading (tinyxml2 `XMLUnknown`, no branch handles it); wrong
+self-closing/EndElement detection (`!FirstChild()` instead of tinyxml2's `ClosingType()`) —
+an explicitly-closed empty element gets no EndElement event; `XmlWriter::ToString()` ignores
+the default `Indent=false` (always pretty-prints); `WriteComment`/`WriteProcessingInstruction`/
+`WriteCData` skip well-formedness validation .NET performs (`"--"`, `"?>"`, `"]]>"`); 
+`XmlNamespaceManager::AddNamespace` skips reserved-prefix validation;
+`RemoveChild`/`AppendChild`/etc. skip .NET's ancestor-cycle/cross-document/legal-child-type
+validation (tree-corruption risk); `Normalize()` doesn't recurse into child elements;
+`XmlDeclaration`/node-creation APIs skip version/standalone/XML-Name validation that real
+.NET performs via `ValidateNames`/`ParseNmtoken`.
+
+**Minor (8)**: `XmlException` message text formatting differences; parse errors lose
+line/position info; `XmlResolver` relative-path promotion gap; `XmlNamespaceManager`
+prefix-shadowing/tie-break nondeterminism; `XmlDeclaration.Value` has a leading-space bug
+(`substr(3)` vs `substr(4)`); `XmlAttributeCollection` insertion-order methods silently
+degrade to Append; apostrophe over-escaping in attributes; stray trailing space in empty
+`XmlProcessingInstruction` data.
+
+#### System.Xml.Linq + XPath (21 findings: 3 critical, 12 moderate, 6 minor)
+
+**Critical:**
+1. `XContainer::InsertNodeAt` has no cycle/self-containment guard — adding an
+   ancestor/self into its own subtree creates a genuine `shared_ptr` reference cycle
+   (permanent leak) and stack-overflows any recursive traversal.
+2. XPath relational operators (`<`,`<=`,`>`,`>=`) use lexicographic **string** comparison
+   instead of numeric comparison whenever a node-set operand is involved — per XPath 1.0
+   §3.4 these must always be numeric. Example: `@count > 9` where `@count` is `"10"` gives
+   the wrong answer (`"10" < "9"` lexicographically). This is silently-wrong output for
+   fully-"supported" XPath, not an unsupported-feature gap. `src/System/Xml/XPath/XPathAstInternal.cpp:709-747`.
+3. Namespaced `XAttribute`/`XElement` serialize as malformed Clark-notation XML
+   (`{http://ns}local` written literally as an attribute *name*, which is not valid XML) —
+   save-then-reload of any namespaced attribute silently corrupts or drops it.
+
+**Moderate (12) highlights**: `XName::Get` doesn't validate malformed Clark notation and
+splits on the first `}` instead of the last; `XAttribute` skips .NET's namespace-declaration
+validation rules; attribute-value escaping doesn't handle `\t`/`\r`/`\n` (collapses on
+reload); `IsNamespaceDeclaration` is missing entirely; `DeepEqualsCore` compares attributes
+as an unordered set where .NET compares positionally; `XElement` has no `ValidateNode`
+override (an `XDocument` can be added as a child element); a large set of documented XLinq
+tree-editing API is entirely absent (`AddBeforeSelf`, `SetAttributeValue`, ~20 conversion
+operators, etc. — compile-time gap, not runtime misbehavior, but means these types don't
+meet the "full public API" bar for `ported` status); `XElement::WriteTo` silently drops the
+element's namespace URI; `Add(std::string)` never merges into a trailing `XText` sibling;
+`XDocument::ValidateNode` uses the wrong exception type and over-rejects whitespace text;
+`XDocument::WriteTo` doesn't match .NET's start/end-document contract; XPath `number()`
+accepts exponent notation, which real XPath 1.0 rejects as NaN.
+
+**Minor (6)**: `XName` constructors skip NCName validation; `XAttribute.EmptySequence`
+missing; `XDeclaration.ToString` version-omission difference; `XDocumentType` skips name
+validation; `DeepEqualsCore` skips Comment/PI nodes (matches a stale doc comment, not .NET's
+actual behavior); XPath `string-length()` uses byte length not character count.
+
+### Suggested processing priority for the next session
+
+1. **`ZipArchive` Update-mode data loss + `ZipArchiveEntry::Delete()` no-op** (IO.Compression
+   #1-2) — real, silent, irreversible data loss on a standard workflow. Highest-value single
+   fix in this catalogue.
+2. **Threading's `Timeout.Infinite` systemic pattern** (~11 sites, one shared root cause) —
+   high finding-count-per-fix ratio if solved with a shared helper.
+3. **Memory-safety criticals**: `Socket::Send/Receive` bounds validation, `XmlReader`
+   post-EOF OOB access, `ClientWebSocket` buffer bounds, `HttpClient::Send` null deref —
+   all genuine UB/crash bugs reachable from common usage, not just parity gaps.
+4. **`Utf8JsonWriter` non-ASCII escaping + `MaxDepth`/`JsonDocument` depth-limit enforcement**
+   — silent wrong output / unbounded-recursion risk in commonly-exercised JSON paths.
+5. Everything else, namespace by namespace, same discipline as waves 1-2.
+
+No `plan.sqlite3` tickets were created for these 214 individual findings (the volume doesn't
+warrant per-finding ticket rows); process them directly from this NEXT.md catalogue, and
+update/close the relevant existing `ported-type-audit` tickets (`Verify ported type: ...`)
+as each type's findings are resolved, following the established pattern.
+
+---
 
 *Branch: `feature/work`, HEAD `364787f` — 11125 tests passing (up from 11111 at the top of
 part 4's checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
