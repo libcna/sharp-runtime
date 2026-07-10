@@ -1,6 +1,202 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `a8b7a14`) — 10986 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `8c4073c`) — 11006 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued) — P2 wave-2 audit dispatched and processed
+
+*Branch: `feature/work`, HEAD `8c4073c` — 11006 tests passing (up from 10986 at the top of
+this checkpoint), full clean rebuild verified (0 errors/0 warnings)*
+
+### Context
+
+Direct continuation of the "P2 wave-1 audit findings, all fixed" checkpoint immediately
+below. After finishing wave 1, dispatched 4 parallel read-only audit agents (same
+methodology) covering ~140 more `ported-type-audit` types: `System.Globalization` remaining
+types, the Collections family (`System.Collections`/`.Immutable`/`.ObjectModel`/
+`.Specialized`), `System.Text`/`System.Text.RegularExpressions`, and
+`System.Security.Cryptography`. All four completed and were processed through the same
+verify-against-real-.NET-source-before-fixing discipline.
+
+### What was fixed (real bugs, not just documentation)
+
+- **Cryptography (28 types audited)**: no behavioral bugs found (hashSizeValue_
+  initialization, HMAC construction, PBKDF2 iteration logic, OID tables all verified
+  correct against known test vectors). Fixed 3 message-text-only mismatches
+  (Rfc2898DeriveBytes, HashAlgorithmName) to match .NET's exact resource strings. Commit
+  `8d3713a`.
+- **ListDictionary/OrderedDictionary/StringDictionary (System.Collections.Specialized)**:
+  mutable `operator[]` phantom-inserted an empty entry for a missing key even on a read, and
+  (for the two vector-backed types) returned a reference that dangled after a later
+  insertion reallocated the backing vector — same bug class as the `ConcurrentDictionary` fix
+  from wave 1 (commit `3605260`). Fixed by making `operator[]` const-only (already-correct
+  getter) plus a named `set(key, value)` setter — a `ValueProxy` was tried first but rejected
+  for the `std::any`-valued `ListDictionary`: `std::any`'s own templated "wrap anything"
+  constructor out-competes a proxy's conversion operator (confirmed via compiled repro,
+  `bad_any_cast` at runtime). Also fixed `StringDictionary::lower()`'s signed-char UB
+  (`::tolower(int)` on a raw signed `char` sign-extends bytes ≥0x80). Found and fixed 4 real
+  call sites in `src/System/Net/Mime/ContentType.cpp` that relied on the old mutable
+  `operator[]` and would have silently no-op'd (compiles fine, assigns to a discarded
+  temporary) under the header fix — **a clean build does not mean no behavioral regression
+  here**. Commit `e1ec3b5`.
+- **BitArray/NameValueCollection (System.Collections{,.Specialized})**: `BitArray`'s
+  `Get`/`Set`/`operator[]` used `std::vector<bool>::at()`, throwing raw `std::out_of_range`
+  instead of `System::ArgumentOutOfRangeException`. `NameValueCollection`'s
+  `Get(int)`/`GetValues(int)`/`GetKey(int)`/`operator[](int)` silently returned `""`/`{}` for
+  an out-of-range index instead of throwing (verified: real .NET delegates through
+  `NameObjectCollectionBase`'s internal `ArrayList` indexer, which throws). Commit `ffb887f`.
+- **RegularExpressions — CRITICAL**: `Regex::matchFrom` (used by `Match()`/`NextMatch()`
+  chains and `Replace(string, MatchEvaluator)`) searched a fresh `input.substr(offset)` each
+  call. `std::smatch::position()` was therefore relative to that substring, not the true
+  input — corrupting every `Match::Index` after the first (confirmed with a compiled repro:
+  replacing in "abc 123 def 456" produced "abc [123] def 456[456]def 456"). Same root cause
+  made `^` incorrectly match at every resumption offset, not just true string start.
+  Fixed by searching an iterator range into the *original* string with
+  `match_prev_avail` instead of a substring copy, plus a `positionOffset` correction
+  parameter added to `Match`'s constructor. Also fixed `MatchCollection::operator[]`'s
+  missing bounds check (UB for out-of-range index; sibling `GroupCollection`/
+  `CaptureCollection` were already correct). Commit `0506330`.
+- **Calendar (System.Globalization)**: `GetDaysInMonth` indexed a days-per-month table with
+  an unvalidated month — OOB read UB for month <1 or >12; same bug duplicated in
+  `KoreanCalendar`/`TaiwanCalendar`/`ThaiBuddhistCalendar`'s own copies. `AddYears`
+  constructed the result directly instead of delegating to `AddMonths` (which already
+  clamped correctly) — a Feb 29 source date landing on a non-leap target year threw instead
+  of clamping to Feb 28, unlike real .NET's `AddYears(t,y) => AddMonths(t, y*12)`
+  (`GregorianCalendar.cs`). Fixed both; the `AddYears` fix only changes the base class
+  default (`PersianCalendar`/`JulianCalendar`/`HebrewCalendar`/`HijriCalendar`/
+  `UmAlQuraCalendar` already have their own separate overrides). Commit `02ecd2f`.
+- **DateTimeFormatInfo (System.Globalization)**: `GetDayName`/`GetAbbreviatedDayName`/
+  `GetShortestDayName` indexed a `std::array<string,7>` with an unvalidated `DayOfWeek` — OOB
+  read UB (commit `4d1f39a`, bundled with the `StringInfo` fix below). Separately:
+  `Clone()` copied `isReadOnly_` verbatim (cloning read-only `InvariantInfo` produced another
+  read-only clone instead of mutable, breaking "clone then customize"); `GetEraName(1)`
+  returned the *abbreviated* "AD" instead of the full "A.D." (verified against
+  `CalendarData.cs`: `saEraNames=["A.D."]` vs `saAbbrevEraNames=["AD"]`); both era-name
+  methods silently returned `""` for an invalid era instead of throwing; `GetEra(string)`
+  compared case-sensitively instead of case-insensitively. Commit `275defe`.
+- **StringInfo (System.Globalization)**: `GetNextTextElement`/`GetNextTextElementLength`
+  only checked the upper bound, so a negative index fell through to `str[index]` (OOB/UB
+  read) or silently returned 1 instead of throwing. Fixed to validate the full
+  `(uint)index > (uint)str.Length`-equivalent range real .NET uses (`StringInfo.cs`).
+  Commit `4d1f39a`.
+- **CultureInfo (System.Globalization)**: `InvariantCulture`/`CurrentCulture`/
+  `CurrentUICulture` were all constructed with `neutral=true`. Real .NET's invariant culture
+  has `IsNeutralCulture == false` (`CultureData.cs`: `invariant._bNeutral = false;`). Commit
+  `51c551f`.
+- **RegionInfo (System.Globalization)**: `isMetric_` defaulted to `true`; the US (the only
+  fully-modeled region) uses the customary, non-metric system — real .NET's
+  `RegionInfo("US").IsMetric` is `false`. Two existing tests hardcoded the wrong value,
+  confirming this wasn't a one-off. Commit `8c4073c`.
+
+Every fix above updated or added tests; several exposed **stale tests that asserted the old,
+wrong behavior** (`NameValueCollectionBatch21Test.GetByIndex`, 4×`StringInfo` past-the-end
+tests, `DateTimeFormatInfoBatch28Test.GetEraName`, 4×`CultureInfo` neutrality tests, 2×
+`RegionInfo` metric tests) — each was independently verified against real .NET source before
+being changed, not just made to match the new code.
+
+### What was found but deliberately NOT fixed this session (real, confirmed gaps)
+
+Tracked in the relevant `plan.sqlite3` ticket notes; listed here for a future session's
+convenience. None of these are urgent — they're feature-completeness/scope items, not
+crashes:
+
+- **PersianCalendar**: uses a fixed 33-year arithmetic leap-year formula instead of .NET's
+  real astronomical vernal-equinox algorithm; diverges on leap-year determination for ~29%
+  of years in the supported range (confirmed by independently reimplementing .NET's real
+  algorithm and diffing). Existing tests only cover a narrow year range where the two
+  algorithms coincide by chance.
+- **CultureInfo**: `CultureInfo(int)` ignores its LCID argument (always builds "en-US");
+  missing `EnglishName`/`NativeName`/ISO-name properties, `NumberFormat`/`DateTimeFormat`
+  wiring, `Equals`/`GetHashCode`/`ToString`, all `GetCultureInfo(...)` overloads —
+  consequence: `CultureNotFoundException` (itself correct) is never thrown anywhere in the
+  codebase, dead code.
+- **RegionInfo**: constructor never validates its name argument (accepts `""`/garbage
+  silently instead of throwing); `RegionInfo(int)` ignores its LCID, always builds "US".
+- **IdnMapping**: `GetUnicode()` skips the mandatory canonical round-trip check real .NET
+  performs; `UseStd3AsciiRules` is a complete no-op (field set, never read);
+  `LabelMax`/63-octet-per-label limit declared but never enforced; `decodeLabel()` silently
+  mis-decodes a trailing-hyphen-only ACE label instead of throwing; missing
+  `(string,int)`/`(string,int,int)` overloads of `GetAscii`/`GetUnicode`.
+  `NumberFormatInfo`: decimal-digit/pattern/group-size setters perform no range validation
+  at all.
+- **UTF8Encoding (System.Text)**: `GetBytes`/`GetString` are a straight byte passthrough
+  with zero well-formedness validation in either direction — a different, larger-scoped gap
+  than the decode-loop bug already fixed in `UnicodeEncoding`/`UTF32Encoding` (wave 1); would
+  need real `DecoderFallback`/`EncoderFallback` infrastructure. Ticket set to `needs_user`.
+- **RegularExpressions**: `Match::Groups()`'s `Group.Name` always returns the numeric index
+  as a string, even for named groups (`(?<name>...)`) — the name-based *indexer* correctly
+  resolves by name and returns the right *value*, but `Group.Name` itself doesn't reflect the
+  parsed name. `MatchCollection`'s bounds check was fixed, but this `Group.Name` bug wasn't.
+  `RegexParseException` is missing an `Offset` property real .NET has.
+- **ASCIIEncoding**: `GetBytes` iterates the UTF-8-encoded input *byte-wise*, so a multi-byte
+  non-ASCII character produces 2-4 `'?'` replacement bytes instead of .NET's one (which
+  operates per UTF-16 code unit). `EncodingInfo::GetEncoding()` is a self-admitted stub
+  hardcoded to always return UTF-8, ignoring `codePage_`/`name_` — violates this project's
+  own "never silently return a wrong value" rule (CLAUDE.md), but is currently dead code
+  (nothing constructs an `EncodingInfo`). `CompositeFormat::Parse` silently swallows
+  malformed format strings via `catch (...) {}` instead of throwing `FormatException`.
+- **Collections.Immutable**: `ImmutableArray<T>`'s default constructor always allocates a
+  live empty vector instead of leaving the internal pointer null, so `IsDefault` can never
+  return `true` — breaks the common "uninitialized struct field" idiom real .NET supports.
+  `ImmutableSortedDictionary::Add`/`AddRange` throw `ArgumentException` on *any* duplicate
+  key, even when the new value equals the existing one; real .NET only throws when the value
+  differs (equal-value re-add is a silent no-op). `ImmutableHashSet`/`ImmutableSortedSet`/
+  `ImmutableSortedDictionary` have no custom-comparer support at all (no
+  `IEqualityComparer`/`IComparer` parameter anywhere).
+- **Collections.ObjectModel**: `ReadOnlyCollection<T>`'s constructors *copy* the source
+  vector instead of wrapping it by reference; real .NET's is a live view. Notably
+  inconsistent with the sibling `ReadOnlyDictionary`/`ReadOnlySet`/
+  `ReadOnlyObservableCollection`, which this project already fixed to wrap-by-reference in
+  an earlier session — `ReadOnlyCollection` itself appears to have been missed at the time.
+- **Collections.Specialized**: `HybridDictionary` never actually switches internal
+  representation (always a flat `unordered_map`), so small-dictionary enumeration order
+  diverges from .NET's insertion-ordered phase (the type's own doc comment already admits
+  this). `NotifyCollectionChangedEventArgs`'s vector-based Add/Remove constructor doesn't
+  validate `startingIndex >= -1` the way real .NET does.
+
+### Process notes for future sessions
+
+- **Verify audit agents' factual claims about real-world data too, not just source-code
+  claims.** The `RegionInfo.IsMetric`/`CultureInfo.IsNeutralCulture` fixes relied on a mix of
+  reading `CultureData.cs`'s literal field initializer (for the culture case — directly
+  verifiable) and independently-known real-world fact (the US uses non-metric units — for the
+  region case, since `RegionInfo.cs`'s `IsMetric` derives from opaque ICU/platform data,
+  `_cultureData.MeasurementSystem == 0`, not a literal constant in the file). Both were
+  cross-checked against *existing test assertions* in the codebase before trusting them (two
+  tests hardcoded `IsMetric==true` for "US", which is itself suspicious/wrong on its face).
+- **`std::any`'s templated converting constructor defeats naive proxy-object patterns.** A
+  `ValueProxy` with `operator std::any() const` does NOT get invoked when constructing a
+  `std::any` from the proxy (`std::any a = proxy;`) — `std::any`'s own
+  `template<class T> any(T&&)` constructor wins overload resolution and wraps the *proxy
+  object itself* as the contained value, not the unwrapped value. This silently compiles and
+  fails only at runtime (`std::any_cast` throws `bad_any_cast`). Confirmed with a minimal
+  repro before abandoning the proxy approach for `ListDictionary`. This trap does NOT apply
+  to `std::string`/`int`-valued proxies (no competing "wrap anything" constructor there) —
+  but even for those, a plain proxy still needs its own `operator==` to work with
+  `EXPECT_EQ`/`gtest` comparisons, since a user-defined conversion isn't picked up
+  automatically by a *non-member* `operator==(const string&, const string&)` unless one side
+  is already exactly `std::string`.
+- **A clean build after an `operator[]` signature change does NOT mean no behavioral
+  regression.** Changing `operator[]` from mutable-reference-returning to
+  const-by-value-returning still compiles at every `container[key] = value` call site — it
+  just silently assigns to a discarded temporary instead of mutating the container. Always
+  grep every remaining `[key] =`-shaped call site across `src/` *and* `tests/` after this
+  class of fix, not just re-run the build.
+
+### To resume
+
+```bash
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' AND priority='P2' ORDER BY ticket_no LIMIT 15;"
+```
+
+Wave-2 audit findings above are now either fixed or explicitly logged as deliberate
+deferrals with ticket notes. The remaining P2 backlog (~450 more `ported-type-audit`
+tickets, plus `classification-audit`/`code-audit`/`namespace-audit`/`correctness` categories)
+is unstarted; continue with a wave-3 dispatch covering more namespaces
+(`System.Net.*`, `System.Diagnostics*`, `System.IO.*`, `System.Text.Json*`,
+`System.Threading.*`, `System.Xml.*`) using the same methodology, or work the deferred items
+listed above first if the user prioritizes finishing what's already been found over breadth.
+
+---
 
 ## Session checkpoint (2026-07-10) — P2 wave-1 audit findings, all fixed
 
