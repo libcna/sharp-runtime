@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <memory>
 #include <set>
 #include <vector>
@@ -18,18 +19,40 @@ using SharpRuntime::intcs;
  * Backed by std::set; provides O(log n) Add, Remove, and Contains with sorted iteration.
  * All mutating operations return a new instance; the original is unchanged.
  *
- * @tparam T The type of elements (must support operator< for ordering).
+ * The ordering function is stored as std::function so a custom comparer (WithComparer())
+ * can be supplied at runtime without adding a comparer type parameter to this class
+ * template -- matching real .NET, where IComparer<T> is a runtime object, not a
+ * compile-time type parameter, and keeping every existing `ImmutableSortedSet<T>` call site
+ * (single type argument) source-compatible.
+ *
+ * @tparam T The type of elements (must support operator< for the default ordering).
  */
 template<typename T>
 class ImmutableSortedSet {
-    using SetT = std::set<T>;
+    using CompareFn = std::function<bool(const T&, const T&)>;
+    using SetT = std::set<T, CompareFn>;
     std::shared_ptr<const SetT> data_;
 
     explicit ImmutableSortedSet(std::shared_ptr<const SetT> data) : data_(std::move(data)) {}
 
+    /**
+     * @brief Constructs an empty backing set using the given ordering function.
+     *
+     * Centralizes every "fresh empty set" construction in this class so a comparer is
+     * always supplied explicitly -- std::set's own default-constructed std::function
+     * comparator is empty and throws std::bad_function_call on first use, so no code path
+     * in this class may construct a SetT without going through this helper (or
+     * copy-constructing from an existing SetT, which already carries a valid comparer).
+     */
+    static std::shared_ptr<SetT> makeEmpty(CompareFn less) {
+        return std::make_shared<SetT>(std::move(less));
+    }
+
+    static CompareFn defaultLess() { return CompareFn(std::less<T>{}); }
+
 public:
-    /** @brief Default-constructs an empty ImmutableSortedSet. */
-    ImmutableSortedSet() : data_(std::make_shared<SetT>()) {}
+    /** @brief Default-constructs an empty ImmutableSortedSet using operator< ordering. */
+    ImmutableSortedSet() : data_(makeEmpty(defaultLess())) {}
 
     /**
      * @brief Returns an empty ImmutableSortedSet.
@@ -47,7 +70,9 @@ public:
      * @return A new ImmutableSortedSet containing the given elements.
      */
     static ImmutableSortedSet<T> Create(std::initializer_list<T> items) {
-        return ImmutableSortedSet<T>(std::make_shared<SetT>(items));
+        auto s = makeEmpty(defaultLess());
+        s->insert(items);
+        return ImmutableSortedSet<T>(std::move(s));
     }
 
     /**
@@ -58,7 +83,47 @@ public:
      * @return A new ImmutableSortedSet containing the given elements.
      */
     static ImmutableSortedSet<T> Create(const std::vector<T>& items) {
-        return ImmutableSortedSet<T>(std::make_shared<SetT>(items.begin(), items.end()));
+        auto s = makeEmpty(defaultLess());
+        s->insert(items.begin(), items.end());
+        return ImmutableSortedSet<T>(std::move(s));
+    }
+
+    /**
+     * @brief Creates an empty ImmutableSortedSet using a custom ordering comparer.
+     *
+     * C++ counterpart of .NET ImmutableSortedSet.Create<T>(IComparer<T>).
+     * @param less A strict-weak-ordering "less than" function for elements.
+     * @return An empty ImmutableSortedSet using the given comparer.
+     */
+    static ImmutableSortedSet<T> Create(CompareFn less) {
+        return ImmutableSortedSet<T>(makeEmpty(std::move(less)));
+    }
+
+    /**
+     * @brief Creates an ImmutableSortedSet from a vector using a custom ordering comparer.
+     *
+     * C++ counterpart of .NET ImmutableSortedSet.CreateRange<T>(IComparer<T>, IEnumerable<T>).
+     * @param less  A strict-weak-ordering "less than" function for elements.
+     * @param items The initial elements.
+     * @return A new ImmutableSortedSet using the given comparer, containing @p items.
+     */
+    static ImmutableSortedSet<T> Create(CompareFn less, const std::vector<T>& items) {
+        auto s = makeEmpty(std::move(less));
+        s->insert(items.begin(), items.end());
+        return ImmutableSortedSet<T>(std::move(s));
+    }
+
+    /**
+     * @brief Returns an equivalent set that uses the specified comparer instead.
+     *
+     * C++ counterpart of .NET ImmutableSortedSet<T>.WithComparer(IComparer<T>).
+     * @param less A strict-weak-ordering "less than" function for elements.
+     * @return A new ImmutableSortedSet with the same elements under the new comparer.
+     */
+    [[nodiscard]] ImmutableSortedSet<T> WithComparer(CompareFn less) const {
+        auto s = makeEmpty(std::move(less));
+        s->insert(data_->begin(), data_->end());
+        return ImmutableSortedSet<T>(std::move(s));
     }
 
     /**
@@ -146,12 +211,14 @@ public:
     }
 
     /**
-     * @brief Returns an empty ImmutableSortedSet.
+     * @brief Returns an empty ImmutableSortedSet using this set's comparer.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.Clear().
-     * @return An empty ImmutableSortedSet<T>.
+     * @return An empty ImmutableSortedSet<T> using the same comparer as this instance.
      */
-    [[nodiscard]] ImmutableSortedSet<T> Clear() const { return Empty(); }
+    [[nodiscard]] ImmutableSortedSet<T> Clear() const {
+        return ImmutableSortedSet<T>(makeEmpty(data_->key_comp()));
+    }
 
     /**
      * @brief Returns a new set containing all elements from both this set and @p other.
@@ -170,12 +237,16 @@ public:
      * @brief Returns a new set containing only elements present in both sets.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.Intersect(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's Intersect: iterates @p other's raw
+     * elements and tests membership via *this* set's Contains (this set's comparer), not
+     * @p other's -- so if the two sets use different comparers, the result and its
+     * membership test are governed entirely by this set's ordering/equivalence notion.
      * @param other The set to intersect with.
-     * @return A new ImmutableSortedSet containing only common elements.
+     * @return A new ImmutableSortedSet containing only common elements, using this set's comparer.
      */
     [[nodiscard]] ImmutableSortedSet<T> Intersect(const ImmutableSortedSet<T>& other) const {
-        auto s = std::make_shared<SetT>();
-        for (const auto& x : *data_) if (other.Contains(x)) s->insert(x);
+        auto s = makeEmpty(data_->key_comp());
+        for (const auto& x : *other.data_) if (Contains(x)) s->insert(x);
         return ImmutableSortedSet<T>(std::move(s));
     }
 
@@ -183,12 +254,15 @@ public:
      * @brief Returns a new set containing elements in this set that are not in @p other.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.Except(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's Except: starts from this set's own tree
+     * and removes each of @p other's raw elements using this set's own comparer (`_comparer`)
+     * -- not @p other's comparer.
      * @param other The set whose elements to exclude.
      * @return A new ImmutableSortedSet without the elements from @p other.
      */
     [[nodiscard]] ImmutableSortedSet<T> Except(const ImmutableSortedSet<T>& other) const {
-        auto s = std::make_shared<SetT>();
-        for (const auto& x : *data_) if (!other.Contains(x)) s->insert(x);
+        auto s = std::make_shared<SetT>(*data_);
+        for (const auto& x : *other.data_) s->erase(x);
         return ImmutableSortedSet<T>(std::move(s));
     }
 
@@ -223,11 +297,17 @@ public:
      * @brief Determines whether every element of this set is in @p other.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.IsSubsetOf(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's IsSubsetOf: rehashes @p other's raw
+     * elements under *this* set's comparer first (`new SortedSet<T>(other,
+     * this.KeyComparer)`), then checks membership -- so the test is governed by this set's
+     * ordering/equivalence notion, not @p other's.
      * @param other The set to compare to.
      * @return true if every element of this set is in @p other; otherwise false.
      */
     [[nodiscard]] bool IsSubsetOf(const ImmutableSortedSet<T>& other) const {
-        for (const auto& x : *data_) if (!other.Contains(x)) return false;
+        auto otherRehashed = makeEmpty(data_->key_comp());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        for (const auto& x : *data_) if (!otherRehashed->count(x)) return false;
         return true;
     }
 
@@ -235,11 +315,15 @@ public:
      * @brief Determines whether every element of @p other is in this set.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.IsSupersetOf(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's IsSupersetOf: iterates @p other's raw
+     * elements and tests membership via *this* set's Contains directly (this set's
+     * comparer), replacing the delegate-to-IsSubsetOf shortcut this port used to take.
      * @param other The set to compare to.
      * @return true if every element of @p other is in this set; otherwise false.
      */
     [[nodiscard]] bool IsSupersetOf(const ImmutableSortedSet<T>& other) const {
-        return other.IsSubsetOf(*this);
+        for (const auto& x : *other.data_) if (!Contains(x)) return false;
+        return true;
     }
 
     /**

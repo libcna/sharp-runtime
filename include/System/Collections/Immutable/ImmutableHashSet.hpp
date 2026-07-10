@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <functional>
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -17,18 +18,42 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Immutable.ImmutableHashSet<T>.
  * Internally shares the underlying unordered_set via shared_ptr; mutations return new instances.
  *
+ * The hash and equality functions are stored as std::function so a custom comparer
+ * (WithComparer()) can be supplied at runtime without adding a comparer type parameter to
+ * this class template -- matching real .NET, where IEqualityComparer<T> is a runtime object,
+ * not a compile-time type parameter, and keeping every existing `ImmutableHashSet<T>` call
+ * site (single type argument) source-compatible.
+ *
  * @tparam T The type of elements in the set.
  */
 template<typename T>
 class ImmutableHashSet {
-    using SetT = std::unordered_set<T>;
+    using HashFn = std::function<size_t(const T&)>;
+    using EqFn   = std::function<bool(const T&, const T&)>;
+    using SetT   = std::unordered_set<T, HashFn, EqFn>;
     std::shared_ptr<const SetT> data_;
 
     explicit ImmutableHashSet(std::shared_ptr<const SetT> data) : data_(std::move(data)) {}
 
+    /**
+     * @brief Constructs an empty backing set using the given hash/equality functions.
+     *
+     * Centralizes every "fresh empty set" construction in this class so a comparer is
+     * always supplied explicitly -- std::unordered_set's own default-constructed
+     * std::function hasher/key_eq is empty and throws std::bad_function_call on first use,
+     * so no code path in this class may construct a SetT without going through this helper
+     * (or copy-constructing from an existing SetT, which already carries a valid comparer).
+     */
+    static std::shared_ptr<SetT> makeEmpty(HashFn hash, EqFn eq) {
+        return std::make_shared<SetT>(0, std::move(hash), std::move(eq));
+    }
+
+    static HashFn defaultHash() { return HashFn(std::hash<T>{}); }
+    static EqFn defaultEq() { return EqFn(std::equal_to<T>{}); }
+
 public:
-    /** @brief Default-constructs an empty ImmutableHashSet. */
-    ImmutableHashSet() : data_(std::make_shared<SetT>()) {}
+    /** @brief Default-constructs an empty ImmutableHashSet using the default hash/equality. */
+    ImmutableHashSet() : data_(makeEmpty(defaultHash(), defaultEq())) {}
 
     /**
      * @brief Returns an empty ImmutableHashSet.
@@ -46,7 +71,9 @@ public:
      * @return A new ImmutableHashSet containing the given elements.
      */
     static ImmutableHashSet<T> Create(std::initializer_list<T> items) {
-        return ImmutableHashSet<T>(std::make_shared<SetT>(items));
+        auto s = makeEmpty(defaultHash(), defaultEq());
+        s->insert(items);
+        return ImmutableHashSet<T>(std::move(s));
     }
 
     /**
@@ -57,7 +84,52 @@ public:
      * @return A new ImmutableHashSet containing the given elements.
      */
     static ImmutableHashSet<T> Create(const std::vector<T>& items) {
-        return ImmutableHashSet<T>(std::make_shared<SetT>(items.begin(), items.end()));
+        auto s = makeEmpty(defaultHash(), defaultEq());
+        s->insert(items.begin(), items.end());
+        return ImmutableHashSet<T>(std::move(s));
+    }
+
+    /**
+     * @brief Creates an empty ImmutableHashSet using a custom equality comparer.
+     *
+     * C++ counterpart of .NET ImmutableHashSet.Create<T>(IEqualityComparer<T>).
+     * @param hash The hash function for elements.
+     * @param equal The equality function for elements.
+     * @return An empty ImmutableHashSet using the given comparer.
+     */
+    static ImmutableHashSet<T> Create(HashFn hash, EqFn equal) {
+        return ImmutableHashSet<T>(makeEmpty(std::move(hash), std::move(equal)));
+    }
+
+    /**
+     * @brief Creates an ImmutableHashSet from a vector using a custom equality comparer.
+     *
+     * C++ counterpart of .NET ImmutableHashSet.CreateRange<T>(IEqualityComparer<T>, IEnumerable<T>).
+     * @param hash  The hash function for elements.
+     * @param equal The equality function for elements.
+     * @param items The initial elements.
+     * @return A new ImmutableHashSet using the given comparer, containing @p items.
+     */
+    static ImmutableHashSet<T> Create(HashFn hash, EqFn equal, const std::vector<T>& items) {
+        auto s = makeEmpty(std::move(hash), std::move(equal));
+        s->insert(items.begin(), items.end());
+        return ImmutableHashSet<T>(std::move(s));
+    }
+
+    /**
+     * @brief Returns an equivalent set that uses the specified comparer instead.
+     *
+     * C++ counterpart of .NET ImmutableHashSet<T>.WithComparer(IEqualityComparer<T>).
+     * All existing elements are re-hashed under the new comparer, so duplicates under the
+     * new equality function collapse (matching real .NET's WithComparer semantics).
+     * @param hash  The new hash function.
+     * @param equal The new equality function.
+     * @return A new ImmutableHashSet with the same elements under the new comparer.
+     */
+    [[nodiscard]] ImmutableHashSet<T> WithComparer(HashFn hash, EqFn equal) const {
+        auto s = makeEmpty(std::move(hash), std::move(equal));
+        s->insert(data_->begin(), data_->end());
+        return ImmutableHashSet<T>(std::move(s));
     }
 
     /**
@@ -114,12 +186,14 @@ public:
     }
 
     /**
-     * @brief Returns an empty ImmutableHashSet.
+     * @brief Returns an empty ImmutableHashSet using this set's comparer.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.Clear().
-     * @return An empty ImmutableHashSet<T>.
+     * @return An empty ImmutableHashSet<T> using the same comparer as this instance.
      */
-    [[nodiscard]] ImmutableHashSet<T> Clear() const { return Empty(); }
+    [[nodiscard]] ImmutableHashSet<T> Clear() const {
+        return ImmutableHashSet<T>(makeEmpty(data_->hash_function(), data_->key_eq()));
+    }
 
     /**
      * @brief Returns a new set containing all elements from both this set and @p other.
@@ -138,12 +212,16 @@ public:
      * @brief Returns a new set containing only elements present in both sets.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.Intersect(IEnumerable<T>).
+     * Verified against ImmutableHashSet_1.cs's private Intersect: iterates @p other's raw
+     * elements and tests membership via *this* set's Contains (i.e. this set's comparer),
+     * not @p other's -- so if the two sets use different comparers, the result and its
+     * membership test are governed entirely by this set's equality notion.
      * @param other The set to intersect with.
-     * @return A new ImmutableHashSet containing only common elements.
+     * @return A new ImmutableHashSet containing only common elements, using this set's comparer.
      */
     [[nodiscard]] ImmutableHashSet<T> Intersect(const ImmutableHashSet<T>& other) const {
-        auto s = std::make_shared<SetT>();
-        for (const auto& x : *data_) if (other.Contains(x)) s->insert(x);
+        auto s = makeEmpty(data_->hash_function(), data_->key_eq());
+        for (const auto& x : *other.data_) if (Contains(x)) s->insert(x);
         return ImmutableHashSet<T>(std::move(s));
     }
 
@@ -151,12 +229,16 @@ public:
      * @brief Returns a new set containing elements in this set that are not in @p other.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.Except(IEnumerable<T>).
+     * Verified against ImmutableHashSet_1.cs's private Except: starts from a copy of this
+     * set and removes each of @p other's raw elements from it using this set's own
+     * comparer (via erase, which always uses the container's own hasher/key_eq) -- not
+     * @p other's comparer.
      * @param other The set whose elements to exclude.
      * @return A new ImmutableHashSet without the elements from @p other.
      */
     [[nodiscard]] ImmutableHashSet<T> Except(const ImmutableHashSet<T>& other) const {
-        auto s = std::make_shared<SetT>();
-        for (const auto& x : *data_) if (!other.Contains(x)) s->insert(x);
+        auto s = std::make_shared<SetT>(*data_);
+        for (const auto& x : *other.data_) s->erase(x);
         return ImmutableHashSet<T>(std::move(s));
     }
 
@@ -193,11 +275,17 @@ public:
      * @brief Determines whether every element of this set is in @p other.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.IsSubsetOf(IEnumerable<T>).
+     * Verified against ImmutableHashSet_1.cs's private IsSubsetOf: rehashes @p other's raw
+     * elements under *this* set's comparer first (`new HashSet<T>(other,
+     * origin.EqualityComparer)`), then checks membership -- so the test is governed by
+     * this set's equality notion, not @p other's.
      * @param other The set to compare to.
      * @return true if every element of this set is in @p other; otherwise false.
      */
     [[nodiscard]] bool IsSubsetOf(const ImmutableHashSet<T>& other) const {
-        for (const auto& x : *data_) if (!other.Contains(x)) return false;
+        auto otherRehashed = makeEmpty(data_->hash_function(), data_->key_eq());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        for (const auto& x : *data_) if (!otherRehashed->count(x)) return false;
         return true;
     }
 
@@ -205,11 +293,18 @@ public:
      * @brief Determines whether every element of @p other is in this set.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.IsSupersetOf(IEnumerable<T>).
+     * Verified against ImmutableHashSet_1.cs's private IsSupersetOf: iterates @p other's
+     * raw elements and tests membership via *this* set's Contains directly (this set's
+     * comparer), unlike the delegate-to-IsSubsetOf shortcut this port used to take -- that
+     * shortcut happened to produce the same comparer precedence, but is replaced here with
+     * a direct implementation for clarity and to avoid relying on IsSubsetOf's own
+     * (now rehashing) implementation detail.
      * @param other The set to compare to.
      * @return true if every element of @p other is in this set; otherwise false.
      */
     [[nodiscard]] bool IsSupersetOf(const ImmutableHashSet<T>& other) const {
-        return other.IsSubsetOf(*this);
+        for (const auto& x : *other.data_) if (!Contains(x)) return false;
+        return true;
     }
 
     /**
