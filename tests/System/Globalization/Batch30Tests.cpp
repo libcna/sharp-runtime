@@ -286,3 +286,13 @@ TEST(JapaneseCalendarBatch30Test, GetYear_Heisei1) {
     JapaneseCalendar jc;
     EXPECT_EQ(jc.GetYear(System::DateTime(1989, 6, 1)), 1);
 }
+
+// Real .NET's s_calendarMinValue is 1868-10-23 (JapaneseCalendar.cs); this port previously
+// used 1868-09-08, off by 45 days.
+TEST(JapaneseCalendarBatch30Test, MinSupportedDateTime_MatchesRealDotNet) {
+    JapaneseCalendar jc;
+    System::DateTime minDate = jc.getMinSupportedDateTimeProperty();
+    EXPECT_EQ(minDate.getYearProperty(), 1868);
+    EXPECT_EQ(minDate.getMonthProperty(), 10);
+    EXPECT_EQ(minDate.getDayProperty(), 23);
+}
