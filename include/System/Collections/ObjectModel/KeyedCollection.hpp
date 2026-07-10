@@ -143,6 +143,7 @@ public:
      * @return true if an item with the key is found; otherwise false.
      */
     [[nodiscard]] bool Contains(const TKey& key) const { return keyIndex_.count(key) > 0; }
+    using Collection<TItem>::Contains;
 
     /**
      * @brief Gets the item with the specified key if it exists.
@@ -172,6 +173,7 @@ public:
         this->RemoveAt(it->second);
         return true;
     }
+    using Collection<TItem>::Remove;
 
     /**
      * @brief Returns a const reference to the item with the specified key.

@@ -39,7 +39,7 @@ namespace System::Xml::Linq::Extensions {
         requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XContainer>>
     {
         std::vector<std::shared_ptr<XElement>> result;
-        for (const std::shared_ptr<XContainer>& c : source) {
+        for (const auto& c : source) {
             if (!c) continue;
             auto es = c->Elements();
             result.insert(result.end(), es.begin(), es.end());
@@ -123,7 +123,7 @@ namespace System::Xml::Linq::Extensions {
         requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XContainer>>
     {
         std::vector<std::shared_ptr<XElement>> result;
-        for (const std::shared_ptr<XContainer>& c : source) {
+        for (const auto& c : source) {
             if (!c) continue;
             auto ds = c->Descendants(name);
             result.insert(result.end(), ds.begin(), ds.end());

@@ -103,7 +103,6 @@ TEST(MulticastNotSupportedExceptionTests, InnerExceptionCtor_WhatContainsBoth) {
 // ===========================================================================
 
 TEST(AppContextExtraTests, SetSwitch_EmptyName_Throws) {
-    bool enabled = false;
     EXPECT_THROW(System::AppContext::SetSwitch("", true), System::ArgumentException);
 }
 

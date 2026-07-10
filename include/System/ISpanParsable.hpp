@@ -30,6 +30,14 @@ namespace System {
     public:
         virtual ~ISpanParsable() = default;
 
+        // Without these, declaring Parse/TryParse below would hide IParsable<TSelf>'s
+        // std::string overloads from name lookup on this type (C++ name-hiding, not
+        // overload resolution) — breaking the "concrete types override all four methods"
+        // contract documented above, since callers couldn't reach the string overloads
+        // through an ISpanParsable<TSelf>-typed reference/pointer.
+        using IParsable<TSelf>::Parse;
+        using IParsable<TSelf>::TryParse;
+
         /**
          * @brief Parses a span of characters into a value of type TSelf.
          *

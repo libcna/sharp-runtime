@@ -8,7 +8,7 @@
 using System::AppDomainSetup;
 
 TEST(AppDomainSetupTests, DefaultCtor_DoesNotThrow) {
-    EXPECT_NO_THROW(AppDomainSetup setup);
+    EXPECT_NO_THROW(AppDomainSetup());
 }
 
 TEST(AppDomainSetupTests, ApplicationBase_NonEmpty) {

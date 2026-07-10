@@ -24,7 +24,7 @@ struct ModuleHandle {
     [[nodiscard]] int getMDStreamVersionProperty() const noexcept { return 0; }
 
     /** @brief Indicates whether this handle equals another. */
-    [[nodiscard]] bool Equals(const ModuleHandle& other) const noexcept { return true; /* always EmptyHandle */ }
+    [[nodiscard]] bool Equals([[maybe_unused]] const ModuleHandle& other) const noexcept { return true; /* always EmptyHandle */ }
 
     /** @brief Returns a hash code for this handle. */
     [[nodiscard]] int GetHashCode() const noexcept { return 0; }
@@ -35,7 +35,7 @@ struct ModuleHandle {
     // Token-resolution methods — all throw NotSupportedException.
 
     /** @brief Not supported — throws NotSupportedException. */
-    [[noreturn]] RuntimeTypeHandle ResolveTypeHandle(int typeToken) const {
+    [[noreturn]] RuntimeTypeHandle ResolveTypeHandle([[maybe_unused]] int typeToken) const {
         throw System::NotSupportedException("ModuleHandle.ResolveTypeHandle is not supported.");
     }
 };

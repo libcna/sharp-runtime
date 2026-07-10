@@ -278,10 +278,14 @@ struct ValueTuple4 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple4& other) const {
-        if (Item1 < other.Item1) return -1; if (other.Item1 < Item1) return 1;
-        if (Item2 < other.Item2) return -1; if (other.Item2 < Item2) return 1;
-        if (Item3 < other.Item3) return -1; if (other.Item3 < Item3) return 1;
-        if (Item4 < other.Item4) return -1; if (other.Item4 < Item4) return 1;
+        if (Item1 < other.Item1) return -1;
+        if (other.Item1 < Item1) return 1;
+        if (Item2 < other.Item2) return -1;
+        if (other.Item2 < Item2) return 1;
+        if (Item3 < other.Item3) return -1;
+        if (other.Item3 < Item3) return 1;
+        if (Item4 < other.Item4) return -1;
+        if (other.Item4 < Item4) return 1;
         return 0;
     }
 
@@ -334,11 +338,16 @@ struct ValueTuple5 {
         return static_cast<intcs>(h);
     }
     [[nodiscard]] intcs CompareTo(const ValueTuple5& o) const {
-        if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1; if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1; if (o.Item5 < Item5) return 1;
+        if (Item1 < o.Item1) return -1;
+        if (o.Item1 < Item1) return 1;
+        if (Item2 < o.Item2) return -1;
+        if (o.Item2 < Item2) return 1;
+        if (Item3 < o.Item3) return -1;
+        if (o.Item3 < Item3) return 1;
+        if (Item4 < o.Item4) return -1;
+        if (o.Item4 < Item4) return 1;
+        if (Item5 < o.Item5) return -1;
+        if (o.Item5 < Item5) return 1;
         return 0;
     }
     [[nodiscard]] std::string ToString() const {
@@ -386,12 +395,18 @@ struct ValueTuple6 {
         return static_cast<intcs>(h);
     }
     [[nodiscard]] intcs CompareTo(const ValueTuple6& o) const {
-        if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1; if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1; if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1; if (o.Item6 < Item6) return 1;
+        if (Item1 < o.Item1) return -1;
+        if (o.Item1 < Item1) return 1;
+        if (Item2 < o.Item2) return -1;
+        if (o.Item2 < Item2) return 1;
+        if (Item3 < o.Item3) return -1;
+        if (o.Item3 < Item3) return 1;
+        if (Item4 < o.Item4) return -1;
+        if (o.Item4 < Item4) return 1;
+        if (Item5 < o.Item5) return -1;
+        if (o.Item5 < Item5) return 1;
+        if (Item6 < o.Item6) return -1;
+        if (o.Item6 < Item6) return 1;
         return 0;
     }
     [[nodiscard]] std::string ToString() const {
@@ -442,13 +457,20 @@ struct ValueTuple7 {
         return static_cast<intcs>(h);
     }
     [[nodiscard]] intcs CompareTo(const ValueTuple7& o) const {
-        if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1; if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1; if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1; if (o.Item6 < Item6) return 1;
-        if (Item7 < o.Item7) return -1; if (o.Item7 < Item7) return 1;
+        if (Item1 < o.Item1) return -1;
+        if (o.Item1 < Item1) return 1;
+        if (Item2 < o.Item2) return -1;
+        if (o.Item2 < Item2) return 1;
+        if (Item3 < o.Item3) return -1;
+        if (o.Item3 < Item3) return 1;
+        if (Item4 < o.Item4) return -1;
+        if (o.Item4 < Item4) return 1;
+        if (Item5 < o.Item5) return -1;
+        if (o.Item5 < Item5) return 1;
+        if (Item6 < o.Item6) return -1;
+        if (o.Item6 < Item6) return 1;
+        if (Item7 < o.Item7) return -1;
+        if (o.Item7 < Item7) return 1;
         return 0;
     }
     [[nodiscard]] std::string ToString() const {
@@ -576,13 +598,20 @@ struct ValueTuple8 {
      * @return -1 if less, 0 if equal, 1 if greater.
      */
     [[nodiscard]] intcs CompareTo(const ValueTuple8& o) const {
-        if (Item1 < o.Item1) return -1; if (o.Item1 < Item1) return 1;
-        if (Item2 < o.Item2) return -1; if (o.Item2 < Item2) return 1;
-        if (Item3 < o.Item3) return -1; if (o.Item3 < Item3) return 1;
-        if (Item4 < o.Item4) return -1; if (o.Item4 < Item4) return 1;
-        if (Item5 < o.Item5) return -1; if (o.Item5 < Item5) return 1;
-        if (Item6 < o.Item6) return -1; if (o.Item6 < Item6) return 1;
-        if (Item7 < o.Item7) return -1; if (o.Item7 < Item7) return 1;
+        if (Item1 < o.Item1) return -1;
+        if (o.Item1 < Item1) return 1;
+        if (Item2 < o.Item2) return -1;
+        if (o.Item2 < Item2) return 1;
+        if (Item3 < o.Item3) return -1;
+        if (o.Item3 < Item3) return 1;
+        if (Item4 < o.Item4) return -1;
+        if (o.Item4 < Item4) return 1;
+        if (Item5 < o.Item5) return -1;
+        if (o.Item5 < Item5) return 1;
+        if (Item6 < o.Item6) return -1;
+        if (o.Item6 < Item6) return 1;
+        if (Item7 < o.Item7) return -1;
+        if (o.Item7 < Item7) return 1;
         return Rest.CompareTo(o.Rest);
     }
 

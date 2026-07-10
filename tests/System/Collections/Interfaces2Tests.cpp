@@ -153,7 +153,6 @@ TEST(IListTest, IsFixedSizeFalse) {
 TEST(IStructuralComparableTest, LessThan) {
     IntBox box(3);
     int other = 5;
-    IComparer* cmp = nullptr;
     EXPECT_LT(box.CompareTo(&other, System::Collections::Comparer::Default()), 0);
 }
 

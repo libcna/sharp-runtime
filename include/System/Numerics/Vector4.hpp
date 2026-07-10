@@ -61,12 +61,18 @@ struct Vector4 {
 
     /** @return The component at @p i (0=X,1=Y,2=Z,3=W). @throws System::ArgumentOutOfRangeException on invalid index. */
     float operator[](int i) const {
-        if(i==0)return X; if(i==1)return Y; if(i==2)return Z; if(i==3)return W;
+        if (i==0) return X;
+        if (i==1) return Y;
+        if (i==2) return Z;
+        if (i==3) return W;
         throw System::ArgumentOutOfRangeException("index");
     }
     /** @return A reference to the component at @p i (0=X,1=Y,2=Z,3=W). @throws System::ArgumentOutOfRangeException on invalid index. */
     float& operator[](int i) {
-        if(i==0)return X; if(i==1)return Y; if(i==2)return Z; if(i==3)return W;
+        if (i==0) return X;
+        if (i==1) return Y;
+        if (i==2) return Z;
+        if (i==3) return W;
         throw System::ArgumentOutOfRangeException("index");
     }
 

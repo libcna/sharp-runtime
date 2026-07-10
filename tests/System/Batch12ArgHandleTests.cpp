@@ -10,7 +10,7 @@
 // ===========================================================================
 
 TEST(RuntimeArgumentHandleTests, DefaultConstruct_DoesNotThrow) {
-    EXPECT_NO_THROW(System::RuntimeArgumentHandle h{});
+    EXPECT_NO_THROW(System::RuntimeArgumentHandle{});
 }
 
 TEST(RuntimeArgumentHandleTests, IsDefaultConstructible) {

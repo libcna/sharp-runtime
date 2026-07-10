@@ -133,7 +133,7 @@ TEST(PlatformNotSupportedExceptionNewTests, DefaultMsg_ContainsPlatform) {
 // GCGenerationInfo
 // ---------------------------------------------------------------------------
 TEST(GCGenerationInfoTests, DefaultCtor_DoesNotThrow) {
-    EXPECT_NO_THROW(System::GCGenerationInfo gi);
+    EXPECT_NO_THROW(System::GCGenerationInfo());
 }
 TEST(GCGenerationInfoTests, SizeBeforeBytes_IsZero) {
     System::GCGenerationInfo gi;
