@@ -58,7 +58,11 @@ namespace System::Text::Json {
 
     public:
         /** @brief Constructs a writer with the given options (an empty internal buffer to start). */
-        explicit Utf8JsonWriter(JsonWriterOptions options = {}) : options_(std::move(options)) { validateOptions(); }
+        explicit Utf8JsonWriter(JsonWriterOptions options = {}) : options_(std::move(options)) {
+            validateOptions();
+            if (options_.MaxDepth == 0)
+                options_.MaxDepth = JsonWriterOptions::DefaultMaxDepth;
+        }
 
         /** @return The options this writer was constructed with. */
         [[nodiscard]] const JsonWriterOptions& getOptionsProperty() const { return options_; }

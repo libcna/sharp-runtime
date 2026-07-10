@@ -150,6 +150,46 @@ TEST(Utf8JsonWriterTests, CurrentDepth_TracksNesting) {
     EXPECT_EQ(w.getCurrentDepthProperty(), 0);
 }
 
+TEST(Utf8JsonWriterTests, WriteNonAsciiString_EscapedAsUnicodeSequences) {
+    Utf8JsonWriter w;
+    w.WriteStringValue("caf\xC3\xA9");  // "café"
+    EXPECT_EQ(w.GetString(), "\"caf\\u00e9\"");
+}
+
+TEST(Utf8JsonWriterTests, WriteAstralCharacter_EscapedAsSurrogatePair) {
+    Utf8JsonWriter w;
+    w.WriteStringValue("\xF0\x9F\x98\x80");  // U+1F600 GRINNING FACE
+    EXPECT_EQ(w.GetString(), "\"\\ud83d\\ude00\"");
+}
+
+TEST(Utf8JsonWriterTests, WritePlusBacktickDel_Escaped) {
+    Utf8JsonWriter w;
+    w.WriteStringValue("a+b`c\x7F" "d");
+    EXPECT_EQ(w.GetString(), "\"a\\u002bb\\u0060c\\u007fd\"");
+}
+
+TEST(Utf8JsonWriterTests, DefaultMaxDepth_Is1000) {
+    Utf8JsonWriter w;
+    EXPECT_EQ(w.getOptionsProperty().MaxDepth, 1000);
+}
+
+TEST(Utf8JsonWriterTests, ExceedingDefaultMaxDepth_Throws) {
+    Utf8JsonWriter w;
+    for (int i = 0; i < 1000; ++i)
+        w.WriteStartArray();
+    EXPECT_THROW(w.WriteStartArray(), System::InvalidOperationException);
+}
+
+TEST(Utf8JsonWriterTests, ExceedingCustomMaxDepth_Throws) {
+    JsonWriterOptions options;
+    options.MaxDepth = 3;
+    Utf8JsonWriter w(options);
+    w.WriteStartArray();
+    w.WriteStartArray();
+    w.WriteStartArray();
+    EXPECT_THROW(w.WriteStartArray(), System::InvalidOperationException);
+}
+
 TEST(Utf8JsonWriterTests, WrittenJsonRoundTripsThroughJsonDocument) {
     Utf8JsonWriter w;
     w.WriteStartObject();
