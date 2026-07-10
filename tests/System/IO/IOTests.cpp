@@ -415,6 +415,11 @@ TEST(DirectoryNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(DirectoryNotFoundException("wrapped", std::exception_ptr{}));
 }
 
+TEST(DirectoryNotFoundExceptionTests, HResult_MatchesCorEDirectoryNotFound) {
+    DirectoryNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070003));
+}
+
 // ===========================================================================
 // DriveNotFoundException
 // ===========================================================================
@@ -435,6 +440,13 @@ TEST(DriveNotFoundExceptionTests, MessageAndInnerCtor_NoThrow) {
 
 TEST(DriveNotFoundExceptionTests, IsA_IOException) {
     EXPECT_THROW(throw DriveNotFoundException(), System::IO::IOException);
+}
+
+TEST(DriveNotFoundExceptionTests, HResult_MatchesCorEDirectoryNotFound) {
+    // .NET's DriveNotFoundException.cs sets COR_E_DIRECTORYNOTFOUND (same as
+    // DirectoryNotFoundException, not a distinct DriveNotFound HResult).
+    DriveNotFoundException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070003));
 }
 
 // ===========================================================================
@@ -715,6 +727,11 @@ TEST(EndOfStreamExceptionTests, MessageAndInnerCtor_NoThrow) {
     EXPECT_NO_THROW(EndOfStreamException("wrapped", std::exception_ptr{}));
 }
 
+TEST(EndOfStreamExceptionTests, HResult_MatchesCorEEndOfStream) {
+    EndOfStreamException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80070026));
+}
+
 // ===========================================================================
 // PathTooLongException
 // ===========================================================================
@@ -853,6 +870,11 @@ TEST(IsolatedStorageExceptionTests, DefaultCtor_WhatNotEmpty) {
 TEST(IsolatedStorageExceptionTests, MessageAndInnerCtor_WhatContainsMessage) {
     IsolatedStorageException ex("wrapped failure", std::exception_ptr{});
     EXPECT_NE(std::string(ex.what()).find("wrapped failure"), std::string::npos);
+}
+
+TEST(IsolatedStorageExceptionTests, HResult_MatchesCorEIsoStore) {
+    IsolatedStorageException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131450));
 }
 
 // ===========================================================================

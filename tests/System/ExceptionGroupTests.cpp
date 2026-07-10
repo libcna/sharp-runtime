@@ -25,6 +25,12 @@ TEST(DivideByZeroExceptionNewTests, IsArithmeticException) {
     System::DivideByZeroException e;
     EXPECT_NE(dynamic_cast<System::ArithmeticException*>(&e), nullptr);
 }
+TEST(DivideByZeroExceptionNewTests, HResult_MatchesCorEDivideByZero) {
+    // Regression: previously inherited ArithmeticException's HResult instead of setting
+    // its own, matching .NET's DivideByZeroException.cs (HResults.COR_E_DIVIDEBYZERO).
+    System::DivideByZeroException e;
+    EXPECT_EQ(e.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80020012));
+}
 TEST(DivideByZeroExceptionNewTests, DefaultMsg_ContainsDivide) {
     System::DivideByZeroException e;
     EXPECT_NE(std::string(e.what()).find("zero"), std::string::npos);

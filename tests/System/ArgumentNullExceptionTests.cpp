@@ -16,6 +16,14 @@ TEST(ArgumentNullExceptionTests, IsA_ArgumentException) {
     EXPECT_THROW(throw ArgumentNullException(), System::ArgumentException);
 }
 
+TEST(ArgumentNullExceptionTests, HResult_MatchesEPointer) {
+    // Regression: previously inherited ArgumentException's HResult; .NET's real value
+    // (ArgumentNullException.cs) is E_POINTER, not COR_E_ARGUMENT -- "Use E_POINTER,
+    // COM used that for null pointers."
+    ArgumentNullException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80004003));
+}
+
 TEST(ArgumentNullExceptionTests, ParamNameCtor_StoresParamName) {
     ArgumentNullException ex("myParam");
     EXPECT_EQ(ex.getParamNameProperty(), "myParam");

@@ -24,6 +24,13 @@ TEST(ArgumentOutOfRangeExceptionTests, DefaultCtor_ActualValue_Empty) {
     EXPECT_TRUE(ex.getActualValueProperty().empty());
 }
 
+TEST(ArgumentOutOfRangeExceptionTests, HResult_MatchesCorEArgumentOutOfRange) {
+    // Regression: previously inherited ArgumentException's HResult instead of .NET's
+    // distinct HResults.COR_E_ARGUMENTOUTOFRANGE (ArgumentOutOfRangeException.cs).
+    ArgumentOutOfRangeException ex;
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131502));
+}
+
 TEST(ArgumentOutOfRangeExceptionTests, DefaultCtor_ParamName_Empty) {
     ArgumentOutOfRangeException ex;
     EXPECT_TRUE(ex.getParamNameProperty().empty());
