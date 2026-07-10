@@ -1,6 +1,148 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `2833f34`) — 11262 tests passing (Debug, default `cmake --build build` config); library-only Release build (GCC 14, `-Werror`) now separately verified clean too — see checkpoint below*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `f12da05`) — 11305 tests passing (Debug, default `cmake --build build` config, verified via full `rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build --parallel 8` + `./build/SharpRuntimeTests`); library-only Release build also separately re-verified clean (`cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release && cmake --build build_no_tests --parallel 8`, exit 0, 0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — dangerous-despite-moderate wave-3 findings: 24 fixed across 4 namespace slices (21 commits)
+
+Per explicit instruction this session, worked exclusively through wave-3 **moderate**-severity
+findings (all criticals were already closed — see the checkpoint below), prioritizing findings
+matching these criteria over ordinary cleanup: silent wrong behavior; null/throw mismatches vs.
+real .NET; missing parent/cycle guards; wrong exception types; doc-comment/implementation
+mismatches; platform-specific behavior leaking through a public API.
+
+**Discipline followed for every item:** verify against real .NET source in
+`/rv/tmp/runtime/src/libraries/` → write/extend a regression test → fix → build clean → run the
+targeted test suite → bump the corresponding `plan.sqlite3` row's `updated_at` → commit. All 21
+commits are individually verified against a specific cited `.NET` source file/method in their
+commit messages.
+
+### Net core + Sockets (7 findings fixed, commits `b19bab6`..`843c3d8`,`81b0a46`)
+
+- `Socket::Send/Receive/SendTo/ReceiveFrom` cast `SocketFlags` directly to native `int` flags
+  with no translation (correct only by coincidence for `OutOfBand`/`Peek`/`DontRoute`) — added
+  `nativeSocketFlags()` translating each individually on POSIX, verified against
+  `pal_networking.c`'s `ConvertSocketFlagsPalToPlatform`.
+- `IPAddress::TryParse` could throw uncaught `std::out_of_range` (via `std::stoul`) on IPv6
+  scope-ID overflow, violating `TryParse`'s never-throws contract — switched to
+  `std::from_chars`.
+- `IPAddress::IsLoopback` missed the IPv4-mapped form `::ffff:127.0.0.1` — added the second
+  equality check real .NET's `IsLoopback` performs.
+- `IPAddress::GetHashCode()` only combined the first 64 bits of an IPv6 address — now combines
+  all 128 bits, matching `IPAddress.cs`.
+- `IPEndPoint(longcs, intcs)` silently truncated an out-of-`uint32_t`-range address instead of
+  throwing — added a validated-narrow helper matching `IPAddress.cs`'s `IPAddress(long)` ctor.
+- `WebUtility::UrlEncode`'s safe-character set didn't match .NET's `s_safeUrlChars`
+  (`-_.!*()`, not `-_.~`) — fixed the character set; one pre-existing test encoded the old
+  wrong set and was updated.
+- `TcpListener::Start()` hardcoded `listen(fd, 5)` instead of requesting the platform max
+  (`INT32_MAX`, matching `TCPListener.cs`'s default `SocketOptionName.MaxConnections`).
+
+### Net.Http + WebSockets + NetworkInformation (5 findings fixed, commits `986eead`..`27845a7`)
+
+- `HttpClient::parseUrl` threw `std::invalid_argument` for every failure path — now throws
+  `System::UriFormatException` (malformed URI) or `System::NotSupportedException` (unsupported
+  scheme), matching real .NET's `Uri` construction failure modes.
+- `CacheControlHeaderValue`'s `max-age`/`s-maxage` parser accepted a leading `-` and silently
+  wrapped on overflow when narrowing `long`→`intcs` — added an all-digit pre-check and explicit
+  bound, matching `HeaderUtilities.cs`'s `int.TryParse(..., NumberStyles.None, ...)`.
+- `ClientWebSocketOptions::AddSubProtocol`'s duplicate check was case-sensitive — switched to
+  `OrdinalIgnoreCase`, matching `ClientWebSocketOptions.cs`.
+- `NetworkInterface::GetIsNetworkAvailable()` excluded only `Loopback`, not `Tunnel` — added the
+  second exclusion, matching `NetworkInterfacePal.Linux.cs`. (No dedicated test: depends on real
+  OS interface topology this port can't mock; verified via full-suite pass instead.)
+- (Verified, no fix needed: `q=` quality-value parsing across all 3 header-value files already
+  correctly try/catch-guards `std::stod`, and NaN/Infinity are naturally rejected by the
+  existing range check — this catalogued finding was already stale.)
+
+### System.IO core (10 findings fixed, commits `d7ab9e6`..`f665128`)
+
+- `File::Delete` silently deleted an empty directory (`std::filesystem::remove()` also removes
+  directories) — real .NET's `unlink()`-based `File.Delete` can never remove a directory; now
+  throws `IOException`.
+- `RandomAccess::Write` issued one `pwrite()`/`WriteFile()` call and silently dropped any bytes
+  a "short write" didn't cover — now loops until the whole buffer is written, matching
+  `RandomAccess.Unix.cs`'s `WriteAtOffset`.
+- `Directory::GetFiles(path, "*.*")` literally translated to a regex requiring a literal `.`,
+  excluding every extensionless file — `"*.*"` now special-cased to match everything, matching
+  `FileSystemName.cs`'s legacy DOS 8.3 compatibility behavior.
+- `FileSystemInfo`'s `CreationTime`/`LastAccessTime`/`LastWriteTime` (the "local" properties)
+  returned the UTC value verbatim with no timezone conversion — routed through the existing
+  `TimeZoneInfo::ConvertTimeFromUtc/ConvertTimeToUtc(..., TimeZoneInfo::Local())`.
+- `FileStream` threw a generic `IOException` (or, for `Open`/`Truncate`, unconditionally
+  `FileNotFoundException`) when the *parent* directory was missing — now throws
+  `DirectoryNotFoundException`, matching `Interop.IOErrors.cs`'s Windows-compatibility fallback.
+- `MemoryStream::Read()` returned `0` (indistinguishable from EOF) for a null buffer or
+  negative offset/count instead of throwing.
+- `MemoryStream::Close()` cleared the buffer and reset position, contradicting its own doc
+  comment ("no-op for MemoryStream") and `MemoryStream.cs`'s `Dispose(bool)`, which explicitly
+  preserves both so `GetBuffer()`/`ToArray()` keep working — now a true no-op.
+- `UnmanagedMemoryStream` threw `NotSupportedException` instead of `ObjectDisposedException`
+  after `Close()` — added an explicit `isOpen_` check ahead of the `CanRead`/`CanWrite` checks
+  in `Read`/`Write`/`SetLength`, matching `UnmanagedMemoryStream.cs`'s `EnsureNotClosed()`
+  ordering.
+- `BinaryWriter::Close()`/destructor did nothing at all when `leaveOpen=true` instead of
+  flushing — now calls `Flush()` on the underlying stream, matching `BinaryWriter.cs`'s
+  `Dispose(bool)`.
+- `StreamReader`/`StringReader::ReadLine()` only stopped at `'\n'`, silently merging a lone
+  `'\r'`-terminated line into the next one — both now treat `'\r'` and `'\n'` as interchangeable
+  terminators (consuming a following `'\n'` after `'\r'` as one CRLF terminator), matching
+  `StreamReader.cs`/`StringReader.cs`.
+  - **Also fixed 2 pre-existing tests** that broke as a side effect of the `MemoryStream::Close()`
+    fix above (they used buffer-clearing as a proxy for "was Close() called on the underlying
+    stream," which stopped working once Close() correctly stopped clearing it) — rewrote using a
+    new `FlushTrackingStream` test double that observes `Close()`/`Flush()` calls directly.
+
+### System.Text.Json (2 of 8 dangerous findings fixed, commits `3e74b43`, `f12da05`)
+
+- `Utf8JsonWriter::WriteNumberValue(double)` silently serialized NaN/±Infinity as the JSON
+  literal `null` (nlohmann's documented behavior) instead of throwing — now throws
+  `System::ArgumentException`, matching `JsonWriterHelper.cs`'s `ValidateDouble`.
+  `WriteNumber(name, double)` validates before writing the property name, so failure is atomic.
+- `JsonValue`'s `Get*()` accessors threw `FormatException` for a wrong-kind access instead of
+  `InvalidOperationException` — matches `JsonValueOfElement.cs`'s `GetValue<T>`.
+
+**Not attempted — genuinely bigger lifts, flagged rather than rushed:**
+- `JsonEncodedText::Encode(string)` doesn't validate or escape its input at all (defeating the
+  type's entire purpose — a caller-embedded unescaped `"` would corrupt JSON output if this
+  pre-encoded text is ever written verbatim). The correct fix requires extracting
+  `Utf8JsonWriter::appendEscapedString` (currently private, writes into the writer's own
+  buffer) into a shared, reusable escaping utility — a real refactor, not a targeted fix.
+- `AllowTrailingCommas`/`AllowDuplicateProperties` (`JsonDocumentOptions`) are validated as
+  constructor args but never actually enforced during parsing, because the underlying parser
+  (nlohmann/json) has no native "allow trailing commas" toggle — would need either a
+  pre-processing pass over the JSON text or a parser swap.
+- `AllowDuplicateProperties` default mismatch, `JsonSerializerOptions(Strict)` no-op,
+  `PropertyNameCaseInsensitive` unconsulted, `GetRawText()` reformatting — not yet started.
+
+### Wave-3 catalogue: moderate/minor status after this session
+
+| namespace | moderate done | moderate remaining (approx.) | minor done |
+|---|---|---|---|
+| Net core + Sockets | 7 | ~5 (validation-only "ordinary" items, e.g. Socket setter validation, TcpClient/UdpClient IPv4-only) | 0 |
+| Net.Http/WebSockets/NetworkInformation | 5 | ~4 (HttpResponseMessage status-range validation, header getters, ClientWebSocket message-type validation) | 0 |
+| IO core | 10 | 0 known dangerous; several "ordinary" gaps remain (StreamReader/StreamWriter ctor validation) | 0 |
+| IO.Compression/Hashing | 6 (done in an earlier session phase) | 0 dangerous | 3 (untouched) |
+| Text.Json | 2 | 6 (see "not attempted" above) | 0 |
+| Threading | 3 (done in an earlier session phase — SynchronizationContext, disposed-race, LIFO) | untouched this session (~26 moderate + "and more" per the original audit, exact count not preserved — see this file's Threading checkpoint) | 0 |
+| Xml core | 1 (done in an earlier session phase — XmlNode ancestor-cycle/cross-doc) | untouched this session (~12 moderate) | 0 |
+| Xml.Linq+XPath | 0 | untouched this session (~12 moderate, ~9 flagged dangerous per this session's triage) | 0 |
+
+**Caveat on the "remaining" counts above:** they come from a fork-agent triage pass over this
+file's own "Full findings catalogue" section this session, which is itself explicitly
+non-exhaustive in places (several namespace "highlights" paragraphs are condensed prose, not
+itemized lists) and Threading's own remaining-findings text ends "...and more" with the detail
+not preserved in this file. Treat these as lower bounds, not exact counts. A fresh audit pass
+would be needed for a precise number.
+
+**Blocked/needs-user items:** none from this session's actual fixes. Two items were
+consciously deferred as "bigger lifts" (see Text.Json section above) rather than blocked —
+they're well-defined, just larger in scope than a single targeted fix.
+
+**Recommended next session priority:** Threading's remaining moderates (this namespace's first
+3 "dangerous" items were the highest-value ones and are already done; check what's left against
+current source, since several catalogued items in other namespaces turned out stale this
+session) → Xml core → Xml.Linq+XPath → Text.Json's 6 remaining dangerous items → everything
+else, ordinary-severity moderates → minors last.
 
 ## Session checkpoint (2026-07-10, continued again) — build-verification gap: library-only Release build with GCC 14 was never actually tested, and failed
 
