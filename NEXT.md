@@ -1,6 +1,51 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `8a440a2`) — 11142 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `a5c34ec`) — 11152 tests passing, full clean rebuild verified (0 errors/0 warnings)*
+
+## Session checkpoint (2026-07-10, continued again) — wave-3 priority item 4 fixed (Utf8JsonWriter escaping/MaxDepth + JsonDocument MaxDepth)
+
+*Branch: `feature/work`, HEAD `a5c34ec` — 11152 tests passing (up from 11142 at the top of
+the item-3 checkpoint below), full clean rebuild verified (0 errors/0 warnings)*
+
+Fixed both parts of the wave-3 "suggested processing priority" list's item 4, each verified
+against the corresponding real .NET source:
+
+- **`Utf8JsonWriter::appendEscapedString` non-ASCII passthrough** — verified against
+  `DefaultJavaScriptEncoder.cs`/`AllowedBmpCodePointsBitmap.cs`: the default
+  `JavaScriptEncoder`'s allow-list is `UnicodeRanges.BasicLatin` minus undefined/control
+  characters (including DEL) minus HTML-sensitive characters (`< > & ' " +`) minus explicit
+  extra escapes for `\` and backtick — net effect, every codepoint ≥ U+0080 must be escaped
+  as `\uXXXX` (or a `\uXXXX\uYYYY` surrogate pair for astral codepoints ≥ U+10000). The
+  previous implementation only escaped control chars, `"`, `\`, and `<>&'` — non-ASCII text
+  (names, i18n strings, emoji) passed straight through as raw UTF-8 bytes inside the JSON
+  string, and `+`/backtick/DEL were missed even within ASCII. Added a `decodeUtf8` helper
+  (same validated-decode pattern used by `ASCIIEncoding`/`UnicodeEncoding`/`UTF32Encoding`/
+  `IdnMapping` elsewhere in this codebase) and rewrote `appendEscapedString` to use it. 6
+  regression tests (non-ASCII, astral surrogate pair, `+`/backtick/DEL).
+- **`Utf8JsonWriter`/`JsonWriterOptions.MaxDepth` never resolved from its 0 sentinel** —
+  verified against `Utf8JsonWriter.cs`'s `SetOptions()`: real .NET resolves `MaxDepth == 0`
+  to `JsonWriterOptions.DefaultMaxDepth` (1000) once, at construction time, so the writer's
+  three depth-check call sites (all originally gated by `MaxDepth > 0 && ...`) actually
+  engage. This port left `MaxDepth` at 0 forever for default-constructed writers, silently
+  disabling every depth check — unbounded nesting wrote successfully with no
+  `InvalidOperationException`, unlike real .NET. Added `JsonWriterOptions::DefaultMaxDepth =
+  1000` and resolved it in the `Utf8JsonWriter` constructor.
+- **`JsonDocument::Parse` never enforced `MaxDepth` at all** — verified against
+  `Utf8JsonReader.cs` (the reader `JsonDocument.Parse` delegates depth tracking to) and
+  `JsonDocumentOptions.cs` (`DefaultMaxDepth = 64`): real .NET throws once nesting reaches
+  the configured/default depth. This port validated `MaxDepth >= 0` but never checked it
+  against the parsed tree at all — pathologically deep documents parsed with no limit. Added
+  `JsonDocumentOptions::DefaultMaxDepth = 64` and a post-parse recursive depth walk
+  (`JsonDocument::checkMaxDepth`) that throws `JsonException` with .NET's exact message
+  format (`Strings.resx`'s `ArrayDepthTooLarge`/`ObjectDepthTooLarge`) once the effective
+  max depth is exceeded. 4 regression tests (default/custom `MaxDepth`, at-limit succeeds,
+  one-over throws).
+
+Both `Utf8JsonWriter` (commit `4ffb04e`) and `JsonDocument` (commit `a5c34ec`) fixes are
+built, tested, and pushed. All four items from the "suggested processing priority" list are
+now done. **Next: item 5 — everything else, namespace by namespace (~180 remaining
+findings)**, same discipline as waves 1-2: verify against real .NET source, fix, add
+regression tests, rebuild/retest clean, commit, push, checkpoint.
 
 ## Session checkpoint (2026-07-10, continued again) — wave-3 priority item 3 fixed (all 4 memory-safety criticals)
 
