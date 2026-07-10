@@ -225,6 +225,22 @@ TEST(TextInfoBatch33Test, ToTitleCase) {
     EXPECT_EQ(ti.ToTitleCase("hello world"), "Hello World");
 }
 
+// .NET preserves all-uppercase words (acronyms) unchanged instead of lowercasing them --
+// TextInfo.cs's own comment: "Use hasLowerCase flag to prevent from lowercasing acronyms
+// (like URT, USA, etc). This is in line with Word 2000 behavior of titlecasing."
+TEST(TextInfoBatch33Test, ToTitleCase_PreservesAllUppercaseAcronym) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("USA"), "USA");
+    EXPECT_EQ(ti.ToTitleCase("visit the USA today"), "Visit The USA Today");
+}
+
+// A word whose first letter is lowercase is still normally title-cased even if the rest
+// happens to be uppercase, since .NET's hasLowerCase check covers the first letter too.
+TEST(TextInfoBatch33Test, ToTitleCase_LowercaseFirstLetter_NotTreatedAsAcronym) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("uSA"), "Usa");
+}
+
 TEST(TextInfoBatch33Test, Clone_IsMutable) {
     auto ro = TextInfo::ReadOnly(TextInfo());
     auto clone = ro.Clone();
