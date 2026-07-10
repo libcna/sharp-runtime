@@ -7,6 +7,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/IO/FileNotFoundException.hpp"
 #include "System/IO/IOException.hpp"
 
@@ -17,6 +18,19 @@ namespace System::IO
     namespace {
         bool HasFlag(FileAccess access, FileAccess flag) {
             return (access & flag) == flag;
+        }
+
+        // Verified against Interop.IOErrors.cs's GetExceptionForIoErrno: real .NET throws
+        // DirectoryNotFoundException (not FileNotFoundException, and not a generic IOException)
+        // whenever the *parent* directory of the target path doesn't exist -- "For Windows
+        // compatibility, throw DirectoryNotFoundException instead of FileNotFoundException when
+        // the parent folder does not exist."
+        bool ParentDirectoryExists(const std::string& path) {
+            std::filesystem::path parent = std::filesystem::path(path).parent_path();
+            if (parent.empty()) return true; // relative path with no directory component
+            std::error_code ec;
+            bool isDir = std::filesystem::is_directory(parent, ec);
+            return !ec && isDir;
         }
 
         // .NET: FileStream(path, mode) defaults access to Write for Append, ReadWrite otherwise.
@@ -58,6 +72,9 @@ namespace System::IO
             throw IOException("Cannot create '" + path + "' because a file or directory with the same name already exists.");
         }
         if ((mode == FileMode::Open || mode == FileMode::Truncate) && !exists) {
+            if (!ParentDirectoryExists(path)) {
+                throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+            }
             throw FileNotFoundException("Unable to find the specified file.", path);
         }
 
@@ -89,6 +106,9 @@ namespace System::IO
 
         file_.open(path, iosMode);
         if (!file_.is_open()) {
+            if (!ParentDirectoryExists(path)) {
+                throw DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
+            }
             throw IOException("Failed to open file '" + path + "'.");
         }
 

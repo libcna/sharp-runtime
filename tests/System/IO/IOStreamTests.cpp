@@ -1207,6 +1207,22 @@ TEST(FileStreamTests, Truncate_NonExistentFile_ThrowsFileNotFoundException) {
                  System::IO::FileNotFoundException);
 }
 
+// Regression tests for a wave-3 audit finding: opening/creating a file whose *parent*
+// directory doesn't exist threw a generic IOException (or, for FileMode::Open,
+// FileNotFoundException) instead of DirectoryNotFoundException. Verified against
+// Interop.IOErrors.cs's GetExceptionForIoErrno: "For Windows compatibility, throw
+// DirectoryNotFoundException instead of FileNotFoundException when the parent folder does not
+// exist."
+TEST(FileStreamTests, Open_MissingParentDirectory_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(FileStream(tf("no_such_parent_dir_xyz/file.bin"), FileMode::Open, FileAccess::Read),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(FileStreamTests, Create_MissingParentDirectory_ThrowsDirectoryNotFoundException) {
+    EXPECT_THROW(FileStream(tf("no_such_parent_dir_xyz/file.bin"), FileMode::Create, FileAccess::ReadWrite),
+                 System::IO::DirectoryNotFoundException);
+}
+
 TEST(FileStreamTests, OpenOrCreate_NonExistentFile_CreatesEmpty) {
     std::string p = tf("fstream_openorcreate_new.bin");
     File::Delete(p);
