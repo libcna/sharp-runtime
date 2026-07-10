@@ -64,7 +64,7 @@ namespace System::Security::Cryptography {
             if (TryFromOid(oidValue, value)) {
                 return value;
             }
-            throw CryptographicException("'" + oidValue + "' is not a supported hash algorithm OID.");
+            throw CryptographicException("The specified OID (" + oidValue + ") does not represent a known hash algorithm.");
         }
     };
 
