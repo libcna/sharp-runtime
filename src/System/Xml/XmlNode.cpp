@@ -81,7 +81,11 @@ namespace System::Xml {
 
     std::string XmlNode::getInnerXmlProperty() const {
         if (!native_) return {};
-        tinyxml2::XMLPrinter printer;
+        // compact=true: real .NET's InnerXml serializes exact markup with no inserted
+        // whitespace between nodes. tinyxml2::XMLPrinter defaults to compact=false (pretty-
+        // printed with inserted newlines/indentation), which this port previously left
+        // unchanged, silently reformatting the tree's own markup instead of reproducing it.
+        tinyxml2::XMLPrinter printer(nullptr, /*compact=*/true);
         for (tinyxml2::XMLNode* child = native_->FirstChild(); child; child = child->NextSibling())
             child->Accept(&printer);
         return printer.CStr() ? printer.CStr() : "";
@@ -104,7 +108,9 @@ namespace System::Xml {
 
     std::string XmlNode::getOuterXmlProperty() const {
         if (!native_) return {};
-        tinyxml2::XMLPrinter printer;
+        // See getInnerXmlProperty()'s comment: compact=true matches real .NET's OuterXml
+        // producing exact markup with no inserted whitespace.
+        tinyxml2::XMLPrinter printer(nullptr, /*compact=*/true);
         native_->Accept(&printer);
         return printer.CStr() ? printer.CStr() : "";
     }

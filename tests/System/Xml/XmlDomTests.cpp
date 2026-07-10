@@ -220,6 +220,23 @@ TEST(XmlElementTests, OuterXml_ContainsTagAndAttributes) {
     EXPECT_NE(xml.find("Title"), std::string::npos);
 }
 
+TEST(XmlElementTests, OuterXml_NestedElements_ProducesExactMarkupNoInsertedWhitespace) {
+    // Regression: real .NET's OuterXml serializes exact markup with no inserted whitespace
+    // between nodes. tinyxml2::XMLPrinter defaults to pretty-printing (inserted newlines and
+    // indentation), which this port previously left unchanged.
+    XmlDocument doc;
+    doc.LoadXml("<root><a/><b>text</b></root>");
+    auto* root = doc.getDocumentElementProperty();
+    EXPECT_EQ(root->getOuterXmlProperty(), "<root><a/><b>text</b></root>");
+}
+
+TEST(XmlElementTests, InnerXml_NestedElements_ProducesExactMarkupNoInsertedWhitespace) {
+    XmlDocument doc;
+    doc.LoadXml("<root><a/><b>text</b></root>");
+    auto* root = doc.getDocumentElementProperty();
+    EXPECT_EQ(root->getInnerXmlProperty(), "<a/><b>text</b>");
+}
+
 TEST(XmlElementTests, SetInnerXml_ParsesAndAppendsChildren) {
     XmlDocument doc;
     auto* el = doc.CreateElement("root");
