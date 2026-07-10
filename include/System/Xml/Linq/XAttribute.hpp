@@ -58,9 +58,18 @@ namespace System::Xml::Linq {
         /** @brief Removes this attribute from its owning element. @throws System::InvalidOperationException if this attribute has no parent. */
         void Remove();
 
-        /** @return The attribute serialised as name="value" (value is XML-escaped). */
+        /**
+         * @return The attribute serialised as name="value" (value is XML-escaped).
+         *
+         * @note Uses the local name only, not XName::ToString()'s Clark notation
+         * ("{namespace}local") -- real .NET's ToString() resolves a proper namespace prefix via
+         * an actual XmlWriter (GetPrefixOfNamespace); this port's XmlWriter has no namespace/
+         * prefix-aware WriteAttributeString overload, so writing Clark notation directly as the
+         * attribute *name* would produce literally malformed, unparseable XML ('{'/'}' are not
+         * legal in an XML Name production) instead of just a namespace-fidelity gap.
+         */
         [[nodiscard]] std::string ToString() const {
-            return name_.ToString() + "=\"" + EscapeValue(value_) + "\"";
+            return name_.getLocalNameProperty() + "=\"" + EscapeValue(value_) + "\"";
         }
 
     private:
