@@ -213,22 +213,22 @@ namespace System {
         /**
          * @brief Returns the floor of the base-2 logarithm of @p value.
          *
-         * C++ counterpart of .NET Byte.Log2(byte).
-         * @throws std::domain_error if @p value is 0.
+         * C++ counterpart of .NET Byte.Log2(byte), which delegates to
+         * BitOperations.Log2 — by convention Log2(0) returns 0 rather than throwing,
+         * since byte can never be negative and there is nothing else to signal.
          */
-        [[nodiscard]] static bytecs Log2(bytecs value) {
-            if (value == 0) throw std::domain_error("Log2 of zero is undefined.");
+        [[nodiscard]] static bytecs Log2(bytecs value) noexcept {
+            if (value == 0) return 0;
             return static_cast<bytecs>(std::bit_width(static_cast<uint32_t>(value)) - 1);
         }
 
         /**
          * @brief Returns the base-10 logarithm of @p value, truncated to Byte.
          *
-         * C++ counterpart of .NET Byte.Log10(byte).
-         * @throws std::domain_error if @p value is 0.
+         * C++ counterpart of .NET Byte.Log10(byte), which delegates to uint.Log10 —
+         * by convention Log10(0) returns 0 rather than throwing.
          */
-        [[nodiscard]] static bytecs Log10(bytecs value) {
-            if (value == 0) throw std::domain_error("Log10 of zero is undefined.");
+        [[nodiscard]] static bytecs Log10(bytecs value) noexcept {
             bytecs result = 0;
             unsigned v = static_cast<unsigned>(value);
             while (v >= 10) { v /= 10; ++result; }

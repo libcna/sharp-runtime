@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/OverflowException.hpp"
 #include "System/SByte.hpp"
 
@@ -53,7 +54,10 @@ TEST(SByteTest, IsPositive_False) { EXPECT_FALSE(SByte::IsPositive(sbytecs(0)));
 
 TEST(SByteTest, Log10_One)     { EXPECT_EQ(SByte::Log10(sbytecs(1)), sbytecs(0)); }
 TEST(SByteTest, Log10_Ten)     { EXPECT_EQ(SByte::Log10(sbytecs(10)), sbytecs(1)); }
-TEST(SByteTest, Log10_Zero_Throws) { EXPECT_THROW(SByte::Log10(sbytecs(0)), std::domain_error); }
+// .NET SByte.Log10(0) returns 0 (uint.Log10 convention), it does not throw; only a
+// negative value throws (ArgumentOutOfRangeException, per SByte.cs).
+TEST(SByteTest, Log10_Zero_IsZero) { EXPECT_EQ(SByte::Log10(sbytecs(0)), sbytecs(0)); }
+TEST(SByteTest, Log10_Negative_Throws) { EXPECT_THROW(SByte::Log10(sbytecs(-1)), System::ArgumentOutOfRangeException); }
 
 TEST(SByteTest, MaxMagnitude_Larger)   { EXPECT_EQ(SByte::MaxMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(-10)); }
 TEST(SByteTest, MinMagnitude_Smaller)  { EXPECT_EQ(SByte::MinMagnitude(sbytecs(-10), sbytecs(5)), sbytecs(5)); }
@@ -87,3 +91,10 @@ TEST(SByteTest, RotateRight_ByEight_Identity) {
 TEST(SByteTest, LeadingZeroCount_One)  { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(1)), sbytecs(7)); }
 TEST(SByteTest, TrailingZeroCount_Two) { EXPECT_EQ(SByte::TrailingZeroCount(sbytecs(4)), sbytecs(2)); }
 TEST(SByteTest, PopCount_Seven)        { EXPECT_EQ(SByte::PopCount(sbytecs(127)), sbytecs(7)); }
+
+// Negative values are reinterpreted as their raw 8-bit pattern (SByte.cs:
+// `(sbyte)(BitOperations.LeadingZeroCount((byte)value) - 24)`), not special-cased to 8 --
+// e.g. -1's bit pattern is 0xFF, which has zero leading zero bits.
+TEST(SByteTest, LeadingZeroCount_NegOne_IsZero) { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(-1)), sbytecs(0)); }
+TEST(SByteTest, LeadingZeroCount_MinValue_IsZero) { EXPECT_EQ(SByte::LeadingZeroCount(SByte::MinValue), sbytecs(0)); }
+TEST(SByteTest, LeadingZeroCount_Zero_IsEight) { EXPECT_EQ(SByte::LeadingZeroCount(sbytecs(0)), sbytecs(8)); }

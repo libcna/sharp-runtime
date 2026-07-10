@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/SByte.hpp"
 
 using System::SByte;
@@ -53,5 +54,6 @@ TEST(SByteNewTests, PopCount_MaxValue_Is7)   { EXPECT_EQ(SByte::PopCount(sbytecs
 
 TEST(SByteNewTests, Log2_One_IsZero)  { EXPECT_EQ(SByte::Log2(sbytecs(1)), sbytecs(0)); }
 TEST(SByteNewTests, Log2_Two_IsOne)   { EXPECT_EQ(SByte::Log2(sbytecs(2)), sbytecs(1)); }
-TEST(SByteNewTests, Log2_Zero_Throws) { EXPECT_THROW(SByte::Log2(sbytecs(0)), std::domain_error); }
-TEST(SByteNewTests, Log2_Neg_Throws)  { EXPECT_THROW(SByte::Log2(sbytecs(-1)), std::domain_error); }
+// .NET SByte.Log2(0) returns 0 (BitOperations.Log2 convention), it does not throw.
+TEST(SByteNewTests, Log2_Zero_IsZero) { EXPECT_EQ(SByte::Log2(sbytecs(0)), sbytecs(0)); }
+TEST(SByteNewTests, Log2_Neg_Throws)  { EXPECT_THROW(SByte::Log2(sbytecs(-1)), System::ArgumentOutOfRangeException); }
