@@ -161,13 +161,18 @@ public:
         }
         wchar_t wc = (codePoint >= 0 && codePoint <= static_cast<intcs>(WCHAR_MAX))
                      ? static_cast<wchar_t>(codePoint) : L'\0';
+        // C0 controls (U+0000-U+001F) must be classified as Control before any of the
+        // iswupper/iswdigit/iswspace/iswpunct checks below: several of them (TAB U+0009,
+        // LF U+000A, VT U+000B, FF U+000C, CR U+000D) also satisfy iswspace() in the C
+        // locale, so checking iswspace() first previously misclassified them as
+        // SpaceSeparator instead of Control -- confirmed against the real Unicode category
+        // database (all of U+0000-U+001F are Cc; only U+0020 itself is Zs).
+        if (codePoint < 32)    return UnicodeCategory::Control;
         if (std::iswupper(wc)) return UnicodeCategory::UppercaseLetter;
         if (std::iswlower(wc)) return UnicodeCategory::LowercaseLetter;
         if (std::iswdigit(wc)) return UnicodeCategory::DecimalDigitNumber;
         if (std::iswspace(wc)) return UnicodeCategory::SpaceSeparator;
         if (std::iswpunct(wc)) return UnicodeCategory::OtherPunctuation;
-        if (codePoint == 0)    return UnicodeCategory::Control;
-        if (codePoint < 32)    return UnicodeCategory::Control;
         if (std::iswalpha(wc)) return UnicodeCategory::OtherLetter;
         if (std::iswcntrl(wc)) return UnicodeCategory::Control;
         return UnicodeCategory::OtherNotAssigned;
