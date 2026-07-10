@@ -10,6 +10,22 @@
 
 namespace System::Text::Json::Nodes {
 
+    void JsonNode::AssignParent(JsonNode* parent) {
+        // Verified against JsonNode.cs's internal AssignParent: real .NET throws
+        // InvalidOperationException both when this node already has a parent (attaching it
+        // elsewhere without detaching first would leave the original container holding a
+        // dangling reference to a node that now silently reports a different parent) and when
+        // walking up from `parent` reaches `this` (attaching would close a cycle: `this` is
+        // already an ancestor of, or equal to, `parent`).
+        if (getParentProperty())
+            throw System::InvalidOperationException("The node already has a parent.");
+        for (JsonNode* p = parent; p; p = p->getParentProperty()) {
+            if (p == this)
+                throw System::InvalidOperationException("A node cycle was detected.");
+        }
+        parent_ = parent;
+    }
+
     JsonArray& JsonNode::AsArray() {
         auto* p = dynamic_cast<JsonArray*>(this);
         if (!p) throw System::InvalidOperationException("The node is not a JsonArray.");

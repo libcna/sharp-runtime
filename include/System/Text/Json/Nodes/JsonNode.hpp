@@ -55,8 +55,17 @@ namespace System::Text::Json::Nodes {
         /** @brief Internal: converts this node's subtree to an nlohmann::ordered_json value. Not part of .NET's public surface. */
         [[nodiscard]] virtual nlohmann::ordered_json toNlohmann() const = 0;
 
-        /** @brief Internal: sets the parent container pointer. Not part of .NET's public surface. */
-        void setParentProperty(JsonNode* parent) { parent_ = parent; }
+        /**
+         * @brief Internal: attaches this node to a parent container. Not part of .NET's public
+         * surface (mirrors JsonNode.cs's internal AssignParent).
+         * @throws System::InvalidOperationException if this node already has a parent (would
+         * silently detach it from whichever container actually still holds it), or if @p parent
+         * is this node itself or one of this node's own descendants (would create a cycle).
+         */
+        void AssignParent(JsonNode* parent);
+
+        /** @brief Internal: clears the parent container pointer. Not part of .NET's public surface (mirrors JsonNode.cs's internal DetachParent). */
+        void DetachParent() { parent_ = nullptr; }
 
         /** @return This node cast to JsonArray. @throws System::InvalidOperationException if this isn't a JsonArray. */
         [[nodiscard]] JsonArray& AsArray();

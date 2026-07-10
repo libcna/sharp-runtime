@@ -8,7 +8,6 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
-#include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
 
 namespace System::Text::Json::Nodes {
@@ -55,7 +54,7 @@ namespace System::Text::Json::Nodes {
         void Add(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
             if (ContainsKey(propertyName))
                 throw System::ArgumentException("An item with the same key has already been added.", "propertyName");
-            if (value) value->setParentProperty(this);
+            if (value) value->AssignParent(this);
             properties_.emplace_back(propertyName, std::move(value));
         }
 
@@ -63,28 +62,38 @@ namespace System::Text::Json::Nodes {
         bool Remove(const std::string& propertyName) {
             intcs idx = findIndex(propertyName);
             if (idx < 0) return false;
+            if (auto& value = properties_[static_cast<size_t>(idx)].second) value->DetachParent();
             properties_.erase(properties_.begin() + idx);
             return true;
         }
 
-        /** @return The value of @p propertyName. @throws System::Collections::Generic::KeyNotFoundException if absent. */
-        [[nodiscard]] const std::shared_ptr<JsonNode>& operator[](const std::string& propertyName) const {
+        /** @return The value of @p propertyName, or nullptr if not present (verified against JsonNode.cs's string indexer). */
+        [[nodiscard]] std::shared_ptr<JsonNode> operator[](const std::string& propertyName) const {
             intcs idx = findIndex(propertyName);
-            if (idx < 0)
-                throw System::Collections::Generic::KeyNotFoundException("The given key '" + propertyName + "' was not present.");
+            if (idx < 0) return nullptr;
             return properties_[static_cast<size_t>(idx)].second;
         }
 
         /** @brief Sets the value of @p propertyName, adding it if not already present. */
         void SetItem(const std::string& propertyName, std::shared_ptr<JsonNode> value) {
-            if (value) value->setParentProperty(this);
             intcs idx = findIndex(propertyName);
-            if (idx >= 0) properties_[static_cast<size_t>(idx)].second = std::move(value);
-            else properties_.emplace_back(propertyName, std::move(value));
+            if (idx >= 0) {
+                auto& slot = properties_[static_cast<size_t>(idx)].second;
+                if (slot == value) return;
+                if (slot) slot->DetachParent();
+                if (value) value->AssignParent(this);
+                slot = std::move(value);
+            } else {
+                if (value) value->AssignParent(this);
+                properties_.emplace_back(propertyName, std::move(value));
+            }
         }
 
         /** @brief Removes all properties from the object. */
-        void Clear() { properties_.clear(); }
+        void Clear() {
+            for (auto& [name, value] : properties_) if (value) value->DetachParent();
+            properties_.clear();
+        }
 
         [[nodiscard]] auto begin() const { return properties_.begin(); }
         [[nodiscard]] auto end() const { return properties_.end(); }

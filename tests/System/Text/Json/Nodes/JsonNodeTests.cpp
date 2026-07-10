@@ -77,6 +77,60 @@ TEST(JsonArrayTests, Add_SetsParent) {
     EXPECT_EQ(item->getParentProperty(), arr.get());
 }
 
+// ===========================================================================
+// Regression: same parent-safety gap as JsonObjectTests above, but for JsonArray's
+// Add/Insert/SetItem/RemoveAt/Clear.
+// ===========================================================================
+
+TEST(JsonArrayTests, Add_NodeAlreadyHasParent_ThrowsInvalidOperationException) {
+    JsonArray first;
+    auto shared = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    first.Add(shared);
+
+    JsonArray second;
+    EXPECT_THROW(second.Add(shared), System::InvalidOperationException);
+    EXPECT_EQ(first[0], shared);
+}
+
+TEST(JsonArrayTests, Add_Self_ThrowsInvalidOperationException) {
+    auto arr = std::make_shared<JsonArray>();
+    EXPECT_THROW(arr->Add(arr), System::InvalidOperationException);
+}
+
+TEST(JsonArrayTests, Add_Ancestor_ThrowsInvalidOperationException) {
+    auto root = std::make_shared<JsonArray>();
+    auto child = std::make_shared<JsonArray>();
+    root->Add(child);
+    EXPECT_THROW(child->Add(root), System::InvalidOperationException);
+}
+
+TEST(JsonArrayTests, RemoveAt_DetachesParent) {
+    auto arr = std::make_shared<JsonArray>();
+    auto item = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    arr->Add(item);
+    arr->RemoveAt(0);
+    EXPECT_EQ(item->getParentProperty(), nullptr);
+
+    JsonArray other;
+    EXPECT_NO_THROW(other.Add(item));
+}
+
+TEST(JsonArrayTests, SetItem_ReplacingExisting_DetachesOldValue) {
+    auto arr = std::make_shared<JsonArray>();
+    auto oldItem = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    arr->Add(oldItem);
+    arr->SetItem(0, JsonValue::Create(static_cast<SharpRuntime::intcs>(2)));
+    EXPECT_EQ(oldItem->getParentProperty(), nullptr);
+}
+
+TEST(JsonArrayTests, Clear_DetachesAllItems) {
+    auto arr = std::make_shared<JsonArray>();
+    auto item = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    arr->Add(item);
+    arr->Clear();
+    EXPECT_EQ(item->getParentProperty(), nullptr);
+}
+
 TEST(JsonArrayTests, RemoveAt_RemovesItem) {
     JsonArray arr;
     arr.Add(JsonValue::Create(static_cast<SharpRuntime::intcs>(1)));
@@ -130,9 +184,11 @@ TEST(JsonObjectTests, Add_DuplicateKey_Throws) {
     EXPECT_THROW(obj.Add("x", JsonValue::Create(static_cast<SharpRuntime::intcs>(2))), System::ArgumentException);
 }
 
-TEST(JsonObjectTests, Indexer_Missing_Throws) {
+TEST(JsonObjectTests, Indexer_Missing_ReturnsNull) {
+    // Verified against JsonNode.cs's string indexer doc comment: "If the property is not
+    // found, null is returned" (unlike JsonElement::GetProperty, which throws).
     JsonObject obj;
-    EXPECT_THROW(obj["missing"], System::Collections::Generic::KeyNotFoundException);
+    EXPECT_EQ(obj["missing"], nullptr);
 }
 
 TEST(JsonObjectTests, TryGetPropertyValue) {
@@ -166,6 +222,66 @@ TEST(JsonObjectTests, Add_SetsParent) {
     auto value = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
     obj->Add("x", value);
     EXPECT_EQ(value->getParentProperty(), obj.get());
+}
+
+// ===========================================================================
+// Regression: Add/SetItem previously called setParentProperty() unconditionally, with no
+// check that the node being attached already had a parent (silently orphaning whichever
+// container actually still held it, leaving a dangling parent_ pointer there) or that
+// attaching it would create a cycle (unbounded recursion in ToJsonString/DeepClone/etc.).
+// Verified against JsonNode.cs's internal AssignParent, which throws InvalidOperationException
+// for both cases.
+// ===========================================================================
+
+TEST(JsonObjectTests, Add_NodeAlreadyHasParent_ThrowsInvalidOperationException) {
+    JsonObject first;
+    auto shared = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    first.Add("a", shared);
+
+    JsonObject second;
+    EXPECT_THROW(second.Add("b", shared), System::InvalidOperationException);
+    // First container must still hold it, undisturbed by the failed attach.
+    EXPECT_EQ(first["a"], shared);
+}
+
+TEST(JsonObjectTests, Add_Self_ThrowsInvalidOperationException) {
+    auto obj = std::make_shared<JsonObject>();
+    EXPECT_THROW(obj->Add("self", obj), System::InvalidOperationException);
+}
+
+TEST(JsonObjectTests, Add_Ancestor_ThrowsInvalidOperationException) {
+    auto root = std::make_shared<JsonObject>();
+    auto child = std::make_shared<JsonObject>();
+    root->Add("child", child);
+    EXPECT_THROW(child->Add("parent", root), System::InvalidOperationException);
+}
+
+TEST(JsonObjectTests, Remove_DetachesParent) {
+    auto obj = std::make_shared<JsonObject>();
+    auto value = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    obj->Add("x", value);
+    obj->Remove("x");
+    EXPECT_EQ(value->getParentProperty(), nullptr);
+
+    // A removed node must be freely re-attachable elsewhere.
+    JsonObject other;
+    EXPECT_NO_THROW(other.Add("x", value));
+}
+
+TEST(JsonObjectTests, SetItem_ReplacingExisting_DetachesOldValue) {
+    auto obj = std::make_shared<JsonObject>();
+    auto oldValue = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    obj->Add("x", oldValue);
+    obj->SetItem("x", JsonValue::Create(static_cast<SharpRuntime::intcs>(2)));
+    EXPECT_EQ(oldValue->getParentProperty(), nullptr);
+}
+
+TEST(JsonObjectTests, Clear_DetachesAllValues) {
+    auto obj = std::make_shared<JsonObject>();
+    auto value = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    obj->Add("x", value);
+    obj->Clear();
+    EXPECT_EQ(value->getParentProperty(), nullptr);
 }
 
 TEST(JsonObjectTests, PreservesInsertionOrder) {

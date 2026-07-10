@@ -37,13 +37,14 @@ namespace System::Text::Json::Nodes {
         void SetItem(intcs index, std::shared_ptr<JsonNode> value) {
             if (index < 0 || index >= static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("index");
-            if (value) value->setParentProperty(this);
+            if (value) value->AssignParent(this);
+            if (auto& old = items_[static_cast<size_t>(index)]) old->DetachParent();
             items_[static_cast<size_t>(index)] = std::move(value);
         }
 
         /** @brief Appends @p item to the end of the array. */
         void Add(std::shared_ptr<JsonNode> item) {
-            if (item) item->setParentProperty(this);
+            if (item) item->AssignParent(this);
             items_.push_back(std::move(item));
         }
 
@@ -51,7 +52,7 @@ namespace System::Text::Json::Nodes {
         void Insert(intcs index, std::shared_ptr<JsonNode> item) {
             if (index < 0 || index > static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("index");
-            if (item) item->setParentProperty(this);
+            if (item) item->AssignParent(this);
             items_.insert(items_.begin() + index, std::move(item));
         }
 
@@ -59,11 +60,15 @@ namespace System::Text::Json::Nodes {
         void RemoveAt(intcs index) {
             if (index < 0 || index >= static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("index");
+            if (auto& item = items_[static_cast<size_t>(index)]) item->DetachParent();
             items_.erase(items_.begin() + index);
         }
 
         /** @brief Removes all items from the array. */
-        void Clear() { items_.clear(); }
+        void Clear() {
+            for (auto& item : items_) if (item) item->DetachParent();
+            items_.clear();
+        }
 
         /** @return The index of @p item within the array, or -1 if not found (pointer identity). */
         [[nodiscard]] intcs IndexOf(const std::shared_ptr<JsonNode>& item) const {
