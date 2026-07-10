@@ -10,6 +10,7 @@
 #include <miniz/miniz.h>
 #include <cstring>
 #include <algorithm>
+#include <unordered_set>
 
 namespace System::IO::Compression {
 
@@ -65,6 +66,7 @@ struct ZipArchiveState {
     std::string             filePath;
     std::vector<SharpRuntime::bytecs> memBuf;      // backing buffer for stream-based read
     std::vector<PendingEntry>         pending;     // entries queued for write
+    std::unordered_set<std::string>   deletedEntries; // full names marked via ZipArchiveEntry::Delete()
     bool                    disposed     = false;
 };
 
@@ -127,7 +129,11 @@ void ZipArchiveEntry::Delete() {
     if (!state_) return;
     if (state_->archive->mode != ZipArchiveMode::Update)
         throw System::NotSupportedException("ZipArchiveEntry::Delete: archive must be in Update mode");
-    // Mark as deleted — simplified: just clear the entry state
+    // Record the full name for exclusion when the archive is next flushed (Dispose()).
+    // Covers both a pre-existing entry (excluded from the pass-through copy of the reader's
+    // contents) and a still-pending, not-yet-written CreateEntry() result (excluded from
+    // the pending list) uniformly, since flushWriter() filters both against this set.
+    state_->archive->deletedEntries.insert(state_->fullName);
     state_ = nullptr;
 }
 
@@ -154,14 +160,64 @@ static void openReader(ZipArchiveState& st) {
     st.readerOpen = true;
 }
 
+namespace {
+    struct ExtractedEntry {
+        std::string name;
+        std::vector<SharpRuntime::bytecs> data;
+    };
+}
+
+// Verified against ZipArchive.cs: real .NET keeps a single unified _entries list containing
+// both entries read from disk and newly-created ones, so disposing an Update-mode archive
+// always preserves every entry that wasn't explicitly Delete()'d. This port's miniz-backed
+// design uses a separate reader (existing entries) and pending list (new entries) instead of
+// one unified list, so flushWriter() must explicitly extract and carry forward every
+// pre-existing, non-deleted entry -- previously it wrote only st.pending, silently discarding
+// every pre-existing entry whenever the archive was disposed with at least one CreateEntry()
+// call (real, silent, irreversible data loss on a standard "update a zip" workflow).
 static void flushWriter(ZipArchiveState& st) {
-    if (st.pending.empty()) return;
+    const bool hasChanges = !st.pending.empty() || !st.deletedEntries.empty();
+    if (st.mode == ZipArchiveMode::Update && !hasChanges) return;
+    if (st.mode == ZipArchiveMode::Create && st.pending.empty()) return;
+
+    // Extract every pre-existing, non-deleted entry into memory before opening a writer --
+    // the writer may truncate/recreate the same backing file or buffer the reader is
+    // currently attached to, so the reader must be fully drained (and closed) first.
+    std::vector<ExtractedEntry> existing;
+    if (st.mode == ZipArchiveMode::Update && st.readerOpen) {
+        mz_uint count = mz_zip_reader_get_num_files(&st.zip);
+        existing.reserve(count);
+        for (mz_uint i = 0; i < count; ++i) {
+            mz_zip_archive_file_stat stat{};
+            if (!mz_zip_reader_file_stat(&st.zip, i, &stat)) continue;
+            if (stat.m_is_directory) continue;
+            std::string name = stat.m_filename;
+            if (st.deletedEntries.count(name)) continue;
+
+            size_t outSize = 0;
+            void* raw = mz_zip_reader_extract_to_heap(&st.zip, i, &outSize, 0);
+            if (!raw) continue; // best-effort: skip an unreadable entry rather than aborting the flush
+            ExtractedEntry ee;
+            ee.name = std::move(name);
+            ee.data.assign(reinterpret_cast<SharpRuntime::bytecs*>(raw),
+                           reinterpret_cast<SharpRuntime::bytecs*>(raw) + outSize);
+            mz_free(raw);
+            existing.push_back(std::move(ee));
+        }
+        mz_zip_reader_end(&st.zip);
+        st.readerOpen = false;
+    }
 
     if (!st.filePath.empty()) {
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_file(&writer, st.filePath.c_str(), 0))
             throw System::IO::IOException("ZipArchive: failed to init writer for " + st.filePath);
+        for (auto& e : existing) {
+            mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                                  static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+        }
         for (auto& e : st.pending) {
+            if (st.deletedEntries.count(e.name)) continue;
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
                                   static_cast<mz_uint>(e.miniLevel));
@@ -173,7 +229,12 @@ static void flushWriter(ZipArchiveState& st) {
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_heap(&writer, 0, 65536))
             throw System::IO::IOException("ZipArchive: failed to init heap writer");
+        for (auto& e : existing) {
+            mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                                  static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+        }
         for (auto& e : st.pending) {
+            if (st.deletedEntries.count(e.name)) continue;
             mz_zip_writer_add_mem(&writer, e.name.c_str(),
                                   e.data->data(), e.data->size(),
                                   static_cast<mz_uint>(e.miniLevel));
@@ -186,6 +247,7 @@ static void flushWriter(ZipArchiveState& st) {
         mz_free(buf);
     }
     st.pending.clear();
+    st.deletedEntries.clear();
 }
 
 // ---------------------------------------------------------------------------

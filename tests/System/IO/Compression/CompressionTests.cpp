@@ -455,6 +455,105 @@ TEST(ZipArchiveTests, CreateMultipleEntries) {
     EXPECT_EQ(z2.getEntriesProperty().size(), 3u);
 }
 
+// Regression test for a real, silent, irreversible data-loss bug: disposing an Update-mode
+// archive after CreateEntry() used to overwrite the file with ONLY the newly-created entry,
+// discarding every pre-existing one. Verified against ZipArchive.cs: real .NET's Dispose()
+// always preserves every entry that wasn't explicitly Delete()'d.
+TEST(ZipArchiveTests, UpdateMode_PreservesExistingEntriesWhenAddingNew) {
+    const char* tmpPath = "/tmp/sharpruntimetest_update_preserve.zip";
+
+    // Seed the archive with one entry in Create mode.
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("original.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        const uint8_t data[] = {'O', 'l', 'd'};
+        s->Write(data, 0, 3);
+    }
+
+    // Open in Update mode and add a second entry.
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Update);
+        auto e = z.CreateEntry("new.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        const uint8_t data[] = {'N', 'e', 'w'};
+        s->Write(data, 0, 3);
+    }
+
+    // Both entries must be present, and the original's content must be intact.
+    ZipArchive z2(tmpPath, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 2u);
+
+    bool foundOriginal = false, foundNew = false;
+    for (auto& e : entries) {
+        if (e.getFullNameProperty() == "original.txt") {
+            foundOriginal = true;
+            std::unique_ptr<System::IO::Stream> s(e.Open());
+            uint8_t out[8]{};
+            int n = s->Read(out, 0, 8);
+            EXPECT_EQ(n, 3);
+            EXPECT_EQ(out[0], 'O');
+            EXPECT_EQ(out[1], 'l');
+            EXPECT_EQ(out[2], 'd');
+        } else if (e.getFullNameProperty() == "new.txt") {
+            foundNew = true;
+        }
+    }
+    EXPECT_TRUE(foundOriginal);
+    EXPECT_TRUE(foundNew);
+}
+
+TEST(ZipArchiveTests, UpdateMode_DeleteExistingEntry_RemovedOnFlush) {
+    const char* tmpPath = "/tmp/sharpruntimetest_update_delete.zip";
+
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Create);
+        auto e1 = z.CreateEntry("keep.txt");
+        std::unique_ptr<System::IO::Stream> s1(e1.Open());
+        s1->Write(reinterpret_cast<const uint8_t*>("k"), 0, 1);
+        auto e2 = z.CreateEntry("remove.txt");
+        std::unique_ptr<System::IO::Stream> s2(e2.Open());
+        s2->Write(reinterpret_cast<const uint8_t*>("r"), 0, 1);
+    }
+
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Update);
+        auto entry = z.GetEntry("remove.txt");
+        ASSERT_TRUE(entry.IsValid());
+        entry.Delete();
+    }
+
+    ZipArchive z2(tmpPath, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "keep.txt");
+}
+
+TEST(ZipArchiveTests, UpdateMode_DeletePendingEntry_NeverWritten) {
+    const char* tmpPath = "/tmp/sharpruntimetest_update_delete_pending.zip";
+
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("existing.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+    }
+
+    {
+        ZipArchive z(tmpPath, ZipArchiveMode::Update);
+        auto pendingEntry = z.CreateEntry("shouldnotexist.txt");
+        std::unique_ptr<System::IO::Stream> s(pendingEntry.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("y"), 0, 1);
+        pendingEntry.Delete();
+    }
+
+    ZipArchive z2(tmpPath, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "existing.txt");
+}
+
 // ===========================================================================
 // CompressionLevel / ZipCompressionMethod / ZLibCompressionStrategy enums
 // ===========================================================================
