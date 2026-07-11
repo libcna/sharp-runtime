@@ -327,6 +327,17 @@ TEST(SequenceReaderTests, Advance_SkipsElements) {
     EXPECT_EQ(v, 3);
 }
 
+// Regression test for a wave-3 audit finding: Advance() threw std::out_of_range (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's SequenceReader<T>.Advance
+// throws when count is negative or exceeds the remaining elements.
+TEST(SequenceReaderTests, Advance_PastRemainingElements_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    EXPECT_THROW(reader.Advance(4), System::ArgumentOutOfRangeException);
+}
+
 TEST(SequenceReaderTests, TryAdvancePast_MatchingElement) {
     uint8_t data[] = {7, 8};
     ReadOnlySequence<uint8_t> seq(data, 2);
@@ -444,14 +455,18 @@ TEST(BinaryPrimitivesTests, WriteUInt64BigEndian_RoundTrip) {
     EXPECT_EQ(BinaryPrimitives::ReadUInt64BigEndian(rspan), uint64_t(0x0102030405060708ULL));
 }
 
+// Regression tests for a wave-3 audit finding: Read*/Write* threw std::out_of_range (an
+// unrelated std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's BinaryPrimitives Read*/Write*
+// methods throw when the source/destination span is too small.
 TEST(BinaryPrimitivesTests, ReadInt32LittleEndian_SpanTooSmall_Throws) {
     uint8_t data[] = {0x01, 0x02};
     auto span = System::ReadOnlySpan<uint8_t>(data, 2);
-    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), std::out_of_range);
+    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), System::ArgumentOutOfRangeException);
 }
 
 TEST(BinaryPrimitivesTests, WriteInt64BigEndian_SpanTooSmall_Throws) {
     uint8_t buf[4] = {};
     auto span = System::Span<uint8_t>(buf, 4);
-    EXPECT_THROW(BinaryPrimitives::WriteInt64BigEndian(span, 0LL), std::out_of_range);
+    EXPECT_THROW(BinaryPrimitives::WriteInt64BigEndian(span, 0LL), System::ArgumentOutOfRangeException);
 }

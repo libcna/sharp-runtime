@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/ReadOnlySequence.hpp"
 
 namespace System::Buffers {
@@ -91,11 +92,11 @@ namespace System::Buffers {
         /**
          * @brief Advances the reader by @p count elements.
          * @param count Number of elements to skip.
-         * @throws std::out_of_range if count exceeds remaining elements.
+         * @throws System::ArgumentOutOfRangeException if count exceeds remaining elements.
          */
         void Advance(long long count) {
             if (count < 0 || count > getRemainingProperty())
-                throw std::out_of_range("SequenceReader::Advance out of range");
+                throw System::ArgumentOutOfRangeException("count");
             consumed_ += static_cast<int>(count);
         }
 
