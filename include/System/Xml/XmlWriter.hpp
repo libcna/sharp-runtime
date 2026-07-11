@@ -82,6 +82,10 @@ namespace System::Xml {
         /**
          * @brief Writes a comment node: @c <!-- text -->.
          *
+         * If @p text contains @c "--" or ends with @c '-', a space is silently inserted to
+         * keep the emitted markup well-formed, matching real .NET's
+         * @c XmlEncodedRawTextWriter (which self-heals rather than throwing).
+         *
          * @param text  Comment text.
          */
         void WriteComment(const std::string& text);
@@ -89,12 +93,19 @@ namespace System::Xml {
         /**
          * @brief Writes a CDATA section as child of the current element: @c <![CDATA[text]]>.
          *
+         * If @p text contains an embedded @c "]]>", the section is silently split into
+         * adjacent CDATA sections around it (matching real .NET) so the terminator never
+         * appears mid-content; the original text round-trips unchanged on read-back.
+         *
          * @param text  Content; not XML-escaped (that is the point of a CDATA section).
          */
         void WriteCData(const std::string& text);
 
         /**
          * @brief Writes a processing instruction: @c <?target data?>.
+         *
+         * If @p data contains @c "?>", a space is silently inserted to keep the emitted
+         * markup well-formed, matching real .NET's @c XmlEncodedRawTextWriter.
          *
          * @param target  The PI target name.
          * @param data    The PI content (not XML-escaped, matching real XML PI syntax).

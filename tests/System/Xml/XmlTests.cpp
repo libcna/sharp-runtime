@@ -394,6 +394,47 @@ TEST(XmlWriterTests, DefaultSettings_ProducesCompactOutput_NoIndentWhitespace) {
     EXPECT_EQ(out, "<root><child/></root>");
 }
 
+// Regression tests for a wave-3 audit finding: WriteComment/WriteProcessingInstruction/
+// WriteCData wrote text completely raw with no protection against embedded terminator
+// sequences, silently producing malformed/corrupted XML. Verified against
+// XmlEncodedRawTextWriter.WriteCommentOrPi/WriteCDataSection: real .NET self-heals rather
+// than throwing (inserts a protective space, or splits the CDATA section), and the
+// original content round-trips unchanged.
+TEST(XmlWriterTests, WriteComment_EmbeddedDoubleDash_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteComment("a--b");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<!--a- -b-->");
+}
+
+TEST(XmlWriterTests, WriteComment_TrailingDash_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteComment("a-");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<!--a- -->");
+}
+
+TEST(XmlWriterTests, WriteProcessingInstruction_EmbeddedQuestionGreaterThan_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteProcessingInstruction("pi", "a?>b");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<?pi a? >b?>");
+}
+
+TEST(XmlWriterTests, WriteCData_EmbeddedCloseSequence_SplitsSection_RoundTrips) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("msg");
+    w->WriteCData("a]]>b");
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_EQ(out.find("]]>b]]>"), std::string::npos) << out; // never a raw, premature "]]>"
+
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(out));
+    r->Read(); // <msg>
+    std::string content = r->ReadElementContentAsString();
+    EXPECT_EQ(content, "a]]>b");
+}
+
 TEST(XmlWriterTests, IndentSettingTrue_ProducesIndentedOutput) {
     XmlWriterSettings settings;
     settings.Indent = true;
