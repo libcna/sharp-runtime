@@ -8,6 +8,8 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/String.hpp"
+#include "System/StringComparison.hpp"
 #include "System/Text/Json/Nodes/JsonNode.hpp"
 
 namespace System::Text::Json::Nodes {
@@ -27,9 +29,20 @@ namespace System::Text::Json::Nodes {
     class JsonObject : public JsonNode {
         std::vector<std::pair<std::string, std::shared_ptr<JsonNode>>> properties_;
 
+        // Verified against JsonObject.IDictionary.cs's CreateDictionary(): real .NET's backing
+        // dictionary uses StringComparer.OrdinalIgnoreCase (when PropertyNameCaseInsensitive is
+        // set) as the comparer for every operation -- lookup, ContainsKey, the duplicate-key
+        // check in Add(), Remove(), the indexer -- not just reads. Since findIndex() is this
+        // port's single choke point for all of those, fixing it here covers every operation
+        // uniformly, matching .NET's design.
         [[nodiscard]] intcs findIndex(const std::string& propertyName) const {
-            for (size_t i = 0; i < properties_.size(); ++i)
-                if (properties_[i].first == propertyName) return static_cast<intcs>(i);
+            bool caseInsensitive = getOptionsProperty().PropertyNameCaseInsensitive;
+            for (size_t i = 0; i < properties_.size(); ++i) {
+                bool match = caseInsensitive
+                    ? System::String::Equals(properties_[i].first, propertyName, System::StringComparison::OrdinalIgnoreCase)
+                    : properties_[i].first == propertyName;
+                if (match) return static_cast<intcs>(i);
+            }
             return -1;
         }
 
