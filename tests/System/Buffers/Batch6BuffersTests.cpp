@@ -354,13 +354,55 @@ TEST(SequenceReaderTests, TryAdvancePast_NoMatchDoesNotAdvance) {
     EXPECT_EQ(reader.getConsumedProperty(), 0LL);
 }
 
-TEST(SequenceReaderTests, Rewind_ResetsToStart) {
+// Regression tests: Rewind() previously took no argument and unconditionally reset the
+// reader to the absolute start of the sequence -- a completely different API shape from real
+// .NET's SequenceReader<T>.Rewind(long count), which moves the reader back by a *relative*
+// count and throws ArgumentOutOfRangeException for a negative count or one exceeding Consumed.
+// Ported C# code calling reader.Rewind(n) would not even compile against the old signature.
+TEST(SequenceReaderTests, Rewind_MovesBackByCount) {
+    uint8_t data[] = {1, 2, 3, 4};
+    ReadOnlySequence<uint8_t> seq(data, 4);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(4);
+    reader.Rewind(1);
+    EXPECT_EQ(reader.getConsumedProperty(), 3LL);
+    uint8_t v = 0;
+    reader.TryRead(v);
+    EXPECT_EQ(v, 4);
+}
+
+TEST(SequenceReaderTests, Rewind_ByConsumedCount_ResetsToStart) {
     uint8_t data[] = {1, 2, 3};
     ReadOnlySequence<uint8_t> seq(data, 3);
     SequenceReader<uint8_t> reader(seq);
     reader.Advance(3);
-    reader.Rewind();
+    reader.Rewind(reader.getConsumedProperty());
     EXPECT_EQ(reader.getConsumedProperty(), 0LL);
+}
+
+TEST(SequenceReaderTests, Rewind_Zero_IsNoOp) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    reader.Rewind(0);
+    EXPECT_EQ(reader.getConsumedProperty(), 2LL);
+}
+
+TEST(SequenceReaderTests, Rewind_NegativeCount_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    EXPECT_THROW(reader.Rewind(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(SequenceReaderTests, Rewind_MoreThanConsumed_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    EXPECT_THROW(reader.Rewind(3), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
