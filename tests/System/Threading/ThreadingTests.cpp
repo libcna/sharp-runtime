@@ -453,6 +453,35 @@ TEST(ThreadingTests, SemaphoreSlim_Wait_TimeoutLessThanNegativeOne_Throws) {
     EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests for a wave-3 audit finding: SemaphoreSlim had no disposed_ flag at all --
+// Dispose() was a true no-op and Wait/Release never checked disposal state, an inconsistency
+// with sibling primitives (Barrier, CountdownEvent, ManualResetEventSlim, ReaderWriterLockSlim)
+// that all already guard against post-Dispose() use. Verified against SemaphoreSlim.cs's
+// CheckDispose(): Wait(int) validates its timeout argument *before* checking disposal, while
+// Release(int) checks disposal *before* validating releaseCount -- each in its own .NET
+// source's order, not a uniform rule across both methods.
+TEST(ThreadingTests, SemaphoreSlim_AfterDispose_Wait_ThrowsObjectDisposedException) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    EXPECT_THROW(ss.Wait(), System::ObjectDisposedException);
+    EXPECT_THROW(ss.Wait(10), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_AfterDispose_Release_ThrowsObjectDisposedException) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    EXPECT_THROW(ss.Release(), System::ObjectDisposedException);
+    EXPECT_THROW(ss.Release(1), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Wait_InvalidTimeoutCheckedBeforeDisposal) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    // Matches SemaphoreSlim.cs's Wait(int): timeout validation happens before CheckDispose(),
+    // so an already-invalid timeout still throws ArgumentOutOfRangeException even when disposed.
+    EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // ManualResetEvent
 // ---------------------------------------------------------------------------
