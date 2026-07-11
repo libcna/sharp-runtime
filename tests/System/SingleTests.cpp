@@ -135,5 +135,40 @@ TEST(SingleTest, Parse_NegInf)          { EXPECT_TRUE(std::isinf(Single::Parse("
 TEST(SingleTest, Parse_Invalid_Throws)  { EXPECT_THROW(Single::Parse("abc"), System::FormatException); }
 TEST(SingleTest, TryParse_Valid)        { float r = 0; EXPECT_TRUE(Single::TryParse("1.5", r)); EXPECT_NEAR(r, 1.5f, 0.001f); }
 TEST(SingleTest, TryParse_Invalid)      { float r = 0; EXPECT_FALSE(Single::TryParse("xyz", r)); }
+
+// Regression tests for a code-audit finding (ticket 249, same bug class as ticket 245's
+// System::Double fix): Parse/TryParse only special-cased the exact-cased strings
+// "NaN"/"Infinity"/"-Infinity" and fell through to std::from_chars for everything else, which
+// per the C++ standard still recognizes "inf"/"infinity"/"nan"/"nan(n-char-seq)"
+// case-insensitively regardless of chars_format -- so abbreviated/miscased spellings like "inf"
+// or "nan(123)" were silently ACCEPTED even though real .NET's float.Parse throws
+// FormatException for all of them (verified against Number.Parsing.cs's TryParseFloat, which
+// only recognizes Infinity/+Infinity/-Infinity/NaN/+NaN/-NaN case-insensitively).
+TEST(SingleTest, TryParse_AbbreviatedInfinitySpelling_ReturnsFalse) {
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse("inf", r));
+    EXPECT_FALSE(Single::TryParse("-inf", r));
+    EXPECT_FALSE(Single::TryParse("INF", r));
+}
+
+TEST(SingleTest, TryParse_NanWithCharSequence_ReturnsFalse) {
+    float r = 0;
+    EXPECT_FALSE(Single::TryParse("nan(123)", r));
+}
+
+TEST(SingleTest, TryParse_CaseInsensitiveCanonicalSpellings_ReturnsTrue) {
+    float r = 0;
+    EXPECT_TRUE(Single::TryParse("infinity", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+    EXPECT_TRUE(Single::TryParse("nan", r));
+    EXPECT_TRUE(std::isnan(r));
+    EXPECT_TRUE(Single::TryParse("+Infinity", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+}
+
+TEST(SingleTest, Parse_AbbreviatedInfinitySpelling_Throws) {
+    EXPECT_THROW(Single::Parse("inf"), System::FormatException);
+    EXPECT_THROW(Single::Parse("nan(123)"), System::FormatException);
+}
 TEST(SingleTest, ToString_Normal)       { EXPECT_EQ(Single::ToString(Single::NaN), "NaN"); }
 TEST(SingleTest, ToString_Format_F2)    { EXPECT_EQ(Single::ToString(3.14159f, "F2"), "3.14"); }

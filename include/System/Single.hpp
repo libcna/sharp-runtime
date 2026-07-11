@@ -4,6 +4,7 @@
 #pragma once
 #include <array>
 #include <bit>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <iomanip>
@@ -512,6 +513,49 @@ public:
         return static_cast<intcs>(bits);
     }
 
+private:
+    static bool equalsIgnoreCaseAscii(const std::string& s, const char* token) noexcept {
+        size_t n = std::char_traits<char>::length(token);
+        if (s.size() != n) return false;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::tolower(static_cast<unsigned char>(s[i])) != std::tolower(static_cast<unsigned char>(token[i])))
+                return false;
+        }
+        return true;
+    }
+
+    // Verified against Number.Parsing.cs's TryParseFloat (same finding as System::Double,
+    // ticket 245): real .NET recognizes exactly (case-insensitively) "Infinity"/"+Infinity"/
+    // "-Infinity" and "NaN"/"+NaN"/"-NaN" as special tokens -- nothing else, including
+    // abbreviations like "inf" or "nan(...)". Prior to this fix, this port only special-cased
+    // the exact-cased strings "NaN"/"Infinity"/"-Infinity" and fell through to std::from_chars
+    // for everything else -- but from_chars's floating-point grammar itself recognizes
+    // "inf"/"infinity"/"nan"/"nan(n-char-seq)" case-insensitively regardless of chars_format (a
+    // C++ standard requirement, not an implementation quirk), so inputs like "inf", "-inf",
+    // "INF", or "nan(123)" were silently ACCEPTED here even though real .NET's float.Parse
+    // throws FormatException for all of them.
+    static bool tryParseCore(const std::string& s, float& result) noexcept {
+        if (equalsIgnoreCaseAscii(s, "NaN") || equalsIgnoreCaseAscii(s, "+NaN") || equalsIgnoreCaseAscii(s, "-NaN")) {
+            result = std::numeric_limits<float>::quiet_NaN();
+            return true;
+        }
+        if (equalsIgnoreCaseAscii(s, "Infinity") || equalsIgnoreCaseAscii(s, "+Infinity")) {
+            result = std::numeric_limits<float>::infinity();
+            return true;
+        }
+        if (equalsIgnoreCaseAscii(s, "-Infinity")) {
+            result = -std::numeric_limits<float>::infinity();
+            return true;
+        }
+        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        if (ec != std::errc{} || ptr != s.data() + s.size() || !std::isfinite(result)) {
+            result = 0.0f;
+            return false;
+        }
+        return true;
+    }
+
+public:
     // -------------------------------------------------------------------------
     // Parse / ToString
     // -------------------------------------------------------------------------
@@ -522,12 +566,8 @@ public:
      * @throws System::FormatException if the string is not a valid floating-point literal.
      */
     [[nodiscard]] static float Parse(const std::string& s) {
-        if (s == "NaN")       return std::numeric_limits<float>::quiet_NaN();
-        if (s == "Infinity")  return  std::numeric_limits<float>::infinity();
-        if (s == "-Infinity") return -std::numeric_limits<float>::infinity();
         float result{};
-        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
-        if (ec != std::errc{} || ptr != s.data() + s.size())
+        if (!tryParseCore(s, result))
             throw System::FormatException("Input string was not in a correct format.");
         return result;
     }
@@ -537,12 +577,7 @@ public:
      * C++ counterpart of .NET Single.TryParse(string, out float).
      */
     static bool TryParse(const std::string& s, float& result) noexcept {
-        if (s == "NaN")       { result = std::numeric_limits<float>::quiet_NaN(); return true; }
-        if (s == "Infinity")  { result =  std::numeric_limits<float>::infinity(); return true; }
-        if (s == "-Infinity") { result = -std::numeric_limits<float>::infinity(); return true; }
-        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
-        if (ec != std::errc{} || ptr != s.data() + s.size()) { result = 0.0f; return false; }
-        return true;
+        return tryParseCore(s, result);
     }
 
     /**
