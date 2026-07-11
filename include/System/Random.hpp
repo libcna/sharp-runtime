@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <limits>
 #include <random>
 #include <string>
@@ -11,6 +13,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/Span.hpp"
 
 namespace System {
@@ -24,12 +27,42 @@ namespace System {
      *
      * C++ counterpart of .NET System.Random. Provides methods for generating
      * pseudo-random integers, floating-point values, byte sequences, and strings.
-     * The default constructor seeds from a hardware source; the integer constructor
-     * produces a deterministic sequence for the given seed.
+     *
+     * @note Determinism: the seeded constructor (`Random(intcs seed)`) is a byte-for-byte
+     *   port of .NET's own seeded algorithm (the Knuth-derived "subtractive" generator that
+     *   backs .NET's `Random(int seed)` since .NET Framework 1.0, kept bit-stable across every
+     *   .NET version specifically so seeded sequences are reproducible) -- verified against
+     *   live Mono reference output for `Next()`, `Next(int)`, `Next(int,int)`, `NextDouble()`,
+     *   and `NextBytes()` across several seeds including 0, a negative seed, and
+     *   `Int32.MinValue`. The default (unseeded) constructor uses the same generator seeded
+     *   from a hardware entropy source; real .NET makes no reproducibility promise for its own
+     *   unseeded case either (it uses a different, faster algorithm there), so there is no
+     *   parity gap to have here.
      */
     class Random {
     private:
-        std::mt19937 generator;
+        // Exact port of .NET's Random.CompatPrng (Random.CompatImpl.cs): a 56-element
+        // Knuth "subtractive" lagged-Fibonacci-style generator. Index 0 of seedArray_ is
+        // permanently unused -- this wastes one slot but matches Knuth's original scheme
+        // (and .NET's own array layout) exactly, which is what makes the seeded sequence
+        // reproducible against real .NET output.
+        std::array<int32_t, 56> seedArray_{};
+        int inext_ = 0;
+        int inextp_ = 21;
+
+        void initializeSeed(intcs seed);
+
+        /** @brief Returns the next raw sample in [0, Int32.MaxValue), advancing the generator. */
+        int32_t internalSample();
+
+        /** @brief Returns the next raw sample as a double in [0.0, 1.0). */
+        double prngSample() { return internalSample() * (1.0 / static_cast<double>(SharpRuntime::INTCS_MAX)); }
+
+        /** @brief Higher-quality (but costlier) sample used for out-of-int32-range Next(min,max). */
+        double getSampleForLargeRange();
+
+        /** @brief Assembles a uniformly-distributed 64-bit value from three Next() calls. */
+        uint64_t nextUInt64();
 
     public:
         /** @brief Initializes a new instance using a random seed from the hardware device. */
@@ -135,28 +168,67 @@ namespace System {
          *
          * C++ counterpart of .NET Random.NextInteger<T>(). T must be an integral type.
          * Unlike Next(), the return range is inclusive of T::max.
+         *
+         * Matches .NET's own generic-math implementation: draws the minimum number of random
+         * bytes needed to cover T's bit-width via NextBytes(), masks the top byte so an
+         * unsigned reinterpretation of those bytes never sets bits beyond T::max's actual bit
+         * pattern, and rejects/retries if the assembled value still exceeds T::max (needed
+         * because for a signed T, T::max doesn't use the full bit pattern of its storage).
          * @tparam T An integral type (int, long, uint32_t, etc.).
          */
         template<typename T>
         T NextInteger() {
             static_assert(std::is_integral_v<T>, "T must be an integral type");
-            std::uniform_int_distribution<T> dist(T{0}, std::numeric_limits<T>::max());
-            return dist(generator);
+            using UType = std::make_unsigned_t<T>;
+            constexpr T maxValue = std::numeric_limits<T>::max();
+            if constexpr (maxValue == T{0}) {
+                return T{0};
+            } else {
+                constexpr int bitLength = std::numeric_limits<T>::digits;
+                constexpr int byteCount = (bitLength + 7) / 8;
+                constexpr int topBits = bitLength % 8;
+                constexpr uint8_t topMask = topBits == 0 ? uint8_t{0xFF} : static_cast<uint8_t>((1 << topBits) - 1);
+
+                std::array<uint8_t, static_cast<size_t>(byteCount)> bytes{};
+                for (;;) {
+                    NextBytes(Span<bytecs>(bytes.data(), byteCount));
+                    bytes[static_cast<size_t>(byteCount) - 1] &= topMask;
+                    UType value{};
+                    for (int i = byteCount - 1; i >= 0; --i)
+                        value = static_cast<UType>((value << 8) | bytes[static_cast<size_t>(i)]);
+                    if (value <= static_cast<UType>(maxValue)) return static_cast<T>(value);
+                }
+            }
         }
 
         /**
          * @brief Returns a non-negative random integer of type T in [0, maxValue).
+         *
+         * Matches .NET's own fast-path dispatch: types whose full range always fits within
+         * Int32 (int8/uint8/int16/uint16/int32) route through Next(int); wider types whose
+         * runtime value fits within Int64 route through NextInt64(long).
          * @param maxValue Exclusive upper bound; must be ≥ 0.
          * @throws System::ArgumentOutOfRangeException if maxValue < 0.
+         * @throws System::NotSupportedException if T is wider than 64 bits, or is a 64-bit
+         *         unsigned type whose @p maxValue exceeds Int64.MaxValue.
          */
         template<typename T>
         T NextInteger(T maxValue) {
             static_assert(std::is_integral_v<T>, "T must be an integral type");
             if (maxValue < T{0})
-                throw ArgumentOutOfRangeException("maxValue must be >= 0");
+                throw ArgumentOutOfRangeException("maxValue");
             if (maxValue == T{0}) return T{0};
-            std::uniform_int_distribution<T> dist(T{0}, maxValue - T{1});
-            return dist(generator);
+
+            if constexpr (sizeof(T) < sizeof(intcs) || (sizeof(T) == sizeof(intcs) && std::is_signed_v<T>)) {
+                return static_cast<T>(Next(static_cast<intcs>(maxValue)));
+            } else if constexpr (sizeof(T) <= sizeof(longcs)) {
+                auto maxAsLong = static_cast<std::make_unsigned_t<longcs>>(std::numeric_limits<longcs>::max());
+                if (static_cast<std::make_unsigned_t<T>>(maxValue) > maxAsLong)
+                    throw NotSupportedException("NextInteger<T>(maxValue) does not support a maxValue exceeding Int64.MaxValue.");
+                return static_cast<T>(NextInt64(static_cast<longcs>(maxValue)));
+            } else {
+                throw NotSupportedException("NextInteger<T>(maxValue) is not supported for integer types wider than 64 bits.");
+            }
         }
 
         /**
@@ -164,15 +236,24 @@ namespace System {
          * @param minValue Inclusive lower bound.
          * @param maxValue Exclusive upper bound; must be ≥ minValue.
          * @throws System::ArgumentOutOfRangeException if minValue > maxValue.
+         * @throws System::NotSupportedException if `maxValue - minValue` overflows T, or T is
+         *         unsupported per the single-argument NextInteger(T) overload above.
          */
         template<typename T>
         T NextInteger(T minValue, T maxValue) {
             static_assert(std::is_integral_v<T>, "T must be an integral type");
             if (minValue > maxValue)
-                throw ArgumentOutOfRangeException("minValue must be <= maxValue");
+                throw ArgumentOutOfRangeException("minValue");
             if (minValue == maxValue) return minValue;
-            std::uniform_int_distribution<T> dist(minValue, maxValue - T{1});
-            return dist(generator);
+            if constexpr (std::is_signed_v<T>) {
+                using UType = std::make_unsigned_t<T>;
+                UType range = static_cast<UType>(static_cast<UType>(maxValue) - static_cast<UType>(minValue));
+                if (range > static_cast<UType>(std::numeric_limits<T>::max()))
+                    throw NotSupportedException("NextInteger<T>(minValue, maxValue) does not support a range wider than T::max.");
+                return static_cast<T>(NextInteger<T>(static_cast<T>(range)) + minValue);
+            } else {
+                return static_cast<T>(NextInteger<T>(static_cast<T>(maxValue - minValue)) + minValue);
+            }
         }
 
         // -------------------------------------------------------------------------
