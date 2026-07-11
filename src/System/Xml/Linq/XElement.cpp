@@ -37,6 +37,20 @@ namespace System::Xml::Linq {
     }
 
     void XElement::Add(const std::string& text) {
+        // Verified against XContainer.cs's AddString(): if the current last child is already a
+        // plain XText (not XCData), real .NET appends into its existing Value rather than
+        // creating a new sibling text node -- e.g. two consecutive Add(string) calls produce
+        // one merged text node, not two adjacent ones. An empty string is a genuine no-op (no
+        // node created at all), matching AddString's `if (s.Length > 0)` guard.
+        if (text.empty()) return;
+        if (!children_.empty()) {
+            auto& last = children_.back();
+            if (last->getNodeTypeProperty() == XmlNodeType::Text) {
+                auto* lastText = static_cast<XText*>(last.get());
+                lastText->setValueProperty(lastText->getValueProperty() + text);
+                return;
+            }
+        }
         XContainer::Add(std::make_shared<XText>(text));
     }
 

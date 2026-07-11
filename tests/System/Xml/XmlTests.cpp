@@ -19,6 +19,7 @@
 #include "System/Xml/Linq/XName.hpp"
 #include "System/Xml/Linq/XNamespace.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
+#include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
 
@@ -32,6 +33,7 @@ using System::Xml::XmlWriterSettings;
 using System::Xml::Linq::XName;
 using System::Xml::Linq::XNamespace;
 using System::Xml::Linq::XAttribute;
+using System::Xml::Linq::XCData;
 using System::Xml::Linq::XElement;
 using System::Xml::Linq::XDeclaration;
 using System::Xml::Linq::XDocument;
@@ -688,6 +690,31 @@ TEST(XElementTests, SetValue) {
     XElement e("x");
     e.setValueProperty("hello");
     EXPECT_EQ(e.getValueProperty(), "hello");
+}
+
+// Regression test for a wave-3 audit finding: Add(const std::string&) always created a new
+// XText child, even when the last child was already a plain (non-CDATA) XText node. Verified
+// against XContainer.cs's AddString(): consecutive string adds merge into the existing
+// trailing text node's Value instead of producing adjacent sibling text nodes.
+TEST(XElementTests, Add_String_MergesIntoTrailingTextNode) {
+    XElement e("root");
+    e.Add(std::string("hello "));
+    e.Add(std::string("world"));
+    EXPECT_EQ(e.Nodes().size(), 1u);
+    EXPECT_EQ(e.getValueProperty(), "hello world");
+}
+
+TEST(XElementTests, Add_String_DoesNotMergeAcrossCData) {
+    XElement e("root");
+    e.Add(std::make_shared<XCData>("cdata"));
+    e.Add(std::string("text"));
+    EXPECT_EQ(e.Nodes().size(), 2u);
+}
+
+TEST(XElementTests, Add_EmptyString_IsNoOp) {
+    XElement e("root");
+    e.Add(std::string(""));
+    EXPECT_EQ(e.Nodes().size(), 0u);
 }
 
 TEST(XElementTests, AddAndFindAttribute) {
