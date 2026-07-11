@@ -496,6 +496,21 @@ TEST(GuidTests, Parse_X_OverflowingComponentThrowsOverflow) {
         System::OverflowException);
 }
 
+// Regression test for a code-audit finding (ticket 252): the X format's byte-component-specific
+// overflow path (a component that fits in 32 bits -- so it doesn't trip TryParseHexRun's
+// >8-significant-hex-digit overflow -- but exceeds a byte's 0xFF range) had zero test coverage,
+// despite being a distinct branch with its own error message (MSG_OVERFLOW_BYTE) separate from
+// the 32-bit-overflow path already covered above. Verified against real .NET's own
+// TryParseExactX, whose comment explicitly documents this as an intentional "odd inconsistency":
+// a byte component is parsed as a full uint32 and only afterward checked against byte.MaxValue,
+// so "0x1ff" (511, 3 significant hex digits) throws OverflowException here just as it does in
+// real .NET, distinct from a component with >8 hex digits.
+TEST(GuidTests, Parse_X_OverflowingByteComponentThrowsOverflow) {
+    EXPECT_THROW(
+        Guid::Parse("{0xa8a110d5,0xfc49,0x43c5,{0xbf,0x46,0x80,0x2d,0xb8,0xf8,0x43,0x1ff}}"),
+        System::OverflowException);
+}
+
 // ---------------------------------------------------------------------------
 // TryFormat / TryFormatUtf8
 // ---------------------------------------------------------------------------
