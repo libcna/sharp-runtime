@@ -46,6 +46,30 @@ TEST(ConsoleWriteExtTests, Write_VectorChar_ZeroCount_DoesNotThrow) {
     EXPECT_NO_THROW(Console::Write(buf, 0, 0));
 }
 
+// Regression tests for a code-audit finding (ticket 250): Write(vector<char>&, int, int) had
+// zero bounds validation at all -- it computed buffer.data() + index and wrote count bytes
+// unconditionally, an out-of-bounds read for any negative index/count or index+count exceeding
+// the buffer, not just a wrong-exception-type gap. Verified against real .NET's
+// TextWriter.Write(char[], int, int) (which Console.Write delegates to), which validates
+// index>=0, count>=0, and buffer.Length-index>=count, throwing ArgumentOutOfRangeException or
+// ArgumentException respectively. Also changed the parameter types from raw int to
+// SharpRuntime::intcs per CLAUDE.md rule #7.
+TEST(ConsoleWriteExtTests, Write_VectorChar_NegativeIndex_Throws) {
+    std::vector<char> buf = {'A', 'B', 'C'};
+    EXPECT_THROW(Console::Write(buf, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ConsoleWriteExtTests, Write_VectorChar_NegativeCount_Throws) {
+    std::vector<char> buf = {'A', 'B', 'C'};
+    EXPECT_THROW(Console::Write(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ConsoleWriteExtTests, Write_VectorChar_IndexPlusCountExceedsLength_Throws) {
+    std::vector<char> buf = {'A', 'B', 'C'};
+    EXPECT_THROW(Console::Write(buf, 1, 3), System::ArgumentException);
+    EXPECT_THROW(Console::Write(buf, 4, 0), System::ArgumentException);
+}
+
 // ===========================================================================
 // WriteLine overloads — uintcs / ulongcs / vector<char>
 // ===========================================================================
