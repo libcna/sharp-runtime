@@ -89,6 +89,25 @@ namespace System::Threading::Tasks {
             }
         }
 
+        // Verified against the sibling For(..., ParallelOptions, ...) overload just below,
+        // which already batches std::async launches by this value. This port's other three
+        // loop-shaped overloads (For with ParallelLoopState, and both ForEach variants) had
+        // no batching at all -- they launched one std::async per iteration/item unconditionally,
+        // unlike real .NET's TPL (which always partitions work across a bounded thread pool
+        // regardless of which overload is called). For a large source collection (e.g.
+        // ForEach(vectorOf50000Items, body)), this attempted to spawn up to 50,000 real OS
+        // threads simultaneously -- libstdc++'s std::async does not pool threads. Past the OS
+        // thread-creation limit, std::async itself throws std::system_error *at the call site*,
+        // which was not wrapped in any try/catch (only f.get() inside
+        // waitAllCollectingExceptions was guarded) -- that exception propagated unhandled
+        // instead of the documented AggregateException contract, with any not-yet-collected
+        // futures then block-joining on stack unwind.
+        static intcs DefaultMaxDegreeOfParallelism() {
+            intcs maxDeg = static_cast<intcs>(std::thread::hardware_concurrency());
+            if (maxDeg < 1) maxDeg = 1;
+            return maxDeg;
+        }
+
     public:
         /** Executes a for loop from fromInclusive to toExclusive in parallel. */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, std::function<void(intcs)> body) {
@@ -136,12 +155,17 @@ namespace System::Threading::Tasks {
             (void)fromInclusive; (void)toExclusive; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
 #else
+            intcs maxDeg = DefaultMaxDegreeOfParallelism();
             ParallelLoopState state;
             std::vector<std::future<void>> futures;
             std::vector<std::exception_ptr> exceptions;
             for (intcs i = fromInclusive; i < toExclusive; ++i) {
                 if (state.getShouldExitCurrentIterationProperty()) break;
                 futures.push_back(std::async(std::launch::async, [body, i, state]() mutable { body(i, state); }));
+                if (static_cast<intcs>(futures.size()) >= maxDeg) {
+                    waitAllCollectingExceptions(futures, exceptions);
+                    futures.clear();
+                }
             }
             waitAllCollectingExceptions(futures, exceptions);
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
@@ -158,12 +182,17 @@ namespace System::Threading::Tasks {
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
 #else
+            intcs maxDeg = DefaultMaxDegreeOfParallelism();
             std::vector<std::future<void>> futures;
+            std::vector<std::exception_ptr> exceptions;
             // Capture item by value to avoid dangling reference after loop iteration.
             for (TSource item : source) {
                 futures.push_back(std::async(std::launch::async, [body, item]{ body(item); }));
+                if (static_cast<intcs>(futures.size()) >= maxDeg) {
+                    waitAllCollectingExceptions(futures, exceptions);
+                    futures.clear();
+                }
             }
-            std::vector<std::exception_ptr> exceptions;
             waitAllCollectingExceptions(futures, exceptions);
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
@@ -180,13 +209,18 @@ namespace System::Threading::Tasks {
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
 #else
+            intcs maxDeg = DefaultMaxDegreeOfParallelism();
             ParallelLoopState state;
             std::vector<std::future<void>> futures;
+            std::vector<std::exception_ptr> exceptions;
             for (TSource item : source) {
                 if (state.getShouldExitCurrentIterationProperty()) break;
                 futures.push_back(std::async(std::launch::async, [body, item, state]() mutable { body(item, state); }));
+                if (static_cast<intcs>(futures.size()) >= maxDeg) {
+                    waitAllCollectingExceptions(futures, exceptions);
+                    futures.clear();
+                }
             }
-            std::vector<std::exception_ptr> exceptions;
             waitAllCollectingExceptions(futures, exceptions);
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
