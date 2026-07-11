@@ -4,12 +4,15 @@
 #pragma once
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/Timeout.hpp"
+#include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
 
@@ -64,8 +67,15 @@ namespace System::Threading {
          * Verified against Lock.cs's doc comment: -1 (Timeout.Infinite) waits indefinitely.
          * std::chrono's try_lock_for treats a negative duration as already-expired, so it
          * must be special-cased rather than passed straight through.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
+         * Verified against Lock.cs's TryEnter(int): ArgumentOutOfRangeException.ThrowIfLessThan
+         * (millisecondsTimeout, -1) -- this port's WaitHandle::ValidateTimeout() implements the
+         * identical check, already used by every sibling wait primitive in this namespace; this
+         * overload had simply never included WaitHandle.hpp to call it.
          */
         bool TryEnter(intcs millisecondsTimeout) {
+            WaitHandle::ValidateTimeout(millisecondsTimeout);
             bool ok;
             if (millisecondsTimeout == -1) {
                 mtx_.lock();
@@ -86,6 +96,11 @@ namespace System::Threading {
          * try_lock_for treats like a non-blocking try_lock() -- returning almost instantly
          * instead of blocking indefinitely -- the one call site the session's -1/Infinite fix
          * pattern (already applied to the intcs overload) had missed.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p timeout, converted to milliseconds,
+         * is less than -1 or exceeds intcs::max(). Verified against Lock.cs's TryEnter(TimeSpan),
+         * which converts via WaitHandle.ToTimeoutMilliseconds(timeout) -- this port had no
+         * equivalent conversion-time validation at all.
          */
         bool TryEnter(const System::TimeSpan& timeout) {
             bool ok;
@@ -93,6 +108,9 @@ namespace System::Threading {
                 mtx_.lock();
                 ok = true;
             } else {
+                long long ms = static_cast<long long>(timeout.getTotalMillisecondsProperty());
+                if (ms < -1 || ms > std::numeric_limits<intcs>::max())
+                    throw System::ArgumentOutOfRangeException("timeout");
                 ok = mtx_.try_lock_for(std::chrono::microseconds(timeout.getTicksProperty() / 10));
             }
             if (ok) onAcquired();

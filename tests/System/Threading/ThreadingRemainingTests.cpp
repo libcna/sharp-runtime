@@ -505,6 +505,29 @@ TEST(LockTests, TryEnter_InfiniteTimeSpan_BlocksUntilReleased) {
     EXPECT_TRUE(acquired.load());
 }
 
+// Regression tests for a wave-3 audit finding: TryEnter(intcs)/TryEnter(TimeSpan) had no
+// timeout validation at all -- Lock.hpp didn't even include WaitHandle.hpp, unlike every
+// sibling wait primitive in this namespace. A negative timeout other than -1 (e.g. -5) fell
+// straight through to try_lock_for, which treats a negative duration as already-expired --
+// silently behaving like a non-blocking try_lock() instead of throwing
+// ArgumentOutOfRangeException as real .NET's Lock.cs does.
+TEST(LockTests, TryEnter_Intcs_InvalidNegativeTimeout_Throws) {
+    Lock lk;
+    EXPECT_THROW(lk.TryEnter(-2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lk.TryEnter(-5), System::ArgumentOutOfRangeException);
+}
+
+TEST(LockTests, TryEnter_Intcs_NegativeOne_StillMeansInfinite) {
+    Lock lk;
+    EXPECT_TRUE(lk.TryEnter(-1));
+    lk.Exit();
+}
+
+TEST(LockTests, TryEnter_TimeSpan_InvalidNegativeTimeout_Throws) {
+    Lock lk;
+    EXPECT_THROW(lk.TryEnter(System::TimeSpan::FromMilliseconds(-2)), System::ArgumentOutOfRangeException);
+}
+
 // ===========================================================================
 // ManualResetEventSlim
 // ===========================================================================
