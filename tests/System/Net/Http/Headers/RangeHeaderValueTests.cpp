@@ -6,6 +6,7 @@
 #include "System/Net/Http/Headers/RangeItemHeaderValue.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Net::Http::Headers::RangeHeaderValue;
 using System::Net::Http::Headers::RangeItemHeaderValue;
@@ -35,8 +36,12 @@ TEST(RangeItemHeaderValueTests, Constructor_NeitherSet_Throws) {
     EXPECT_THROW(RangeItemHeaderValue(std::nullopt, std::nullopt), System::ArgumentException);
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's RangeItemHeaderValue
+// constructor throws (via ArgumentOutOfRangeException.ThrowIfGreaterThan) when from > to.
 TEST(RangeItemHeaderValueTests, Constructor_FromGreaterThanTo_Throws) {
-    EXPECT_THROW(RangeItemHeaderValue(5, 2), std::out_of_range);
+    EXPECT_THROW(RangeItemHeaderValue(5, 2), System::ArgumentOutOfRangeException);
 }
 
 TEST(RangeItemHeaderValueTests, Equals_SameValues) {

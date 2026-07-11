@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/MediaTypeWithQualityHeaderValue.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
 #include <cctype>
@@ -67,8 +68,8 @@ namespace System::Net::Http::Headers {
             }
         }
         if (value.has_value()) {
-            if (*value < 0.0) throw std::out_of_range("quality must not be negative.");
-            if (*value > 1.0) throw std::out_of_range("quality must not be greater than 1.0.");
+            if (*value < 0.0) throw System::ArgumentOutOfRangeException("quality", "quality must not be negative.");
+            if (*value > 1.0) throw System::ArgumentOutOfRangeException("quality", "quality must not be greater than 1.0.");
             params.push_back(NameValueHeaderValue("q", formatQuality(*value)));
         }
     }

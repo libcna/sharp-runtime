@@ -6,6 +6,7 @@
 #include "System/Net/Http/Headers/TransferCodingWithQualityHeaderValue.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Net::Http::Headers::TransferCodingHeaderValue;
 using System::Net::Http::Headers::TransferCodingWithQualityHeaderValue;
@@ -64,8 +65,12 @@ TEST(TransferCodingWithQualityHeaderValueTests, WithQuality_ToString) {
     EXPECT_EQ(v.ToString(), "gzip; q=0.5");
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's HeaderUtilities.SetQuality
+// throws for an out-of-[0,1]-range quality value.
 TEST(TransferCodingWithQualityHeaderValueTests, Constructor_QualityOutOfRange_Throws) {
-    EXPECT_THROW(TransferCodingWithQualityHeaderValue("gzip", 1.5), std::out_of_range);
+    EXPECT_THROW(TransferCodingWithQualityHeaderValue("gzip", 1.5), System::ArgumentOutOfRangeException);
 }
 
 TEST(TransferCodingWithQualityHeaderValueTests, Parse_WithQuality) {

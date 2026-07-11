@@ -70,9 +70,13 @@ TEST(ContentDispositionHeaderValueTests, Size_GetSet) {
     EXPECT_EQ(*v.getSizeProperty(), 12345);
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's ContentDispositionHeaderValue
+// .Size setter throws (via ArgumentOutOfRangeException.ThrowIfNegative) for a negative size.
 TEST(ContentDispositionHeaderValueTests, Size_Negative_Throws) {
     ContentDispositionHeaderValue v("attachment");
-    EXPECT_THROW(v.setSizeProperty(-1), std::out_of_range);
+    EXPECT_THROW(v.setSizeProperty(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ContentDispositionHeaderValueTests, CreationDate_RoundTrips) {

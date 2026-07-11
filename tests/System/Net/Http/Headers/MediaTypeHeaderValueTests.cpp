@@ -6,6 +6,7 @@
 #include "System/Net/Http/Headers/MediaTypeWithQualityHeaderValue.hpp"
 #include "System/FormatException.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Net::Http::Headers::MediaTypeHeaderValue;
 using System::Net::Http::Headers::MediaTypeWithQualityHeaderValue;
@@ -90,9 +91,14 @@ TEST(MediaTypeWithQualityHeaderValueTests, WithQuality_ToString) {
     EXPECT_EQ(v.ToString(), "text/html; q=0.8");
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's HeaderUtilities.SetQuality
+// throws (via ArgumentOutOfRangeException.ThrowIfNegative/ThrowIfGreaterThan) for an
+// out-of-[0,1]-range quality value.
 TEST(MediaTypeWithQualityHeaderValueTests, Constructor_QualityOutOfRange_Throws) {
-    EXPECT_THROW(MediaTypeWithQualityHeaderValue("text/html", 1.5), std::out_of_range);
-    EXPECT_THROW(MediaTypeWithQualityHeaderValue("text/html", -0.1), std::out_of_range);
+    EXPECT_THROW(MediaTypeWithQualityHeaderValue("text/html", 1.5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(MediaTypeWithQualityHeaderValue("text/html", -0.1), System::ArgumentOutOfRangeException);
 }
 
 TEST(MediaTypeWithQualityHeaderValueTests, Parse_WithQualityAndParameters) {

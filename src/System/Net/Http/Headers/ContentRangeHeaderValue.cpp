@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/ContentRangeHeaderValue.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/HashCode.hpp"
 #include <algorithm>
@@ -50,11 +51,11 @@ namespace System::Net::Http::Headers {
     }
 
     ContentRangeHeaderValue::ContentRangeHeaderValue(SharpRuntime::longcs from, SharpRuntime::longcs to, SharpRuntime::longcs length) {
-        if (length < 0) throw std::out_of_range("length must not be negative.");
-        if (to < 0) throw std::out_of_range("to must not be negative.");
-        if (to > length) throw std::out_of_range("to must not be greater than length.");
-        if (from < 0) throw std::out_of_range("from must not be negative.");
-        if (from > to) throw std::out_of_range("from must not be greater than to.");
+        if (length < 0) throw System::ArgumentOutOfRangeException("length");
+        if (to < 0) throw System::ArgumentOutOfRangeException("to");
+        if (to > length) throw System::ArgumentOutOfRangeException("to");
+        if (from < 0) throw System::ArgumentOutOfRangeException("from");
+        if (from > to) throw System::ArgumentOutOfRangeException("from");
 
         from_ = from;
         to_ = to;
@@ -62,14 +63,14 @@ namespace System::Net::Http::Headers {
     }
 
     ContentRangeHeaderValue::ContentRangeHeaderValue(SharpRuntime::longcs length) {
-        if (length < 0) throw std::out_of_range("length must not be negative.");
+        if (length < 0) throw System::ArgumentOutOfRangeException("length");
         length_ = length;
     }
 
     ContentRangeHeaderValue::ContentRangeHeaderValue(SharpRuntime::longcs from, SharpRuntime::longcs to) {
-        if (to < 0) throw std::out_of_range("to must not be negative.");
-        if (from < 0) throw std::out_of_range("from must not be negative.");
-        if (from > to) throw std::out_of_range("from must not be greater than to.");
+        if (to < 0) throw System::ArgumentOutOfRangeException("to");
+        if (from < 0) throw System::ArgumentOutOfRangeException("from");
+        if (from > to) throw System::ArgumentOutOfRangeException("from");
 
         from_ = from;
         to_ = to;

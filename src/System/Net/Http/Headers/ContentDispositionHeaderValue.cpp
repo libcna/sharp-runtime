@@ -286,7 +286,7 @@ namespace System::Net::Http::Headers {
 
     void ContentDispositionHeaderValue::setSizeProperty(std::optional<SharpRuntime::longcs> value) {
         if (!value.has_value()) { removeParameter("size"); return; }
-        if (*value < 0) throw std::out_of_range("size must not be negative.");
+        if (*value < 0) throw System::ArgumentOutOfRangeException("value", "size must not be negative.");
         setOrAddParameter("size", std::to_string(*value));
     }
 

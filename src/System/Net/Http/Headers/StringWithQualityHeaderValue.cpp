@@ -63,8 +63,8 @@ namespace System::Net::Http::Headers {
     StringWithQualityHeaderValue::StringWithQualityHeaderValue(const std::string& value, double quality)
         : value_(value), quality_(quality) {
         checkValidToken(value, "value");
-        if (quality < 0.0) throw std::out_of_range("quality must not be negative.");
-        if (quality > 1.0) throw std::out_of_range("quality must not be greater than 1.0.");
+        if (quality < 0.0) throw System::ArgumentOutOfRangeException("quality", "quality must not be negative.");
+        if (quality > 1.0) throw System::ArgumentOutOfRangeException("quality", "quality must not be greater than 1.0.");
     }
 
     std::string StringWithQualityHeaderValue::ToString() const {

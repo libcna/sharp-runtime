@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include "System/Net/Http/Headers/StringWithQualityHeaderValue.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 
 using System::Net::Http::Headers::StringWithQualityHeaderValue;
@@ -27,9 +28,14 @@ TEST(StringWithQualityHeaderValueTests, Quality_One_ToString) {
     EXPECT_EQ(v.ToString(), "gzip; q=1.0");
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's StringWithQualityHeaderValue
+// constructor throws (via ArgumentOutOfRangeException.ThrowIfNegative/ThrowIfGreaterThan) for
+// an out-of-[0,1]-range quality value.
 TEST(StringWithQualityHeaderValueTests, Constructor_QualityOutOfRange_Throws) {
-    EXPECT_THROW(StringWithQualityHeaderValue("gzip", -0.1), std::out_of_range);
-    EXPECT_THROW(StringWithQualityHeaderValue("gzip", 1.1), std::out_of_range);
+    EXPECT_THROW(StringWithQualityHeaderValue("gzip", -0.1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(StringWithQualityHeaderValue("gzip", 1.1), System::ArgumentOutOfRangeException);
 }
 
 TEST(StringWithQualityHeaderValueTests, Constructor_InvalidToken_Throws) {
