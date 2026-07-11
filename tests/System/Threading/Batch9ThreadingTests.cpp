@@ -499,6 +499,44 @@ TEST(RegisteredWaitHandleTests, RegisterWaitForSingleObject_WithSemaphore_Invoke
     rwh.Unregister(nullptr);
 }
 
+namespace {
+    // Test double: never signals, and tracks whether a WaitOne() call is currently in flight,
+    // so the regression test below can observe that RegisteredWaitHandle::Unregister() genuinely
+    // waits for the background wait thread to leave its WaitOne() call before returning.
+    class CountingNeverSignaledWaitHandle : public WaitHandle {
+    public:
+        std::atomic<int> activeCalls{0};
+        bool WaitOne() override { return WaitOne(-1); }
+        bool WaitOne(intcs millisecondsTimeout) override {
+            activeCalls.fetch_add(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(millisecondsTimeout));
+            activeCalls.fetch_sub(1);
+            return false;
+        }
+    };
+}
+
+// Regression test for a wave-3 audit finding: Unregister() detached the background wait
+// thread instead of joining it, so a caller that destroyed the registered WaitHandle right
+// after Unregister() returned could race the thread's in-flight WaitOne() call on that same
+// (now freed, non-reference-counted) pointer -- a genuine use-after-free. Real .NET is safe
+// without blocking because its wait thread operates on a ref-counted SafeWaitHandle; this port
+// has no equivalent ref-counting, so blocking is the simpler, safe alternative.
+TEST(RegisteredWaitHandleTests, Unregister_WaitsForInFlightWaitOneToReturn) {
+    auto handle = std::make_unique<CountingNeverSignaledWaitHandle>();
+    auto rwh = ThreadPool::RegisterWaitForSingleObject(
+        handle.get(), [](void*, bool) {}, nullptr, -1, false);
+
+    // Wait until the background thread is confirmed to be inside a WaitOne() call.
+    while (handle->activeCalls.load() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    rwh.Unregister(nullptr);
+    // Unregister() must not return while WaitOne() is still in flight.
+    EXPECT_EQ(handle->activeCalls.load(), 0);
+
+    handle.reset(); // safe to destroy now; would race a still-detached thread before the fix
+}
+
 // ===========================================================================
 // WaitHandle::WaitAll / WaitAny
 // ===========================================================================
