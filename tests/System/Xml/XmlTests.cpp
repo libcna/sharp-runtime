@@ -222,6 +222,81 @@ TEST(XmlReaderTests, ReadElementContentAsString_ReturnsText) {
     EXPECT_EQ(text, "hello world");
 }
 
+// Regression test for a wave-3 audit finding: CDATA sections were reported as plain
+// XmlNodeType::Text (tinyxml2's XMLText::CData() flag was never consulted), so a reader
+// could not distinguish `<![CDATA[...]]>` from ordinary text -- matches XmlTextReaderImpl.cs,
+// which reports XmlNodeType.CDATA for CDATA sections.
+TEST(XmlReaderTests, CDataSection_ReportsCDataNodeType) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<msg><![CDATA[a<b]]></msg>"));
+    r->Read(); // <msg>
+    r->Read(); // CDATA
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::CDATA);
+    EXPECT_EQ(r->getValueProperty(), "a<b");
+}
+
+// Regression test: a real processing instruction (target != "xml") was previously
+// misreported as XmlNodeType::XmlDeclaration with a hardcoded name of "xml" -- tinyxml2
+// parses every `<?target data?>` form uniformly, so this port has to split target vs. data
+// itself. Matches XmlTextReaderImpl.cs, which only treats a target of exactly "xml" as the
+// document declaration.
+TEST(XmlReaderTests, ProcessingInstruction_ReportsPINodeTypeAndSplitsTargetData) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<?xml-stylesheet type=\"text/xsl\" href=\"style.xsl\"?><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::ProcessingInstruction);
+    EXPECT_EQ(r->getNameProperty(), "xml-stylesheet");
+    EXPECT_EQ(r->getValueProperty(), "type=\"text/xsl\" href=\"style.xsl\"");
+}
+
+// Regression test: a real `<?xml ...?>` declaration's Value used to include the "xml"
+// target token itself ("xml version=\"1.0\""); real .NET's XmlDeclaration.Value is
+// everything after the target, e.g. "version=\"1.0\"".
+TEST(XmlReaderTests, XmlDeclaration_ValueExcludesTargetToken) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<?xml version=\"1.0\"?><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNameProperty(), "xml");
+    EXPECT_EQ(r->getValueProperty(), "version=\"1.0\"");
+}
+
+// Regression test for a wave-3 audit finding: DOCTYPE declarations parse as tinyxml2's
+// XMLUnknown, which buildEvents() had no branch for at all -- the node silently vanished
+// from the event stream instead of surfacing as XmlNodeType::DocumentType.
+TEST(XmlReaderTests, DocumentType_ReportsDocumentTypeNodeType) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<!DOCTYPE root><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::DocumentType);
+    EXPECT_EQ(r->getNameProperty(), "root");
+}
+
+// Regression test for a wave-3 audit finding: isEmptyElement was computed from
+// `!FirstChild()`, so an explicitly-closed empty element (`<a></a>`) was indistinguishable
+// from a self-closing one (`<a/>`) and silently lost its EndElement event. Real .NET's
+// IsEmptyElement is only true for the `<a/>` empty-tag syntax; `<a></a>` always produces a
+// separate EndElement node.
+TEST(XmlReaderTests, ExplicitlyClosedEmptyElement_IsNotEmptyElement_GetsEndElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<root><a></a></root>"));
+    r->Read(); // <root>
+    r->Read(); // <a>
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+    EXPECT_EQ(r->getNameProperty(), "a");
+    EXPECT_FALSE(r->getIsEmptyElementProperty());
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "a");
+}
+
+TEST(XmlReaderTests, SelfClosingEmptyElement_IsEmptyElement_NoSeparateEndElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<root><a/></root>"));
+    r->Read(); // <root>
+    r->Read(); // <a/>
+    EXPECT_TRUE(r->getIsEmptyElementProperty());
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "root");
+}
+
 // ===========================================================================
 // XmlWriter — tinyxml2-backed implementation
 // ===========================================================================

@@ -43,7 +43,9 @@ namespace System::Xml {
         /** @brief Returns the text value of the current node (Text/CDATA/Comment). */
         [[nodiscard]] std::string getValueProperty() const;
 
-        /** @brief Returns @c true if the current element has no child nodes. */
+        /** @brief Returns @c true if the current element was written in the empty-tag
+         *  (self-closing, e.g. @c &lt;foo/&gt;) syntax; @c false for @c &lt;foo&gt;&lt;/foo&gt;,
+         *  even when it has no children. */
         [[nodiscard]] bool getIsEmptyElementProperty() const;
 
         /** @brief Returns the current read state. */
