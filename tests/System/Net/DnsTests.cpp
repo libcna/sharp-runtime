@@ -69,9 +69,38 @@ TEST(DnsTests, GetHostAddresses_LiteralIPv4_ReturnsSameAddress) {
     EXPECT_EQ(addrs[0], IPAddress::Loopback);
 }
 
-TEST(DnsTests, GetHostAddresses_RequestingIPv6Only_ReturnsEmpty) {
-    auto addrs = Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6);
-    EXPECT_TRUE(addrs.empty());
+// Regression test for a wave-3 audit finding: requesting AddressFamily::InterNetworkV6 for
+// any host unconditionally returned an empty result -- IPv6 resolution was effectively
+// disabled entirely, silently, with no distinction between "no IPv6 address exists" and
+// "IPv6 support is turned off". Asking for an IPv6-only resolution of an IPv4-only literal
+// address has no valid answer, so it now surfaces as a SocketException(HostNotFound) --
+// consistent with how every other unresolvable-address case in this API already behaves --
+// instead of a silent empty vector indistinguishable from "checked and found nothing".
+TEST(DnsTests, GetHostAddresses_RequestingIPv6Only_MismatchedIPv4Literal_Throws) {
+    EXPECT_THROW(Dns::GetHostAddresses("127.0.0.1", AddressFamily::InterNetworkV6), SocketException);
+}
+
+TEST(DnsTests, GetHostAddresses_LiteralIPv6_ReturnsSameAddress) {
+    auto addrs = Dns::GetHostAddresses("::1");
+    ASSERT_FALSE(addrs.empty());
+    for (const auto& a : addrs) {
+        EXPECT_TRUE(a.getIsIPv6Property());
+        EXPECT_EQ(a, IPAddress::IPv6Loopback);
+    }
+}
+
+TEST(DnsTests, GetHostAddresses_RequestingIPv6_LiteralIPv6_ReturnsAddress) {
+    auto addrs = Dns::GetHostAddresses("::1", AddressFamily::InterNetworkV6);
+    ASSERT_FALSE(addrs.empty());
+    EXPECT_EQ(addrs[0], IPAddress::IPv6Loopback);
+}
+
+// Verified against the real getaddrinfo() behavior of this build host: requesting AF_INET6
+// for the numeric literal "127.0.0.1" fails with EAI_ADDRFAMILY, and requesting AF_INET for
+// the numeric literal "::1" is likewise rejected -- an IPv4-only request for an IPv6 literal
+// has no valid answer either.
+TEST(DnsTests, GetHostAddresses_RequestingIPv4Only_MismatchedIPv6Literal_Throws) {
+    EXPECT_THROW(Dns::GetHostAddresses("::1", AddressFamily::InterNetwork), SocketException);
 }
 
 TEST(DnsTests, GetHostEntry_LiteralIPv4_ReturnsEntryWithSameAddress) {
@@ -80,8 +109,22 @@ TEST(DnsTests, GetHostEntry_LiteralIPv4_ReturnsEntryWithSameAddress) {
     EXPECT_EQ(entry.getAddressListProperty()[0], IPAddress::Loopback);
 }
 
+TEST(DnsTests, GetHostEntry_LiteralIPv6_ReturnsEntryWithSameAddress) {
+    IPHostEntry entry = Dns::GetHostEntry("::1", AddressFamily::InterNetworkV6);
+    ASSERT_FALSE(entry.getAddressListProperty().empty());
+    EXPECT_EQ(entry.getAddressListProperty()[0], IPAddress::IPv6Loopback);
+}
+
 TEST(DnsTests, GetHostEntry_ByAddress_Loopback_ResolvesSomeName) {
     IPHostEntry entry = Dns::GetHostEntry(IPAddress::Loopback);
+    EXPECT_FALSE(entry.getHostNameProperty().empty());
+}
+
+// Regression test: GetHostEntry(const IPAddress&) previously called address.getAddressProperty()
+// unconditionally, which throws SocketException for any IPv6 address (per its documented
+// contract) -- there was no code path at all for a reverse lookup of an IPv6 address.
+TEST(DnsTests, GetHostEntry_ByAddress_IPv6Loopback_ResolvesSomeName) {
+    IPHostEntry entry = Dns::GetHostEntry(IPAddress::IPv6Loopback);
     EXPECT_FALSE(entry.getHostNameProperty().empty());
 }
 
