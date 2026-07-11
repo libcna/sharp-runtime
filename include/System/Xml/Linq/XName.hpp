@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 
 namespace System::Xml::Linq {
 
@@ -71,15 +72,23 @@ namespace System::Xml::Linq {
 
         /**
          * @brief Parses an expanded name of the form "{namespace}localName" or plain "localName".
+         *
+         * Matches XName.cs's Get(string): splits on the *last* '}' (not the first -- a
+         * namespace URI may itself legally contain '}'), and rejects a malformed expanded
+         * name (empty namespace "{}x", or no local name after the closing brace "{ns}").
+         *
          * @param expandedName The expanded XML name string.
          * @return Parsed XName.
+         * @throws System::ArgumentException if @p expandedName is empty or malformed.
          */
         [[nodiscard]] static XName Get(const std::string& expandedName) {
-            if (!expandedName.empty() && expandedName[0] == '{') {
-                size_t end = expandedName.find('}');
-                if (end != std::string::npos) {
-                    return XName(expandedName.substr(1, end - 1), expandedName.substr(end + 1));
-                }
+            if (expandedName.empty())
+                throw System::ArgumentException("The value cannot be an empty string.", "expandedName");
+            if (expandedName[0] == '{') {
+                size_t end = expandedName.rfind('}');
+                if (end == std::string::npos || end <= 1 || end == expandedName.size() - 1)
+                    throw System::ArgumentException("The format of value '" + expandedName + "' is invalid.");
+                return XName(expandedName.substr(1, end - 1), expandedName.substr(end + 1));
             }
             return XName(std::string(), expandedName);
         }

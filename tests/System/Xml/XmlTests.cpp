@@ -525,6 +525,29 @@ TEST(XNameTests, Get_WithNamespace) {
     EXPECT_EQ(n.getLocalNameProperty(), "root");
 }
 
+// Regression tests for a wave-3 audit finding: Get() split on the *first* '}' instead of
+// the last, and performed no validation of malformed expanded-name syntax. Verified against
+// XName.cs's Get(string): a namespace URI may itself legally contain '}', so the split must
+// use LastIndexOf; an empty namespace ("{}x") or missing local name ("{ns}") must throw
+// ArgumentException.
+TEST(XNameTests, Get_NamespaceContainingCloseBrace_SplitsOnLastBrace) {
+    XName n = XName::Get("{urn:example:{weird}}root");
+    EXPECT_EQ(n.getNamespaceNameProperty(), "urn:example:{weird}");
+    EXPECT_EQ(n.getLocalNameProperty(), "root");
+}
+
+TEST(XNameTests, Get_EmptyString_Throws) {
+    EXPECT_THROW(XName::Get(""), System::ArgumentException);
+}
+
+TEST(XNameTests, Get_EmptyNamespace_Throws) {
+    EXPECT_THROW(XName::Get("{}x"), System::ArgumentException);
+}
+
+TEST(XNameTests, Get_NoLocalNameAfterBrace_Throws) {
+    EXPECT_THROW(XName::Get("{ns}"), System::ArgumentException);
+}
+
 // ===========================================================================
 // XAttribute
 // ===========================================================================
