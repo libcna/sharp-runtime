@@ -23,9 +23,14 @@ namespace System::Threading::Channels {
      * reproduced) — this runtime's Task type has no async-enumerable idiom; drain a channel with
      * a `while (WaitToReadAsync) { while (TryRead) { ... } }` loop instead, matching
      * `ReadAllAsync`'s own documented implementation.
+     *
+     * @note Inherits `std::enable_shared_from_this` so the default `ReadAsync()` can keep `this`
+     * alive for the lifetime of its background task (see that method's doc comment) — instances
+     * must therefore be held via `std::shared_ptr` (true of every factory in this file, and of
+     * any custom subclass expected to use the default `ReadAsync()`).
      */
     template<typename T>
-    class ChannelReader {
+    class ChannelReader : public std::enable_shared_from_this<ChannelReader<T>> {
     public:
         virtual ~ChannelReader() = default;
 
@@ -52,13 +57,21 @@ namespace System::Threading::Channels {
         /** @brief A Task that completes once the channel is closed and fully drained. */
         [[nodiscard]] virtual System::Threading::Tasks::Task getCompletionProperty() const = 0;
 
-        /** @brief Reads an item, waiting for one to become available if necessary. */
+        /**
+         * @brief Reads an item, waiting for one to become available if necessary.
+         *
+         * The returned Task runs on a background thread (see Task's constructor) that may
+         * still be executing after this call returns; it keeps `this` alive via
+         * `shared_from_this()` for its own duration, so it's safe to call even if every other
+         * reference to this reader is dropped immediately after issuing the call.
+         */
         virtual System::Threading::Tasks::TaskT<T> ReadAsync() {
-            return System::Threading::Tasks::TaskT<T>([this]() {
+            auto self = this->shared_from_this();
+            return System::Threading::Tasks::TaskT<T>([self]() {
                 T item{};
                 while (true) {
-                    if (TryRead(item)) return item;
-                    if (!WaitToReadAsync().getResultProperty()) {
+                    if (self->TryRead(item)) return item;
+                    if (!self->WaitToReadAsync().getResultProperty()) {
                         throw ChannelClosedException();
                     }
                 }
@@ -70,9 +83,14 @@ namespace System::Threading::Channels {
      * @brief Provides a base class for writing to a channel.
      *
      * C++ counterpart of .NET System.Threading.Channels.ChannelWriter<T>.
+     *
+     * @note Inherits `std::enable_shared_from_this` so the default `WriteAsync()` can keep
+     * `this` alive for the lifetime of its background task (see that method's doc comment) —
+     * instances must therefore be held via `std::shared_ptr` (true of every factory in this
+     * file, and of any custom subclass expected to use the default `WriteAsync()`).
      */
     template<typename T>
-    class ChannelWriter {
+    class ChannelWriter : public std::enable_shared_from_this<ChannelWriter<T>> {
     public:
         virtual ~ChannelWriter() = default;
 
@@ -95,11 +113,19 @@ namespace System::Threading::Channels {
             }
         }
 
-        /** @brief Writes an item, waiting for space if necessary. */
+        /**
+         * @brief Writes an item, waiting for space if necessary.
+         *
+         * The returned Task runs on a background thread (see Task's constructor) that may
+         * still be executing after this call returns; it keeps `this` alive via
+         * `shared_from_this()` for its own duration, so it's safe to call even if every other
+         * reference to this writer is dropped immediately after issuing the call.
+         */
         virtual System::Threading::Tasks::Task WriteAsync(T item) {
-            return System::Threading::Tasks::Task([this, item = std::move(item)]() mutable {
-                while (!TryWrite(item)) {
-                    if (!WaitToWriteAsync().getResultProperty()) {
+            auto self = this->shared_from_this();
+            return System::Threading::Tasks::Task([self, item = std::move(item)]() mutable {
+                while (!self->TryWrite(item)) {
+                    if (!self->WaitToWriteAsync().getResultProperty()) {
                         throw ChannelClosedException();
                     }
                 }
