@@ -356,6 +356,35 @@ TEST(DateTimeTests, TryParse_BadMonth_ReturnsFalse) {
     EXPECT_FALSE(DateTime::TryParse("2024-13-01", dt));
 }
 
+// Regression tests for a wave-3 audit finding: TryParse computed the fractional-second
+// digit count as `s.size() - 20`, which counted a trailing ISO-8601 'Z'/offset marker as if
+// it were extra fraction digits, corrupting the millisecond normalisation (".123Z" was read
+// as 4 digits and truncated 123ms down to 12ms instead of being recognised as 3 digits).
+
+TEST(DateTimeTests, TryParse_MillisecondsWithTrailingZ_ParsesCorrectly) {
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.123Z", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+}
+
+TEST(DateTimeTests, TryParse_MillisecondsWithTrailingOffset_ParsesCorrectly) {
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.123+02:00", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+}
+
+TEST(DateTimeTests, TryParse_SevenFractionalDigitsWithTrailingZ_TruncatesToMilliseconds) {
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.1234567Z", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+}
+
+TEST(DateTimeTests, TryParse_MillisecondsNoTimezone_StillParsesCorrectly) {
+    DateTime dt;
+    ASSERT_TRUE(DateTime::TryParse("2024-06-15 10:30:45.123", dt));
+    EXPECT_EQ(dt.getMillisecondProperty(), 123);
+}
+
 // ---------------------------------------------------------------------------
 // MinValue / MaxValue / UnixEpoch
 // ---------------------------------------------------------------------------

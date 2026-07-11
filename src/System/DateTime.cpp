@@ -336,8 +336,15 @@ namespace System {
                 hr = mn = sc = 0;
             if (s.size() >= 23 && s[19] == '.') {
                 std::sscanf(s.c_str() + 20, "%d", &ms);
-                // Normalise fractional digits to milliseconds (3 digits)
-                size_t fracLen = s.size() - 20;
+                // Count only the actual fractional-digit characters -- a trailing
+                // 'Z'/'+hh:mm'/'-hh:mm' timezone marker (common on ISO-8601/wire-format
+                // timestamps such as "...ss.123Z") is not part of the fraction and must not
+                // be counted as if it were extra digits, or the millisecond normalisation
+                // below divides by the wrong power of ten (e.g. ".123Z" would previously be
+                // read as 4 fractional digits and truncated from 123ms to 12ms).
+                size_t fracLen = 0;
+                while (20 + fracLen < s.size() && s[20 + fracLen] >= '0' && s[20 + fracLen] <= '9')
+                    ++fracLen;
                 while (fracLen < 3) { ms *= 10; ++fracLen; }
                 if (fracLen > 3) { for (size_t k = 3; k < fracLen; ++k) ms /= 10; }
             }
