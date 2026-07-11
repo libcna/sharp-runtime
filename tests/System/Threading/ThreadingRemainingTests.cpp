@@ -298,6 +298,27 @@ TEST(CountdownEventTests, Reset_WithNewCount) {
     EXPECT_EQ(ce.getInitialCountProperty(), 10);
     EXPECT_EQ(ce.getCurrentCountProperty(), 10);
 }
+
+// Regression test for a wave-3 audit finding: Reset(intcs count = -1) used -1 as a sentinel
+// meaning "use InitialCount", so an explicit Reset(-1) call silently reset to InitialCount
+// instead of throwing. Verified against CountdownEvent.cs's Reset(int): real .NET has no
+// negative-sentinel concept -- Reset(int count) rejects *any* negative count, including -1,
+// with ArgumentOutOfRangeException.
+TEST(CountdownEventTests, Reset_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    CountdownEvent ce(3);
+    EXPECT_THROW(ce.Reset(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.Reset(-5), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: Reset() never called ThrowIfDisposed() at all,
+// so calling it after Dispose() silently succeeded instead of throwing. Verified against
+// CountdownEvent.cs's Reset(int): ObjectDisposedException.ThrowIf(_disposed, this).
+TEST(CountdownEventTests, Reset_AfterDispose_ThrowsObjectDisposedException) {
+    CountdownEvent ce(3);
+    ce.Dispose();
+    EXPECT_THROW(ce.Reset(), System::ObjectDisposedException);
+    EXPECT_THROW(ce.Reset(5), System::ObjectDisposedException);
+}
 TEST(CountdownEventTests, Wait_AlreadySet_ReturnsImmediately) {
     CountdownEvent ce(0);
     EXPECT_NO_THROW(ce.Wait());

@@ -83,11 +83,31 @@ namespace System::Threading {
             currentCount_ += signalCount;
         }
 
-        /** Resets the current count to the initial count, or to count when count >= 0. */
-        void Reset(intcs count = -1) {
+        /**
+         * @brief Resets both CurrentCount and InitialCount to InitialCount's current value.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
+        void Reset() { Reset(initialCount_); }
+
+        /**
+         * @brief Resets both CurrentCount and InitialCount to @p count.
+         *
+         * Verified against CountdownEvent.cs's Reset(int): unlike this method's previous
+         * signature here (a single `Reset(intcs count = -1)` using -1 as a sentinel for "use
+         * InitialCount"), real .NET has two separate overloads and Reset(int) rejects *any*
+         * negative count -- including -1 -- with ArgumentOutOfRangeException. The sentinel
+         * previously made an explicit `Reset(-1)` call silently reset to InitialCount instead
+         * of throwing as real .NET does.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p count is negative.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
+        void Reset(intcs count) {
+            ThrowIfDisposed();
+            System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
             std::unique_lock lock(mutex_);
-            if (count < 0) currentCount_ = initialCount_;
-            else { initialCount_ = count; currentCount_ = count; }
+            initialCount_ = count;
+            currentCount_ = count;
         }
 
         /**
