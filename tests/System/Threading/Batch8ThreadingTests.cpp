@@ -158,6 +158,55 @@ TEST(ThreadingTests, Thread_Join_WithTimeout_ReturnsTrueOnCompletion) {
     EXPECT_TRUE(result);
 }
 
+// Regression test for a wave-3 audit finding: Start()'s spawned-thread lambda captured raw
+// `this`, and ~Thread() detaches (not joins) -- destroying the Thread wrapper before its OS
+// thread finishes left the lambda writing into freed memory. Confirmed via a standalone
+// AddressSanitizer repro against the pre-fix code (reliably crashed with a heap-use-after-free
+// write inside Thread::Start()'s lambda). Fixed by moving finished_/isBackground_/
+// managedThreadId_ into a heap-allocated RunState captured by shared_ptr instead of raw `this`.
+TEST(ThreadingTests, Thread_DestroyedWhileRunning_DoesNotCrash) {
+    std::atomic<bool> started{false};
+    std::atomic<bool> completed{false};
+    {
+        auto t = std::make_unique<Thread>([&]{
+            started.store(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            completed.store(true);
+        });
+        t->Start();
+        while (!started.load()) std::this_thread::yield();
+        // t destructs here (detach, not join) while the spawned OS thread is still sleeping.
+    }
+    // Give the detached thread time to finish; a crash/UB would most likely surface here.
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    EXPECT_TRUE(completed.load());
+}
+
+// Regression test: CurrentThreadProxy must still resolve the correct ManagedThreadId/
+// IsBackground even when the owning Thread object has already been destroyed before (or
+// while) the spawned thread runs its body -- exercising the RunState indirection directly.
+TEST(ThreadingTests, CurrentThread_ResolvesCorrectly_AfterOwningThreadObjectDestroyed) {
+    std::atomic<intcs> observedId{-1};
+    std::atomic<bool> observedBackground{false};
+    std::atomic<bool> done{false};
+    intcs expectedId;
+    {
+        auto t = std::make_unique<Thread>([&]{
+            observedId.store(Thread::CurrentThread().getManagedThreadIdProperty());
+            observedBackground.store(Thread::CurrentThread().getIsBackgroundProperty());
+            done.store(true);
+        });
+        t->setIsBackgroundProperty(true);
+        expectedId = t->getManagedThreadIdProperty();
+        t->Start();
+        // t destructs here (detach) -- possibly before the spawned thread runs its body at all.
+    }
+    for (int i = 0; i < 500 && !done.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    ASSERT_TRUE(done.load());
+    EXPECT_EQ(observedId.load(), expectedId);
+    EXPECT_TRUE(observedBackground.load());
+}
+
 // ===========================================================================
 // ThreadAbortException
 // ===========================================================================

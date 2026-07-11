@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -31,26 +32,41 @@ namespace System::Threading {
      */
     class Thread {
         // Managed thread IDs start at 2, matching .NET's convention that the main/first
-        // thread is ID 1 (see currentThread_'s default below) — the first Thread object
+        // thread is ID 1 (see currentThreadState_'s default below) — the first Thread object
         // constructed by user code must not collide with that.
         inline static std::atomic<intcs> nextManagedId_{2};
 
-        // Tracks which Thread object (if any) is running on the calling OS thread, so
+        // Verified: the spawned-thread lambda previously captured `this` by raw pointer and
+        // wrote into `finished_`/read `currentThread_->...` after ~Thread() (which detach()es,
+        // not join()s -- a deliberate design letting the OS thread outlive the wrapper). A
+        // Thread object destroyed before its OS thread finishes left the lambda touching freed
+        // memory: a genuine use-after-free, the same bug class fixed elsewhere this session
+        // (Channel::ReadAsync/WriteAsync's raw-`this` capture, RegisteredWaitHandle::
+        // Unregister()'s detach-without-join). Fixed by moving everything the spawned thread
+        // touches into a heap-allocated RunState the lambda captures by shared_ptr, so it stays
+        // alive for the OS thread's full lifetime regardless of the owning Thread object's.
+        struct RunState {
+            std::atomic<bool> finished{false};
+            std::atomic<bool> isBackground{false};
+            intcs             managedThreadId = 0;
+        };
+
+        // Tracks which running thread's RunState (if any) belongs to the calling OS thread, so
         // CurrentThread() can report the correct ManagedThreadId/IsBackground instead of an
         // unrelated hash of the OS thread handle. Threads not started via this class (the
         // main thread, or any other externally-created thread) see nullptr and report the
-        // .NET-convention main-thread ID of 1.
-        inline static thread_local Thread* currentThread_ = nullptr;
+        // .NET-convention main-thread ID of 1. Holding the shared_ptr here (rather than a raw
+        // Thread*) means CurrentThreadProxy never dereferences the (possibly already-destroyed)
+        // Thread object itself.
+        inline static thread_local std::shared_ptr<RunState> currentThreadState_;
 
+        std::shared_ptr<RunState> state_ = std::make_shared<RunState>();
         std::function<void()>  fn_;
         std::thread            thread_;
         std::string            name_;
-        intcs                  managedThreadId_;
-        bool                   isBackground_      = false;
         bool                   isThreadPoolThread_ = false;
         ThreadPriority         priority_          = ThreadPriority::Normal;
         std::atomic<bool>      started_{false};
-        std::atomic<bool>      finished_{false};
 
     public:
         /**
@@ -58,8 +74,10 @@ namespace System::Threading {
          * @param start Function to execute on the new thread.
          */
         explicit Thread(std::function<void()> start)
-            : fn_(std::move(start)), managedThreadId_(nextManagedId_.fetch_add(1))
-        {}
+            : fn_(std::move(start))
+        {
+            state_->managedThreadId = nextManagedId_.fetch_add(1);
+        }
 
         ~Thread() {
             if (thread_.joinable()) thread_.detach();
@@ -79,10 +97,10 @@ namespace System::Threading {
         void Start() {
             if (started_.exchange(true))
                 throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
-            thread_ = std::thread([this, fn = std::move(fn_)]() mutable {
-                currentThread_ = this;
+            thread_ = std::thread([state = state_, fn = std::move(fn_)]() mutable {
+                currentThreadState_ = state;
                 fn();
-                finished_.store(true);
+                state->finished.store(true);
             });
         }
 
@@ -94,11 +112,11 @@ namespace System::Threading {
         void Start(void* parameter) {
             if (started_.exchange(true))
                 throw System::Threading::ThreadStateException("Thread is running or terminated; it cannot restart.");
-            thread_ = std::thread([this, fn = std::move(fn_), parameter]() mutable {
-                currentThread_ = this;
+            thread_ = std::thread([state = state_, fn = std::move(fn_), parameter]() mutable {
+                currentThreadState_ = state;
                 (void)parameter;
                 fn();
-                finished_.store(true);
+                state->finished.store(true);
             });
         }
 
@@ -134,7 +152,7 @@ namespace System::Threading {
             }
             auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::milliseconds(millisecondsTimeout);
-            while (!finished_.load()) {
+            while (!state_->finished.load()) {
                 if (std::chrono::steady_clock::now() >= deadline) return false;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
@@ -153,18 +171,18 @@ namespace System::Threading {
          * @brief Returns true while the OS thread is live (started and not yet joined).
          * @return true if the thread is running.
          */
-        [[nodiscard]] bool getIsAliveProperty() const { return thread_.joinable() && !finished_.load(); }
+        [[nodiscard]] bool getIsAliveProperty() const { return thread_.joinable() && !state_->finished.load(); }
 
         /**
          * @brief Returns the unique managed thread ID assigned at construction.
          * @return Managed thread ID.
          */
-        [[nodiscard]] intcs getManagedThreadIdProperty() const { return managedThreadId_; }
+        [[nodiscard]] intcs getManagedThreadIdProperty() const { return state_->managedThreadId; }
 
         /** @brief Returns true if this is a background thread. */
-        [[nodiscard]] bool getIsBackgroundProperty() const { return isBackground_; }
+        [[nodiscard]] bool getIsBackgroundProperty() const { return state_->isBackground.load(); }
         /** @brief Sets the background status of this thread. */
-        void setIsBackgroundProperty(bool v) { isBackground_ = v; }
+        void setIsBackgroundProperty(bool v) { state_->isBackground.store(v); }
 
         /** @brief Returns true if this thread was created by the thread pool. Always false for user-created threads. */
         [[nodiscard]] bool getIsThreadPoolThreadProperty() const { return isThreadPoolThread_; }
@@ -185,10 +203,10 @@ namespace System::Threading {
          */
         [[nodiscard]] ThreadState getThreadStateProperty() const {
             if (!started_.load())          return ThreadState::Unstarted;
-            if (finished_.load())          return ThreadState::Stopped;
+            if (state_->finished.load())   return ThreadState::Stopped;
             if (!thread_.joinable())       return ThreadState::Stopped;
-            return isBackground_ ? (ThreadState::Running | ThreadState::Background)
-                                 : ThreadState::Running;
+            return state_->isBackground.load() ? (ThreadState::Running | ThreadState::Background)
+                                                : ThreadState::Running;
         }
 
         // -----------------------------------------------------------------------
@@ -284,11 +302,11 @@ namespace System::Threading {
              * main-thread convention.
              */
             [[nodiscard]] intcs getManagedThreadIdProperty() const {
-                return currentThread_ ? currentThread_->managedThreadId_ : 1;
+                return currentThreadState_ ? currentThreadState_->managedThreadId : 1;
             }
             /** @brief Returns whether the calling thread's owning Thread object is marked background. */
             [[nodiscard]] bool getIsBackgroundProperty() const {
-                return currentThread_ && currentThread_->isBackground_;
+                return currentThreadState_ && currentThreadState_->isBackground.load();
             }
             /** @brief Suspends the calling thread for @p ms milliseconds. */
             static void Sleep(intcs ms) {
