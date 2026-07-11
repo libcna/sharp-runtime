@@ -255,6 +255,8 @@ namespace System
 
     std::string String::Substring(const std::string& value, SharpRuntime::intcs startIndex)
     {
+        if (startIndex < 0 || static_cast<size_t>(startIndex) > value.size())
+            throw System::ArgumentOutOfRangeException("startIndex", "String::Substring: startIndex must be within the bounds of the string.");
         return value.substr(static_cast<size_t>(startIndex));
     }
 
@@ -364,6 +366,8 @@ namespace System
 
     std::string String::PadLeft(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar)
     {
+        if (totalWidth < 0)
+            throw System::ArgumentOutOfRangeException("totalWidth", "String::PadLeft: totalWidth must not be negative.");
         if (static_cast<SharpRuntime::intcs>(value.size()) >= totalWidth) return value;
         return std::string(static_cast<size_t>(totalWidth) - value.size(), paddingChar) + value;
     }
@@ -375,6 +379,8 @@ namespace System
 
     std::string String::PadRight(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar)
     {
+        if (totalWidth < 0)
+            throw System::ArgumentOutOfRangeException("totalWidth", "String::PadRight: totalWidth must not be negative.");
         if (static_cast<SharpRuntime::intcs>(value.size()) >= totalWidth) return value;
         return value + std::string(static_cast<size_t>(totalWidth) - value.size(), paddingChar);
     }
@@ -402,30 +408,46 @@ namespace System
 
     SharpRuntime::intcs String::IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex)
     {
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex > len)
+            throw System::ArgumentOutOfRangeException("startIndex", "String::IndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.find(substr, static_cast<size_t>(startIndex));
         return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
     }
 
     SharpRuntime::intcs String::IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex)
     {
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex > len)
+            throw System::ArgumentOutOfRangeException("startIndex", "String::IndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.find(ch, static_cast<size_t>(startIndex));
         return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
     }
 
     SharpRuntime::intcs String::LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex)
     {
+        if (value.empty()) return substr.empty() ? 0 : -1;
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex >= len)
+            throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
         return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
     }
 
     SharpRuntime::intcs String::LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex)
     {
+        if (value.empty()) return -1;
+        auto len = static_cast<SharpRuntime::intcs>(value.size());
+        if (startIndex < 0 || startIndex >= len)
+            throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.rfind(ch, static_cast<size_t>(startIndex));
         return pos == std::string::npos ? -1 : static_cast<SharpRuntime::intcs>(pos);
     }
 
     std::string String::Create(SharpRuntime::intcs count, char ch)
     {
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "String::Create: count must not be negative.");
         return std::string(static_cast<size_t>(count), ch);
     }
 
@@ -524,6 +546,8 @@ namespace System
 
     std::string String::Insert(const std::string& value, SharpRuntime::intcs startIndex, const std::string& insertValue)
     {
+        if (startIndex < 0 || static_cast<size_t>(startIndex) > value.size())
+            throw System::ArgumentOutOfRangeException("startIndex", "String::Insert: startIndex must be within the bounds of the string.");
         std::string result = value;
         result.insert(static_cast<size_t>(startIndex), insertValue);
         return result;
