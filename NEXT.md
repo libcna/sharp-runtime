@@ -1,6 +1,93 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `08d9318`) — 11356 tests passing (Debug, default `cmake --build build --parallel 8` config; also verified clean on a library-only `-DCMAKE_BUILD_TYPE=Release -DSHARP_RUNTIME_BUILD_TESTS=OFF` rebuild after this batch, per the earlier-session lesson that `-O2`+ can surface warnings `-O0` doesn't).*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `7413d80`) — 11386 tests passing (Debug, default `cmake --build build --parallel 8` config; also verified clean on a library-only `-DCMAKE_BUILD_TYPE=Release -DSHARP_RUNTIME_BUILD_TESTS=OFF` rebuild after this batch).*
+
+## Session checkpoint (2026-07-11, continued) — Xml.Linq+XPath dangerous-moderate findings: 10 fixed, 1 flagged as bigger lift (11 commits)
+
+Per NEXT.md's recommended priority, continued from Xml core straight into **System.Xml.Linq +
+XPath**'s remaining dangerous-moderate catalogue (12 itemized/condensed findings, criticals
+already closed in an earlier session). Same discipline as every prior batch this session.
+
+### Fixed (10 findings, commits `8df416b`..`7413d80`)
+
+- **`XName::Get`** split on the *first* `'}'` instead of the last (a namespace URI may itself
+  legally contain `'}'`) and performed no malformed-name validation at all. Verified against
+  `XName.cs`: switched to `rfind`, added the two real-.NET validation checks (empty
+  `expandedName`; malformed `"{}"`/`"{ns}"` with no local name after the brace) — both throw
+  `ArgumentException`. 4 regression tests.
+- **`XAttribute` had zero namespace-declaration validation** and **`IsNamespaceDeclaration` was
+  entirely missing** — fixed together (same class, same commit). Verified against
+  `XAttribute.cs`'s `ValidateAttribute`: enforces the XML Namespaces spec's constraints on
+  `xmlns="..."`/`xmlns:prefix="..."` (e.g. the XML namespace URI may only be declared by the
+  `xml` prefix; the xmlns namespace URI must never be declared by any prefix). Moved the
+  constructor and `setValueProperty()` out of inline header bodies into `.cpp` so both share a
+  new `ValidateAttribute()` helper. Added `getIsNamespaceDeclarationProperty()`. 15 regression
+  tests.
+- **`XAttribute::EscapeValue` didn't escape tab/LF/CR** — per the XML spec's attribute-value
+  normalization (§3.3.3), a literal tab/LF/CR in an attribute value is collapsed to a plain
+  space on reload; character references are exempt from that normalization. Verified against
+  `XmlEncodedRawTextWriter`'s `Tab`/`LineFeed`/`CarriageReturnEntity` (`&#x9;`/`&#xA;`/`&#xD;`).
+  2 regression tests including a full write-then-read-back round trip.
+- **`XElement::DeepEqualsCore` compared attributes via name lookup** (unordered-set semantics)
+  where real .NET's `AttributesEqual` walks both attribute lists in parallel *by position* —
+  verified against `XElement.cs`. Two elements with the same attributes in a different order
+  are NOT deep-equal in real .NET. 2 regression tests.
+- **`XElement` had no `ValidateNode` override at all** (inherited `XContainer`'s no-op default)
+  — an `XDocument`/`XDocumentType` could be added as a child element via `Add()`, producing a
+  structurally invalid tree. Verified against `XElement.cs`'s `ValidateNode`
+  (`ArgumentException`). Corrected the base class's doc-comment, which overclaimed a single
+  exception type across all subclasses. 2 regression tests.
+- **`XElement::Add(string)` always created a new `XText`** even when the last child was already
+  a plain (non-CDATA) text node. Verified against `XContainer.cs`'s `AddString()`: real .NET
+  merges into the existing trailing text node's `Value`; an empty string is a genuine no-op
+  (matches `AddString`'s `if (s.Length > 0)` guard). 3 regression tests.
+- **`XDocument::ValidateNode` used the wrong exception type and over-rejected whitespace text**
+  — verified against `XDocument.cs`'s `ValidateNode`/`ValidateString`: real .NET throws
+  `ArgumentException` for a fundamentally wrong node *kind* (CDATA, nested `XDocument`), and
+  `InvalidOperationException` only for a structurally valid kind that conflicts with the
+  document's *current state* (already has a root/doctype). Whitespace-only text (e.g.
+  indentation between top-level nodes) is legal — the old `default:` case rejected every
+  top-level `XText` unconditionally. Updated 1 pre-existing test, added 3 new ones.
+- **`XDocument::WriteTo` skipped `WriteStartDocument()` without an explicit declaration and
+  never called `WriteEndDocument()`** — verified against `XDocument.cs`'s `WriteTo()`: real
+  .NET always calls both as a matched pair regardless of whether an `XDeclaration` was set.
+  Note: `XDocument::ToString()` is unaffected (separate `SerializeTo()` code path). 1
+  regression test.
+- **XPath `number()` accepted scientific/exponent notation** — `ParseXPathNumberLiteralString`
+  used `std::from_chars`' default `general` format, which parses `"1e2"` as `100` instead of
+  correctly yielding `NaN`; XPath 1.0's `Number` production (§3.4) has no exponent syntax at
+  all. Fixed by passing `std::chars_format::fixed`. This function is also the shared
+  numeric-comparison path from an earlier session's relational-operator fix, so this also
+  corrects number-valued node-set comparisons against an exponent-notation string operand. 3
+  regression tests.
+
+### Flagged, not attempted — genuinely bigger lift (1 finding)
+
+- **`XElement::WriteTo` silently drops the element's namespace URI** — real .NET's
+  `XElement.WriteTo` routes through a full internal `ElementWriter` subsystem that resolves
+  namespace prefixes against ancestor scope and auto-generates `xmlns:pN` declarations; this
+  port's `XmlWriter` has no prefix-aware `WriteStartElement`/`WriteAttributeString` overloads at
+  all. Already documented as a deliberate, previously-reasoned simplification in the existing
+  code comment (see `XElement.cpp`'s `WriteTo()`) — a real feature addition, not a targeted bug
+  fix. A partial fix (e.g. auto-emitting a default `xmlns="..."` attribute) risks introducing
+  new namespace-scoping bugs for descendant elements, so left alone.
+
+### Xml.Linq+XPath dangerous-moderate scope: closed
+
+Only minor-severity items remain untouched for this namespace (see the "Full findings
+catalogue" section further down): `XName` constructors skip NCName validation;
+`XAttribute.EmptySequence` missing; `XDeclaration.ToString` version-omission difference;
+`XDocumentType` skips name validation; `DeepEqualsCore` skips Comment/PI nodes (matches a stale
+doc comment); XPath `string-length()` uses byte length not character count. Also still open,
+separately: "a large set of documented XLinq tree-editing API is entirely absent"
+(`AddBeforeSelf`, `SetAttributeValue`, ~20 conversion operators, etc.) — a compile-time API-
+surface gap, not runtime misbehavior, flagged in the original catalogue as too large for a
+targeted fix.
+
+**Recommended next session priority (unchanged from before this batch):** Text.Json's 6
+remaining dangerous findings (`JsonEncodedText::Encode`/`AllowTrailingCommas` refactors,
+flagged as bigger lifts in an earlier checkpoint — re-check whether they're still accurate
+before starting) → everything else, ordinary-severity moderates → minors last.
 
 ## Session checkpoint (2026-07-11) — Xml core dangerous-moderate findings: 6 fixed, 2 already-fixed/stale (6 commits)
 
