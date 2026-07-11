@@ -533,9 +533,31 @@ TEST(XDocumentStructureTests, SecondRootElement_Throws) {
     EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XElement>("other"))), InvalidOperationException);
 }
 
-TEST(XDocumentStructureTests, TextNode_Throws) {
+// Regression test: real .NET's XDocument.ValidateNode throws ArgumentException (not
+// InvalidOperationException) for non-whitespace text -- it's a fundamentally wrong node
+// *kind* for this container, not a conflict with the document's current state. Verified
+// against XDocument.cs's ValidateString.
+TEST(XDocumentStructureTests, NonWhitespaceTextNode_ThrowsArgumentException) {
     XDocument doc;
-    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("stray"))), InvalidOperationException);
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("stray"))), System::ArgumentException);
+}
+
+// Regression test for a wave-3 audit finding: the previous ValidateNode unconditionally
+// rejected every top-level XText, including whitespace-only text (e.g. indentation between
+// top-level nodes), which real .NET's ValidateString explicitly allows.
+TEST(XDocumentStructureTests, WhitespaceOnlyTextNode_DoesNotThrow) {
+    XDocument doc;
+    EXPECT_NO_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("  \t\r\n  "))));
+}
+
+TEST(XDocumentStructureTests, CDataNode_ThrowsArgumentException) {
+    XDocument doc;
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XCData>("cdata"))), System::ArgumentException);
+}
+
+TEST(XDocumentStructureTests, NestedXDocument_ThrowsArgumentException) {
+    XDocument doc;
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XDocument>())), System::ArgumentException);
 }
 
 TEST(XDocumentStructureTests, CommentsAndPIsAllowedAtTopLevel) {
