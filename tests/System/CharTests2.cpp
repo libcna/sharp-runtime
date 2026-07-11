@@ -333,3 +333,30 @@ TEST(CharTests2, StringIndex_ConvertToUtf32_BMP) {
 TEST(CharTests2, StringIndex_IsSurrogatePair_False_ForASCII) {
     EXPECT_FALSE(Char::IsSurrogatePair("AB", 0));
 }
+
+// Regression tests for a code-audit finding (ticket 242): the string-indexed overloads read
+// through charAt(), which returns the raw *byte* at an index rather than decoding UTF-8 --
+// consistent with this project's existing single-byte-per-char std::string convention. One
+// consequence (now documented on the "String-indexed overloads" section) is that a raw byte can
+// never fall in the UTF-16 surrogate range (0xD800-0xDFFF), so IsHighSurrogate(s,index)/
+// IsLowSurrogate(s,index)/IsSurrogate(s,index) can never return true through these overloads,
+// even when s holds the UTF-8 encoding of an actual supplementary-plane character. These tests
+// lock in that documented (not fixed -- see the section note) behavior so it isn't silently
+// changed by an unrelated future edit.
+TEST(CharTests2, StringIndex_IsHighSurrogate_NeverTrue_EvenForUtf8EncodedSupplementaryChar) {
+    // U+1F600 (an emoji outside the BMP) UTF-8-encodes to F0 9F 98 80 -- none of those raw
+    // bytes fall in the char16_t high-surrogate range, since a byte tops out at 0xFF.
+    std::string s = Char::ConvertFromUtf32(0x1F600);
+    for (SharpRuntime::intcs i = 0; i < static_cast<SharpRuntime::intcs>(s.size()); ++i) {
+        EXPECT_FALSE(Char::IsHighSurrogate(s, i));
+        EXPECT_FALSE(Char::IsLowSurrogate(s, i));
+        EXPECT_FALSE(Char::IsSurrogate(s, i));
+    }
+}
+
+TEST(CharTests2, StringIndex_ConvertToUtf32_NeverTakesSurrogateCombiningPath) {
+    // ConvertToUtf32(s, index)'s surrogate-pair-combining branch is unreachable via the
+    // string-indexed overload for the same reason -- it returns the raw first byte as-is.
+    std::string s = Char::ConvertFromUtf32(0x1F600);
+    EXPECT_EQ(Char::ConvertToUtf32(s, 0), static_cast<SharpRuntime::intcs>(static_cast<unsigned char>(s[0])));
+}
