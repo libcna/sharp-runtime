@@ -111,6 +111,55 @@ TEST(CancellationTokenRegisterTests, Cancel_ThrowingCallback_RunsAllCallbacksAnd
     reg3.Dispose();
 }
 
+// Regression test for a wave-3 audit finding: CancellationTokenRegistration::Dispose() was a
+// no-op race when the callback was already picked up by a concurrent Cancel() -- it returned
+// immediately instead of waiting for the in-flight callback to finish, risking use-after-free
+// if the caller tears down a resource the callback references right after Dispose() returns.
+// Verified against CancellationTokenRegistration.cs's documented Dispose() contract: "If the
+// target callback is currently executing, this method will wait until it completes."
+TEST(CancellationTokenRegisterTests, Dispose_WaitsForInFlightCallbackToFinish) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+
+    std::atomic<bool> callbackStarted{false};
+    std::atomic<bool> callbackFinished{false};
+
+    auto reg = token.Register([&] {
+        callbackStarted = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        callbackFinished = true;
+    });
+
+    std::thread canceller([&] { cts.Cancel(); });
+
+    while (!callbackStarted.load()) std::this_thread::yield();
+    // The callback is now guaranteed to be mid-execution (sleeping) -- sanity-check the race
+    // window is real before trusting the post-Dispose() assertion below.
+    bool observedStillRunning = !callbackFinished.load();
+
+    reg.Dispose();
+    EXPECT_TRUE(observedStillRunning);
+    EXPECT_TRUE(callbackFinished.load());
+
+    canceller.join();
+}
+
+// Regression test: the wait-for-completion contract must not deadlock when a callback disposes
+// its own registration (the documented "degenerate case" in CancellationTokenRegistration.cs).
+TEST(CancellationTokenRegisterTests, SelfUnregisteringCallback_DoesNotDeadlock) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    CancellationTokenRegistration* selfPtr = nullptr;
+    bool called = false;
+    auto reg = token.Register([&] {
+        called = true;
+        selfPtr->Dispose();
+    });
+    selfPtr = &reg;
+    cts.Cancel();
+    EXPECT_TRUE(called);
+}
+
 // ===========================================================================
 // LockCookie
 // ===========================================================================
@@ -186,6 +235,22 @@ TEST(ReaderWriterLockTests, WriterSeqNum_IncrementsOnEachRelease) {
 TEST(ReaderWriterLockTests, AcquireReaderLock_NegativeTimeoutBelowMinusOne_Throws) {
     ReaderWriterLock lock;
     EXPECT_THROW(lock.AcquireReaderLock(-2), System::ArgumentOutOfRangeException);
+}
+
+// Regression tests for a wave-3 audit finding: ReleaseReaderLock/ReleaseWriterLock threw
+// SynchronizationLockException when the calling thread didn't hold the lock. Verified against
+// ReaderWriterLock.cs's GetNotOwnerException(): real .NET's private
+// ReaderWriterLockApplicationException derives from ApplicationException, not
+// SynchronizationLockException -- the same exception family as the already-correct timeout
+// path in this class (AcquireReaderLock/AcquireWriterLock, tested above).
+TEST(ReaderWriterLockTests, ReleaseReaderLock_NotHeld_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    EXPECT_THROW(lock.ReleaseReaderLock(), System::ApplicationException);
+}
+
+TEST(ReaderWriterLockTests, ReleaseWriterLock_NotHeld_ThrowsApplicationException) {
+    ReaderWriterLock lock;
+    EXPECT_THROW(lock.ReleaseWriterLock(), System::ApplicationException);
 }
 
 TEST(ReaderWriterLockTests, AcquireWriterLock_TimesOut_ThrowsApplicationException) {
@@ -432,6 +497,44 @@ TEST(RegisteredWaitHandleTests, RegisterWaitForSingleObject_WithSemaphore_Invoke
     EXPECT_EQ(callCount.load(), 1);
     EXPECT_FALSE(lastTimedOut.load());
     rwh.Unregister(nullptr);
+}
+
+namespace {
+    // Test double: never signals, and tracks whether a WaitOne() call is currently in flight,
+    // so the regression test below can observe that RegisteredWaitHandle::Unregister() genuinely
+    // waits for the background wait thread to leave its WaitOne() call before returning.
+    class CountingNeverSignaledWaitHandle : public WaitHandle {
+    public:
+        std::atomic<int> activeCalls{0};
+        bool WaitOne() override { return WaitOne(-1); }
+        bool WaitOne(intcs millisecondsTimeout) override {
+            activeCalls.fetch_add(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(millisecondsTimeout));
+            activeCalls.fetch_sub(1);
+            return false;
+        }
+    };
+}
+
+// Regression test for a wave-3 audit finding: Unregister() detached the background wait
+// thread instead of joining it, so a caller that destroyed the registered WaitHandle right
+// after Unregister() returned could race the thread's in-flight WaitOne() call on that same
+// (now freed, non-reference-counted) pointer -- a genuine use-after-free. Real .NET is safe
+// without blocking because its wait thread operates on a ref-counted SafeWaitHandle; this port
+// has no equivalent ref-counting, so blocking is the simpler, safe alternative.
+TEST(RegisteredWaitHandleTests, Unregister_WaitsForInFlightWaitOneToReturn) {
+    auto handle = std::make_unique<CountingNeverSignaledWaitHandle>();
+    auto rwh = ThreadPool::RegisterWaitForSingleObject(
+        handle.get(), [](void*, bool) {}, nullptr, -1, false);
+
+    // Wait until the background thread is confirmed to be inside a WaitOne() call.
+    while (handle->activeCalls.load() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    rwh.Unregister(nullptr);
+    // Unregister() must not return while WaitOne() is still in flight.
+    EXPECT_EQ(handle->activeCalls.load(), 0);
+
+    handle.reset(); // safe to destroy now; would race a still-detached thread before the fix
 }
 
 // ===========================================================================

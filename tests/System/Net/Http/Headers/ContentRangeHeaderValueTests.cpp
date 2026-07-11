@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Net/Http/Headers/ContentRangeHeaderValue.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 
 using System::Net::Http::Headers::ContentRangeHeaderValue;
@@ -32,17 +33,22 @@ TEST(ContentRangeHeaderValueTests, Constructor_FromToOnly_ToString) {
     EXPECT_EQ(v.ToString(), "bytes 12-34/*");
 }
 
+// Regression tests for a wave-3 audit finding: these threw std::out_of_range (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's ContentRangeHeaderValue
+// constructors throw (via ArgumentOutOfRangeException.ThrowIfNegative/ThrowIfGreaterThan) for
+// these exact validation failures.
 TEST(ContentRangeHeaderValueTests, Constructor_ToGreaterThanLength_Throws) {
-    EXPECT_THROW(ContentRangeHeaderValue(12, 5000, 100), std::out_of_range);
+    EXPECT_THROW(ContentRangeHeaderValue(12, 5000, 100), System::ArgumentOutOfRangeException);
 }
 
 TEST(ContentRangeHeaderValueTests, Constructor_FromGreaterThanTo_Throws) {
-    EXPECT_THROW(ContentRangeHeaderValue(34, 12, 100), std::out_of_range);
-    EXPECT_THROW(ContentRangeHeaderValue(34, 12), std::out_of_range);
+    EXPECT_THROW(ContentRangeHeaderValue(34, 12, 100), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ContentRangeHeaderValue(34, 12), System::ArgumentOutOfRangeException);
 }
 
 TEST(ContentRangeHeaderValueTests, Constructor_NegativeLength_Throws) {
-    EXPECT_THROW(ContentRangeHeaderValue(-1), std::out_of_range);
+    EXPECT_THROW(ContentRangeHeaderValue(-1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ContentRangeHeaderValueTests, Parse_FullForm) {

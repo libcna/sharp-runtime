@@ -1,6 +1,596 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `f12da05`) — 11305 tests passing (Debug, default `cmake --build build` config, verified via full `rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build --parallel 8` + `./build/SharpRuntimeTests`); library-only Release build also separately re-verified clean (`cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release && cmake --build build_no_tests --parallel 8`, exit 0, 0 errors/0 warnings)*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `5a8303b`) — 11449 tests passing. Verified via:*
+```
+cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
+./build/SharpRuntimeTests                 # 11449 tests from 1191 test suites, 0 failures
+cmake --build build_no_tests --parallel 8 # library-only Release, incremental — 0 errors/0 warnings
+```
+
+## Session checkpoint (2026-07-11, continued again) — external review triage: 8 real bugs fixed + full exception-normalization sweep closed out (14 commits)
+
+**Trigger:** the user pointed at an external Czech-language code review,
+`../sharp-runtime.md` (one directory up from the repo root), of an old ZIP snapshot at commits
+`fd1178a`/`16c823d` — confirmed via `git log` to be genuine ancestors of this branch, 238
+commits behind HEAD at the time. Instruction: study every claim in that review, verify against
+current code (not the stale snapshot), fix what's still real, ask if a decision is needed.
+
+**Triage outcome:** most of the review's claims turned out to already be fixed by earlier
+sessions (Ping's memset bug, DateTime constructor validation, CancellationTokenSource's
+`ThrowIfDisposed`, HttpClient's/Dns's exception types generally). Of what remained, 8 were
+confirmed still-real bugs (not stale) and got fixed this session; two required a user decision,
+asked via `AskUserQuestion` and both resolved before work started:
+
+- **MSVC/`__int128` blocker in `Decimal`/`Int128`/`UInt128`** → user chose "document as a
+  permanent deviation" (not attempt hand-rolled 128-bit arithmetic). Added a new "What is
+  MSVC-unsupported" table to `CLAUDE.md` (commit `58924bd`).
+- **16 remaining files with raw `std::*` exceptions** (a continuation of an exception-type
+  audit from an earlier session — see the memory note
+  `project_sharp_runtime_exception_type_audit.md`) → user chose "finish now, same batch."
+
+### Fixed (8 real bugs, commits `606924a`..`17f266c`)
+
+- **`OperatingSystem::IsAndroid()`/`IsIOS()` hardcoded `false`**, and `IsLinux()` didn't
+  exclude Android (Android's kernel also defines `__linux__`, so both could report `true`
+  simultaneously — real .NET treats `OSPlatform` values as mutually exclusive). Fixed all
+  three to use the correct preprocessor guards; confirmed `StoragePaths.cpp` already had real
+  `__ANDROID__` handling that `IsAndroid()` contradicted. (`606924a`)
+- **`ArrayList::GetEnumerator()`/`GetEnumerator(int,int)` unconditionally returned
+  `nullptr`** — a bare stub. Any code enumerating an `ArrayList`, including its own
+  `ICollection`-copying constructor, silently did nothing instead of iterating. Implemented a
+  real fail-fast enumerator (version-counter pattern mirroring `Queue::Enumerator`), bumped
+  `version_` at every verified `_version++` call site from real `ArrayList.cs`. Also corrected
+  `plan.sqlite3`: this type was marked `ignored` despite being fully implemented — same
+  pre-existing mis-classification pattern found again on `Hashtable` later this session.
+  (`1e4f234`, `Hashtable` correction in `2784dce`)
+- **`DateTime::TryParse` miscounted fractional-second digits** when a trailing ISO-8601
+  `Z`/offset marker was present (`fracLen = s.size() - 20` counted the zone marker as if it
+  were extra digits) — `".123Z"` silently produced `Millisecond=12` instead of `123`. Fixed by
+  counting only actual digit characters. Documented a separate, pre-existing, out-of-scope
+  limitation found along the way: fractions under 3 digits (e.g. `".5Z"`) are silently ignored
+  by an unrelated `s.size() >= 23` gate — not touched, not what the review flagged. (`408dc8a`)
+- **`HttpClient::parseUrl` broke on IPv6 literals** (`http://[::1]:8080/` — a bare
+  `rfind(':')` split the address in the middle of the brackets when no port was given, and
+  never stripped brackets even when a port was present) — the exact bug the review called out
+  by name. **`HttpClient`'s response status line silently defaulted to HTTP 200 OK** when
+  unparseable (no space in the line at all) instead of surfacing a failure. Extracted the
+  status-line parser into a new testable static `HttpClient::parseStatusLine()` (mirroring the
+  existing `parseUrl` "public for testability" pattern) that now throws
+  `HttpRequestException` on a malformed line. (`5c196fb`)
+- **`Dns` IPv6 resolution was effectively disabled**: `GetHostAddresses(host,
+  AddressFamily::InterNetworkV6)` unconditionally returned `{}` without calling
+  `getaddrinfo`; both `GetHostAddresses`/`GetHostEntry` hardcoded `hints.ai_family = AF_INET`
+  even for `Unspecified`; the result-collection loops only handled `AF_INET`
+  (`sockaddr_in`), silently dropping any `AF_INET6` result; and
+  `GetHostEntry(const IPAddress&)` (reverse lookup) had no IPv6 code path at all — it called
+  `getAddressProperty()`, which throws for IPv6 by contract. Fixed all four; added an
+  `IPv6`-literal short-circuit (`tryParseIPv6Literal`, reusing `IPAddress::TryParse`) mirroring
+  the existing IPv4 one. Verified against this build host's actual `getaddrinfo()` behavior
+  that a family/literal mismatch (e.g. asking for IPv6-only resolution of an IPv4 literal)
+  correctly fails with `EAI_ADDRFAMILY` — updated one pre-existing test that had hard-coded an
+  assertion on the old silent-empty-vector behavior. (`17f266c`)
+
+### Exception-normalization sweep closed out (16 files, commits `a2d1570`..`5a8303b`)
+
+Continuation of an earlier session's audit (see memory:
+`project_sharp_runtime_exception_type_audit.md`) that found raw `std::*` exceptions (invisible
+to code catching `System::Exception&`) escaping from otherwise-ported types. This session
+finished the remaining 16 files found by
+`grep -rE 'throw std::(runtime_error|invalid_argument|out_of_range|overflow_error|
+domain_error|logic_error)' include/ src/` (that grep now returns **zero matches** — the sweep
+is complete):
+
+| File(s) | Old type | New type | .NET source verified against |
+|---|---|---|---|
+| `Linq.hpp` (First/Min/Max, 4 sites) | `invalid_argument` | `InvalidOperationException` | `Enumerable`'s `ThrowHelper.ThrowNoElementsException`/`ThrowNoMatchException` |
+| `Int128.hpp` (`Abs(MinValue)`) | `overflow_error` | `OverflowException` | `Int128.Abs` → `Math.ThrowNegateTwosCompOverflow` |
+| `Text/Rune.hpp` (ctor) | `out_of_range` | `ArgumentOutOfRangeException` | `Rune(uint)` ctor |
+| `Buffers/SequenceReader.hpp` (`Advance`) | `out_of_range` | `ArgumentOutOfRangeException` | `SequenceReader<T>.Advance` |
+| `Buffers/Binary/BinaryPrimitives.hpp` (24 call sites, 1 helper) | `out_of_range` | `ArgumentOutOfRangeException` | `BinaryPrimitives` Read*/Write* — gave the shared `checkSize()` helper a `paramName` arg so Read (`source`) vs Write (`destination`) get the right name |
+| `Collections/Hashtable.hpp` (`Add`, 2 overloads) | `invalid_argument` | `ArgumentException` | `Hashtable.Add` duplicate-key path — also corrected `plan.sqlite3` `ignored`→`ported` (same gap as `ArrayList`) |
+| `Collections/ArrayList.hpp` (`RemoveAt`) | `out_of_range` | `ArgumentOutOfRangeException` | `ArrayList.RemoveAt` |
+| `SharpRuntime/Experimental/Property.hpp` (2 sites) | `logic_error` | `NotSupportedException` | no direct .NET counterpart (internal experimental helper); closest .NET-idiomatic fit |
+| 6× `Net/Http/Headers/*.cpp` (`StringWithQuality`, `TransferCodingWithQuality`, `MediaTypeWithQuality`, `RangeItem`, `ContentRange`, `ContentDisposition`, `RetryCondition` — 7 types, one file has 2) | `out_of_range` | `ArgumentOutOfRangeException` | each type's own constructor/setter in `System.Net.Http.Headers` — all use `ArgumentOutOfRangeException.ThrowIfNegative`/`ThrowIfGreaterThan` |
+| `Xml/XPath/XPathAstInternal.cpp` (4 sites, exhaustive-switch fallbacks) | `logic_error` | `System::Diagnostics::UnreachableException` | .NET 7+'s `System.Diagnostics.UnreachableException` — a direct type match, not a judgment call |
+
+Every file above got a real regression test where the old behavior was previously untested, or
+had its pre-existing test's hard-coded exception-type assertion corrected where one already
+existed. 11449/11449 tests passing (started this checkpoint at 11414).
+
+### Honest scope note
+
+- Two things found during triage were **deliberately left alone** as out of scope for this
+  batch: `DateTime::TryParse`'s separate `s.size() >= 23` fraction-length gate (a different,
+  pre-existing limitation the review didn't flag), and the general `parseUrl`/`parseStatusLine`
+  question of whether to extract more of `HttpClient`'s response-parsing internals into
+  testable static methods beyond what these two fixes needed.
+- `SequenceReader<T>` itself has no tracked row in `plan.sqlite3` (only
+  `SequenceReaderExtensions` does) — a pre-existing gap, not touched.
+- This checkpoint's "16 files" count is the exact, itemized, `grep`-verified figure — not a
+  prose estimate like earlier checkpoints' Threading figures.
+
+### Commands used to verify (same pattern every commit this batch)
+
+```
+cmake --build build --parallel 8                         # Debug — 0 errors/0 warnings, every commit
+./build/SharpRuntimeTests --gtest_filter="<targeted>"     # new/changed tests first
+./build/SharpRuntimeTests                                 # full suite — 11449/11449 passing at HEAD
+cmake --build build_no_tests --parallel 8                 # Release library-only — 0 errors/0 warnings
+```
+
+### Recommended next namespace
+
+Nothing in this batch was namespace-scoped (it was a targeted bug-fix/review-triage pass, not
+plan.sqlite3 traversal) — resume the plan.sqlite3 workflow in `prompt.md` from where the prior
+session's resume prompt (§10 below) left off: `System.Numerics.Colors`, then the small
+`System.Runtime.*`/`System.Security.*` namespaces, then the two large not-yet-started blocks
+(`System.Security.Cryptography`, `System.Text*`/`System.Xml.Serialization`).
+
+---
+
+## Session checkpoint (2026-07-11, continued) — Threading high-risk moderate findings: 9 fixed, two-pass fresh audit (9 commits)
+
+**Scope for this pass, per explicit user instruction:** focus exclusively on Threading's
+remaining moderate findings, treating "moderate" as potentially high-risk. Prioritize race
+conditions, cancellation/disposal correctness, callback ordering, deadlock/reentrancy,
+wrong exception types, silent wrong behavior, undocumented .NET deviations, and flaky/
+under-tested timing behavior. Explicitly **not** in scope: ordinary minor cleanup, Text.Json
+refactors, Net/XML work.
+
+**Methodology:** the previous checkpoints' "26 moderate + 10 minor" Threading figure was
+prose, never itemized (see the caveat in the wave-3 catalogue section further down: "Threading's
+own remaining-findings text ends '...and more' with the detail not preserved"). Rather than
+guess which of those were still real, dispatched two read-only audit forks that re-derived
+concrete findings by reading current source against `/rv/tmp/runtime/src/libraries/`, explicitly
+told what was already fixed in prior sessions so they wouldn't re-report it:
+
+- **Pass 1** covered most of `include/System/Threading/` + `src/System/Threading/` (all files
+  except 8 explicitly time-boxed out). Found 6 findings, all fixed. Reported the following files
+  clean (read in full, no new issues): `ReaderWriterLockSlim.hpp`, `Tasks/Task.hpp`,
+  `Tasks/TaskCompletionSource.hpp`, `CancellationTokenSource.hpp`, `CancellationToken.hpp/.cpp`,
+  `Barrier.hpp`, `WaitHandle.hpp`, `ThreadLocal.hpp`, `AsyncLocal.hpp`, `Monitor.hpp`,
+  `ReaderWriterLock.hpp`, `Tasks/ValueTask.hpp`, `ManualResetEventSlim.hpp`, `Mutex.hpp`,
+  `SpinWait.hpp`, `LazyInitializer.hpp`, `EventWaitHandle.hpp`, `Semaphore.hpp`,
+  `Tasks/TaskFactory.hpp`, `ThreadPool.hpp`.
+- **Pass 2** covered the 8 files pass 1 didn't reach: `Lock.hpp`, `AutoResetEvent.hpp`,
+  `ManualResetEvent.hpp`, `Tasks/Parallel.hpp` (full read this time), `Tasks/TaskScheduler.hpp`/
+  `.cpp`, `Thread.hpp`/`.cpp`, `Interlocked.hpp`, `Volatile.hpp`. Found 3 findings, all fixed.
+  `AutoResetEvent.hpp`, `ManualResetEvent.hpp`, `Tasks/TaskScheduler.hpp`/`.cpp`, `Thread.cpp`,
+  `Interlocked.hpp`, `Volatile.hpp` reported clean.
+
+Between the two passes, **every file under `include/System/Threading/` and
+`src/System/Threading/` has now been freshly audited** against the 8 requested risk categories
+this session. See "Honest scope note" below for what this claim does and doesn't cover.
+
+### Fixed (9 findings, commits `5daef24`..`b0aba00`)
+
+- **`CancellationTokenRegistration::Dispose()` didn't wait for an in-flight callback** — a
+  no-op race when the callback was already claimed by a concurrent `Cancel()`; returned
+  immediately instead of waiting, risking use-after-free if the caller tears down a resource
+  the callback references right after `Dispose()`. Verified against
+  `CancellationTokenRegistration.cs`'s documented `Dispose()` contract
+  (`WaitForCallbackIfNecessary`). Added `executingId`/`executingThreadId`/`callbackFinished`
+  (condition_variable) to the shared state; same-thread self-unregister detected and skipped
+  to avoid deadlock. 2 regression tests, one exercising the actual race window.
+- **`Channel<T>::ReadAsync()`/`WriteAsync()` captured raw `this`** in a lambda run on a
+  detached background thread (`Task`'s `std::async`) — use-after-free if the caller drops
+  every reference to the `Channel`/`Reader`/`Writer` right after issuing the call. **Confirmed
+  via a standalone AddressSanitizer repro**: pre-fix code reliably crashed with a
+  heap-use-after-free on the first iteration; fix showed zero ASan errors across multiple
+  runs. Fixed via `std::enable_shared_from_this` + `shared_from_this()` instead of raw `this`.
+  2 regression tests.
+- **`RegisteredWaitHandle::Unregister()` detached the background wait thread** instead of
+  joining — could still be blocked inside `waitObject->WaitOne()` when `Unregister()` returns,
+  racing a caller that deletes `waitObject` right after. Verified against
+  `RegisteredWaitHandle.Portable.cs`; this port has no ref-counted-handle equivalent to
+  .NET's `SafeWaitHandle.DangerousAddRef`, so blocking (joining) is the simpler safe
+  alternative — documented as a deliberate deviation from .NET's non-blocking
+  `Unregister(null)` contract. Self-unregister (called from within the wait thread's own
+  callback) detaches instead, to avoid a self-join deadlock. 1 regression test using a
+  `WaitHandle` test double that tracks in-flight `WaitOne()` calls; verified it fails
+  pre-fix.
+- **`Timer::Change()` silently discarded `dueTime` after the first fire, and wasn't
+  interruptible mid-wait** — `run()` used non-interruptible `sleep_for` (a `Change()` call
+  during the between-fires wait had no effect until the stale deadline elapsed) and
+  unconditionally derived the next `dueTime` from `period` after every fire (clobbering a
+  fresh `dueTime` a mid-callback `Change()` call had just set). Verified against
+  `TimerQueue.UpdateTimer` (every `Change()` reschedules relative to when it's called).
+  Replaced `sleep_for` with `condition_variable::wait_until` + a generation counter. 2
+  regression tests; verified both fail pre-fix.
+- **`CountdownEvent::Reset()` skipped `ObjectDisposedException`, and its negative-count
+  sentinel swallowed validation** — `Reset(intcs count = -1)` used `-1` as a sentinel for
+  "use `InitialCount`", so an explicit `Reset(-1)` call silently reset instead of throwing as
+  real .NET's `Reset(int)` does for any negative count. Verified against
+  `CountdownEvent.cs`. Split into `Reset()`/`Reset(intcs count)`, both now disposal-checked.
+  2 regression tests.
+- **`SemaphoreSlim` had no `disposed_`/`ObjectDisposedException` support at all** —
+  `Dispose()` was a true no-op, inconsistent with every sibling Slim primitive already fixed
+  this session. Verified against `SemaphoreSlim.cs`'s `CheckDispose()`: check order differs
+  per method (`Wait(int)` validates its timeout before checking disposal; `Release(int)`
+  checks disposal first) — matched each method's own ordering. 3 regression tests.
+- **`Thread::Start()`/`Start(void*)` captured raw `this`; `~Thread()` detaches, not joins** —
+  the same bug class as the `Channel`/`RegisteredWaitHandle` fixes above, in the most
+  fundamental of the three primitives. **Confirmed via a standalone AddressSanitizer repro**:
+  pre-fix code reliably crashed with heap-use-after-free in `Thread::Start()`'s lambda; fix
+  showed zero ASan errors. Fixed via the same `shared_ptr<State>` indirection pattern already
+  used by `Timer`/`RegisteredWaitHandle`/`CancellationTokenSource` this session
+  (`finished_`/`isBackground_`/`managedThreadId_` moved into a heap-allocated `RunState`).
+  2 regression tests.
+- **`Lock::TryEnter(intcs)`/`TryEnter(TimeSpan)` skipped timeout validation** —
+  `Lock.hpp` didn't even include `WaitHandle.hpp`, unlike every sibling wait primitive. A
+  negative timeout other than `-1` silently behaved like a non-blocking `try_lock()` instead
+  of throwing. Verified against `Lock.cs`. 3 regression tests.
+- **`Parallel::For` (with `ParallelLoopState`) / both `ForEach` overloads launched unbounded
+  concurrent `std::async` tasks**, unlike the sibling `For(..., ParallelOptions, ...)`
+  overload, which already batches. For a large source, this could spawn far more OS threads
+  than the hardware supports; past the creation limit, `std::async` itself throws
+  `std::system_error` **unwrapped**, breaking the documented `AggregateException` contract.
+  Extracted the existing batching pattern into a shared helper. 2 regression tests tracking
+  observed peak concurrency; verified both fail pre-fix (64 concurrent vs. a 16 bound on the
+  CI machine).
+
+All 9 fixes followed the same discipline: verify against real .NET source → write/extend a
+regression test (verified it fails pre-fix by temporarily `git stash`-ing the fix and
+re-running, sometimes with a standalone AddressSanitizer repro for the two genuine
+memory-safety bugs) → fix → full Debug rebuild + targeted test run → bump the relevant
+`plan.sqlite3` row → commit → push. Every commit landed cleanly on `origin/feature/work`.
+
+### Honest scope note — what "9 fixed, audit complete" does and doesn't mean
+
+- **Does mean:** every `.hpp`/`.cpp` file under `System::Threading` has been read end-to-end
+  this session specifically hunting for the 8 requested risk categories, and every concrete
+  finding from that search has been fixed with a verified-failing-pre-fix regression test.
+- **Does not mean:** the older prose "26 moderate + 10 minor" catalogue figure from earlier
+  sessions has been itemized and reconciled to zero. That figure was never broken into a
+  concrete list, was known-stale in several other namespaces this session already found (Xml,
+  Net), and likely included lower-risk items (message-text wording, minor doc-comment gaps,
+  API-surface completeness) that were explicitly out of scope for this pass by the user's own
+  instruction ("do not touch ordinary minor cleanup"). A full item-by-item reconciliation
+  against that old text was not attempted and would need a separate pass if wanted.
+- **Deliberately still deferred, not blocked:** `Task::Wait()`/`getResultProperty()`/
+  `ValueTask::getResultProperty()` propagate the original exception type unwrapped instead of
+  wrapping in `AggregateException` — a documented, intentional simplification from an earlier
+  session with ~10 existing tests asserting the unwrapped behavior. Both audit forks were
+  explicitly told not to re-report this; it needs a user design decision whenever revisited,
+  and does not block other namespaces.
+- **Blocked items:** none. All 9 findings from both audit passes were targeted, well-scoped
+  fixes; nothing required a design decision beyond what's already documented above.
+
+**Recommended next namespace:** per the last checkpoint before this one, the broader
+"everything else, ordinary-severity moderates across all namespaces" sweep (Net core+Sockets
+~5 remaining, Net.Http/WebSockets ~4, plus whatever Xml/Text.Json minors remain) is still the
+next item in priority order once Threading-specific work is paused. Given this session's
+experience that prose-catalogued counts are consistently stale, the same "dispatch a fresh
+read-only audit fork per namespace, then fix with verified-failing regression tests" pattern
+used for Threading this session is recommended over trusting the old catalogue text directly.
+
+## Session checkpoint (2026-07-11, continued) — Text.Json's 6 remaining dangerous findings: 3 fixed, 3 flagged as bigger lifts (3 commits)
+
+## Session checkpoint (2026-07-11, continued) — Text.Json's 6 remaining dangerous findings: 3 fixed, 3 flagged as bigger lifts (3 commits)
+
+Per NEXT.md's recommended priority, continued from Xml.Linq+XPath into **System.Text.Json**'s
+6 previously-unaddressed dangerous-moderate findings (of the original 12; 2 were already fixed
+in an earlier session — see that checkpoint further down).
+
+### Fixed (3 findings, commits `0b17016`, `c9a905f` — 1 commit covered 2 related findings)
+
+- **`JsonSerializerOptions.AllowDuplicateProperties` defaulted to `false`**; real .NET's
+  backing field defaults to `true` (the sibling `JsonDocumentOptions.AllowDuplicateProperties`
+  in this same codebase already correctly defaults `true`, confirming this was an oversight).
+- **`JsonSerializerOptions(JsonSerializerDefaults.Strict)` was a silent no-op** — the
+  constructor only handled `::Web`. Wired up the two `Strict` effects with a C++ equivalent in
+  this port's reduced property set (`UnmappedMemberHandling=Disallow`,
+  `AllowDuplicateProperties=false`); `RespectNullableAnnotations`/
+  `RespectRequiredConstructorParameters` don't apply (C#-language-feature properties this port
+  doesn't expose at all).
+- **`JsonNodeOptions::PropertyNameCaseInsensitive` was stored but never consulted** —
+  `JsonObject::findIndex()` (the single choke point behind `ContainsKey`/
+  `TryGetPropertyValue`/`Add`/`Remove`/`operator[]`/`SetItem`) always compared case-sensitively.
+  Verified against `JsonObject.IDictionary.cs`'s `CreateDictionary()`: real .NET's backing
+  dictionary comparer affects every one of those operations, not just reads. Reused the
+  existing `System::String::Equals(a, b, StringComparison)` helper.
+
+7 new regression tests total across the 3 fixes.
+
+### Flagged, not attempted — genuinely bigger lifts (3 findings)
+
+- **`GetRawText()` reformats numbers instead of returning exact source text** — confirmed via
+  a minimal standalone test that nlohmann's `dump()` genuinely loses the original digit
+  sequence (`1.50`→`1.5`, `1e2`→`100.0`, and a large integer literal
+  `100000000000000000000`→`1e+20`, a different numeric representation entirely). This is a
+  direct consequence of `JsonElement`'s documented architecture (backed by nlohmann's parsed
+  tree, not a raw-buffer/span design — see the class's own doc comment: "same observable API,
+  simpler implementation"). Truly fixing this needs either a parser swap or a raw-span-tracking
+  layer added to every parsed node — the same class of lift as the two items below, already
+  flagged in an earlier session.
+- **`JsonEncodedText::Encode` doesn't validate/pre-escape its input** — unchanged from the
+  earlier-session assessment: needs `Utf8JsonWriter::appendEscapedString` extracted into a
+  shared, reusable escaping utility first.
+- **`AllowTrailingCommas`/`AllowDuplicateProperties` (`JsonDocumentOptions`) validated but
+  never enforced during parsing** — unchanged from the earlier-session assessment: nlohmann has
+  no native "allow trailing commas" toggle; needs a pre-processing pass or a parser swap.
+
+### Text.Json dangerous-moderate scope: closed for this pass
+
+All 12 originally-catalogued moderate findings are now accounted for: 2 fixed in an earlier
+session, 3 fixed this pass, 1 (`AllowDuplicateProperties` default mismatch) was actually the
+first item above — 6 total fixed across both sessions — and the remaining 3 are consciously
+flagged as bigger lifts, not gaps that were skipped by oversight. Only minor-severity items
+remain untouched for this namespace (double formatting/hex-escape casing cosmetics,
+`JsonWriterOptions.NewLine` hardcoded, `JsonException` position info, `WriteRawValue`
+validation order, several `JsonElement` temporal getters missing, `GetString()` on JSON `null`
+— see the "Full findings catalogue" section further down for detail).
+
+**Recommended next session priority:** everything else, ordinary-severity moderates across all
+namespaces (Net core+Sockets ~5, Net.Http/WebSockets ~4, Threading ~26+10 minor, per the
+earlier per-namespace tables further down in this file — re-verify counts before starting,
+several have turned out stale this session) → minors last. The `Task::Wait()`/
+`AggregateException` wrapping deferral (see the Threading checkpoint further down) still needs
+a user design decision whenever it's revisited; it does not block other namespaces. The 3
+Text.Json items and the 1 Xml.Linq `XElement::WriteTo` namespace item flagged as bigger lifts
+this session remain open, well-defined follow-ups if ever prioritized.
+
+## Session checkpoint (2026-07-11, continued) — Xml.Linq+XPath dangerous-moderate findings: 10 fixed, 1 flagged as bigger lift (11 commits)
+
+Per NEXT.md's recommended priority, continued from Xml core straight into **System.Xml.Linq +
+XPath**'s remaining dangerous-moderate catalogue (12 itemized/condensed findings, criticals
+already closed in an earlier session). Same discipline as every prior batch this session.
+
+### Fixed (10 findings, commits `8df416b`..`7413d80`)
+
+- **`XName::Get`** split on the *first* `'}'` instead of the last (a namespace URI may itself
+  legally contain `'}'`) and performed no malformed-name validation at all. Verified against
+  `XName.cs`: switched to `rfind`, added the two real-.NET validation checks (empty
+  `expandedName`; malformed `"{}"`/`"{ns}"` with no local name after the brace) — both throw
+  `ArgumentException`. 4 regression tests.
+- **`XAttribute` had zero namespace-declaration validation** and **`IsNamespaceDeclaration` was
+  entirely missing** — fixed together (same class, same commit). Verified against
+  `XAttribute.cs`'s `ValidateAttribute`: enforces the XML Namespaces spec's constraints on
+  `xmlns="..."`/`xmlns:prefix="..."` (e.g. the XML namespace URI may only be declared by the
+  `xml` prefix; the xmlns namespace URI must never be declared by any prefix). Moved the
+  constructor and `setValueProperty()` out of inline header bodies into `.cpp` so both share a
+  new `ValidateAttribute()` helper. Added `getIsNamespaceDeclarationProperty()`. 15 regression
+  tests.
+- **`XAttribute::EscapeValue` didn't escape tab/LF/CR** — per the XML spec's attribute-value
+  normalization (§3.3.3), a literal tab/LF/CR in an attribute value is collapsed to a plain
+  space on reload; character references are exempt from that normalization. Verified against
+  `XmlEncodedRawTextWriter`'s `Tab`/`LineFeed`/`CarriageReturnEntity` (`&#x9;`/`&#xA;`/`&#xD;`).
+  2 regression tests including a full write-then-read-back round trip.
+- **`XElement::DeepEqualsCore` compared attributes via name lookup** (unordered-set semantics)
+  where real .NET's `AttributesEqual` walks both attribute lists in parallel *by position* —
+  verified against `XElement.cs`. Two elements with the same attributes in a different order
+  are NOT deep-equal in real .NET. 2 regression tests.
+- **`XElement` had no `ValidateNode` override at all** (inherited `XContainer`'s no-op default)
+  — an `XDocument`/`XDocumentType` could be added as a child element via `Add()`, producing a
+  structurally invalid tree. Verified against `XElement.cs`'s `ValidateNode`
+  (`ArgumentException`). Corrected the base class's doc-comment, which overclaimed a single
+  exception type across all subclasses. 2 regression tests.
+- **`XElement::Add(string)` always created a new `XText`** even when the last child was already
+  a plain (non-CDATA) text node. Verified against `XContainer.cs`'s `AddString()`: real .NET
+  merges into the existing trailing text node's `Value`; an empty string is a genuine no-op
+  (matches `AddString`'s `if (s.Length > 0)` guard). 3 regression tests.
+- **`XDocument::ValidateNode` used the wrong exception type and over-rejected whitespace text**
+  — verified against `XDocument.cs`'s `ValidateNode`/`ValidateString`: real .NET throws
+  `ArgumentException` for a fundamentally wrong node *kind* (CDATA, nested `XDocument`), and
+  `InvalidOperationException` only for a structurally valid kind that conflicts with the
+  document's *current state* (already has a root/doctype). Whitespace-only text (e.g.
+  indentation between top-level nodes) is legal — the old `default:` case rejected every
+  top-level `XText` unconditionally. Updated 1 pre-existing test, added 3 new ones.
+- **`XDocument::WriteTo` skipped `WriteStartDocument()` without an explicit declaration and
+  never called `WriteEndDocument()`** — verified against `XDocument.cs`'s `WriteTo()`: real
+  .NET always calls both as a matched pair regardless of whether an `XDeclaration` was set.
+  Note: `XDocument::ToString()` is unaffected (separate `SerializeTo()` code path). 1
+  regression test.
+- **XPath `number()` accepted scientific/exponent notation** — `ParseXPathNumberLiteralString`
+  used `std::from_chars`' default `general` format, which parses `"1e2"` as `100` instead of
+  correctly yielding `NaN`; XPath 1.0's `Number` production (§3.4) has no exponent syntax at
+  all. Fixed by passing `std::chars_format::fixed`. This function is also the shared
+  numeric-comparison path from an earlier session's relational-operator fix, so this also
+  corrects number-valued node-set comparisons against an exponent-notation string operand. 3
+  regression tests.
+
+### Flagged, not attempted — genuinely bigger lift (1 finding)
+
+- **`XElement::WriteTo` silently drops the element's namespace URI** — real .NET's
+  `XElement.WriteTo` routes through a full internal `ElementWriter` subsystem that resolves
+  namespace prefixes against ancestor scope and auto-generates `xmlns:pN` declarations; this
+  port's `XmlWriter` has no prefix-aware `WriteStartElement`/`WriteAttributeString` overloads at
+  all. Already documented as a deliberate, previously-reasoned simplification in the existing
+  code comment (see `XElement.cpp`'s `WriteTo()`) — a real feature addition, not a targeted bug
+  fix. A partial fix (e.g. auto-emitting a default `xmlns="..."` attribute) risks introducing
+  new namespace-scoping bugs for descendant elements, so left alone.
+
+### Xml.Linq+XPath dangerous-moderate scope: closed
+
+Only minor-severity items remain untouched for this namespace (see the "Full findings
+catalogue" section further down): `XName` constructors skip NCName validation;
+`XAttribute.EmptySequence` missing; `XDeclaration.ToString` version-omission difference;
+`XDocumentType` skips name validation; `DeepEqualsCore` skips Comment/PI nodes (matches a stale
+doc comment); XPath `string-length()` uses byte length not character count. Also still open,
+separately: "a large set of documented XLinq tree-editing API is entirely absent"
+(`AddBeforeSelf`, `SetAttributeValue`, ~20 conversion operators, etc.) — a compile-time API-
+surface gap, not runtime misbehavior, flagged in the original catalogue as too large for a
+targeted fix.
+
+**Recommended next session priority (unchanged from before this batch):** Text.Json's 6
+remaining dangerous findings (`JsonEncodedText::Encode`/`AllowTrailingCommas` refactors,
+flagged as bigger lifts in an earlier checkpoint — re-check whether they're still accurate
+before starting) → everything else, ordinary-severity moderates → minors last.
+
+## Session checkpoint (2026-07-11) — Xml core dangerous-moderate findings: 6 fixed, 2 already-fixed/stale (6 commits)
+
+Per NEXT.md's own recommended priority from the previous session, worked through **System.Xml
+core**'s remaining dangerous-moderate catalogue (see "Full findings catalogue" further down —
+13-ish itemized/condensed findings). Same discipline as prior batches: verify against real .NET
+source in `/rv/tmp/runtime/src/libraries/` → write/extend a regression test → fix → build clean
+(Debug **and** a Release/library-only rebuild) → run the targeted suite → bump `plan.sqlite3` →
+commit, one fix per commit.
+
+### Fixed (6 findings, commits `07577d3`..`08d9318`)
+
+- **`XmlReader` buildEvents() had four distinct bugs**, all in one commit since they're the same
+  function: CDATA sections reported as plain `Text` (tinyxml2's `XMLText::CData()` flag never
+  consulted); every `<?target data?>` parsed uniformly as `XmlDeclaration` with a hardcoded
+  `"xml"` name (tinyxml2 doesn't distinguish PI from the real declaration) — now splits the
+  target token and only treats an exact `"xml"` target as the declaration; DOCTYPE parses as
+  tinyxml2's `XMLUnknown`, which had no branch at all and silently vanished from the event
+  stream — now surfaces as `XmlNodeType::DocumentType`; `isEmptyElement` was computed from
+  `!FirstChild()`, so `<a></a>` was indistinguishable from `<a/>` and silently lost its
+  `EndElement` event — now uses tinyxml2's `ClosingType() == CLOSED`. 8 regression tests.
+- **`XmlWriter::ToString()`/`Flush()` ignored `XmlWriterSettings.Indent`**, always
+  pretty-printing via tinyxml2's default `XMLPrinter(compact=false)` — real .NET's `Indent`
+  defaults to `false` (compact). Added an optional `XmlWriterSettings` param to
+  `Create()`/`CreateToString()`, wired through to `compact=!settings.Indent`.
+- **`WriteComment`/`WriteProcessingInstruction`/`WriteCData` wrote embedded terminator
+  sequences raw** (`--`, `?>`, `]]>`), producing literally malformed/corrupted markup. Verified
+  against `XmlEncodedRawTextWriter.WriteCommentOrPi`/`WriteCDataSection`: real .NET does **not**
+  throw for any of these — it self-heals (inserts a protective space; splits CDATA sections
+  around the embedded terminator) so content round-trips unchanged. **This corrects this
+  session's own audit catalogue**, which described the gap as "skip well-formedness validation"
+  implying validate-and-throw — the real source has no such throw path. Added
+  `sanitizeCommentText`/`sanitizeProcessingInstructionText`/`sanitizeCDataText` helpers
+  replicating the self-healing behavior. 4 regression tests including a full write-then-read
+  round-trip.
+- **`XmlNode::Normalize()` only merged adjacent text among direct children**, never recursing
+  into descendant elements — verified against `XmlNode.cs`'s `Normalize()`, which explicitly
+  recurses (`case XmlNodeType.Element: crtChild.Normalize(); goto default;`). Extracted the
+  existing merge loop into a `NormalizeNative()` free-function helper that recurses.
+- **`XmlDocument`'s node-creation factories skipped XML-Name validation entirely** —
+  `CreateElement`/`CreateAttribute`/`CreateEntityReference`/`CreateProcessingInstruction`
+  accepted any string with zero validation. Verified each validates *differently* per node kind
+  in real .NET (not uniformly): `CreateElement`/`CreateAttribute` reuse this port's existing
+  `XmlConvert::VerifyName` (matches `XmlDocument.CheckName`); `CreateEntityReference` only
+  rejects a name starting with `'#'` (matches `XmlEntityReference.cs` — entity names are
+  otherwise unconstrained); `CreateProcessingInstruction` only rejects an empty target (matches
+  `XmlProcessingInstruction.cs` — no NCName check at DOM-construction time). 7 regression tests.
+
+### Already fixed / stale catalogue entries (2 findings, no code change)
+
+- **`XmlNamespaceManager::AddNamespace` reserved-prefix validation** — already throws
+  `ArgumentException` for `xml`/`xmlns` misuse exactly per `XmlNamespaceManager.cs`, with
+  existing test coverage (`AddNamespace_XmlnsPrefix_Throws`,
+  `AddNamespace_XmlPrefixWithWrongUri_Throws`). Fixed in an earlier session; this catalogue
+  entry was stale.
+- **`XmlDeclaration` version/standalone validation** — likewise already correct with existing
+  tests (`CreateXmlDeclaration_InvalidVersion_Throws`, `CreateXmlDeclaration_InvalidStandalone_Throws`,
+  `SetStandaloneProperty_InvalidValue_Throws`). The catalogue's "XmlDeclaration ... skip
+  version/standalone ... validation" framing was stale by the time this session started.
+
+### Xml core dangerous-moderate scope: closed
+
+Both remaining "highlights" items not explicitly itemized above (self-closing/EndElement
+detection, and the `XmlWriter` well-formedness gap) were folded into the fixes above since they
+shared a file/function with an itemized finding. Xml core's dangerous-moderate catalogue is now
+fully processed for this pass — only minor-severity items remain untouched (see the "Full
+findings catalogue" section further down: message-text formatting, line/position info loss,
+`XmlResolver` relative-path gap, prefix-shadowing nondeterminism, `XmlDeclaration.Value`
+leading-space bug, `XmlAttributeCollection` insertion-order degrade, apostrophe over-escaping,
+stray PI trailing space).
+
+**Recommended next session priority (unchanged from before this batch):** Xml.Linq+XPath
+dangerous-moderate findings → Text.Json's 6 remaining dangerous findings → everything else,
+ordinary-severity moderates → minors last.
+
+## Session checkpoint (2026-07-10, continued again) — Threading dangerous-moderate findings: 10 fixed, 1 deliberately deferred (10 commits)
+
+Scope for this session, per explicit instruction: finish Threading's remaining dangerous-despite-
+moderate findings before touching Xml core, and do not start the Text.Json
+`JsonEncodedText::Encode`/`AllowTrailingCommas` refactors flagged as bigger lifts in the previous
+checkpoint. All 10 fixes below follow the same discipline as prior batches: verify against real
+.NET source in `/rv/tmp/runtime/src/libraries/` → write/extend a regression test → fix → build
+clean → run the targeted test suite → bump the corresponding `plan.sqlite3` row's `updated_at` →
+commit, one coherent fix per commit.
+
+**Fresh audit note:** this file's own Threading catalogue (see the wave-3 "Full findings
+catalogue" section further down) was condensed prose for the moderate/minor tier, not an itemized
+list, and referenced a prior session's agent transcript that isn't accessible in this session. A
+fresh audit fork re-derived concrete findings by reading current source against the .NET
+reference; several catalogued items turned out already-fixed by earlier sessions and were skipped.
+
+### Fixed (10 findings, commits `77fc618`..`13ab167`)
+
+- `Semaphore(initialCount, maximumCount)` threw the same `ArgumentOutOfRangeException` for both
+  `initialCount < 0` and `initialCount > maximumCount` — real .NET throws a plain
+  `ArgumentException` for the latter case (`initialCount` is a valid non-negative value, just
+  inconsistent with `maximumCount`). Split into three distinct checks matching `Semaphore.cs`.
+- `ReaderWriterLock::ReleaseReaderLock/ReleaseWriterLock` without ownership threw
+  `SynchronizationLockException` — real .NET throws `ApplicationException` here specifically
+  (unlike every other lock type in this namespace), matching `ReaderWriterLock.cs`.
+- `Barrier::Dispose()` was a true no-op — added a `disposed_` flag, `ThrowIfDisposed()` guards on
+  `SignalAndWait`/`AddParticipant`/`RemoveParticipant`, and `Dispose()` now actually marks the
+  instance disposed (still respecting the existing post-phase-action guard), matching
+  `Barrier.cs`.
+- `Timer::Change(dueTime, period)` treated `dueTime = Timeout.Infinite (-1)` as "fire immediately"
+  because `std::chrono::wait_for` treats a negative duration as already-expired — rewrote the
+  timer thread to block on a condition variable whenever `dueTime == -1`, matching
+  `TimerQueueTimer.cs`'s `dueTime == Timeout.UnsignedInfinite` → "not scheduled" semantics (this
+  applies both to a never-started timer and to `Change(-1, ...)` pausing an active one). Bonus
+  fix: single-shot timers are now re-armable via a later `Change()` call, matching real .NET.
+- `PeriodicTimer` had no period validation and busy-looped at 100% CPU for `Zero`/negative
+  periods — added the same `>= 1 && <= 0xFFFFFFFE` validation as `PeriodicTimer.cs`, plus
+  `Timeout.InfiniteTimeSpan` support (blocks until `Dispose()` rather than never ticking via a
+  hot loop).
+- `AutoResetEvent::WaitOne(intcs milliseconds)` had no timeout validation, unlike every sibling
+  wait-handle type in this namespace — added `WaitHandle::ValidateTimeout()`.
+- `Lock::TryEnter(TimeSpan)` passed `Timeout::InfiniteTimeSpan` straight through as a negative
+  `std::chrono` duration, which `try_lock_for` treats like a non-blocking `try_lock()` — the one
+  call site the `-1`/Infinite special-casing pattern (already applied everywhere else this
+  session) had missed. Now special-cased like the `intcs` overload.
+- `Channel<T>::WaitToReadAsync()`/`WaitToWriteAsync()` never inspected `closeError` — closing a
+  channel with an exception and an empty queue returned `false` (as if gracefully closed) instead
+  of faulting the task, silently discarding the real error on the primary read/write path (it was
+  only observable via the separate `getCompletionProperty()` task). Verified against
+  `UnboundedChannel.cs`; both methods now rethrow `closeError` when present.
+- `Parallel::For/ForEach/Invoke` called `future.get()` per future with no `try`/`catch` — the
+  first exception observed escaped **unwrapped**, and every other future's exception was silently
+  discarded when its `std::future` was destroyed unobserved. Real .NET always aggregates every
+  exception raised into a single `AggregateException`, even for a single failure. Added a shared
+  `waitAllCollectingExceptions()` helper; scheduling still runs to completion after a failure
+  rather than stopping early like .NET's internal self-replicating-task algorithm (an efficiency
+  difference, not a correctness one — out of scope for this fix).
+- `SpinLock` was a bare `std::atomic_flag` with the `enableThreadOwnerTracking` constructor
+  parameter fully ignored, `getIsHeldProperty()` hard-coded to always return `false`, no
+  re-entrancy detection, and `Exit()` releasing unconditionally regardless of which thread called
+  it — silently permitting lock-corruption bugs (double-release, cross-thread release) that real
+  .NET surfaces as exceptions. Rewrote with an atomic owner-thread-id (tracking enabled) or atomic
+  held-flag (tracking disabled) and a bounded spin/yield loop, matching `SpinLock.cs`'s public
+  contract: `LockRecursionException` on same-thread re-entry, `SynchronizationLockException` on
+  `Exit()` without ownership, `ArgumentException` when `lockTaken` isn't pre-initialized to
+  `false`, `InvalidOperationException` from `IsHeldByCurrentThread` when tracking is disabled.
+  Also added the missing `TryEnter(intcs, bool&)`/`TryEnter(TimeSpan, bool&)` timeout overloads
+  and `getIsThreadOwnerTrackingEnabledProperty()`. `TryEnter`'s C++-friendly `bool` return (an
+  existing convention in this port, unlike .NET's `void` + out-param) was preserved.
+
+### Deliberately deferred — risky design boundary, not fixed this session
+
+- **`Task::Wait()`/`getResultProperty()`/`ValueTask::getResultProperty()` don't wrap thrown
+  exceptions in `AggregateException`.** Real .NET's `Task.Wait()` always wraps a faulted task's
+  exception in `AggregateException`; this port propagates the original exception type unwrapped.
+  **Why deferred:** the current (unwrapped) behavior is called out in `Task.hpp`'s own code
+  comments as "an established, deliberate simplification" from a prior session, and ~10 existing
+  tests in `TasksTests.cpp` (lines 96, 107, 114, 119, 145, 245, 251, 328, 471, 479) explicitly
+  assert the unwrapped exception type propagates. Changing this is a real design decision, not a
+  targeted fix: wrap always and rewrite all ~10 tests plus audit every internal
+  Task-exception-catching call site, or leave it as a permanent documented deviation, or add a new
+  opt-in wrapping API alongside the existing one. Per this session's explicit instruction to stop
+  at risky design boundaries rather than rush, this needs a documented design decision from the
+  user before any future attempt — **no design has been written yet.**
+- `Parallel`'s exception aggregation (fixed this session, see above) does **not** conflict with
+  this deferral — `Parallel.hpp` had no such prior "deliberate simplification" precedent or
+  existing tests asserting unwrapped-exception behavior, so it was safe to fix directly.
+
+### Wave-3 catalogue: Threading now resolved for this session's dangerous-moderate scope
+
+Threading's dangerous-moderate findings are now resolved one way or another: 10 fixed, 1
+explicitly deferred with a documented rationale (above) pending a user design decision. Per this
+session's instruction, Xml core dangerous-moderate findings are next.
+
+**Recommended next session priority:** Xml core dangerous-moderate findings → Xml.Linq+XPath
+dangerous-moderate findings → Text.Json's 6 remaining dangerous findings (see the checkpoint
+below for the `JsonEncodedText::Encode`/`AllowTrailingCommas` refactor scope — still not started,
+still flagged as bigger lifts) → everything else, ordinary-severity moderates → minors last. The
+`Task`/`AggregateException` deferral above needs a user decision whenever it's revisited; it does
+not block other namespaces.
 
 ## Session checkpoint (2026-07-10, continued again) — dangerous-despite-moderate wave-3 findings: 24 fixed across 4 namespace slices (21 commits)
 

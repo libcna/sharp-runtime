@@ -290,6 +290,78 @@ TEST(HttpClientUrlParseTests, EmptyHostThrowsUriFormatException) {
     EXPECT_THROW(HttpClient::parseUrl("http://:8080/path"), System::UriFormatException);
 }
 
+// Regression tests for a wave-3 audit finding: parseUrl split host:port on the last ':' in
+// the string, which is wrong for an IPv6 literal in bracket notation -- the address itself
+// contains colons, so "[::1]" (no port) had its host/port split in the middle of the address
+// instead of at the bracket, and the brackets themselves were never stripped even when a
+// port was present.
+TEST(HttpClientUrlParseTests, IPv6Literal_WithPort_StripsBracketsAndParsesPort) {
+    auto p = HttpClient::parseUrl("http://[::1]:8080/path");
+    EXPECT_EQ(p.host, "::1");
+    EXPECT_EQ(p.port, 8080);
+    EXPECT_EQ(p.path, "/path");
+}
+
+TEST(HttpClientUrlParseTests, IPv6Literal_NoPort_StripsBracketsAndDefaultsPort80) {
+    auto p = HttpClient::parseUrl("http://[::1]/path");
+    EXPECT_EQ(p.host, "::1");
+    EXPECT_EQ(p.port, 80);
+    EXPECT_EQ(p.path, "/path");
+}
+
+TEST(HttpClientUrlParseTests, IPv6Literal_FullAddress_WithPort) {
+    auto p = HttpClient::parseUrl("http://[2001:db8::1]:9090/api");
+    EXPECT_EQ(p.host, "2001:db8::1");
+    EXPECT_EQ(p.port, 9090);
+}
+
+TEST(HttpClientUrlParseTests, IPv6Literal_NoPath_DefaultsToRoot) {
+    auto p = HttpClient::parseUrl("http://[::1]");
+    EXPECT_EQ(p.host, "::1");
+    EXPECT_EQ(p.path, "/");
+}
+
+TEST(HttpClientUrlParseTests, IPv6Literal_Unterminated_ThrowsUriFormatException) {
+    EXPECT_THROW(HttpClient::parseUrl("http://[::1/path"), System::UriFormatException);
+}
+
+// ---------------------------------------------------------------------------
+// HttpClient — status line parser
+// ---------------------------------------------------------------------------
+
+TEST(HttpClientStatusLineParseTests, WellFormed_ParsesCodeAndReason) {
+    auto p = HttpClient::parseStatusLine("HTTP/1.1 200 OK");
+    EXPECT_EQ(p.statusCode, 200);
+    EXPECT_EQ(p.reason, "OK");
+}
+
+TEST(HttpClientStatusLineParseTests, MultiWordReason_KeptIntact) {
+    auto p = HttpClient::parseStatusLine("HTTP/1.1 404 Not Found");
+    EXPECT_EQ(p.statusCode, 404);
+    EXPECT_EQ(p.reason, "Not Found");
+}
+
+TEST(HttpClientStatusLineParseTests, NoReasonPhrase_EmptyReason) {
+    auto p = HttpClient::parseStatusLine("HTTP/1.1 200");
+    EXPECT_EQ(p.statusCode, 200);
+    EXPECT_EQ(p.reason, "");
+}
+
+// Regression tests for a wave-3 audit finding: a malformed status line silently defaulted to
+// statusCode=200 (OK) whenever the line had no space at all, making a garbled/empty response
+// from the server indistinguishable from success. It now throws HttpRequestException.
+TEST(HttpClientStatusLineParseTests, NoSpaces_ThrowsHttpRequestException) {
+    EXPECT_THROW(HttpClient::parseStatusLine("garbage"), HttpRequestException);
+}
+
+TEST(HttpClientStatusLineParseTests, EmptyLine_ThrowsHttpRequestException) {
+    EXPECT_THROW(HttpClient::parseStatusLine(""), HttpRequestException);
+}
+
+TEST(HttpClientStatusLineParseTests, NonNumericStatusCode_ThrowsHttpRequestException) {
+    EXPECT_THROW(HttpClient::parseStatusLine("HTTP/1.1 XYZ OK"), HttpRequestException);
+}
+
 // ---------------------------------------------------------------------------
 // HttpClient — construction and default headers
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "System/Diagnostics/UnreachableException.hpp"
 #include "System/Double.hpp"
 #include "System/Xml/XPath/XPathException.hpp"
 
@@ -464,10 +465,27 @@ namespace System::Xml::XPath {
             if (b == std::string::npos) return std::numeric_limits<double>::quiet_NaN();
             size_t e = raw.find_last_not_of(" \t\n\r");
             std::string s = raw.substr(b, e - b + 1);
+
+            // XPath 1.0's number() string-to-number conversion (§4.2) is an optional leading
+            // '-' followed by a Number per the §3.4 production `Digits ('.' Digits?)? | '.'
+            // Digits` -- no exponent, no "inf"/"nan" spellings. std::from_chars with
+            // chars_format::fixed rejects exponents (e.g. "1e2") as intended, but per the C++
+            // standard it still recognizes "nan"/"inf"/"infinity" (case-insensitively, with an
+            // optional sign) as valid floating-point spellings regardless of chars_format --
+            // that restriction only governs the numeric-digit grammar, not these special
+            // tokens. Left unchecked, number("Infinity") would silently produce +Infinity
+            // instead of the NaN the spec requires for any string outside its Number grammar.
+            // Reject any character outside [-0-9.] up front so those spellings can never reach
+            // from_chars at all.
+            for (char c : s) {
+                if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '-'))
+                    return std::numeric_limits<double>::quiet_NaN();
+            }
+
             double result = 0.0;
             const char* begin = s.data();
             const char* end = s.data() + s.size();
-            auto [ptr, ec] = std::from_chars(begin, end, result);
+            auto [ptr, ec] = std::from_chars(begin, end, result, std::chars_format::fixed);
             if (ec != std::errc{} || ptr != end) return std::numeric_limits<double>::quiet_NaN();
             return result;
         }
@@ -801,7 +819,7 @@ namespace System::Xml::XPath {
                     return XPathValue::Nodes(std::move(combined));
                 }
             }
-            throw std::logic_error("unreachable BinOp");
+            throw System::Diagnostics::UnreachableException("unreachable BinOp");
         }
 
         XPathValue EvaluateFunctionCall(const AstNode& node, EvalContext& ctx) {
@@ -880,7 +898,7 @@ XPathValue System::Xml::XPath::Internal::AstNode::Evaluate(EvalContext& ctx) con
         case AstKind::FunctionCall: return System::Xml::XPath::EvaluateFunctionCall(*this, ctx);
         case AstKind::LocationPath: return System::Xml::XPath::EvaluateLocationPath(*this, ctx);
     }
-    throw std::logic_error("unreachable AstKind");
+    throw System::Diagnostics::UnreachableException("unreachable AstKind");
 }
 
 System::Xml::XPath::XPathResultType System::Xml::XPath::Internal::AstNode::InferReturnType() const {
@@ -899,11 +917,11 @@ System::Xml::XPath::XPathResultType System::Xml::XPath::Internal::AstNode::Infer
                 case BinOp::Union:
                     return XPathResultType::NodeSet;
             }
-            throw std::logic_error("unreachable BinOp");
+            throw System::Diagnostics::UnreachableException("unreachable BinOp");
         case AstKind::FunctionCall: {
             auto it = System::Xml::XPath::FunctionTable().find(functionName);
             return it != System::Xml::XPath::FunctionTable().end() ? it->second.returnType : XPathResultType::Any;
         }
     }
-    throw std::logic_error("unreachable AstKind");
+    throw System::Diagnostics::UnreachableException("unreachable AstKind");
 }

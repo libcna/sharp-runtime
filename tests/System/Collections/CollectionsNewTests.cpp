@@ -78,6 +78,16 @@ TEST(HashtableTests, Clear) {
     EXPECT_EQ(ht.getCountProperty(), 0);
 }
 
+// Regression test for a wave-3 audit finding: Add() threw std::invalid_argument (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentException, which is what real .NET's Hashtable.Add throws for a duplicate
+// key (SR.Argument_AddingDuplicate__: "Item has already been added. Key in dictionary...").
+TEST(HashtableTests, Add_DuplicateKey_Throws) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    EXPECT_THROW(ht.Add("a", std::any(2)), System::ArgumentException);
+}
+
 // --- Ascii ---
 TEST(AsciiTests, IsValid) {
     EXPECT_TRUE(System::Text::Ascii::IsValid("hello"));

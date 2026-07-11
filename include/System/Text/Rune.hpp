@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Text {
 
@@ -26,7 +27,7 @@ namespace System::Text {
         /** Constructs a Rune from a Unicode code point; throws if the value is a surrogate or > U+10FFFF. */
         explicit Rune(uint32_t value) : value_(value) {
             if (!IsValidCodePoint(value))
-                throw std::out_of_range("Invalid Unicode scalar value.");
+                throw System::ArgumentOutOfRangeException("value", "Invalid Unicode scalar value.");
         }
         /** Constructs a Rune from a plain ASCII char. */
         explicit Rune(char c) : Rune(static_cast<uint32_t>(static_cast<unsigned char>(c))) {}

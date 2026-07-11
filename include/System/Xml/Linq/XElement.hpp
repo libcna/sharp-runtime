@@ -141,6 +141,12 @@ namespace System::Xml::Linq {
         void SerializeTo(std::ostream& os, int depth, bool indent) const override;
         [[nodiscard]] bool DeepEqualsCore(const XNode& other) const override;
 
+        /**
+         * @brief Rejects adding an XDocument or XDocumentType as a child element.
+         * @throws System::ArgumentException if @p node is an XDocument or XDocumentType.
+         */
+        void ValidateNode(const XNode& node) const override;
+
     private:
         void AppendTextValue(std::string& sb) const;
     };

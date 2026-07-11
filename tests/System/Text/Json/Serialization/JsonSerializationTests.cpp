@@ -9,6 +9,7 @@
 #include "System/Text/Json/JsonDocument.hpp"
 #include "System/Text/Json/JsonElement.hpp"
 #include "System/Text/Json/JsonException.hpp"
+#include "System/Text/Json/JsonSerializerDefaults.hpp"
 #include "System/Text/Json/Serialization/JsonConverter.hpp"
 #include "System/Text/Json/Serialization/JsonConverterFactory.hpp"
 #include "System/Text/Json/Serialization/JsonKnownNamingPolicy.hpp"
@@ -266,4 +267,33 @@ TEST(ReferenceResolverTests, IgnoreCycles_GetReference_DetectsRepeatedIdentity) 
 TEST(ReferenceResolverTests, IgnoreCycles_AddReference_ThrowsInvalidOperation) {
     auto resolver = ReferenceHandler::IgnoreCycles()->CreateResolver(/*writing=*/false);
     EXPECT_THROW(resolver->AddReference("1", nullptr), System::InvalidOperationException);
+}
+
+// ===========================================================================
+// JsonSerializerOptions defaults
+// ===========================================================================
+
+// Regression test for a wave-3 audit finding: AllowDuplicateProperties defaulted to false,
+// where real .NET's backing field (_allowDuplicateProperties) defaults to true -- the sibling
+// JsonDocumentOptions.AllowDuplicateProperties in this same codebase already correctly
+// defaults true, confirming this was an oversight, not a deliberate divergence.
+TEST(JsonSerializerOptionsTests, AllowDuplicateProperties_DefaultsTrue) {
+    JsonSerializerOptions opts;
+    EXPECT_TRUE(opts.getAllowDuplicatePropertiesProperty());
+}
+
+// Regression test for a wave-3 audit finding: JsonSerializerDefaults::Strict was a silent
+// no-op (the constructor only handled ::Web), so requesting Strict defaults silently produced
+// General behavior instead. Verified against JsonSerializerOptions.cs's
+// JsonSerializerOptions(JsonSerializerDefaults) constructor.
+TEST(JsonSerializerOptionsTests, StrictDefaults_DisallowsUnmappedAndDuplicateProperties) {
+    JsonSerializerOptions opts(System::Text::Json::JsonSerializerDefaults::Strict);
+    EXPECT_EQ(opts.getUnmappedMemberHandlingProperty(), JsonUnmappedMemberHandling::Disallow);
+    EXPECT_FALSE(opts.getAllowDuplicatePropertiesProperty());
+}
+
+TEST(JsonSerializerOptionsTests, WebDefaults_Unaffected) {
+    JsonSerializerOptions opts(System::Text::Json::JsonSerializerDefaults::Web);
+    EXPECT_TRUE(opts.getPropertyNameCaseInsensitiveProperty());
+    EXPECT_TRUE(opts.getAllowDuplicatePropertiesProperty());
 }

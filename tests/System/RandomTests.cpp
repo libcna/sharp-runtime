@@ -561,3 +561,92 @@ TEST(RandomTests, GetItems_ReadOnlySpan_OnlyFromChoices) {
     for (int v : result)
         EXPECT_TRUE(v == 10 || v == 20 || v == 30);
 }
+
+// ---------------------------------------------------------------------------
+// .NET parity (ticket 64): Random(seed) is now a byte-for-byte port of real
+// .NET's own seeded algorithm (the Knuth "subtractive" generator .NET has kept
+// bit-stable since .NET Framework 1.0). Every expected value below was captured
+// from a live Mono run (System.Private.CoreLib-compatible mscorlib, which uses
+// the identical unchanged seeded algorithm) with the exact same seeds -- these
+// are not just "same seed -> same output" self-consistency checks like the
+// tests above, but actual cross-runtime parity checks against real .NET output.
+// ---------------------------------------------------------------------------
+
+TEST(RandomTests, Parity_Next_Seed42) {
+    System::Random rng(42);
+    EXPECT_EQ(rng.Next(), 1434747710);
+    EXPECT_EQ(rng.Next(), 302596119);
+    EXPECT_EQ(rng.Next(), 269548474);
+    EXPECT_EQ(rng.Next(), 1122627734);
+    EXPECT_EQ(rng.Next(), 361709742);
+}
+
+TEST(RandomTests, Parity_NextMaxValue_Seed42) {
+    System::Random rng(42);
+    EXPECT_EQ(rng.Next(100), 66);
+    EXPECT_EQ(rng.Next(100), 14);
+    EXPECT_EQ(rng.Next(100), 12);
+    EXPECT_EQ(rng.Next(100), 52);
+    EXPECT_EQ(rng.Next(100), 16);
+}
+
+TEST(RandomTests, Parity_NextMinMax_Seed42) {
+    System::Random rng(42);
+    EXPECT_EQ(rng.Next(10, 20), 16);
+    EXPECT_EQ(rng.Next(10, 20), 11);
+    EXPECT_EQ(rng.Next(10, 20), 11);
+    EXPECT_EQ(rng.Next(10, 20), 15);
+    EXPECT_EQ(rng.Next(10, 20), 11);
+}
+
+TEST(RandomTests, Parity_NextDouble_Seed42) {
+    System::Random rng(42);
+    EXPECT_DOUBLE_EQ(rng.NextDouble(), 0.66810646591154232);
+    EXPECT_DOUBLE_EQ(rng.NextDouble(), 0.14090729837348093);
+    EXPECT_DOUBLE_EQ(rng.NextDouble(), 0.12551828945312568);
+}
+
+TEST(RandomTests, Parity_NextBytes_Seed42) {
+    System::Random rng(42);
+    std::vector<SharpRuntime::bytecs> buf(8);
+    rng.NextBytes(buf);
+    std::vector<SharpRuntime::bytecs> expected = {0x3E, 0x17, 0xBA, 0x96, 0xAE, 0x04, 0xCD, 0x3B};
+    EXPECT_EQ(buf, expected);
+}
+
+TEST(RandomTests, Parity_Next_Seed12345) {
+    System::Random rng(12345);
+    EXPECT_EQ(rng.Next(), 143337951);
+    EXPECT_EQ(rng.Next(), 150666398);
+    EXPECT_EQ(rng.Next(), 1663795458);
+    EXPECT_EQ(rng.Next(), 1097663221);
+    EXPECT_EQ(rng.Next(), 1712597933);
+}
+
+TEST(RandomTests, Parity_Next_SeedZero) {
+    System::Random rng(0);
+    EXPECT_EQ(rng.Next(), 1559595546);
+    EXPECT_EQ(rng.Next(), 1755192844);
+    EXPECT_EQ(rng.Next(), 1649316166);
+}
+
+// Verified against real .NET's own seed-normalization: Math.Abs(seed) is used for every
+// seed except int.MinValue (where Math.Abs would overflow), which is special-cased to
+// int.MaxValue instead -- so this is deliberately a different effective seed from 0, and
+// legitimately produces a different sequence from SeedZero above.
+TEST(RandomTests, Parity_Next_SeedIntMinValue) {
+    System::Random rng(std::numeric_limits<intcs>::min());
+    EXPECT_EQ(rng.Next(), 1559595546);
+    EXPECT_EQ(rng.Next(), 1755192844);
+    EXPECT_EQ(rng.Next(), 1649316172);
+}
+
+// Verified against real .NET's Math.Abs(seed) normalization: a negative seed produces the
+// exact same sequence as its positive absolute value.
+TEST(RandomTests, Parity_Next_NegativeSeed_MatchesAbsoluteValue) {
+    System::Random negative(-42);
+    System::Random positive(42);
+    EXPECT_EQ(negative.Next(), positive.Next());
+    EXPECT_EQ(negative.Next(), positive.Next());
+    EXPECT_EQ(negative.Next(), positive.Next());
+}

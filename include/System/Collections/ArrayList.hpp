@@ -8,6 +8,9 @@
 #include <vector>
 #include "System/Collections/IList.hpp"
 #include "System/Collections/IComparer.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections {
@@ -23,6 +26,14 @@ using SharpRuntime::intcs;
  * IComparer-based methods pass const std::any* pointers to the comparer.
  */
 class ArrayList : public IList {
+    // Verified against ArrayList.cs: every structural mutation (Add/Insert/Remove/Clear/
+    // Reverse/Sort/SetRange/the indexer setter) bumps _version, and GetEnumerator()'s
+    // enumerator throws InvalidOperationException on the next MoveNext()/Reset()/getCurrent()
+    // call if the list was mutated since the enumerator was created -- .NET's fail-fast
+    // enumeration contract. Not bumped by non-mutating operations (BinarySearch, IndexOf,
+    // Contains, ToArray, Clone, etc.) or by TrimToSize() (capacity-only, matching .NET).
+    intcs version_ = 0;
+
 public:
     // -----------------------------------------------------------------------
     // Constructors
@@ -142,10 +153,17 @@ public:
      */
     void setItem(intcs index, void* value) override {
         _items.at(static_cast<size_t>(index)) = value ? *static_cast<std::any*>(value) : std::any{};
+        ++version_;
     }
 
     /**
      * @brief Returns a reference to the element at the given index.
+     *
+     * @note Unlike setItem()/the .NET indexer setter, assigning through the reference this
+     * returns does not bump the fail-fast version counter (there is no way to intercept a
+     * plain C++ reference assignment) -- a known, narrow gap versus real .NET, where every
+     * indexer-setter assignment invalidates in-progress enumerators. Prefer setItem() when
+     * fail-fast enumeration correctness matters.
      * @param index Zero-based index.
      */
     std::any& operator[](int index) { return _items.at(static_cast<size_t>(index)); }
@@ -167,6 +185,7 @@ public:
      */
     SharpRuntime::intcs Add(void* value) override {
         _items.emplace_back(value);
+        ++version_;
         return static_cast<SharpRuntime::intcs>(_items.size()) - 1;
     }
 
@@ -175,7 +194,11 @@ public:
      * @param value Value to add.
      * @return Zero-based index at which the value was inserted.
      */
-    int Add(const std::any& value) { _items.push_back(value); return static_cast<int>(_items.size()) - 1; }
+    int Add(const std::any& value) {
+        _items.push_back(value);
+        ++version_;
+        return static_cast<int>(_items.size()) - 1;
+    }
 
     /**
      * @brief Appends all elements from @p c to the end of the list.
@@ -183,7 +206,9 @@ public:
      * C++ counterpart of .NET ArrayList.AddRange(ICollection).
      */
     void AddRange(const std::vector<std::any>& c) {
+        if (c.empty()) return;
         _items.insert(_items.end(), c.begin(), c.end());
+        ++version_;
     }
 
     // -----------------------------------------------------------------------
@@ -195,7 +220,7 @@ public:
      *
      * C++ counterpart of .NET ArrayList.Clear().
      */
-    void Clear() override { _items.clear(); }
+    void Clear() override { _items.clear(); ++version_; }
 
     /**
      * @brief Removes the first occurrence of the raw pointer from the list.
@@ -214,8 +239,9 @@ public:
      * @param index Zero-based index of the element to remove.
      */
     void RemoveAt(SharpRuntime::intcs index) override {
-        if (index < 0 || index >= static_cast<int>(_items.size())) throw std::out_of_range("index");
+        if (index < 0 || index >= static_cast<int>(_items.size())) throw System::ArgumentOutOfRangeException("index");
         _items.erase(_items.begin() + index);
+        ++version_;
     }
 
     /**
@@ -224,7 +250,9 @@ public:
      * C++ counterpart of .NET ArrayList.RemoveRange(int, int).
      */
     void RemoveRange(int index, int count) {
+        if (count <= 0) return;
         _items.erase(_items.begin() + index, _items.begin() + index + count);
+        ++version_;
     }
 
     // -----------------------------------------------------------------------
@@ -341,6 +369,7 @@ public:
      */
     void Insert(SharpRuntime::intcs index, void* value) override {
         _items.insert(_items.begin() + index, value);
+        ++version_;
     }
 
     /**
@@ -348,6 +377,7 @@ public:
      */
     void Insert(int index, const std::any& value) {
         _items.insert(_items.begin() + index, value);
+        ++version_;
     }
 
     /**
@@ -356,7 +386,9 @@ public:
      * C++ counterpart of .NET ArrayList.InsertRange(int, ICollection).
      */
     void InsertRange(int index, const std::vector<std::any>& c) {
+        if (c.empty()) return;
         _items.insert(_items.begin() + index, c.begin(), c.end());
+        ++version_;
     }
 
     // -----------------------------------------------------------------------
@@ -368,7 +400,7 @@ public:
      *
      * C++ counterpart of .NET ArrayList.Reverse().
      */
-    void Reverse() { std::reverse(_items.begin(), _items.end()); }
+    void Reverse() { std::reverse(_items.begin(), _items.end()); ++version_; }
 
     /**
      * @brief Reverses the order of @p count elements starting at @p index.
@@ -377,6 +409,7 @@ public:
      */
     void Reverse(int index, int count) {
         std::reverse(_items.begin() + index, _items.begin() + index + count);
+        ++version_;
     }
 
     /**
@@ -385,8 +418,10 @@ public:
      * C++ counterpart of .NET ArrayList.SetRange(int, ICollection).
      */
     void SetRange(int index, const std::vector<std::any>& c) {
+        if (c.empty()) return;
         for (size_t i = 0; i < c.size(); ++i)
             _items[static_cast<size_t>(index) + i] = c[i];
+        ++version_;
     }
 
     /**
@@ -417,6 +452,7 @@ public:
             [&comparer](const std::any& a, const std::any& b) {
                 return comparer.Compare(&a, &b) < 0;
             });
+        ++version_;
     }
 
     /**
@@ -429,6 +465,7 @@ public:
             [&comparer](const std::any& a, const std::any& b) {
                 return comparer.Compare(&a, &b) < 0;
             });
+        ++version_;
     }
 
     // -----------------------------------------------------------------------
@@ -515,21 +552,70 @@ public:
     [[nodiscard]] const std::vector<std::any>& getItems() const { return _items; }
 
     /**
-     * @brief Returns an enumerator over the full list; not implemented — returns nullptr.
+     * @brief Returns an enumerator that iterates through the full list.
      *
-     * C++ counterpart of .NET ArrayList.GetEnumerator().
+     * C++ counterpart of .NET ArrayList.GetEnumerator(). The enumerator throws
+     * InvalidOperationException on MoveNext()/Reset()/getCurrent() if the list is
+     * structurally modified while enumeration is in progress, matching .NET's fail-fast
+     * contract (see the Enumerator class doc-comment for the one known gap: mutation via
+     * the non-const operator[] reference isn't detected).
      */
-    IEnumerator* GetEnumerator() override { return nullptr; }
+    IEnumerator* GetEnumerator() override { return new Enumerator(this, 0, static_cast<intcs>(_items.size())); }
 
     /**
-     * @brief Returns an enumerator over a range; not implemented — returns nullptr.
+     * @brief Returns an enumerator that iterates through @p count elements starting at @p index.
      *
      * C++ counterpart of .NET ArrayList.GetEnumerator(int, int).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    IEnumerator* GetEnumerator(int /*index*/, int /*count*/) { return nullptr; }
+    IEnumerator* GetEnumerator(int index, int count) {
+        if (index < 0) throw System::ArgumentOutOfRangeException("index");
+        if (count < 0) throw System::ArgumentOutOfRangeException("count");
+        if (static_cast<size_t>(index) + static_cast<size_t>(count) > _items.size())
+            throw System::ArgumentException("Invalid index/count: range exceeds the list's bounds.");
+        return new Enumerator(this, index, index + count);
+    }
 
 private:
     std::vector<std::any> _items;
+
+    /**
+     * @brief Enumerator over an ArrayList (or a sub-range of one), matching the fail-fast
+     * versioning pattern established by Queue::Enumerator in this codebase.
+     */
+    class Enumerator : public IEnumerator {
+        const ArrayList* list_;
+        intcs version_;
+        intcs start_;
+        intcs end_;     // exclusive
+        intcs index_;   // one before start_ / past-end after MoveNext() returns false
+        bool started_ = false;
+
+    public:
+        Enumerator(const ArrayList* list, intcs start, intcs end)
+            : list_(list), version_(list->version_), start_(start), end_(end), index_(start - 1) {}
+
+        bool MoveNext() override {
+            if (version_ != list_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            if (index_ + 1 >= end_) { started_ = true; index_ = end_; return false; }
+            ++index_;
+            started_ = true;
+            return true;
+        }
+
+        void Reset() override {
+            if (version_ != list_->version_) throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            index_ = start_ - 1;
+            started_ = false;
+        }
+
+        [[nodiscard]] void* getCurrent() const override {
+            if (!started_ || index_ < start_ || index_ >= end_)
+                throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+            return const_cast<std::any*>(&list_->_items[static_cast<size_t>(index_)]);
+        }
+    };
 };
 
 } // namespace System::Collections

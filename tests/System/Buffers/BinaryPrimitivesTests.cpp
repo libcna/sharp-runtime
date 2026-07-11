@@ -64,10 +64,14 @@ TEST(BinaryPrimitivesTest, ReverseEndiannessInt16) {
     EXPECT_EQ(BinaryPrimitives::ReverseEndianness(in), expected);
 }
 
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's BinaryPrimitives Read*
+// methods throw when the source span is too small.
 TEST(BinaryPrimitivesTest, SpanTooSmallThrows) {
     uint8_t buf[2] = {};
     ReadOnlySpan<uint8_t> span(buf, 2);
-    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), std::out_of_range);
+    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

@@ -11,6 +11,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 #if defined(_MSC_VER)
 #  error "Int128 requires __int128 (GCC/Clang only). MSVC is not supported for this type."
@@ -245,11 +246,11 @@ namespace System {
          * C++ counterpart of .NET Int128.Abs(Int128) (INumberBase&lt;TSelf&gt;.Abs).
          * @param value The value whose absolute value is to be computed.
          * @return The absolute value of @p value.
-         * @throws std::overflow_error if @p value is MinValue (its magnitude does not
-         *         fit in a signed Int128), matching .NET's OverflowException.
+         * @throws System::OverflowException if @p value is MinValue (its magnitude does not
+         *         fit in a signed Int128).
          */
         [[nodiscard]] static Int128 Abs(const Int128& value) {
-            if (value.value_ == MinValue().value_) throw std::overflow_error("Negating the minimum value of a twos complement number is invalid.");
+            if (value.value_ == MinValue().value_) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return value.value_ < 0 ? Int128(-value.value_) : value;
         }
 

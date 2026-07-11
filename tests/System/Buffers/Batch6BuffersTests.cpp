@@ -327,6 +327,17 @@ TEST(SequenceReaderTests, Advance_SkipsElements) {
     EXPECT_EQ(v, 3);
 }
 
+// Regression test for a wave-3 audit finding: Advance() threw std::out_of_range (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's SequenceReader<T>.Advance
+// throws when count is negative or exceeds the remaining elements.
+TEST(SequenceReaderTests, Advance_PastRemainingElements_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    EXPECT_THROW(reader.Advance(4), System::ArgumentOutOfRangeException);
+}
+
 TEST(SequenceReaderTests, TryAdvancePast_MatchingElement) {
     uint8_t data[] = {7, 8};
     ReadOnlySequence<uint8_t> seq(data, 2);
@@ -343,13 +354,55 @@ TEST(SequenceReaderTests, TryAdvancePast_NoMatchDoesNotAdvance) {
     EXPECT_EQ(reader.getConsumedProperty(), 0LL);
 }
 
-TEST(SequenceReaderTests, Rewind_ResetsToStart) {
+// Regression tests: Rewind() previously took no argument and unconditionally reset the
+// reader to the absolute start of the sequence -- a completely different API shape from real
+// .NET's SequenceReader<T>.Rewind(long count), which moves the reader back by a *relative*
+// count and throws ArgumentOutOfRangeException for a negative count or one exceeding Consumed.
+// Ported C# code calling reader.Rewind(n) would not even compile against the old signature.
+TEST(SequenceReaderTests, Rewind_MovesBackByCount) {
+    uint8_t data[] = {1, 2, 3, 4};
+    ReadOnlySequence<uint8_t> seq(data, 4);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(4);
+    reader.Rewind(1);
+    EXPECT_EQ(reader.getConsumedProperty(), 3LL);
+    uint8_t v = 0;
+    reader.TryRead(v);
+    EXPECT_EQ(v, 4);
+}
+
+TEST(SequenceReaderTests, Rewind_ByConsumedCount_ResetsToStart) {
     uint8_t data[] = {1, 2, 3};
     ReadOnlySequence<uint8_t> seq(data, 3);
     SequenceReader<uint8_t> reader(seq);
     reader.Advance(3);
-    reader.Rewind();
+    reader.Rewind(reader.getConsumedProperty());
     EXPECT_EQ(reader.getConsumedProperty(), 0LL);
+}
+
+TEST(SequenceReaderTests, Rewind_Zero_IsNoOp) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    reader.Rewind(0);
+    EXPECT_EQ(reader.getConsumedProperty(), 2LL);
+}
+
+TEST(SequenceReaderTests, Rewind_NegativeCount_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    EXPECT_THROW(reader.Rewind(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(SequenceReaderTests, Rewind_MoreThanConsumed_Throws) {
+    uint8_t data[] = {1, 2, 3};
+    ReadOnlySequence<uint8_t> seq(data, 3);
+    SequenceReader<uint8_t> reader(seq);
+    reader.Advance(2);
+    EXPECT_THROW(reader.Rewind(3), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================
@@ -444,14 +497,18 @@ TEST(BinaryPrimitivesTests, WriteUInt64BigEndian_RoundTrip) {
     EXPECT_EQ(BinaryPrimitives::ReadUInt64BigEndian(rspan), uint64_t(0x0102030405060708ULL));
 }
 
+// Regression tests for a wave-3 audit finding: Read*/Write* threw std::out_of_range (an
+// unrelated std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's BinaryPrimitives Read*/Write*
+// methods throw when the source/destination span is too small.
 TEST(BinaryPrimitivesTests, ReadInt32LittleEndian_SpanTooSmall_Throws) {
     uint8_t data[] = {0x01, 0x02};
     auto span = System::ReadOnlySpan<uint8_t>(data, 2);
-    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), std::out_of_range);
+    EXPECT_THROW(BinaryPrimitives::ReadInt32LittleEndian(span), System::ArgumentOutOfRangeException);
 }
 
 TEST(BinaryPrimitivesTests, WriteInt64BigEndian_SpanTooSmall_Throws) {
     uint8_t buf[4] = {};
     auto span = System::Span<uint8_t>(buf, 4);
-    EXPECT_THROW(BinaryPrimitives::WriteInt64BigEndian(span, 0LL), std::out_of_range);
+    EXPECT_THROW(BinaryPrimitives::WriteInt64BigEndian(span, 0LL), System::ArgumentOutOfRangeException);
 }

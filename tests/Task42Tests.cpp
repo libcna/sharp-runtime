@@ -118,6 +118,80 @@ TEST(TimerTests, ChangeUpdatesInterval) {
     EXPECT_LE(count.load(), snapshot + 1);
 }
 
+// Regression tests for a wave-3 audit finding: constructing with dueTime == Timeout.Infinite
+// (-1) fired the callback immediately instead of never firing until a later Change() call sets
+// a real due time. Verified against TimerQueueTimer.Change()/TimerQueue.UpdateTimer: a timer
+// whose dueTime is UnsignedInfinite is never linked into the firing list.
+TEST(TimerTests, DueTimeInfinite_DoesNotFireUntilChanged) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, -1, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    EXPECT_EQ(count.load(), 0);
+    t.Change(0, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    EXPECT_EQ(count.load(), 1);
+}
+
+TEST(TimerTests, ChangeToInfinite_PausesActivelyRepeatingTimer_ThenResumes) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, 0, 10);
+    std::this_thread::sleep_for(std::chrono::milliseconds(35));
+    ASSERT_GE(count.load(), 2);
+    t.Change(-1, -1);
+    int paused = count.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_LE(count.load(), paused + 1); // allow one in-flight firing at the moment of pausing
+
+    // A single-shot timer (period <= 0) must also be re-armable via a later Change() call,
+    // not permanently dead after its one fire -- verified against TimerQueueTimer.Change(),
+    // which always re-links the timer regardless of its previous state.
+    t.Change(0, -1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_GT(count.load(), paused);
+}
+
+// Regression test for a wave-3 audit finding: run() used std::this_thread::sleep_for for the
+// between-fires wait, which is not interruptible -- a Change() call made while the timer
+// thread was mid-sleep had no observable effect until the original (now-stale) deadline
+// naturally elapsed. Verified against TimerQueue.UpdateTimer: every Change() call reschedules
+// the next fire relative to when Change() itself is called, regardless of the timer's current
+// wait state.
+TEST(TimerTests, Change_DuringLongWait_TakesEffectImmediately) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, 2000, -1); // would not fire for 2s unless Change() interrupts the wait
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    t.Change(20, -1); // reschedule to fire soon
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    EXPECT_EQ(count.load(), 1); // must have fired well before the original 2000ms deadline
+}
+
+// Regression test for a wave-3 audit finding: after every fire, run() unconditionally derived
+// the next dueTime from `period`, discarding whatever dueTime a Change() call made *during*
+// that fire's callback had just set -- only `period` survived past the first fire.
+TEST(TimerTests, Change_DuringCallback_NotClobberedByPeriod) {
+    std::atomic<int> count{0};
+    System::Threading::Timer* timerPtr = nullptr;
+    auto callback = [&](void* s) {
+        int n = (*static_cast<std::atomic<int>*>(s)).fetch_add(1) + 1;
+        if (n == 1) {
+            // Reschedule to fire again soon, overriding the original period (500ms).
+            timerPtr->Change(15, -1);
+        }
+    };
+    System::Threading::Timer t(callback, &count, 30, 500); // first fire ~30ms, then every 500ms
+    timerPtr = &t;
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // If the mid-callback Change(15, ...) was respected, a 2nd fire happens well within 150ms.
+    // If it was clobbered by the original period=500, count would still be 1 at this point.
+    EXPECT_GE(count.load(), 2);
+}
+
 // ===========================================================================
 // Object — abstract base: concrete stub for testing
 // ===========================================================================
@@ -512,6 +586,21 @@ TEST(AppDomainTests, BaseDirectory_EndsWithSlash) {
     EXPECT_EQ(System::AppDomain::CurrentDomain().getBaseDirectoryProperty().back(), '/');
 }
 
+#if defined(__linux__)
+// Regression/coverage test for a gap found while auditing AppDomain (ticket 69): the existing
+// tests only check "non-empty" and "ends with slash", which pass identically whether
+// /proc/self/exe resolution actually succeeded or silently fell back to the relative "./"
+// stub path -- neither invariant distinguishes the two. On Linux specifically, a successfully
+// resolved path is always absolute (readlink("/proc/self/exe", ...) never returns a relative
+// path), so asserting that catches a regression to the "./" fallback that the other two tests
+// would miss.
+TEST(AppDomainTests, BaseDirectory_Linux_IsAbsolutePath) {
+    const auto& dir = System::AppDomain::CurrentDomain().getBaseDirectoryProperty();
+    ASSERT_FALSE(dir.empty());
+    EXPECT_EQ(dir.front(), '/');
+}
+#endif
+
 TEST(AppDomainTests, SetGetData_Stubs_NoThrow) {
     int x = 1;
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("k", &x));
@@ -599,6 +688,21 @@ TEST(AppDomainTests, AddRemoveDomainUnload_NoThrow) {
     auto handler = [](void*, System::EventArgs&) {};
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_DomainUnload(handler));
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_DomainUnload(handler));
+}
+
+// Regression test for a coverage gap found while auditing AppDomain (ticket 69): the
+// UnhandledException and ProcessExit event stubs had zero test coverage, unlike the sibling
+// DomainUnload stub above.
+TEST(AppDomainTests, AddRemoveUnhandledException_NoThrow) {
+    System::UnhandledExceptionEventHandler handler = [](void*, System::UnhandledExceptionEventArgs&) {};
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_UnhandledException(handler));
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_UnhandledException(handler));
+}
+
+TEST(AppDomainTests, AddRemoveProcessExit_NoThrow) {
+    auto handler = [](void*, System::EventArgs&) {};
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_ProcessExit(handler));
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_ProcessExit(handler));
 }
 
 // ===========================================================================

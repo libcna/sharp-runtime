@@ -6,6 +6,7 @@
 #include <cstring>
 #include <stdexcept>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
 
 namespace System::Buffers::Binary {
@@ -30,32 +31,32 @@ namespace System::Buffers::Binary {
 
         /** @brief Reads a little-endian int16 from the first 2 bytes of @p source. */
         [[nodiscard]] static int16_t ReadInt16LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 2);
+            checkSize(source.getLengthProperty(), 2, "source");
             int16_t v; std::memcpy(&v, source.getPointer(), 2); return fromLE16(v);
         }
         /** @brief Reads a little-endian uint16 from the first 2 bytes of @p source. */
         [[nodiscard]] static uint16_t ReadUInt16LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 2);
+            checkSize(source.getLengthProperty(), 2, "source");
             uint16_t v; std::memcpy(&v, source.getPointer(), 2); return fromLE16u(v);
         }
         /** @brief Reads a little-endian int32 from the first 4 bytes of @p source. */
         [[nodiscard]] static int32_t ReadInt32LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 4);
+            checkSize(source.getLengthProperty(), 4, "source");
             int32_t v; std::memcpy(&v, source.getPointer(), 4); return fromLE32(v);
         }
         /** @brief Reads a little-endian uint32 from the first 4 bytes of @p source. */
         [[nodiscard]] static uint32_t ReadUInt32LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 4);
+            checkSize(source.getLengthProperty(), 4, "source");
             uint32_t v; std::memcpy(&v, source.getPointer(), 4); return fromLE32u(v);
         }
         /** @brief Reads a little-endian int64 from the first 8 bytes of @p source. */
         [[nodiscard]] static int64_t ReadInt64LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 8);
+            checkSize(source.getLengthProperty(), 8, "source");
             int64_t v; std::memcpy(&v, source.getPointer(), 8); return fromLE64(v);
         }
         /** @brief Reads a little-endian uint64 from the first 8 bytes of @p source. */
         [[nodiscard]] static uint64_t ReadUInt64LittleEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 8);
+            checkSize(source.getLengthProperty(), 8, "source");
             uint64_t v; std::memcpy(&v, source.getPointer(), 8); return fromLE64u(v);
         }
         /** @brief Reads a little-endian float from the first 4 bytes of @p source. */
@@ -75,32 +76,32 @@ namespace System::Buffers::Binary {
 
         /** @brief Reads a big-endian int16 from the first 2 bytes of @p source. */
         [[nodiscard]] static int16_t ReadInt16BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 2);
+            checkSize(source.getLengthProperty(), 2, "source");
             int16_t v; std::memcpy(&v, source.getPointer(), 2); return fromBE16(v);
         }
         /** @brief Reads a big-endian uint16 from the first 2 bytes of @p source. */
         [[nodiscard]] static uint16_t ReadUInt16BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 2);
+            checkSize(source.getLengthProperty(), 2, "source");
             uint16_t v; std::memcpy(&v, source.getPointer(), 2); return fromBE16u(v);
         }
         /** @brief Reads a big-endian int32 from the first 4 bytes of @p source. */
         [[nodiscard]] static int32_t ReadInt32BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 4);
+            checkSize(source.getLengthProperty(), 4, "source");
             int32_t v; std::memcpy(&v, source.getPointer(), 4); return fromBE32(v);
         }
         /** @brief Reads a big-endian uint32 from the first 4 bytes of @p source. */
         [[nodiscard]] static uint32_t ReadUInt32BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 4);
+            checkSize(source.getLengthProperty(), 4, "source");
             uint32_t v; std::memcpy(&v, source.getPointer(), 4); return fromBE32u(v);
         }
         /** @brief Reads a big-endian int64 from the first 8 bytes of @p source. */
         [[nodiscard]] static int64_t ReadInt64BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 8);
+            checkSize(source.getLengthProperty(), 8, "source");
             int64_t v; std::memcpy(&v, source.getPointer(), 8); return fromBE64(v);
         }
         /** @brief Reads a big-endian uint64 from the first 8 bytes of @p source. */
         [[nodiscard]] static uint64_t ReadUInt64BigEndian(System::ReadOnlySpan<uint8_t> source) {
-            checkSize(source.getLengthProperty(), 8);
+            checkSize(source.getLengthProperty(), 8, "source");
             uint64_t v; std::memcpy(&v, source.getPointer(), 8); return fromBE64u(v);
         }
         /** @brief Reads a big-endian float from the first 4 bytes of @p source. */
@@ -214,32 +215,32 @@ namespace System::Buffers::Binary {
 
         /** @brief Writes @p value as little-endian int16 into the first 2 bytes of @p destination. */
         static void WriteInt16LittleEndian(System::Span<uint8_t> destination, int16_t value) {
-            checkSize(destination.getLengthProperty(), 2);
+            checkSize(destination.getLengthProperty(), 2, "destination");
             int16_t v = toLE16(value); std::memcpy(destination.getPointer(), &v, 2);
         }
         /** @brief Writes @p value as little-endian uint16 into the first 2 bytes of @p destination. */
         static void WriteUInt16LittleEndian(System::Span<uint8_t> destination, uint16_t value) {
-            checkSize(destination.getLengthProperty(), 2);
+            checkSize(destination.getLengthProperty(), 2, "destination");
             uint16_t v = toLE16u(value); std::memcpy(destination.getPointer(), &v, 2);
         }
         /** @brief Writes @p value as little-endian int32 into the first 4 bytes of @p destination. */
         static void WriteInt32LittleEndian(System::Span<uint8_t> destination, int32_t value) {
-            checkSize(destination.getLengthProperty(), 4);
+            checkSize(destination.getLengthProperty(), 4, "destination");
             int32_t v = toLE32(value); std::memcpy(destination.getPointer(), &v, 4);
         }
         /** @brief Writes @p value as little-endian uint32 into the first 4 bytes of @p destination. */
         static void WriteUInt32LittleEndian(System::Span<uint8_t> destination, uint32_t value) {
-            checkSize(destination.getLengthProperty(), 4);
+            checkSize(destination.getLengthProperty(), 4, "destination");
             uint32_t v = toLE32u(value); std::memcpy(destination.getPointer(), &v, 4);
         }
         /** @brief Writes @p value as little-endian int64 into the first 8 bytes of @p destination. */
         static void WriteInt64LittleEndian(System::Span<uint8_t> destination, int64_t value) {
-            checkSize(destination.getLengthProperty(), 8);
+            checkSize(destination.getLengthProperty(), 8, "destination");
             int64_t v = toLE64(value); std::memcpy(destination.getPointer(), &v, 8);
         }
         /** @brief Writes @p value as little-endian uint64 into the first 8 bytes of @p destination. */
         static void WriteUInt64LittleEndian(System::Span<uint8_t> destination, uint64_t value) {
-            checkSize(destination.getLengthProperty(), 8);
+            checkSize(destination.getLengthProperty(), 8, "destination");
             uint64_t v = toLE64u(value); std::memcpy(destination.getPointer(), &v, 8);
         }
         /** @brief Writes @p value as little-endian float into the first 4 bytes of @p destination. */
@@ -259,32 +260,32 @@ namespace System::Buffers::Binary {
 
         /** @brief Writes @p value as big-endian int16 into the first 2 bytes of @p destination. */
         static void WriteInt16BigEndian(System::Span<uint8_t> destination, int16_t value) {
-            checkSize(destination.getLengthProperty(), 2);
+            checkSize(destination.getLengthProperty(), 2, "destination");
             int16_t v = toBE16(value); std::memcpy(destination.getPointer(), &v, 2);
         }
         /** @brief Writes @p value as big-endian uint16 into the first 2 bytes of @p destination. */
         static void WriteUInt16BigEndian(System::Span<uint8_t> destination, uint16_t value) {
-            checkSize(destination.getLengthProperty(), 2);
+            checkSize(destination.getLengthProperty(), 2, "destination");
             uint16_t v = toBE16u(value); std::memcpy(destination.getPointer(), &v, 2);
         }
         /** @brief Writes @p value as big-endian int32 into the first 4 bytes of @p destination. */
         static void WriteInt32BigEndian(System::Span<uint8_t> destination, int32_t value) {
-            checkSize(destination.getLengthProperty(), 4);
+            checkSize(destination.getLengthProperty(), 4, "destination");
             int32_t v = toBE32(value); std::memcpy(destination.getPointer(), &v, 4);
         }
         /** @brief Writes @p value as big-endian uint32 into the first 4 bytes of @p destination. */
         static void WriteUInt32BigEndian(System::Span<uint8_t> destination, uint32_t value) {
-            checkSize(destination.getLengthProperty(), 4);
+            checkSize(destination.getLengthProperty(), 4, "destination");
             uint32_t v = toBE32u(value); std::memcpy(destination.getPointer(), &v, 4);
         }
         /** @brief Writes @p value as big-endian int64 into the first 8 bytes of @p destination. */
         static void WriteInt64BigEndian(System::Span<uint8_t> destination, int64_t value) {
-            checkSize(destination.getLengthProperty(), 8);
+            checkSize(destination.getLengthProperty(), 8, "destination");
             int64_t v = toBE64(value); std::memcpy(destination.getPointer(), &v, 8);
         }
         /** @brief Writes @p value as big-endian uint64 into the first 8 bytes of @p destination. */
         static void WriteUInt64BigEndian(System::Span<uint8_t> destination, uint64_t value) {
-            checkSize(destination.getLengthProperty(), 8);
+            checkSize(destination.getLengthProperty(), 8, "destination");
             uint64_t v = toBE64u(value); std::memcpy(destination.getPointer(), &v, 8);
         }
         /** @brief Writes @p value as big-endian float into the first 4 bytes of @p destination. */
@@ -419,8 +420,8 @@ namespace System::Buffers::Binary {
         static uint64_t ReverseEndianness(uint64_t value) { return bswap64(value); }
 
     private:
-        static void checkSize(intcs len, intcs needed) {
-            if (len < needed) throw std::out_of_range("BinaryPrimitives: span too small");
+        static void checkSize(intcs len, intcs needed, const char* paramName) {
+            if (len < needed) throw System::ArgumentOutOfRangeException(paramName);
         }
 
         // Little-endian helpers (no-op on LE architectures; byte-swap on BE)

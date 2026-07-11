@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Net/Http/Headers/RetryConditionHeaderValue.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include "System/TimeSpan.hpp"
 
@@ -13,6 +14,17 @@ TEST(RetryConditionHeaderValueTests, Constructor_Delta) {
     ASSERT_TRUE(v.getDeltaProperty().has_value());
     EXPECT_FALSE(v.getDateProperty().has_value());
     EXPECT_EQ(v.ToString(), "120");
+}
+
+// Regression test for a wave-3 audit finding: threw std::out_of_range (an unrelated std::
+// exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's
+// RetryConditionHeaderValue(TimeSpan) constructor throws (via
+// ArgumentOutOfRangeException.ThrowIfGreaterThan) when delta exceeds int.MaxValue seconds.
+TEST(RetryConditionHeaderValueTests, Constructor_DeltaExceedsInt32Max_Throws) {
+    // int.MaxValue seconds is ~68 years; 1e10 seconds (~317 years) exceeds it while still
+    // being well within TimeSpan's own much larger representable range.
+    EXPECT_THROW(RetryConditionHeaderValue(System::TimeSpan::FromSeconds(1e10)), System::ArgumentOutOfRangeException);
 }
 
 TEST(RetryConditionHeaderValueTests, Constructor_Date) {

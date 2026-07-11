@@ -63,10 +63,35 @@ namespace System::Threading {
         RegisteredWaitHandle& operator=(const RegisteredWaitHandle&) = delete;
         ~RegisteredWaitHandle() { Unregister(nullptr); }
 
-        /** Cancels the registered wait; the waitObject parameter is accepted for API compatibility and ignored. */
+        /**
+         * @brief Cancels the registered wait; the waitObject parameter is accepted for API
+         * compatibility and ignored (real .NET signals it once unregistration completes, but
+         * this port has no user-visible use for it beyond that -- see the blocking note below).
+         *
+         * @note Deliberately blocks (joins the background wait thread) before returning, unlike
+         * real .NET's `Unregister(null)`, which does not wait for an in-flight `WaitOne()` call
+         * to return. Real .NET is safe to not block because its wait thread operates on a
+         * ref-counted `SafeWaitHandle` (`DangerousAddRef`), keeping the underlying OS handle
+         * alive even if the caller's `WaitHandle` wrapper is garbage-collected immediately after
+         * `Unregister()` returns. This port's background thread instead calls
+         * `waitObject->WaitOne(...)` directly on the caller-owned, non-reference-counted pointer
+         * -- without blocking here, a caller that deletes `waitObject` right after `Unregister()`
+         * returns would race the background thread's in-flight `WaitOne()` call on that same
+         * (now freed) object: a genuine use-after-free, not just a parity gap. Blocking is the
+         * simpler, safe alternative to reproducing .NET's ref-counted-handle machinery. The one
+         * exception is a self-unregistering callback (this method called with `this_thread`
+         * being the wait thread itself) — joining there would deadlock, so it detaches instead;
+         * the thread is already about to exit on its own.
+         */
         bool Unregister(WaitHandle* /*waitObject*/) {
             if (!state_ || state_->unregistered.exchange(true)) return false;
-            if (thread_.joinable()) thread_.detach();
+            if (thread_.joinable()) {
+                if (thread_.get_id() == std::this_thread::get_id()) {
+                    thread_.detach();
+                } else {
+                    thread_.join();
+                }
+            }
             return true;
         }
     };

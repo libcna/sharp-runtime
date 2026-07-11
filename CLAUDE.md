@@ -35,6 +35,23 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 | `System::AppDomain/AppContext` | `/proc/self/exe` | Linux-only |
 | `System::TimeZoneInfo` | `localtime_r`, `/usr/share/zoneinfo` | POSIX-only |
 
+### What is MSVC-unsupported (compiler-extension dependency, not a platform bug)
+
+These types require the GCC/Clang `__int128`/`unsigned __int128` extension and hard-`#error`
+on MSVC. This is a compiler dependency, not an OS dependency — GCC and Clang on Windows (e.g.
+MinGW, or Clang with `-target x86_64-pc-windows-msvc` using its own `__int128` support) are
+unaffected; only the MSVC frontend itself lacks `__int128`. Documented here as a **known,
+accepted, permanent limitation** — not a bug to silently "fix" by working around `__int128`
+with hand-rolled 128-bit arithmetic, per an explicit 2026-07-11 decision (the risk/complexity
+of a from-scratch 128-bit implementation outweighs the benefit for a project that doesn't
+target MSVC as a first-class compiler).
+
+| Type | Requires | Status |
+|------|----------|--------|
+| `System::Decimal` | `unsigned __int128` | MSVC-unsupported |
+| `System::Int128` | `__int128` | MSVC-unsupported |
+| `System::UInt128` | `unsigned __int128` | MSVC-unsupported |
+
 ### Correct platform abstraction approach
 
 - POSIX includes (`<unistd.h>`, `<sys/socket.h>`, etc.) must **not** appear in public `.hpp` headers.
@@ -60,7 +77,18 @@ sharp-runtime and .NET will naturally differ — C++ has no GC, no IL, no runtim
 Known permanent deviations (not bugs, not TODO):
 - **Reflection** (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`, etc.) — completely out of scope. Stubs are the correct end state.
 - **GC** (`System::GC`) — all methods are no-ops. Memory is managed by RAII / `std::shared_ptr`.
-- **Delegates** — mapped to `std::function<>` type aliases; no multicast, no `BeginInvoke`.
+- **Delegates** — three tiers, not one blanket rule (verified 2026-07-11 while auditing ticket 72,
+  since the previous one-line version of this bullet was itself inaccurate for two of the three):
+  the majority of delegate-shaped types (`Action`, `Func`, `EventHandler`, and most
+  `*EventHandler`/`*Callback` aliases across the codebase) are bare `using X = std::function<...>;`
+  aliases — single-target only, no multicast, no `BeginInvoke`/`EndInvoke` (async delegate
+  invocation is out of scope entirely, matching .NET's own removal of the pattern). But
+  `System::Delegate` (`include/System/Delegate.hpp`) is a real multicast delegate base class with
+  working `Combine`/`Remove`/`RemoveAll`/`GetInvocationList`, and `System::MulticastAction<Args...>`
+  (`include/System/MulticastAction.hpp`) is a purpose-built multicast event-field type with `+=`/`=`
+  and reentrancy-safe snapshot invocation — both genuinely support multicast where a ported type
+  needs it. `Delegate::DynamicInvoke` always throws `NotImplementedException` (no late-bound
+  `object[]` invocation equivalent in C++) in all three tiers.
 - **Serialization** (`[Serializable]`, `SerializationInfo`) — ignored; not needed for game code.
 - **P/Invoke / interop** — out of scope.
 - **Symmetric/asymmetric cryptography, X.509 certificates, TLS** (`System.Security.Cryptography`'s `Aes*`/`RSA*`/`EC*`/`ChaCha20Poly1305`/`CryptoStream`, `System.Security.Cryptography.X509Certificates`, `System.Net.Security`'s `SslStream` and friends) — out of scope by explicit decision (2026-07-07): implementing this correctly needs either a large new external dependency (OpenSSL/mbedTLS) or a hand-rolled, security-critical implementation, neither of which is worth it for game code. Hash algorithms (`MD5`/`SHA*`/`HMAC`/`PBKDF2` — no key material, no confidentiality guarantees to get wrong) are already ported and remain in scope; they are not affected by this deviation.

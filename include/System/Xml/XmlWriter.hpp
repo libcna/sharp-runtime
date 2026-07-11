@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+#include "System/Xml/XmlWriterSettings.hpp"
+
 namespace System::Xml {
 
     struct XmlWriterState; ///< Opaque tinyxml2 state; defined in XmlWriter.cpp.
@@ -80,6 +82,10 @@ namespace System::Xml {
         /**
          * @brief Writes a comment node: @c <!-- text -->.
          *
+         * If @p text contains @c "--" or ends with @c '-', a space is silently inserted to
+         * keep the emitted markup well-formed, matching real .NET's
+         * @c XmlEncodedRawTextWriter (which self-heals rather than throwing).
+         *
          * @param text  Comment text.
          */
         void WriteComment(const std::string& text);
@@ -87,12 +93,19 @@ namespace System::Xml {
         /**
          * @brief Writes a CDATA section as child of the current element: @c <![CDATA[text]]>.
          *
+         * If @p text contains an embedded @c "]]>", the section is silently split into
+         * adjacent CDATA sections around it (matching real .NET) so the terminator never
+         * appears mid-content; the original text round-trips unchanged on read-back.
+         *
          * @param text  Content; not XML-escaped (that is the point of a CDATA section).
          */
         void WriteCData(const std::string& text);
 
         /**
          * @brief Writes a processing instruction: @c <?target data?>.
+         *
+         * If @p data contains @c "?>", a space is silently inserted to keep the emitted
+         * markup well-formed, matching real .NET's @c XmlEncodedRawTextWriter.
          *
          * @param target  The PI target name.
          * @param data    The PI content (not XML-escaped, matching real XML PI syntax).
@@ -113,7 +126,9 @@ namespace System::Xml {
         /**
          * @brief Returns the serialized XML as a string.
          *
-         * Includes the XML declaration if @c WriteStartDocument() was called.
+         * Includes the XML declaration if @c WriteStartDocument() was called. Compact
+         * (no inserted whitespace) unless the writer was created with
+         * @c XmlWriterSettings::Indent set to @c true, matching real .NET's default.
          */
         [[nodiscard]] std::string ToString() const;
 
@@ -129,18 +144,25 @@ namespace System::Xml {
          * Call @c Close() or @c Flush() to write the file.
          *
          * @param outputFileName  Destination file path.
+         * @param settings        Formatting settings; only @c Indent is currently consulted
+         *                        (matches real @c XmlWriterSettings' default of @c false —
+         *                        compact, non-pretty-printed output).
          * @return Heap-allocated XmlWriter; caller owns the pointer.
          */
-        static XmlWriter* Create(const std::string& outputFileName);
+        static XmlWriter* Create(const std::string& outputFileName,
+                                  const XmlWriterSettings& settings = XmlWriterSettings());
 
         /**
          * @brief Creates an XmlWriter that serializes to an in-memory string.
          *
          * Use @c ToString() to retrieve the result.
          *
+         * @param settings  Formatting settings; only @c Indent is currently consulted
+         *                  (matches real @c XmlWriterSettings' default of @c false —
+         *                  compact, non-pretty-printed output).
          * @return Heap-allocated XmlWriter; caller owns the pointer.
          */
-        static XmlWriter* CreateToString();
+        static XmlWriter* CreateToString(const XmlWriterSettings& settings = XmlWriterSettings());
     };
 
 } // namespace System::Xml

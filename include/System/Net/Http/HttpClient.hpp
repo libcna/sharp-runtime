@@ -84,9 +84,21 @@ public:
 
     /**
      * Parses an absolute HTTP URL into its components.
-     * Throws std::invalid_argument for malformed or non-HTTP URLs.
+     * Throws System::UriFormatException for a malformed URL, or
+     * System::NotSupportedException for a non-HTTP scheme.
      */
     static ParsedUrl parseUrl(const std::string& url);
+
+    struct ParsedStatusLine {
+        int         statusCode = 0;
+        std::string reason;
+    };
+
+    /**
+     * Parses an HTTP response status line (e.g. "HTTP/1.1 200 OK").
+     * Throws HttpRequestException if the line has no status code, or the code isn't numeric.
+     */
+    static ParsedStatusLine parseStatusLine(const std::string& statusLine);
 
 private:
     std::string                                  baseAddress_;

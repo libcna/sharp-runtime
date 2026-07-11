@@ -91,3 +91,15 @@ TEST(EnumTests, HasFlag_ReadWrite_HasRead) {
 TEST(EnumTests, HasFlag_Self_IsTrue) {
     EXPECT_TRUE(Enum::HasFlag(Color::Green, Color::Green));
 }
+
+// Regression/coverage test for a gap found while auditing reflection stubs (ticket 71):
+// a zero flag (Perm::None) is always considered "present" -- (value & 0) == 0 is
+// unconditionally true regardless of value, matching real .NET's documented Enum.HasFlag
+// contract that a zero flag argument always returns true. This edge case (flag == 0, as
+// opposed to value == 0, which the pre-existing HasFlag_None_NotHasRead test already covers)
+// had no test coverage.
+TEST(EnumTests, HasFlag_ZeroFlag_AlwaysTrue) {
+    EXPECT_TRUE(Enum::HasFlag(Perm::Read, Perm::None));
+    EXPECT_TRUE(Enum::HasFlag(Perm::All, Perm::None));
+    EXPECT_TRUE(Enum::HasFlag(Perm::None, Perm::None));
+}

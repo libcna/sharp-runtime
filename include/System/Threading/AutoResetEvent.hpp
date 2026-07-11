@@ -6,6 +6,7 @@
 #include <condition_variable>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/Threading/WaitHandle.hpp"
 
 namespace System::Threading {
 
@@ -49,8 +50,16 @@ namespace System::Threading {
          * Blocks until signaled or timeout elapses.
          * @param milliseconds Maximum time to wait.
          * @return True if the event was signaled (then auto-resets); false on timeout.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         * @note Verified against every sibling wait-handle type in this codebase
+         * (ManualResetEvent, EventWaitHandle, Mutex, Semaphore, SemaphoreSlim, CountdownEvent,
+         * ManualResetEventSlim), all of which call WaitHandle::ValidateTimeout(...) here. This
+         * was previously the one call site missing it: a timeout below -1 (e.g. -2) silently
+         * reached cv_.wait_for(..., milliseconds(-2), ...), which per C++'s negative-duration
+         * semantics returns almost immediately instead of throwing.
          */
         bool WaitOne(intcs milliseconds) {
+            WaitHandle::ValidateTimeout(milliseconds);
             std::unique_lock<std::mutex> lk(mutex_);
             // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
             // negative duration as already-expired, so it must be special-cased.

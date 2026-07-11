@@ -408,13 +408,17 @@ namespace System {
          * @brief Returns the status of a registered notification for a full GC approach.
          *
          * C++ counterpart of .NET GC.WaitForFullGCApproach(int).
-         * Always returns GCNotificationStatus::Succeeded in this port.
+         * Always returns GCNotificationStatus::NotApplicable in this port: since
+         * RegisterForFullGCNotification() is a no-op (nothing is ever actually monitored),
+         * claiming Succeeded (a full GC approach was genuinely detected) would misrepresent
+         * that no such detection occurred. NotApplicable matches real .NET's own use of that
+         * value for "this API doesn't apply to the current GC configuration".
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCApproach(
             int millisecondsTimeout = -1)
         {
             (void)millisecondsTimeout;
-            return GCNotificationStatus::Succeeded;
+            return GCNotificationStatus::NotApplicable;
         }
 
         /**
@@ -422,24 +426,26 @@ namespace System {
          * using a TimeSpan timeout.
          *
          * C++ counterpart of .NET GC.WaitForFullGCApproach(TimeSpan).
-         * Always returns GCNotificationStatus::Succeeded in this port.
+         * Always returns GCNotificationStatus::NotApplicable in this port -- see the
+         * millisecond-timeout overload's doc-comment for why.
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCApproach(TimeSpan timeout) {
             (void)timeout;
-            return GCNotificationStatus::Succeeded;
+            return GCNotificationStatus::NotApplicable;
         }
 
         /**
          * @brief Returns the status of a registered notification for a full GC completion.
          *
          * C++ counterpart of .NET GC.WaitForFullGCComplete(int).
-         * Always returns GCNotificationStatus::Succeeded in this port.
+         * Always returns GCNotificationStatus::NotApplicable in this port -- see
+         * WaitForFullGCApproach(int)'s doc-comment for why.
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCComplete(
             int millisecondsTimeout = -1)
         {
             (void)millisecondsTimeout;
-            return GCNotificationStatus::Succeeded;
+            return GCNotificationStatus::NotApplicable;
         }
 
         /**
@@ -447,11 +453,12 @@ namespace System {
          * using a TimeSpan timeout.
          *
          * C++ counterpart of .NET GC.WaitForFullGCComplete(TimeSpan).
-         * Always returns GCNotificationStatus::Succeeded in this port.
+         * Always returns GCNotificationStatus::NotApplicable in this port -- see
+         * WaitForFullGCApproach(int)'s doc-comment for why.
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCComplete(TimeSpan timeout) {
             (void)timeout;
-            return GCNotificationStatus::Succeeded;
+            return GCNotificationStatus::NotApplicable;
         }
 
         // -----------------------------------------------------------------------

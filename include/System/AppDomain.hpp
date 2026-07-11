@@ -64,9 +64,11 @@ namespace System {
          * for assemblies.
          *
          * C++ counterpart of .NET AppDomain.BaseDirectory.
-         * On Linux, the directory containing the executable (from /proc/self/exe),
-         * with a trailing '/'. On Windows, from GetModuleFileNameW. Falls back to
-         * "./" if detection fails.
+         * The directory containing the executable, with a trailing '/': on Linux (and other
+         * POSIX platforms besides macOS), resolved from /proc/self/exe; on macOS, from
+         * _NSGetExecutablePath; on Windows, from GetModuleFileNameW. Falls back to "./" if
+         * detection fails, and always "./" on Emscripten (no real executable path to resolve
+         * -- runs against the virtual filesystem root).
          */
         [[nodiscard]] const std::string& getBaseDirectoryProperty() const {
             return baseDirectory_;

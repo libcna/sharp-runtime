@@ -382,6 +382,50 @@ TEST(ParallelTests, Invoke_ExecutesAllActions) {
     EXPECT_EQ(count.load(), 3);
 }
 
+// Regression tests for a wave-3 audit finding: For/ForEach/Invoke called f.get() on each future
+// with no try/catch, so the first exception observed escaped unwrapped and every other future's
+// exception was silently discarded when its std::future was destroyed. Verified against
+// Parallel.cs, which always aggregates every exception raised by any iteration/action into a
+// single AggregateException, even when only one iteration actually throws.
+TEST(ParallelTests, For_IterationThrows_ThrowsAggregateException) {
+    EXPECT_THROW(
+        Parallel::For(0, 10, [](int i) {
+            if (i % 2 == 0) throw std::runtime_error("even");
+        }),
+        System::AggregateException);
+}
+
+TEST(ParallelTests, For_MultipleIterationsThrow_AggregatesAllExceptions) {
+    try {
+        Parallel::For(0, 10, [](int i) {
+            if (i % 2 == 0) throw std::runtime_error("even");
+        });
+        FAIL() << "expected AggregateException";
+    } catch (const System::AggregateException& agg) {
+        // Iterations 0,2,4,6,8 all throw -- every one of them must be collected, not just the first.
+        EXPECT_EQ(agg.getInnerExceptionCountProperty(), 5u);
+    }
+}
+
+TEST(ParallelTests, ForEach_ItemThrows_ThrowsAggregateException) {
+    std::vector<int> items = {1, 2, 3};
+    EXPECT_THROW(
+        Parallel::ForEach<int>(items, [](int v) {
+            if (v == 2) throw std::runtime_error("bad item");
+        }),
+        System::AggregateException);
+}
+
+TEST(ParallelTests, Invoke_ActionThrows_ThrowsAggregateException) {
+    EXPECT_THROW(
+        Parallel::Invoke({
+            []() {},
+            []() { throw std::runtime_error("boom"); },
+            []() {}
+        }),
+        System::AggregateException);
+}
+
 // ===========================================================================
 // ParallelLoopState
 // ===========================================================================
@@ -636,6 +680,52 @@ TEST(ParallelWithLoopStateTests, For_NoStop_CompletesAndRunsEveryIteration) {
             [&sum](int i, System::Threading::Tasks::ParallelLoopState&) { sum += i; }));
     EXPECT_TRUE(result.getIsCompletedProperty());
     EXPECT_EQ(sum.load(), 45);
+}
+
+// Regression test for a wave-3 audit finding: unlike the sibling For(..., ParallelOptions,
+// ...) overload, this port's other loop-shaped overloads (For with ParallelLoopState, both
+// ForEach variants) launched one std::async per iteration/item with no batching at all --
+// for a large source, this attempted to spawn far more concurrent OS threads than the
+// hardware supports. Verified indirectly: track the maximum number of loop bodies observed
+// running concurrently and assert it never exceeds hardware_concurrency(); before the fix,
+// all items would fire (and briefly overlap) at once, exceeding this bound.
+TEST(ParallelWithLoopStateTests, ForEach_BoundedConcurrency_DoesNotExceedHardwareConcurrency) {
+    int maxAllowed = static_cast<int>(std::thread::hardware_concurrency());
+    if (maxAllowed < 1) maxAllowed = 1;
+    std::vector<int> items(static_cast<size_t>(maxAllowed) * 4);
+    for (size_t i = 0; i < items.size(); ++i) items[i] = static_cast<int>(i);
+
+    std::atomic<int> concurrent{0};
+    std::atomic<int> maxConcurrent{0};
+    Parallel::ForEach<int>(items, std::function<void(int)>([&](int) {
+        int now = concurrent.fetch_add(1) + 1;
+        int prevMax = maxConcurrent.load();
+        while (now > prevMax && !maxConcurrent.compare_exchange_weak(prevMax, now)) {}
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        concurrent.fetch_sub(1);
+    }));
+
+    EXPECT_LE(maxConcurrent.load(), maxAllowed);
+}
+
+TEST(ParallelWithLoopStateTests, For_BoundedConcurrency_DoesNotExceedHardwareConcurrency) {
+    int maxAllowed = static_cast<int>(std::thread::hardware_concurrency());
+    if (maxAllowed < 1) maxAllowed = 1;
+    int total = maxAllowed * 4;
+
+    std::atomic<int> concurrent{0};
+    std::atomic<int> maxConcurrent{0};
+    Parallel::For(0, total,
+        std::function<void(int, System::Threading::Tasks::ParallelLoopState&)>(
+            [&](int, System::Threading::Tasks::ParallelLoopState&) {
+                int now = concurrent.fetch_add(1) + 1;
+                int prevMax = maxConcurrent.load();
+                while (now > prevMax && !maxConcurrent.compare_exchange_weak(prevMax, now)) {}
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                concurrent.fetch_sub(1);
+            }));
+
+    EXPECT_LE(maxConcurrent.load(), maxAllowed);
 }
 
 TEST(ParallelWithLoopStateTests, ForEach_StopStopsSchedulingFurtherIterations) {

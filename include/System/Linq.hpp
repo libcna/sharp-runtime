@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Linq {
 
@@ -69,14 +70,14 @@ namespace System::Linq {
     {
         for (const auto& item : source)
             if (predicate(item)) return item;
-        throw std::invalid_argument("Sequence contains no matching element.");
+        throw System::InvalidOperationException("Sequence contains no matching element.");
     }
 
     /** @brief Returns the first element; throws if the sequence is empty. */
     template<typename T>
     T First(const std::vector<T>& source)
     {
-        if (source.empty()) throw std::invalid_argument("Sequence contains no elements.");
+        if (source.empty()) throw System::InvalidOperationException("Sequence contains no elements.");
         return source.front();
     }
 
@@ -168,7 +169,7 @@ namespace System::Linq {
     template<typename T>
     T Min(const std::vector<T>& source)
     {
-        if (source.empty()) throw std::invalid_argument("Sequence contains no elements.");
+        if (source.empty()) throw System::InvalidOperationException("Sequence contains no elements.");
         return *std::min_element(source.begin(), source.end());
     }
 
@@ -176,7 +177,7 @@ namespace System::Linq {
     template<typename T>
     T Max(const std::vector<T>& source)
     {
-        if (source.empty()) throw std::invalid_argument("Sequence contains no elements.");
+        if (source.empty()) throw System::InvalidOperationException("Sequence contains no elements.");
         return *std::max_element(source.begin(), source.end());
     }
 

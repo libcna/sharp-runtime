@@ -4,6 +4,7 @@
 #include "System/Xml/Linq/XElement.hpp"
 #include <algorithm>
 #include <fstream>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
 #include "System/Xml/Linq/XText.hpp"
@@ -36,6 +37,20 @@ namespace System::Xml::Linq {
     }
 
     void XElement::Add(const std::string& text) {
+        // Verified against XContainer.cs's AddString(): if the current last child is already a
+        // plain XText (not XCData), real .NET appends into its existing Value rather than
+        // creating a new sibling text node -- e.g. two consecutive Add(string) calls produce
+        // one merged text node, not two adjacent ones. An empty string is a genuine no-op (no
+        // node created at all), matching AddString's `if (s.Length > 0)` guard.
+        if (text.empty()) return;
+        if (!children_.empty()) {
+            auto& last = children_.back();
+            if (last->getNodeTypeProperty() == XmlNodeType::Text) {
+                auto* lastText = static_cast<XText*>(last.get());
+                lastText->setValueProperty(lastText->getValueProperty() + text);
+                return;
+            }
+        }
         XContainer::Add(std::make_shared<XText>(text));
     }
 
@@ -174,13 +189,32 @@ namespace System::Xml::Linq {
         return h;
     }
 
+    void XElement::ValidateNode(const XNode& node) const {
+        // Verified against XElement.cs's ValidateNode: an XDocument or XDocumentType can never
+        // be a legal child of an element (only of an XDocument, which enforces its own,
+        // separate single-root/single-doctype rules) -- without this check, tinyxml2's own
+        // insertion has no such restriction and would silently produce a structurally invalid
+        // tree (a nested document, or a doctype declaration inside element content).
+        auto nt = node.getNodeTypeProperty();
+        if (nt == XmlNodeType::Document)
+            throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add an XDocument as a child of an XElement).");
+        if (nt == XmlNodeType::DocumentType)
+            throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add an XDocumentType as a child of an XElement).");
+    }
+
     bool XElement::DeepEqualsCore(const XNode& other) const {
         const auto& o = static_cast<const XElement&>(other);
         if (name_ != o.name_) return false;
+        // Verified against XElement.cs's AttributesEqual: real .NET walks both attribute lists
+        // in parallel by *position*, not by name lookup -- two elements with the same
+        // attributes in a different order are NOT deep-equal (attribute order is part of an
+        // XElement's identity for DeepEquals purposes, even though lookup-by-name is
+        // order-independent).
         if (attributes_.size() != o.attributes_.size()) return false;
-        for (auto& a : attributes_) {
-            auto match = o.Attribute(a->getNameProperty());
-            if (!match || match->getValueProperty() != a->getValueProperty()) return false;
+        for (size_t i = 0; i < attributes_.size(); ++i) {
+            if (attributes_[i]->getNameProperty() != o.attributes_[i]->getNameProperty() ||
+                attributes_[i]->getValueProperty() != o.attributes_[i]->getValueProperty())
+                return false;
         }
         // Ignore comments/processing instructions on both sides; pairwise-compare the rest.
         std::vector<const XNode*> lhs, rhs;

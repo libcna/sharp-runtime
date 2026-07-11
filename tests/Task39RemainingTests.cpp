@@ -17,8 +17,10 @@
 #include <memory>
 #include <stdexcept>
 
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Threading/SynchronizationContext.hpp"
 #include "System/Threading/PeriodicTimer.hpp"
+#include "System/Threading/Timeout.hpp"
 #include "System/Threading/WaitHandle.hpp"
 #include "System/Text/ASCIIEncoding.hpp"
 #include "System/Text/UnicodeEncoding.hpp"
@@ -103,6 +105,42 @@ TEST(PeriodicTimerTests, WaitForNextTick_ShortPeriod_ReturnsTrue) {
     PeriodicTimer timer(TimeSpan::FromMilliseconds(1));
     EXPECT_TRUE(timer.WaitForNextTick());
     timer.Dispose();
+}
+
+// Regression tests for a wave-3 audit finding: the constructor performed no validation of
+// period at all -- TimeSpan::Zero or a negative (non-Infinite) period silently constructed a
+// timer whose next_ was already <= now(), so WaitForNextTick() would busy-loop at 100% CPU
+// instead of throwing. Verified against PeriodicTimer.cs's TryGetMilliseconds, which requires
+// the period to be Timeout.InfiniteTimeSpan or in [1ms, uint.MaxValue - 1].
+TEST(PeriodicTimerTests, Constructor_ZeroPeriod_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(PeriodicTimer timer(TimeSpan::FromMilliseconds(0)), System::ArgumentOutOfRangeException);
+}
+
+TEST(PeriodicTimerTests, Constructor_NegativePeriod_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(PeriodicTimer timer(TimeSpan::FromMilliseconds(-5)), System::ArgumentOutOfRangeException);
+}
+
+TEST(PeriodicTimerTests, Constructor_InfiniteTimeSpan_DoesNotThrow) {
+    EXPECT_NO_THROW(PeriodicTimer timer(TimeSpan(System::Threading::Timeout::InfiniteTimeSpan)));
+}
+
+// A PeriodicTimer constructed with Timeout.InfiniteTimeSpan never ticks on its own, but
+// Dispose() must still unblock a pending WaitForNextTick() call -- verified against
+// PeriodicTimer.cs's Dispose(), which calls State.Signal(stopping: true) unconditionally.
+TEST(PeriodicTimerTests, InfinitePeriod_WaitForNextTick_UnblocksOnDispose) {
+    PeriodicTimer timer(TimeSpan(System::Threading::Timeout::InfiniteTimeSpan));
+    std::atomic<bool> result{true};
+    std::atomic<bool> finished{false};
+    std::thread waiter([&] {
+        result = timer.WaitForNextTick();
+        finished = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(finished.load());
+    timer.Dispose();
+    waiter.join();
+    EXPECT_TRUE(finished.load());
+    EXPECT_FALSE(result.load());
 }
 
 // ===========================================================================
@@ -439,9 +477,16 @@ TEST(ExperimentalPropertyTests, ReadOnly_GetReturnsValue) {
     EXPECT_EQ(p.get(), 7);
 }
 
-TEST(ExperimentalPropertyTests, ReadOnly_Set_ThrowsLogicError) {
+// Regression test for a wave-3 audit finding: set() threw std::logic_error (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::NotSupportedException -- this Property never has a real .NET counterpart to
+// verify against (it's a SharpRuntime-internal experimental helper), but the project's
+// overall policy is that every thrown exception is a System:: type, and NotSupportedException
+// is the closest .NET-idiomatic match for "this operation is permanently unsupported on a
+// read-only property" (as opposed to NotImplementedException's "not yet implemented").
+TEST(ExperimentalPropertyTests, ReadOnly_Set_ThrowsNotSupportedException) {
     Property<int> p([](){ return 0; });
-    EXPECT_THROW(p.set(1), std::logic_error);
+    EXPECT_THROW(p.set(1), System::NotSupportedException);
 }
 
 TEST(ExperimentalPropertyTests, ImplicitConversion_WorksAsGetter) {

@@ -96,6 +96,24 @@ TEST(ChannelTests, WaitToReadAsync_ReturnsFalse_WhenClosedEmpty) {
     EXPECT_FALSE(channel.Reader->WaitToReadAsync().getResultProperty());
 }
 
+// Regression test for a wave-3 audit finding: WaitToReadAsync() never inspected closeError, so
+// completing the channel with an exception and an empty queue made it return false (as if
+// gracefully closed) instead of faulting -- the real error was only observable via the
+// separate getCompletionProperty() task, not the primary read path. Verified against
+// UnboundedChannel.cs's WaitToReadAsync, which returns Task.FromException when the channel
+// completed with a non-null error.
+TEST(ChannelTests, WaitToReadAsync_ThrowsCompletionError_WhenClosedWithException) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->TryComplete(std::make_exception_ptr(std::runtime_error("boom")));
+    EXPECT_THROW(channel.Reader->WaitToReadAsync().getResultProperty(), std::runtime_error);
+}
+
+TEST(ChannelTests, WaitToWriteAsync_ThrowsCompletionError_WhenClosedWithException) {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->TryComplete(std::make_exception_ptr(std::runtime_error("boom")));
+    EXPECT_THROW(channel.Writer->WaitToWriteAsync().getResultProperty(), std::runtime_error);
+}
+
 TEST(ChannelTests, ReadAsync_ThrowsChannelClosedException_WhenClosedEmpty) {
     auto channel = Channel<int>::CreateUnbounded();
     channel.Writer->TryComplete();
@@ -127,6 +145,42 @@ TEST(ChannelTests, WriteAsync_BlocksUntilSpaceAvailable) {
     int second = 0;
     EXPECT_TRUE(channel.Reader->TryRead(second));
     EXPECT_EQ(second, 2);
+}
+
+// Regression test for a wave-3 audit finding: the default ChannelReader<T>::ReadAsync()/
+// ChannelWriter<T>::WriteAsync() captured a raw `this` pointer into a lambda that runs on a
+// background thread (Task's std::async(std::launch::async, ...)) outlasting the synchronous
+// call. If the caller drops every other shared_ptr reference to the Channel/Reader/Writer
+// right after issuing the call -- a realistic "fire and forget" pattern -- the background
+// thread could still be executing against an already-destroyed object: a genuine
+// heap-use-after-free, confirmed via a standalone AddressSanitizer repro against the pre-fix
+// code (reliably crashed on the very first iteration). Fixed by having ChannelReader<T>/
+// ChannelWriter<T> inherit std::enable_shared_from_this and capture shared_from_this()
+// instead of `this`.
+TEST(ChannelTests, WriteAsync_ChannelDroppedImmediately_StillCompletesSafely) {
+    System::Threading::Tasks::Task task;
+    {
+        auto channel = Channel<int>::CreateBounded(1);
+        task = channel.Writer->WriteAsync(42);
+        // `channel` (and its shared_ptr Reader/Writer) is destroyed here. `task` is the only
+        // thing keeping the write's background work referenced; before the fix, that
+        // background work referenced the (now being destroyed) ChannelWriterImpl directly.
+    }
+    task.Wait();
+    EXPECT_TRUE(task.getIsCompletedProperty());
+    EXPECT_FALSE(task.getIsFaultedProperty());
+}
+
+static System::Threading::Tasks::TaskT<int> IssueReadAsyncThenDropChannel() {
+    auto channel = Channel<int>::CreateUnbounded();
+    channel.Writer->TryWrite(99);
+    return channel.Reader->ReadAsync();
+    // `channel` (and its shared_ptr Reader/Writer) is destroyed here, on function return.
+}
+
+TEST(ChannelTests, ReadAsync_ChannelDroppedImmediately_StillCompletesSafely) {
+    auto task = IssueReadAsyncThenDropChannel();
+    EXPECT_EQ(task.getResultProperty(), 99);
 }
 
 TEST(ChannelTests, ZeroCapacityChannel_TryWrite_SucceedsOnceThenBlocksLikeCapacityOne) {

@@ -391,6 +391,27 @@ TEST(XmlNodeTests, AppendChild_CrossDocument_ThrowsArgumentException) {
     EXPECT_THROW(root1->AppendChild(other), System::ArgumentException);
 }
 
+// Regression test for a wave-3 audit finding: Normalize() only merged adjacent text nodes
+// among direct children, never recursing into child elements -- verified against
+// XmlNode.cs's Normalize(), which explicitly recurses (`case XmlNodeType.Element:
+// crtChild.Normalize(); goto default;`) into the full depth of the sub-tree.
+TEST(XmlNodeTests, Normalize_MergesAdjacentTextInDescendantElements) {
+    XmlDocument doc;
+    doc.LoadXml("<root><child>a</child></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    // Simulate two adjacent text nodes under the descendant element (as real .NET code
+    // building a DOM by hand, e.g. repeated AppendChild(CreateTextNode(...)), would produce).
+    child->AppendChild(doc.CreateTextNode("b"));
+
+    root->Normalize();
+
+    auto* mergedText = child->getFirstChildProperty();
+    ASSERT_NE(mergedText, nullptr);
+    EXPECT_EQ(mergedText->getValueProperty(), "ab");
+    EXPECT_EQ(mergedText->getNextSiblingProperty(), nullptr);
+}
+
 // ===========================================================================
 // Comment / Text / CDATA
 // ===========================================================================
@@ -489,6 +510,50 @@ TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_SplitsTargetAndD
     auto* pi = doc.CreateProcessingInstruction("xml-stylesheet", "type=\"text/xsl\" href=\"style.xsl\"");
     EXPECT_EQ(pi->getTargetProperty(), "xml-stylesheet");
     EXPECT_EQ(pi->getDataProperty(), "type=\"text/xsl\" href=\"style.xsl\"");
+}
+
+// Regression test for a wave-3 audit finding: CreateProcessingInstruction never checked
+// that target was non-empty. Matches XmlProcessingInstruction.cs's constructor
+// (ArgumentException.ThrowIfNullOrEmpty(target)).
+TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_EmptyTarget_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateProcessingInstruction("", "data"), System::ArgumentException);
+}
+
+// Regression tests for a wave-3 audit finding: CreateElement/CreateAttribute never validated
+// that the given name is a well-formed XML name -- silently accepting e.g. "1bad" or "" and
+// producing unparseable markup on write-out. Matches XmlDocument.cs's CheckName (called via
+// CreateElement/CreateAttribute's XmlElement/XmlAttribute constructors), which throws
+// XmlException for a malformed name.
+TEST(XmlDocumentTests, CreateElement_InvalidName_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateElement("1bad"), System::Exception);
+    EXPECT_THROW(doc.CreateElement(""), System::Exception);
+    EXPECT_THROW(doc.CreateElement("bad name"), System::Exception);
+}
+
+TEST(XmlDocumentTests, CreateElement_ValidQualifiedName_DoesNotThrow) {
+    XmlDocument doc;
+    EXPECT_NO_THROW(doc.CreateElement("ns:tag"));
+}
+
+TEST(XmlAttributeTests, CreateAttribute_InvalidName_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateAttribute("1bad"), System::Exception);
+    EXPECT_THROW(doc.CreateAttribute(""), System::Exception);
+}
+
+// Regression test for a wave-3 audit finding: CreateEntityReference never rejected a name
+// starting with '#', which would collide with a character reference. Matches
+// XmlEntityReference.cs's constructor.
+TEST(XmlEntityReferenceTests, CreateEntityReference_NameStartsWithHash_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateEntityReference("#65"), System::ArgumentException);
+}
+
+TEST(XmlEntityReferenceTests, CreateEntityReference_ValidName_DoesNotThrow) {
+    XmlDocument doc;
+    EXPECT_NO_THROW(doc.CreateEntityReference("amp"));
 }
 
 TEST(XmlDocumentTypeTests, CreateDocumentType_StoresNameAndIds) {

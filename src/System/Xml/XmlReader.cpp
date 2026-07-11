@@ -4,6 +4,7 @@
 #include "System/Xml/XmlReader.hpp"
 #include <tinyxml2/tinyxml2.h>
 #include "System/Xml/XmlException.hpp"
+#include <cctype>
 #include <stack>
 
 namespace System::Xml {
@@ -36,12 +37,31 @@ struct XmlReaderState {
 // DOM → flat event list
 // ---------------------------------------------------------------------------
 
+// tinyxml2 has no distinct "processing instruction" node kind: both the real
+// `<?xml ...?>` declaration and every other `<?target data?>` PI parse as XMLDeclaration,
+// with Value() holding the raw "target data" text. Split the leading whitespace-delimited
+// target token from the rest so the two can be told apart (target == "xml", the only
+// reserved PI target per the XML spec, means a real declaration).
+static void splitTargetAndData(const std::string& raw, std::string& target, std::string& data) {
+    size_t i = 0;
+    while (i < raw.size() && !std::isspace(static_cast<unsigned char>(raw[i]))) ++i;
+    target = raw.substr(0, i);
+    while (i < raw.size() && std::isspace(static_cast<unsigned char>(raw[i]))) ++i;
+    data = raw.substr(i);
+}
+
 static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
     if (auto* decl = node->ToDeclaration()) {
+        std::string target, data;
+        splitTargetAndData(decl->Value() ? decl->Value() : "", target, data);
         XmlEvent e;
-        e.type  = XmlNodeType::XmlDeclaration;
-        e.name  = "xml";
-        e.value = decl->Value() ? decl->Value() : "";
+        bool isRealDeclaration = target.size() == 3 &&
+            (target[0] == 'x' || target[0] == 'X') &&
+            (target[1] == 'm' || target[1] == 'M') &&
+            (target[2] == 'l' || target[2] == 'L');
+        e.type  = isRealDeclaration ? XmlNodeType::XmlDeclaration : XmlNodeType::ProcessingInstruction;
+        e.name  = target;
+        e.value = data;
         out.push_back(std::move(e));
         return;
     }
@@ -49,7 +69,7 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         XmlEvent e;
         e.type          = XmlNodeType::Element;
         e.name          = el->Name() ? el->Name() : "";
-        e.isEmptyElement = !el->FirstChild();
+        e.isEmptyElement = el->ClosingType() == tinyxml2::XMLElement::CLOSED;
         for (const tinyxml2::XMLAttribute* a = el->FirstAttribute(); a; a = a->Next())
             e.attributes.emplace_back(a->Name() ? a->Name() : "",
                                       a->Value() ? a->Value() : "");
@@ -68,7 +88,7 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
     }
     if (auto* txt = node->ToText()) {
         XmlEvent e;
-        e.type  = XmlNodeType::Text;
+        e.type  = txt->CData() ? XmlNodeType::CDATA : XmlNodeType::Text;
         e.value = txt->Value() ? txt->Value() : "";
         out.push_back(std::move(e));
         return;
@@ -77,6 +97,27 @@ static void buildEvents(tinyxml2::XMLNode* node, std::vector<XmlEvent>& out) {
         XmlEvent e;
         e.type  = XmlNodeType::Comment;
         e.value = cmt->Value() ? cmt->Value() : "";
+        out.push_back(std::move(e));
+        return;
+    }
+    if (auto* unk = node->ToUnknown()) {
+        // tinyxml2 parses every other `<!...>` form (DOCTYPE, and anything else it
+        // doesn't specifically recognize) as XMLUnknown, with Value() holding the raw
+        // text between "<!" and the next ">". DOCTYPE's Name is the root element name
+        // per the DOM spec; anything else is reported best-effort with the raw text as
+        // Name rather than silently dropped.
+        std::string raw = unk->Value() ? unk->Value() : "";
+        XmlEvent e;
+        e.type = XmlNodeType::DocumentType;
+        if (raw.rfind("DOCTYPE", 0) == 0) {
+            std::string keyword, rest;
+            splitTargetAndData(raw, keyword, rest);
+            std::string name;
+            splitTargetAndData(rest, name, rest);
+            e.name = name;
+        } else {
+            e.name = raw;
+        }
         out.push_back(std::move(e));
         return;
     }

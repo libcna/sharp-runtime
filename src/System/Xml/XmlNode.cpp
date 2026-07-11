@@ -47,6 +47,36 @@ namespace System::Xml {
             if (childDoc && childDoc != thisDoc && static_cast<const void*>(childDoc) != static_cast<const void*>(thisNode))
                 throw System::ArgumentException("The node to be inserted is from a different document context.");
         }
+
+        // Verified against XmlNode.cs's Normalize(): real .NET recurses into the full depth of
+        // the sub-tree (`case XmlNodeType.Element: crtChild.Normalize(); goto default;`), not
+        // just direct children -- this port previously only merged adjacent text nodes among
+        // `this`'s immediate children, silently leaving un-merged runs inside any descendant
+        // element untouched.
+        void NormalizeNative(tinyxml2::XMLNode* native, XmlDocument* doc) {
+            tinyxml2::XMLNode* child = native->FirstChild();
+            while (child) {
+                tinyxml2::XMLNode* next = child->NextSibling();
+                if (child->ToElement()) {
+                    NormalizeNative(child, doc);
+                    child = next;
+                    continue;
+                }
+                auto* text = child->ToText();
+                if (text && !text->CData() && next) {
+                    auto* nextText = next->ToText();
+                    if (nextText && !nextText->CData()) {
+                        std::string merged = (text->Value() ? text->Value() : std::string());
+                        merged += (nextText->Value() ? nextText->Value() : std::string());
+                        text->SetValue(merged.c_str());
+                        if (doc) doc->PurgeCache(next);
+                        native->DeleteChild(next); // genuinely discarded (merged away), not detached for reuse
+                        continue; // re-check this node against its new next sibling
+                    }
+                }
+                child = next;
+            }
+        }
     }
 
     XmlNode::~XmlNode() = default;
@@ -284,23 +314,7 @@ namespace System::Xml {
 
     void XmlNode::Normalize() {
         if (!native_) return;
-        tinyxml2::XMLNode* child = native_->FirstChild();
-        while (child) {
-            tinyxml2::XMLNode* next = child->NextSibling();
-            auto* text = child->ToText();
-            if (text && !text->CData() && next) {
-                auto* nextText = next->ToText();
-                if (nextText && !nextText->CData()) {
-                    std::string merged = (text->Value() ? text->Value() : std::string());
-                    merged += (nextText->Value() ? nextText->Value() : std::string());
-                    text->SetValue(merged.c_str());
-                    if (XmlDocument* doc = GetDocument()) doc->PurgeCache(next);
-                    native_->DeleteChild(next); // genuinely discarded (merged away), not detached for reuse
-                    continue; // re-check this node against its new next sibling
-                }
-            }
-            child = next;
-        }
+        NormalizeNative(native_, GetDocument());
     }
 
     XmlElement* XmlNode::Item(const std::string& name) const {

@@ -13,6 +13,7 @@
 using System::Text::Json::JsonValueKind;
 using System::Text::Json::Nodes::JsonArray;
 using System::Text::Json::Nodes::JsonNode;
+using System::Text::Json::Nodes::JsonNodeOptions;
 using System::Text::Json::Nodes::JsonObject;
 using System::Text::Json::Nodes::JsonValue;
 
@@ -305,6 +306,44 @@ TEST(JsonObjectTests, PreservesInsertionOrder) {
     obj.Add("a", JsonValue::Create(static_cast<SharpRuntime::intcs>(2)));
     obj.Add("m", JsonValue::Create(static_cast<SharpRuntime::intcs>(3)));
     EXPECT_EQ(obj.ToJsonString(), R"({"z":1,"a":2,"m":3})");
+}
+
+// Regression tests for a wave-3 audit finding: JsonNodeOptions::PropertyNameCaseInsensitive
+// was stored but never consulted by any lookup -- findIndex() always compared case-
+// sensitively regardless of the option. Verified against JsonObject.IDictionary.cs's
+// CreateDictionary(): real .NET's backing dictionary comparer (StringComparer.
+// OrdinalIgnoreCase when the option is set) affects every operation -- lookup, ContainsKey,
+// Add()'s duplicate-key check, Remove(), the indexer -- not just reads.
+TEST(JsonObjectTests, CaseInsensitiveOption_ContainsKey_IgnoresCase) {
+    JsonNodeOptions opts;
+    opts.PropertyNameCaseInsensitive = true;
+    JsonObject obj(opts);
+    obj.Add("Name", JsonValue::Create(std::string("Alice")));
+    EXPECT_TRUE(obj.ContainsKey("name"));
+    EXPECT_TRUE(obj.ContainsKey("NAME"));
+}
+
+TEST(JsonObjectTests, CaseInsensitiveOption_Indexer_IgnoresCase) {
+    JsonNodeOptions opts;
+    opts.PropertyNameCaseInsensitive = true;
+    JsonObject obj(opts);
+    obj.Add("Name", JsonValue::Create(std::string("Alice")));
+    EXPECT_NE(obj["name"], nullptr);
+}
+
+TEST(JsonObjectTests, CaseInsensitiveOption_Add_DuplicateDifferentCase_Throws) {
+    JsonNodeOptions opts;
+    opts.PropertyNameCaseInsensitive = true;
+    JsonObject obj(opts);
+    obj.Add("Name", JsonValue::Create(std::string("Alice")));
+    EXPECT_THROW(obj.Add("name", JsonValue::Create(std::string("Bob"))), System::ArgumentException);
+}
+
+TEST(JsonObjectTests, DefaultOptions_LookupRemainsCaseSensitive) {
+    JsonObject obj;
+    obj.Add("Name", JsonValue::Create(std::string("Alice")));
+    EXPECT_FALSE(obj.ContainsKey("name"));
+    EXPECT_EQ(obj["name"], nullptr);
 }
 
 TEST(JsonNodeTests, Parse_Object) {

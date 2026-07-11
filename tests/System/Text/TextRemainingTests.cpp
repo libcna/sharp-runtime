@@ -100,12 +100,16 @@ TEST(RuneTests, CharConstructor_Works) {
     EXPECT_EQ(r.getValueProperty(), 65u);
 }
 
+// Regression tests for a wave-3 audit finding: the Rune(uint32_t) constructor threw
+// std::out_of_range (an unrelated std:: exception type invisible to code catching
+// System::Exception&) instead of System::ArgumentOutOfRangeException, which is what real
+// .NET's Rune(int)/Rune(uint) constructors throw for an invalid Unicode scalar value.
 TEST(RuneTests, Constructor_SurrogateCodePoint_Throws) {
-    EXPECT_THROW(Rune{0xD800u}, std::out_of_range);
+    EXPECT_THROW(Rune{0xD800u}, System::ArgumentOutOfRangeException);
 }
 
 TEST(RuneTests, Constructor_BeyondMaxCodePoint_Throws) {
-    EXPECT_THROW(Rune{0x200000u}, std::out_of_range);
+    EXPECT_THROW(Rune{0x200000u}, System::ArgumentOutOfRangeException);
 }
 
 TEST(RuneTests, IsAscii_True_ForLatinLetter) {

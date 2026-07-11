@@ -295,13 +295,114 @@ TEST(ArrayListGapFill, Repeat_ZeroCount) {
 // ArrayList — ICollection constructor
 // -----------------------------------------------------------------------
 
+// Regression test for a wave-3 audit finding: ArrayList::GetEnumerator() unconditionally
+// returned nullptr, so this ICollection-copying constructor's `if (e) { ... }` guard always
+// skipped the copy loop entirely -- silently producing an empty ArrayList regardless of the
+// source's contents, instead of either a working enumerator or a clear failure. Now that
+// GetEnumerator() returns a real enumerator, the constructor actually copies elements.
 TEST(ArrayListGapFill, ICollectionCtor_CopiesElements) {
-    // Use a concrete ArrayList as the source ICollection
-    // (GetEnumerator returns nullptr currently, so count should be 0 — that is expected)
     ArrayList src;
     src.Add(std::any(7));
-    // ICollection ctor iterates via GetEnumerator; ArrayList::GetEnumerator returns nullptr
     ArrayList dst(static_cast<ICollection&>(src));
-    // Documented: GetEnumerator not implemented → nothing copied; count = 0
-    EXPECT_EQ(dst.getCountProperty(), 0);
+    EXPECT_EQ(dst.getCountProperty(), 1);
+}
+
+// -----------------------------------------------------------------------
+// ArrayList — GetEnumerator
+// -----------------------------------------------------------------------
+
+TEST(ArrayListGapFill, GetEnumerator_IteratesAllElementsInOrder) {
+    ArrayList al;
+    al.Add(std::any(10));
+    al.Add(std::any(20));
+    al.Add(std::any(30));
+
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    ASSERT_NE(e, nullptr);
+    std::vector<int> seen;
+    while (e->MoveNext())
+        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())));
+    EXPECT_EQ(seen, (std::vector<int>{10, 20, 30}));
+    EXPECT_FALSE(e->MoveNext());
+}
+
+TEST(ArrayListGapFill, GetEnumerator_EmptyList_MoveNextFalseImmediately) {
+    ArrayList al;
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    ASSERT_NE(e, nullptr);
+    EXPECT_FALSE(e->MoveNext());
+}
+
+TEST(ArrayListGapFill, GetEnumerator_GetCurrent_BeforeMoveNext_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    EXPECT_THROW(e->getCurrent(), System::InvalidOperationException);
+}
+
+TEST(ArrayListGapFill, GetEnumerator_GetCurrent_AfterExhaustion_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    e->MoveNext();
+    EXPECT_FALSE(e->MoveNext());
+    EXPECT_THROW(e->getCurrent(), System::InvalidOperationException);
+}
+
+TEST(ArrayListGapFill, GetEnumerator_Reset_AllowsReiteration) {
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    e->MoveNext();
+    e->MoveNext();
+    e->Reset();
+    ASSERT_TRUE(e->MoveNext());
+    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())), 1);
+}
+
+// Regression test: real .NET's ArrayList enumerator is fail-fast -- a structural
+// modification (Add/Insert/Remove/Clear/...) after the enumerator is created invalidates it,
+// throwing InvalidOperationException on the next MoveNext()/Reset()/getCurrent() call.
+TEST(ArrayListGapFill, GetEnumerator_ModifiedDuringEnumeration_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator());
+    e->MoveNext();
+    al.Add(std::any(3));
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+}
+
+TEST(ArrayListGapFill, GetEnumerator_TwoArgOverload_IteratesOnlyTheRequestedRange) {
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    al.Add(std::any(3));
+    al.Add(std::any(4));
+
+    std::unique_ptr<IEnumerator> e(al.GetEnumerator(1, 2));
+    ASSERT_NE(e, nullptr);
+    std::vector<int> seen;
+    while (e->MoveNext())
+        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())));
+    EXPECT_EQ(seen, (std::vector<int>{2, 3}));
+}
+
+TEST(ArrayListGapFill, GetEnumerator_TwoArgOverload_OutOfBoundsRange_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.GetEnumerator(0, 5), System::ArgumentException);
+    EXPECT_THROW(al.GetEnumerator(-1, 1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: RemoveAt() threw std::out_of_range (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's ArrayList.RemoveAt throws
+// for an out-of-range index.
+TEST(ArrayListGapFill, RemoveAt_OutOfRange_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.RemoveAt(5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(al.RemoveAt(-1), System::ArgumentOutOfRangeException);
 }

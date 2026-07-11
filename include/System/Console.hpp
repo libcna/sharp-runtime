@@ -348,6 +348,15 @@ namespace System {
 
         /**
          * @brief Returns the current cursor position as (Left, Top).
+         *
+         * @note Status: PARTIAL. Unlike real .NET (which queries the terminal's actual
+         *   cursor position via a DSR ANSI escape sequence on POSIX), this returns a local
+         *   cache that is only updated by SetCursorPosition()/setCursorLeftProperty()/
+         *   setCursorTopProperty()/Clear() calls made through this API. Writing text via
+         *   Write()/WriteLine() (including text that wraps or contains newlines) moves the
+         *   real terminal cursor without updating this cache, so the two can silently
+         *   diverge -- do not rely on this for anything that needs the true on-screen
+         *   position after writing output.
          * @return std::pair where first=Left, second=Top.
          */
         [[nodiscard]] static std::pair<intcs, intcs> GetCursorPosition() {
@@ -361,12 +370,20 @@ namespace System {
         // Cursor properties
         // -----------------------------------------------------------------------
 
-        /** @brief Gets the cursor's current column. */
+        /**
+         * @brief Gets the cursor's current column.
+         * @note Status: PARTIAL -- see GetCursorPosition()'s doc-comment; this is the same
+         *   locally-cached value, not a live terminal query.
+         */
         [[nodiscard]] static intcs getCursorLeftProperty() { return cursorLeft_; }
         /** @brief Sets the cursor's column position. */
         static void setCursorLeftProperty(intcs v) { SetCursorPosition(v, cursorTop_); }
 
-        /** @brief Gets the cursor's current row. */
+        /**
+         * @brief Gets the cursor's current row.
+         * @note Status: PARTIAL -- see GetCursorPosition()'s doc-comment; this is the same
+         *   locally-cached value, not a live terminal query.
+         */
         [[nodiscard]] static intcs getCursorTopProperty() { return cursorTop_; }
         /** @brief Sets the cursor's row position. */
         static void setCursorTopProperty(intcs v) { SetCursorPosition(cursorLeft_, v); }
@@ -399,15 +416,19 @@ namespace System {
 
         /**
          * @brief Gets the width of the console window in columns.
-         * @return 80 (stub; ioctl query requires platform-specific headers).
+         * @return The real terminal width when standard output is a TTY (queried via
+         *         ioctl(TIOCGWINSZ) on POSIX, GetConsoleScreenBufferInfo on Windows);
+         *         80 as a fallback when output is redirected or the query fails.
          */
-        [[nodiscard]] static intcs getWindowWidthProperty() { return 80; }
+        [[nodiscard]] static intcs getWindowWidthProperty();
 
         /**
          * @brief Gets the height of the console window in rows.
-         * @return 24 (stub; ioctl query requires platform-specific headers).
+         * @return The real terminal height when standard output is a TTY (queried via
+         *         ioctl(TIOCGWINSZ) on POSIX, GetConsoleScreenBufferInfo on Windows);
+         *         24 as a fallback when output is redirected or the query fails.
          */
-        [[nodiscard]] static intcs getWindowHeightProperty() { return 24; }
+        [[nodiscard]] static intcs getWindowHeightProperty();
 
         /** @brief Gets the leftmost column of the console window area (always 0). */
         [[nodiscard]] static intcs getWindowLeftProperty() { return 0; }

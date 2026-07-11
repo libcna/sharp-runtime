@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Dns.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
+#include <array>
 #include <cstring>
 #include <optional>
 
@@ -53,9 +54,32 @@ namespace System::Net {
             return IPAddress((a << 24) | (b << 16) | (c << 8) | d);
         }
 
+        // Short-circuits a numeric IPv6 literal (e.g. "::1") without a getaddrinfo() round
+        // trip, mirroring the IPv4 literal shortcut above. Reuses IPAddress::TryParse's
+        // existing, already-tested IPv6 parser rather than hand-rolling a second one here.
+        std::optional<IPAddress> tryParseIPv6Literal(const std::string& s) {
+            IPAddress addr;
+            if (!IPAddress::TryParse(s, addr) || !addr.getIsIPv6Property()) return std::nullopt;
+            return addr;
+        }
+
         IPAddress fromSockaddrIn(const sockaddr_in& sin) {
             uint32_t hostOrder = ntohl(sin.sin_addr.s_addr);
             return IPAddress(hostOrder);
+        }
+
+        IPAddress fromSockaddrIn6(const sockaddr_in6& sin6) {
+            std::array<bytecs, 16> bytes{};
+            std::memcpy(bytes.data(), sin6.sin6_addr.s6_addr, bytes.size());
+            return IPAddress(bytes, static_cast<longcs>(sin6.sin6_scope_id));
+        }
+
+        // Maps a requested AddressFamily to the getaddrinfo() hint that resolves it: IPv4-only,
+        // IPv6-only, or (for Unspecified) both families via AF_UNSPEC.
+        int addressFamilyToAiFamily(AddressFamily family) {
+            if (family == AddressFamily::InterNetwork) return AF_INET;
+            if (family == AddressFamily::InterNetworkV6) return AF_INET6;
+            return AF_UNSPEC;
         }
     }
 #endif
@@ -83,17 +107,20 @@ namespace System::Net {
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostAddresses is not supported on Emscripten.");
 #else
-        if (family == AddressFamily::InterNetworkV6) {
-            return {};
+        if (family != AddressFamily::InterNetworkV6) {
+            if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
+                return { *parsed };
+            }
         }
-
-        if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
-            return { *parsed };
+        if (family != AddressFamily::InterNetwork) {
+            if (auto parsed = tryParseIPv6Literal(hostNameOrAddress)) {
+                return { *parsed };
+            }
         }
 
         wsaInit();
         struct addrinfo hints {};
-        hints.ai_family = AF_INET;
+        hints.ai_family = addressFamilyToAiFamily(family);
         hints.ai_socktype = 0;
         struct addrinfo* res = nullptr;
         int rc = ::getaddrinfo(hostNameOrAddress.c_str(), nullptr, &hints, &res);
@@ -105,6 +132,8 @@ namespace System::Net {
         for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
             if (p->ai_family == AF_INET) {
                 result.push_back(fromSockaddrIn(*reinterpret_cast<sockaddr_in*>(p->ai_addr)));
+            } else if (p->ai_family == AF_INET6) {
+                result.push_back(fromSockaddrIn6(*reinterpret_cast<sockaddr_in6*>(p->ai_addr)));
             }
         }
         ::freeaddrinfo(res);
@@ -122,19 +151,20 @@ namespace System::Net {
         (void)family;
         throw System::PlatformNotSupportedException("Dns.GetHostEntry is not supported on Emscripten.");
 #else
-        if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
-            return GetHostEntry(*parsed);
+        if (family != AddressFamily::InterNetworkV6) {
+            if (auto parsed = tryParseIPv4(hostNameOrAddress)) {
+                return GetHostEntry(*parsed);
+            }
         }
-
-        if (family == AddressFamily::InterNetworkV6) {
-            IPHostEntry empty;
-            empty.setHostNameProperty(hostNameOrAddress);
-            return empty;
+        if (family != AddressFamily::InterNetwork) {
+            if (auto parsed = tryParseIPv6Literal(hostNameOrAddress)) {
+                return GetHostEntry(*parsed);
+            }
         }
 
         wsaInit();
         struct addrinfo hints {};
-        hints.ai_family = AF_INET;
+        hints.ai_family = addressFamilyToAiFamily(family);
         hints.ai_socktype = 0;
         hints.ai_flags = AI_CANONNAME;
         struct addrinfo* res = nullptr;
@@ -154,6 +184,8 @@ namespace System::Net {
         for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
             if (p->ai_family == AF_INET) {
                 addresses.push_back(fromSockaddrIn(*reinterpret_cast<sockaddr_in*>(p->ai_addr)));
+            } else if (p->ai_family == AF_INET6) {
+                addresses.push_back(fromSockaddrIn6(*reinterpret_cast<sockaddr_in6*>(p->ai_addr)));
             }
         }
         ::freeaddrinfo(res);
@@ -168,18 +200,31 @@ namespace System::Net {
         throw System::PlatformNotSupportedException("Dns.GetHostEntry is not supported on Emscripten.");
 #else
         wsaInit();
-        sockaddr_in sin{};
-        sin.sin_family = AF_INET;
-        sin.sin_port = 0;
-        sin.sin_addr.s_addr = htonl(address.getAddressProperty());
-
         char hostBuf[NI_MAXHOST] = {};
-        int rc = ::getnameinfo(reinterpret_cast<sockaddr*>(&sin), sizeof(sin), hostBuf, sizeof(hostBuf), nullptr, 0, 0);
+        int rc;
+
+        if (address.getIsIPv6Property()) {
+            sockaddr_in6 sin6{};
+            sin6.sin6_family = AF_INET6;
+            sin6.sin6_port = 0;
+            sin6.sin6_scope_id = static_cast<uint32_t>(address.getScopeIdProperty());
+            std::vector<bytecs> bytes = address.GetAddressBytes();
+            std::memcpy(sin6.sin6_addr.s6_addr, bytes.data(), bytes.size());
+            rc = ::getnameinfo(reinterpret_cast<sockaddr*>(&sin6), sizeof(sin6), hostBuf, sizeof(hostBuf), nullptr, 0, 0);
+        } else {
+            sockaddr_in sin{};
+            sin.sin_family = AF_INET;
+            sin.sin_port = 0;
+            sin.sin_addr.s_addr = htonl(address.getAddressProperty());
+            rc = ::getnameinfo(reinterpret_cast<sockaddr*>(&sin), sizeof(sin), hostBuf, sizeof(hostBuf), nullptr, 0, 0);
+        }
         if (rc != 0) {
             throw SocketException(static_cast<intcs>(SocketError::HostNotFound));
         }
 
-        return GetHostEntry(std::string(hostBuf), AddressFamily::InterNetwork);
+        AddressFamily resolvedFamily = address.getIsIPv6Property()
+            ? AddressFamily::InterNetworkV6 : AddressFamily::InterNetwork;
+        return GetHostEntry(std::string(hostBuf), resolvedFamily);
 #endif
     }
 

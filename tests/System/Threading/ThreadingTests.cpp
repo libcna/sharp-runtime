@@ -6,10 +6,13 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/Threading/Thread.hpp"
 #include "System/Threading/Interlocked.hpp"
+#include "System/Threading/LockRecursionException.hpp"
 #include "System/Threading/Monitor.hpp"
 #include "System/Threading/SynchronizationLockException.hpp"
 #include "System/Threading/Mutex.hpp"
@@ -399,6 +402,24 @@ TEST(ThreadingTests, Semaphore_WaitOne_TimeoutLessThanNegativeOne_Throws) {
     EXPECT_THROW(s.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests for a wave-3 audit finding: the constructor threw
+// ArgumentOutOfRangeException when initialCount > maximumCount (both individually valid).
+// Verified against Semaphore.cs's ValidateArguments: real .NET throws a plain ArgumentException
+// (Argument_SemaphoreInitialMaximum) for exactly this case; ArgumentOutOfRangeException is only
+// for each count being individually out of range (negative initialCount, non-positive
+// maximumCount).
+TEST(ThreadingTests, Semaphore_Ctor_InitialGreaterThanMaximum_ThrowsArgumentException) {
+    EXPECT_THROW(Semaphore(5, 2), System::ArgumentException);
+}
+
+TEST(ThreadingTests, Semaphore_Ctor_NegativeInitialCount_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Semaphore(-1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, Semaphore_Ctor_NonPositiveMaximumCount_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Semaphore(0, 0), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // SemaphoreSlim
 // ---------------------------------------------------------------------------
@@ -429,6 +450,35 @@ TEST(ThreadingTests, SemaphoreSlim_Release_Multiple_IncreasesCount) {
 
 TEST(ThreadingTests, SemaphoreSlim_Wait_TimeoutLessThanNegativeOne_Throws) {
     SemaphoreSlim ss(1, 2);
+    EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
+}
+
+// Regression tests for a wave-3 audit finding: SemaphoreSlim had no disposed_ flag at all --
+// Dispose() was a true no-op and Wait/Release never checked disposal state, an inconsistency
+// with sibling primitives (Barrier, CountdownEvent, ManualResetEventSlim, ReaderWriterLockSlim)
+// that all already guard against post-Dispose() use. Verified against SemaphoreSlim.cs's
+// CheckDispose(): Wait(int) validates its timeout argument *before* checking disposal, while
+// Release(int) checks disposal *before* validating releaseCount -- each in its own .NET
+// source's order, not a uniform rule across both methods.
+TEST(ThreadingTests, SemaphoreSlim_AfterDispose_Wait_ThrowsObjectDisposedException) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    EXPECT_THROW(ss.Wait(), System::ObjectDisposedException);
+    EXPECT_THROW(ss.Wait(10), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_AfterDispose_Release_ThrowsObjectDisposedException) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    EXPECT_THROW(ss.Release(), System::ObjectDisposedException);
+    EXPECT_THROW(ss.Release(1), System::ObjectDisposedException);
+}
+
+TEST(ThreadingTests, SemaphoreSlim_Wait_InvalidTimeoutCheckedBeforeDisposal) {
+    SemaphoreSlim ss(1, 2);
+    ss.Dispose();
+    // Matches SemaphoreSlim.cs's Wait(int): timeout validation happens before CheckDispose(),
+    // so an already-invalid timeout still throws ArgumentOutOfRangeException even when disposed.
     EXPECT_THROW(ss.Wait(-2), System::ArgumentOutOfRangeException);
 }
 
@@ -477,6 +527,15 @@ TEST(ThreadingTests, ManualResetEvent_WaitOne_TimeoutLessThanNegativeOne_Throws)
 TEST(ThreadingTests, AutoResetEvent_InitiallyNotSignaled_WaitTimesOut) {
     AutoResetEvent e(false);
     EXPECT_FALSE(e.WaitOne(0));
+}
+
+// Regression test for a wave-3 audit finding: WaitOne(intcs) was missing the
+// WaitHandle::ValidateTimeout(...) call present on every sibling wait-handle type in this
+// codebase (ManualResetEvent, EventWaitHandle, Mutex, Semaphore, etc.) -- a timeout below -1
+// silently reached cv_.wait_for with a negative duration instead of throwing.
+TEST(ThreadingTests, AutoResetEvent_WaitOne_TimeoutLessThanNegativeOne_Throws) {
+    AutoResetEvent e(false);
+    EXPECT_THROW(e.WaitOne(-2), System::ArgumentOutOfRangeException);
 }
 
 TEST(ThreadingTests, AutoResetEvent_InitiallySignaled_WaitSucceeds) {
@@ -591,6 +650,91 @@ TEST(ThreadingTests, SpinLock_TryEnter_WhenFree_ReturnsTrue) {
 
 TEST(ThreadingTests, SpinLock_Exit_DoesNotThrow) {
     SpinLock sl;
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_NO_THROW(sl.Exit());
+}
+
+// Regression tests for a wave-3 audit finding: SpinLock was a bare atomic_flag with no thread
+// ownership tracking at all -- getIsHeldProperty() always returned false (a hard-coded stub),
+// Exit() never validated ownership, and there was no re-entrancy or IsHeldByCurrentThread
+// support, unlike real SpinLock.cs. Verified against SpinLock.cs's default constructor (thread
+// ownership tracking enabled), Enter()'s LockRecursionException on same-thread re-entry, and
+// ExitSlowPath()'s SynchronizationLockException when the calling thread doesn't own the lock.
+
+TEST(ThreadingTests, SpinLock_IsHeld_ReflectsActualState) {
+    SpinLock sl;
+    EXPECT_FALSE(sl.getIsHeldProperty());
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_TRUE(sl.getIsHeldProperty());
+    sl.Exit();
+    EXPECT_FALSE(sl.getIsHeldProperty());
+}
+
+TEST(ThreadingTests, SpinLock_IsHeldByCurrentThread_TracksOwner) {
+    SpinLock sl;
+    bool taken = false;
+    sl.Enter(taken);
+    EXPECT_TRUE(sl.getIsHeldByCurrentThreadProperty());
+    sl.Exit();
+    EXPECT_FALSE(sl.getIsHeldByCurrentThreadProperty());
+}
+
+TEST(ThreadingTests, SpinLock_IsHeldByCurrentThread_ThrowsWhenTrackingDisabled) {
+    SpinLock sl(false);
+    EXPECT_THROW(sl.getIsHeldByCurrentThreadProperty(), System::InvalidOperationException);
+}
+
+TEST(ThreadingTests, SpinLock_Enter_SameThreadReentry_ThrowsLockRecursionException) {
+    SpinLock sl;
+    bool taken1 = false;
+    sl.Enter(taken1);
+    bool taken2 = false;
+    EXPECT_THROW(sl.Enter(taken2), System::Threading::LockRecursionException);
+    sl.Exit();
+}
+
+TEST(ThreadingTests, SpinLock_Enter_LockTakenAlreadyTrue_ThrowsArgumentException) {
+    SpinLock sl;
+    bool taken = true;
+    EXPECT_THROW(sl.Enter(taken), System::ArgumentException);
+}
+
+TEST(ThreadingTests, SpinLock_Exit_WithoutOwnership_ThrowsSynchronizationLockException) {
+    SpinLock sl;
+    std::thread other([&sl]() {
+        bool taken = false;
+        sl.Enter(taken);
+    });
+    other.join();
+    // sl is now held by the (finished) "other" thread; this thread never entered it.
+    EXPECT_THROW(sl.Exit(), System::Threading::SynchronizationLockException);
+}
+
+TEST(ThreadingTests, SpinLock_TryEnter_WhenHeldByAnotherThread_TimesOutAndReturnsFalse) {
+    SpinLock sl;
+    bool taken1 = false;
+    sl.Enter(taken1);
+    std::atomic<bool> ok{true};
+    std::thread other([&]() {
+        bool taken2 = false;
+        ok = sl.TryEnter(20, taken2);
+    });
+    other.join();
+    EXPECT_FALSE(ok.load());
+    sl.Exit();
+}
+
+TEST(ThreadingTests, SpinLock_TryEnter_NegativeTimeoutOtherThanInfinite_ThrowsArgumentOutOfRangeException) {
+    SpinLock sl;
+    bool taken = false;
+    EXPECT_THROW(sl.TryEnter(-2, taken), System::ArgumentOutOfRangeException);
+}
+
+TEST(ThreadingTests, SpinLock_ThreadOwnerTrackingDisabled_ExitNeverThrows) {
+    SpinLock sl(false);
+    EXPECT_FALSE(sl.getIsThreadOwnerTrackingEnabledProperty());
     bool taken = false;
     sl.Enter(taken);
     EXPECT_NO_THROW(sl.Exit());

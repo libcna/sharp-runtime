@@ -95,16 +95,20 @@ namespace System::Xml {
 
         // --- Node factories ------------------------------------------------------------
 
+        /** @throws XmlException / System::ArgumentException if @p name is not a well-formed XML name. */
         [[nodiscard]] XmlAttribute* CreateAttribute(const std::string& name);
+        /** @throws XmlException / System::ArgumentException if @p name is not a well-formed XML name. */
         [[nodiscard]] XmlElement* CreateElement(const std::string& name);
         [[nodiscard]] XmlText* CreateTextNode(const std::string& text);
         [[nodiscard]] XmlComment* CreateComment(const std::string& data);
         [[nodiscard]] XmlCDataSection* CreateCDataSection(const std::string& data);
+        /** @throws System::ArgumentException if @p target is empty. */
         [[nodiscard]] XmlProcessingInstruction* CreateProcessingInstruction(const std::string& target, const std::string& data);
         [[nodiscard]] XmlDeclaration* CreateXmlDeclaration(const std::string& version, const std::string& encoding, const std::string& standalone);
         [[nodiscard]] XmlDocumentFragment* CreateDocumentFragment();
         [[nodiscard]] XmlDocumentType* CreateDocumentType(const std::string& name, const std::string& publicId,
                                                           const std::string& systemId, const std::string& internalSubset);
+        /** @throws System::ArgumentException if @p name starts with '#'. */
         [[nodiscard]] XmlEntityReference* CreateEntityReference(const std::string& name);
         [[nodiscard]] XmlWhitespace* CreateWhitespace(const std::string& text);
         [[nodiscard]] XmlSignificantWhitespace* CreateSignificantWhitespace(const std::string& text);

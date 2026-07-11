@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Http/Headers/RetryConditionHeaderValue.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
 #include <array>
@@ -56,7 +57,7 @@ namespace System::Net::Http::Headers {
 
     RetryConditionHeaderValue::RetryConditionHeaderValue(const System::TimeSpan& delta) {
         if (delta.getTotalSecondsProperty() > static_cast<double>(std::numeric_limits<SharpRuntime::intcs>::max())) {
-            throw std::out_of_range("delta must not exceed INT32_MAX seconds.");
+            throw System::ArgumentOutOfRangeException("delta", "delta must not exceed INT32_MAX seconds.");
         }
         delta_ = delta;
     }

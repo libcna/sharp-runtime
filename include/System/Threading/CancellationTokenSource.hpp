@@ -5,6 +5,8 @@
 #include <atomic>
 #include <exception>
 #include <memory>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -58,7 +60,7 @@ namespace System::Threading {
          */
         void Cancel() {
             ThrowIfDisposed();
-            std::vector<std::function<void()>> callbacksToRun;
+            std::vector<std::pair<SharpRuntime::intcs, std::function<void()>>> callbacksToRun;
             {
                 // Checking-and-setting `cancelled` under the same lock used by Register() closes
                 // the TOCTOU window where a registration could otherwise be added after Cancel()
@@ -71,17 +73,32 @@ namespace System::Threading {
                 // so nested/child registrations fire before their parents'. state_->callbacks is a
                 // std::map keyed by a monotonically increasing registration id, so a reverse walk
                 // yields exactly that order.
-                for (auto it = state_->callbacks.rbegin(); it != state_->callbacks.rend(); ++it) callbacksToRun.push_back(it->second);
+                for (auto it = state_->callbacks.rbegin(); it != state_->callbacks.rend(); ++it)
+                    callbacksToRun.emplace_back(it->first, it->second);
                 state_->callbacks.clear();
             }
             std::vector<std::exception_ptr> exceptions;
-            for (auto& callback : callbacksToRun) {
+            for (auto& [id, callback] : callbacksToRun) {
                 if (!callback) continue;
+                // Record which callback is executing (and on which thread) so a concurrent
+                // CancellationTokenRegistration::Dispose() for this id can wait for it to finish
+                // rather than returning while it's still running -- verified against
+                // CancellationTokenSource.cs's ExecutingCallbackId/ThreadIDExecutingCallbacks.
+                {
+                    std::lock_guard<std::mutex> lock(state_->mutex);
+                    state_->executingId = id;
+                    state_->executingThreadId = std::this_thread::get_id();
+                }
                 try {
                     callback();
                 } catch (...) {
                     exceptions.push_back(std::current_exception());
                 }
+                {
+                    std::lock_guard<std::mutex> lock(state_->mutex);
+                    state_->executingId = -1;
+                }
+                state_->callbackFinished.notify_all();
             }
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
         }

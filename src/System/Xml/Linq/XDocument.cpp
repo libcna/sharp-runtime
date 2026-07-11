@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/Linq/XComment.hpp"
@@ -139,7 +140,22 @@ namespace System::Xml::Linq {
     }
 
     void XDocument::ValidateNode(const XNode& node) const {
+        // Verified against XDocument.cs's ValidateNode/ValidateString: two corrections from the
+        // previous version. (1) Exception type: real .NET throws ArgumentException for CDATA/
+        // nested-Document (a fundamentally wrong node *kind* for this container -- a caller
+        // bug), reserving InvalidOperationException for Element/DocumentType (a structurally
+        // valid kind that conflicts with this specific document's *current state*, e.g. already
+        // has a root). (2) Whitespace-only text: real .NET's Text case calls ValidateString,
+        // which only rejects a string containing any character *other than* space/tab/CR/LF --
+        // whitespace-only text (e.g. indentation between top-level nodes) is legal at document
+        // level and was previously rejected unconditionally by the old default: case.
         switch (node.getNodeTypeProperty()) {
+            case XmlNodeType::Text: {
+                const std::string& text = static_cast<const XText&>(node).getValueProperty();
+                if (text.find_first_not_of(" \t\r\n") != std::string::npos)
+                    throw System::ArgumentException("Cannot add non-white space text to content.");
+                break;
+            }
             case XmlNodeType::Element:
                 if (getRootProperty() != nullptr) {
                     throw System::InvalidOperationException("This document already has a root element.");
@@ -150,17 +166,27 @@ namespace System::Xml::Linq {
                     throw System::InvalidOperationException("This document already has a document type.");
                 }
                 break;
-            case XmlNodeType::Comment:
-            case XmlNodeType::ProcessingInstruction:
-                break;
+            case XmlNodeType::CDATA:
+                throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add CDATA to an XDocument).");
+            case XmlNodeType::Document:
+                throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add an XDocument as a child of an XDocument).");
             default:
-                throw System::InvalidOperationException("This operation would create an incorrectly structured document.");
+                // Comment/ProcessingInstruction (and anything else): unrestricted, matching
+                // real .NET's switch, which has no case (and no default throw) for them.
+                break;
         }
     }
 
     void XDocument::WriteTo(System::Xml::XmlWriter& writer) const {
-        if (declaration_) writer.WriteStartDocument();
+        // Verified against XDocument.cs's WriteTo(): real .NET always calls
+        // WriteStartDocument()/WriteEndDocument() as a matched pair, regardless of whether an
+        // explicit XDeclaration was set (the declaration's Standalone value, when present,
+        // only selects *which* WriteStartDocument overload -- it never skips the call). This
+        // port previously wrote a declaration only when declaration_ was non-null and never
+        // called WriteEndDocument() at all.
+        writer.WriteStartDocument();
         for (auto& c : children_) c->WriteTo(writer);
+        writer.WriteEndDocument();
     }
 
     void XDocument::Save(const std::string& filePath, SaveOptions options) const {

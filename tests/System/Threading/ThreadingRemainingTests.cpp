@@ -211,6 +211,34 @@ TEST(BarrierTests, PostPhaseAction_CalledAfterPhase) {
     EXPECT_EQ(phasesCalled, 1);
 }
 
+// Regression tests for a wave-3 audit finding: Dispose() was a true no-op with no disposed_
+// flag at all -- every method remained fully usable after disposal. Verified against
+// Barrier.cs: SignalAndWait/AddParticipants/RemoveParticipants all call
+// ObjectDisposedException.ThrowIf(_disposed, this) as their first check.
+TEST(BarrierTests, SignalAndWait_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_THROW(b.SignalAndWait(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, AddParticipant_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_THROW(b.AddParticipant(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, RemoveParticipant_AfterDispose_ThrowsObjectDisposedException) {
+    Barrier b(2);
+    b.Dispose();
+    EXPECT_THROW(b.RemoveParticipant(), System::ObjectDisposedException);
+}
+
+TEST(BarrierTests, Dispose_CalledTwice_DoesNotThrow) {
+    Barrier b(1);
+    b.Dispose();
+    EXPECT_NO_THROW(b.Dispose());
+}
+
 // ===========================================================================
 // CountdownEvent
 // ===========================================================================
@@ -269,6 +297,27 @@ TEST(CountdownEventTests, Reset_WithNewCount) {
     ce.Reset(10);
     EXPECT_EQ(ce.getInitialCountProperty(), 10);
     EXPECT_EQ(ce.getCurrentCountProperty(), 10);
+}
+
+// Regression test for a wave-3 audit finding: Reset(intcs count = -1) used -1 as a sentinel
+// meaning "use InitialCount", so an explicit Reset(-1) call silently reset to InitialCount
+// instead of throwing. Verified against CountdownEvent.cs's Reset(int): real .NET has no
+// negative-sentinel concept -- Reset(int count) rejects *any* negative count, including -1,
+// with ArgumentOutOfRangeException.
+TEST(CountdownEventTests, Reset_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    CountdownEvent ce(3);
+    EXPECT_THROW(ce.Reset(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(ce.Reset(-5), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a wave-3 audit finding: Reset() never called ThrowIfDisposed() at all,
+// so calling it after Dispose() silently succeeded instead of throwing. Verified against
+// CountdownEvent.cs's Reset(int): ObjectDisposedException.ThrowIf(_disposed, this).
+TEST(CountdownEventTests, Reset_AfterDispose_ThrowsObjectDisposedException) {
+    CountdownEvent ce(3);
+    ce.Dispose();
+    EXPECT_THROW(ce.Reset(), System::ObjectDisposedException);
+    EXPECT_THROW(ce.Reset(5), System::ObjectDisposedException);
 }
 TEST(CountdownEventTests, Wait_AlreadySet_ReturnsImmediately) {
     CountdownEvent ce(0);
@@ -428,6 +477,55 @@ TEST(LockTests, EnterScope_RAII_ReleasesOnDestruction) {
     }
     EXPECT_TRUE(lk.TryEnter());
     lk.Exit();
+}
+
+// Regression test for a wave-3 audit finding: TryEnter(TimeSpan) didn't special-case
+// Timeout::InfiniteTimeSpan the way the intcs overload above does -- it fell through to
+// try_lock_for with a negative duration, which behaves like a non-blocking try_lock() (returns
+// almost instantly) instead of blocking indefinitely. Verified against Lock.cs's doc comment.
+// This blocks a contending thread on an already-held lock and confirms TryEnter only succeeds
+// once the lock is actually released, rather than returning early.
+TEST(LockTests, TryEnter_InfiniteTimeSpan_BlocksUntilReleased) {
+    Lock lk;
+    lk.Enter();
+    std::atomic<bool> acquired{false};
+    std::atomic<bool> started{false};
+    // The acquiring thread must also be the one to Exit() -- Lock's ownership tracking (like
+    // the underlying std::recursive_timed_mutex) is thread-affine, matching real .NET's Lock.
+    std::thread t([&] {
+        started = true;
+        acquired = lk.TryEnter(System::TimeSpan(System::Threading::Timeout::InfiniteTimeSpan));
+        if (acquired.load()) lk.Exit();
+    });
+    while (!started.load()) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_FALSE(acquired.load()); // still blocked -- lock hasn't been released yet
+    lk.Exit();
+    t.join();
+    EXPECT_TRUE(acquired.load());
+}
+
+// Regression tests for a wave-3 audit finding: TryEnter(intcs)/TryEnter(TimeSpan) had no
+// timeout validation at all -- Lock.hpp didn't even include WaitHandle.hpp, unlike every
+// sibling wait primitive in this namespace. A negative timeout other than -1 (e.g. -5) fell
+// straight through to try_lock_for, which treats a negative duration as already-expired --
+// silently behaving like a non-blocking try_lock() instead of throwing
+// ArgumentOutOfRangeException as real .NET's Lock.cs does.
+TEST(LockTests, TryEnter_Intcs_InvalidNegativeTimeout_Throws) {
+    Lock lk;
+    EXPECT_THROW(lk.TryEnter(-2), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(lk.TryEnter(-5), System::ArgumentOutOfRangeException);
+}
+
+TEST(LockTests, TryEnter_Intcs_NegativeOne_StillMeansInfinite) {
+    Lock lk;
+    EXPECT_TRUE(lk.TryEnter(-1));
+    lk.Exit();
+}
+
+TEST(LockTests, TryEnter_TimeSpan_InvalidNegativeTimeout_Throws) {
+    Lock lk;
+    EXPECT_THROW(lk.TryEnter(System::TimeSpan::FromMilliseconds(-2)), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

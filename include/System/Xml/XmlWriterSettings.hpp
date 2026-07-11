@@ -35,9 +35,12 @@ namespace System::Xml {
         System::Xml::NewLineHandling NewLineHandling = System::Xml::NewLineHandling::Replace;
         /** @brief The character string to use for line breaks. Not currently consulted. */
         std::string NewLineChars = "\r\n";
-        /** @brief Whether to indent elements. Not currently consulted (tinyxml2's own default formatting is used). */
+        /** @brief Whether to indent elements. Consulted by @c XmlWriter::ToString()/Flush(): @c false
+         *  (the default) emits compact output with no inserted whitespace; @c true pretty-prints
+         *  via tinyxml2's own indentation (which does not consult @c IndentChars). */
         bool Indent = false;
-        /** @brief The character string to use when indenting. Not currently consulted. */
+        /** @brief The character string to use when indenting. Not currently consulted (tinyxml2's
+         *  own fixed-width indentation is used regardless of @c Indent). */
         std::string IndentChars = "  ";
         /** @brief Whether to write attributes on a new line. Not currently consulted. */
         bool NewLineOnAttributes = false;

@@ -17,7 +17,9 @@
 #include "System/Xml/XmlReader.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/Linq/XName.hpp"
+#include "System/Xml/Linq/XNamespace.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
+#include "System/Xml/Linq/XCData.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
 
@@ -27,8 +29,11 @@ using System::Xml::XmlException;
 using System::Xml::XmlNodeType;
 using System::Xml::XmlReader;
 using System::Xml::XmlWriter;
+using System::Xml::XmlWriterSettings;
 using System::Xml::Linq::XName;
+using System::Xml::Linq::XNamespace;
 using System::Xml::Linq::XAttribute;
+using System::Xml::Linq::XCData;
 using System::Xml::Linq::XElement;
 using System::Xml::Linq::XDeclaration;
 using System::Xml::Linq::XDocument;
@@ -222,6 +227,81 @@ TEST(XmlReaderTests, ReadElementContentAsString_ReturnsText) {
     EXPECT_EQ(text, "hello world");
 }
 
+// Regression test for a wave-3 audit finding: CDATA sections were reported as plain
+// XmlNodeType::Text (tinyxml2's XMLText::CData() flag was never consulted), so a reader
+// could not distinguish `<![CDATA[...]]>` from ordinary text -- matches XmlTextReaderImpl.cs,
+// which reports XmlNodeType.CDATA for CDATA sections.
+TEST(XmlReaderTests, CDataSection_ReportsCDataNodeType) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<msg><![CDATA[a<b]]></msg>"));
+    r->Read(); // <msg>
+    r->Read(); // CDATA
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::CDATA);
+    EXPECT_EQ(r->getValueProperty(), "a<b");
+}
+
+// Regression test: a real processing instruction (target != "xml") was previously
+// misreported as XmlNodeType::XmlDeclaration with a hardcoded name of "xml" -- tinyxml2
+// parses every `<?target data?>` form uniformly, so this port has to split target vs. data
+// itself. Matches XmlTextReaderImpl.cs, which only treats a target of exactly "xml" as the
+// document declaration.
+TEST(XmlReaderTests, ProcessingInstruction_ReportsPINodeTypeAndSplitsTargetData) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<?xml-stylesheet type=\"text/xsl\" href=\"style.xsl\"?><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::ProcessingInstruction);
+    EXPECT_EQ(r->getNameProperty(), "xml-stylesheet");
+    EXPECT_EQ(r->getValueProperty(), "type=\"text/xsl\" href=\"style.xsl\"");
+}
+
+// Regression test: a real `<?xml ...?>` declaration's Value used to include the "xml"
+// target token itself ("xml version=\"1.0\""); real .NET's XmlDeclaration.Value is
+// everything after the target, e.g. "version=\"1.0\"".
+TEST(XmlReaderTests, XmlDeclaration_ValueExcludesTargetToken) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<?xml version=\"1.0\"?><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNameProperty(), "xml");
+    EXPECT_EQ(r->getValueProperty(), "version=\"1.0\"");
+}
+
+// Regression test for a wave-3 audit finding: DOCTYPE declarations parse as tinyxml2's
+// XMLUnknown, which buildEvents() had no branch for at all -- the node silently vanished
+// from the event stream instead of surfacing as XmlNodeType::DocumentType.
+TEST(XmlReaderTests, DocumentType_ReportsDocumentTypeNodeType) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(
+        "<!DOCTYPE root><root/>"));
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::DocumentType);
+    EXPECT_EQ(r->getNameProperty(), "root");
+}
+
+// Regression test for a wave-3 audit finding: isEmptyElement was computed from
+// `!FirstChild()`, so an explicitly-closed empty element (`<a></a>`) was indistinguishable
+// from a self-closing one (`<a/>`) and silently lost its EndElement event. Real .NET's
+// IsEmptyElement is only true for the `<a/>` empty-tag syntax; `<a></a>` always produces a
+// separate EndElement node.
+TEST(XmlReaderTests, ExplicitlyClosedEmptyElement_IsNotEmptyElement_GetsEndElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<root><a></a></root>"));
+    r->Read(); // <root>
+    r->Read(); // <a>
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+    EXPECT_EQ(r->getNameProperty(), "a");
+    EXPECT_FALSE(r->getIsEmptyElementProperty());
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "a");
+}
+
+TEST(XmlReaderTests, SelfClosingEmptyElement_IsEmptyElement_NoSeparateEndElement) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<root><a/></root>"));
+    r->Read(); // <root>
+    r->Read(); // <a/>
+    EXPECT_TRUE(r->getIsEmptyElementProperty());
+    r->Read();
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::EndElement);
+    EXPECT_EQ(r->getNameProperty(), "root");
+}
+
 // ===========================================================================
 // XmlWriter — tinyxml2-backed implementation
 // ===========================================================================
@@ -304,6 +384,73 @@ TEST(XmlWriterTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(w->Close());
 }
 
+// Regression test for a wave-3 audit finding: ToString() always pretty-printed via
+// tinyxml2's XMLPrinter default (compact=false), ignoring XmlWriterSettings::Indent, whose
+// real .NET default is false (compact, no inserted whitespace). Matches
+// XmlWriterSettings.cs's documented default and XmlTextEncoder's un-indented output.
+TEST(XmlWriterTests, DefaultSettings_ProducesCompactOutput_NoIndentWhitespace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteStartElement("child");
+    w->WriteEndElement();
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<root><child/></root>");
+}
+
+// Regression tests for a wave-3 audit finding: WriteComment/WriteProcessingInstruction/
+// WriteCData wrote text completely raw with no protection against embedded terminator
+// sequences, silently producing malformed/corrupted XML. Verified against
+// XmlEncodedRawTextWriter.WriteCommentOrPi/WriteCDataSection: real .NET self-heals rather
+// than throwing (inserts a protective space, or splits the CDATA section), and the
+// original content round-trips unchanged.
+TEST(XmlWriterTests, WriteComment_EmbeddedDoubleDash_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteComment("a--b");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<!--a- -b-->");
+}
+
+TEST(XmlWriterTests, WriteComment_TrailingDash_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteComment("a-");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<!--a- -->");
+}
+
+TEST(XmlWriterTests, WriteProcessingInstruction_EmbeddedQuestionGreaterThan_InsertsProtectiveSpace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteProcessingInstruction("pi", "a?>b");
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<?pi a? >b?>");
+}
+
+TEST(XmlWriterTests, WriteCData_EmbeddedCloseSequence_SplitsSection_RoundTrips) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("msg");
+    w->WriteCData("a]]>b");
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_EQ(out.find("]]>b]]>"), std::string::npos) << out; // never a raw, premature "]]>"
+
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(out));
+    r->Read(); // <msg>
+    std::string content = r->ReadElementContentAsString();
+    EXPECT_EQ(content, "a]]>b");
+}
+
+TEST(XmlWriterTests, IndentSettingTrue_ProducesIndentedOutput) {
+    XmlWriterSettings settings;
+    settings.Indent = true;
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString(settings));
+    w->WriteStartElement("root");
+    w->WriteStartElement("child");
+    w->WriteEndElement();
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find('\n'), std::string::npos);
+}
+
 // ===========================================================================
 // Round-trip: write then read back
 // ===========================================================================
@@ -382,6 +529,29 @@ TEST(XNameTests, Get_WithNamespace) {
     EXPECT_EQ(n.getLocalNameProperty(), "root");
 }
 
+// Regression tests for a wave-3 audit finding: Get() split on the *first* '}' instead of
+// the last, and performed no validation of malformed expanded-name syntax. Verified against
+// XName.cs's Get(string): a namespace URI may itself legally contain '}', so the split must
+// use LastIndexOf; an empty namespace ("{}x") or missing local name ("{ns}") must throw
+// ArgumentException.
+TEST(XNameTests, Get_NamespaceContainingCloseBrace_SplitsOnLastBrace) {
+    XName n = XName::Get("{urn:example:{weird}}root");
+    EXPECT_EQ(n.getNamespaceNameProperty(), "urn:example:{weird}");
+    EXPECT_EQ(n.getLocalNameProperty(), "root");
+}
+
+TEST(XNameTests, Get_EmptyString_Throws) {
+    EXPECT_THROW(XName::Get(""), System::ArgumentException);
+}
+
+TEST(XNameTests, Get_EmptyNamespace_Throws) {
+    EXPECT_THROW(XName::Get("{}x"), System::ArgumentException);
+}
+
+TEST(XNameTests, Get_NoLocalNameAfterBrace_Throws) {
+    EXPECT_THROW(XName::Get("{ns}"), System::ArgumentException);
+}
+
 // ===========================================================================
 // XAttribute
 // ===========================================================================
@@ -408,6 +578,25 @@ TEST(XAttributeTests, ToString_LocalName) {
     EXPECT_EQ(a.ToString(), "href=\"url\"");
 }
 
+// Regression test for a wave-3 audit finding: EscapeValue() left tab/LF/CR unescaped, so
+// per the XML spec's attribute-value normalization (section 3.3.3) a literal tab/LF/CR
+// written into an attribute is collapsed to a plain space on reload -- the original value
+// silently doesn't round-trip. Verified against XmlEncodedRawTextWriter's Tab/LineFeed/
+// CarriageReturnEntity, which escape as character references instead.
+TEST(XAttributeTests, ToString_TabNewlineCarriageReturn_EscapedAsCharacterReferences) {
+    XAttribute a("x", "a\tb\nc\rd");
+    std::string s = a.ToString();
+    EXPECT_EQ(s, "x=\"a&#x9;b&#xA;c&#xD;d\"");
+}
+
+TEST(XAttributeTests, TabNewlineCarriageReturn_RoundTripsThroughReader) {
+    XAttribute a("x", "a\tb\nc\rd");
+    std::string xml = "<root " + a.ToString() + "/>";
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(xml));
+    r->Read();
+    EXPECT_EQ(r->GetAttribute("x"), "a\tb\nc\rd");
+}
+
 TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
     // Regression: XAttribute::ToString() previously wrote XName::ToString()'s Clark notation
     // ("{namespace}local") directly as the attribute *name* -- '{'/'}' are not legal in an XML
@@ -423,6 +612,64 @@ TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
 TEST(XAttributeTests, NextAttribute_DefaultNull) {
     XAttribute a("x", "1");
     EXPECT_EQ(a.getNextAttributeProperty(), nullptr);
+}
+
+// Regression tests for a wave-3 audit finding: XAttribute performed zero namespace-declaration
+// validation. Verified against XAttribute.cs's ValidateAttribute.
+TEST(XAttributeTests, IsNamespaceDeclaration_DefaultXmlns_IsTrue) {
+    XAttribute a(XName("", "xmlns"), "http://example.com");
+    EXPECT_TRUE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, IsNamespaceDeclaration_PrefixedXmlns_IsTrue) {
+    XAttribute a(XNamespace::Xmlns + "p", "http://example.com");
+    EXPECT_TRUE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, IsNamespaceDeclaration_OrdinaryAttribute_IsFalse) {
+    XAttribute a("id", "42");
+    EXPECT_FALSE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_EmptyUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_XmlnsUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "http://www.w3.org/2000/xmlns/")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_XmlUriWithWrongPrefix_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "http://www.w3.org/XML/1998/namespace")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, XmlnsXmlDeclaration_CorrectUri_DoesNotThrow) {
+    EXPECT_NO_THROW((XAttribute(XNamespace::Xmlns + "xml", "http://www.w3.org/XML/1998/namespace")));
+}
+
+TEST(XAttributeTests, XmlnsXmlDeclaration_WrongUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "xml", "http://example.com")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, XmlnsXmlnsDeclaration_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "xmlns", "http://example.com")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, DefaultXmlnsDeclaration_XmlUri_Throws) {
+    EXPECT_THROW((XAttribute(XName("", "xmlns"), "http://www.w3.org/XML/1998/namespace")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, DefaultXmlnsDeclaration_XmlnsUri_Throws) {
+    EXPECT_THROW((XAttribute(XName("", "xmlns"), "http://www.w3.org/2000/xmlns/")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, SetValueProperty_ValidatesNamespaceDeclaration) {
+    XAttribute a(XNamespace::Xmlns + "p", "http://example.com");
+    EXPECT_THROW(a.setValueProperty(""), System::ArgumentException);
 }
 
 // ===========================================================================
@@ -443,6 +690,31 @@ TEST(XElementTests, SetValue) {
     XElement e("x");
     e.setValueProperty("hello");
     EXPECT_EQ(e.getValueProperty(), "hello");
+}
+
+// Regression test for a wave-3 audit finding: Add(const std::string&) always created a new
+// XText child, even when the last child was already a plain (non-CDATA) XText node. Verified
+// against XContainer.cs's AddString(): consecutive string adds merge into the existing
+// trailing text node's Value instead of producing adjacent sibling text nodes.
+TEST(XElementTests, Add_String_MergesIntoTrailingTextNode) {
+    XElement e("root");
+    e.Add(std::string("hello "));
+    e.Add(std::string("world"));
+    EXPECT_EQ(e.Nodes().size(), 1u);
+    EXPECT_EQ(e.getValueProperty(), "hello world");
+}
+
+TEST(XElementTests, Add_String_DoesNotMergeAcrossCData) {
+    XElement e("root");
+    e.Add(std::make_shared<XCData>("cdata"));
+    e.Add(std::string("text"));
+    EXPECT_EQ(e.Nodes().size(), 2u);
+}
+
+TEST(XElementTests, Add_EmptyString_IsNoOp) {
+    XElement e("root");
+    e.Add(std::string(""));
+    EXPECT_EQ(e.Nodes().size(), 0u);
 }
 
 TEST(XElementTests, AddAndFindAttribute) {

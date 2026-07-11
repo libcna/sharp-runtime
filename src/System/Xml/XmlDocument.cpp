@@ -7,6 +7,7 @@
 #include <tinyxml2/tinyxml2.h>
 
 #include "System/ArgumentException.hpp"
+#include "System/Xml/XmlConvert.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
 
@@ -146,10 +147,16 @@ namespace System::Xml {
     }
 
     XmlAttribute* XmlDocument::CreateAttribute(const std::string& name) {
+        // Verified against XmlDocument.cs's CreateElement/CreateAttribute -> XmlDocument.CheckName
+        // (called on the split prefix and local name): both throw XmlException for a
+        // malformed XML name (e.g. empty, or starting with a digit) instead of silently
+        // accepting it and producing unparseable markup on write-out.
+        (void)XmlConvert::VerifyName(name);
         return new XmlAttribute(this, name); // unattached; owned by whichever element it's later attached to via SetAttributeNode
     }
 
     XmlElement* XmlDocument::CreateElement(const std::string& name) {
+        (void)XmlConvert::VerifyName(name);
         auto* native = doc_.NewElement(name.c_str());
         return static_cast<XmlElement*>(WrapNode(native));
     }
@@ -171,6 +178,11 @@ namespace System::Xml {
     }
 
     XmlProcessingInstruction* XmlDocument::CreateProcessingInstruction(const std::string& target, const std::string& data) {
+        // Matches XmlProcessingInstruction.cs's constructor: only an empty target is rejected
+        // (ArgumentException.ThrowIfNullOrEmpty) -- unlike CreateElement/CreateAttribute, the
+        // DOM does not additionally require target to be a well-formed NCName at construction.
+        if (target.empty())
+            throw System::ArgumentException("Value cannot be null or empty.", "target");
         std::string text = data.empty() ? target : target + " " + data;
         auto* native = doc_.NewDeclaration(text.c_str());
         return static_cast<XmlProcessingInstruction*>(WrapNode(native));
@@ -210,6 +222,12 @@ namespace System::Xml {
     }
 
     XmlEntityReference* XmlDocument::CreateEntityReference(const std::string& name) {
+        // Matches XmlEntityReference.cs's constructor: entity reference names are not required
+        // to be well-formed NCNames (they may reference arbitrary DTD-declared entities) -- the
+        // only rejected form is one starting with '#', which would collide with a character
+        // reference (e.g. "&#65;").
+        if (!name.empty() && name[0] == '#')
+            throw System::ArgumentException("An entity reference must not start with '#'.", "name");
         return new XmlEntityReference(this, name);
     }
 

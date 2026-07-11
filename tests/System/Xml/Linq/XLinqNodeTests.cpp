@@ -206,6 +206,41 @@ TEST(XNodeTests, DeepEquals_Elements_IgnoresCommentsAndPIs) {
     EXPECT_TRUE(XNode::DeepEquals(&a, &b));
 }
 
+// Regression test for a wave-3 audit finding: DeepEqualsCore compared attributes via
+// name-lookup (order-independent, like an unordered set), but real .NET's AttributesEqual
+// walks both attribute lists in parallel by *position* -- verified against XElement.cs.
+// Two elements with the same attributes in a different order are NOT deep-equal.
+TEST(XNodeTests, DeepEquals_Elements_AttributeOrderMatters) {
+    XElement a("root");
+    a.Add(std::make_shared<XAttribute>("x", "1"));
+    a.Add(std::make_shared<XAttribute>("y", "2"));
+    XElement b("root");
+    b.Add(std::make_shared<XAttribute>("y", "2"));
+    b.Add(std::make_shared<XAttribute>("x", "1"));
+    EXPECT_FALSE(XNode::DeepEquals(&a, &b));
+
+    XElement c("root");
+    c.Add(std::make_shared<XAttribute>("x", "1"));
+    c.Add(std::make_shared<XAttribute>("y", "2"));
+    EXPECT_TRUE(XNode::DeepEquals(&a, &c));
+}
+
+// Regression test for a wave-3 audit finding: XElement had no ValidateNode override at all
+// (inherited XContainer's no-op default), so an XDocument or XDocumentType could be added as
+// a child element -- a structurally invalid tree real .NET rejects. Verified against
+// XElement.cs's ValidateNode.
+TEST(XElementTests, Add_XDocument_ThrowsArgumentException) {
+    XElement parent("root");
+    auto doc = std::make_shared<XDocument>();
+    EXPECT_THROW(parent.Add(doc), System::ArgumentException);
+}
+
+TEST(XElementTests, Add_XDocumentType_ThrowsArgumentException) {
+    XElement parent("root");
+    auto dt = std::make_shared<XDocumentType>("html", "", "", "");
+    EXPECT_THROW(parent.Add(dt), System::ArgumentException);
+}
+
 TEST(XNodeTests, ToString_NoArgs_IsIndentedByDefault) {
     auto root = std::make_shared<XElement>("root");
     root->Add(std::make_shared<XElement>("child"));
@@ -396,6 +431,18 @@ TEST(WriteToTests, XDocumentType_WritesDocType) {
     EXPECT_NE(w->ToString().find("<!DOCTYPE root>"), std::string::npos);
 }
 
+// Regression test for a wave-3 audit finding: XDocument::WriteTo() only wrote a declaration
+// when an explicit XDeclaration had been set, and never called WriteEndDocument() at all.
+// Verified against XDocument.cs's WriteTo(): real .NET always calls WriteStartDocument()/
+// WriteEndDocument() as a matched pair, regardless of whether an XDeclaration was set.
+TEST(WriteToTests, XDocument_NoExplicitDeclaration_StillWritesXmlDeclaration) {
+    XDocument doc(std::make_shared<XElement>("root"));
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    doc.WriteTo(*w);
+    EXPECT_NE(w->ToString().find("<?xml"), std::string::npos);
+    EXPECT_NE(w->ToString().find("<root"), std::string::npos);
+}
+
 // ===========================================================================
 // XElement.Value with mixed content
 // ===========================================================================
@@ -498,9 +545,31 @@ TEST(XDocumentStructureTests, SecondRootElement_Throws) {
     EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XElement>("other"))), InvalidOperationException);
 }
 
-TEST(XDocumentStructureTests, TextNode_Throws) {
+// Regression test: real .NET's XDocument.ValidateNode throws ArgumentException (not
+// InvalidOperationException) for non-whitespace text -- it's a fundamentally wrong node
+// *kind* for this container, not a conflict with the document's current state. Verified
+// against XDocument.cs's ValidateString.
+TEST(XDocumentStructureTests, NonWhitespaceTextNode_ThrowsArgumentException) {
     XDocument doc;
-    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("stray"))), InvalidOperationException);
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("stray"))), System::ArgumentException);
+}
+
+// Regression test for a wave-3 audit finding: the previous ValidateNode unconditionally
+// rejected every top-level XText, including whitespace-only text (e.g. indentation between
+// top-level nodes), which real .NET's ValidateString explicitly allows.
+TEST(XDocumentStructureTests, WhitespaceOnlyTextNode_DoesNotThrow) {
+    XDocument doc;
+    EXPECT_NO_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XText>("  \t\r\n  "))));
+}
+
+TEST(XDocumentStructureTests, CDataNode_ThrowsArgumentException) {
+    XDocument doc;
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XCData>("cdata"))), System::ArgumentException);
+}
+
+TEST(XDocumentStructureTests, NestedXDocument_ThrowsArgumentException) {
+    XDocument doc;
+    EXPECT_THROW(doc.Add(std::static_pointer_cast<XNode>(std::make_shared<XDocument>())), System::ArgumentException);
 }
 
 TEST(XDocumentStructureTests, CommentsAndPIsAllowedAtTopLevel) {

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Threading/SemaphoreFullException.hpp"
 #include "System/Threading/WaitHandle.hpp"
 
@@ -26,6 +27,17 @@ namespace System::Threading {
         std::condition_variable cv_;
         intcs                   count_;
         intcs                   maxCount_;
+        // Verified against SemaphoreSlim.cs's CheckDispose()/ObjectDisposedException.ThrowIf:
+        // real .NET's Wait/Release all reject calls after Dispose(). This port's sibling
+        // primitives (Barrier, CountdownEvent, ManualResetEventSlim, ReaderWriterLockSlim) all
+        // already have this guard; SemaphoreSlim was previously missed, with Dispose() a true
+        // no-op and no disposal check anywhere.
+        bool                    disposed_ = false;
+
+        void ThrowIfDisposed() const {
+            if (disposed_) throw System::ObjectDisposedException("SemaphoreSlim");
+        }
+
     public:
         /** Constructs a SemaphoreSlim with the given initial and maximum counts. */
         explicit SemaphoreSlim(intcs initialCount, intcs maxCount = 0x7fffffff)
@@ -39,8 +51,12 @@ namespace System::Threading {
         /** Returns the current count of the semaphore. */
         [[nodiscard]] intcs getCurrentCountProperty() const { return count_; }
 
-        /** @brief Blocks until the semaphore can be entered. */
+        /**
+         * @brief Blocks until the semaphore can be entered.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
         void Wait() {
+            ThrowIfDisposed();
             std::unique_lock<std::mutex> lk(mutex_);
             cv_.wait(lk, [this]{ return count_ > 0; });
             --count_;
@@ -49,9 +65,11 @@ namespace System::Threading {
         /**
          * @brief Tries to enter the semaphore within a timeout. Returns true on success.
          * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
          */
         bool Wait(intcs milliseconds) {
             WaitHandle::ValidateTimeout(milliseconds);
+            ThrowIfDisposed();
             std::unique_lock<std::mutex> lk(mutex_);
             // -1 (Timeout.Infinite) waits indefinitely; std::chrono's wait_for treats a
             // negative duration as already-expired, so it must be special-cased.
@@ -66,11 +84,24 @@ namespace System::Threading {
             return ok;
         }
 
-        /** @brief Releases the semaphore once. */
+        /**
+         * @brief Releases the semaphore once.
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         */
         intcs Release() { return Release(1); }
 
-        /** @brief Releases the semaphore a specified number of times. Returns previous count. */
+        /**
+         * @brief Releases the semaphore a specified number of times. Returns previous count.
+         *
+         * Verified against SemaphoreSlim.cs's Release(int): the disposal check runs *before*
+         * the releaseCount validation (the reverse order from Wait(int), which validates its
+         * timeout argument before checking disposal -- matching each method's own .NET source).
+         *
+         * @throws System::ObjectDisposedException if this instance has been disposed.
+         * @throws System::ArgumentOutOfRangeException if @p releaseCount is less than 1.
+         */
         intcs Release(intcs releaseCount) {
+            ThrowIfDisposed();
             if (releaseCount < 1)
                 throw System::ArgumentOutOfRangeException("releaseCount");
             std::lock_guard<std::mutex> lk(mutex_);
@@ -83,7 +114,7 @@ namespace System::Threading {
         }
 
         /** Releases resources used by the SemaphoreSlim. */
-        void Dispose() {}
+        void Dispose() { disposed_ = true; }
     };
 
 } // namespace System::Threading
