@@ -512,6 +512,50 @@ TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_SplitsTargetAndD
     EXPECT_EQ(pi->getDataProperty(), "type=\"text/xsl\" href=\"style.xsl\"");
 }
 
+// Regression test for a wave-3 audit finding: CreateProcessingInstruction never checked
+// that target was non-empty. Matches XmlProcessingInstruction.cs's constructor
+// (ArgumentException.ThrowIfNullOrEmpty(target)).
+TEST(XmlProcessingInstructionTests, CreateProcessingInstruction_EmptyTarget_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateProcessingInstruction("", "data"), System::ArgumentException);
+}
+
+// Regression tests for a wave-3 audit finding: CreateElement/CreateAttribute never validated
+// that the given name is a well-formed XML name -- silently accepting e.g. "1bad" or "" and
+// producing unparseable markup on write-out. Matches XmlDocument.cs's CheckName (called via
+// CreateElement/CreateAttribute's XmlElement/XmlAttribute constructors), which throws
+// XmlException for a malformed name.
+TEST(XmlDocumentTests, CreateElement_InvalidName_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateElement("1bad"), System::Exception);
+    EXPECT_THROW(doc.CreateElement(""), System::Exception);
+    EXPECT_THROW(doc.CreateElement("bad name"), System::Exception);
+}
+
+TEST(XmlDocumentTests, CreateElement_ValidQualifiedName_DoesNotThrow) {
+    XmlDocument doc;
+    EXPECT_NO_THROW(doc.CreateElement("ns:tag"));
+}
+
+TEST(XmlAttributeTests, CreateAttribute_InvalidName_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateAttribute("1bad"), System::Exception);
+    EXPECT_THROW(doc.CreateAttribute(""), System::Exception);
+}
+
+// Regression test for a wave-3 audit finding: CreateEntityReference never rejected a name
+// starting with '#', which would collide with a character reference. Matches
+// XmlEntityReference.cs's constructor.
+TEST(XmlEntityReferenceTests, CreateEntityReference_NameStartsWithHash_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateEntityReference("#65"), System::ArgumentException);
+}
+
+TEST(XmlEntityReferenceTests, CreateEntityReference_ValidName_DoesNotThrow) {
+    XmlDocument doc;
+    EXPECT_NO_THROW(doc.CreateEntityReference("amp"));
+}
+
 TEST(XmlDocumentTypeTests, CreateDocumentType_StoresNameAndIds) {
     XmlDocument doc;
     auto* dt = doc.CreateDocumentType("html", "-//W3C//DTD XHTML 1.0//EN",
