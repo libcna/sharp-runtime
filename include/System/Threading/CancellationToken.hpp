@@ -3,10 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -25,6 +27,16 @@ namespace System::Threading {
             // CancellationTokenSource.cs's ExecuteCallbackHandlers.
             std::map<intcs, std::function<void()>> callbacks;
             intcs nextId = 0;
+            // Verified against CancellationTokenSource.cs's ExecutingCallbackId/
+            // ThreadIDExecutingCallbacks and CancellationTokenRegistration.cs's
+            // WaitForCallbackIfNecessary: while Cancel() is invoking a callback, its id and
+            // executing thread are recorded here (under `mutex`) so a concurrent
+            // CancellationTokenRegistration::Dispose() for that same id can wait for it to
+            // finish instead of racing a caller's post-Dispose() teardown against the
+            // still-running callback (see CancellationTokenRegistration.hpp's Dispose()).
+            intcs executingId = -1;
+            std::thread::id executingThreadId{};
+            std::condition_variable callbackFinished;
         };
     }
 

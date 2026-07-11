@@ -111,6 +111,55 @@ TEST(CancellationTokenRegisterTests, Cancel_ThrowingCallback_RunsAllCallbacksAnd
     reg3.Dispose();
 }
 
+// Regression test for a wave-3 audit finding: CancellationTokenRegistration::Dispose() was a
+// no-op race when the callback was already picked up by a concurrent Cancel() -- it returned
+// immediately instead of waiting for the in-flight callback to finish, risking use-after-free
+// if the caller tears down a resource the callback references right after Dispose() returns.
+// Verified against CancellationTokenRegistration.cs's documented Dispose() contract: "If the
+// target callback is currently executing, this method will wait until it completes."
+TEST(CancellationTokenRegisterTests, Dispose_WaitsForInFlightCallbackToFinish) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+
+    std::atomic<bool> callbackStarted{false};
+    std::atomic<bool> callbackFinished{false};
+
+    auto reg = token.Register([&] {
+        callbackStarted = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        callbackFinished = true;
+    });
+
+    std::thread canceller([&] { cts.Cancel(); });
+
+    while (!callbackStarted.load()) std::this_thread::yield();
+    // The callback is now guaranteed to be mid-execution (sleeping) -- sanity-check the race
+    // window is real before trusting the post-Dispose() assertion below.
+    bool observedStillRunning = !callbackFinished.load();
+
+    reg.Dispose();
+    EXPECT_TRUE(observedStillRunning);
+    EXPECT_TRUE(callbackFinished.load());
+
+    canceller.join();
+}
+
+// Regression test: the wait-for-completion contract must not deadlock when a callback disposes
+// its own registration (the documented "degenerate case" in CancellationTokenRegistration.cs).
+TEST(CancellationTokenRegisterTests, SelfUnregisteringCallback_DoesNotDeadlock) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    CancellationTokenRegistration* selfPtr = nullptr;
+    bool called = false;
+    auto reg = token.Register([&] {
+        called = true;
+        selfPtr->Dispose();
+    });
+    selfPtr = &reg;
+    cts.Cancel();
+    EXPECT_TRUE(called);
+}
+
 // ===========================================================================
 // LockCookie
 // ===========================================================================

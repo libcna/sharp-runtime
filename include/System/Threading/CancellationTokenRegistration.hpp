@@ -4,6 +4,7 @@
 #pragma once
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IDisposable.hpp"
@@ -25,13 +26,25 @@ namespace System::Threading {
         CancellationTokenRegistration(std::shared_ptr<Detail::CancellationState> state, intcs id)
             : state_(std::move(state)), id_(id) {}
 
-        /** Deregisters the callback associated with this registration. */
+        /**
+         * @brief Deregisters the callback associated with this registration.
+         *
+         * If the target callback is currently executing (i.e. Cancel() removed it from the
+         * pending map and is in the middle of invoking it on another thread), this method waits
+         * until it completes before returning -- except when called from within the callback
+         * itself (self-unregister), which would otherwise deadlock. Verified against
+         * CancellationTokenRegistration.cs's Dispose()/WaitForCallbackIfNecessary: without this
+         * wait, a caller that disposes a registration and then immediately tears down a resource
+         * the callback references would race a still-in-flight callback invocation.
+         */
         void Dispose() override {
             if (!state_) return;
-            {
-                std::lock_guard<std::mutex> lock(state_->mutex);
-                state_->callbacks.erase(id_);
+            std::unique_lock<std::mutex> lock(state_->mutex);
+            bool erased = state_->callbacks.erase(id_) != 0;
+            if (!erased && state_->executingId == id_ && state_->executingThreadId != std::this_thread::get_id()) {
+                state_->callbackFinished.wait(lock, [this] { return state_->executingId != id_; });
             }
+            lock.unlock();
             state_.reset();
         }
 
