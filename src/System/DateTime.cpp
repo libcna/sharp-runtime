@@ -334,7 +334,11 @@ namespace System {
         if (s.size() >= 19 && (s[10] == ' ' || s[10] == 'T')) {
             if (std::sscanf(s.c_str() + 11, "%d:%d:%d", &hr, &mn, &sc) != 3)
                 hr = mn = sc = 0;
-            if (s.size() >= 23 && s[19] == '.') {
+            if (s.size() > 20 && s[19] == '.') {
+                // Note: the gate is "at least 1 char after the dot", not "at least 3" -- a
+                // 1-2 digit fraction (e.g. ".5" or ".5Z") is valid and must be scaled up to
+                // milliseconds below, not silently skipped because the string happens to be
+                // short.
                 std::sscanf(s.c_str() + 20, "%d", &ms);
                 // Count only the actual fractional-digit characters -- a trailing
                 // 'Z'/'+hh:mm'/'-hh:mm' timezone marker (common on ISO-8601/wire-format
