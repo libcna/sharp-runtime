@@ -576,6 +576,25 @@ TEST(XAttributeTests, ToString_LocalName) {
     EXPECT_EQ(a.ToString(), "href=\"url\"");
 }
 
+// Regression test for a wave-3 audit finding: EscapeValue() left tab/LF/CR unescaped, so
+// per the XML spec's attribute-value normalization (section 3.3.3) a literal tab/LF/CR
+// written into an attribute is collapsed to a plain space on reload -- the original value
+// silently doesn't round-trip. Verified against XmlEncodedRawTextWriter's Tab/LineFeed/
+// CarriageReturnEntity, which escape as character references instead.
+TEST(XAttributeTests, ToString_TabNewlineCarriageReturn_EscapedAsCharacterReferences) {
+    XAttribute a("x", "a\tb\nc\rd");
+    std::string s = a.ToString();
+    EXPECT_EQ(s, "x=\"a&#x9;b&#xA;c&#xD;d\"");
+}
+
+TEST(XAttributeTests, TabNewlineCarriageReturn_RoundTripsThroughReader) {
+    XAttribute a("x", "a\tb\nc\rd");
+    std::string xml = "<root " + a.ToString() + "/>";
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(xml));
+    r->Read();
+    EXPECT_EQ(r->GetAttribute("x"), "a\tb\nc\rd");
+}
+
 TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
     // Regression: XAttribute::ToString() previously wrote XName::ToString()'s Clark notation
     // ("{namespace}local") directly as the attribute *name* -- '{'/'}' are not legal in an XML

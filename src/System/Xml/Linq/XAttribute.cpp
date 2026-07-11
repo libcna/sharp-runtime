@@ -82,6 +82,15 @@ namespace System::Xml::Linq {
                 case '<': out += "&lt;"; break;
                 case '>': out += "&gt;"; break;
                 case '"': out += "&quot;"; break;
+                // Matches XmlEncodedRawTextWriter.WriteAttributeTextBlock's Tab/LineFeed/
+                // CarriageReturnEntity: a literal tab/LF/CR written unescaped into an attribute
+                // value is collapsed to a plain space by the XML spec's attribute-value
+                // normalization on reload (section 3.3.3) -- character references are not
+                // subject to that normalization, so escaping is the only way for the value to
+                // round-trip unchanged.
+                case '\t': out += "&#x9;"; break;
+                case '\n': out += "&#xA;"; break;
+                case '\r': out += "&#xD;"; break;
                 default: out += c; break;
             }
         }
