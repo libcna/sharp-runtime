@@ -391,6 +391,27 @@ TEST(XmlNodeTests, AppendChild_CrossDocument_ThrowsArgumentException) {
     EXPECT_THROW(root1->AppendChild(other), System::ArgumentException);
 }
 
+// Regression test for a wave-3 audit finding: Normalize() only merged adjacent text nodes
+// among direct children, never recursing into child elements -- verified against
+// XmlNode.cs's Normalize(), which explicitly recurses (`case XmlNodeType.Element:
+// crtChild.Normalize(); goto default;`) into the full depth of the sub-tree.
+TEST(XmlNodeTests, Normalize_MergesAdjacentTextInDescendantElements) {
+    XmlDocument doc;
+    doc.LoadXml("<root><child>a</child></root>");
+    auto* root = doc.getDocumentElementProperty();
+    auto* child = static_cast<XmlElement*>(root->getFirstChildProperty());
+    // Simulate two adjacent text nodes under the descendant element (as real .NET code
+    // building a DOM by hand, e.g. repeated AppendChild(CreateTextNode(...)), would produce).
+    child->AppendChild(doc.CreateTextNode("b"));
+
+    root->Normalize();
+
+    auto* mergedText = child->getFirstChildProperty();
+    ASSERT_NE(mergedText, nullptr);
+    EXPECT_EQ(mergedText->getValueProperty(), "ab");
+    EXPECT_EQ(mergedText->getNextSiblingProperty(), nullptr);
+}
+
 // ===========================================================================
 // Comment / Text / CDATA
 // ===========================================================================
