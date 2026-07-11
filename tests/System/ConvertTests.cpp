@@ -207,10 +207,26 @@ TEST(ConvertTests, ToBooleanFromInt) {
 TEST(ConvertTests, ToBooleanFromString) {
     EXPECT_TRUE(Convert::ToBoolean("True"));
     EXPECT_TRUE(Convert::ToBoolean("true"));
-    EXPECT_TRUE(Convert::ToBoolean("1"));
     EXPECT_FALSE(Convert::ToBoolean("False"));
     EXPECT_FALSE(Convert::ToBoolean("false"));
-    EXPECT_FALSE(Convert::ToBoolean("0"));
+}
+
+// Regression tests for a code-audit finding (ticket 248): verified against Convert.cs's
+// ToBoolean(string) (delegates to bool.Parse) and Boolean.cs's TryParse -- real .NET's
+// Convert.ToBoolean(string) is fully case-insensitive for "true"/"false" (not just the two
+// exact casings previously matched here) and does NOT accept "1"/"0" at all (those throw
+// FormatException). Convert::ToBoolean("1")/("0") previously returned true/false instead of
+// throwing.
+TEST(ConvertTests, ToBooleanFromString_CaseInsensitive) {
+    EXPECT_TRUE(Convert::ToBoolean("TRUE"));
+    EXPECT_TRUE(Convert::ToBoolean("TrUe"));
+    EXPECT_FALSE(Convert::ToBoolean("FALSE"));
+    EXPECT_FALSE(Convert::ToBoolean("FaLsE"));
+}
+
+TEST(ConvertTests, ToBooleanFromString_OneAndZero_Throws) {
+    EXPECT_THROW(Convert::ToBoolean("1"), std::exception);
+    EXPECT_THROW(Convert::ToBoolean("0"), std::exception);
 }
 
 TEST(ConvertTests, ToBooleanFromStringInvalidThrows) {
@@ -277,6 +293,11 @@ TEST(ConvertTests, ToStringInvalidBaseThrows) {
 
 // ---------------------------------------------------------------------------
 // ToHexString / FromHexString
+//
+// Regression coverage for a code-audit finding (ticket 248): verified against Convert.cs,
+// Convert.ToHexString produces UPPERCASE (HexConverter.Casing.Upper) -- this port previously
+// had the casing backwards (ToHexString was lowercase, and the uppercase implementation was
+// under the non-existent-in-.NET name ToHexStringUpper, since renamed to ToHexStringLower).
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToHexString_Empty) {
@@ -284,11 +305,11 @@ TEST(ConvertTests, ToHexString_Empty) {
 }
 
 TEST(ConvertTests, ToHexString_SingleByte) {
-    EXPECT_EQ(Convert::ToHexString({0xFF}), "ff");
+    EXPECT_EQ(Convert::ToHexString({0xFF}), "FF");
 }
 
 TEST(ConvertTests, ToHexString_MultipleBytes) {
-    EXPECT_EQ(Convert::ToHexString({0x00, 0xAB, 0xCD, 0xEF}), "00abcdef");
+    EXPECT_EQ(Convert::ToHexString({0x00, 0xAB, 0xCD, 0xEF}), "00ABCDEF");
 }
 
 TEST(ConvertTests, ToHexString_AllZeros) {

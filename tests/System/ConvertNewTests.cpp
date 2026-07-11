@@ -126,18 +126,25 @@ TEST(ConvertTests, ToString_FromUInt32)         { EXPECT_EQ(Convert::ToString(ui
 TEST(ConvertTests, ToString_FromUInt64)         { EXPECT_EQ(Convert::ToString(uint64_t(18446744073709551615ull)), "18446744073709551615"); }
 
 // ---------------------------------------------------------------------------
-// ToHexStringUpper
+// ToHexStringLower
+//
+// Regression coverage for a code-audit finding (ticket 248): this method was previously
+// named ToHexStringUpper despite producing uppercase output -- a name that doesn't exist in
+// real .NET's Convert class at all -- while the real .NET name ToHexString (which is
+// documented, and verified against Convert.cs, to produce UPPERCASE) was attached to a
+// lowercase implementation. Renamed to match .NET's actual API surface: ToHexString is now
+// uppercase (tested in ConvertTests.cpp) and this method (ToHexStringLower) is lowercase.
 // ---------------------------------------------------------------------------
 
-TEST(ConvertTests, ToHexStringUpper_Empty)      { EXPECT_EQ(Convert::ToHexStringUpper({}), ""); }
-TEST(ConvertTests, ToHexStringUpper_SingleByte) { EXPECT_EQ(Convert::ToHexStringUpper({0xFF}), "FF"); }
-TEST(ConvertTests, ToHexStringUpper_Multi)      { EXPECT_EQ(Convert::ToHexStringUpper({0xAB, 0xCD}), "ABCD"); }
-TEST(ConvertTests, ToHexStringUpper_AllZeros)   { EXPECT_EQ(Convert::ToHexStringUpper({0x00, 0x00}), "0000"); }
+TEST(ConvertTests, ToHexStringLower_Empty)      { EXPECT_EQ(Convert::ToHexStringLower({}), ""); }
+TEST(ConvertTests, ToHexStringLower_SingleByte) { EXPECT_EQ(Convert::ToHexStringLower({0xFF}), "ff"); }
+TEST(ConvertTests, ToHexStringLower_Multi)      { EXPECT_EQ(Convert::ToHexStringLower({0xAB, 0xCD}), "abcd"); }
+TEST(ConvertTests, ToHexStringLower_AllZeros)   { EXPECT_EQ(Convert::ToHexStringLower({0x00, 0x00}), "0000"); }
 
-TEST(ConvertTests, ToHexStringUpper_RoundTripWithFromHex) {
+TEST(ConvertTests, ToHexStringLower_RoundTripWithFromHex) {
     std::vector<uint8_t> original{0x01, 0xAB, 0xCD, 0xEF};
-    auto hex = Convert::ToHexStringUpper(original);
-    EXPECT_EQ(hex, "01ABCDEF");
+    auto hex = Convert::ToHexStringLower(original);
+    EXPECT_EQ(hex, "01abcdef");
     auto back = Convert::FromHexString(hex);
     EXPECT_EQ(original, back);
 }
