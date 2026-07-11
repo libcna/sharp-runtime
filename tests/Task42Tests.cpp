@@ -154,6 +154,44 @@ TEST(TimerTests, ChangeToInfinite_PausesActivelyRepeatingTimer_ThenResumes) {
     EXPECT_GT(count.load(), paused);
 }
 
+// Regression test for a wave-3 audit finding: run() used std::this_thread::sleep_for for the
+// between-fires wait, which is not interruptible -- a Change() call made while the timer
+// thread was mid-sleep had no observable effect until the original (now-stale) deadline
+// naturally elapsed. Verified against TimerQueue.UpdateTimer: every Change() call reschedules
+// the next fire relative to when Change() itself is called, regardless of the timer's current
+// wait state.
+TEST(TimerTests, Change_DuringLongWait_TakesEffectImmediately) {
+    std::atomic<int> count{0};
+    System::Threading::Timer t(
+        [](void* s){ (*static_cast<std::atomic<int>*>(s))++; },
+        &count, 2000, -1); // would not fire for 2s unless Change() interrupts the wait
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    t.Change(20, -1); // reschedule to fire soon
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    EXPECT_EQ(count.load(), 1); // must have fired well before the original 2000ms deadline
+}
+
+// Regression test for a wave-3 audit finding: after every fire, run() unconditionally derived
+// the next dueTime from `period`, discarding whatever dueTime a Change() call made *during*
+// that fire's callback had just set -- only `period` survived past the first fire.
+TEST(TimerTests, Change_DuringCallback_NotClobberedByPeriod) {
+    std::atomic<int> count{0};
+    System::Threading::Timer* timerPtr = nullptr;
+    auto callback = [&](void* s) {
+        int n = (*static_cast<std::atomic<int>*>(s)).fetch_add(1) + 1;
+        if (n == 1) {
+            // Reschedule to fire again soon, overriding the original period (500ms).
+            timerPtr->Change(15, -1);
+        }
+    };
+    System::Threading::Timer t(callback, &count, 30, 500); // first fire ~30ms, then every 500ms
+    timerPtr = &t;
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // If the mid-callback Change(15, ...) was respected, a 2nd fire happens well within 150ms.
+    // If it was clobbered by the original period=500, count would still be 1 at this point.
+    EXPECT_GE(count.load(), 2);
+}
+
 // ===========================================================================
 // Object — abstract base: concrete stub for testing
 // ===========================================================================

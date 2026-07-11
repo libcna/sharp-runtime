@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -45,6 +46,13 @@ namespace System::Threading {
             std::condition_variable    cv;
             intcs                      dueTime = 0;
             intcs                      period  = 0;
+            // Verified against TimerQueue.UpdateTimer: every Change() call reschedules the
+            // *next* fire relative to when Change() itself is called (`nowTicks + dueTime`),
+            // regardless of whether the timer thread is currently mid-sleep between fires or
+            // mid-callback. Bumped on every Change() call so run()'s wait loop can detect "the
+            // schedule changed since I started this cycle" and react immediately instead of
+            // finishing a now-stale sleep or clobbering a fresh dueTime after the callback.
+            std::uint64_t              generation = 0;
         };
 
         std::shared_ptr<State> state_;
@@ -92,6 +100,7 @@ namespace System::Threading {
                 std::lock_guard<std::mutex> lock(state_->mtx);
                 state_->dueTime = dueTime;
                 state_->period  = period;
+                ++state_->generation;
             }
             state_->cv.notify_all();
         }
@@ -120,23 +129,44 @@ namespace System::Threading {
                     s->cv.wait(lock);
                 }
                 if (!s->running) break;
+
+                // Snapshot which "schedule generation" this cycle is waiting/firing for. Any
+                // Change() call bumps this, whether it happens while we're waiting below or
+                // while the callback (invoked with the lock released, further down) is running.
+                std::uint64_t genAtStart = s->generation;
                 intcs due = s->dueTime;
-                lock.unlock();
-                if (due > 0) std::this_thread::sleep_for(std::chrono::milliseconds(due));
-                lock.lock();
-                if (!s->running || s->dueTime == -1) continue; // paused/disposed while sleeping
+                if (due > 0) {
+                    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(due);
+                    // wait_until (not sleep_for) so a concurrent Change() can interrupt this
+                    // wait immediately via the generation bump, instead of only taking effect
+                    // after this now-stale deadline naturally elapses.
+                    s->cv.wait_until(lock, deadline, [&] { return !s->running || s->generation != genAtStart; });
+                }
+                if (!s->running) break;
+                // Change() ran during the wait above (including a pause via dueTime=-1) --
+                // restart the outer loop to pick up the fresh schedule from scratch rather than
+                // firing on stale timing.
+                if (s->generation != genAtStart) continue;
+
                 if (s->callback) {
                     lock.unlock();
                     s->callback(s->arg);
                     lock.lock();
                 }
-                if (s->period <= 0) {
-                    // Single-shot: disable further firing until a future Change() re-arms it
-                    // (rather than exiting the loop/thread entirely, so a later Change() call
-                    // can still bring this timer back to life, matching real .NET).
-                    s->dueTime = -1;
-                } else {
-                    s->dueTime = s->period; // schedule the next cycle using the period
+                // Only derive the next dueTime from `period` if no Change() call happened while
+                // we didn't hold the lock (i.e. during the callback). If one did, it already set
+                // the dueTime/period it wants for the next cycle -- overwriting that here was
+                // the original bug (a mid-callback Change(newDueTime, ...) call's newDueTime was
+                // silently discarded).
+                if (s->generation == genAtStart) {
+                    if (s->period <= 0) {
+                        // Single-shot: disable further firing until a future Change() re-arms it
+                        // (rather than exiting the loop/thread entirely, so a later Change() call
+                        // can still bring this timer back to life, matching real .NET).
+                        s->dueTime = -1;
+                    } else {
+                        s->dueTime = s->period; // schedule the next cycle using the period
+                    }
                 }
             }
         }
