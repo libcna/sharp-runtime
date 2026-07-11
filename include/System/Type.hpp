@@ -17,8 +17,17 @@ namespace System
      *
      * Unlike .NET reflection, this implementation identifies types by their
      * C++ RTTI std::type_info, accessible via the static From&lt;T&gt;() factory.
-     * All boolean predicates (IsClass, IsAbstract, etc.) are stubs that return
-     * a conservative default — true reflection is not available in C++.
+     *
+     * @note Status: STUB (permanent deviation — see CLAUDE.md's "Known permanent
+     *   deviations"; reflection is out of scope, this is the intended end state, not a gap
+     *   to close). All boolean predicates (IsClass, IsValueType, IsAbstract, IsSealed,
+     *   IsInterface) return a fixed value regardless of what T actually is — C++ RTTI cannot
+     *   determine any of these. They are **not mutually consistent**: e.g. `Type::From<int>()`
+     *   reports both IsClass()==true and IsValueType()==false simultaneously, which would be
+     *   contradictory for a real .NET type (int is IsValueType==true, IsClass==false). Do not
+     *   branch on these predicates to distinguish value types from class types; they exist
+     *   only so ported code that calls `type.IsClass` etc. compiles, not to answer the
+     *   question correctly.
      */
     class Type
     {
