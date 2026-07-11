@@ -278,6 +278,35 @@ TEST(DecimalTests, ToDouble) {
     EXPECT_NEAR(Decimal(0).ToDouble(), 0.0, 1e-15);
 }
 
+// Regression tests for a code-audit finding (ticket 241): Decimal(double) used
+// std::llround(v), whose return type (long long) tops out around 9.2e18 -- far below
+// Decimal's own ~7.9e28 mantissa range. Any in-range double roughly between 9.2e18 and
+// 7.9e28 (e.g. 1e20, an exactly-representable double) silently overflowed llround to
+// LLONG_MIN, producing a garbage mantissa instead of throwing or converting correctly.
+// Confirmed via a standalone UBSan repro that std::llround(1e20) actually returned
+// LLONG_MIN pre-fix. Fixed by splitting the value into two 64-bit limbs instead of routing
+// through `long long`.
+TEST(DecimalTests, Constructor_FromDouble_ExactPowerOfTen_AboveLongLongRange) {
+    // 1e20 is exactly representable as a double (5^20 fits in 53 bits, so the multiply by
+    // 2^20 is an exact exponent shift) and is well within Decimal's range but exceeds
+    // long long's ~9.2e18 max -- exactly the previously-broken zone.
+    EXPECT_EQ(Decimal(1e20).ToString(), "100000000000000000000");
+}
+
+TEST(DecimalTests, Constructor_FromDouble_AboveLongLongRange_DoesNotThrow) {
+    EXPECT_NO_THROW(Decimal(1.5e19));
+    EXPECT_EQ(Decimal(1.5e19).ToString(), "15000000000000000000");
+}
+
+TEST(DecimalTests, Constructor_FromDouble_NearMaxValue_DoesNotThrow) {
+    EXPECT_NO_THROW(Decimal(7e28));
+    EXPECT_GT(Decimal(7e28), Decimal(1e28));
+}
+
+TEST(DecimalTests, Constructor_FromDouble_NegativeAboveLongLongRange) {
+    EXPECT_EQ(Decimal(-1e20).ToString(), "-100000000000000000000");
+}
+
 TEST(DecimalTests, ToInt32) {
     EXPECT_EQ(Decimal::Parse("42.9").ToInt32(),  42);
     EXPECT_EQ(Decimal::Parse("-3.7").ToInt32(), -3);

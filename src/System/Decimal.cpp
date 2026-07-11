@@ -129,7 +129,17 @@ Decimal::Decimal(double v) {
     scale_ = 0;
     while (v != std::floor(v) && scale_ < 15) { v *= 10.0; ++scale_; }
     if (v > u128tod(MAX_MANTISSA)) throw System::OverflowException("Value too large for Decimal.");
-    mantissa_ = u128(uint64_t(std::llround(v)));
+    // v can legitimately reach ~7.9e28 here (Decimal's own mantissa range), far beyond what
+    // std::llround's `long long` return type can hold (~9.2e18) -- for any v roughly between
+    // 9.2e18 and 7.9e28 (e.g. Decimal(1e20), a perfectly in-range, exactly-representable double)
+    // std::llround(v) silently overflowed to LLONG_MIN, producing a garbage mantissa instead of
+    // the correct value. Split v into two 64-bit limbs instead, each within double's/uint64_t's
+    // exactly-representable range, avoiding `long long` entirely.
+    static const double pow2_64 = 18446744073709551616.0;
+    double hi = std::floor(v / pow2_64);
+    double lo = std::round(v - hi * pow2_64);
+    if (lo >= pow2_64) { lo -= pow2_64; hi += 1.0; }
+    mantissa_ = (u128(static_cast<uint64_t>(hi)) << 64) | static_cast<uint64_t>(lo);
     fitMantissa();
     normalize();
 }
