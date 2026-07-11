@@ -1105,3 +1105,28 @@ TEST(UnitySerializationHolderTests, GetRealObject_SameInstanceEachCall) {
     System::UnitySerializationHolder h(System::UnitySerializationHolder::NullUnity);
     EXPECT_EQ(&h.GetRealObject(), &h.GetRealObject());
 }
+
+// ===========================================================================
+// SerializationInfo / StreamingContext
+//
+// Coverage gap found while auditing serialization stubs (ticket 73): both types had zero
+// test coverage anywhere despite being public API surface. Kept intentionally minimal --
+// they are permanent no-op stubs (see their own doc-comments) with no behavior beyond
+// "constructible, destructible", so that is all there is to verify.
+// ===========================================================================
+#include "System/Runtime/Serialization/SerializationInfo.hpp"
+#include "System/Runtime/Serialization/StreamingContext.hpp"
+
+TEST(SerializationInfoTests, DefaultConstructible) {
+    EXPECT_NO_THROW(System::Runtime::Serialization::SerializationInfo{});
+}
+
+TEST(SerializationInfoTests, TwoInstancesAreIndependent) {
+    System::Runtime::Serialization::SerializationInfo a;
+    System::Runtime::Serialization::SerializationInfo b;
+    EXPECT_NE(&a, &b);
+}
+
+TEST(StreamingContextTests, DefaultConstructible) {
+    EXPECT_NO_THROW(System::Runtime::Serialization::StreamingContext{});
+}
