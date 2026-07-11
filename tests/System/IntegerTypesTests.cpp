@@ -77,6 +77,16 @@ TEST(Int128Tests2, DefaultCtor_DoesNotThrow) {
     EXPECT_NO_THROW(System::Int128 v);
 }
 
+TEST(Int128Tests2, Abs_PositiveValue_ReturnsSameValue) {
+    System::Int128 v(static_cast<__int128>(5));
+    EXPECT_TRUE(System::Int128::Abs(v) == v);
+}
+
+TEST(Int128Tests2, Abs_NegativeValue_ReturnsPositive) {
+    System::Int128 v(static_cast<__int128>(-5));
+    EXPECT_TRUE(System::Int128::Abs(v) == System::Int128(static_cast<__int128>(5)));
+}
+
 // ---------------------------------------------------------------------------
 // IntPtr
 // ---------------------------------------------------------------------------

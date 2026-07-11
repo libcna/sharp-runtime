@@ -451,10 +451,14 @@ TEST(Int128Tests, NegativeOne_IsMinusOne) {
     EXPECT_EQ(static_cast<long long>(System::Int128::NegativeOne()), -1LL);
 }
 
+// Regression test for a wave-3 audit finding: this threw std::overflow_error (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::OverflowException, despite Int128.hpp's own doc-comment already saying "matching
+// .NET's OverflowException".
 TEST(Int128Tests, Abs_MinValue_Throws) {
     // .NET's Abs(Int128.MinValue) throws OverflowException, since -MinValue does
     // not fit in a signed Int128 (matches Int64.Abs(Int64.MinValue) in this codebase).
-    EXPECT_THROW(System::Int128::Abs(System::Int128::MinValue()), std::overflow_error);
+    EXPECT_THROW(System::Int128::Abs(System::Int128::MinValue()), System::OverflowException);
 }
 
 TEST(Int128Tests, ShiftLeft_MasksShiftAmountLike_DotNet) {
