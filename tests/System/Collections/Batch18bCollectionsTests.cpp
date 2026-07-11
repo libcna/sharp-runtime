@@ -395,3 +395,14 @@ TEST(ArrayListGapFill, GetEnumerator_TwoArgOverload_OutOfBoundsRange_Throws) {
     EXPECT_THROW(al.GetEnumerator(0, 5), System::ArgumentException);
     EXPECT_THROW(al.GetEnumerator(-1, 1), System::ArgumentOutOfRangeException);
 }
+
+// Regression test for a wave-3 audit finding: RemoveAt() threw std::out_of_range (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::ArgumentOutOfRangeException, which is what real .NET's ArrayList.RemoveAt throws
+// for an out-of-range index.
+TEST(ArrayListGapFill, RemoveAt_OutOfRange_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.RemoveAt(5), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(al.RemoveAt(-1), System::ArgumentOutOfRangeException);
+}

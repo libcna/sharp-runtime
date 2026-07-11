@@ -239,7 +239,7 @@ public:
      * @param index Zero-based index of the element to remove.
      */
     void RemoveAt(SharpRuntime::intcs index) override {
-        if (index < 0 || index >= static_cast<int>(_items.size())) throw std::out_of_range("index");
+        if (index < 0 || index >= static_cast<int>(_items.size())) throw System::ArgumentOutOfRangeException("index");
         _items.erase(_items.begin() + index);
         ++version_;
     }
