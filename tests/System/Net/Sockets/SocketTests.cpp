@@ -230,6 +230,57 @@ TEST(SocketTests, PollDetectsReadable) {
     EXPECT_TRUE(receiver.Poll(2'000'000, SelectMode::SelectRead));
 }
 
+// Regression test for a code-audit finding (ticket 240): Poll(-1, mode) is documented (matching
+// real .NET's Socket.Poll/SocketPal.Unix.cs Poll) to mean "wait indefinitely", but this port
+// previously built a timeval from microSeconds unconditionally -- for -1, truncating division
+// gave tv_sec=0 and tv_usec=-1, an invalid timeval that made select() fail with EINVAL, so
+// Poll(-1, ...) always returned false immediately instead of blocking. Data is sent before
+// polling so a correct fix returns promptly (true) rather than actually blocking forever if the
+// fix were wrong.
+TEST(SocketTests, Poll_InfiniteTimeout_DoesNotReturnFalseImmediately) {
+    Socket receiver(AddressFamily::InterNetwork, SocketType::Dgram, ProtocolType::Udp);
+    receiver.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(receiver.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+
+    Socket sender(AddressFamily::InterNetwork, SocketType::Dgram, ProtocolType::Udp);
+    std::vector<SharpRuntime::bytecs> payload{1};
+    sender.SendTo(payload, *local);
+
+    EXPECT_TRUE(receiver.Poll(-1, SelectMode::SelectRead));
+}
+
+// Regression test for a code-audit finding (ticket 240): Connect(host, port) had no test
+// coverage at all before this fix. Verified against Socket.cs's Connect(string,int) ->
+// Connect(IPAddress[],int), which resolves the host and tries every returned address in turn.
+TEST(SocketTests, Connect_ByHostnameLiteral_ConnectsSuccessfully) {
+    Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    intcs port = local->getPortProperty();
+
+    std::shared_ptr<Socket> acceptedSocket;
+    std::thread serverThread([&]() { acceptedSocket = listener.Accept(); });
+
+    Socket client(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
+    client.Connect("127.0.0.1", port);
+    serverThread.join();
+
+    ASSERT_NE(acceptedSocket, nullptr);
+    EXPECT_TRUE(client.getConnectedProperty());
+}
+
+// Regression test for the same audit finding: this port previously connected only to
+// addresses[0], with no address-family filtering at all, so a family-mismatched resolved
+// address (e.g. connecting an IPv4-only socket to a literal IPv6 host) would be handed straight
+// to connect() rather than being skipped as real .NET's CanTryAddressFamily check does.
+TEST(SocketTests, Connect_ByHostname_NoMatchingAddressFamily_Throws) {
+    Socket client(AddressFamily::InterNetworkV6, SocketType::Stream, ProtocolType::Tcp);
+    EXPECT_THROW(client.Connect("127.0.0.1", 12345), System::ArgumentException);
+}
+
 TEST(SocketTests, AcceptAsyncAndConnectAsync) {
     Socket listener(AddressFamily::InterNetwork, SocketType::Stream, ProtocolType::Tcp);
     listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
