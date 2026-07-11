@@ -17,6 +17,7 @@ struct XmlWriterState {
     std::stack<tinyxml2::XMLNode*> nodeStack;  // top = current parent
     std::string                    filePath;
     bool                           hasDeclaration = false;
+    XmlWriterSettings              settings;
 };
 
 // ---------------------------------------------------------------------------
@@ -110,14 +111,15 @@ void XmlWriter::WriteDocType(const std::string& name, const std::string& publicI
 
 std::string XmlWriter::ToString() const {
     if (!state_) return {};
-    tinyxml2::XMLPrinter printer;
+    tinyxml2::XMLPrinter printer(nullptr, /*compact=*/!state_->settings.Indent);
     state_->doc.Print(&printer);
     return printer.CStr() ? printer.CStr() : "";
 }
 
 void XmlWriter::Flush() {
     if (!state_ || state_->filePath.empty()) return;
-    if (state_->doc.SaveFile(state_->filePath.c_str()) != tinyxml2::XML_SUCCESS)
+    if (state_->doc.SaveFile(state_->filePath.c_str(), /*compact=*/!state_->settings.Indent) !=
+        tinyxml2::XML_SUCCESS)
         throw XmlException("XmlWriter: failed to save file: " + state_->filePath);
 }
 
@@ -132,14 +134,16 @@ void XmlWriter::Close() {
 // Factory methods
 // ---------------------------------------------------------------------------
 
-XmlWriter* XmlWriter::Create(const std::string& outputFileName) {
+XmlWriter* XmlWriter::Create(const std::string& outputFileName, const XmlWriterSettings& settings) {
     auto st = std::make_unique<XmlWriterState>();
     st->filePath = outputFileName;
+    st->settings = settings;
     return new XmlWriter(std::move(st));
 }
 
-XmlWriter* XmlWriter::CreateToString() {
+XmlWriter* XmlWriter::CreateToString(const XmlWriterSettings& settings) {
     auto st = std::make_unique<XmlWriterState>();
+    st->settings = settings;
     return new XmlWriter(std::move(st));
 }
 

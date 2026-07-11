@@ -27,6 +27,7 @@ using System::Xml::XmlException;
 using System::Xml::XmlNodeType;
 using System::Xml::XmlReader;
 using System::Xml::XmlWriter;
+using System::Xml::XmlWriterSettings;
 using System::Xml::Linq::XName;
 using System::Xml::Linq::XAttribute;
 using System::Xml::Linq::XElement;
@@ -377,6 +378,32 @@ TEST(XmlWriterTests, Close_DoesNotThrow) {
     w->WriteStartElement("root");
     w->WriteEndElement();
     EXPECT_NO_THROW(w->Close());
+}
+
+// Regression test for a wave-3 audit finding: ToString() always pretty-printed via
+// tinyxml2's XMLPrinter default (compact=false), ignoring XmlWriterSettings::Indent, whose
+// real .NET default is false (compact, no inserted whitespace). Matches
+// XmlWriterSettings.cs's documented default and XmlTextEncoder's un-indented output.
+TEST(XmlWriterTests, DefaultSettings_ProducesCompactOutput_NoIndentWhitespace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("root");
+    w->WriteStartElement("child");
+    w->WriteEndElement();
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_EQ(out, "<root><child/></root>");
+}
+
+TEST(XmlWriterTests, IndentSettingTrue_ProducesIndentedOutput) {
+    XmlWriterSettings settings;
+    settings.Indent = true;
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString(settings));
+    w->WriteStartElement("root");
+    w->WriteStartElement("child");
+    w->WriteEndElement();
+    w->WriteEndElement();
+    std::string out = w->ToString();
+    EXPECT_NE(out.find('\n'), std::string::npos);
 }
 
 // ===========================================================================

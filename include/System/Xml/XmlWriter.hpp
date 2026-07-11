@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+#include "System/Xml/XmlWriterSettings.hpp"
+
 namespace System::Xml {
 
     struct XmlWriterState; ///< Opaque tinyxml2 state; defined in XmlWriter.cpp.
@@ -113,7 +115,9 @@ namespace System::Xml {
         /**
          * @brief Returns the serialized XML as a string.
          *
-         * Includes the XML declaration if @c WriteStartDocument() was called.
+         * Includes the XML declaration if @c WriteStartDocument() was called. Compact
+         * (no inserted whitespace) unless the writer was created with
+         * @c XmlWriterSettings::Indent set to @c true, matching real .NET's default.
          */
         [[nodiscard]] std::string ToString() const;
 
@@ -129,18 +133,25 @@ namespace System::Xml {
          * Call @c Close() or @c Flush() to write the file.
          *
          * @param outputFileName  Destination file path.
+         * @param settings        Formatting settings; only @c Indent is currently consulted
+         *                        (matches real @c XmlWriterSettings' default of @c false —
+         *                        compact, non-pretty-printed output).
          * @return Heap-allocated XmlWriter; caller owns the pointer.
          */
-        static XmlWriter* Create(const std::string& outputFileName);
+        static XmlWriter* Create(const std::string& outputFileName,
+                                  const XmlWriterSettings& settings = XmlWriterSettings());
 
         /**
          * @brief Creates an XmlWriter that serializes to an in-memory string.
          *
          * Use @c ToString() to retrieve the result.
          *
+         * @param settings  Formatting settings; only @c Indent is currently consulted
+         *                  (matches real @c XmlWriterSettings' default of @c false —
+         *                  compact, non-pretty-printed output).
          * @return Heap-allocated XmlWriter; caller owns the pointer.
          */
-        static XmlWriter* CreateToString();
+        static XmlWriter* CreateToString(const XmlWriterSettings& settings = XmlWriterSettings());
     };
 
 } // namespace System::Xml
