@@ -178,8 +178,15 @@ namespace System::Xml::Linq {
     }
 
     void XDocument::WriteTo(System::Xml::XmlWriter& writer) const {
-        if (declaration_) writer.WriteStartDocument();
+        // Verified against XDocument.cs's WriteTo(): real .NET always calls
+        // WriteStartDocument()/WriteEndDocument() as a matched pair, regardless of whether an
+        // explicit XDeclaration was set (the declaration's Standalone value, when present,
+        // only selects *which* WriteStartDocument overload -- it never skips the call). This
+        // port previously wrote a declaration only when declaration_ was non-null and never
+        // called WriteEndDocument() at all.
+        writer.WriteStartDocument();
         for (auto& c : children_) c->WriteTo(writer);
+        writer.WriteEndDocument();
     }
 
     void XDocument::Save(const std::string& filePath, SaveOptions options) const {

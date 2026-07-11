@@ -431,6 +431,18 @@ TEST(WriteToTests, XDocumentType_WritesDocType) {
     EXPECT_NE(w->ToString().find("<!DOCTYPE root>"), std::string::npos);
 }
 
+// Regression test for a wave-3 audit finding: XDocument::WriteTo() only wrote a declaration
+// when an explicit XDeclaration had been set, and never called WriteEndDocument() at all.
+// Verified against XDocument.cs's WriteTo(): real .NET always calls WriteStartDocument()/
+// WriteEndDocument() as a matched pair, regardless of whether an XDeclaration was set.
+TEST(WriteToTests, XDocument_NoExplicitDeclaration_StillWritesXmlDeclaration) {
+    XDocument doc(std::make_shared<XElement>("root"));
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    doc.WriteTo(*w);
+    EXPECT_NE(w->ToString().find("<?xml"), std::string::npos);
+    EXPECT_NE(w->ToString().find("<root"), std::string::npos);
+}
+
 // ===========================================================================
 // XElement.Value with mixed content
 // ===========================================================================
