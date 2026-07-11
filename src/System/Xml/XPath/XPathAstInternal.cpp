@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "System/Diagnostics/UnreachableException.hpp"
 #include "System/Double.hpp"
 #include "System/Xml/XPath/XPathException.hpp"
 
@@ -807,7 +808,7 @@ namespace System::Xml::XPath {
                     return XPathValue::Nodes(std::move(combined));
                 }
             }
-            throw std::logic_error("unreachable BinOp");
+            throw System::Diagnostics::UnreachableException("unreachable BinOp");
         }
 
         XPathValue EvaluateFunctionCall(const AstNode& node, EvalContext& ctx) {
@@ -886,7 +887,7 @@ XPathValue System::Xml::XPath::Internal::AstNode::Evaluate(EvalContext& ctx) con
         case AstKind::FunctionCall: return System::Xml::XPath::EvaluateFunctionCall(*this, ctx);
         case AstKind::LocationPath: return System::Xml::XPath::EvaluateLocationPath(*this, ctx);
     }
-    throw std::logic_error("unreachable AstKind");
+    throw System::Diagnostics::UnreachableException("unreachable AstKind");
 }
 
 System::Xml::XPath::XPathResultType System::Xml::XPath::Internal::AstNode::InferReturnType() const {
@@ -905,11 +906,11 @@ System::Xml::XPath::XPathResultType System::Xml::XPath::Internal::AstNode::Infer
                 case BinOp::Union:
                     return XPathResultType::NodeSet;
             }
-            throw std::logic_error("unreachable BinOp");
+            throw System::Diagnostics::UnreachableException("unreachable BinOp");
         case AstKind::FunctionCall: {
             auto it = System::Xml::XPath::FunctionTable().find(functionName);
             return it != System::Xml::XPath::FunctionTable().end() ? it->second.returnType : XPathResultType::Any;
         }
     }
-    throw std::logic_error("unreachable AstKind");
+    throw System::Diagnostics::UnreachableException("unreachable AstKind");
 }
