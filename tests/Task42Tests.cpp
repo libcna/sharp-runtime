@@ -586,6 +586,21 @@ TEST(AppDomainTests, BaseDirectory_EndsWithSlash) {
     EXPECT_EQ(System::AppDomain::CurrentDomain().getBaseDirectoryProperty().back(), '/');
 }
 
+#if defined(__linux__)
+// Regression/coverage test for a gap found while auditing AppDomain (ticket 69): the existing
+// tests only check "non-empty" and "ends with slash", which pass identically whether
+// /proc/self/exe resolution actually succeeded or silently fell back to the relative "./"
+// stub path -- neither invariant distinguishes the two. On Linux specifically, a successfully
+// resolved path is always absolute (readlink("/proc/self/exe", ...) never returns a relative
+// path), so asserting that catches a regression to the "./" fallback that the other two tests
+// would miss.
+TEST(AppDomainTests, BaseDirectory_Linux_IsAbsolutePath) {
+    const auto& dir = System::AppDomain::CurrentDomain().getBaseDirectoryProperty();
+    ASSERT_FALSE(dir.empty());
+    EXPECT_EQ(dir.front(), '/');
+}
+#endif
+
 TEST(AppDomainTests, SetGetData_Stubs_NoThrow) {
     int x = 1;
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().SetData("k", &x));
@@ -673,6 +688,21 @@ TEST(AppDomainTests, AddRemoveDomainUnload_NoThrow) {
     auto handler = [](void*, System::EventArgs&) {};
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_DomainUnload(handler));
     EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_DomainUnload(handler));
+}
+
+// Regression test for a coverage gap found while auditing AppDomain (ticket 69): the
+// UnhandledException and ProcessExit event stubs had zero test coverage, unlike the sibling
+// DomainUnload stub above.
+TEST(AppDomainTests, AddRemoveUnhandledException_NoThrow) {
+    System::UnhandledExceptionEventHandler handler = [](void*, System::UnhandledExceptionEventArgs&) {};
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_UnhandledException(handler));
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_UnhandledException(handler));
+}
+
+TEST(AppDomainTests, AddRemoveProcessExit_NoThrow) {
+    auto handler = [](void*, System::EventArgs&) {};
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().add_ProcessExit(handler));
+    EXPECT_NO_THROW(System::AppDomain::CurrentDomain().remove_ProcessExit(handler));
 }
 
 // ===========================================================================
