@@ -477,9 +477,16 @@ TEST(ExperimentalPropertyTests, ReadOnly_GetReturnsValue) {
     EXPECT_EQ(p.get(), 7);
 }
 
-TEST(ExperimentalPropertyTests, ReadOnly_Set_ThrowsLogicError) {
+// Regression test for a wave-3 audit finding: set() threw std::logic_error (an unrelated
+// std:: exception type invisible to code catching System::Exception&) instead of
+// System::NotSupportedException -- this Property never has a real .NET counterpart to
+// verify against (it's a SharpRuntime-internal experimental helper), but the project's
+// overall policy is that every thrown exception is a System:: type, and NotSupportedException
+// is the closest .NET-idiomatic match for "this operation is permanently unsupported on a
+// read-only property" (as opposed to NotImplementedException's "not yet implemented").
+TEST(ExperimentalPropertyTests, ReadOnly_Set_ThrowsNotSupportedException) {
     Property<int> p([](){ return 0; });
-    EXPECT_THROW(p.set(1), std::logic_error);
+    EXPECT_THROW(p.set(1), System::NotSupportedException);
 }
 
 TEST(ExperimentalPropertyTests, ImplicitConversion_WorksAsGetter) {

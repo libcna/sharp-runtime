@@ -12,6 +12,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include "System/NotSupportedException.hpp"
 
 #define DEF_PROP_AUTO(type, name, init) \
     private: type name##VVVV = init; \
@@ -44,12 +45,12 @@ namespace SharpRuntime::Experimental {
         Property(std::function<T()> customGetter, std::function<void(const T&)> customSetter = nullptr)
             : getter(customGetter), setter(customSetter) {}
 
-        /// Writes @p value via the custom setter. Throws std::logic_error if no setter was provided.
+        /// Writes @p value via the custom setter. Throws System::NotSupportedException if no setter was provided.
         T& operator=(const T& value) {
             if (setter) {
                 setter(value);
             } else {
-                throw std::logic_error("Setter not implemented.");
+                throw System::NotSupportedException("Setter not implemented.");
             }
             return cachedValue;
         }
@@ -62,12 +63,12 @@ namespace SharpRuntime::Experimental {
         T get() const {
             return getter();
         }
-        /// Writes @p value via the custom setter. Throws std::logic_error if no setter was provided.
+        /// Writes @p value via the custom setter. Throws System::NotSupportedException if no setter was provided.
         void set(T value) {
             if (setter) {
                 setter(value);
             } else {
-                throw std::logic_error("Setter not implemented.");
+                throw System::NotSupportedException("Setter not implemented.");
             }
         }
 
