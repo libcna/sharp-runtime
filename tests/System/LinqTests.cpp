@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "System/Linq.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using namespace System::Linq;
 
@@ -77,14 +78,18 @@ TEST(LinqTests, First_Found) {
     EXPECT_EQ(First<int>(v, [](const int& x) { return x > 1; }), 2);
 }
 
+// Regression tests for a wave-3 audit finding: First()/Min()/Max() threw std::invalid_argument
+// (an unrelated std:: exception type invisible to code catching System::Exception&) instead of
+// System::InvalidOperationException, which is what real .NET's Enumerable.First/Min/Max throw
+// for an empty (or, for First(predicate), non-matching) sequence.
 TEST(LinqTests, First_NotFound_Throws) {
     std::vector<int> v{1, 2};
-    EXPECT_THROW(First<int>(v, [](const int& x) { return x > 10; }), std::exception);
+    EXPECT_THROW(First<int>(v, [](const int& x) { return x > 10; }), System::InvalidOperationException);
 }
 
 TEST(LinqTests, First_NoPredicate_Empty_Throws) {
     std::vector<int> v;
-    EXPECT_THROW(First<int>(v), std::exception);
+    EXPECT_THROW(First<int>(v), System::InvalidOperationException);
 }
 
 // --- LastOrDefault ---
@@ -183,7 +188,11 @@ TEST(LinqTests, Max_Integers) {
 }
 
 TEST(LinqTests, Min_EmptyThrows) {
-    EXPECT_THROW(Min<int>({}), std::exception);
+    EXPECT_THROW(Min<int>({}), System::InvalidOperationException);
+}
+
+TEST(LinqTests, Max_EmptyThrows) {
+    EXPECT_THROW(Max<int>({}), System::InvalidOperationException);
 }
 
 // --- OrderBy / OrderByDescending ---
