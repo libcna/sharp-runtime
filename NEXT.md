@@ -1,13 +1,132 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `b0aba00`) — 11412 tests passing. Verified via:*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `5a8303b`) — 11449 tests passing. Verified via:*
 ```
-cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11412 tests from 1190 test suites, 0 failures
-rm -rf build_no_tests
-cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
-cmake --build build_no_tests --parallel 8 # library-only Release, fresh configure — 0 errors/0 warnings
+cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
+./build/SharpRuntimeTests                 # 11449 tests from 1191 test suites, 0 failures
+cmake --build build_no_tests --parallel 8 # library-only Release, incremental — 0 errors/0 warnings
 ```
+
+## Session checkpoint (2026-07-11, continued again) — external review triage: 8 real bugs fixed + full exception-normalization sweep closed out (14 commits)
+
+**Trigger:** the user pointed at an external Czech-language code review,
+`../sharp-runtime.md` (one directory up from the repo root), of an old ZIP snapshot at commits
+`fd1178a`/`16c823d` — confirmed via `git log` to be genuine ancestors of this branch, 238
+commits behind HEAD at the time. Instruction: study every claim in that review, verify against
+current code (not the stale snapshot), fix what's still real, ask if a decision is needed.
+
+**Triage outcome:** most of the review's claims turned out to already be fixed by earlier
+sessions (Ping's memset bug, DateTime constructor validation, CancellationTokenSource's
+`ThrowIfDisposed`, HttpClient's/Dns's exception types generally). Of what remained, 8 were
+confirmed still-real bugs (not stale) and got fixed this session; two required a user decision,
+asked via `AskUserQuestion` and both resolved before work started:
+
+- **MSVC/`__int128` blocker in `Decimal`/`Int128`/`UInt128`** → user chose "document as a
+  permanent deviation" (not attempt hand-rolled 128-bit arithmetic). Added a new "What is
+  MSVC-unsupported" table to `CLAUDE.md` (commit `58924bd`).
+- **16 remaining files with raw `std::*` exceptions** (a continuation of an exception-type
+  audit from an earlier session — see the memory note
+  `project_sharp_runtime_exception_type_audit.md`) → user chose "finish now, same batch."
+
+### Fixed (8 real bugs, commits `606924a`..`17f266c`)
+
+- **`OperatingSystem::IsAndroid()`/`IsIOS()` hardcoded `false`**, and `IsLinux()` didn't
+  exclude Android (Android's kernel also defines `__linux__`, so both could report `true`
+  simultaneously — real .NET treats `OSPlatform` values as mutually exclusive). Fixed all
+  three to use the correct preprocessor guards; confirmed `StoragePaths.cpp` already had real
+  `__ANDROID__` handling that `IsAndroid()` contradicted. (`606924a`)
+- **`ArrayList::GetEnumerator()`/`GetEnumerator(int,int)` unconditionally returned
+  `nullptr`** — a bare stub. Any code enumerating an `ArrayList`, including its own
+  `ICollection`-copying constructor, silently did nothing instead of iterating. Implemented a
+  real fail-fast enumerator (version-counter pattern mirroring `Queue::Enumerator`), bumped
+  `version_` at every verified `_version++` call site from real `ArrayList.cs`. Also corrected
+  `plan.sqlite3`: this type was marked `ignored` despite being fully implemented — same
+  pre-existing mis-classification pattern found again on `Hashtable` later this session.
+  (`1e4f234`, `Hashtable` correction in `2784dce`)
+- **`DateTime::TryParse` miscounted fractional-second digits** when a trailing ISO-8601
+  `Z`/offset marker was present (`fracLen = s.size() - 20` counted the zone marker as if it
+  were extra digits) — `".123Z"` silently produced `Millisecond=12` instead of `123`. Fixed by
+  counting only actual digit characters. Documented a separate, pre-existing, out-of-scope
+  limitation found along the way: fractions under 3 digits (e.g. `".5Z"`) are silently ignored
+  by an unrelated `s.size() >= 23` gate — not touched, not what the review flagged. (`408dc8a`)
+- **`HttpClient::parseUrl` broke on IPv6 literals** (`http://[::1]:8080/` — a bare
+  `rfind(':')` split the address in the middle of the brackets when no port was given, and
+  never stripped brackets even when a port was present) — the exact bug the review called out
+  by name. **`HttpClient`'s response status line silently defaulted to HTTP 200 OK** when
+  unparseable (no space in the line at all) instead of surfacing a failure. Extracted the
+  status-line parser into a new testable static `HttpClient::parseStatusLine()` (mirroring the
+  existing `parseUrl` "public for testability" pattern) that now throws
+  `HttpRequestException` on a malformed line. (`5c196fb`)
+- **`Dns` IPv6 resolution was effectively disabled**: `GetHostAddresses(host,
+  AddressFamily::InterNetworkV6)` unconditionally returned `{}` without calling
+  `getaddrinfo`; both `GetHostAddresses`/`GetHostEntry` hardcoded `hints.ai_family = AF_INET`
+  even for `Unspecified`; the result-collection loops only handled `AF_INET`
+  (`sockaddr_in`), silently dropping any `AF_INET6` result; and
+  `GetHostEntry(const IPAddress&)` (reverse lookup) had no IPv6 code path at all — it called
+  `getAddressProperty()`, which throws for IPv6 by contract. Fixed all four; added an
+  `IPv6`-literal short-circuit (`tryParseIPv6Literal`, reusing `IPAddress::TryParse`) mirroring
+  the existing IPv4 one. Verified against this build host's actual `getaddrinfo()` behavior
+  that a family/literal mismatch (e.g. asking for IPv6-only resolution of an IPv4 literal)
+  correctly fails with `EAI_ADDRFAMILY` — updated one pre-existing test that had hard-coded an
+  assertion on the old silent-empty-vector behavior. (`17f266c`)
+
+### Exception-normalization sweep closed out (16 files, commits `a2d1570`..`5a8303b`)
+
+Continuation of an earlier session's audit (see memory:
+`project_sharp_runtime_exception_type_audit.md`) that found raw `std::*` exceptions (invisible
+to code catching `System::Exception&`) escaping from otherwise-ported types. This session
+finished the remaining 16 files found by
+`grep -rE 'throw std::(runtime_error|invalid_argument|out_of_range|overflow_error|
+domain_error|logic_error)' include/ src/` (that grep now returns **zero matches** — the sweep
+is complete):
+
+| File(s) | Old type | New type | .NET source verified against |
+|---|---|---|---|
+| `Linq.hpp` (First/Min/Max, 4 sites) | `invalid_argument` | `InvalidOperationException` | `Enumerable`'s `ThrowHelper.ThrowNoElementsException`/`ThrowNoMatchException` |
+| `Int128.hpp` (`Abs(MinValue)`) | `overflow_error` | `OverflowException` | `Int128.Abs` → `Math.ThrowNegateTwosCompOverflow` |
+| `Text/Rune.hpp` (ctor) | `out_of_range` | `ArgumentOutOfRangeException` | `Rune(uint)` ctor |
+| `Buffers/SequenceReader.hpp` (`Advance`) | `out_of_range` | `ArgumentOutOfRangeException` | `SequenceReader<T>.Advance` |
+| `Buffers/Binary/BinaryPrimitives.hpp` (24 call sites, 1 helper) | `out_of_range` | `ArgumentOutOfRangeException` | `BinaryPrimitives` Read*/Write* — gave the shared `checkSize()` helper a `paramName` arg so Read (`source`) vs Write (`destination`) get the right name |
+| `Collections/Hashtable.hpp` (`Add`, 2 overloads) | `invalid_argument` | `ArgumentException` | `Hashtable.Add` duplicate-key path — also corrected `plan.sqlite3` `ignored`→`ported` (same gap as `ArrayList`) |
+| `Collections/ArrayList.hpp` (`RemoveAt`) | `out_of_range` | `ArgumentOutOfRangeException` | `ArrayList.RemoveAt` |
+| `SharpRuntime/Experimental/Property.hpp` (2 sites) | `logic_error` | `NotSupportedException` | no direct .NET counterpart (internal experimental helper); closest .NET-idiomatic fit |
+| 6× `Net/Http/Headers/*.cpp` (`StringWithQuality`, `TransferCodingWithQuality`, `MediaTypeWithQuality`, `RangeItem`, `ContentRange`, `ContentDisposition`, `RetryCondition` — 7 types, one file has 2) | `out_of_range` | `ArgumentOutOfRangeException` | each type's own constructor/setter in `System.Net.Http.Headers` — all use `ArgumentOutOfRangeException.ThrowIfNegative`/`ThrowIfGreaterThan` |
+| `Xml/XPath/XPathAstInternal.cpp` (4 sites, exhaustive-switch fallbacks) | `logic_error` | `System::Diagnostics::UnreachableException` | .NET 7+'s `System.Diagnostics.UnreachableException` — a direct type match, not a judgment call |
+
+Every file above got a real regression test where the old behavior was previously untested, or
+had its pre-existing test's hard-coded exception-type assertion corrected where one already
+existed. 11449/11449 tests passing (started this checkpoint at 11414).
+
+### Honest scope note
+
+- Two things found during triage were **deliberately left alone** as out of scope for this
+  batch: `DateTime::TryParse`'s separate `s.size() >= 23` fraction-length gate (a different,
+  pre-existing limitation the review didn't flag), and the general `parseUrl`/`parseStatusLine`
+  question of whether to extract more of `HttpClient`'s response-parsing internals into
+  testable static methods beyond what these two fixes needed.
+- `SequenceReader<T>` itself has no tracked row in `plan.sqlite3` (only
+  `SequenceReaderExtensions` does) — a pre-existing gap, not touched.
+- This checkpoint's "16 files" count is the exact, itemized, `grep`-verified figure — not a
+  prose estimate like earlier checkpoints' Threading figures.
+
+### Commands used to verify (same pattern every commit this batch)
+
+```
+cmake --build build --parallel 8                         # Debug — 0 errors/0 warnings, every commit
+./build/SharpRuntimeTests --gtest_filter="<targeted>"     # new/changed tests first
+./build/SharpRuntimeTests                                 # full suite — 11449/11449 passing at HEAD
+cmake --build build_no_tests --parallel 8                 # Release library-only — 0 errors/0 warnings
+```
+
+### Recommended next namespace
+
+Nothing in this batch was namespace-scoped (it was a targeted bug-fix/review-triage pass, not
+plan.sqlite3 traversal) — resume the plan.sqlite3 workflow in `prompt.md` from where the prior
+session's resume prompt (§10 below) left off: `System.Numerics.Colors`, then the small
+`System.Runtime.*`/`System.Security.*` namespaces, then the two large not-yet-started blocks
+(`System.Security.Cryptography`, `System.Text*`/`System.Xml.Serialization`).
+
+---
 
 ## Session checkpoint (2026-07-11, continued) — Threading high-risk moderate findings: 9 fixed, two-pass fresh audit (9 commits)
 
