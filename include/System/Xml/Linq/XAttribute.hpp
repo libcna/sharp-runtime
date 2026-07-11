@@ -28,9 +28,14 @@ namespace System::Xml::Linq {
         XAttribute* next_ = nullptr;
 
     public:
-        /** Constructs an attribute with an XName key and string value (plain strings convert implicitly via XName). */
-        XAttribute(const XName& name, const std::string& value)
-            : name_(name), value_(value) {}
+        /**
+         * @brief Constructs an attribute with an XName key and string value (plain strings
+         * convert implicitly via XName).
+         *
+         * @throws System::ArgumentException if @p name/@p value form an invalid namespace
+         * declaration (see @c ValidateAttribute in XAttribute.cpp for the exact rules).
+         */
+        XAttribute(const XName& name, const std::string& value);
 
         /** @brief Copies @p other's name/value. The clone starts detached (no parent, no next). */
         XAttribute(const XAttribute& other) : name_(other.name_), value_(other.value_) {}
@@ -43,8 +48,18 @@ namespace System::Xml::Linq {
         /** @return The attribute value string. */
         [[nodiscard]] const std::string& getValueProperty() const { return value_; }
 
-        /** Sets the attribute value. */
-        void setValueProperty(const std::string& v)               { value_ = v; }
+        /**
+         * @brief Sets the attribute value.
+         * @throws System::ArgumentException if this attribute is a namespace declaration and
+         * @p v would violate the namespace-declaration rules (see the constructor).
+         */
+        void setValueProperty(const std::string& v);
+
+        /**
+         * @return @c true if this attribute is a namespace declaration (@c xmlns="..." or
+         * @c xmlns:prefix="...").
+         */
+        [[nodiscard]] bool getIsNamespaceDeclarationProperty() const;
 
         /** @return Pointer to the next sibling attribute (in owning-element order), or nullptr. */
         [[nodiscard]] XAttribute* getNextAttributeProperty() const { return next_; }

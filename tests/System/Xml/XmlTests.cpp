@@ -17,6 +17,7 @@
 #include "System/Xml/XmlReader.hpp"
 #include "System/Xml/XmlWriter.hpp"
 #include "System/Xml/Linq/XName.hpp"
+#include "System/Xml/Linq/XNamespace.hpp"
 #include "System/Xml/Linq/XAttribute.hpp"
 #include "System/Xml/Linq/XElement.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
@@ -29,6 +30,7 @@ using System::Xml::XmlReader;
 using System::Xml::XmlWriter;
 using System::Xml::XmlWriterSettings;
 using System::Xml::Linq::XName;
+using System::Xml::Linq::XNamespace;
 using System::Xml::Linq::XAttribute;
 using System::Xml::Linq::XElement;
 using System::Xml::Linq::XDeclaration;
@@ -589,6 +591,64 @@ TEST(XAttributeTests, ToString_NamespacedAttribute_DoesNotEmitClarkNotation) {
 TEST(XAttributeTests, NextAttribute_DefaultNull) {
     XAttribute a("x", "1");
     EXPECT_EQ(a.getNextAttributeProperty(), nullptr);
+}
+
+// Regression tests for a wave-3 audit finding: XAttribute performed zero namespace-declaration
+// validation. Verified against XAttribute.cs's ValidateAttribute.
+TEST(XAttributeTests, IsNamespaceDeclaration_DefaultXmlns_IsTrue) {
+    XAttribute a(XName("", "xmlns"), "http://example.com");
+    EXPECT_TRUE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, IsNamespaceDeclaration_PrefixedXmlns_IsTrue) {
+    XAttribute a(XNamespace::Xmlns + "p", "http://example.com");
+    EXPECT_TRUE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, IsNamespaceDeclaration_OrdinaryAttribute_IsFalse) {
+    XAttribute a("id", "42");
+    EXPECT_FALSE(a.getIsNamespaceDeclarationProperty());
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_EmptyUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_XmlnsUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "http://www.w3.org/2000/xmlns/")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, PrefixedXmlnsDeclaration_XmlUriWithWrongPrefix_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "p", "http://www.w3.org/XML/1998/namespace")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, XmlnsXmlDeclaration_CorrectUri_DoesNotThrow) {
+    EXPECT_NO_THROW((XAttribute(XNamespace::Xmlns + "xml", "http://www.w3.org/XML/1998/namespace")));
+}
+
+TEST(XAttributeTests, XmlnsXmlDeclaration_WrongUri_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "xml", "http://example.com")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, XmlnsXmlnsDeclaration_Throws) {
+    EXPECT_THROW((XAttribute(XNamespace::Xmlns + "xmlns", "http://example.com")), System::ArgumentException);
+}
+
+TEST(XAttributeTests, DefaultXmlnsDeclaration_XmlUri_Throws) {
+    EXPECT_THROW((XAttribute(XName("", "xmlns"), "http://www.w3.org/XML/1998/namespace")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, DefaultXmlnsDeclaration_XmlnsUri_Throws) {
+    EXPECT_THROW((XAttribute(XName("", "xmlns"), "http://www.w3.org/2000/xmlns/")),
+                 System::ArgumentException);
+}
+
+TEST(XAttributeTests, SetValueProperty_ValidatesNamespaceDeclaration) {
+    XAttribute a(XNamespace::Xmlns + "p", "http://example.com");
+    EXPECT_THROW(a.setValueProperty(""), System::ArgumentException);
 }
 
 // ===========================================================================
