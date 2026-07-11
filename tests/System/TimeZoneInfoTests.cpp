@@ -558,6 +558,31 @@ TEST(TimeZoneInfoTests, TransitionTime_CreateFloating_InvalidWeek_Throws) {
         tod, 3, 0, System::DayOfWeek::Sunday), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests for a code-audit finding (ticket 243): CreateFixedDateRule/
+// CreateFloatingDateRule previously did not validate timeOfDay at all. Verified against real
+// .NET's TimeZoneInfo.TransitionTime.ValidateTransitionTime (TimeZoneInfo.TransitionTime.cs),
+// which throws ArgumentException when timeOfDay.Ticks >= TimeSpan.TicksPerDay (i.e. it has a
+// date component beyond DateTime.MinValue's implicit date) -- a full DateTime like year
+// 2024/January/1 with a time-of-day fell straight through with no validation before this fix.
+TEST(TimeZoneInfoTests, TransitionTime_CreateFixed_TimeOfDayWithDateComponent_Throws) {
+    DateTime withDate(2024, 1, 1, 2, 0, 0);
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(withDate, 3, 14),
+                 System::ArgumentException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFloating_TimeOfDayWithDateComponent_Throws) {
+    DateTime withDate(2024, 1, 1, 2, 0, 0);
+    EXPECT_THROW(TimeZoneInfo::TransitionTime::CreateFloatingDateRule(
+        withDate, 10, 4, System::DayOfWeek::Sunday), System::ArgumentException);
+}
+
+TEST(TimeZoneInfoTests, TransitionTime_CreateFixed_ValidTimeOfDay_DoesNotThrow) {
+    // A pure time-of-day (year/month/day fixed at DateTime.MinValue's 1/1/1) at
+    // millisecond granularity must still be accepted.
+    DateTime validTod(1, 1, 1, 2, 30, 0);
+    EXPECT_NO_THROW(TimeZoneInfo::TransitionTime::CreateFixedDateRule(validTod, 3, 14));
+}
+
 TEST(TimeZoneInfoTests, TransitionTime_DayProperty_StoredByFixedRule) {
     DateTime tod;
     auto t = TimeZoneInfo::TransitionTime::CreateFixedDateRule(tod, 7, 4);

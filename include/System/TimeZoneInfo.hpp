@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DateTimeOffset.hpp"
@@ -64,6 +65,25 @@ namespace System {
             [[nodiscard]] bool       getIsFixedDateRuleProperty() const { return isFixedDateRule_; }
 
             /**
+             * @brief Validates that @p timeOfDay represents only a time-of-day (no date
+             * component beyond DateTime.MinValue's implicit date) at millisecond granularity.
+             *
+             * C++ counterpart of the timeOfDay portion of .NET
+             * TimeZoneInfo.TransitionTime.ValidateTransitionTime -- real .NET also rejects a
+             * timeOfDay.Kind other than Unspecified, which does not apply here since this
+             * port's DateTime does not track DateTimeKind (see DateTime.hpp's documented
+             * Kind limitation).
+             * @throws ArgumentException if @p timeOfDay has a date component or sub-millisecond ticks.
+             */
+            static void validateTimeOfDay(const DateTime& timeOfDay) {
+                longcs ticks = timeOfDay.getTicksProperty();
+                if (ticks >= TimeSpan::TicksPerDay || ticks % TimeSpan::TicksPerMillisecond != 0)
+                    throw System::ArgumentException(
+                        "The supplied DateTime must have the Year, Month, and Day properties set to 1, "
+                        "and the Millisecond, and Ticks properties set to 0.", "timeOfDay");
+            }
+
+            /**
              * @brief Creates a fixed-date transition rule.
              *
              * C++ counterpart of .NET TransitionTime.CreateFixedDateRule(DateTime, int, int).
@@ -71,8 +91,10 @@ namespace System {
              * @param month     Month of the transition (1-12).
              * @param day       Day of the month (1-31).
              * @throws ArgumentOutOfRangeException if month or day is out of range.
+             * @throws ArgumentException if timeOfDay has a date component or sub-millisecond ticks.
              */
             static TransitionTime CreateFixedDateRule(DateTime timeOfDay, intcs month, intcs day) {
+                validateTimeOfDay(timeOfDay);
                 if (month < 1 || month > 12)
                     throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
                 if (day < 1 || day > 31)
@@ -95,9 +117,11 @@ namespace System {
              * @param week       Week of the month (1-5).
              * @param dayOfWeek  Day of the week (Sunday=0 … Saturday=6).
              * @throws ArgumentOutOfRangeException if month, week, or dayOfWeek is out of range.
+             * @throws ArgumentException if timeOfDay has a date component or sub-millisecond ticks.
              */
             static TransitionTime CreateFloatingDateRule(DateTime timeOfDay, intcs month,
                                                          intcs week, DayOfWeek dayOfWeek) {
+                validateTimeOfDay(timeOfDay);
                 if (month < 1 || month > 12)
                     throw ArgumentOutOfRangeException("month: Month must be between 1 and 12.");
                 if (week < 1 || week > 5)
