@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "System/ArgumentException.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
@@ -110,20 +111,20 @@ public:
     /**
      * @brief Adds an element with the specified key and value.
      * C++ counterpart of .NET Hashtable.Add(object, object?).
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     void Add(const void* key, void* value) override {
         std::string k = toKey(key);
-        if (_map.count(k)) throw std::invalid_argument("key already exists");
+        if (_map.count(k)) throw System::ArgumentException("Item has already been added. Key in dictionary: '" + k + "'");
         _map[k] = value ? *static_cast<std::any*>(value) : std::any{};
     }
 
     /**
      * @brief Adds a string key with a typed value.
-     * @throws std::invalid_argument if the key already exists.
+     * @throws System::ArgumentException if the key already exists.
      */
     void Add(const std::string& key, const std::any& value) {
-        if (_map.count(key)) throw std::invalid_argument("key already exists");
+        if (_map.count(key)) throw System::ArgumentException("Item has already been added. Key in dictionary: '" + key + "'");
         _map[key] = value;
     }
 
