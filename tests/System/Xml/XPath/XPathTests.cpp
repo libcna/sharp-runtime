@@ -507,6 +507,30 @@ TEST(XPathFunctionTests, Number_ExponentNotation_YieldsNaN) {
     EXPECT_TRUE(std::isnan(nav->Evaluate("number('1.5E-3')").getNumberProperty()));
 }
 
+// Regression test for a code-audit finding (ticket 236): std::from_chars(..., fixed) rejects
+// exponent notation as intended, but the C++ standard still has it recognize "nan"/"inf"/
+// "infinity" (case-insensitively) as valid floating-point spellings regardless of
+// chars_format -- so number("Infinity") previously produced +Infinity instead of the NaN
+// required by XPath 1.0's Number grammar, which has no such spellings at all.
+TEST(XPathFunctionTests, Number_NanAndInfinitySpellings_YieldNaN) {
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('NaN')").getNumberProperty()));
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('Infinity')").getNumberProperty()));
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('-Infinity')").getNumberProperty()));
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('inf')").getNumberProperty()));
+}
+
+// The leading-minus and leading-decimal-point forms that XPath 1.0's number() conversion (as
+// opposed to the Number *token* production used for in-expression literals) does allow must
+// keep working after the character-whitelist fix above.
+TEST(XPathFunctionTests, Number_LeadingMinusAndDecimalPoint_StillParse) {
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    EXPECT_DOUBLE_EQ(nav->Evaluate("number('-3.5')").getNumberProperty(), -3.5);
+    EXPECT_DOUBLE_EQ(nav->Evaluate("number('.5')").getNumberProperty(), 0.5);
+}
+
 TEST(XPathFunctionTests, Number_PlainDecimal_StillParsesCorrectly) {
     auto doc = LoadCatalog();
     std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
