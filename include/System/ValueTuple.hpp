@@ -319,17 +319,36 @@ struct ValueTuple4 {
  */
 template<typename T1, typename T2, typename T3, typename T4, typename T5>
 struct ValueTuple5 {
-    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5;
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
+    /** @brief The third element. */
+    T3 Item3;
+    /** @brief The fourth element. */
+    T4 Item4;
+    /** @brief The fifth element. */
+    T5 Item5;
 
+    /** @brief Default-constructs all elements. */
     ValueTuple5() = default;
+
+    /** @brief Constructs a ValueTuple5 with the specified elements. */
     ValueTuple5(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5)
         : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
           Item4(std::move(i4)), Item5(std::move(i5)) {}
 
+    /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple5& o) const {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
                Item4==o.Item4 && Item5==o.Item5;
     }
+
+    /**
+     * @brief Returns a hash code for this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T5>.GetHashCode().
+     */
     [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
@@ -338,6 +357,11 @@ struct ValueTuple5 {
         h = detail::vtHashCombine(h, detail::vtHash(Item5));
         return static_cast<intcs>(h);
     }
+
+    /**
+     * @brief Compares this instance to another ValueTuple5 lexicographically.
+     * @return -1 if less, 0 if equal, 1 if greater.
+     */
     [[nodiscard]] intcs CompareTo(const ValueTuple5& o) const {
         if (Item1 < o.Item1) return -1;
         if (o.Item1 < Item1) return 1;
@@ -351,6 +375,13 @@ struct ValueTuple5 {
         if (o.Item5 < Item5) return 1;
         return 0;
     }
+
+    /**
+     * @brief Returns a string that represents the value of this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T5>.ToString() — formats as
+     * "(Item1, Item2, Item3, Item4, Item5)".
+     */
     [[nodiscard]] std::string ToString() const {
         return "(" + detail::vtItemStr(Item1) + ", " + detail::vtItemStr(Item2) + ", " +
                      detail::vtItemStr(Item3) + ", " + detail::vtItemStr(Item4) + ", " +
@@ -375,17 +406,38 @@ struct ValueTuple5 {
  */
 template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
 struct ValueTuple6 {
-    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6;
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
+    /** @brief The third element. */
+    T3 Item3;
+    /** @brief The fourth element. */
+    T4 Item4;
+    /** @brief The fifth element. */
+    T5 Item5;
+    /** @brief The sixth element. */
+    T6 Item6;
 
+    /** @brief Default-constructs all elements. */
     ValueTuple6() = default;
+
+    /** @brief Constructs a ValueTuple6 with the specified elements. */
     ValueTuple6(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6)
         : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
           Item4(std::move(i4)), Item5(std::move(i5)), Item6(std::move(i6)) {}
 
+    /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple6& o) const {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 &&
                Item4==o.Item4 && Item5==o.Item5 && Item6==o.Item6;
     }
+
+    /**
+     * @brief Returns a hash code for this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T6>.GetHashCode().
+     */
     [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
@@ -395,6 +447,11 @@ struct ValueTuple6 {
         h = detail::vtHashCombine(h, detail::vtHash(Item6));
         return static_cast<intcs>(h);
     }
+
+    /**
+     * @brief Compares this instance to another ValueTuple6 lexicographically.
+     * @return -1 if less, 0 if equal, 1 if greater.
+     */
     [[nodiscard]] intcs CompareTo(const ValueTuple6& o) const {
         if (Item1 < o.Item1) return -1;
         if (o.Item1 < Item1) return 1;
@@ -410,6 +467,13 @@ struct ValueTuple6 {
         if (o.Item6 < Item6) return 1;
         return 0;
     }
+
+    /**
+     * @brief Returns a string that represents the value of this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T6>.ToString() — formats as
+     * "(Item1, Item2, Item3, Item4, Item5, Item6)".
+     */
     [[nodiscard]] std::string ToString() const {
         return "(" + detail::vtItemStr(Item1) + ", " + detail::vtItemStr(Item2) + ", " +
                      detail::vtItemStr(Item3) + ", " + detail::vtItemStr(Item4) + ", " +
@@ -435,18 +499,41 @@ struct ValueTuple6 {
 template<typename T1, typename T2, typename T3, typename T4,
          typename T5, typename T6, typename T7>
 struct ValueTuple7 {
-    T1 Item1; T2 Item2; T3 Item3; T4 Item4; T5 Item5; T6 Item6; T7 Item7;
+    /** @brief The first element. */
+    T1 Item1;
+    /** @brief The second element. */
+    T2 Item2;
+    /** @brief The third element. */
+    T3 Item3;
+    /** @brief The fourth element. */
+    T4 Item4;
+    /** @brief The fifth element. */
+    T5 Item5;
+    /** @brief The sixth element. */
+    T6 Item6;
+    /** @brief The seventh element. */
+    T7 Item7;
 
+    /** @brief Default-constructs all elements. */
     ValueTuple7() = default;
+
+    /** @brief Constructs a ValueTuple7 with the specified elements. */
     ValueTuple7(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7)
         : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
           Item4(std::move(i4)), Item5(std::move(i5)), Item6(std::move(i6)),
           Item7(std::move(i7)) {}
 
+    /** @brief Determines whether this instance equals another. */
     [[nodiscard]] bool Equals(const ValueTuple7& o) const {
         return Item1==o.Item1 && Item2==o.Item2 && Item3==o.Item3 && Item4==o.Item4 &&
                Item5==o.Item5 && Item6==o.Item6 && Item7==o.Item7;
     }
+
+    /**
+     * @brief Returns a hash code for this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T7>.GetHashCode().
+     */
     [[nodiscard]] intcs GetHashCode() const noexcept {
         size_t h = detail::vtHash(Item1);
         h = detail::vtHashCombine(h, detail::vtHash(Item2));
@@ -457,6 +544,11 @@ struct ValueTuple7 {
         h = detail::vtHashCombine(h, detail::vtHash(Item7));
         return static_cast<intcs>(h);
     }
+
+    /**
+     * @brief Compares this instance to another ValueTuple7 lexicographically.
+     * @return -1 if less, 0 if equal, 1 if greater.
+     */
     [[nodiscard]] intcs CompareTo(const ValueTuple7& o) const {
         if (Item1 < o.Item1) return -1;
         if (o.Item1 < Item1) return 1;
@@ -474,6 +566,13 @@ struct ValueTuple7 {
         if (o.Item7 < Item7) return 1;
         return 0;
     }
+
+    /**
+     * @brief Returns a string that represents the value of this instance.
+     *
+     * C++ counterpart of .NET ValueTuple<T1..T7>.ToString() — formats as
+     * "(Item1, Item2, Item3, Item4, Item5, Item6, Item7)".
+     */
     [[nodiscard]] std::string ToString() const {
         return "(" + detail::vtItemStr(Item1) + ", " + detail::vtItemStr(Item2) + ", " +
                      detail::vtItemStr(Item3) + ", " + detail::vtItemStr(Item4) + ", " +
