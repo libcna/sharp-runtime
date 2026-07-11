@@ -1,6 +1,151 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `c9a905f`) — 11393 tests passing (Debug, default `cmake --build build --parallel 8` config; also verified clean on a library-only `-DCMAKE_BUILD_TYPE=Release -DSHARP_RUNTIME_BUILD_TESTS=OFF` rebuild after this batch).*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `b0aba00`) — 11412 tests passing. Verified via:*
+```
+cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
+./build/SharpRuntimeTests                 # 11412 tests from 1190 test suites, 0 failures
+rm -rf build_no_tests
+cmake -S . -B build_no_tests -DSHARP_RUNTIME_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build_no_tests --parallel 8 # library-only Release, fresh configure — 0 errors/0 warnings
+```
+
+## Session checkpoint (2026-07-11, continued) — Threading high-risk moderate findings: 9 fixed, two-pass fresh audit (9 commits)
+
+**Scope for this pass, per explicit user instruction:** focus exclusively on Threading's
+remaining moderate findings, treating "moderate" as potentially high-risk. Prioritize race
+conditions, cancellation/disposal correctness, callback ordering, deadlock/reentrancy,
+wrong exception types, silent wrong behavior, undocumented .NET deviations, and flaky/
+under-tested timing behavior. Explicitly **not** in scope: ordinary minor cleanup, Text.Json
+refactors, Net/XML work.
+
+**Methodology:** the previous checkpoints' "26 moderate + 10 minor" Threading figure was
+prose, never itemized (see the caveat in the wave-3 catalogue section further down: "Threading's
+own remaining-findings text ends '...and more' with the detail not preserved"). Rather than
+guess which of those were still real, dispatched two read-only audit forks that re-derived
+concrete findings by reading current source against `/rv/tmp/runtime/src/libraries/`, explicitly
+told what was already fixed in prior sessions so they wouldn't re-report it:
+
+- **Pass 1** covered most of `include/System/Threading/` + `src/System/Threading/` (all files
+  except 8 explicitly time-boxed out). Found 6 findings, all fixed. Reported the following files
+  clean (read in full, no new issues): `ReaderWriterLockSlim.hpp`, `Tasks/Task.hpp`,
+  `Tasks/TaskCompletionSource.hpp`, `CancellationTokenSource.hpp`, `CancellationToken.hpp/.cpp`,
+  `Barrier.hpp`, `WaitHandle.hpp`, `ThreadLocal.hpp`, `AsyncLocal.hpp`, `Monitor.hpp`,
+  `ReaderWriterLock.hpp`, `Tasks/ValueTask.hpp`, `ManualResetEventSlim.hpp`, `Mutex.hpp`,
+  `SpinWait.hpp`, `LazyInitializer.hpp`, `EventWaitHandle.hpp`, `Semaphore.hpp`,
+  `Tasks/TaskFactory.hpp`, `ThreadPool.hpp`.
+- **Pass 2** covered the 8 files pass 1 didn't reach: `Lock.hpp`, `AutoResetEvent.hpp`,
+  `ManualResetEvent.hpp`, `Tasks/Parallel.hpp` (full read this time), `Tasks/TaskScheduler.hpp`/
+  `.cpp`, `Thread.hpp`/`.cpp`, `Interlocked.hpp`, `Volatile.hpp`. Found 3 findings, all fixed.
+  `AutoResetEvent.hpp`, `ManualResetEvent.hpp`, `Tasks/TaskScheduler.hpp`/`.cpp`, `Thread.cpp`,
+  `Interlocked.hpp`, `Volatile.hpp` reported clean.
+
+Between the two passes, **every file under `include/System/Threading/` and
+`src/System/Threading/` has now been freshly audited** against the 8 requested risk categories
+this session. See "Honest scope note" below for what this claim does and doesn't cover.
+
+### Fixed (9 findings, commits `5daef24`..`b0aba00`)
+
+- **`CancellationTokenRegistration::Dispose()` didn't wait for an in-flight callback** — a
+  no-op race when the callback was already claimed by a concurrent `Cancel()`; returned
+  immediately instead of waiting, risking use-after-free if the caller tears down a resource
+  the callback references right after `Dispose()`. Verified against
+  `CancellationTokenRegistration.cs`'s documented `Dispose()` contract
+  (`WaitForCallbackIfNecessary`). Added `executingId`/`executingThreadId`/`callbackFinished`
+  (condition_variable) to the shared state; same-thread self-unregister detected and skipped
+  to avoid deadlock. 2 regression tests, one exercising the actual race window.
+- **`Channel<T>::ReadAsync()`/`WriteAsync()` captured raw `this`** in a lambda run on a
+  detached background thread (`Task`'s `std::async`) — use-after-free if the caller drops
+  every reference to the `Channel`/`Reader`/`Writer` right after issuing the call. **Confirmed
+  via a standalone AddressSanitizer repro**: pre-fix code reliably crashed with a
+  heap-use-after-free on the first iteration; fix showed zero ASan errors across multiple
+  runs. Fixed via `std::enable_shared_from_this` + `shared_from_this()` instead of raw `this`.
+  2 regression tests.
+- **`RegisteredWaitHandle::Unregister()` detached the background wait thread** instead of
+  joining — could still be blocked inside `waitObject->WaitOne()` when `Unregister()` returns,
+  racing a caller that deletes `waitObject` right after. Verified against
+  `RegisteredWaitHandle.Portable.cs`; this port has no ref-counted-handle equivalent to
+  .NET's `SafeWaitHandle.DangerousAddRef`, so blocking (joining) is the simpler safe
+  alternative — documented as a deliberate deviation from .NET's non-blocking
+  `Unregister(null)` contract. Self-unregister (called from within the wait thread's own
+  callback) detaches instead, to avoid a self-join deadlock. 1 regression test using a
+  `WaitHandle` test double that tracks in-flight `WaitOne()` calls; verified it fails
+  pre-fix.
+- **`Timer::Change()` silently discarded `dueTime` after the first fire, and wasn't
+  interruptible mid-wait** — `run()` used non-interruptible `sleep_for` (a `Change()` call
+  during the between-fires wait had no effect until the stale deadline elapsed) and
+  unconditionally derived the next `dueTime` from `period` after every fire (clobbering a
+  fresh `dueTime` a mid-callback `Change()` call had just set). Verified against
+  `TimerQueue.UpdateTimer` (every `Change()` reschedules relative to when it's called).
+  Replaced `sleep_for` with `condition_variable::wait_until` + a generation counter. 2
+  regression tests; verified both fail pre-fix.
+- **`CountdownEvent::Reset()` skipped `ObjectDisposedException`, and its negative-count
+  sentinel swallowed validation** — `Reset(intcs count = -1)` used `-1` as a sentinel for
+  "use `InitialCount`", so an explicit `Reset(-1)` call silently reset instead of throwing as
+  real .NET's `Reset(int)` does for any negative count. Verified against
+  `CountdownEvent.cs`. Split into `Reset()`/`Reset(intcs count)`, both now disposal-checked.
+  2 regression tests.
+- **`SemaphoreSlim` had no `disposed_`/`ObjectDisposedException` support at all** —
+  `Dispose()` was a true no-op, inconsistent with every sibling Slim primitive already fixed
+  this session. Verified against `SemaphoreSlim.cs`'s `CheckDispose()`: check order differs
+  per method (`Wait(int)` validates its timeout before checking disposal; `Release(int)`
+  checks disposal first) — matched each method's own ordering. 3 regression tests.
+- **`Thread::Start()`/`Start(void*)` captured raw `this`; `~Thread()` detaches, not joins** —
+  the same bug class as the `Channel`/`RegisteredWaitHandle` fixes above, in the most
+  fundamental of the three primitives. **Confirmed via a standalone AddressSanitizer repro**:
+  pre-fix code reliably crashed with heap-use-after-free in `Thread::Start()`'s lambda; fix
+  showed zero ASan errors. Fixed via the same `shared_ptr<State>` indirection pattern already
+  used by `Timer`/`RegisteredWaitHandle`/`CancellationTokenSource` this session
+  (`finished_`/`isBackground_`/`managedThreadId_` moved into a heap-allocated `RunState`).
+  2 regression tests.
+- **`Lock::TryEnter(intcs)`/`TryEnter(TimeSpan)` skipped timeout validation** —
+  `Lock.hpp` didn't even include `WaitHandle.hpp`, unlike every sibling wait primitive. A
+  negative timeout other than `-1` silently behaved like a non-blocking `try_lock()` instead
+  of throwing. Verified against `Lock.cs`. 3 regression tests.
+- **`Parallel::For` (with `ParallelLoopState`) / both `ForEach` overloads launched unbounded
+  concurrent `std::async` tasks**, unlike the sibling `For(..., ParallelOptions, ...)`
+  overload, which already batches. For a large source, this could spawn far more OS threads
+  than the hardware supports; past the creation limit, `std::async` itself throws
+  `std::system_error` **unwrapped**, breaking the documented `AggregateException` contract.
+  Extracted the existing batching pattern into a shared helper. 2 regression tests tracking
+  observed peak concurrency; verified both fail pre-fix (64 concurrent vs. a 16 bound on the
+  CI machine).
+
+All 9 fixes followed the same discipline: verify against real .NET source → write/extend a
+regression test (verified it fails pre-fix by temporarily `git stash`-ing the fix and
+re-running, sometimes with a standalone AddressSanitizer repro for the two genuine
+memory-safety bugs) → fix → full Debug rebuild + targeted test run → bump the relevant
+`plan.sqlite3` row → commit → push. Every commit landed cleanly on `origin/feature/work`.
+
+### Honest scope note — what "9 fixed, audit complete" does and doesn't mean
+
+- **Does mean:** every `.hpp`/`.cpp` file under `System::Threading` has been read end-to-end
+  this session specifically hunting for the 8 requested risk categories, and every concrete
+  finding from that search has been fixed with a verified-failing-pre-fix regression test.
+- **Does not mean:** the older prose "26 moderate + 10 minor" catalogue figure from earlier
+  sessions has been itemized and reconciled to zero. That figure was never broken into a
+  concrete list, was known-stale in several other namespaces this session already found (Xml,
+  Net), and likely included lower-risk items (message-text wording, minor doc-comment gaps,
+  API-surface completeness) that were explicitly out of scope for this pass by the user's own
+  instruction ("do not touch ordinary minor cleanup"). A full item-by-item reconciliation
+  against that old text was not attempted and would need a separate pass if wanted.
+- **Deliberately still deferred, not blocked:** `Task::Wait()`/`getResultProperty()`/
+  `ValueTask::getResultProperty()` propagate the original exception type unwrapped instead of
+  wrapping in `AggregateException` — a documented, intentional simplification from an earlier
+  session with ~10 existing tests asserting the unwrapped behavior. Both audit forks were
+  explicitly told not to re-report this; it needs a user design decision whenever revisited,
+  and does not block other namespaces.
+- **Blocked items:** none. All 9 findings from both audit passes were targeted, well-scoped
+  fixes; nothing required a design decision beyond what's already documented above.
+
+**Recommended next namespace:** per the last checkpoint before this one, the broader
+"everything else, ordinary-severity moderates across all namespaces" sweep (Net core+Sockets
+~5 remaining, Net.Http/WebSockets ~4, plus whatever Xml/Text.Json minors remain) is still the
+next item in priority order once Threading-specific work is paused. Given this session's
+experience that prose-catalogued counts are consistently stale, the same "dispatch a fresh
+read-only audit fork per namespace, then fix with verified-failing regression tests" pattern
+used for Threading this session is recommended over trusting the old catalogue text directly.
+
+## Session checkpoint (2026-07-11, continued) — Text.Json's 6 remaining dangerous findings: 3 fixed, 3 flagged as bigger lifts (3 commits)
 
 ## Session checkpoint (2026-07-11, continued) — Text.Json's 6 remaining dangerous findings: 3 fixed, 3 flagged as bigger lifts (3 commits)
 
