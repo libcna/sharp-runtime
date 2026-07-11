@@ -13,7 +13,7 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/AggregateException.hpp"
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
@@ -117,7 +117,7 @@ namespace System::Threading::Tasks {
         /** Executes a for loop in parallel, respecting MaxDegreeOfParallelism in @p opts. */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive, const ParallelOptions& opts,
                                        std::function<void(intcs)> body) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)opts; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -151,7 +151,7 @@ namespace System::Threading::Tasks {
          */
         static ParallelLoopResult For(intcs fromInclusive, intcs toExclusive,
                                        std::function<void(intcs, ParallelLoopState&)> body) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)fromInclusive; (void)toExclusive; (void)body;
             throw System::PlatformNotSupportedException("Parallel::For requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -178,7 +178,7 @@ namespace System::Threading::Tasks {
         /** Executes a foreach loop over source in parallel. */
         template<typename TSource>
         static ParallelLoopResult ForEach(const std::vector<TSource>& source, std::function<void(TSource)> body) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -205,7 +205,7 @@ namespace System::Threading::Tasks {
         template<typename TSource>
         static ParallelLoopResult ForEach(const std::vector<TSource>& source,
                                            std::function<void(TSource, ParallelLoopState&)> body) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)source; (void)body;
             throw System::PlatformNotSupportedException("Parallel::ForEach requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -231,7 +231,7 @@ namespace System::Threading::Tasks {
 
         /** Executes all actions in parallel, blocking until all have completed. */
         static void Invoke(std::initializer_list<std::function<void()>> actions) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)actions;
             throw System::PlatformNotSupportedException("Parallel::Invoke requires pthreads (not available in Emscripten single-threaded build)");
 #else

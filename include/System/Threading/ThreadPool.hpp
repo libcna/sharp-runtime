@@ -13,7 +13,7 @@
 #include "System/Threading/WaitCallback.hpp"
 #include "System/Threading/WaitHandle.hpp"
 #include "System/Threading/WaitOrTimerCallback.hpp"
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
@@ -31,7 +31,7 @@ namespace System::Threading {
         static bool QueueUserWorkItem(std::function<void()> callBack) {
             if (!callBack)
                 throw System::ArgumentNullException("callBack");
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             throw System::PlatformNotSupportedException("ThreadPool::QueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
             std::thread(std::move(callBack)).detach();
@@ -43,7 +43,7 @@ namespace System::Threading {
         static bool QueueUserWorkItem(std::function<void(void*)> callBack, void* state) {
             if (!callBack)
                 throw System::ArgumentNullException("callBack");
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)state;
             throw System::PlatformNotSupportedException("ThreadPool::QueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -60,7 +60,7 @@ namespace System::Threading {
 
         /** Retrieves the maximum number of concurrent threads. */
         static void GetMaxThreads(int& workerThreads, int& completionPortThreads) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             workerThreads = 1;
             completionPortThreads = 1;
 #else
@@ -78,7 +78,7 @@ namespace System::Threading {
         static bool UnsafeQueueUserWorkItem(IThreadPoolWorkItem* callBack, bool /*preferLocal*/) {
             if (!callBack)
                 throw System::ArgumentNullException("callBack");
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             throw System::PlatformNotSupportedException("ThreadPool::UnsafeQueueUserWorkItem requires pthreads (not available in Emscripten single-threaded build)");
 #else
             std::thread([callBack]{ callBack->Execute(); }).detach();

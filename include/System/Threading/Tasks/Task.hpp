@@ -14,7 +14,15 @@
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
 #include "System/Threading/Tasks/TaskStatus.hpp"
-#if defined(__EMSCRIPTEN__)
+// Emscripten: std::async/std::thread need pthreads, which Emscripten only
+// provides when the whole program is compiled AND linked with `-pthread`
+// (Web Workers + SharedArrayBuffer under the hood -- the page must also be
+// cross-origin isolated via COOP/COEP headers). The toolchain defines
+// __EMSCRIPTEN_PTHREADS__ exactly in that configuration, so the throwing
+// stubs below apply ONLY to the single-threaded wasm build -- which is what
+// their own message always said. A -pthread wasm build now gets the real
+// std::async implementation, same as every native platform.
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
@@ -46,7 +54,7 @@ namespace System::Threading::Tasks {
          * @param action The work to execute asynchronously.
          */
         explicit Task(std::function<void()> action) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)action;
             throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -79,7 +87,7 @@ namespace System::Threading::Tasks {
         Task(std::function<void()> action, System::Threading::CancellationToken token)
             : cancellationToken_(token)
         {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)action;
             throw System::PlatformNotSupportedException("Task: std::async requires pthreads (not available in Emscripten single-threaded build)");
 #else
@@ -206,7 +214,7 @@ namespace System::Threading::Tasks {
          * @param milliseconds Delay duration in milliseconds.
          */
         static Task Delay(int milliseconds) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)milliseconds;
             throw System::PlatformNotSupportedException("Task::Delay requires pthreads (not available on Emscripten).");
 #else
@@ -243,7 +251,7 @@ namespace System::Threading::Tasks {
          * @param func Factory function that produces the result.
          */
         explicit TaskT(std::function<TResult()> func) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)func;
             throw System::PlatformNotSupportedException("TaskT: std::async requires pthreads (not available in Emscripten single-threaded build)");
 #else

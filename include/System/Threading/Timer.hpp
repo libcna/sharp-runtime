@@ -12,7 +12,7 @@
 #include <thread>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
 #  include "System/PlatformNotSupportedException.hpp"
 #endif
 
@@ -68,7 +68,7 @@ namespace System::Threading {
         {
             System::ArgumentOutOfRangeException::ThrowIfLessThan(dueTime, static_cast<intcs>(-1), "dueTime");
             System::ArgumentOutOfRangeException::ThrowIfLessThan(period, static_cast<intcs>(-1), "period");
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
             (void)callback; (void)state; (void)dueTime; (void)period;
             throw System::PlatformNotSupportedException("Timer requires pthreads (not available in Emscripten single-threaded build)");
 #else
