@@ -60,20 +60,28 @@ namespace System {
          * @brief Returns a Span over vector elements starting at @p start.
          *
          * C++ counterpart of .NET MemoryExtensions.AsSpan<T>(T[], int).
+         * @throws System::ArgumentOutOfRangeException if @p start is out of bounds.
          */
         template<typename T>
         [[nodiscard]] static Span<T> AsSpan(std::vector<T>& v, SharpRuntime::intcs start) {
-            return Span<T>(v.data() + start, static_cast<SharpRuntime::intcs>(v.size()) - start);
+            auto sz = static_cast<SharpRuntime::intcs>(v.size());
+            if (start < 0 || start > sz)
+                throw System::ArgumentOutOfRangeException("start");
+            return Span<T>(v.data() + start, sz - start);
         }
 
         /**
          * @brief Returns a Span over @p length elements of vector starting at @p start.
          *
          * C++ counterpart of .NET MemoryExtensions.AsSpan<T>(T[], int, int).
+         * @throws System::ArgumentOutOfRangeException if @p start or @p length is out of bounds.
          */
         template<typename T>
         [[nodiscard]] static Span<T> AsSpan(std::vector<T>& v, SharpRuntime::intcs start,
                                              SharpRuntime::intcs length) {
+            auto sz = static_cast<SharpRuntime::intcs>(v.size());
+            if (start < 0 || length < 0 || start + length > sz)
+                throw System::ArgumentOutOfRangeException("start");
             return Span<T>(v.data() + start, length);
         }
 
@@ -617,6 +625,23 @@ namespace System {
             for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
                 if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
                     Detail::MemoryExtensionsElementEquals(span[i], value1)) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Returns the index of the last occurrence of any of three values.
+         *
+         * C++ counterpart of .NET MemoryExtensions.LastIndexOfAny<T>(ReadOnlySpan<T>, T, T, T).
+         * @return Index of last match, or -1 if not found.
+         */
+        template<typename T>
+        [[nodiscard]] static SharpRuntime::intcs LastIndexOfAny(ReadOnlySpan<T> span,
+                                                                 const T& value0, const T& value1,
+                                                                 const T& value2) {
+            for (SharpRuntime::intcs i = span.getLengthProperty() - 1; i >= 0; --i)
+                if (Detail::MemoryExtensionsElementEquals(span[i], value0) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value1) ||
+                    Detail::MemoryExtensionsElementEquals(span[i], value2)) return i;
             return -1;
         }
 

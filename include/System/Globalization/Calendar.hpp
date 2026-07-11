@@ -448,12 +448,23 @@ public:
     /**
      * @brief Returns a DateTime that is the specified number of months from the given DateTime.
      *
-     * C++ counterpart of .NET Calendar.AddMonths(DateTime, int).
+     * C++ counterpart of .NET Calendar.AddMonths(DateTime, int). Verified against
+     * GregorianCalendar.cs's AddMonths, which rejects |months| > 120000 before doing any
+     * arithmetic: without that check, a caller-supplied @p months near INT_MAX/INT_MIN makes
+     * `(year-1)*12 + (month-1) + months` overflow signed int -- confirmed via a standalone
+     * UBSan repro that AddMonths(<year 9999 date>, INT_MAX) silently produced a nonsensical
+     * negative "year" instead of throwing, rather than the clean, documented exception .NET's
+     * bounds check produces. 120000 months (10000 years) safely covers every representable
+     * DateTime year range with no realistic legitimate use case beyond it.
      * @param time   The starting DateTime.
      * @param months The number of months to add.
      * @return A new DateTime offset by @p months.
+     * @throws System::ArgumentOutOfRangeException if @p months is outside [-120000, 120000].
      */
     virtual System::DateTime AddMonths(const System::DateTime& time, int months) const {
+        if (months < -120000 || months > 120000)
+            throw System::ArgumentOutOfRangeException("months", std::to_string(months),
+                "Valid values are between -120000 and 120000, inclusive.");
         int totalMonths = (time.getYearProperty() - 1) * 12 + (time.getMonthProperty() - 1) + months;
         int year  = totalMonths / 12 + 1;
         int month = totalMonths % 12 + 1;

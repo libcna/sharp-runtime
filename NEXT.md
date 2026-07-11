@@ -1,11 +1,106 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `5a8303b`) — 11449 tests passing. Verified via:*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `99fd000`) — 11557 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11449 tests from 1191 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11557 tests from 1197 test suites, 0 failures
 cmake --build build_no_tests --parallel 8 # library-only Release, incremental — 0 errors/0 warnings
 ```
+
+## Session checkpoint (2026-07-11, continued again) — ticket-workflow pivot: `task` table 100% classified, 16 P2 code-audit tickets closed (238-253, 16 commits)
+
+**Trigger:** `plan.sqlite3`'s `task` table (namespace/.NET-type classification — `status` in
+`''`/`todo`/`ported`/`ignore`/`tobedecided`) reached 100% classification with nothing left to
+process. Work pivoted to the separate `ticket` table (stabilization work — `status` in
+`todo`/`doing`/`done`/`blocked`/`needs_user`/`wontfix`, `priority` P0-P3). Its P0/P1 tiers were
+already fully done in earlier sessions (see the memory note
+`project_sharp_runtime_exception_type_audit.md` and this file's own earlier checkpoints below),
+leaving P2 (~620 items at the start of this batch) and P3 (7 items) as the active queue. **This
+is the first NEXT.md checkpoint to document the ticket-table workflow at all** — earlier
+checkpoints below predate the pivot and describe a different (now-superseded) "dangerous-moderate
+findings sweep" process.
+
+**Per-ticket workflow** (full detail in `prompt.md`): read the target file fully; verify every
+non-trivial claim against real .NET reference source in `/rv/tmp/runtime/src/libraries/` (never
+trust memory/assumption); fix real bugs found (not paper over them) and add regression tests for
+anything fixed; confirm `cmake --build build --parallel 8` and `./build/SharpRuntimeTests` are
+clean; mark `doing`→`done` in `plan.sqlite3` with detailed notes including the commit hash;
+commit+push to `feature/work` (routine pushes there are pre-authorized); move to the next ticket
+without stopping to ask. Several genuine bugs in this batch were only caught by going one step
+further than static reading — a standalone ASan/UBSan repro or a small throwaway test program —
+which is worth continuing as a habit, not just skimming for "looks wrong."
+
+**To resume:**
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+Next up is **ticket 254** (`include/System/Environment.hpp`). 609 P2/P3 tickets remain `todo` as
+of this checkpoint, out of 1486 total (776 `done`, 100 `blocked` — almost all pre-existing,
+self-documented policy-deferral tickets like #136/#137/#138, which depend on ticket #43's
+unresolved global `int`→`intcs` policy decision and should not be actioned until that changes; 1
+`needs_user`).
+
+### Fixed this batch (16 tickets, commits `9873972`..`99fd000`)
+
+- **`MemoryExtensions::AsSpan(vector, start[, length])`** had zero bounds validation — raw
+  pointer arithmetic on out-of-range input, worse than even a wrongly-typed exception. Also added
+  the missing 3-value `LastIndexOfAny` overload (present on sibling `IndexOfAny` and in real
+  .NET, absent here). (ticket 238, `9873972`)
+- **`Socket::Poll(-1, mode)`** never actually blocked — building a `timeval` unconditionally from
+  `microSeconds` for the -1 "infinite" sentinel produced an invalid negative `tv_usec`, so
+  `select()` failed `EINVAL` and returned immediately instead of waiting forever as documented.
+  **`Socket::Connect(host, port)`** only ever tried `addresses[0]` from DNS resolution instead of
+  every candidate address like real .NET. (ticket 240, `f8adcbc`)
+- **`Decimal(double)`** invoked real UB: `std::llround(v)`'s return type (`long long`, max
+  ~9.2e18) is far smaller than Decimal's own ~7.9e28 mantissa range, so e.g. `Decimal(1e20)`
+  silently produced garbage instead of the correct value. Confirmed via a standalone UBSan repro.
+  Fixed by splitting into two 64-bit limbs instead of routing through `long long`. (ticket 241,
+  `257980d`)
+- **`TimeZoneInfo::TransitionTime::CreateFixedDateRule`/`CreateFloatingDateRule`** never
+  validated `timeOfDay` at all — a caller could pass a full multi-year `DateTime` as a
+  time-of-day and have it silently accepted. (ticket 243, `079a424`)
+- **`Double::Parse`/`TryParse`** (and identically, **`Single::Parse`/`TryParse`**) silently
+  accepted `"inf"`, `"-inf"`, `"nan(123)"` — `std::from_chars`'s floating-point grammar
+  recognizes these regardless of `chars_format` (a C++ standard requirement), but real .NET only
+  recognizes the exact case-insensitive tokens `Infinity`/`+Infinity`/`-Infinity`/`NaN`/`+NaN`/
+  `-NaN`. Same bug class as ticket 236 (XPath's `number()`) from an earlier session. (tickets
+  245/249, `2f3c031`/`8d071b7`)
+- **`Tuple8`/`Tuple::Create(8 args)` was entirely missing** — sibling `ValueTuple.hpp` already
+  supports 8-element tuples (with a `Rest` field), `Tuple.hpp` only went up to 7. Added, with the
+  hash-combining algorithm verified bit-exact against `Tuple.cs`'s `CombineHashCodes` (one of the
+  few .NET `GetHashCode` contracts that's actually guaranteed stable — its own comment says "the
+  F# compiler depends on the exact tuple hashing algorithm, do not ever change it"). (ticket 246,
+  `e821c83`)
+- **`Convert::ToHexString`/`ToHexStringLower`** had their casing backwards vs. real .NET
+  (confirmed real-world impact: `PhysicalAddress.ToString()` calls `Convert.ToHexString`).
+  **`ToBoolean(string)`** was too lenient (accepted `"1"`/`"0"`, wasn't fully case-insensitive).
+  **`ToDouble(string)`** duplicated the ticket-245 bug. **`ToUInt32(string)`/`ToUInt64(string)`**
+  leaked raw `std::invalid_argument`/`std::out_of_range` instead of `System::FormatException`/
+  `OverflowException`. All fixed by delegating to the already-correct `Boolean::Parse`/
+  `Double::Parse`/`UInt32::Parse`/`UInt64::Parse`. (ticket 248, `19dfd66`)
+- **`Console::Write(vector<char>&, int, int)`** had zero bounds validation — a genuine
+  out-of-bounds read for negative `index`/`count` or `index+count` exceeding the buffer, not just
+  a wrong-exception-type gap. Also fixed several stub methods (`SetWindowSize`/
+  `SetWindowPosition`/`SetBufferSize`/`MoveBufferArea`) using raw `int` instead of
+  `SharpRuntime::intcs` (CLAUDE.md rule #7). (ticket 250, `8c497d7`)
+- **`Calendar::AddMonths`** had no bounds check on `months` at all — confirmed via a standalone
+  UBSan repro that `AddMonths(<year 9999 date>, INT_MAX)` overflows signed `int`, silently
+  producing a nonsensical negative year instead of a clean exception. Real .NET's
+  `GregorianCalendar.AddMonths` explicitly rejects `|months| > 120000` before any arithmetic;
+  ported the same check. (ticket 251, `752d832`)
+
+### Audited clean / doc+test-only (7 tickets)
+
+`ValueTuple.hpp` (239, filled a Doxygen gap on arities 5-7), `Char.hpp` (242, documented — not
+fixed, by design, since fixing would diverge from `String`'s own established byte-offset
+convention — that the string-indexed overloads operate on raw bytes, not code points),
+`String.hpp` (244, added 18 missing `@throws` doc-comments matching already-validated `.cpp`
+behavior), `Base64.hpp`/`Base64Url.hpp` (247/253, both fully verified against .NET reference with
+no bugs found — just missing `NeedMoreData`/upper-bound test coverage), `Guid.cpp`/`.hpp` (252,
+an exceptionally carefully-ported file, bit-exact verified against `Guid.cs`, one missing test
+case added).
+
+Test count: 11493 → 11557 across this batch. All commits pushed to `origin/feature/work`.
 
 ## Session checkpoint (2026-07-11, continued again) — external review triage: 8 real bugs fixed + full exception-normalization sweep closed out (14 commits)
 

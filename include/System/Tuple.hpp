@@ -587,6 +587,129 @@ struct Tuple7 {
 };
 
 // ---------------------------------------------------------------------------
+// Tuple8
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Represents an eight-or-more-element tuple.
+ *
+ * C++ counterpart of .NET System.Tuple<T1, T2, T3, T4, T5, T6, T7, TRest>.
+ * @p TRest should be another TupleN to represent additional elements, matching
+ * .NET's Tuple.Create(T1..T8) convention (which wraps item8 in a Tuple1<T8>).
+ */
+template<typename T1, typename T2, typename T3, typename T4,
+         typename T5, typename T6, typename T7, typename TRest>
+struct Tuple8 {
+    /** @brief The first element of the tuple. */
+    T1 Item1;
+    /** @brief The second element of the tuple. */
+    T2 Item2;
+    /** @brief The third element of the tuple. */
+    T3 Item3;
+    /** @brief The fourth element of the tuple. */
+    T4 Item4;
+    /** @brief The fifth element of the tuple. */
+    T5 Item5;
+    /** @brief The sixth element of the tuple. */
+    T6 Item6;
+    /** @brief The seventh element of the tuple. */
+    T7 Item7;
+    /** @brief The remaining elements (another TupleN). */
+    TRest Rest;
+
+    /** @brief Constructs a Tuple8 from seven values and a Rest tuple. */
+    Tuple8(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7, TRest rest)
+        : Item1(std::move(i1)), Item2(std::move(i2)), Item3(std::move(i3)),
+          Item4(std::move(i4)), Item5(std::move(i5)), Item6(std::move(i6)),
+          Item7(std::move(i7)), Rest(std::move(rest)) {}
+
+    /** @brief Converts this tuple to an equivalent std::tuple (Rest kept as its own element, not flattened). */
+    [[nodiscard]] std::tuple<T1, T2, T3, T4, T5, T6, T7, TRest> ToStdTuple() const
+    {
+        return {Item1, Item2, Item3, Item4, Item5, Item6, Item7, Rest};
+    }
+
+    /** @brief Returns true if all elements, including Rest, compare equal. */
+    bool operator==(const Tuple8& o) const
+    {
+        return Item1 == o.Item1 && Item2 == o.Item2 && Item3 == o.Item3 && Item4 == o.Item4
+            && Item5 == o.Item5 && Item6 == o.Item6 && Item7 == o.Item7 && Rest == o.Rest;
+    }
+
+    /** @brief Returns true if any element differs. */
+    bool operator!=(const Tuple8& o) const { return !(*this == o); }
+
+    /**
+     * @brief Compares this tuple to @p o element-by-element, then Rest.
+     *
+     * C++ counterpart of .NET Tuple<T1..T7,TRest>.CompareTo (via IStructuralComparable).
+     */
+    [[nodiscard]] intcs CompareTo(const Tuple8& o) const
+    {
+        intcs c = detail::tupleCompare(Item1, o.Item1);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item2, o.Item2);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item3, o.Item3);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item4, o.Item4);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item5, o.Item5);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item6, o.Item6);
+        if (c != 0) return c;
+        c = detail::tupleCompare(Item7, o.Item7);
+        if (c != 0) return c;
+        return detail::tupleCompare(Rest, o.Rest);
+    }
+
+    /** @brief Returns true if this tuple sorts before @p o. */
+    bool operator<(const Tuple8& o) const { return CompareTo(o) < 0; }
+
+    /**
+     * @brief Returns a string representation, flattening Rest inline:
+     * "(item1, item2, ..., item7, rest_item1, rest_item2, ...)".
+     *
+     * C++ counterpart of .NET Tuple<T1..T7,TRest>.ToString().
+     */
+    [[nodiscard]] std::string ToString() const
+    {
+        std::string restStr = Rest.ToString();
+        // Rest.ToString() yields "(x)" or "(x, y, ...)" -- strip outer parens
+        std::string restInner = restStr.size() >= 2
+            ? restStr.substr(1, restStr.size() - 2) : "";
+        return "(" + detail::tupleItemStr(Item1) + ", "
+                   + detail::tupleItemStr(Item2) + ", "
+                   + detail::tupleItemStr(Item3) + ", "
+                   + detail::tupleItemStr(Item4) + ", "
+                   + detail::tupleItemStr(Item5) + ", "
+                   + detail::tupleItemStr(Item6) + ", "
+                   + detail::tupleItemStr(Item7) + ", " + restInner + ")";
+    }
+
+    /**
+     * @brief Returns a hash code for this tuple.
+     *
+     * C++ counterpart of .NET Tuple<T1..T7,TRest>.GetHashCode(). Matches real .NET's
+     * exact algorithm for the common case (Rest is a single-element tuple, i.e. the
+     * shape produced by Tuple::Create(item1..item8)); deeper manual nesting (a Rest
+     * with 8+ elements of its own) isn't specially collapsed the way .NET's rotating
+     * 8-element window is, since .NET's GetHashCode() values are documented as
+     * unspecified/not to be persisted regardless.
+     */
+    [[nodiscard]] intcs GetHashCode() const
+    {
+        return detail::tupleHashCombine(
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item1), detail::tupleHash(Item2)),
+                detail::tupleHashCombine(detail::tupleHash(Item3), detail::tupleHash(Item4))),
+            detail::tupleHashCombine(
+                detail::tupleHashCombine(detail::tupleHash(Item5), detail::tupleHash(Item6)),
+                detail::tupleHashCombine(detail::tupleHash(Item7), Rest.GetHashCode())));
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Tuple factory (mirrors .NET static Tuple.Create<T...>() methods)
 // ---------------------------------------------------------------------------
 
@@ -653,6 +776,22 @@ struct Tuple {
         return Tuple7<T1,T2,T3,T4,T5,T6,T7>(std::move(i1),std::move(i2),std::move(i3),
                                              std::move(i4),std::move(i5),std::move(i6),
                                              std::move(i7));
+    }
+
+    /**
+     * @brief Creates an 8-element tuple.
+     *
+     * C++ counterpart of .NET Tuple.Create<T1..T8>(T1..T8).
+     * Wraps item8 in a Tuple1 as the Rest field, matching .NET convention.
+     */
+    template<typename T1, typename T2, typename T3, typename T4,
+             typename T5, typename T6, typename T7, typename T8>
+    [[nodiscard]] static Tuple8<T1,T2,T3,T4,T5,T6,T7,Tuple1<T8>>
+    Create(T1 i1, T2 i2, T3 i3, T4 i4, T5 i5, T6 i6, T7 i7, T8 i8)
+    {
+        return Tuple8<T1,T2,T3,T4,T5,T6,T7,Tuple1<T8>>(
+            std::move(i1), std::move(i2), std::move(i3), std::move(i4),
+            std::move(i5), std::move(i6), std::move(i7), Tuple1<T8>(std::move(i8)));
     }
 };
 

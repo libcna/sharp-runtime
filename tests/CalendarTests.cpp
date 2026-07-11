@@ -4,6 +4,7 @@
 //
 // Tests for Calendar, GregorianCalendar, ISOWeek and the new DateTime
 // Add* convenience methods (AddDays, AddHours, AddMinutes, AddSeconds, AddMilliseconds).
+#include <climits>
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
@@ -266,6 +267,42 @@ TEST(CalendarTests, AddMonths_Negative) {
     EXPECT_EQ(r.getYearProperty(),  2021);
     EXPECT_EQ(r.getMonthProperty(), 1);
     EXPECT_EQ(r.getDayProperty(),   15);
+}
+
+// Regression tests for a code-audit finding (ticket 251): AddMonths had no bounds check on
+// `months` at all, unlike real .NET's GregorianCalendar.AddMonths, which rejects |months| >
+// 120000 before doing any arithmetic. Without that check, `(year-1)*12 + (month-1) + months`
+// can overflow signed int for an extreme months value -- confirmed via a standalone UBSan
+// repro that AddMonths(<year 9999 date>, INT_MAX) silently produced a nonsensical negative
+// year instead of throwing.
+TEST(CalendarTests, AddMonths_AboveMaximum_Throws) {
+    Calendar cal;
+    DateTime d(2021, 3, 15);
+    EXPECT_THROW(cal.AddMonths(d, 120001), System::ArgumentOutOfRangeException);
+}
+
+TEST(CalendarTests, AddMonths_BelowMinimum_Throws) {
+    Calendar cal;
+    DateTime d(2021, 3, 15);
+    EXPECT_THROW(cal.AddMonths(d, -120001), System::ArgumentOutOfRangeException);
+}
+
+TEST(CalendarTests, AddMonths_ExtremeValue_DoesNotOverflow) {
+    Calendar cal;
+    DateTime d(2021, 3, 15);
+    EXPECT_THROW(cal.AddMonths(d, INT_MAX), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddMonths(d, INT_MIN), System::ArgumentOutOfRangeException);
+}
+
+// 120000 months (10000 years) itself always overflows DateTime's own 1-9999 year range
+// regardless of starting year, so it can't be used to prove the new check's own boundary is
+// exclusive (> not >=) -- this instead confirms a large-but-comfortably-in-range value (100
+// years) is not spuriously rejected by the new check.
+TEST(CalendarTests, AddMonths_LargeButInRange_DoesNotThrow) {
+    Calendar cal;
+    DateTime d(2021, 3, 15);
+    EXPECT_NO_THROW(cal.AddMonths(d, 1200));
+    EXPECT_NO_THROW(cal.AddMonths(d, -1200));
 }
 
 TEST(CalendarTests, AddDays_Via_Calendar) {

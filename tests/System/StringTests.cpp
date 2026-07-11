@@ -138,6 +138,23 @@ TEST(StringTests, Substring_NegativeLength_Throws) {
     EXPECT_THROW(String::Substring("abcde", 0, -1), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests for a code-audit finding (ticket 237): the single-arg Substring(string,
+// startIndex) had no validation at all, unlike its two-arg sibling above -- an
+// out-of-bounds startIndex fell straight into std::string::substr(), which throws
+// std::out_of_range (an unrelated std:: exception type invisible to code catching
+// System::Exception&) instead of the System::ArgumentOutOfRangeException real .NET's
+// String.Substring(int) throws for the same input (verified against
+// String.Manipulation.cs's `(uint)startIndex > (uint)Length` check).
+TEST(StringTests, Substring_SingleArg_NegativeStartIndex_Throws) {
+    EXPECT_THROW(String::Substring("abcde", -1), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, Substring_SingleArg_StartIndexTooLarge_Throws) {
+    EXPECT_THROW(String::Substring("abcde", 100), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, Substring_SingleArg_StartIndexEqualsLength_ReturnsEmpty) {
+    EXPECT_EQ(String::Substring("abcde", 5), "");
+}
+
 // --- Trim ---
 
 TEST(StringTests, Trim_Both) {
@@ -246,6 +263,13 @@ TEST(StringTests, PadLeft_AlreadyWide) {
     EXPECT_EQ(String::PadLeft("hello", 3), "hello");
 }
 
+// Regression test for a code-audit finding (ticket 237): negative totalWidth was silently
+// treated as "already wide enough" instead of throwing, unlike real .NET's PadLeft(int,
+// char), which calls ArgumentOutOfRangeException.ThrowIfNegative(totalWidth).
+TEST(StringTests, PadLeft_NegativeTotalWidth_Throws) {
+    EXPECT_THROW(String::PadLeft("hello", -1), System::ArgumentOutOfRangeException);
+}
+
 // --- PadRight ---
 
 TEST(StringTests, PadRight_WithSpaces) {
@@ -256,6 +280,12 @@ TEST(StringTests, PadRight_WithChar) {
 }
 TEST(StringTests, PadRight_AlreadyWide) {
     EXPECT_EQ(String::PadRight("hello", 3), "hello");
+}
+
+// Regression test for a code-audit finding (ticket 237): same negative-totalWidth gap as
+// PadLeft above.
+TEST(StringTests, PadRight_NegativeTotalWidth_Throws) {
+    EXPECT_THROW(String::PadRight("hello", -1), System::ArgumentOutOfRangeException);
 }
 
 // --- Format specifiers ---
@@ -388,12 +418,43 @@ TEST(StringTests, LastIndexOf_CharStartIndex_NotFound) {
     EXPECT_EQ(String::LastIndexOf("hello", 'z', 4), -1);
 }
 
+// Regression tests for a code-audit finding (ticket 237): all four of these startIndex-only
+// (no count) overloads silently returned -1 for an out-of-bounds startIndex instead of
+// throwing, unlike their startIndex+count siblings tested further down in this file (e.g.
+// IndexOf_CharCount_StartIndexOutOfRange_Throws) -- an out-of-range std::string::find/rfind
+// pos is well-defined to just return npos rather than throw, so nothing crashed, but real
+// .NET's String.IndexOf(string/char, int startIndex) and LastIndexOf(...) both throw
+// ArgumentOutOfRangeException for the same input, making the old behavior "silently wrong"
+// rather than merely differently-typed.
+TEST(StringTests, IndexOf_StringStartIndex_NegativeStartIndex_Throws) {
+    EXPECT_THROW(String::IndexOf("abc", "b", -1), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, IndexOf_CharStartIndex_StartIndexTooLarge_Throws) {
+    EXPECT_THROW(String::IndexOf("abc", 'b', 100), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, LastIndexOf_StringStartIndex_NegativeStartIndex_Throws) {
+    EXPECT_THROW(String::LastIndexOf("abc", "b", -1), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, LastIndexOf_CharStartIndex_StartIndexTooLarge_Throws) {
+    EXPECT_THROW(String::LastIndexOf("abc", 'b', 100), System::ArgumentOutOfRangeException);
+}
+
 // --- String::Create ---
 TEST(StringTests, Create_RepeatsChar) {
     EXPECT_EQ(String::Create(5, 'x'), "xxxxx");
 }
 TEST(StringTests, Create_ZeroCount) {
     EXPECT_EQ(String::Create(0, 'a'), "");
+}
+
+// Regression test for a code-audit finding (ticket 237): a negative count wrapped to a huge
+// size_t and fell straight into the std::string(size_t, char) constructor, which throws
+// std::length_error (an unrelated std:: exception type) or attempts a massive allocation,
+// instead of the System::ArgumentOutOfRangeException real .NET's `new string(char, int)`
+// throws for a negative count (String.cs's Ctor(char, int):
+// ArgumentOutOfRangeException.ThrowIfNegative(count)).
+TEST(StringTests, Create_NegativeCount_Throws) {
+    EXPECT_THROW(String::Create(-1, 'x'), System::ArgumentOutOfRangeException);
 }
 
 // --- String::Compare ---
@@ -475,6 +536,23 @@ TEST(StringTests, Insert_AtEnd) {
 }
 TEST(StringTests, Insert_InMiddle) {
     EXPECT_EQ(String::Insert("helo", 3, "l"), "hello");
+}
+
+// Regression tests for a code-audit finding (ticket 237): Insert had no validation at all,
+// unlike Remove/Substring(int,int) elsewhere in this file -- an out-of-bounds startIndex fell
+// straight into std::string::insert(), which throws std::out_of_range (an unrelated std::
+// exception type) instead of the System::ArgumentOutOfRangeException real .NET's
+// String.Insert(int, string) throws for the same input (verified against
+// String.Manipulation.cs's ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)startIndex,
+// (uint)Length, ...)).
+TEST(StringTests, Insert_NegativeStartIndex_Throws) {
+    EXPECT_THROW(String::Insert("hello", -1, "X"), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, Insert_StartIndexTooLarge_Throws) {
+    EXPECT_THROW(String::Insert("hello", 100, "X"), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, Insert_StartIndexEqualsLength_AppendsAtEnd) {
+    EXPECT_EQ(String::Insert("hello", 5, "!"), "hello!");
 }
 
 // --- String::Join(intcs vector) ---

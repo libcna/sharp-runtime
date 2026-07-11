@@ -37,6 +37,27 @@ TEST(MemoryExtensionsTests, AsSpan_Vector_StartAndLength) {
     EXPECT_EQ(s[2], 4);
 }
 
+// Regression tests for a code-audit finding (ticket 238): AsSpan(vector&, start) and
+// AsSpan(vector&, start, length) had no validation at all, unlike their AsSpan(string, ...)
+// siblings just below (AsSpan_String_StartOutOfRange_Throws etc.), which already correctly
+// throw. An out-of-bounds start/length here fell straight into raw pointer arithmetic
+// (v.data() + start) with no bounds check at all -- undefined behavior, not even a defined
+// std:: exception to catch. Verified against real .NET's MemoryExtensions.AsSpan<T>(T[], int)
+// ((uint)start > (uint)array.Length -> ArgumentOutOfRangeException) and AsSpan<T>(T[], int,
+// int) (delegates to the Span<T> constructor, which validates the same way).
+TEST(MemoryExtensionsTests, AsSpan_Vector_StartOutOfRange_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, 99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryExtensionsTests, AsSpan_Vector_StartAndLengthOutOfRange_Throws) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, 0, 99), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, 1, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, 4, 2), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // Contains
 // ---------------------------------------------------------------------------
@@ -472,6 +493,20 @@ TEST(MemoryExtensionsTests, LastIndexOfAny_TwoValues_LastMatch) {
 TEST(MemoryExtensionsTests, LastIndexOfAny_TwoValues_NotFound) {
     std::vector<int> v = {1, 2, 3};
     EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), 8, 9), -1);
+}
+
+// Regression test for a code-audit finding (ticket 238): LastIndexOfAny was missing the
+// 3-value overload that its sibling IndexOfAny already has (IndexOfAny_ThreeValues_Found
+// above), and that real .NET's MemoryExtensions.LastIndexOfAny<T>(ReadOnlySpan<T>, T, T, T)
+// provides.
+TEST(MemoryExtensionsTests, LastIndexOfAny_ThreeValues_Found) {
+    std::vector<int> v = {10, 20, 30, 40, 20};
+    EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), 0, 20, 99), 4);
+}
+
+TEST(MemoryExtensionsTests, LastIndexOfAny_ThreeValues_NotFound) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(MemoryExtensions::LastIndexOfAny(ReadOnlySpan<int>(v), 7, 8, 9), -1);
 }
 
 TEST(MemoryExtensionsTests, LastIndexOfAny_Span_Found) {

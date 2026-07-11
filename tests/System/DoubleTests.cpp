@@ -339,6 +339,41 @@ TEST(DoubleTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_EQ(r, 0.0);
 }
 
+// Regression tests for a code-audit finding (ticket 245): TryParse/Parse only special-cased
+// the exact-cased strings "NaN"/"Infinity"/"-Infinity" and fell through to std::from_chars for
+// everything else. Per the C++ standard, from_chars's floating-point grammar recognizes
+// "inf"/"infinity"/"nan"/"nan(n-char-seq)" case-insensitively regardless of chars_format, so
+// abbreviated/miscased spellings like "inf" or "nan(123)" were silently ACCEPTED here even
+// though real .NET's double.Parse (verified against Number.Parsing.cs's TryParseFloat) throws
+// FormatException for all of them -- it only recognizes (case-insensitively) the exact tokens
+// "Infinity"/"+Infinity"/"-Infinity" and "NaN"/"+NaN"/"-NaN".
+TEST(DoubleTests, TryParse_AbbreviatedInfinitySpelling_ReturnsFalse) {
+    double r;
+    EXPECT_FALSE(Double::TryParse("inf", r));
+    EXPECT_FALSE(Double::TryParse("-inf", r));
+    EXPECT_FALSE(Double::TryParse("INF", r));
+}
+
+TEST(DoubleTests, TryParse_NanWithCharSequence_ReturnsFalse) {
+    double r;
+    EXPECT_FALSE(Double::TryParse("nan(123)", r));
+}
+
+TEST(DoubleTests, TryParse_CaseInsensitiveCanonicalSpellings_ReturnsTrue) {
+    double r;
+    EXPECT_TRUE(Double::TryParse("infinity", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+    EXPECT_TRUE(Double::TryParse("nan", r));
+    EXPECT_TRUE(std::isnan(r));
+    EXPECT_TRUE(Double::TryParse("+Infinity", r));
+    EXPECT_TRUE(std::isinf(r) && r > 0);
+}
+
+TEST(DoubleTests, Parse_AbbreviatedInfinitySpelling_Throws) {
+    EXPECT_THROW(Double::Parse("inf"), System::FormatException);
+    EXPECT_THROW(Double::Parse("nan(123)"), System::FormatException);
+}
+
 // ---------------------------------------------------------------------------
 // ToString
 // ---------------------------------------------------------------------------

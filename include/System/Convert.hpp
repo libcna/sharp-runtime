@@ -65,8 +65,11 @@ namespace System {
         /**
          * @brief Converts a string to Boolean.
          *
-         * C++ counterpart of .NET Convert.ToBoolean(string).
-         * Accepts "True"/"true"/"1" → true and "False"/"false"/"0" → false.
+         * C++ counterpart of .NET Convert.ToBoolean(string), which delegates to
+         * bool.Parse(string). Case-insensitive match against "true"/"false" only
+         * (with optional surrounding whitespace) -- unlike some ad hoc boolean
+         * parsers, "1"/"0" are NOT accepted and throw FormatException, matching
+         * real .NET exactly.
          * @throws FormatException for any other string.
          */
         [[nodiscard]] static bool ToBoolean(const std::string& value);
@@ -560,20 +563,23 @@ namespace System {
         // ===================================================================
 
         /**
-         * @brief Converts a byte array to a lowercase hexadecimal string (no separators).
+         * @brief Converts a byte array to an uppercase hexadecimal string (no separators).
          *
-         * C++ counterpart of .NET Convert.ToHexStringLower (lowercase variant).
-         * Produces lowercase hex digits, e.g., "ff" for byte 0xFF.
+         * C++ counterpart of .NET Convert.ToHexString (the default, uppercase form --
+         * verified against Convert.cs, which calls HexConverter.ToString(bytes,
+         * HexConverter.Casing.Upper)).
+         * Produces uppercase hex digits, e.g., "FF" for byte 0xFF.
          */
         [[nodiscard]] static std::string ToHexString(const std::vector<bytecs>& inArray);
 
         /**
-         * @brief Converts a byte array to an uppercase hexadecimal string (no separators).
+         * @brief Converts a byte array to a lowercase hexadecimal string (no separators).
          *
-         * C++ counterpart of .NET Convert.ToHexString (the default uppercase form).
-         * Produces uppercase hex digits, e.g., "FF" for byte 0xFF.
+         * C++ counterpart of .NET Convert.ToHexStringLower (verified against Convert.cs,
+         * which calls HexConverter.ToString(bytes, HexConverter.Casing.Lower)).
+         * Produces lowercase hex digits, e.g., "ff" for byte 0xFF.
          */
-        [[nodiscard]] static std::string ToHexStringUpper(const std::vector<bytecs>& inArray);
+        [[nodiscard]] static std::string ToHexStringLower(const std::vector<bytecs>& inArray);
 
         /**
          * @brief Converts a hexadecimal string (even number of hex digits) to a byte array.

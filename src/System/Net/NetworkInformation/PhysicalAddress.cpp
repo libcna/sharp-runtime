@@ -56,7 +56,12 @@ namespace System::Net::NetworkInformation {
     }
 
     std::string PhysicalAddress::ToString() const {
-        return System::Convert::ToHexStringUpper(address_);
+        // Verified against PhysicalAddress.cs: real .NET's ToString() is
+        // `Convert.ToHexString(_address)` (the uppercase form) -- Convert::ToHexString
+        // now produces uppercase directly (ticket 248 fixed a naming/casing swap between
+        // ToHexString and ToHexStringLower), so this no longer needs the old, incorrectly
+        // named ToHexStringUpper.
+        return System::Convert::ToHexString(address_);
     }
 
     bool PhysicalAddress::tryGetValidSegmentLength(const std::string& address, char delimiter, SharpRuntime::intcs& value) {

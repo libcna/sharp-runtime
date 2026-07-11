@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ConsoleColor.hpp"
 #include "System/ConsoleKeyInfo.hpp"
 #include "System/ConsoleCancelEventArgs.hpp"
@@ -92,11 +94,20 @@ namespace System {
         }
         /**
          * @brief Writes @p count characters from @p buffer starting at @p index.
+         *
+         * C++ counterpart of .NET Console.Write(char[], int, int) (via TextWriter.Write).
          * @param buffer Source vector.
          * @param index  Zero-based start index.
          * @param count  Number of characters to write.
+         * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+         * @throws System::ArgumentException if @p index and @p count do not describe a valid
+         *         range within @p buffer.
          */
-        static void Write(const std::vector<char>& buffer, int index, int count) {
+        static void Write(const std::vector<char>& buffer, intcs index, intcs count) {
+            if (index < 0) throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+            if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+            if (static_cast<intcs>(buffer.size()) - index < count)
+                throw System::ArgumentException("Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.");
             if (count > 0)
                 std::cout.write(buffer.data() + index, static_cast<std::streamsize>(count));
         }
@@ -451,8 +462,8 @@ namespace System {
          * @param width  New window width in columns.
          * @param height New window height in rows.
          */
-        static void SetWindowSize(int width, int height) {
-            std::printf("\033[8;%d;%dt", height, width);
+        static void SetWindowSize(intcs width, intcs height) {
+            std::printf("\033[8;%d;%dt", static_cast<int>(height), static_cast<int>(width));
             std::fflush(stdout);
         }
 
@@ -461,8 +472,8 @@ namespace System {
          * @param left New left position in pixels.
          * @param top  New top position in pixels.
          */
-        static void SetWindowPosition(int left, int top) {
-            std::printf("\033[3;%d;%dt", top, left);
+        static void SetWindowPosition(intcs left, intcs top) {
+            std::printf("\033[3;%d;%dt", static_cast<int>(top), static_cast<int>(left));
             std::fflush(stdout);
         }
 
@@ -497,14 +508,14 @@ namespace System {
          * @param width  New buffer width.
          * @param height New buffer height.
          */
-        static void SetBufferSize(int width, int height) { (void)width; (void)height; }
+        static void SetBufferSize(intcs width, intcs height) { (void)width; (void)height; }
 
         /**
          * @brief Copies a rectangular region of the buffer to another location (no-op stub).
          */
-        static void MoveBufferArea(int sourceLeft, int sourceTop,
-                                    int sourceWidth, int sourceHeight,
-                                    int targetLeft, int targetTop) {
+        static void MoveBufferArea(intcs sourceLeft, intcs sourceTop,
+                                    intcs sourceWidth, intcs sourceHeight,
+                                    intcs targetLeft, intcs targetTop) {
             (void)sourceLeft; (void)sourceTop; (void)sourceWidth;
             (void)sourceHeight; (void)targetLeft; (void)targetTop;
         }
@@ -512,9 +523,9 @@ namespace System {
         /**
          * @brief Copies a rectangular region of the buffer, filling vacated cells (no-op stub).
          */
-        static void MoveBufferArea(int sourceLeft, int sourceTop,
-                                    int sourceWidth, int sourceHeight,
-                                    int targetLeft, int targetTop,
+        static void MoveBufferArea(intcs sourceLeft, intcs sourceTop,
+                                    intcs sourceWidth, intcs sourceHeight,
+                                    intcs targetLeft, intcs targetTop,
                                     char sourceChar,
                                     ConsoleColor sourceForeColor,
                                     ConsoleColor sourceBackColor) {

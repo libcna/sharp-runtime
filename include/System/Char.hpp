@@ -517,6 +517,20 @@ public:
 
     // -----------------------------------------------------------------------
     // String-indexed overloads
+    //
+    // Status: PARTIAL. Every method below (and ConvertToUtf32(string, int)'s
+    // surrogate-pair branch above) reads @p s through charAt(), which returns the raw
+    // *byte* at @p index -- consistent with this project's existing single-byte-per-char
+    // std::string convention used throughout System::String (index is a byte offset, not
+    // a UTF-16 code-unit offset). This differs from Parse()/ToString()/ConvertFromUtf32()
+    // above, which do encode/decode real multi-byte UTF-8. A practical consequence: since
+    // a single byte can never fall in the surrogate range (0xD800-0xDFFF is only reachable
+    // by a 3-byte UTF-8 sequence), IsHighSurrogate(s, index)/IsLowSurrogate(s, index)/
+    // IsSurrogate(s, index) can never return true, and ConvertToUtf32(s, index)'s
+    // surrogate-pair-combining branch is unreachable through these overloads. Any @p s
+    // containing non-ASCII (multi-byte UTF-8) text will have interior bytes of a multi-byte
+    // sequence misclassified, since a lone continuation/lead byte does not correspond to any
+    // single meaningful Unicode character. Correct only for ASCII input.
     // -----------------------------------------------------------------------
 
     /**
@@ -686,6 +700,8 @@ public:
     }
 
 private:
+    // Returns the raw byte at s[i] widened to charcs -- NOT a UTF-8 decode. See the
+    // "String-indexed overloads" section note above for what this means for non-ASCII input.
     static SharpRuntime::charcs charAt(const std::string& s, SharpRuntime::intcs i) noexcept {
         return static_cast<SharpRuntime::charcs>(static_cast<unsigned char>(s[static_cast<size_t>(i)]));
     }

@@ -4,6 +4,10 @@
 #include "System/Convert.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
+#include "System/Boolean.hpp"
+#include "System/Double.hpp"
+#include "System/UInt32.hpp"
+#include "System/UInt64.hpp"
 
 #include <stdexcept>
 #include <cstdlib>
@@ -79,19 +83,14 @@ namespace System {
     }
 
     double Convert::ToDouble(const std::string& value) {
-        if (value.empty()) throw FormatException();
-        // Handle .NET special string representations
-        if (value == "NaN")       return std::numeric_limits<double>::quiet_NaN();
-        if (value == "Infinity")  return  std::numeric_limits<double>::infinity();
-        if (value == "-Infinity") return -std::numeric_limits<double>::infinity();
-        double result{};
-        // from_chars is locale-independent (always uses '.' as decimal separator)
-        auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), result);
-        if (ec == std::errc::invalid_argument || ptr != value.data() + value.size())
-            throw FormatException();
-        if (ec == std::errc::result_out_of_range)
-            throw OverflowException();
-        return result;
+        // Verified against Convert.cs's ToDouble(string): delegates straight to
+        // double.Parse(value). Previously this reimplemented parsing inline with the same
+        // "special-case exact NaN/Infinity/-Infinity strings, then fall through to
+        // std::from_chars" pattern that was found to silently accept abbreviated spellings
+        // like "inf"/"nan(123)" in ticket 245 (Double::Parse) -- from_chars's floating-point
+        // grammar recognizes those regardless of chars_format, a C++ standard requirement.
+        // Delegating to the already-fixed Double::Parse avoids duplicating that bug here.
+        return Double::Parse(value);
     }
 
     Single Convert::ToSingle(const std::string& value) {
@@ -107,9 +106,14 @@ namespace System {
     }
 
     bool Convert::ToBoolean(const std::string& value) {
-        if (value == "True"  || value == "true"  || value == "1") return true;
-        if (value == "False" || value == "false" || value == "0") return false;
-        throw FormatException("String was not recognized as a valid Boolean.");
+        // Verified against Convert.cs's ToBoolean(string): delegates to bool.Parse(value),
+        // which (per Boolean.cs's TryParse) matches "true"/"false" case-insensitively (with
+        // optional surrounding whitespace) and nothing else -- "1"/"0" throw FormatException
+        // in real .NET. This previously accepted "1"/"0" as valid and only matched the two
+        // exact casings "True"/"true" and "False"/"false" rather than being fully
+        // case-insensitive (e.g. "TRUE" or "tRuE" would have thrown). System::Boolean::Parse
+        // already correctly implements .NET's case-insensitive-with-trim semantics.
+        return Boolean::Parse(value);
     }
 
     std::string Convert::ToString(intcs value)   { return std::to_string(value); }
@@ -153,7 +157,14 @@ namespace System {
 
     std::string Convert::ToHexString(const std::vector<bytecs>& inArray)
     {
-        static constexpr char hex[] = "0123456789abcdef";
+        // Verified against Convert.cs: ToHexString delegates to
+        // HexConverter.ToString(bytes, HexConverter.Casing.Upper) -- real .NET's ToHexString
+        // (unlike ToHexStringLower) is uppercase. This previously used a lowercase table
+        // (swapped with what is now ToHexStringLower below), silently producing the wrong
+        // casing under the correct .NET method name for any caller expecting real .NET's
+        // Convert.ToHexString output (e.g. PhysicalAddress.ToString(), which real .NET
+        // implements as `Convert.ToHexString(_address)`).
+        static constexpr char hex[] = "0123456789ABCDEF";
         std::string result;
         result.reserve(inArray.size() * 2);
         for (bytecs b : inArray) {
@@ -163,9 +174,15 @@ namespace System {
         return result;
     }
 
-    std::string Convert::ToHexStringUpper(const std::vector<bytecs>& inArray)
+    std::string Convert::ToHexStringLower(const std::vector<bytecs>& inArray)
     {
-        static constexpr char hex[] = "0123456789ABCDEF";
+        // Verified against Convert.cs: ToHexStringLower delegates to
+        // HexConverter.ToString(bytes, HexConverter.Casing.Lower). This method was previously
+        // named ToHexStringUpper despite producing uppercase output nowhere -- a method name
+        // that doesn't exist in real .NET at all -- while the real .NET Convert.ToHexString
+        // name was attached to the lowercase implementation above. Renamed to match .NET's
+        // actual API surface.
+        static constexpr char hex[] = "0123456789abcdef";
         std::string result;
         result.reserve(inArray.size() * 2);
         for (bytecs b : inArray) {
@@ -210,14 +227,20 @@ namespace System {
 
     uint32_t Convert::ToUInt32(const std::string& value)
     {
-        unsigned long r = std::stoul(value);
-        return static_cast<uint32_t>(r);
+        // Previously called std::stoul directly: on bad format or overflow, std::stoul
+        // throws raw std::invalid_argument/std::out_of_range, not the System::FormatException/
+        // System::OverflowException this class's own header documents -- the same raw-std::-
+        // exception-escape bug class found repeatedly elsewhere this session. Verified real
+        // .NET's Convert.ToUInt32(string) delegates to uint.Parse(value); System::UInt32::Parse
+        // already correctly translates std:: exceptions to System:: ones.
+        return UInt32::Parse(value);
     }
 
     uint64_t Convert::ToUInt64(const std::string& value)
     {
-        unsigned long long r = std::stoull(value);
-        return static_cast<uint64_t>(r);
+        // Same fix as ToUInt32(string) above -- verified real .NET's Convert.ToUInt64(string)
+        // delegates to ulong.Parse(value).
+        return UInt64::Parse(value);
     }
 
     static constexpr char kB64Chars[] =

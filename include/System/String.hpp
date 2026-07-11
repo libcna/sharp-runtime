@@ -191,6 +191,7 @@ namespace System
          * @brief Returns the first occurrence of @p substr starting at @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.IndexOf(string, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static SharpRuntime::intcs IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex);
 
@@ -198,6 +199,7 @@ namespace System
          * @brief Returns the first occurrence of @p ch starting at @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.IndexOf(char, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static SharpRuntime::intcs IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex);
 
@@ -205,6 +207,7 @@ namespace System
          * @brief Returns the first occurrence of @p ch in the range [@p startIndex, @p startIndex+@p count), or -1.
          *
          * C++ counterpart of .NET String.IndexOf(char, int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count are out of bounds.
          */
         static SharpRuntime::intcs IndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
 
@@ -212,6 +215,7 @@ namespace System
          * @brief Returns the first occurrence of @p substr in the range [@p startIndex, @p startIndex+@p count), or -1.
          *
          * C++ counterpart of .NET String.IndexOf(string, int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count are out of bounds.
          */
         static SharpRuntime::intcs IndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
 
@@ -254,6 +258,7 @@ namespace System
          * @brief Returns the last occurrence of @p substr searching backward from @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.LastIndexOf(string, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static SharpRuntime::intcs LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex);
 
@@ -261,6 +266,7 @@ namespace System
          * @brief Returns the last occurrence of @p ch searching backward from @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.LastIndexOf(char, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static SharpRuntime::intcs LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex);
 
@@ -268,6 +274,7 @@ namespace System
          * @brief Returns the last occurrence of @p ch in @p count characters ending at @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.LastIndexOf(char, int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count are out of bounds.
          */
         static SharpRuntime::intcs LastIndexOf(const std::string& value, char ch, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
 
@@ -275,6 +282,7 @@ namespace System
          * @brief Returns the last occurrence of @p substr in @p count characters ending at @p startIndex, or -1.
          *
          * C++ counterpart of .NET String.LastIndexOf(string, int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count are out of bounds.
          */
         static SharpRuntime::intcs LastIndexOf(const std::string& value, const std::string& substr, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
 
@@ -332,6 +340,7 @@ namespace System
          * @brief Returns the substring of @p value starting at @p startIndex to the end.
          *
          * C++ counterpart of .NET String.Substring(int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static std::string Substring(const std::string& value, SharpRuntime::intcs startIndex);
 
@@ -339,6 +348,7 @@ namespace System
          * @brief Returns the substring of @p value starting at @p startIndex with the given @p length.
          *
          * C++ counterpart of .NET String.Substring(int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p length are out of bounds.
          */
         static std::string Substring(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length);
 
@@ -346,6 +356,7 @@ namespace System
          * @brief Returns a new string with all characters from @p startIndex to the end removed.
          *
          * C++ counterpart of .NET String.Remove(int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static std::string Remove(const std::string& value, SharpRuntime::intcs startIndex);
 
@@ -353,6 +364,7 @@ namespace System
          * @brief Returns a new string with @p count characters removed starting at @p startIndex.
          *
          * C++ counterpart of .NET String.Remove(int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count are out of bounds.
          */
         static std::string Remove(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs count);
 
@@ -360,6 +372,7 @@ namespace System
          * @brief Inserts @p insertValue into @p value at @p startIndex.
          *
          * C++ counterpart of .NET String.Insert(int, string).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is out of bounds.
          */
         static std::string Insert(const std::string& value, SharpRuntime::intcs startIndex, const std::string& insertValue);
 
@@ -427,6 +440,7 @@ namespace System
          * @brief Returns @p value right-aligned in a field of @p totalWidth, padded with spaces on the left.
          *
          * C++ counterpart of .NET String.PadLeft(int).
+         * @throws System::ArgumentOutOfRangeException if @p totalWidth is negative.
          */
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth);
 
@@ -434,6 +448,7 @@ namespace System
          * @brief Returns @p value right-aligned in a field of @p totalWidth, padded with @p paddingChar on the left.
          *
          * C++ counterpart of .NET String.PadLeft(int, char).
+         * @throws System::ArgumentOutOfRangeException if @p totalWidth is negative.
          */
         static std::string PadLeft(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar);
 
@@ -441,6 +456,7 @@ namespace System
          * @brief Returns @p value left-aligned in a field of @p totalWidth, padded with spaces on the right.
          *
          * C++ counterpart of .NET String.PadRight(int).
+         * @throws System::ArgumentOutOfRangeException if @p totalWidth is negative.
          */
         static std::string PadRight(const std::string& value, SharpRuntime::intcs totalWidth);
 
@@ -448,6 +464,7 @@ namespace System
          * @brief Returns @p value left-aligned in a field of @p totalWidth, padded with @p paddingChar on the right.
          *
          * C++ counterpart of .NET String.PadRight(int, char).
+         * @throws System::ArgumentOutOfRangeException if @p totalWidth is negative.
          */
         static std::string PadRight(const std::string& value, SharpRuntime::intcs totalWidth, char paddingChar);
 
@@ -576,6 +593,7 @@ namespace System
          * @brief Returns a new string of @p count copies of character @p ch.
          *
          * C++ counterpart of .NET new string(char, int).
+         * @throws System::ArgumentOutOfRangeException if @p count is negative.
          */
         static std::string Create(SharpRuntime::intcs count, char ch);
 

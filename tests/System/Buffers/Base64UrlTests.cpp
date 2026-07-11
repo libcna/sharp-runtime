@@ -255,3 +255,39 @@ TEST(Base64UrlTest, GetEncodedLength_Negative_Throws) {
 TEST(Base64UrlTest, GetMaxDecodedLength_Negative_Throws) {
     EXPECT_THROW(Base64Url::GetMaxDecodedLength(-1), System::ArgumentOutOfRangeException);
 }
+
+// Regression tests for a code-audit finding (ticket 253, same gaps found in sibling Base64.hpp
+// under ticket 247): the isFinalBlock=false streaming path (NeedMoreData) and
+// GetEncodedLength's upper-bound throw had zero test coverage. The core algorithm itself was
+// fully verified against real .NET's Base64UrlEncoder.cs/Base64UrlDecoder.cs (GetEncodedLength/
+// GetMaxDecodedLength formulas, the encode/decode alphabet table, and the API shape of
+// TryEncodeToUtf8InPlace/DecodeFromUtf8InPlace returning bool/int rather than OperationStatus,
+// which matches .NET's actual, deliberately simpler Base64Url signatures) and found correct.
+TEST(Base64UrlTest, DecodeFromUtf8_IncompleteFinalGroup_NotFinalBlock_NeedsMoreData) {
+    std::string b64url = "SGVs"; // 4 symbols consumed as a full group, "bG8" left incomplete
+    std::string partial = "SGVsbG8"; // 7 symbols -- remainder of 3 is valid only when final
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(partial.data()), static_cast<int>(partial.size()));
+    std::vector<uint8_t> out(10);
+    Span<uint8_t> dst(out.data(), static_cast<int>(out.size()));
+    int consumed = 0, written = 0;
+    // With isFinalBlock=false, the trailing 3-symbol remainder must wait for more data.
+    EXPECT_EQ(Base64Url::DecodeFromUtf8(src, dst, consumed, written, false), OperationStatus::NeedMoreData);
+    EXPECT_EQ(consumed, 4);
+    EXPECT_EQ(written, 3);
+}
+
+TEST(Base64UrlTest, EncodeToChars_NotFinalBlock_RemainderBytes_NeedsMoreData) {
+    std::vector<uint8_t> input = {'H', 'e'}; // 2 bytes -- not a full 3-byte group
+    ReadOnlySpan<uint8_t> src(input.data(), static_cast<int>(input.size()));
+    std::vector<char> out(10);
+    Span<char> dst(out.data(), static_cast<int>(out.size()));
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64Url::EncodeToChars(src, dst, consumed, written, false), OperationStatus::NeedMoreData);
+    EXPECT_EQ(consumed, 0);
+    EXPECT_EQ(written, 0);
+}
+
+TEST(Base64UrlTest, GetEncodedLength_AboveMaximum_Throws) {
+    EXPECT_THROW(Base64Url::GetEncodedLength(1610612734), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(Base64Url::GetEncodedLength(1610612733));
+}

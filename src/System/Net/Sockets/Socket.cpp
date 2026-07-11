@@ -524,7 +524,30 @@ void Socket::Connect(const std::string& host, intcs port) {
     if (addresses.empty()) {
         throw SocketException(SocketError::HostNotFound, "Socket::Connect: could not resolve host " + host);
     }
-    Connect(System::Net::IPEndPoint(addresses[0], port));
+
+    // Verified against Socket.cs's Connect(string,int) -> Connect(IPAddress[],int): real .NET
+    // tries every resolved address in order (skipping ones whose family doesn't match this
+    // socket's, via CanTryAddressFamily -- DualMode isn't implemented in this port, so only the
+    // exact-family half of that check applies) and only throws once every candidate has failed.
+    // This port previously connected to addresses[0] only, so a host whose first DNS answer was
+    // unreachable/refused failed outright even when a later answer (e.g. the IPv6 address before
+    // a working IPv4 one) would have succeeded.
+    bool triedAny = false;
+    std::unique_ptr<SocketException> lastError;
+    for (const auto& address : addresses) {
+        if (address.getAddressFamilyProperty() != addressFamily_) continue;
+        triedAny = true;
+        try {
+            Connect(System::Net::IPEndPoint(address, port));
+            return;
+        } catch (const SocketException& ex) {
+            lastError = std::make_unique<SocketException>(ex);
+        }
+    }
+    if (lastError) throw *lastError;
+    if (!triedAny) {
+        throw System::ArgumentException("Socket::Connect: no resolved address matches this socket's address family.", "host");
+    }
 }
 
 void Socket::Listen(intcs backlog) {
@@ -654,17 +677,32 @@ bool Socket::Poll(longcs microSeconds, SelectMode mode) const {
     fd_set set;
     FD_ZERO(&set);
     FD_SET(toSk(fd_), &set);
+
+    // Verified against SocketPal.Unix.cs's Poll: real .NET treats microSeconds == -1 as an
+    // infinite wait ("milliseconds = microseconds == -1 ? -1 : microseconds / 1000", then
+    // passed to native poll() with a -1 timeout meaning "block indefinitely"). This port
+    // previously always built a timeval from microSeconds unconditionally: for -1, C++
+    // truncating division/modulo gives tv_sec=0, tv_usec=-1 -- a timeval with a negative
+    // tv_usec is invalid per POSIX, so select() failed with EINVAL and Poll(-1, ...) returned
+    // false immediately instead of blocking forever as documented. Passing a null timeval
+    // pointer to select() is the correct native equivalent of an infinite wait on both POSIX
+    // and Windows (Winsock2's select() honors a null timeout the same way).
     timeval tv{};
-    tv.tv_sec = static_cast<long>(microSeconds / 1000000);
-    tv.tv_usec = static_cast<long>(microSeconds % 1000000);
+    timeval* tvPtr = &tv;
+    if (microSeconds == -1) {
+        tvPtr = nullptr;
+    } else {
+        tv.tv_sec = static_cast<long>(microSeconds / 1000000);
+        tv.tv_usec = static_cast<long>(microSeconds % 1000000);
+    }
 
     int rc = 0;
     if (mode == SelectMode::SelectRead) {
-        rc = ::select(toFd(fd_) + 1, &set, nullptr, nullptr, &tv);
+        rc = ::select(toFd(fd_) + 1, &set, nullptr, nullptr, tvPtr);
     } else if (mode == SelectMode::SelectWrite) {
-        rc = ::select(toFd(fd_) + 1, nullptr, &set, nullptr, &tv);
+        rc = ::select(toFd(fd_) + 1, nullptr, &set, nullptr, tvPtr);
     } else {
-        rc = ::select(toFd(fd_) + 1, nullptr, nullptr, &set, &tv);
+        rc = ::select(toFd(fd_) + 1, nullptr, nullptr, &set, tvPtr);
     }
     return rc > 0 && FD_ISSET(toSk(fd_), &set);
 }

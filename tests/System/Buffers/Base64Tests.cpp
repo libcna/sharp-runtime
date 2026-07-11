@@ -114,6 +114,31 @@ TEST(Base64Test, DecodeFromUtf8_IncompleteFinalGroup_IsInvalid) {
     EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, true), OperationStatus::InvalidData);
 }
 
+// Regression tests for a code-audit finding (ticket 247): the isFinalBlock=false streaming
+// path (NeedMoreData) had zero test coverage for either DecodeFromUtf8 or EncodeToChars, despite
+// being explicit, documented OperationStatus outcomes used by the streaming (chunked) overloads.
+TEST(Base64Test, DecodeFromUtf8_IncompleteFinalGroup_NotFinalBlock_NeedsMoreData) {
+    std::string b64 = "QQQ"; // 3 symbols -- incomplete group, but more data may follow
+    ReadOnlySpan<uint8_t> src(reinterpret_cast<const uint8_t*>(b64.data()), static_cast<int>(b64.size()));
+    std::vector<uint8_t> out(10);
+    Span<uint8_t> dst(out.data(), static_cast<int>(out.size()));
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64::DecodeFromUtf8(src, dst, consumed, written, false), OperationStatus::NeedMoreData);
+    EXPECT_EQ(consumed, 0);
+    EXPECT_EQ(written, 0);
+}
+
+TEST(Base64Test, EncodeToChars_NotFinalBlock_RemainderBytes_NeedsMoreData) {
+    std::vector<uint8_t> input = {'H', 'e'}; // 2 bytes -- not a full 3-byte group
+    ReadOnlySpan<uint8_t> src(input.data(), static_cast<int>(input.size()));
+    std::vector<char> out(10);
+    Span<char> dst(out.data(), static_cast<int>(out.size()));
+    int consumed = 0, written = 0;
+    EXPECT_EQ(Base64::EncodeToChars(src, dst, consumed, written, false), OperationStatus::NeedMoreData);
+    EXPECT_EQ(consumed, 0);
+    EXPECT_EQ(written, 0);
+}
+
 TEST(Base64Test, IsValid_AllowsEmbeddedWhitespace) {
     std::string valid = "SGVs\r\nbG8=";
     ReadOnlySpan<uint8_t> span(reinterpret_cast<const uint8_t*>(valid.data()), static_cast<int>(valid.size()));
@@ -319,6 +344,15 @@ TEST(Base64Test, IsValid_Char_WithDecodedLength) {
 
 TEST(Base64Test, GetMaxEncodedLength_Negative_Throws) {
     EXPECT_THROW(Base64::GetMaxEncodedToUtf8Length(-1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for a code-audit finding (ticket 247): the negative-input bound of
+// GetMaxEncodedToUtf8Length was tested above, but the upper bound (bytesLength >
+// kMaximumEncodeLength, i.e. > 1610612733, matching .NET's Base64Helper.MaximumEncodeLength)
+// had no test coverage at all.
+TEST(Base64Test, GetMaxEncodedLength_AboveMaximum_Throws) {
+    EXPECT_THROW(Base64::GetMaxEncodedToUtf8Length(1610612734), System::ArgumentOutOfRangeException);
+    EXPECT_NO_THROW(Base64::GetMaxEncodedToUtf8Length(1610612733));
 }
 
 TEST(Base64Test, GetMaxDecodedLength_Negative_Throws) {
