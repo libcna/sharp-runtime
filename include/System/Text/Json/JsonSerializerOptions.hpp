@@ -30,7 +30,7 @@ namespace System::Text::Json {
      */
     class JsonSerializerOptions {
         bool allowTrailingCommas_ = false;
-        bool allowDuplicateProperties_ = false;
+        bool allowDuplicateProperties_ = true;
         intcs defaultBufferSize_ = 16 * 1024;
         std::shared_ptr<JsonNamingPolicy> dictionaryKeyPolicy_;
         bool ignoreReadOnlyProperties_ = false;
@@ -52,12 +52,23 @@ namespace System::Text::Json {
         /** @brief Constructs default options (no indentation, strict comments, case-sensitive). */
         JsonSerializerOptions() = default;
 
-        /** @brief Constructs options initialized from a set of well-known defaults. */
+        /**
+         * @brief Constructs options initialized from a set of well-known defaults.
+         *
+         * @note @c Strict's real-.NET effect also includes @c RespectNullableAnnotations and
+         * @c RespectRequiredConstructorParameters (C#-nullable-annotation/required-member
+         * language features with no C++ equivalent in this port, per the class doc-comment) --
+         * only the two applicable properties (@c UnmappedMemberHandling,
+         * @c AllowDuplicateProperties) are set here.
+         */
         explicit JsonSerializerOptions(JsonSerializerDefaults defaults) {
             if (defaults == JsonSerializerDefaults::Web) {
                 propertyNameCaseInsensitive_ = true;
                 propertyNamingPolicy_ = JsonNamingPolicy::CamelCase();
                 numberHandling_ = Serialization::JsonNumberHandling::AllowReadingFromString;
+            } else if (defaults == JsonSerializerDefaults::Strict) {
+                unmappedMemberHandling_ = Serialization::JsonUnmappedMemberHandling::Disallow;
+                allowDuplicateProperties_ = false;
             }
         }
 
