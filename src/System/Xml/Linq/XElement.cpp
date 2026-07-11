@@ -4,6 +4,7 @@
 #include "System/Xml/Linq/XElement.hpp"
 #include <algorithm>
 #include <fstream>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/Linq/XDocument.hpp"
 #include "System/Xml/Linq/XText.hpp"
@@ -172,6 +173,19 @@ namespace System::Xml::Linq {
             h ^= c->GetDeepHashCode();
         }
         return h;
+    }
+
+    void XElement::ValidateNode(const XNode& node) const {
+        // Verified against XElement.cs's ValidateNode: an XDocument or XDocumentType can never
+        // be a legal child of an element (only of an XDocument, which enforces its own,
+        // separate single-root/single-doctype rules) -- without this check, tinyxml2's own
+        // insertion has no such restriction and would silently produce a structurally invalid
+        // tree (a nested document, or a doctype declaration inside element content).
+        auto nt = node.getNodeTypeProperty();
+        if (nt == XmlNodeType::Document)
+            throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add an XDocument as a child of an XElement).");
+        if (nt == XmlNodeType::DocumentType)
+            throw System::ArgumentException("This operation would create an incorrectly structured document (cannot add an XDocumentType as a child of an XElement).");
     }
 
     bool XElement::DeepEqualsCore(const XNode& other) const {

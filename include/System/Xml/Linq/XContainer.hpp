@@ -40,9 +40,13 @@ namespace System::Xml::Linq {
         static void AdoptObject(XObject& obj, XContainer* parent) { obj.parent_ = parent; }
 
         /**
-         * @brief Structural validation hook run before a node is inserted, so subclasses (XDocument)
-         * can enforce constraints (single root element, single doctype, no free text). Default: no restrictions.
-         * @throws System::InvalidOperationException if @p node may not be added to this container.
+         * @brief Structural validation hook run before a node is inserted, so subclasses
+         * (XDocument, XElement) can enforce constraints (XDocument: single root element,
+         * single doctype, no free text; XElement: an XDocument/XDocumentType may not be
+         * added as a child element). Default: no restrictions.
+         * @throws System::Exception (the specific type is subclass-defined -- XDocument
+         * throws System::InvalidOperationException, XElement throws System::ArgumentException,
+         * matching their respective .NET sources) if @p node may not be added to this container.
          */
         virtual void ValidateNode(const XNode& node) const { (void)node; }
 

@@ -225,6 +225,22 @@ TEST(XNodeTests, DeepEquals_Elements_AttributeOrderMatters) {
     EXPECT_TRUE(XNode::DeepEquals(&a, &c));
 }
 
+// Regression test for a wave-3 audit finding: XElement had no ValidateNode override at all
+// (inherited XContainer's no-op default), so an XDocument or XDocumentType could be added as
+// a child element -- a structurally invalid tree real .NET rejects. Verified against
+// XElement.cs's ValidateNode.
+TEST(XElementTests, Add_XDocument_ThrowsArgumentException) {
+    XElement parent("root");
+    auto doc = std::make_shared<XDocument>();
+    EXPECT_THROW(parent.Add(doc), System::ArgumentException);
+}
+
+TEST(XElementTests, Add_XDocumentType_ThrowsArgumentException) {
+    XElement parent("root");
+    auto dt = std::make_shared<XDocumentType>("html", "", "", "");
+    EXPECT_THROW(parent.Add(dt), System::ArgumentException);
+}
+
 TEST(XNodeTests, ToString_NoArgs_IsIndentedByDefault) {
     auto root = std::make_shared<XElement>("root");
     root->Add(std::make_shared<XElement>("child"));
