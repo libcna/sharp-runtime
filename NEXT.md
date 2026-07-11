@@ -1,6 +1,80 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-10 (branch: `feature/work`, HEAD `13ab167`) — 11337 tests passing (Debug, default `cmake --build build --parallel 8` config, verified via `./build/SharpRuntimeTests` after every fix in this batch, most recently after the SpinLock rewrite).*
+*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `08d9318`) — 11356 tests passing (Debug, default `cmake --build build --parallel 8` config; also verified clean on a library-only `-DCMAKE_BUILD_TYPE=Release -DSHARP_RUNTIME_BUILD_TESTS=OFF` rebuild after this batch, per the earlier-session lesson that `-O2`+ can surface warnings `-O0` doesn't).*
+
+## Session checkpoint (2026-07-11) — Xml core dangerous-moderate findings: 6 fixed, 2 already-fixed/stale (6 commits)
+
+Per NEXT.md's own recommended priority from the previous session, worked through **System.Xml
+core**'s remaining dangerous-moderate catalogue (see "Full findings catalogue" further down —
+13-ish itemized/condensed findings). Same discipline as prior batches: verify against real .NET
+source in `/rv/tmp/runtime/src/libraries/` → write/extend a regression test → fix → build clean
+(Debug **and** a Release/library-only rebuild) → run the targeted suite → bump `plan.sqlite3` →
+commit, one fix per commit.
+
+### Fixed (6 findings, commits `07577d3`..`08d9318`)
+
+- **`XmlReader` buildEvents() had four distinct bugs**, all in one commit since they're the same
+  function: CDATA sections reported as plain `Text` (tinyxml2's `XMLText::CData()` flag never
+  consulted); every `<?target data?>` parsed uniformly as `XmlDeclaration` with a hardcoded
+  `"xml"` name (tinyxml2 doesn't distinguish PI from the real declaration) — now splits the
+  target token and only treats an exact `"xml"` target as the declaration; DOCTYPE parses as
+  tinyxml2's `XMLUnknown`, which had no branch at all and silently vanished from the event
+  stream — now surfaces as `XmlNodeType::DocumentType`; `isEmptyElement` was computed from
+  `!FirstChild()`, so `<a></a>` was indistinguishable from `<a/>` and silently lost its
+  `EndElement` event — now uses tinyxml2's `ClosingType() == CLOSED`. 8 regression tests.
+- **`XmlWriter::ToString()`/`Flush()` ignored `XmlWriterSettings.Indent`**, always
+  pretty-printing via tinyxml2's default `XMLPrinter(compact=false)` — real .NET's `Indent`
+  defaults to `false` (compact). Added an optional `XmlWriterSettings` param to
+  `Create()`/`CreateToString()`, wired through to `compact=!settings.Indent`.
+- **`WriteComment`/`WriteProcessingInstruction`/`WriteCData` wrote embedded terminator
+  sequences raw** (`--`, `?>`, `]]>`), producing literally malformed/corrupted markup. Verified
+  against `XmlEncodedRawTextWriter.WriteCommentOrPi`/`WriteCDataSection`: real .NET does **not**
+  throw for any of these — it self-heals (inserts a protective space; splits CDATA sections
+  around the embedded terminator) so content round-trips unchanged. **This corrects this
+  session's own audit catalogue**, which described the gap as "skip well-formedness validation"
+  implying validate-and-throw — the real source has no such throw path. Added
+  `sanitizeCommentText`/`sanitizeProcessingInstructionText`/`sanitizeCDataText` helpers
+  replicating the self-healing behavior. 4 regression tests including a full write-then-read
+  round-trip.
+- **`XmlNode::Normalize()` only merged adjacent text among direct children**, never recursing
+  into descendant elements — verified against `XmlNode.cs`'s `Normalize()`, which explicitly
+  recurses (`case XmlNodeType.Element: crtChild.Normalize(); goto default;`). Extracted the
+  existing merge loop into a `NormalizeNative()` free-function helper that recurses.
+- **`XmlDocument`'s node-creation factories skipped XML-Name validation entirely** —
+  `CreateElement`/`CreateAttribute`/`CreateEntityReference`/`CreateProcessingInstruction`
+  accepted any string with zero validation. Verified each validates *differently* per node kind
+  in real .NET (not uniformly): `CreateElement`/`CreateAttribute` reuse this port's existing
+  `XmlConvert::VerifyName` (matches `XmlDocument.CheckName`); `CreateEntityReference` only
+  rejects a name starting with `'#'` (matches `XmlEntityReference.cs` — entity names are
+  otherwise unconstrained); `CreateProcessingInstruction` only rejects an empty target (matches
+  `XmlProcessingInstruction.cs` — no NCName check at DOM-construction time). 7 regression tests.
+
+### Already fixed / stale catalogue entries (2 findings, no code change)
+
+- **`XmlNamespaceManager::AddNamespace` reserved-prefix validation** — already throws
+  `ArgumentException` for `xml`/`xmlns` misuse exactly per `XmlNamespaceManager.cs`, with
+  existing test coverage (`AddNamespace_XmlnsPrefix_Throws`,
+  `AddNamespace_XmlPrefixWithWrongUri_Throws`). Fixed in an earlier session; this catalogue
+  entry was stale.
+- **`XmlDeclaration` version/standalone validation** — likewise already correct with existing
+  tests (`CreateXmlDeclaration_InvalidVersion_Throws`, `CreateXmlDeclaration_InvalidStandalone_Throws`,
+  `SetStandaloneProperty_InvalidValue_Throws`). The catalogue's "XmlDeclaration ... skip
+  version/standalone ... validation" framing was stale by the time this session started.
+
+### Xml core dangerous-moderate scope: closed
+
+Both remaining "highlights" items not explicitly itemized above (self-closing/EndElement
+detection, and the `XmlWriter` well-formedness gap) were folded into the fixes above since they
+shared a file/function with an itemized finding. Xml core's dangerous-moderate catalogue is now
+fully processed for this pass — only minor-severity items remain untouched (see the "Full
+findings catalogue" section further down: message-text formatting, line/position info loss,
+`XmlResolver` relative-path gap, prefix-shadowing nondeterminism, `XmlDeclaration.Value`
+leading-space bug, `XmlAttributeCollection` insertion-order degrade, apostrophe over-escaping,
+stray PI trailing space).
+
+**Recommended next session priority (unchanged from before this batch):** Xml.Linq+XPath
+dangerous-moderate findings → Text.Json's 6 remaining dangerous findings → everything else,
+ordinary-severity moderates → minors last.
 
 ## Session checkpoint (2026-07-10, continued again) — Threading dangerous-moderate findings: 10 fixed, 1 deliberately deferred (10 commits)
 
