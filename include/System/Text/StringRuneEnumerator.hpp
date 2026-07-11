@@ -21,25 +21,34 @@ namespace System::Text {
     class StringRuneEnumerator {
         struct Sentinel {};
 
-        const std::string* string_;
+        // Owns a copy of the source string rather than holding a pointer/reference to it.
+        // .NET's StringRuneEnumerator can safely hold a `string` field because C# strings
+        // are immutable and garbage-collected -- the string outlives the enumerator by
+        // construction. C++ has neither guarantee: a `const std::string&` constructor
+        // parameter routinely binds to a temporary (e.g. the extremely common
+        // `StringRuneEnumerator e("abc");` -- a string literal implicitly converts to a
+        // temporary std::string), and that temporary is destroyed at the end of the full
+        // expression, before the enumerator is ever used. Storing just a pointer to it was a
+        // dangling-pointer bug on the single most natural way to construct this type.
+        std::string string_;
         Rune current_;
         size_t nextIndex_ = 0;
         bool hasCurrent_ = false;
 
     public:
-        explicit StringRuneEnumerator(const std::string& value) : string_(&value) {}
+        explicit StringRuneEnumerator(const std::string& value) : string_(value) {}
 
         /** @return The current Rune. */
         [[nodiscard]] Rune getCurrentProperty() const { return current_; }
 
         /** @brief Advances to the next Rune. @return false once past the end of the string. */
         bool MoveNext() {
-            if (nextIndex_ >= string_->size()) {
+            if (nextIndex_ >= string_.size()) {
                 current_ = Rune();
                 return false;
             }
             size_t consumed = 0;
-            if (!Rune::TryGetRuneAt(*string_, nextIndex_, current_, consumed)) {
+            if (!Rune::TryGetRuneAt(string_, nextIndex_, current_, consumed)) {
                 current_ = Rune::ReplacementChar;
                 consumed = (consumed == 0) ? 1 : consumed;
             }

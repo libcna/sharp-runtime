@@ -69,7 +69,12 @@ namespace System::Text {
      * Utf16Enumerator — see RunePosition's class doc comment).
      */
     class RunePosition::Enumerator {
-        const std::string* data_;
+        // Owns a copy of the source data rather than holding a pointer/reference to it -- see
+        // StringRuneEnumerator.hpp's class doc-comment for why: a `const std::string&`
+        // constructor parameter routinely binds to a temporary (e.g.
+        // `RunePosition::Enumerate("abc")`), and a bare pointer to that parameter dangles the
+        // instant the temporary is destroyed at the end of the full expression.
+        std::string data_;
         size_t nextIndex_ = 0;
         Rune currentRune_;
         SharpRuntime::intcs currentStart_ = 0;
@@ -79,14 +84,14 @@ namespace System::Text {
         struct Sentinel {};
 
     public:
-        explicit Enumerator(const std::string& data) : data_(&data) {}
+        explicit Enumerator(const std::string& data) : data_(data) {}
 
         [[nodiscard]] RunePosition getCurrentProperty() const {
             return RunePosition(currentRune_, currentStart_, currentLength_, currentWasReplaced_);
         }
 
         bool MoveNext() {
-            if (nextIndex_ >= data_->size()) {
+            if (nextIndex_ >= data_.size()) {
                 currentRune_ = Rune();
                 currentStart_ = currentLength_ = 0;
                 currentWasReplaced_ = false;
@@ -95,7 +100,7 @@ namespace System::Text {
             SharpRuntime::intcs start = static_cast<SharpRuntime::intcs>(nextIndex_);
             Rune rune;
             size_t consumed = 0;
-            bool ok = Rune::TryGetRuneAt(*data_, nextIndex_, rune, consumed);
+            bool ok = Rune::TryGetRuneAt(data_, nextIndex_, rune, consumed);
             if (!ok) {
                 rune = Rune::ReplacementChar;
                 consumed = (consumed == 0) ? 1 : consumed;

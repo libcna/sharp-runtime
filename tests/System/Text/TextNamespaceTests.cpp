@@ -261,6 +261,15 @@ TEST(UTF32EncodingTests, GetString_SurrogateCodeUnit_ReplacesWithFFFD) {
 
 // --- StringRuneEnumerator / RunePosition / StringBuilderRuneEnumerator ------------------------
 
+// Regression test for a memory-safety bug found via AddressSanitizer (ticket 1485):
+// StringRuneEnumerator's constructor used to store a raw `const std::string*` pointing at its
+// reference parameter instead of owning a copy. Constructing from a string literal -- exactly
+// what this test does, and the single most natural way to use this type -- binds the
+// parameter to a temporary std::string that is destroyed at the end of the full expression,
+// so every subsequent MoveNext() read through an already-dangling pointer. This test always
+// happened to "pass" under a normal (non-ASan) build purely by luck of what garbage bytes
+// were left on the stack; it is kept here specifically because it is the exact repro, now that
+// the enumerator owns its own copy of the string instead.
 TEST(StringRuneEnumeratorTests, EnumeratesAsciiRunes) {
     StringRuneEnumerator e("abc");
     std::vector<uint32_t> values;
@@ -288,6 +297,22 @@ TEST(RunePositionTests, EnumerateReportsStartIndexAndLength) {
     EXPECT_FALSE(positions[0].getWasReplacedProperty());
     EXPECT_EQ(positions[1].getStartIndexProperty(), 1);
     EXPECT_EQ(positions[1].getLengthProperty(), 2);
+}
+
+// Regression test for the same dangling-pointer bug class as StringRuneEnumeratorTests.
+// EnumeratesAsciiRunes above (ticket 1485): RunePosition::Enumerator had the identical
+// raw-pointer-to-reference-parameter defect. RunePosition::Enumerate("abc") binds the
+// parameter to a temporary std::string, which is destroyed at the end of the full expression
+// -- unlike EnumerateReportsStartIndexAndLength above (which uses a named local `s` that
+// outlives the loop and so never actually exercised the bug), this test specifically
+// constructs from a temporary to catch a regression here.
+TEST(RunePositionTests, Enumerate_FromTemporary_DoesNotDangle) {
+    std::vector<RunePosition> positions;
+    for (RunePosition p : RunePosition::Enumerate("abc")) positions.push_back(p);
+    ASSERT_EQ(positions.size(), 3u);
+    EXPECT_EQ(positions[0].getRuneProperty().getValueProperty(), static_cast<uint32_t>('a'));
+    EXPECT_EQ(positions[1].getRuneProperty().getValueProperty(), static_cast<uint32_t>('b'));
+    EXPECT_EQ(positions[2].getRuneProperty().getValueProperty(), static_cast<uint32_t>('c'));
 }
 
 TEST(RunePositionTests, Equality) {
