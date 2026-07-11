@@ -276,28 +276,34 @@ TEST(GCTests, CancelFullGCNotification_DoesNotThrow) {
     EXPECT_NO_THROW(GC::CancelFullGCNotification());
 }
 
-TEST(GCTests, WaitForFullGCApproach_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCApproach(0), GCNotificationStatus::Succeeded);
+// Regression tests for a misleading-result gap found while auditing GC (ticket 70):
+// WaitForFullGCApproach/WaitForFullGCComplete previously returned GCNotificationStatus::
+// Succeeded unconditionally, which asserts "a full GC approach/completion was genuinely
+// detected" -- a false claim, since RegisterForFullGCNotification() is a no-op and nothing is
+// ever actually monitored. NotApplicable is real .NET's own value for "this API doesn't apply
+// to the current GC configuration", which honestly describes this permanently-no-GC port.
+TEST(GCTests, WaitForFullGCApproach_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCApproach(0), GCNotificationStatus::NotApplicable);
 }
 
-TEST(GCTests, WaitForFullGCApproach_DefaultTimeout_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCApproach(), GCNotificationStatus::Succeeded);
+TEST(GCTests, WaitForFullGCApproach_DefaultTimeout_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCApproach(), GCNotificationStatus::NotApplicable);
 }
 
-TEST(GCTests, WaitForFullGCApproach_TimeSpanTimeout_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCApproach(TimeSpan::FromSeconds(1)), GCNotificationStatus::Succeeded);
+TEST(GCTests, WaitForFullGCApproach_TimeSpanTimeout_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCApproach(TimeSpan::FromSeconds(1)), GCNotificationStatus::NotApplicable);
 }
 
-TEST(GCTests, WaitForFullGCComplete_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCComplete(0), GCNotificationStatus::Succeeded);
+TEST(GCTests, WaitForFullGCComplete_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCComplete(0), GCNotificationStatus::NotApplicable);
 }
 
-TEST(GCTests, WaitForFullGCComplete_DefaultTimeout_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCComplete(), GCNotificationStatus::Succeeded);
+TEST(GCTests, WaitForFullGCComplete_DefaultTimeout_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCComplete(), GCNotificationStatus::NotApplicable);
 }
 
-TEST(GCTests, WaitForFullGCComplete_TimeSpanTimeout_ReturnsSucceeded) {
-    EXPECT_EQ(GC::WaitForFullGCComplete(TimeSpan::FromSeconds(1)), GCNotificationStatus::Succeeded);
+TEST(GCTests, WaitForFullGCComplete_TimeSpanTimeout_ReturnsNotApplicable) {
+    EXPECT_EQ(GC::WaitForFullGCComplete(TimeSpan::FromSeconds(1)), GCNotificationStatus::NotApplicable);
 }
 
 // ---------------------------------------------------------------------------
