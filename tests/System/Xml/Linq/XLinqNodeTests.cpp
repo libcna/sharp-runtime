@@ -206,6 +206,25 @@ TEST(XNodeTests, DeepEquals_Elements_IgnoresCommentsAndPIs) {
     EXPECT_TRUE(XNode::DeepEquals(&a, &b));
 }
 
+// Regression test for a wave-3 audit finding: DeepEqualsCore compared attributes via
+// name-lookup (order-independent, like an unordered set), but real .NET's AttributesEqual
+// walks both attribute lists in parallel by *position* -- verified against XElement.cs.
+// Two elements with the same attributes in a different order are NOT deep-equal.
+TEST(XNodeTests, DeepEquals_Elements_AttributeOrderMatters) {
+    XElement a("root");
+    a.Add(std::make_shared<XAttribute>("x", "1"));
+    a.Add(std::make_shared<XAttribute>("y", "2"));
+    XElement b("root");
+    b.Add(std::make_shared<XAttribute>("y", "2"));
+    b.Add(std::make_shared<XAttribute>("x", "1"));
+    EXPECT_FALSE(XNode::DeepEquals(&a, &b));
+
+    XElement c("root");
+    c.Add(std::make_shared<XAttribute>("x", "1"));
+    c.Add(std::make_shared<XAttribute>("y", "2"));
+    EXPECT_TRUE(XNode::DeepEquals(&a, &c));
+}
+
 TEST(XNodeTests, ToString_NoArgs_IsIndentedByDefault) {
     auto root = std::make_shared<XElement>("root");
     root->Add(std::make_shared<XElement>("child"));

@@ -177,10 +177,16 @@ namespace System::Xml::Linq {
     bool XElement::DeepEqualsCore(const XNode& other) const {
         const auto& o = static_cast<const XElement&>(other);
         if (name_ != o.name_) return false;
+        // Verified against XElement.cs's AttributesEqual: real .NET walks both attribute lists
+        // in parallel by *position*, not by name lookup -- two elements with the same
+        // attributes in a different order are NOT deep-equal (attribute order is part of an
+        // XElement's identity for DeepEquals purposes, even though lookup-by-name is
+        // order-independent).
         if (attributes_.size() != o.attributes_.size()) return false;
-        for (auto& a : attributes_) {
-            auto match = o.Attribute(a->getNameProperty());
-            if (!match || match->getValueProperty() != a->getValueProperty()) return false;
+        for (size_t i = 0; i < attributes_.size(); ++i) {
+            if (attributes_[i]->getNameProperty() != o.attributes_[i]->getNameProperty() ||
+                attributes_[i]->getValueProperty() != o.attributes_[i]->getValueProperty())
+                return false;
         }
         // Ignore comments/processing instructions on both sides; pairwise-compare the rest.
         std::vector<const XNode*> lhs, rhs;
