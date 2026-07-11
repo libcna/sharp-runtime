@@ -270,3 +270,34 @@ TEST(DelegateTests, Equality_DifferentObjects_False) {
     auto d2 = std::make_shared<Delegate>([]{});
     EXPECT_TRUE(*d1 != *d2);
 }
+
+// ---------------------------------------------------------------------------
+// GetHashCode / Target -- coverage gap found while auditing delegates (ticket 72): both
+// were fully implemented/documented but had zero test coverage.
+// ---------------------------------------------------------------------------
+
+TEST(DelegateTests, GetHashCode_Default_IsZero) {
+    auto d = std::make_shared<Delegate>();
+    EXPECT_EQ(d->GetHashCode(), 0u);
+}
+
+TEST(DelegateTests, GetHashCode_SingleTarget_Consistent) {
+    auto d = std::make_shared<Delegate>([]{});
+    EXPECT_EQ(d->GetHashCode(), d->GetHashCode());
+}
+
+TEST(DelegateTests, GetHashCode_Multicast_DiffersFromEmpty) {
+    auto d1 = std::make_shared<Delegate>([]{});
+    auto d2 = std::make_shared<Delegate>([]{});
+    auto combined = Delegate::Combine(d1, d2);
+    // Not asserting a specific value -- only documented as "XOR-folds the pointer hashes of
+    // its entries", i.e. an implementation detail -- just that it is stable and doesn't
+    // collide with the documented empty-delegate value of 0.
+    EXPECT_EQ(combined->GetHashCode(), combined->GetHashCode());
+    EXPECT_NE(combined->GetHashCode(), 0u);
+}
+
+TEST(DelegateTests, GetTargetProperty_AlwaysNull) {
+    auto d = std::make_shared<Delegate>([]{});
+    EXPECT_EQ(d->getTargetProperty(), nullptr);
+}
