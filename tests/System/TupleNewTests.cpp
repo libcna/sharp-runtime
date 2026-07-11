@@ -229,6 +229,53 @@ TEST(TupleTests, Tuple7_GetHashCode_Consistent) {
 }
 
 // ===========================================================================
+// Tuple8 -- regression coverage for a code-audit finding (ticket 246): real .NET's
+// Tuple.Create supports arities 1-8 (Tuple.Create(T1..T8) wraps item8 in a Tuple1<T8> Rest
+// field, verified against Tuple.cs), but this port only implemented Tuple1-Tuple7 and
+// Create() up to 7 args -- unlike its sibling ValueTuple.hpp, which already supports 8.
+// Tuple8/Tuple::Create(8 args) were added to close that gap.
+// ===========================================================================
+
+TEST(TupleTests, Tuple8_ConstructAndAccess) {
+    System::Tuple8<int,int,int,int,int,int,int,System::Tuple1<int>> t(
+        1,2,3,4,5,6,7, System::Tuple1<int>(8));
+    EXPECT_EQ(t.Item1, 1);
+    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.Rest.Item1, 8);
+}
+
+TEST(TupleTests, Tuple8_EqualityTrue) {
+    auto a = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    auto b = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    EXPECT_TRUE(a == b);
+}
+
+TEST(TupleTests, Tuple8_EqualityFalse_DifferentRest) {
+    auto a = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    auto b = System::Tuple::Create(1,2,3,4,5,6,7,9);
+    EXPECT_FALSE(a == b);
+}
+
+TEST(TupleTests, Tuple8_ToString) {
+    auto t = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    EXPECT_EQ(t.ToString(), "(1, 2, 3, 4, 5, 6, 7, 8)");
+}
+
+TEST(TupleTests, Tuple8_CompareTo) {
+    auto a = System::Tuple::Create(1,2,3,4,5,6,7,1);
+    auto b = System::Tuple::Create(1,2,3,4,5,6,7,2);
+    EXPECT_LT(a.CompareTo(b), 0);
+    EXPECT_GT(b.CompareTo(a), 0);
+    EXPECT_EQ(a.CompareTo(a), 0);
+}
+
+TEST(TupleTests, Tuple8_GetHashCode_Consistent) {
+    auto a = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    auto b = System::Tuple::Create(1,2,3,4,5,6,7,8);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+// ===========================================================================
 // Tuple::Create factory
 // ===========================================================================
 
@@ -266,6 +313,12 @@ TEST(TupleTests, TupleCreate6) {
 TEST(TupleTests, TupleCreate7) {
     auto t = System::Tuple::Create(1, 2, 3, 4, 5, 6, 7);
     EXPECT_EQ(t.Item7, 7);
+}
+
+TEST(TupleTests, TupleCreate8) {
+    auto t = System::Tuple::Create(1, 2, 3, 4, 5, 6, 7, 8);
+    EXPECT_EQ(t.Item7, 7);
+    EXPECT_EQ(t.Rest.Item1, 8);
 }
 
 TEST(TupleTests, TupleCreate2_TypeDeduction) {
