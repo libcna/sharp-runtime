@@ -467,7 +467,13 @@ namespace System::Xml::XPath {
             double result = 0.0;
             const char* begin = s.data();
             const char* end = s.data() + s.size();
-            auto [ptr, ec] = std::from_chars(begin, end, result);
+            // XPath 1.0's Number production (§3.4) is `Digits ('.' Digits?)? | '.' Digits` --
+            // no exponent, no "inf"/"nan" spellings. std::from_chars' default format
+            // (general) accepts scientific notation too, so e.g. number("1e2") would silently
+            // parse as 100 instead of correctly yielding NaN (XPath has no exponent syntax at
+            // all, unlike most other "number as string" conversions). chars_format::fixed
+            // restricts parsing to the fixed-notation grammar XPath actually specifies.
+            auto [ptr, ec] = std::from_chars(begin, end, result, std::chars_format::fixed);
             if (ec != std::errc{} || ptr != end) return std::numeric_limits<double>::quiet_NaN();
             return result;
         }

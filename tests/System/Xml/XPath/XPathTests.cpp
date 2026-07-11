@@ -496,6 +496,25 @@ TEST(XPathFunctionTests, StringNumberFunctions) {
     EXPECT_DOUBLE_EQ(nav->Evaluate("number('3.5')").getNumberProperty(), 3.5);
 }
 
+// Regression test for a wave-3 audit finding: number() accepted scientific/exponent
+// notation (e.g. "1e2" -> 100), but XPath 1.0's Number production (section 3.4) is
+// `Digits ('.' Digits?)? | '.' Digits` -- no exponent syntax at all. A string containing an
+// exponent must evaluate to NaN, matching real XPath 1.0 (and .NET's XPathNavigator).
+TEST(XPathFunctionTests, Number_ExponentNotation_YieldsNaN) {
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('1e2')").getNumberProperty()));
+    EXPECT_TRUE(std::isnan(nav->Evaluate("number('1.5E-3')").getNumberProperty()));
+}
+
+TEST(XPathFunctionTests, Number_PlainDecimal_StillParsesCorrectly) {
+    auto doc = LoadCatalog();
+    std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
+    EXPECT_DOUBLE_EQ(nav->Evaluate("number('123')").getNumberProperty(), 123.0);
+    EXPECT_DOUBLE_EQ(nav->Evaluate("number('.5')").getNumberProperty(), 0.5);
+    EXPECT_DOUBLE_EQ(nav->Evaluate("number('-2.25')").getNumberProperty(), -2.25);
+}
+
 TEST(XPathFunctionTests, StartsWithContainsFunctions) {
     auto doc = LoadCatalog();
     std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
