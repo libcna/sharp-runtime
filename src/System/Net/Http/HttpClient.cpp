@@ -88,23 +88,64 @@ HttpClient::ParsedUrl HttpClient::parseUrl(const std::string& url) {
     }
     if (result.path.empty()) result.path = "/";
 
-    // Strip query from host:port field (shouldn't happen, but guard)
-    size_t colonPos = hostPort.rfind(':');
-    if (colonPos != std::string::npos) {
-        result.host = hostPort.substr(0, colonPos);
-        try {
-            result.port = std::stoi(hostPort.substr(colonPos + 1));
-        } catch (...) {
-            throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
+    if (!hostPort.empty() && hostPort[0] == '[') {
+        // IPv6 literal in bracket notation, e.g. "[::1]" or "[::1]:8080". A bare
+        // `rfind(':')` split is wrong here -- an IPv6 address itself contains colons, so
+        // splitting on the last colon in "[::1]" (no port) grabs the second colon of the
+        // address instead of a port separator, corrupting both host and port.
+        size_t closeBracket = hostPort.find(']');
+        if (closeBracket == std::string::npos)
+            throw System::UriFormatException("HttpClient: unterminated IPv6 literal in URL: " + url);
+        result.host = hostPort.substr(1, closeBracket - 1);
+        if (closeBracket + 1 < hostPort.size() && hostPort[closeBracket + 1] == ':') {
+            try {
+                result.port = std::stoi(hostPort.substr(closeBracket + 2));
+            } catch (...) {
+                throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
+            }
+        } else {
+            result.port = 80;
         }
     } else {
-        result.host = hostPort;
-        result.port = 80;
+        size_t colonPos = hostPort.rfind(':');
+        if (colonPos != std::string::npos) {
+            result.host = hostPort.substr(0, colonPos);
+            try {
+                result.port = std::stoi(hostPort.substr(colonPos + 1));
+            } catch (...) {
+                throw System::UriFormatException("HttpClient: invalid port in URL: " + url);
+            }
+        } else {
+            result.host = hostPort;
+            result.port = 80;
+        }
     }
 
     if (result.host.empty())
         throw System::UriFormatException("HttpClient: empty host in URL: " + url);
 
+    return result;
+}
+
+// A status line that can't be parsed (no space to find the code, or a non-numeric code) must
+// not silently report success -- this previously defaulted the status code to 200 (OK)
+// whenever the line had no space at all, making a garbled/empty response from the server look
+// exactly like a successful one to calling code.
+HttpClient::ParsedStatusLine HttpClient::parseStatusLine(const std::string& statusLine) {
+    ParsedStatusLine result;
+    size_t sp1 = statusLine.find(' ');
+    if (sp1 == std::string::npos)
+        throw HttpRequestException("HttpClient: malformed status line: '" + statusLine + "'");
+    size_t sp2 = statusLine.find(' ', sp1 + 1);
+    std::string codeStr = (sp2 != std::string::npos)
+        ? statusLine.substr(sp1 + 1, sp2 - sp1 - 1)
+        : statusLine.substr(sp1 + 1);
+    try {
+        result.statusCode = std::stoi(codeStr);
+    } catch (...) {
+        throw HttpRequestException("HttpClient: malformed status line: '" + statusLine + "'");
+    }
+    if (sp2 != std::string::npos) result.reason = statusLine.substr(sp2 + 1);
     return result;
 }
 
@@ -259,24 +300,12 @@ static std::shared_ptr<HttpResponseMessage> performRequest(
 
     // Status line: HTTP/1.1 200 OK
     std::string statusLine = recvLine(fd, buf);
-    int         statusCode = 200;
-    std::string reason;
-    {
-        size_t sp1 = statusLine.find(' ');
-        if (sp1 != std::string::npos) {
-            size_t sp2 = statusLine.find(' ', sp1 + 1);
-            if (sp2 != std::string::npos) {
-                statusCode = std::stoi(statusLine.substr(sp1 + 1, sp2 - sp1 - 1));
-                reason     = statusLine.substr(sp2 + 1);
-            } else {
-                statusCode = std::stoi(statusLine.substr(sp1 + 1));
-            }
-        }
-    }
+    HttpClient::ParsedStatusLine parsedStatus = HttpClient::parseStatusLine(statusLine);
+    int statusCode = parsedStatus.statusCode;
 
     auto resp = std::make_shared<HttpResponseMessage>(
         static_cast<System::Net::HttpStatusCode>(statusCode));
-    resp->setReasonPhraseProperty(reason);
+    resp->setReasonPhraseProperty(parsedStatus.reason);
 
     // Response headers
     std::string transferEncoding;
