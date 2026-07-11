@@ -47,12 +47,24 @@ TEST(OperatingSystemTest, IsOSPlatform_Unknown) {
     EXPECT_FALSE(OperatingSystem::IsOSPlatform("unknown_os_xyz"));
 }
 
-TEST(OperatingSystemTest, IsAndroid_False) {
+TEST(OperatingSystemTest, IsAndroid_FalseOnNonAndroidBuild) {
     EXPECT_FALSE(OperatingSystem::IsAndroid());
 }
 
-TEST(OperatingSystemTest, IsIOS_False) {
+TEST(OperatingSystemTest, IsIOS_FalseOnNonAppleBuild) {
     EXPECT_FALSE(OperatingSystem::IsIOS());
+}
+
+// Regression test for a wave-3 audit finding: IsAndroid() was hardcoded false, so it and
+// IsLinux() could both report true simultaneously on an Android build (Android's kernel also
+// defines __linux__) -- real .NET treats them as mutually exclusive OSPlatform values.
+// Verified against IsMacOS()'s existing analogous exclusion of iOS.
+TEST(OperatingSystemTest, IsAndroidAndIsLinux_MutuallyExclusive) {
+    EXPECT_FALSE(OperatingSystem::IsAndroid() && OperatingSystem::IsLinux());
+}
+
+TEST(OperatingSystemTest, IsIOSAndIsMacOS_MutuallyExclusive) {
+    EXPECT_FALSE(OperatingSystem::IsIOS() && OperatingSystem::IsMacOS());
 }
 
 TEST(OperatingSystemTest, ServicePack_Empty) {

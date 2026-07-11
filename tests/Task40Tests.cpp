@@ -965,7 +965,7 @@ TEST(OperatingSystemTests, IsWindows_FalseOnLinux) {
 #endif
 }
 
-TEST(OperatingSystemTests, IsAndroid_AlwaysFalse) {
+TEST(OperatingSystemTests, IsAndroid_FalseOnNonAndroidBuild) {
     EXPECT_FALSE(OperatingSystem::IsAndroid());
 }
 

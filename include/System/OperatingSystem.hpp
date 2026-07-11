@@ -116,12 +116,15 @@ namespace System {
         }
 
         /**
-         * @brief Returns true when compiled for Linux (__linux__ defined).
+         * @brief Returns true when compiled for Linux (__linux__ defined, excluding Android).
          *
-         * C++ counterpart of .NET OperatingSystem.IsLinux().
+         * C++ counterpart of .NET OperatingSystem.IsLinux(). Android also defines __linux__
+         * (its kernel is Linux-based), but real .NET treats Android as a distinct OSPlatform
+         * from generic Linux, so it's excluded here — mutually exclusive with IsAndroid(),
+         * matching IsMacOS()'s existing exclusion of iOS via __IPHONE_OS_VERSION_MIN_REQUIRED.
          */
         static bool IsLinux() {
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
             return true;
 #else
             return false;
@@ -175,18 +178,35 @@ namespace System {
         static bool IsWasi() { return false; }
 
         /**
-         * @brief Returns false — Android is not supported in this port.
+         * @brief Returns true when compiled for Android (__ANDROID__ defined).
          *
-         * C++ counterpart of .NET OperatingSystem.IsAndroid().
+         * C++ counterpart of .NET OperatingSystem.IsAndroid(). Was previously hardcoded
+         * false, in direct contradiction to SharpRuntime/Storage/StoragePaths.cpp's own
+         * real __ANDROID__-guarded code path — this port does have Android-specific
+         * handling elsewhere, this predicate just never reported it.
          */
-        static bool IsAndroid() { return false; }
+        static bool IsAndroid() {
+#if defined(__ANDROID__)
+            return true;
+#else
+            return false;
+#endif
+        }
 
         /**
-         * @brief Returns false — iOS is not supported in this port.
+         * @brief Returns true when compiled for iOS (__APPLE__ and __IPHONE_OS_VERSION_MIN_REQUIRED defined).
          *
-         * C++ counterpart of .NET OperatingSystem.IsIOS().
+         * C++ counterpart of .NET OperatingSystem.IsIOS(). Uses the same
+         * __IPHONE_OS_VERSION_MIN_REQUIRED convention IsMacOS() already relies on to
+         * exclude iOS from itself.
          */
-        static bool IsIOS() { return false; }
+        static bool IsIOS() {
+#if defined(__APPLE__) && defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
+            return true;
+#else
+            return false;
+#endif
+        }
 
         /**
          * @brief Returns false — tvOS is not supported in this port.
