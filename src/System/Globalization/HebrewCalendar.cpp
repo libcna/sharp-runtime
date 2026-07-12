@@ -353,6 +353,17 @@ int HebrewCalendar::GetDaysInYear(int year, int era) const {
 }
 
 System::DateTime HebrewCalendar::AddMonths(const System::DateTime& time, int months) const {
+    // `int i = m + months;` below (and, in the negative branch, `-months`) is real signed-
+    // integer-overflow UB in C++ for a months argument as simple as INT_MAX/INT_MIN -- real
+    // .NET's identical-looking arithmetic relies on C#'s well-defined unchecked wraparound,
+    // eventually caught by a try/catch around the whole method that converts any downstream
+    // ArgumentException into ArgumentOutOfRangeException(nameof(months), ...). This port has
+    // no such wrapper (and C++ wraparound isn't guaranteed for signed types), so validate
+    // upfront instead, matching the same 120000-month bound Calendar::AddMonths and this
+    // port's other calendar-specific AddMonths overrides already use.
+    if (months < -120000 || months > 120000)
+        throw System::ArgumentOutOfRangeException("months", std::to_string(months),
+            "Valid values are between -120000 and 120000, inclusive.");
     int y = GetYear(time), m = GetMonth(time), d = GetDayOfMonth(time);
     if (months >= 0) {
         int i = m + months;
@@ -377,7 +388,17 @@ System::DateTime HebrewCalendar::AddMonths(const System::DateTime& time, int mon
 }
 
 System::DateTime HebrewCalendar::AddYears(const System::DateTime& time, int years) const {
-    int y = GetYear(time) + years;
+    // `GetYear(time) + years` computed directly in int32 is real signed-integer-overflow UB
+    // in C++ for a years argument near INT_MAX/INT_MIN -- real .NET's `y += years` relies on
+    // C#'s well-defined unchecked wraparound, immediately followed by
+    // CheckHebrewYearValue(y, ...) validating the (possibly-wrapped) result is in
+    // [MinHebrewYear, MaxHebrewYear]. Computing the sum in a wider type first avoids the
+    // overflow while preserving the same effective validation (the narrow Hebrew year range
+    // means any genuinely out-of-range sum is rejected either way).
+    long long y64 = static_cast<long long>(GetYear(time)) + static_cast<long long>(years);
+    if (y64 < MinHebrewYear || y64 > MaxHebrewYear)
+        throw System::ArgumentOutOfRangeException("years");
+    int y = static_cast<int>(y64);
     int m = GetMonth(time), d = GetDayOfMonth(time);
     if (m > GetMonthsInYear(y, CurrentEra)) m = GetMonthsInYear(y, CurrentEra);
     int maxDay = GetDaysInMonth(y, m);

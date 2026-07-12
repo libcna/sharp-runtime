@@ -229,6 +229,13 @@ System::DateTime UmAlQuraCalendar::AddMonths(const System::DateTime& time, int m
 }
 
 System::DateTime UmAlQuraCalendar::AddYears(const System::DateTime& time, int years) const {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large years argument (same bug class fixed in
+    // Calendar::AddYears/JulianCalendar::AddYears/PersianCalendar::AddYears/
+    // HebrewCalendar::AddYears/HijriCalendar::AddYears). Validated against the equivalent
+    // bound AddMonths (above) already enforces (120000 / 12 = 10000).
+    if (years < -10000 || years > 10000)
+        throw System::ArgumentOutOfRangeException("years");
     return AddMonths(time, years * 12);
 }
 

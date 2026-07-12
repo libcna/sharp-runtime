@@ -199,8 +199,19 @@ public:
      * @brief Returns a DateTime that is the specified number of months from the given DateTime,
      * performing the arithmetic in the Julian calendar system.
      * C++ counterpart of .NET JulianCalendar.AddMonths(DateTime, int).
+     *
+     * As a virtual override, this replaces (does not augment) Calendar::AddMonths's own
+     * |months| > 120000 bounds check, so it needs its own -- without it, `i = m - 1 + months`
+     * a few lines below is real signed-integer-overflow UB in C++ for a months argument as
+     * simple as INT_MAX (confirmed via UBSan: "signed integer overflow: 2147483647 + 5 cannot
+     * be represented in type 'int'"). Matches the same 120000 bound Calendar::AddMonths and
+     * this port's other calendar-specific AddMonths overrides use.
+     * @throws System::ArgumentOutOfRangeException if @p months is outside [-120000, 120000].
      */
     System::DateTime AddMonths(const System::DateTime& time, int months) const override {
+        if (months < -120000 || months > 120000)
+            throw System::ArgumentOutOfRangeException("months", std::to_string(months),
+                "Valid values are between -120000 and 120000, inclusive.");
         SharpRuntime::longcs ticks = time.getTicksProperty();
         int y = GetDatePart(ticks, DatePartYear);
         int m = GetDatePart(ticks, DatePartMonth);
@@ -223,8 +234,17 @@ public:
      * @brief Returns a DateTime that is the specified number of years from the given DateTime,
      * performing the arithmetic in the Julian calendar system.
      * C++ counterpart of .NET JulianCalendar.AddYears(DateTime, int).
+     *
+     * `years * 12` computed directly with no upfront bounds check is real signed-integer-
+     * overflow UB in C++ for a merely large years argument (same bug class as
+     * Calendar::AddYears and PersianCalendar::AddYears). Validated against the equivalent
+     * bound AddMonths (above) already enforces (120000 / 12 = 10000) before the multiply.
+     * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      */
     System::DateTime AddYears(const System::DateTime& time, int years) const override {
+        if (years < -10000 || years > 10000)
+            throw System::ArgumentOutOfRangeException("years", std::to_string(years),
+                "Valid values are between -10000 and 10000, inclusive.");
         return AddMonths(time, years * 12);
     }
 

@@ -127,6 +127,14 @@ TEST(HijriCalendarTests, GetMonth2000AD) {
     int m = cal.GetMonth(DateTime(2000, 1, 1));
     EXPECT_EQ(m, 9);
 }
+TEST(HijriCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large years argument.
+    HijriCalendar cal;
+    DateTime start(2000, 1, 1);
+    EXPECT_THROW(cal.AddYears(start, 200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddYears(start, -200000000), System::ArgumentOutOfRangeException);
+}
 
 // ---------------------------------------------------------------------------
 // HebrewCalendar
@@ -166,6 +174,22 @@ TEST(HebrewCalendarTests, MonthsInLeapYear) {
 TEST(HebrewCalendarTests, MonthsInCommonYear) {
     HebrewCalendar cal;
     EXPECT_EQ(cal.GetMonthsInYear(5785), 12); // 5785 is common
+}
+TEST(HebrewCalendarTests, AddMonths_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `int i = m + months;` computed directly with no upfront bounds check is real
+    // signed-integer-overflow UB in C++ for a months argument as simple as INT_MAX/INT_MIN.
+    HebrewCalendar cal;
+    DateTime start(2024, 1, 1);
+    EXPECT_THROW(cal.AddMonths(start, 1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddMonths(start, -1000000000), System::ArgumentOutOfRangeException);
+}
+TEST(HebrewCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `GetYear(time) + years` computed directly is real signed-integer-overflow UB in C++
+    // for a years argument near INT_MAX/INT_MIN.
+    HebrewCalendar cal;
+    DateTime start(2024, 1, 1);
+    EXPECT_THROW(cal.AddYears(start, 1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddYears(start, -1000000000), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,4 +253,13 @@ TEST(UmAlQuraCalendarTests, ToDateTime_RoundTripsThroughGetYearMonthDay) {
 TEST(UmAlQuraCalendarTests, ToDateTime_InvalidDay_Throws) {
     UmAlQuraCalendar cal;
     EXPECT_THROW(cal.ToDateTime(1445, 1, 31, 0, 0, 0, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(UmAlQuraCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large years argument.
+    UmAlQuraCalendar cal;
+    DateTime start(2024, 6, 15);
+    EXPECT_THROW(cal.AddYears(start, 200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddYears(start, -200000000), System::ArgumentOutOfRangeException);
 }

@@ -358,12 +358,26 @@ public:
      * @brief Returns a DateTime that is the specified number of years from the given DateTime.
      *
      * C++ counterpart of .NET PersianCalendar.AddYears(DateTime, int). Delegates to
-     * AddMonths(time, years * 12), matching real .NET exactly.
+     * AddMonths(time, years * 12), matching real .NET exactly -- real .NET's own AddYears is
+     * literally `return AddMonths(time, years * 12);` with no upfront check, since C#'s default
+     * unchecked arithmetic is defined to wrap silently on overflow. C++ signed overflow is
+     * undefined behavior for the same expression (confirmed via UBSan: "signed integer
+     * overflow: 200000000 * 12 cannot be represented in type 'int'"), so this validates years
+     * is small enough that the multiplication itself can never overflow before attempting it --
+     * the exact bound AddMonths itself already enforces on its `months` parameter
+     * (120000 / 12 = 10000), so this doesn't reject anything AddMonths would have accepted
+     * anyway; it only moves the rejection earlier, before the overflow-prone multiply. Same
+     * bug class and same fix as DateTime::AddYears (which this port's DateTimeOffset::AddYears
+     * also had until it was fixed to delegate to DateTime::AddYears).
      * @param time  The starting DateTime.
      * @param years The number of years to add (may be negative).
+     * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      * @return A new DateTime offset by @p years Persian years.
      */
     System::DateTime AddYears(const System::DateTime& time, int years) const override {
+        if (years < -10000 || years > 10000)
+            throw System::ArgumentOutOfRangeException("years", std::to_string(years),
+                "Valid values are between -10000 and 10000, inclusive.");
         return AddMonths(time, years * 12);
     }
 

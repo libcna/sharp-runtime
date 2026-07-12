@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -438,10 +439,24 @@ public:
      * rejects Feb 29 in a non-leap year) where .NET clamps silently.
      * @param time  The starting DateTime.
      * @param years The number of years to add.
+     * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      * @return A new DateTime offset by @p years, with the day clamped if the target month is
      *         shorter than the source day (e.g. Feb 29 -> Feb 28 in a non-leap year).
+     *
+     * `years * 12` computed directly with no upfront bounds check is real signed-integer-
+     * overflow UB in C++ for a merely large (not extreme) years argument -- unlike real .NET,
+     * where the identical `AddMonths(time, years * 12)` expression relies on C#'s well-defined
+     * unchecked-arithmetic wraparound (confirmed via UBSan). AddMonths (below) already rejects
+     * |months| > 120000 before doing arithmetic, so validating years against the equivalent
+     * bound (120000 / 12 = 10000) here, before the multiply, rejects nothing AddMonths would
+     * have accepted anyway -- it only moves the rejection earlier, before the overflow-prone
+     * multiplication. This exact bug class was already fixed once in this same file (see
+     * AddMonths's own doc comment below) but missed here in the sibling method.
      */
     virtual System::DateTime AddYears(const System::DateTime& time, int years) const {
+        if (years < -10000 || years > 10000)
+            throw System::ArgumentOutOfRangeException("years", std::to_string(years),
+                "Valid values are between -10000 and 10000, inclusive.");
         return AddMonths(time, years * 12);
     }
 
@@ -477,13 +492,25 @@ public:
     /**
      * @brief Returns a DateTime that is the specified number of weeks from the given DateTime.
      *
-     * C++ counterpart of .NET Calendar.AddWeeks(DateTime, int).
+     * C++ counterpart of .NET Calendar.AddWeeks(DateTime, int). Real .NET's implementation is
+     * `AddDays(time, weeks * 7)` with no upfront check, relying on C#'s well-defined unchecked-
+     * arithmetic wraparound for `weeks * 7`. That expression is real signed-integer-overflow UB
+     * in C++ for a merely large (not extreme) weeks argument -- same bug class as AddYears
+     * above. Computes the product in a wider type first so the multiplication itself can never
+     * overflow, then lets DateTime::AddDays's own bounds check (already validated against
+     * DateTime::MaxDays) reject anything outside DateTime's representable range, rather than
+     * duplicating that bound here.
      * @param time  The starting DateTime.
      * @param weeks The number of weeks to add.
+     * @throws System::ArgumentOutOfRangeException if `weeks * 7` doesn't fit in a 32-bit int.
      * @return A new DateTime offset by @p weeks * 7 days.
      */
     virtual System::DateTime AddWeeks(const System::DateTime& time, int weeks) const {
-        return time.AddDays(weeks * 7);
+        long long totalDays = static_cast<long long>(weeks) * 7;
+        if (totalDays < std::numeric_limits<int>::min() || totalDays > std::numeric_limits<int>::max())
+            throw System::ArgumentOutOfRangeException("weeks", std::to_string(weeks),
+                "Value was either too large or too small for an Int32.");
+        return time.AddDays(static_cast<int>(totalDays));
     }
 
     /**
