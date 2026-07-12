@@ -572,6 +572,45 @@ TEST(Int128Tests, Log2_Negative_Throws) {
     EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), System::ArgumentOutOfRangeException);
 }
 
+// operator+/-/* previously used raw signed __int128 arithmetic, which is genuine C++ UB on
+// overflow (confirmed via a standalone UBSan repro) even though real .NET's own unchecked
+// operators are defined to wrap silently -- these lock in the wrapping behavior.
+TEST(Int128Tests, OperatorPlus_MaxValuePlusOne_WrapsToMinValue) {
+    EXPECT_EQ(System::Int128::MaxValue() + System::Int128::One(), System::Int128::MinValue());
+}
+
+TEST(Int128Tests, OperatorMinus_MinValueMinusOne_WrapsToMaxValue) {
+    EXPECT_EQ(System::Int128::MinValue() - System::Int128::One(), System::Int128::MaxValue());
+}
+
+TEST(Int128Tests, OperatorMultiply_Overflow_WrapsWithoutUB) {
+    // MaxValue * 2 overflows; must not crash/UB, just wrap per real .NET's unchecked operator.
+    System::Int128 result = System::Int128::MaxValue() * System::Int128(2);
+    EXPECT_EQ(result, System::Int128(-2));
+}
+
+// Matches real .NET's unchecked unary operator- => Zero - value: negating MinValue wraps back
+// to MinValue itself, a two's-complement quirk (Int128::Abs() is the method that throws for
+// this case, not the raw operator). Confirmed real UB in plain __int128 negation via UBSan.
+TEST(Int128Tests, UnaryNegate_MinValue_WrapsToItself) {
+    EXPECT_EQ(-System::Int128::MinValue(), System::Int128::MinValue());
+}
+
+// Unlike +/-/*, real .NET's Int128 operator/ (and operator%, which is defined in terms of it)
+// explicitly throws OverflowException for MinValue/-1, rather than wrapping -- confirmed real
+// UB in plain __int128 division/modulo for this exact case via a standalone UBSan repro.
+TEST(Int128Tests, OperatorDivide_MinValueByNegativeOne_ThrowsOverflow) {
+    EXPECT_THROW(System::Int128::MinValue() / System::Int128(-1), System::OverflowException);
+}
+
+TEST(Int128Tests, OperatorModulo_MinValueByNegativeOne_ThrowsOverflow) {
+    EXPECT_THROW(System::Int128::MinValue() % System::Int128(-1), System::OverflowException);
+}
+
+TEST(Int128Tests, OperatorDivide_ByZero_ThrowsDivideByZero) {
+    EXPECT_THROW(System::Int128::One() / System::Int128::Zero(), System::DivideByZeroException);
+}
+
 // ===========================================================================
 // UInt128
 // ===========================================================================
