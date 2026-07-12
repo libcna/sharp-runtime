@@ -1,10 +1,52 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1efd360`) — 11774 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `eb162a6`) — 11778 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11774 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11778 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 313-314 closed, a real threading bug in Task + a header-parsing strictness divergence
+
+Continuing the same autonomous run (previous checkpoint covered 310-312). Commits: 597129d,
+eb162a6 — pushed to `origin/feature/work`.
+
+- **313 (Threading/Tasks/Task.hpp)**: a second genuine concurrency bug this session (after 308's
+  TimeZoneInfo race), this time in a core primitive. `Task`/`TaskT<TResult>` are trivially
+  copyable and share their state via `shared_ptr` — matching real .NET's `Task`, which explicitly
+  supports being awaited by multiple callers — but stored their `std::async` result in a plain
+  `std::future<T>`, whose `get()` the C++ standard documents as unsafe for concurrent calls on
+  the same instance. Confirmed via ThreadSanitizer: two threads calling `Wait()` on copies of the
+  same `Task` raced inside `std::future::get()`'s internal teardown. Fixed by switching to
+  `std::shared_future<T>` (`.share()` on construction) — which required one more fix beyond the
+  type swap: `TaskT::getResultProperty()` used to write the result back into the shared,
+  non-atomic `State::result` on every call, which would have become a *new* race once multiple
+  threads could reach it concurrently through the now-safe `shared_future`. Rewrote it to read
+  into a local instead. No new gtest coverage (consistent with ticket 308's precedent) — verified
+  via two standalone TSan repros (`Task` and `TaskT`), both clean after the fix.
+- **314 (Net/Http/Headers/CacheControlHeaderValue.cpp)**: `TryParse` rejected the *entire* header
+  as invalid for any empty comma-separated list element — a trailing comma, leading comma, or a
+  run of consecutive commas between two real directives. A fork traced real .NET's actual parsing
+  chain (`CacheControlHeaderValue.cs`'s `MultipleValueNameValueParser` →
+  `BaseHeaderParser.TryParseValue` → `HeaderUtilities.GetNextNonEmptyOrWhitespaceIndex`) to
+  confirm real .NET explicitly skips any run of empty list elements when the parser supports
+  multiple values (which Cache-Control's does) — matching RFC 7230's `#rule` ABNF, where empty
+  list elements are ignorable by design, not an error. Changed the empty-segment branch from a
+  hard failure to a skip.
+
+45 tickets closed this autonomous run so far (268-314, minus 279 and 306). Two threading bugs
+found this run (308, 313) via the same TSan-repro-before/after discipline already established
+for UBSan/ASan — worth flagging as a durable technique addition: **any code touching shared
+mutable state across threads (not just obviously "concurrent" code — Task's Wait() looks like
+an innocuous blocking call) is worth a quick TSan sanity pass**, especially for anything backed
+by shared_ptr-based sharing, which is this codebase's dominant pattern for reference-semantics
+types and therefore a recurring source of exactly this "looks single-owner, is actually shared"
+bug shape.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 310-312 closed, a new bug class (exception-safety desync) plus a security-relevant UTF-8 fix
 
