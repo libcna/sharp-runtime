@@ -1,10 +1,70 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `b005a46`) — 11756 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1e2b582`) — 11768 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11756 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11768 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 305-309 closed, four more real bugs (ticket 306 does not exist in plan.sqlite3, skipped)
+
+Continuing the same autonomous run (previous checkpoint covered 299-304). Commits: 43834df,
+01f3c40, 75c0cdf, 1e2b582 — all pushed to `origin/feature/work`.
+
+- **305 (ReadOnlySequence.hpp)**: `GetPosition(offset, origin)` narrowed a `longcs` offset to
+  `intcs` BEFORE bounds-checking it, so a huge offset (e.g. 2^32 + 2) silently truncated to a
+  small in-range value and returned a bogus position with no throw at all — confirmed via a
+  standalone repro. The subsequent addition, and `Slice(longcs, longcs)`'s direct
+  `start + length`, were also genuine UBSan-confirmed signed-overflow UB for values near
+  `LONGCS_MAX`. Rewrote both to validate/combine via subtraction-based checks in `longcs` before
+  ever adding or narrowing — the same overflow-bypasses-bounds-check pattern fixed dozens of
+  times earlier this session, just newly found in the Buffers namespace.
+- **307 (MathF.hpp)**: two independent bugs. `Round(float, int[, MidpointRounding])` never
+  validated `digits` (real .NET throws for values outside [0,6]) and never guarded large
+  magnitudes (real .NET returns `x` unchanged for `|x| >= 1e8` instead of multiplying by a power
+  of 10) — confirmed `Round(3.0e38f, 6)` silently overflowed to `inf`. Separately, `ILogB(NaN)`
+  delegated to `std::ilogb`, whose NaN sentinel (`FP_ILOGBNAN`) is implementation-defined and on
+  this platform's glibc is `INT_MIN`, not the `INT_MAX` real .NET always returns for both NaN and
+  infinity — confirmed via repro. Both fixed to match `MathF.cs` exactly.
+- **308 (TimeZoneInfo.cpp)**: a genuine data race, confirmed with ThreadSanitizer both before and
+  after the fix (first TSan use this session — the established habit of UBSan/ASan repro-before/
+  repro-after extends naturally to concurrency bugs). `FindSystemTimeZoneById()` temporarily
+  overwrites the process-global `TZ` env var, already guarded by a mutex against concurrent calls
+  to itself — but `Local()` reads the same global TZ state via `localtime_r` without taking that
+  mutex, so a thread calling `Local()` while another thread is mid-swap could transiently observe
+  the wrong zone. Unlike the `Guid::NewGuid()` RNG race documented-but-not-fixed in ticket 302
+  (no synchronization convention existed anywhere in that file), this fix was narrowly scoped and
+  directly consistent with an *existing* local precedent (the mutex already existed for exactly
+  this purpose) — extending established local protection is different from inventing a new
+  cross-cutting policy.
+- **309 (ZipArchive.cpp)**: two bugs in the same function. The write-mode entry stream's
+  `Write(data, offset, count)` used `offset` completely unchecked in pointer arithmetic —
+  confirmed via ASan as a genuine stack-buffer-overflow read for a negative offset. Separately,
+  `flushWriter()`'s `mz_zip_writer_add_mem`/`finalize_archive`/`finalize_heap_archive` calls never
+  checked their `mz_bool` return values, so a write failure silently produced a truncated zip
+  with no exception — inconsistent with this exact same function's own `init_file`/`init_heap`
+  checks two lines above. Not empirically regression-tested (no portable way found to force an
+  actual miniz failure), verified by code review/consistency with the established local pattern
+  instead.
+
+40 tickets closed this autonomous run so far (268-309, minus 279 and 306 [never existed in
+plan.sqlite3 — ticket numbering has a gap there, not a skipped/forgotten item]). Every ticket in
+this five-ticket stretch found and fixed at least one real bug — the "large audited file, several
+prior fix rounds" files are *still* not running dry. Two process notes worth carrying forward:
+(1) **UBSan/ASan repro-before/repro-after now formally extends to TSan** for anything touching
+shared mutable state across threads (env vars, static caches, lazily-initialized singletons) —
+first applied this stretch (ticket 308), caught a real race a pure code-read might have missed
+given how innocuous `Local()` looks in isolation. (2) **"Does this file already have an
+established local convention for this exact problem?" is the right question when deciding
+whether a scoped fix vs. a broader policy decision is warranted** — tickets 302 (Guid RNG, no
+convention → documented, not fixed) and 308 (TimeZoneInfo mutex, convention already existed →
+fixed) are a clean side-by-side contrast of the same underlying judgment call going both ways for
+principled reasons, not inconsistency.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 299-304 closed, six real bugs found and fixed
 
