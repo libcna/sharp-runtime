@@ -1,10 +1,82 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `9753097`) — 11633 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `e1cc791`) — 11642 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11633 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11642 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continued again) — 14 tickets closed total, 3 more real bugs found (264/265/306), new P1 ticket #1487 filed, 2 more commits
+
+Continuation of the checkpoint below (same autonomous run). This entry only covers what's new.
+
+### Fixed this batch (tickets 264, 265, 306; new ticket #1487 filed; commits `e24f1db`, `e1cc791`)
+
+- **`ticket 264`, `src/System/Net/WebSockets/ClientWebSocket.cpp`**: `readFrame()` read the
+  64-bit extended payload length straight off the wire with **no upper bound** before
+  `readExact()` → `buffer.resize(n)` — a malicious/misbehaving server sending a huge length
+  (near `UINT64_MAX`) triggers a correspondingly huge allocation attempt, throwing a raw
+  `std::length_error`/`std::bad_alloc` instead of a clean, catchable `WebSocketException`.
+  Added a defensive 256 MiB per-frame cap (matching the existing 16384-byte cap already applied
+  to the handshake response a few lines up in the same file); verified with a loopback-socket
+  test that a crafted huge-length header (zero payload bytes ever sent) throws promptly instead
+  of hanging or crashing. Also made `CloseAsync` consistent with its three sibling methods,
+  which all honestly comment out `cancellationToken` as unimplemented — `CloseAsync` alone
+  captured it into its lambda without ever checking it, misleadingly implying cancellation
+  works there specifically. Commit `e24f1db`.
+- **`ticket 265`/`306`, `include/System/Span.hpp` + `include/System/Memory.hpp`** (plus
+  drive-by fixes to `MemoryExtensions.hpp`/`ReadOnlyMemory.hpp`): **the most serious bug found
+  this session.** `Span<T>::Slice(intcs,intcs)`/`ReadOnlySpan<T>::Slice` computed their bounds
+  check as `start + length > totalLength` directly in `intcs` (int32) arithmetic — for large
+  `start`/`length` this signed-overflows (**confirmed real UB via a standalone UBSan repro**),
+  and the wrapped (very negative) result then compares as `<= totalLength`, **silently
+  bypassing the bounds check entirely** instead of throwing (e.g. `start=INT32_MAX, length=10`
+  on a 10-element span constructs a wildly out-of-bounds `Span` instead of raising
+  `ArgumentOutOfRangeException` — a real memory-safety hole, not just a wrong-answer bug). Real
+  .NET's own `Span<T>.Slice(int,int)` source has an explicit comment guarding against exactly
+  this, via unsigned comparison + subtraction instead of addition — fixed the same way. A
+  codebase-wide grep for the same anti-pattern (`grep -rn "start + length\|+ length >\|+ count
+  >"`) found it **also present** in `MemoryExtensions.hpp` (2 occurrences) and
+  `ReadOnlyMemory.hpp` — both fixed directly in this same pass rather than left to bitrot,
+  since both already had **closed** tickets (238, 562) that evidently missed this exact bug and
+  the ticket-workflow process doesn't revisit closed tickets on its own. `Memory.hpp` (ticket
+  306, still open) had the identical pattern too — fixed and closed in the same pass rather than
+  waiting for the queue to reach it separately. **Not yet fixed, filed as new ticket `#1487`
+  (P1 — higher than this batch's routine P2 code-audits, since it's a confirmed real
+  memory-safety bug class)**: the same pattern also found in `ArraySegment.hpp` (×2),
+  `String.cpp`, `MemoryStream.cpp`, `UnmanagedMemoryStream.cpp` — see that ticket's notes for
+  exact file:line locations and the fix template to reuse. Commit `e1cc791`.
+
+Test count: 11634 → 11642 across this batch (8 new regression tests). Both commits pushed.
+
+### Process note
+
+- The `Span`/`Memory` overflow bug is the clearest example yet in this session of why "audit a
+  file, then grep for the same anti-pattern codebase-wide" is worth the extra few minutes: two
+  of the four affected files had *already been marked done* by earlier, apparently-incomplete
+  audits. A ticket being `done` means someone looked at the file once, not that the file is
+  bug-free forever — don't skip re-verification of a closed ticket's claims if you stumble onto
+  contradicting evidence while working on something else.
+- When a systemic bug pattern is found mid-ticket and fixing every occurrence would blow up the
+  current ticket's scope, file a new ticket immediately (with priority reflecting actual
+  severity, not just the batch's default) rather than leaving a mental note that won't survive
+  a context reset. `#1487` is P1, not P2, specifically because "confirmed memory-safety bug
+  class" is more urgent than routine stabilization sweep items.
+
+### To resume
+
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+That query now surfaces **ticket `#1487` first** (P1 sorts before P2) — the systemic
+`start+length`/`start+count` integer-overflow bounds-check-bypass pattern in
+`ArraySegment.hpp`/`String.cpp`/`MemoryStream.cpp`/`UnmanagedMemoryStream.cpp`. Recommended:
+take it next, before falling back to the P2 queue (589 P2 + 6 P3 remain `todo`, 100 P2 stay
+`blocked` on ticket #43 per user decision). Same workflow throughout: read the target fully,
+verify every claim against `/rv/tmp/runtime/src/libraries/`, fix real bugs with regression
+tests (confirm genuine UB with a standalone UBSan repro before *and after* fixing when it
+smells like an overflow case), build+test clean, update `plan.sqlite3`, commit+push, move on
+without stopping.
 
 ## Session checkpoint (2026-07-12, autonomous run continued) — 11 tickets closed total, 5 more real bugs found (259-263), 4 more commits
 
