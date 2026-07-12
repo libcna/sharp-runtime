@@ -22,6 +22,15 @@ namespace System::Xml {
             return true;
         }
 
+        // Matches XmlCharType.IsOnlyWhitespace / the XML S production: exactly tab, LF, CR,
+        // space -- used by XmlWhitespace.cs/XmlSignificantWhiteSpace.cs's constructors
+        // (CheckOnData) to reject non-whitespace content. An empty string is vacuously valid.
+        bool IsOnlyXmlWhitespace(const std::string& s) {
+            for (char c : s)
+                if (c != '\t' && c != '\n' && c != '\r' && c != ' ') return false;
+            return true;
+        }
+
         bool StartsWithDoctype(const char* v) {
             if (!v) return false;
             std::string s(v);
@@ -232,6 +241,11 @@ namespace System::Xml {
     }
 
     XmlWhitespace* XmlDocument::CreateWhitespace(const std::string& text) {
+        // Matches XmlWhitespace.cs's constructor: `if (!doc.IsLoading && !CheckOnData(strData))
+        // throw new ArgumentException(SR.Xdom_WS_Char);` -- content must be only XML whitespace
+        // characters when created programmatically (not during parsing).
+        if (!IsOnlyXmlWhitespace(text))
+            throw System::ArgumentException("The string for whitespace contains an invalid character.");
         auto* native = doc_.NewText(text.c_str());
         auto wrapper = std::make_unique<XmlWhitespace>(native, this);
         auto* raw = wrapper.get();
@@ -240,6 +254,10 @@ namespace System::Xml {
     }
 
     XmlSignificantWhitespace* XmlDocument::CreateSignificantWhitespace(const std::string& text) {
+        // Matches XmlSignificantWhiteSpace.cs's constructor: same CheckOnData validation as
+        // XmlWhitespace above.
+        if (!IsOnlyXmlWhitespace(text))
+            throw System::ArgumentException("The string for whitespace contains an invalid character.");
         auto* native = doc_.NewText(text.c_str());
         auto wrapper = std::make_unique<XmlSignificantWhitespace>(native, this);
         auto* raw = wrapper.get();
