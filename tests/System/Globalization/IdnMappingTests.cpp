@@ -89,6 +89,36 @@ TEST(IdnMappingTests, EmptyThrows) {
     EXPECT_THROW(idn.GetAscii(""), System::ArgumentException);
 }
 
+// Regression tests for ticket 312: the UTF-8 decoder previously trusted continuation bytes'
+// low 6 bits without checking their top 2 bits are actually 10xxxxxx (and never rejected
+// overlong encodings or out-of-range/surrogate code points), so malformed UTF-8 was silently
+// misinterpreted as some other, unrelated code point instead of being rejected -- a real concern
+// for IdnMapping specifically, since domain names routinely originate from untrusted input.
+TEST(IdnMappingTests, MalformedUtf8_InvalidContinuationByte_Throws) {
+    IdnMapping idn;
+    // 0xC2 is a valid 2-byte lead byte, but 'A' (0x41) is not a continuation byte.
+    EXPECT_THROW(idn.GetAscii("\xC2\x41"), System::ArgumentException);
+}
+TEST(IdnMappingTests, MalformedUtf8_TruncatedSequence_Throws) {
+    IdnMapping idn;
+    EXPECT_THROW(idn.GetAscii("\xE2\x82"), System::ArgumentException); // 3-byte lead, only 1 continuation byte
+}
+TEST(IdnMappingTests, MalformedUtf8_OverlongEncoding_Throws) {
+    IdnMapping idn;
+    // 0xC0 0x80 is an overlong encoding of U+0000 -- forbidden by RFC 3629.
+    EXPECT_THROW(idn.GetAscii(std::string("\xC0\x80")), System::ArgumentException);
+}
+TEST(IdnMappingTests, MalformedUtf8_SurrogateCodePoint_Throws) {
+    IdnMapping idn;
+    // 0xED 0xA0 0x80 encodes U+D800, a surrogate -- never a valid standalone UTF-8 code point.
+    EXPECT_THROW(idn.GetAscii("\xED\xA0\x80"), System::ArgumentException);
+}
+TEST(IdnMappingTests, ValidMultiByteUtf8_StillAccepted) {
+    IdnMapping idn;
+    // Sanity check the fix didn't over-reject well-formed multi-byte UTF-8.
+    EXPECT_NO_THROW(idn.GetAscii("m\xC3\xBCnchen")); // "münchen"
+}
+
 TEST(IdnMappingTests, GetHashCode_MatchesForEqualInstances) {
     IdnMapping a, b;
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
