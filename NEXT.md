@@ -1,10 +1,34 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `2bdd68d`) — 11713 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `5cddb18`) — 11719 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11713 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11719 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — ticket 291 closed
+
+Continuing the same autonomous run (previous checkpoint covered 288-290). Commit: 5cddb18 —
+pushed to `origin/feature/work`. Ticket queue status: 819 done, 569 todo, 100 blocked (ticket
+#43 and its dependents).
+
+- **291 (OperatingSystem.hpp)**: `getVersionStringProperty()` only handled 3 of 8 `PlatformID`
+  enum values, falling through to generic "Unknown " for the rest. `PlatformID::Other` is not
+  dead code in this codebase — `Environment::getOSVersionProperty()` (ticket 273) constructs it
+  for Emscripten builds — so this was a real, reachable divergence (Emscripten's
+  `OperatingSystem::ToString()` said "Unknown 0.0" instead of real .NET's "Other 0.0"). Added
+  all missing cases matching real .NET exactly, including the version-dependent Win32Windows
+  "95" vs "98" text.
+
+24 tickets closed this autonomous run so far (268-291, minus 279 which needed no code changes).
+Zero regressions at any point; full suite run after every single change; every fix pushed
+individually with its own commit plus a NEXT.md checkpoint every few tickets. Continuing to the
+next `todo` ticket per the standing instruction to work without stopping to summarize/ask.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked` per explicit user decision — do not reopen without being asked again.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 288-290 closed, one severe finding
 
