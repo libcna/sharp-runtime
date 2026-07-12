@@ -185,11 +185,17 @@ namespace System {
          * @brief Returns a new TimeOnly that adds the given TimeSpan (wraps midnight).
          *
          * C++ counterpart of .NET TimeOnly.Add(TimeSpan).
+         * Real .NET's private AddTicks(long) reduces the delta modulo TicksPerDay *before*
+         * adding it to this instance's (already-bounded) ticks -- `_ticks + TicksPerDay +
+         * (ticks % TicksPerDay)`. Adding the raw, unreduced TimeSpan ticks first (as this
+         * method previously did) can overflow int64 for a TimeSpan near
+         * TimeSpan::MaxValue/MinValue (confirmed via UBSan), since TimeSpan's tick range is
+         * ~Int64 range while this instance's own ticks are bounded to under one day.
          * @param value The TimeSpan to add.
          */
         [[nodiscard]] TimeOnly Add(const TimeSpan& value) const {
-            longcs ticks = (getTicksProperty() + value.getTicksProperty()) % TicksPerDay;
-            if (ticks < 0) ticks += TicksPerDay;
+            longcs deltaModDay = value.getTicksProperty() % TicksPerDay;
+            longcs ticks = (getTicksProperty() + TicksPerDay + deltaModDay) % TicksPerDay;
             return TimeOnly(ticks);
         }
 
