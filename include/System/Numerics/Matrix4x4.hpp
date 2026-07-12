@@ -326,7 +326,9 @@ struct Matrix4x4 {
         System::ArgumentOutOfRangeException::ThrowIfGreaterThanOrEqual(near, far, "nearPlaneDistance");
         float ys = 1.0f/std::tan(fov*0.5f);
         float xs = ys/aspect;
-        float zn = far/(near-far);
+        // Real .NET special-cases an infinite far plane to -1 rather than evaluating
+        // far/(near-far), which would divide inf by -inf and yield NaN.
+        float zn = std::isinf(far) ? -1.0f : far/(near-far);
         return {xs,0,0,0, 0,ys,0,0, 0,0,zn,-1, 0,0,near*zn,0};
     }
 

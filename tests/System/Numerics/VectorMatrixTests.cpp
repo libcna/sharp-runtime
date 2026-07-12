@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 #include "System/Numerics/Vector3.hpp"
@@ -129,6 +130,15 @@ TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NearGreaterThanFar_Throws) {
 }
 TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_ValidArgs_NoThrow) {
     EXPECT_NO_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 100.0f));
+}
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_InfiniteFar_ProducesFiniteRangeNotNaN) {
+    // Real .NET special-cases farPlaneDistance == +Infinity to range = -1 rather than
+    // evaluating far/(near-far), which would divide inf by -inf and yield NaN.
+    auto m = Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, std::numeric_limits<float>::infinity());
+    EXPECT_FALSE(std::isnan(m.M33));
+    EXPECT_FALSE(std::isnan(m.M43));
+    EXPECT_TRUE(near(m.M33, -1.0f));
+    EXPECT_TRUE(near(m.M43, -0.1f));
 }
 TEST(Matrix4x4Tests, TransformVector3) {
     auto m = Matrix4x4::CreateTranslation(10,0,0);
