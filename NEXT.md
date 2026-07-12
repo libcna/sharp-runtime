@@ -1,10 +1,40 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `a655f50`) — 11728 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `1ed69e2`) — 11734 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11728 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11734 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — ticket 295 closed, fourth systemic find this run
+
+Continuing the same autonomous run (previous checkpoint covered 292-294). Commit: 1ed69e2 —
+pushed to `origin/feature/work`.
+
+- **295 (Byte.hpp)**: found the exact "unguarded `std::stoi(format.substr(1))` raw exception
+  leak" already fixed once this session in `Int32::ToString` (ticket 272). Grepped every sibling
+  integer type and found it systemic: **Int16, Int64, SByte, UInt16, UInt64 all had the identical
+  bug** (`UInt32` has no `ToString(value, format)` overload at all — a gap, not a bug, left
+  alone). Fixed all six with the same try/catch-and-rethrow-as-`FormatException` pattern.
+
+This is now the **fourth** time this session a bug found in one file turned out to be systemic
+across a whole family once grepped (after the `DivRem` zero-check, the `years*12`/`weeks*7`
+calendar overflow, and now this). The pattern holds: **the moment a bug is confirmed in a second
+independent file, grep the whole relevant family immediately** — it has had a 100% hit rate this
+session for finding more real instances.
+
+28 tickets closed this autonomous run so far (268-295, minus 279 which needed no code changes).
+Zero regressions at any point; full suite run after every single change.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. Given how consistently the "grep the sibling family" instinct has paid off, when
+auditing any remaining integer-type file (UInt32 was the only one of 8 primitive integer types
+*not* touched by tickets 272/295 — its `ToString`/`Parse`/`DivRem` etc. haven't been
+specifically re-verified this session, only confirmed to lack the `ToString(format)` overload
+entirely) it's worth a quick pass for the same two bug shapes (unguarded `stoi`, missing
+zero-divisor check) even before its own audit ticket comes up.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 292-294 closed, systemic calendar overflow fix
 
