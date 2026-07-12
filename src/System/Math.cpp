@@ -46,9 +46,20 @@ namespace System
         return std::min(a, b);
     }
 
-    double Math::Min(double a, double b)
+    double Math::Min(double val1, double val2)
     {
-        return std::min(a, b);
+        // Matches the IEEE 754:2019 `minimum` function (propagates NaN regardless of which
+        // argument it's in, and treats +0 as greater than -0) -- std::min() does neither:
+        // std::min(5.0, NaN) == 5.0 (should be NaN, since NaN only propagates when it's the
+        // *first* argument to the typical `b < a ? b : a` implementation), and
+        // std::min(+0.0, -0.0) == +0.0 (should be -0.0).
+        if (val1 != val2)
+        {
+            if (!std::isnan(val1))
+                return val1 < val2 ? val1 : val2;
+            return val1;
+        }
+        return std::signbit(val1) ? val1 : val2;
     }
 
     intcs Math::Max(intcs a, intcs b)
@@ -56,9 +67,17 @@ namespace System
         return std::max(a, b);
     }
 
-    double Math::Max(double a, double b)
+    double Math::Max(double val1, double val2)
     {
-        return std::max(a, b);
+        // See Math::Min(double,double) above -- same IEEE 754:2019 `maximum` mismatch with
+        // std::max().
+        if (val1 != val2)
+        {
+            if (!std::isnan(val1))
+                return val2 < val1 ? val1 : val2;
+            return val1;
+        }
+        return std::signbit(val2) ? val1 : val2;
     }
 
     intcs Math::Clamp(intcs value, intcs min, intcs max)
@@ -188,6 +207,7 @@ namespace System
 
     intcs Math::DivRem(intcs a, intcs b, intcs& result)
     {
+        if (b == 0) throw System::DivideByZeroException();
         intcs q = a / b;
         result  = a % b;
         return q;
@@ -195,6 +215,7 @@ namespace System
 
     longcs Math::DivRem(longcs a, longcs b, longcs& result)
     {
+        if (b == 0) throw System::DivideByZeroException();
         longcs q = a / b;
         result   = a % b;
         return q;
