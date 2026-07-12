@@ -1,11 +1,67 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-11 (branch: `feature/work`, HEAD `99fd000`) — 11557 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `4a94db3`) — 11566 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11557 tests from 1197 test suites, 0 failures
-cmake --build build_no_tests --parallel 8 # library-only Release, incremental — 0 errors/0 warnings
+./build/SharpRuntimeTests                 # 11566 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12) — resolved the one `needs_user` ticket: real UTF8Encoding validation
+
+**Trigger:** session start found the repo state unchanged since the last checkpoint (build clean,
+11557/11557 passing, `task` table 100% classified, ticket queue at 609 `todo`/100 `blocked`/1
+`needs_user`). Asked the user what to do next; they chose to resolve the single `needs_user`
+ticket (**#1161**, `System.Text.UTF8Encoding`) before resuming the P2 ticket grind. Given a choice
+between leaving it as a documented deviation, a minimal fix, or full validation, the user chose
+**full validation**.
+
+**What was wrong:** `UTF8Encoding::GetBytes`/`GetString` were a raw byte passthrough with zero
+well-formedness checking in either direction — worse than `ASCIIEncoding`/`UnicodeEncoding`/
+`UTF32Encoding`, which at least hardcode U+FFFD substitution for malformed input (commit
+`a8b7a14`, an earlier session). Investigation also found that `System::Text::DecoderFallback`/
+`EncoderFallback` (`include/System/Text/DecoderFallback.hpp`/`EncoderFallback.hpp`) — real,
+already-implemented `CreateFallbackBuffer()`/`Fallback()`/`GetNextChar()` machinery, with
+`Encoding` base class storage (`getDecoderFallbackProperty()`/`getEncoderFallbackProperty()`)
+already wired in — had **zero production call sites anywhere in the codebase**; every concrete
+`Encoding` subclass did its own hardcoded `'?'`/U+FFFD substitution instead of using it. Confirmed
+via `grep -rn "CreateFallbackBuffer" include/ src/` returning only the two `Fallback.hpp`
+definition files.
+
+**Fix** (`include/System/Text/UTF8Encoding.hpp`, `src/System/Text/UTF8Encoding.cpp`, commit
+`4a94db3`): `GetBytes`/`GetString` now validate well-formed UTF-8 (same continuation-byte/
+overlong-encoding/surrogate/out-of-range rejection rules as the sibling encodings' `decodeUtf8`
+helpers, factored into a new file-local `wellFormedUtf8Length`), pass well-formed bytes through
+unchanged, and route each ill-formed byte through the real
+`getEncoderFallbackProperty()`/`getDecoderFallbackProperty()` buffer (resync one byte at a time,
+matching the sibling encodings' existing granularity) — this is now the first production code in
+the repo that actually drives the fallback-buffer API end-to-end. Also fixed the constructor to
+set a U+FFFD replacement default (matching real `UTF8Encoding.SetDefaultFallbacks()`) instead of
+inheriting the generic `Encoding` base class's `"?"` default, which is correct only for
+single-byte code pages — this was a latent, previously-unobservable bug since nothing ever
+consulted the fallback object before. 9 new tests added to `tests/System/Text/
+TextNamespaceTests.cpp` (`UTF8EncodingTests` suite): round trips (ASCII/non-ASCII BMP/
+supplementary plane), bad-continuation-byte and overlong-encoding replacement on the encode
+side, truncated-sequence and direct-surrogate-encoding replacement on the decode side, and
+`ExceptionFallback` throwing on both sides. 11557 → 11566 tests passing. Marked `done` in
+`plan.sqlite3` with full resolution notes; pushed to `origin/feature/work`.
+
+**Deliberately left alone:** `ASCIIEncoding`/`UnicodeEncoding`/`UTF32Encoding` still hardcode
+substitution instead of using the fallback objects — consistent, pre-existing behavior from an
+earlier session, not part of this ticket's scope, not touched. Also did not add the two extra
+`UTF8Encoding` constructor overloads from real .NET's surface (`encoderShouldEmitUTF8Identifier`,
+`throwOnInvalidBytes`) — the BOM-related one needs a `GetPreamble()`/`Preamble` API that doesn't
+exist anywhere on the `Encoding` base class today (a separate, unrelated feature gap), and
+`throwOnInvalidBytes`'s behavior is already fully reachable today via
+`setEncoderFallbackProperty(EncoderFallback::ExceptionFallback())`/the decoder equivalent, which
+this session's new tests exercise directly.
+
+**To resume:** back to the P2/P3 ticket grind, next up is **ticket 254**
+(`include/System/Environment.hpp`) — see the query and full per-ticket workflow in the checkpoint
+below and in `prompt.md`. 609 P2/P3 tickets remain `todo`; 100 stay `blocked` on ticket #43's
+global `int`→`intcs` policy decision, which the user declined to reopen on 2026-07-07 ("zatím
+neřešit") — this session offered it again as one of three next-step options and the user chose a
+different one (resolving ticket #1161 instead), which is not itself a renewed decline. Still don't
+treat it as a default next action without asking again.
 
 ## Session checkpoint (2026-07-11, continued again) — ticket-workflow pivot: `task` table 100% classified, 16 P2 code-audit tickets closed (238-253, 16 commits)
 
