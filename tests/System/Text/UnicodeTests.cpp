@@ -347,6 +347,53 @@ TEST(Utf8Tests, ToUtf16_TruncatedSequence_NotFinalBlock_ReturnsNeedMoreData) {
     EXPECT_EQ(charsWritten, 1);
 }
 
+// Regression tests for ticket 321: verified against real .NET's Rune.DecodeFromUtf8 (which
+// Utf8.ToUtf16 delegates to for exactly this purpose), which implements the Unicode Standard's
+// "maximal subpart" replacement algorithm (Ch. 3.9) -- a malformed/truncated sequence should
+// consume ONLY the bytes that formed a valid prefix before hitting either an invalid byte or
+// the end of the buffer, not every remaining byte in the buffer. The previous implementation's
+// separate "not enough bytes for the promised length" branch consumed every remaining byte as
+// one replacement even when some of them weren't continuation bytes at all -- confirmed via a
+// standalone repro before the fix: a 4-byte lead byte followed by ordinary ASCII 'A','B'
+// silently swallowed both characters, producing only U+FFFD instead of U+FFFD + "AB".
+TEST(Utf8Tests, ToUtf16_TruncatedLeadByteFollowedByValidChars_PreservesThem) {
+    std::vector<SharpRuntime::bytecs> source{static_cast<SharpRuntime::bytecs>(0xF0), 'A', 'B'};
+    std::u16string destination(8, 0);
+    SharpRuntime::intcs bytesRead = 0, charsWritten = 0;
+    auto status = Utf8::ToUtf16(source, destination, bytesRead, charsWritten, /*replaceInvalidSequences=*/true, /*isFinalBlock=*/true);
+    EXPECT_EQ(status, OperationStatus::Done);
+    EXPECT_EQ(bytesRead, 3);
+    ASSERT_EQ(charsWritten, 3);
+    EXPECT_EQ(destination[0], 0xFFFD);
+    EXPECT_EQ(destination[1], u'A');
+    EXPECT_EQ(destination[2], u'B');
+}
+TEST(Utf8Tests, ToUtf16_LoneLeadByteAtEnd_ConsumesOnlyOneByte) {
+    std::vector<SharpRuntime::bytecs> source{static_cast<SharpRuntime::bytecs>(0xE0)};
+    std::u16string destination(8, 0);
+    SharpRuntime::intcs bytesRead = 0, charsWritten = 0;
+    auto status = Utf8::ToUtf16(source, destination, bytesRead, charsWritten, true, true);
+    EXPECT_EQ(status, OperationStatus::Done);
+    EXPECT_EQ(bytesRead, 1);
+    ASSERT_EQ(charsWritten, 1);
+    EXPECT_EQ(destination[0], 0xFFFD);
+}
+TEST(Utf8Tests, ToUtf16_TruncatedWithValidContinuationPrefix_ConsumesAllOfIt) {
+    // 4-byte lead + 2 genuinely valid continuation bytes, but the buffer ends before the 4th
+    // byte -- the whole 3-byte run IS the maximal valid subpart, so all 3 bytes are consumed
+    // for one replacement (unlike the mixed-validity case above).
+    std::vector<SharpRuntime::bytecs> source{static_cast<SharpRuntime::bytecs>(0xF0),
+                                              static_cast<SharpRuntime::bytecs>(0x90),
+                                              static_cast<SharpRuntime::bytecs>(0x80)};
+    std::u16string destination(8, 0);
+    SharpRuntime::intcs bytesRead = 0, charsWritten = 0;
+    auto status = Utf8::ToUtf16(source, destination, bytesRead, charsWritten, true, true);
+    EXPECT_EQ(status, OperationStatus::Done);
+    EXPECT_EQ(bytesRead, 3);
+    ASSERT_EQ(charsWritten, 1);
+    EXPECT_EQ(destination[0], 0xFFFD);
+}
+
 TEST(Utf8Tests, ToUtf16_DestinationTooSmall_ReportsPartialProgress) {
     std::vector<SharpRuntime::bytecs> source{'H', 'i', '!'};
     std::u16string destination(2, 0);
