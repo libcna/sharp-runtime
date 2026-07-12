@@ -1,10 +1,70 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `545fe6c`) — 11651 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `31ba1e3`) — 11692 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11651 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11692 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 268-273 + 1488 closed, still going
+
+Continuing the same autonomous run as the checkpoint below (268 onward). User corrected the
+assistant mid-session for pausing to report progress and ask "want me to continue?" — the
+standing instruction is to keep working continuously without stopping for check-ins, only
+pausing for genuinely blocking/irreversible/architectural decisions. This checkpoint is a
+routine documentation update, not a stopping point.
+
+**7 tickets closed this stretch: 268 (Half.hpp), 269 (Array.hpp), 270 (Matrix4x4.hpp), 271
+(DateTimeFormatInfo.hpp), 272 (Int32.hpp), 1488 (systemic DivRem zero-check, filed mid-session),
+273 (Environment.cpp).** Test count: 11651 → 11692 (41 new regression tests). Commits:
+41937a3, be32dff, f7aa6b5, f51b6ee, 86e69b9, d018100, 31ba1e3 — all pushed to `origin/feature/work`.
+
+Highlights:
+- **Half::GetHashCode()** used `b = 0x7C00` (assignment) where real .NET does `bits &=
+  PositiveInfinityBits` (AND-mask) — equal for NaN, but wrong for ±0 (should hash to 0, not
+  0x7C00). Pre-existing test encoded the old wrong value; fixed.
+- **Array.hpp**: every range-taking static method (`Sort`, `Copy`, `IndexOf`, `Reverse`,
+  `Clear`, `BinarySearch`, `Fill`, `FindIndex`, `FindLastIndex`, `LastIndexOf`) had **no bounds
+  validation at all** — silently read/wrote out of range instead of throwing
+  `ArgumentOutOfRangeException`. Added the same `requireValidRange`/`requireValidStartIndex`/
+  `requireValidBackwardRange` helpers real .NET's `Array.cs` uses (unsigned-comparison style,
+  same overflow-safe pattern as the `Span<T>::Slice` fix from the previous stretch). 19 new
+  tests. Unrelated to blocked ticket #138 (int-vs-intcs naming in this same file — not touched).
+- **Matrix4x4::CreatePerspectiveFieldOfView** was missing real .NET's `far ==
+  +Infinity → range = -1` special case (used for infinite-far-plane projections); without it,
+  `far/(near-far)` evaluates as `inf/-inf = NaN`, silently producing a garbage matrix instead of
+  a valid infinite-far-plane one. `CreateOrthographic`, `CreateLookAt` (the Impl reference has an
+  explicit `Transpose()` call that's easy to miss on a partial read — initially misdiagnosed as
+  a transpose bug, wasn't one), `Invert`, `GetDeterminant`, `CreateFromQuaternion` all verified
+  correct.
+- **DateTimeFormatInfo::GetAllDateTimePatterns(char)** silently returned an empty vector for an
+  unrecognized format character; real .NET throws `ArgumentException(nameof(format))`. Fixed;
+  updated the one pre-existing test that asserted the old silent-empty-vector behavior.
+- **Int32.hpp — three real bugs, one systemic**: `DivRem` had **no zero-divisor check at all**
+  (`left/right` with `right==0` is undefined behavior / hardware SIGFPE trap in C++, not a
+  catchable exception — real .NET's CLR traps this into `DivideByZeroException`).
+  `CopySign(MinValue, negativeSign)` negated `MinValue` — UB in C++ (confirmed via UBSan); real
+  .NET's identical-looking code relies on C#'s unchecked-negation-wraps-to-self guarantee, which
+  C++ doesn't have. `ToString(value, format)`'s `std::stoi` width parse let raw
+  `std::invalid_argument`/`out_of_range` escape instead of `FormatException`. **Grepping for the
+  same DivRem pattern across sibling types found it missing in Int16, Int64, SByte, Byte,
+  UInt16, UInt32, UInt64 too** — filed and immediately fixed as P1 ticket 1488 (Int64 additionally
+  needed the MinValue/-1 `OverflowException` check, since int64_t division runs at native width
+  with no C++ integer-promotion safety net, unlike the 8/16-bit signed types). All 8 zero-check
+  paths + the Int64 MinValue/-1 path reverified with a standalone UBSan/ASan repro linked
+  against `libSHARP_RUNTIME.a` — zero sanitizer output post-fix.
+- **Environment::getMachineNameProperty()** on POSIX returned the raw `gethostname()` result
+  including any domain suffix; real .NET's Unix `MachineName` truncates at the first `.`.
+  `getUserDomainNameProperty()` delegates to `MachineName` on POSIX so it inherited the fix
+  automatically.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 (global
+`int`→`intcs` policy) stays `blocked` per explicit user decision — do not reopen. Standing
+process note: when a `DivRem`-shaped or `start+length`-shaped bug is found in one type, grep
+sibling types immediately rather than waiting for their individual audit tickets to come up —
+both of this session's systemic tickets (1487, 1488) were found exactly this way.
 
 ## Session checkpoint (2026-07-12, autonomous run — pausing here) — 17 tickets closed, 2 more real bugs found (266/267), session summary
 
