@@ -1,10 +1,39 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `88b0ded`) — 11743 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `88b0ded`) — 11743 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11743 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 296-298 closed, all clean
+
+Continuing the same autonomous run (previous checkpoint covered the ticket-295 follow-up). No
+new commits this stretch — all three were clean audits with no code changes needed:
+
+- **296 (XPathNavigator.cpp)**: fetched real .NET's `ComparePosition`/`CompareSiblings` source
+  directly and compared line-by-line — both are faithful, structurally identical ports. The
+  custom `ApplySortKeys` multi-key stable-sort (not a direct .NET port) uses the standard,
+  correct reverse-priority-order technique.
+- **297 (OrderedDictionary.hpp)**: already had 3 fix rounds. Specifically chased down whether
+  `RemoveAt(index) => Remove(storage_->keys[index])` is a use-after-free (the argument is a
+  reference into the vector that `Remove` then erases) — traced every use of the parameter and
+  confirmed it's never dereferenced after the erase, so it's safe despite looking fragile. No
+  `GetEnumerator()` exists on this type, but that's a completeness gap, not a bug.
+- **298 (XmlNode.cpp)**: already had 3 fix rounds (ancestor-cycle guards, exact-markup
+  InnerXml/OuterXml, recursive Normalize). Traced the `XmlDocumentFragment` insertion loops in
+  `PrependChild`/`AppendChild` through a concrete example to confirm ordering is preserved (not
+  reversed) despite removing-while-iterating.
+
+30 tickets closed this autonomous run so far (268-298, minus 279). Zero regressions at any
+point. Three consecutive clean audits is itself informative — this batch of files had already
+absorbed the "easy" bugs in prior rounds, consistent with how thoroughly this codebase has been
+worked over.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — follow-up to ticket 295
 
