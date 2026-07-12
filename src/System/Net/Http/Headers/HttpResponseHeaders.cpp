@@ -113,12 +113,21 @@ namespace System::Net::Http::Headers {
     void HttpResponseHeaders::AddAcceptRanges(const std::string& token) { Add("Accept-Ranges", token); }
 
     std::optional<System::TimeSpan> HttpResponseHeaders::getAgeProperty() const {
+        // Matches real .NET's TimeSpanHeaderParser (used for Age): HttpRuleParser.GetNumberLength
+        // counts a run of pure DIGIT characters (delta-seconds = 1*DIGIT, no sign allowed at
+        // all), then HeaderUtilities.TryParseInt32 parses it -- std::stoll's leading-sign
+        // tolerance (accepts an optional '+' or '-') let a value like "+5" through, silently
+        // accepting a form real .NET rejects entirely (the same bug class already fixed in
+        // CacheControlHeaderValue::tryParseSeconds for max-age/s-maxage/etc.). Validate every
+        // character is a digit before parsing, exactly as that fix does.
         std::string raw = getRawValue("Age");
-        if (raw.empty()) return std::nullopt;
+        if (raw.empty() ||
+            !std::all_of(raw.begin(), raw.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
+            return std::nullopt;
         try {
             size_t pos = 0;
             long long seconds = std::stoll(raw, &pos);
-            if (pos != raw.size() || seconds < 0) return std::nullopt;
+            if (pos != raw.size()) return std::nullopt;
             return System::TimeSpan::FromSeconds(static_cast<double>(seconds));
         } catch (...) {
             return std::nullopt;
