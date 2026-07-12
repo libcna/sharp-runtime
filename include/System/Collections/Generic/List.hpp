@@ -365,6 +365,29 @@ class List : public IList<T> {
         }
 
         /**
+         * @brief Searches for the specified object in [@p startIndex, @p startIndex+@p count).
+         *
+         * C++ counterpart of .NET List<T>.IndexOf(T, int, int).
+         * @param item       The value to locate.
+         * @param startIndex The zero-based index to start searching at.
+         * @param count      The number of elements to search.
+         * @return The index of the first occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or greater
+         *         than Count, or if @p count is negative or the range extends past the end.
+         */
+        [[nodiscard]] intcs IndexOf(const T& item, intcs startIndex, intcs count) const {
+            intcs size = static_cast<intcs>(items_.size());
+            if (startIndex < 0 || startIndex > size)
+                throw System::ArgumentOutOfRangeException("startIndex");
+            if (count < 0 || startIndex > size - count)
+                throw System::ArgumentOutOfRangeException("count");
+            intcs end = startIndex + count;
+            for (intcs i = startIndex; i < end; ++i)
+                if (items_[static_cast<size_t>(i)] == item) return i;
+            return -1;
+        }
+
+        /**
          * @brief Searches for the last occurrence of @p item in the entire list.
          *
          * C++ counterpart of .NET List<T>.LastIndexOf(T).
@@ -390,6 +413,35 @@ class List : public IList<T> {
             if (startIndex < 0 || startIndex >= static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("startIndex");
             for (intcs i = startIndex; i >= 0; --i)
+                if (items_[static_cast<size_t>(i)] == item) return i;
+            return -1;
+        }
+
+        /**
+         * @brief Searches backward from @p startIndex for the last occurrence of @p item,
+         *        examining @p count elements.
+         *
+         * C++ counterpart of .NET List<T>.LastIndexOf(T, int, int).
+         * @param item       The value to locate.
+         * @param startIndex The zero-based index to start searching backward from.
+         * @param count      The number of elements to search.
+         * @return The index of the last occurrence, or -1 if not found.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count is negative
+         *         on a non-empty list, if @p startIndex is out of range, or if @p count extends
+         *         past the start of the list. A negative @p startIndex on an empty list quietly
+         *         returns -1, matching .NET's own special case.
+         */
+        [[nodiscard]] intcs LastIndexOf(const T& item, intcs startIndex, intcs count) const {
+            intcs size = static_cast<intcs>(items_.size());
+            if (size != 0) {
+                if (startIndex < 0) throw System::ArgumentOutOfRangeException("startIndex");
+                if (count < 0) throw System::ArgumentOutOfRangeException("count");
+            }
+            if (size == 0) return -1;
+            if (startIndex >= size) throw System::ArgumentOutOfRangeException("startIndex");
+            if (count > startIndex + 1) throw System::ArgumentOutOfRangeException("count");
+            intcs lo = startIndex - count + 1;
+            for (intcs i = startIndex; i >= lo; --i)
                 if (items_[static_cast<size_t>(i)] == item) return i;
             return -1;
         }

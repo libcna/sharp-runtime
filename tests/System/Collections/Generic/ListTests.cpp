@@ -61,6 +61,54 @@ TEST(GenListTests, IndexOf) {
     EXPECT_EQ(lst.IndexOf(99), -1);
 }
 
+// IndexOf(item, startIndex, count) / LastIndexOf(item, startIndex, count) were entirely missing
+// from List<T> (only the 1-arg and 2-arg overloads existed) despite being part of real .NET's
+// List<T> public surface; added to match List.cs exactly (ticket 261).
+TEST(GenListTests, IndexOf_StartIndexCount_FindsWithinRange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.IndexOf(1, 1, 3), 2);
+    EXPECT_EQ(lst.IndexOf(1, 0, 1), 0);
+}
+
+TEST(GenListTests, IndexOf_StartIndexCount_NotFoundOutsideRange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(1);
+    EXPECT_EQ(lst.IndexOf(1, 1, 1), -1); // only examines index 1 (value 2)
+}
+
+TEST(GenListTests, IndexOf_StartIndexCount_NegativeCount_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    EXPECT_THROW(lst.IndexOf(1, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(GenListTests, IndexOf_StartIndexCount_RangePastEnd_Throws) {
+    List<int> lst;
+    lst.Add(1);
+    EXPECT_THROW(lst.IndexOf(1, 0, 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(GenListTests, LastIndexOf_StartIndexCount_FindsWithinRange) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(1); lst.Add(2);
+    EXPECT_EQ(lst.LastIndexOf(1, 2, 3), 2);
+    // Excluding index 2 from the search range (start at 1, examine indices {1,0}) finds the
+    // earlier occurrence at index 0 instead.
+    EXPECT_EQ(lst.LastIndexOf(1, 1, 2), 0);
+}
+
+TEST(GenListTests, LastIndexOf_StartIndexCount_OnEmptyList_ReturnsNegativeOneWithoutThrowing) {
+    List<int> lst;
+    EXPECT_EQ(lst.LastIndexOf(1, -1, 0), -1);
+}
+
+TEST(GenListTests, LastIndexOf_StartIndexCount_CountPastStart_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    EXPECT_THROW(lst.LastIndexOf(1, 1, 5), System::ArgumentOutOfRangeException);
+}
+
 TEST(GenListTests, Insert) {
     List<int> lst;
     lst.Add(1); lst.Add(3);
