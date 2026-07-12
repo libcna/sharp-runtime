@@ -224,8 +224,14 @@ namespace System {
          */
         void CopyTo(std::vector<T>& destination, intcs destinationIndex) const
         {
-            intcs needed = destinationIndex + count_;
-            if (static_cast<intcs>(destination.size()) < needed)
+            if (destinationIndex < 0)
+                throw System::ArgumentOutOfRangeException("destinationIndex", "Non-negative number required.");
+            // Widen to SharpRuntime::longcs so a destinationIndex near INT32_MAX cannot
+            // overflow the addition (the same overflow-bypasses-bounds-check pattern
+            // already fixed elsewhere in this file's constructor/Slice).
+            SharpRuntime::longcs needed = static_cast<SharpRuntime::longcs>(destinationIndex) +
+                                           static_cast<SharpRuntime::longcs>(count_);
+            if (static_cast<SharpRuntime::longcs>(destination.size()) < needed)
                 destination.resize(static_cast<size_t>(needed));
             std::copy(begin(), end(), destination.begin() + destinationIndex);
         }

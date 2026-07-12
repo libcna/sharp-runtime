@@ -164,6 +164,17 @@ TEST(ArraySegmentTests, CopyTo_VectorWithOffset_ExpandsDest) {
     EXPECT_EQ(dest[4], 8);
 }
 
+TEST(ArraySegmentTests, CopyTo_VectorNegativeDestinationIndex_Throws) {
+    // destinationIndex + count_ (e.g. -1 + 5 = 4) previously bypassed the resize
+    // check against a large-enough destination, then destination.begin() + (-1)
+    // computed an out-of-bounds iterator -- a genuine heap-buffer-overflow write.
+    std::vector<int> v{1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v);
+    std::vector<int> dest(10, 0);
+    EXPECT_THROW(seg.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
+
 // ---------------------------------------------------------------------------
 // CopyTo(ArraySegment)
 // ---------------------------------------------------------------------------
