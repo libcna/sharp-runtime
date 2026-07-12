@@ -1,10 +1,51 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `eb162a6`) — 11778 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `451f7d2`) — 11782 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11778 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11782 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 315-316 closed, another sibling-family bug plus a wasm32-portability UB fix
+
+Continuing the same autonomous run (previous checkpoint covered 313-314). Commits: b9ad0e6,
+451f7d2 — pushed to `origin/feature/work`.
+
+- **315 (Immutable/ImmutableSortedSet.hpp)**: `SetEquals` compared the backing `std::set`s
+  directly via `operator==`, a position-wise comparison valid only when both sets share a
+  comparer — sets with identical elements but different orderings (ascending vs. descending)
+  compared unequal. Real .NET's `SetEquals` rehashes `other` under `this` set's comparer first,
+  the same pattern this file's own `IsSubsetOf`/`Intersect`/`Except` already use (from the prior
+  364787f custom-comparer commit) — `SetEquals` was just missed in that pass. Grepped the sibling
+  `ImmutableHashSet` (touched by the same original commit) for the identical gap and found it
+  too (raw-size comparison + membership tested via `other`'s own comparer instead of rehashing).
+  Fixed both identically.
+- **316 (StringComparer.hpp)**: `OrdinalComparer`/`CultureAwareComparer::GetHashCode` shifted a
+  raw `std::size_t` hash result by 32 to fold it — UB on any target where `size_t` is 32 bits
+  (Emscripten's wasm32, which this project explicitly supports). This exact bug shape was already
+  found and fixed once in `String::GetHashCode` (with a comment explicitly citing the wasm32
+  rationale) — these two implementations just never got the same fix. Widened to `uint64_t`
+  before shifting, matching the established precedent. Grepped the rest of the codebase for the
+  same `std::hash<...>` + `>> 32` shape and confirmed no other unfixed instances exist (other
+  `>> 32` usages found via a broader grep all operate on already-fixed-width
+  `SharpRuntime::xxxcs`/`uint64_t` types, not `size_t`). Could not empirically verify on an actual
+  32-bit build (no Emscripten toolchain in this environment) — confidence rests on the exact
+  precedent, not a fresh repro.
+
+47 tickets closed this autonomous run so far (268-316, minus 279 and 306). Both tickets this
+stretch were **"grep the sibling family" wins driven by an EXISTING fix elsewhere in the
+codebase**, not a fresh discovery — 315 found the gap by comparing against a sibling method's
+already-fixed pattern *in the same file*, 316 found it by comparing against a fix in a
+*different* file for the identical code shape. Worth reinforcing as a standing audit technique:
+when a file has prior fix commits, treat each of those fixes as a *template* to grep for
+elsewhere — both within the file (are all sibling methods equally protected?) and across the
+codebase (does the same fragile pattern recur in unrelated files?), not just as a record of
+work already done.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 313-314 closed, a real threading bug in Task + a header-parsing strictness divergence
 
