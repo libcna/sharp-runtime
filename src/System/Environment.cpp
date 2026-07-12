@@ -37,6 +37,24 @@ extern char** environ; // POSIX — global process environment array
 
 namespace System {
 
+namespace {
+    // Splits one raw "NAME=value" environment-block entry on its first '='. Returns false (skip
+    // this entry) for a malformed block entry with no '=' at all, or one where '=' is the very
+    // first character (an empty name) -- matching real .NET's ParseEntry, which explicitly skips
+    // "entries starting with '=' and entries with no value" when building the environment
+    // dictionary (Environment.Variables.Unix.cs). The previous version of the POSIX loop below
+    // only checked for "no '=' at all", not "'=' is the first character", so a corrupted/synthetic
+    // environment block entry like "=X" would have produced an empty-string key -- inconsistent
+    // with the Windows loop just below it, which already had the `eq > 0` guard.
+    bool splitEnvEntry(const std::string& entry, std::string& key, std::string& value) {
+        auto eq = entry.find('=');
+        if (eq == std::string::npos || eq == 0) return false;
+        key = entry.substr(0, eq);
+        value = entry.substr(eq + 1);
+        return true;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OSVersion
 // ---------------------------------------------------------------------------
@@ -187,24 +205,39 @@ std::vector<std::string> Environment::GetLogicalDrives() {
 #endif
 }
 
+// Ported from real .NET's Environment.ExpandEnvironmentVariablesCore (Environment.UnixOrBrowser.cs)
+// rather than a from-scratch %VAR% scanner, since the reference algorithm has a non-obvious
+// property the previous implementation here didn't reproduce: when a %name% token fails to
+// resolve, only its opening '%' is treated as consumed literal text -- the closing '%' is left
+// to double as the *opening* delimiter of the next token, rather than both percents being
+// consumed as one failed pair. E.g. for "%UNDEFINED%HOME%" (UNDEFINED unset, HOME set), real
+// .NET produces "%UNDEFINED" + <value of HOME> (the middle '%' is absorbed into the HOME token),
+// not "%UNDEFINED%" + "HOME%" with HOME left unexpanded, which is what a naive
+// find-the-next-'%'-and-consume-both scanner (the previous version of this function) produced.
 std::string Environment::ExpandEnvironmentVariables(const std::string& name) {
+    if (name.empty()) return name;
+
     std::string result;
     result.reserve(name.size());
-    size_t i = 0;
-    while (i < name.size()) {
-        if (name[i] == '%') {
-            size_t end = name.find('%', i + 1);
-            if (end != std::string::npos && end > i + 1) {
-                std::string var = name.substr(i + 1, end - i - 1);
-                const char* val = std::getenv(var.c_str());
-                if (val) result += val;
-                else { result += '%'; result += var; result += '%'; }
-                i = end + 1;
+    size_t lastPos = 0;
+    size_t pos;
+    while (lastPos < name.size() && (pos = name.find('%', lastPos + 1)) != std::string::npos) {
+        if (name[lastPos] == '%') {
+            std::string key = name.substr(lastPos + 1, pos - lastPos - 1);
+            // getenv("") is unspecified by POSIX ("If name is an empty string ... the behavior
+            // is undefined") -- guard it explicitly rather than relying on every libc happening
+            // to return null gracefully for "%%".
+            const char* val = key.empty() ? nullptr : std::getenv(key.c_str());
+            if (val != nullptr) {
+                result += val;
+                lastPos = pos + 1;
                 continue;
             }
         }
-        result += name[i++];
+        result.append(name, lastPos, pos - lastPos);
+        lastPos = pos;
     }
+    result.append(name, lastPos, std::string::npos);
     return result;
 }
 
@@ -329,19 +362,15 @@ std::map<std::string, std::string> Environment::GetEnvironmentVariables() {
     LPCH envBlock = GetEnvironmentStringsA();
     if (envBlock) {
         for (LPCH p = envBlock; *p; p += std::strlen(p) + 1) {
-            std::string entry(p);
-            auto eq = entry.find('=');
-            if (eq != std::string::npos && eq > 0)
-                result[entry.substr(0, eq)] = entry.substr(eq + 1);
+            std::string key, value;
+            if (splitEnvEntry(p, key, value)) result[key] = value;
         }
         FreeEnvironmentStringsA(envBlock);
     }
 #else
     for (char** ep = environ; ep && *ep; ++ep) {
-        std::string entry(*ep);
-        auto eq = entry.find('=');
-        if (eq != std::string::npos)
-            result[entry.substr(0, eq)] = entry.substr(eq + 1);
+        std::string key, value;
+        if (splitEnvEntry(*ep, key, value)) result[key] = value;
     }
 #endif
     return result;
