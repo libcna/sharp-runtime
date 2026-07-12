@@ -66,6 +66,15 @@ TEST(BigIntegerTests, ConstructFromUInt64MaxViaLong) {
     EXPECT_EQ(a.ToString(), "9223372036854775807");
 }
 
+TEST(BigIntegerTests, ConstructFromLongMinValue) {
+    // Negating LONGCS_MIN directly (`-v`) is undefined behavior in C++ (no wider standard
+    // integer type to widen into, unlike the intcs constructor); the correct magnitude is
+    // 2^63 = 9223372036854775808.
+    BigInteger a(static_cast<int64_t>(-9223372036854775807LL - 1)); // INT64_MIN
+    EXPECT_TRUE(a.getIsNegativeProperty());
+    EXPECT_EQ(a.ToString(), "-9223372036854775808");
+}
+
 // ---------------------------------------------------------------------------
 // Parse / ToString roundtrip
 // ---------------------------------------------------------------------------
