@@ -1,10 +1,63 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1e2b582`) — 11768 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1efd360`) — 11774 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11768 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11774 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 310-312 closed, a new bug class (exception-safety desync) plus a security-relevant UTF-8 fix
+
+Continuing the same autonomous run (previous checkpoint covered 305-309). Commits: 0c30af0,
+9c70757, 1efd360 — all pushed to `origin/feature/work`.
+
+- **310 (Generic OrderedDictionary<K,V>.hpp)**: a NEW bug class for this session — exception
+  safety, not arithmetic overflow. `Add`/`TryAdd`/`operator[]` all set `keyIndex_[key] =
+  entries_.size()` BEFORE `entries_.emplace_back(...)`. If emplace_back throws (a throwing
+  TKey/TValue copy or move constructor — realistic for a generic container holding arbitrary
+  user types), `keyIndex_` is left pointing one-past-the-end of `entries_`, desynced. Confirmed
+  via ASan with a deliberately-throwing TValue: a failed `Add()` left `ContainsKey()` returning
+  `true` and `IndexOf()` returning an out-of-bounds index, and the next `operator[]` lookup
+  produced a genuine heap-buffer-overflow. Fixed by reordering all three to mutate the container
+  first. `Insert`/`Remove`/`RemoveAt` were already correctly ordered. **Follow-up fork** searched
+  the whole codebase for the same shape (index-map-set-before-container-mutation, generic element
+  type) — found no other instance meeting that bar. One lower-severity variant exists in
+  `System::Collections::Specialized::OrderedDictionary::Add()` (ticket 297's file, fixed
+  `std::string` key/value, so only `std::bad_alloc` could trigger it — a pervasive,
+  effectively-universal risk across the whole codebase's `push_back` calls, not a targeted gap).
+  Not fixed — noted here for whoever picks up a future dedicated "exception safety across
+  push_back-heavy containers" pass, if that's ever prioritized.
+- **311 (XxHash128.cpp)**: clean audit of the file's own hash-length-specific functions
+  (verified byte-for-byte against `XxHash128.cs`, no bugs) — but found and closed a real gap in
+  the existing randomized differential test's boundary coverage: it never tested
+  `HashLength129To240`'s internal `bound` sub-branch transitions (161/193/225) or the
+  `HashLength129To240`→`HashLengthOver240` boundary (240/241). Verified via a standalone repro
+  that these lengths already produce correct results before touching the test suite — a coverage
+  gap, not a live bug, consistent with ticket 290's own precedent for this file family.
+- **312 (IdnMapping.cpp)**: a security-relevant UTF-8 decoder gap. `utf8ToCodePoints` already
+  clearly intended to validate UTF-8 well-formedness (throws for bad lead bytes and truncated
+  sequences) but never checked that continuation bytes match the required `10xxxxxx` pattern, and
+  never rejected overlong encodings or surrogate/out-of-range code points. Confirmed via repro:
+  a valid lead byte followed by an ordinary ASCII byte was silently misinterpreted as an
+  unrelated code point instead of rejected — notable specifically for IdnMapping since domain
+  names routinely come from untrusted input, where malformed encoding should be rejected, not
+  silently reinterpreted. No direct .NET reference to check against here (real .NET's IdnMapping
+  is UTF-16-native, so this is a C++-porting-specific gap in this port's own std::string/UTF-8
+  API surface, not a parity deviation) — evaluated purely on "does the code's own already-partial
+  validation logic actually do what it clearly intends to."
+
+43 tickets closed this autonomous run so far (268-312, minus 279 and 306). Ticket 310 is the
+session's first exception-safety (as opposed to arithmetic-overflow or missing-validation) bug —
+worth flagging as a genuinely different bug shape from everything else found this run, and a
+reminder that "grep the sibling family" applies across bug *classes*, not just within one: the
+follow-up fork this ticket spawned is the first time this session explicitly went looking for a
+newly-discovered bug SHAPE (rather than a specific overflow/exception-type pattern) across the
+whole codebase.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 305-309 closed, four more real bugs (ticket 306 does not exist in plan.sqlite3, skipped)
 
