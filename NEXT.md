@@ -1,10 +1,55 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `0d74a07`) — 11707 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `efedd98`) — 11708 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11707 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11708 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 282-285 closed
+
+Continuing the same autonomous run (previous checkpoint covered 278-281). Test count: 11707 →
+11708 (+1 regression test; two of these four tickets were clean audits or defensive-only fixes
+with no new test needed). Commits: 14eb9b8, efedd98 — all pushed to `origin/feature/work`.
+
+- **282 (LinkedList.hpp)**: clean audit, no code changes. CopyTo's start+length check (the
+  pattern that's been a real bug repeatedly this session) isn't actually exploitable here — size
+  would need to approach SIZE_MAX to overflow when added to an int32-bounded index. Flagged but
+  deliberately did NOT fix a real, systemic issue: `Enumerator::Current()` dereferences the
+  underlying iterator with no guard against being called before `MoveNext()`/after enumeration
+  ends (real UB in C++, vs. real .NET's memory-safe-but-logically-undefined equivalent) —
+  confirmed via `List.hpp`'s `Enumerator::Current()` that this is consistent across every
+  `IEnumerator<T>` implementation in the codebase, not a LinkedList-specific oversight, so fixing
+  it here alone would be an inconsistent partial fix. Left as a documented finding for a future
+  ticket covering the whole `IEnumerator<T>` family.
+- **283 (BigInteger.cpp)**: `BigInteger(longcs v)`'s constructor negated `v` directly for
+  negative values — UB for `v == LONGCS_MIN`, confirmed via UBSan. The sibling `intcs`
+  constructor already avoided this correctly (widens to int64 before negating); there's no wider
+  type to widen into for the `longcs` overload. Fixed with well-defined unsigned subtraction
+  (`0ULL - (uint64_t)v`) instead. This is the second instance this session of "negate the widest
+  signed integer type without a MinValue guard" (after `Int32::CopySign`, ticket 272) —
+  grepped for the same pattern afterward and found the other two matches already safe.
+- **284 (TlsCipherSuite.hpp)**: clean audit via scripted diff (337 enum values, 0
+  missing/extra/mismatched) rather than manual reading — the right call for a pure data enum.
+- **285 (IPAddress.cpp)**: `IsLoopback` had the *exact* static-initialization-order hazard
+  already found and fixed for `DateTimeOffset::MinValue/MaxValue/UnixEpoch` — referencing another
+  class-level static (`Loopback`/`IPv6Loopback`) from a function that could itself run during a
+  *different* translation unit's dynamic initialization. Fixed with function-local statics (safe,
+  lazy, thread-safe since C++11) and a literal constant, matching the DateTimeOffset fix's
+  approach exactly. Not empirically triggered in this session (no test exercises the pathological
+  cross-TU call order), but cheap, safe, and textbook — same reasoning the codebase already
+  applied once.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. Two standing process notes reinforced this stretch: (1) when a class exposes several
+static const singleton instances (Zero/Empty/MinValue/Loopback-style), check whether any static
+*method* in the same file reads one of those singletons — if so it's worth a 30-second SIOF
+check, this has now been a real, confirmed bug twice in this codebase. (2) `Enumerator::Current()`
+being unguarded before `MoveNext()`/after end is systemic across every `IEnumerator<T>` in this
+codebase — worth a dedicated cross-cutting ticket rather than fixing one implementation at a
+time inconsistently.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 278-281 closed, one reverted dead-end worth reading
 
