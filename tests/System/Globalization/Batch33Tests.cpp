@@ -254,6 +254,26 @@ TEST(TextInfoBatch33Test, ToTitleCase_LowercaseFirstLetter_NotTreatedAsAcronym) 
     EXPECT_EQ(ti.ToTitleCase("uSA"), "Usa");
 }
 
+// Regression tests for ticket 319: ToTitleCase previously split words only on whitespace, but
+// real .NET's word-boundary detection (TextInfo.cs's c_wordSeparatorMask) treats most
+// punctuation categories (dashes, parens, quotes, other punctuation/symbols) as word
+// separators too -- so a hyphenated word like "mary-jane" was incorrectly treated as one word
+// ("Mary-jane") instead of two ("Mary-Jane"). The apostrophe is a documented exception (real
+// .NET gives it bespoke handling this port doesn't replicate, but excluding it from the
+// separator set reproduces the same observable result for the common case).
+TEST(TextInfoBatch33Test, ToTitleCase_HyphenatedWord_CapitalizesBothParts) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("mary-jane watson"), "Mary-Jane Watson");
+}
+TEST(TextInfoBatch33Test, ToTitleCase_Parentheses_CapitalizeInsideToo) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("test(word)"), "Test(Word)");
+}
+TEST(TextInfoBatch33Test, ToTitleCase_Apostrophe_DoesNotCapitalizeAfter) {
+    TextInfo ti;
+    EXPECT_EQ(ti.ToTitleCase("o'brien"), "O'brien");
+}
+
 TEST(TextInfoBatch33Test, Clone_IsMutable) {
     auto ro = TextInfo::ReadOnly(TextInfo());
     auto clone = ro.Clone();

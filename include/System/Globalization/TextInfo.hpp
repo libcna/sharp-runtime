@@ -216,10 +216,23 @@ public:
     [[nodiscard]] std::string ToTitleCase(const std::string& str) const {
         std::string result = str;
         std::size_t i = 0;
+        // Matches real .NET's word-boundary detection (TextInfo.cs's c_wordSeparatorMask):
+        // whitespace AND most punctuation categories (dash, open/close, quote, other
+        // punctuation, symbols, etc.) are word separators -- NOT just whitespace. Letters and
+        // digits are never separators. The apostrophe is a documented exception (real .NET
+        // gives it bespoke mid-word handling this port doesn't replicate, but excluding it
+        // from the separator set here reproduces the same observable result for the common
+        // case, e.g. "o'brien" -> "O'brien"). Previously splitting only on whitespace meant a
+        // hyphenated word like "mary-jane" was treated as one word and title-cased as
+        // "Mary-jane" instead of "Mary-Jane" -- confirmed via a standalone repro before this
+        // fix, matching real .NET's actual documented behavior for punctuation-separated words.
+        auto isWordBoundary = [](unsigned char c) {
+            return std::isspace(c) || (std::ispunct(c) && c != '\'');
+        };
         while (i < result.size()) {
-            if (std::isspace(static_cast<unsigned char>(result[i]))) { ++i; continue; }
+            if (isWordBoundary(static_cast<unsigned char>(result[i]))) { ++i; continue; }
             std::size_t wordStart = i;
-            while (i < result.size() && !std::isspace(static_cast<unsigned char>(result[i]))) ++i;
+            while (i < result.size() && !isWordBoundary(static_cast<unsigned char>(result[i]))) ++i;
             std::size_t wordEnd = i;
             bool hasLower = false;
             for (std::size_t j = wordStart; j < wordEnd; ++j) {
