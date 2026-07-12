@@ -203,10 +203,21 @@ TEST(HalfNewTests, CompareTo_NaN_EqualsNaN) {
 TEST(HalfNewTests, GetHashCode_ZerosMatch) {
     EXPECT_EQ(Half::Zero.GetHashCode(), Half::NegativeZero.GetHashCode());
 }
+// Regression test (ticket 268): real Half.GetHashCode() does `bits &= PositiveInfinityBits`
+// (an AND-mask), not an assignment to PositiveInfinityBits (0x7C00) -- verified against
+// Half.cs directly. For NaN the exponent field is already all-ones, so the mask is a no-op in
+// effect (0x7C00 survives). But for zero (+0 or -0, exponent field 0), the mask clears
+// everything to 0 -- NOT 0x7C00, which is what this test previously (incorrectly) asserted.
+// Both +0 and -0 still hash equally to each other either way (satisfying the hash contract,
+// since Equals() treats them as equal), so this was a real divergence from .NET's actual hash
+// *value*, not a broken hash table.
 TEST(HalfNewTests, GetHashCode_NaNMatchesPositiveInfinityPattern) {
-    // .NET normalizes NaN/zero hash codes to PositiveInfinityBits (0x7C00).
     EXPECT_EQ(Half::NaN.GetHashCode(), static_cast<SharpRuntime::intcs>(0x7C00));
-    EXPECT_EQ(Half::Zero.GetHashCode(), static_cast<SharpRuntime::intcs>(0x7C00));
+    EXPECT_EQ(Half::Zero.GetHashCode(), static_cast<SharpRuntime::intcs>(0));
+}
+
+TEST(HalfNewTests, GetHashCode_PositiveAndNegativeZero_Match) {
+    EXPECT_EQ(Half::Zero.GetHashCode(), Half::NegativeZero.GetHashCode());
 }
 
 // ---------------------------------------------------------------------------
