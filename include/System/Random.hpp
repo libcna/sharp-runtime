@@ -309,21 +309,6 @@ namespace System {
         // -------------------------------------------------------------------------
 
         /**
-         * @brief Performs an in-place Fisher-Yates shuffle of a vector.
-         *
-         * C++ counterpart of .NET Random.Shuffle<T>(T[]).
-         * @tparam T Element type.
-         * @param values The vector to shuffle in place.
-         */
-        template<typename T>
-        void Shuffle(std::vector<T>& values) {
-            for (intcs i = static_cast<intcs>(values.size()) - 1; i > 0; --i) {
-                intcs j = Next(i + 1);
-                std::swap(values[i], values[j]);
-            }
-        }
-
-        /**
          * @brief Performs an in-place Fisher-Yates shuffle of a Span.
          *
          * C++ counterpart of .NET Random.Shuffle<T>(Span<T>).
@@ -336,6 +321,26 @@ namespace System {
                 intcs j = Next(i, values.getLengthProperty());
                 std::swap(values[i], values[j]);
             }
+        }
+
+        /**
+         * @brief Performs an in-place Fisher-Yates shuffle of a vector.
+         *
+         * C++ counterpart of .NET Random.Shuffle<T>(T[]).
+         * Real .NET's array overload delegates entirely to the Span overload
+         * (`Shuffle(new Span<T>(...))`) rather than implementing its own algorithm -- there is
+         * only one shuffle algorithm in real .NET. This previously implemented an independent,
+         * opposite-direction traditional Fisher-Yates loop (i from n-1 down to 1, j=Next(i+1)),
+         * which produces a genuinely different permutation than Shuffle(Span<T>) for the same
+         * seed and input size, breaking this file's carefully-verified seeded-determinism
+         * guarantee (see the class-level doc comment) for any caller mixing the two overloads
+         * or comparing against real .NET's own array-shuffle output.
+         * @tparam T Element type.
+         * @param values The vector to shuffle in place.
+         */
+        template<typename T>
+        void Shuffle(std::vector<T>& values) {
+            Shuffle(Span<T>(values.data(), static_cast<intcs>(values.size())));
         }
 
         /**

@@ -278,6 +278,22 @@ TEST(RandomTests, Shuffle_EmptyVector_NoThrow) {
     EXPECT_NO_THROW(rng.Shuffle(v));
 }
 
+TEST(RandomTests, Shuffle_VectorAndSpan_ProduceIdenticalSequenceForSameSeed) {
+    // Real .NET's Shuffle(T[]) delegates entirely to Shuffle(Span<T>) -- there is only one
+    // shuffle algorithm. Shuffle(std::vector<T>&) previously implemented an independent,
+    // opposite-direction loop that produced a genuinely different permutation than
+    // Shuffle(Span<T>) for the same seed, breaking this file's seeded-determinism guarantee.
+    System::Random rngVec(42);
+    std::vector<int> v = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    rngVec.Shuffle(v);
+
+    System::Random rngSpan(42);
+    std::vector<int> s = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    rngSpan.Shuffle(System::Span<int>(s));
+
+    EXPECT_EQ(v, s);
+}
+
 // ---------------------------------------------------------------------------
 // GetItems<T>
 // ---------------------------------------------------------------------------
