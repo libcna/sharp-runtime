@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DayOfWeek.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -390,6 +391,10 @@ public:
      * Stub — returns a single-element vector with the pattern for the format character.
      * @param format The format specifier character.
      * @return A vector of pattern strings.
+     * @throws System::ArgumentException if @p format is not a recognized standard format
+     *         character -- real .NET throws here (DateTimeFormatInfo.cs:
+     *         `throw new ArgumentException(..., nameof(format))`) rather than returning
+     *         an empty collection.
      */
     [[nodiscard]] std::vector<std::string> GetAllDateTimePatterns(char format) const {
         switch (format) {
@@ -406,7 +411,7 @@ public:
             case 'T': return {longTimePattern_};
             case 'u': return {getUniversalSortableDateTimePatternProperty()};
             case 'y': case 'Y': return {yearMonthPattern_};
-            default: return {};
+            default: throw System::ArgumentException("Format specifier was invalid.", "format");
         }
     }
 

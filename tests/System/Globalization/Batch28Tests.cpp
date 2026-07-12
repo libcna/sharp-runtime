@@ -269,7 +269,13 @@ TEST(DateTimeFormatInfoBatch28Test, GetAllDateTimePatterns_ByFormat) {
     EXPECT_FALSE(dtfi.GetAllDateTimePatterns('d').empty());
     EXPECT_FALSE(dtfi.GetAllDateTimePatterns('D').empty());
     EXPECT_FALSE(dtfi.GetAllDateTimePatterns('T').empty());
-    EXPECT_TRUE(dtfi.GetAllDateTimePatterns('?').empty());
+}
+
+TEST(DateTimeFormatInfoBatch28Test, GetAllDateTimePatterns_UnrecognizedFormat_Throws) {
+    // Real .NET throws ArgumentException(nameof(format)) for an unrecognized standard
+    // format character rather than returning an empty collection.
+    DateTimeFormatInfo dtfi;
+    EXPECT_THROW(dtfi.GetAllDateTimePatterns('?'), System::ArgumentException);
 }
 
 TEST(DateTimeFormatInfoBatch28Test, NativeCalendarName) {
