@@ -1,10 +1,68 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `7eda594`) — 11701 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `0d74a07`) — 11707 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11701 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11707 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 278-281 closed, one reverted dead-end worth reading
+
+Continuing the same autonomous run (previous checkpoint covered 274-277). Test count: 11701 →
+11707 (6 net new regression tests). Commits: e4ecdc6, 7eda594 (already in prior checkpoint),
+0d74a07 — all pushed to `origin/feature/work`. Ticket 279 (`src/System/DateTime.cpp`) turned out
+to be the same file already fully covered by ticket 275's audit — closed with zero code changes,
+cross-referencing 275's notes.
+
+**3 tickets closed with real fixes: 278 (BinaryData.hpp), 280 (Ping.cpp — investigated and
+reverted, see below), 281 (Utf8Parser.hpp).**
+
+- **BinaryData::operator[]** (a C++-only addition, real .NET's BinaryData has no indexer) had
+  zero bounds checking — confirmed a real ASan heap-buffer-overflow for `bd[-1]`. Added the
+  same unsigned-comparison bounds check this project's other array-like accessors use.
+- **Utf8Parser's overflow-check idiom was not airtight.** `tryParseUInt`/`tryParseGrouped` both
+  used the common `next = v*10+digit; if (next < v) overflow` post-multiply check. Brute-forced
+  against `__uint128_t` ground truth (curated cases + 200k randomized trials) and found it
+  **falsely accepts** some genuinely-overflowing 21-digit inputs whose true value wraps around
+  2⁶⁴ more than once and lands back above the previous accumulator by coincidence — e.g.
+  `"184467440737095516159"` (`UINT64_MAX*10+9`) silently parsed as a wrapped, wrong value
+  instead of failing. Fixed with the standard check-*before*-multiply idiom
+  (`v > (UINT64_MAX-digit)/10`), re-verified against the same harness with zero false
+  accepts/rejects. **Worth remembering**: this exact idiom flaw is subtle enough that it's easy
+  to write and easy to review-past — a `*10+digit` accumulator's overflow check is only airtight
+  if it checks *before* multiplying, not after. Grepped the rest of the codebase for the same
+  literal pattern afterward (`Int128.hpp`, `StandardFormat.hpp`, `TimeSpan.cpp`, `Decimal.cpp`
+  all have `*10+digit` accumulators) — all four already use the correct pre-check idiom or are
+  bounded by a small fixed digit count, so this was an isolated instance, not systemic.
+
+**Ticket 280 (Ping.cpp) — a fix that looked right, tested wrong, and was reverted.** Real .NET's
+Unix `Ping.RawSocket.cs` validates a received echo reply's ICMP identifier against the request
+and loops (discarding mismatches) until a match or timeout — this port's `sendPingCore` does a
+single `recv()` with no identifier check, which looks like a real "could misattribute an
+unrelated ICMP packet as this call's reply" bug. Implemented the equivalent retry loop — and the
+**live loopback ping tests** (`PingTests.cpp`, which hit a real ICMP socket, not a mock)
+immediately failed with 5-second timeouts across the board. Root cause: real .NET's check exists
+because it uses `SOCK_RAW` (receives *all* ICMP system-wide, no kernel filtering). This port
+deliberately uses the unprivileged `SOCK_DGRAM`+`IPPROTO_ICMP` Linux "ping socket" instead
+(documented in `Ping.hpp`'s own note, specifically to avoid requiring root) — and the kernel's
+ping-socket implementation *rewrites* the ICMP identifier field to a kernel-assigned value on
+send and only delivers matching replies to that same socket's receive queue. The userspace
+identifier this code builds into the packet never actually round-trips, so the added check could
+never match — confirmed empirically, reverted cleanly (`git checkout`), full note left in ticket
+280 so this isn't attempted again blind. **Process lesson reinforced**: for any change to
+protocol-level/syscall-level code, run the *live* test (not just build+compile) before
+committing — this is exactly why `PingTests.cpp` hits a real socket instead of mocking, and it
+caught a plausible-looking but wrong fix in under 30 seconds that pure code review would have
+missed entirely.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. When auditing any other custom numeric-string parser in this codebase, check its
+digit-accumulation overflow guard specifically for the check-before-vs-after-multiply
+distinction — cheap to verify with a small brute-force/randomized harness against
+`__uint128_t` ground truth (see ticket 281's approach), and this session has now found it wrong
+once in a security/correctness-relevant place.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 274-277 closed, a whole family of overflow bugs across the date/time types
 
