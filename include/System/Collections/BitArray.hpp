@@ -44,10 +44,23 @@ public:
     /**
      * @brief Constructs a BitArray of the given length with all bits set to @p defaultValue.
      *
-     * C++ counterpart of .NET BitArray(int) and BitArray(int, bool).
+     * C++ counterpart of .NET BitArray(int) and BitArray(int, bool). Real .NET validates
+     * `ArgumentOutOfRangeException.ThrowIfNegative(length)` before allocating.
+     *
+     * Without this check, a negative @p length cast to size_t wraps to a huge value passed
+     * directly to std::vector<bool>'s constructor -- confirmed via a standalone ASan repro
+     * that this is not merely "throws the wrong exception type" but a genuine, exploitable
+     * heap-buffer-overflow: std::vector<bool>'s internal bit-to-word-count calculation
+     * overflows for a size_t(-1)-scale request, silently allocating far less backing storage
+     * than the reported size() implies, so any subsequent element access (even bits_[0]) is a
+     * wild out-of-bounds write into unrelated heap memory (ASan: "heap-buffer-overflow...
+     * WRITE of size 1").
+     * @throws System::ArgumentOutOfRangeException if @p length is negative.
      */
-    explicit BitArray(intcs length, bool defaultValue = false)
-        : bits_(static_cast<size_t>(length), defaultValue) {}
+    explicit BitArray(intcs length, bool defaultValue = false) {
+        if (length < 0) throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
+        bits_.assign(static_cast<size_t>(length), defaultValue);
+    }
 
     /**
      * @brief Constructs a BitArray from a vector of bool values.
