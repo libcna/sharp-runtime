@@ -80,7 +80,13 @@ namespace System {
         [[nodiscard]] static Span<T> AsSpan(std::vector<T>& v, SharpRuntime::intcs start,
                                              SharpRuntime::intcs length) {
             auto sz = static_cast<SharpRuntime::intcs>(v.size());
-            if (start < 0 || length < 0 || start + length > sz)
+            // start+length (both intcs/int32) can itself signed-overflow for large start/length,
+            // silently bypassing this check instead of throwing -- confirmed real UB via a
+            // standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket 265);
+            // fixed the same way real .NET's Span<T>.Slice(int,int) does: unsigned comparison,
+            // subtraction instead of addition (sz-start can't overflow once start<=sz is known).
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(sz) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(sz - start))
                 throw System::ArgumentOutOfRangeException("start");
             return Span<T>(v.data() + start, length);
         }
@@ -140,7 +146,10 @@ namespace System {
                                                         SharpRuntime::intcs start,
                                                         SharpRuntime::intcs length) {
             auto sz = static_cast<SharpRuntime::intcs>(text.size());
-            if (start < 0 || length < 0 || start + length > sz)
+            // See AsSpan(vector<T>&, intcs, intcs) above: same overflow-bypasses-the-check bug,
+            // same fix.
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(sz) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(sz - start))
                 throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<char>(text.data() + start, length);
         }

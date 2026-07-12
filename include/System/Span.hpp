@@ -147,7 +147,17 @@ namespace System {
          * @throws System::ArgumentOutOfRangeException if the range is invalid.
          */
         [[nodiscard]] Span<T> Slice(intcs start, intcs length) const {
-            if (start < 0 || length < 0 || start + length > length_)
+            // start+length (both intcs/int32) can itself signed-overflow for large start/length
+            // -- confirmed real UB via a standalone UBSan repro before fixing, and worse than
+            // "just UB": the wrapped (very negative) sum then compares as <= length_, silently
+            // BYPASSING this bounds check entirely (e.g. start=INT32_MAX, length=10 on a
+            // 10-element span). Real .NET's Span<T>.Slice(int,int) guards against exactly this
+            // (see its own comment) by casting to unsigned and rearranging the comparison as a
+            // subtraction instead of an addition -- length_-start cannot overflow once we know
+            // 0 <= start <= length_, and casting to unsigned makes a negative start/length
+            // compare as huge instead of silently passing.
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(length_) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(length_ - start))
                 throw System::ArgumentOutOfRangeException("start");
             return Span<T>(ptr_ + start, length);
         }
@@ -373,7 +383,11 @@ namespace System {
          * @throws System::ArgumentOutOfRangeException if the range is invalid.
          */
         [[nodiscard]] ReadOnlySpan<T> Slice(intcs start, intcs length) const {
-            if (start < 0 || length < 0 || start + length > length_)
+            // See Span<T>::Slice(intcs,intcs)'s doc-comment: start+length can itself overflow
+            // and silently bypass this check (confirmed real UB via a standalone UBSan repro);
+            // this mirrors that fix.
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(length_) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(length_ - start))
                 throw System::ArgumentOutOfRangeException("start");
             return ReadOnlySpan<T>(ptr_ + start, length);
         }

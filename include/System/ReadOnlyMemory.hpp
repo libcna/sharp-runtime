@@ -118,7 +118,14 @@ namespace System {
          * @throws System::ArgumentOutOfRangeException if the slice extends outside the current range.
          */
         [[nodiscard]] ReadOnlyMemory<T> Slice(intcs start, intcs length) const {
-            if (start < 0 || length < 0 || start + length > length_)
+            // start+length (both intcs/int32) can itself signed-overflow for large start/length,
+            // silently bypassing this check instead of throwing -- confirmed real UB via a
+            // standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket 265);
+            // fixed the same way real .NET's Span<T>.Slice(int,int) does: unsigned comparison,
+            // subtraction instead of addition (length_-start can't overflow once start<=length_
+            // is known).
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(length_) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(length_ - start))
                 throw System::ArgumentOutOfRangeException("start");
             return ReadOnlyMemory<T>(ptr_ + start, length);
         }

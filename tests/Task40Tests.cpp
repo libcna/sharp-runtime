@@ -78,6 +78,24 @@ TEST(SpanTests, Slice_SubRange) {
     EXPECT_EQ(sl[2], 4);
 }
 
+// Slice(start, length)'s bounds check used to compute `start + length` directly in intcs
+// (int32) arithmetic, which itself signed-overflows for large start/length -- confirmed real
+// UB via a standalone UBSan repro -- and worse, the wrapped (very negative) sum then compared
+// as <= the span's actual length, silently BYPASSING the check entirely instead of throwing.
+// Real .NET's Span<T>.Slice(int,int) explicitly guards against exactly this by casting to
+// unsigned and using subtraction instead of addition.
+TEST(SpanTests, Slice_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    int arr[] = {1, 2, 3, 4, 5};
+    Span<int> s(arr, 5);
+    EXPECT_THROW(s.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(SpanTests, Slice_NegativeLength_Throws) {
+    int arr[] = {1, 2, 3};
+    Span<int> s(arr, 3);
+    EXPECT_THROW(s.Slice(0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(SpanTests, FromVector_Ctor) {
     std::vector<int> v = {5, 6, 7};
     Span<int> s(v);

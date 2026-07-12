@@ -99,6 +99,14 @@ TEST(ReadOnlySpanTests, Slice_StartAndLength) {
     EXPECT_EQ(sl[2], 4);
 }
 
+// Same overflow-bypasses-the-check bug as Span<T>::Slice(intcs,intcs) (ticket 265) -- fixed
+// alongside it since ReadOnlySpan<T> duplicates the same Slice(start,length) logic.
+TEST(ReadOnlySpanTests, Slice_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    int arr[] = {1, 2, 3, 4, 5};
+    ReadOnlySpan<int> s(arr, 5);
+    EXPECT_THROW(s.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
 TEST(ReadOnlySpanTests, Slice_OutOfRange_Throws) {
     int arr[] = {1, 2};
     ReadOnlySpan<int> s(arr, 2);
