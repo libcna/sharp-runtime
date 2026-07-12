@@ -25,6 +25,40 @@ TEST(OperatingSystemTest, ToString) {
     EXPECT_EQ(os.ToString(), os.getVersionStringProperty());
 }
 
+TEST(OperatingSystemTest, VersionString_Other) {
+    // PlatformID::Other is not a dead/legacy enum value here: Environment::getOSVersionProperty()
+    // constructs it for Emscripten builds. Previously fell through to "Unknown ", not real
+    // .NET's "Other ".
+    OperatingSystem os(PlatformID::Other, Version(0, 0));
+    EXPECT_EQ(os.getVersionStringProperty(), "Other 0.0");
+}
+
+TEST(OperatingSystemTest, VersionString_Win32S) {
+    OperatingSystem os(PlatformID::Win32S, Version(1, 0));
+    EXPECT_EQ(os.getVersionStringProperty(), "Microsoft Win32S 1.0");
+}
+
+TEST(OperatingSystemTest, VersionString_WinCE) {
+    OperatingSystem os(PlatformID::WinCE, Version(5, 0));
+    EXPECT_EQ(os.getVersionStringProperty(), "Microsoft Windows CE 5.0");
+}
+
+TEST(OperatingSystemTest, VersionString_Xbox) {
+    OperatingSystem os(PlatformID::Xbox, Version(1, 0));
+    EXPECT_EQ(os.getVersionStringProperty(), "Xbox 1.0");
+}
+
+TEST(OperatingSystemTest, VersionString_Win32Windows_Version95) {
+    // Real .NET: major<4, or major==4 && minor==0 -> "95"; otherwise "98".
+    OperatingSystem os(PlatformID::Win32Windows, Version(4, 0));
+    EXPECT_EQ(os.getVersionStringProperty(), "Microsoft Windows 95 4.0");
+}
+
+TEST(OperatingSystemTest, VersionString_Win32Windows_Version98) {
+    OperatingSystem os(PlatformID::Win32Windows, Version(4, 10));
+    EXPECT_EQ(os.getVersionStringProperty(), "Microsoft Windows 98 4.10");
+}
+
 TEST(OperatingSystemTest, Clone) {
     OperatingSystem os(PlatformID::Unix, Version(1, 0, 0, 0));
     auto clone = os.Clone();
