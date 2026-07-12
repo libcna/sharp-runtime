@@ -85,6 +85,30 @@ TEST(ArraySegmentTests, Slice1Arg_Negative_Throws) {
     EXPECT_THROW(seg.Slice(-1), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests (ticket 1487): offset+count (constructor) / index+count (Slice(int,int))
+// used to be computed directly in intcs (int32) arithmetic, which overflows for large inputs
+// and silently bypasses the bounds check instead of throwing -- same bug class as
+// Span<T>::Slice (ticket 265), confirmed via a standalone UBSan repro before fixing.
+TEST(ArraySegmentTests, Constructor_OffsetPlusCountOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3};
+    EXPECT_THROW((ArraySegment<int>(v, 2147483647, 10)), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArraySegmentTests, Slice2Arg_IndexPlusCountOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v);
+    EXPECT_THROW(seg.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArraySegmentTests, Slice2Arg_ValidRange_Works) {
+    std::vector<int> v{10, 20, 30, 40, 50};
+    ArraySegment<int> seg(v);
+    ArraySegment<int> s = seg.Slice(1, 3);
+    EXPECT_EQ(s.getCountProperty(), 3);
+    EXPECT_EQ(s[0], 20);
+    EXPECT_EQ(s[2], 40);
+}
+
 TEST(ArraySegmentTests, Slice1Arg_CorrectElements) {
     std::vector<int> v{10, 20, 30, 40};
     ArraySegment<int> seg(v);

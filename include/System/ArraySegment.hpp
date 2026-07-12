@@ -63,7 +63,14 @@ namespace System {
         ArraySegment(std::vector<T>& array, intcs offset, intcs count)
             : array_(&array), offset_(offset), count_(count)
         {
-            if (offset < 0 || count < 0 || offset + count > static_cast<intcs>(array.size()))
+            // offset+count (both intcs/int32) can itself signed-overflow for large offset/count,
+            // silently bypassing this check instead of throwing -- confirmed real UB via a
+            // standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket 265);
+            // fixed the same way real .NET's Span<T>.Slice(int,int) does: unsigned comparison,
+            // subtraction instead of addition (sz-offset can't overflow once offset<=sz is known).
+            auto sz = static_cast<intcs>(array.size());
+            if (static_cast<SharpRuntime::uintcs>(offset) > static_cast<SharpRuntime::uintcs>(sz) ||
+                static_cast<SharpRuntime::uintcs>(count) > static_cast<SharpRuntime::uintcs>(sz - offset))
                 throw System::ArgumentOutOfRangeException("offset", "offset/count out of range");
         }
 
@@ -181,7 +188,10 @@ namespace System {
          */
         [[nodiscard]] ArraySegment<T> Slice(intcs index, intcs count) const
         {
-            if (index < 0 || count < 0 || index + count > count_)
+            // See the (vector&, offset, count) constructor above: same overflow-bypasses-the-
+            // check bug, same fix.
+            if (static_cast<SharpRuntime::uintcs>(index) > static_cast<SharpRuntime::uintcs>(count_) ||
+                static_cast<SharpRuntime::uintcs>(count) > static_cast<SharpRuntime::uintcs>(count_ - index))
                 throw System::ArgumentOutOfRangeException("index", "ArraySegment::Slice: out of range");
             return ArraySegment<T>(*array_, offset_ + index, count);
         }
