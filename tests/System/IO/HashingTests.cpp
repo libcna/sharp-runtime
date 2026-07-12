@@ -703,8 +703,16 @@ TEST(HashingTests, XxHash3_StreamingMatchesOneShot_RandomizedChunkSplits) {
     // internal buffer size (~192 bytes for XxHash3's default secret), a single stripe (64
     // bytes), a full block, and multi-block inputs, plus small/edge lengths (0, 1, and just
     // above/below each boundary).
+    // Includes 159-162/192-193/224-226/239-242, straddling HashLength129To240's own internal
+    // `bound` sub-branch transitions (at length 161/193/225, where an extra Mix32Bytes call
+    // kicks in) and the HashLength129To240 -> HashLengthOver240 boundary at MidSizeMaxBytes=240
+    // -- none of which the original length list (which jumped from 193 straight to 200 then
+    // 255) actually exercised. Manually verified via a standalone repro before adding these:
+    // all of these lengths already produced correct (streaming == one-shot) results, so this is
+    // permanent regression coverage for previously-untested branches, not a bug fix.
     std::vector<int> lengths = {0, 1, 2, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65,
-                                 127, 128, 129, 191, 192, 193, 200, 255, 256, 257,
+                                 127, 128, 129, 159, 160, 161, 162, 191, 192, 193,
+                                 200, 224, 225, 226, 239, 240, 241, 242, 255, 256, 257,
                                  511, 512, 513, 1000, 2000, 4096, 8192};
     for (int length : lengths) {
         std::vector<uint8_t> data(static_cast<size_t>(length));
@@ -733,8 +741,16 @@ TEST(HashingTests, XxHash3_StreamingMatchesOneShot_RandomizedChunkSplits) {
 
 TEST(HashingTests, XxHash128_StreamingMatchesOneShot_RandomizedChunkSplits) {
     std::mt19937 rng(0xC0FFEE);
+    // Includes 159-162/192-193/224-226/239-242, straddling HashLength129To240's own internal
+    // `bound` sub-branch transitions (at length 161/193/225, where an extra Mix32Bytes call
+    // kicks in) and the HashLength129To240 -> HashLengthOver240 boundary at MidSizeMaxBytes=240
+    // -- none of which the original length list (which jumped from 193 straight to 200 then
+    // 255) actually exercised. Manually verified via a standalone repro before adding these:
+    // all of these lengths already produced correct (streaming == one-shot) results, so this is
+    // permanent regression coverage for previously-untested branches, not a bug fix.
     std::vector<int> lengths = {0, 1, 2, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65,
-                                 127, 128, 129, 191, 192, 193, 200, 255, 256, 257,
+                                 127, 128, 129, 159, 160, 161, 162, 191, 192, 193,
+                                 200, 224, 225, 226, 239, 240, 241, 242, 255, 256, 257,
                                  511, 512, 513, 1000, 2000, 4096, 8192};
     for (int length : lengths) {
         std::vector<uint8_t> data(static_cast<size_t>(length));
