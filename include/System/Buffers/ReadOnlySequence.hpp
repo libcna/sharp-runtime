@@ -135,7 +135,12 @@ namespace System::Buffers {
          * with e.g. a `long long` literal ambiguous).
          */
         [[nodiscard]] ReadOnlySequence<T> Slice(longcs start, longcs length) const {
-            return Slice(GetPosition(start), GetPosition(start + length));
+            // Computing `start + length` directly (both attacker/caller-controlled longcs
+            // values) can overflow before either is ever validated -- confirmed via UBSan.
+            // Resolve `start` to a position first, then let the (now overflow-safe)
+            // GetPosition(offset, origin) combine `length` with it.
+            System::SequencePosition begin = GetPosition(start);
+            return Slice(begin, GetPosition(length, begin));
         }
 
         /**
@@ -180,10 +185,19 @@ namespace System::Buffers {
         [[nodiscard]] System::SequencePosition GetPosition(longcs offset, System::SequencePosition origin) const {
             if (offset < 0)
                 throw ArgumentOutOfRangeException("offset");
-            intcs pos = origin.GetInteger() + static_cast<intcs>(offset);
-            if (pos < start_ || pos > end_)
+            // Do the whole computation in longcs and check via subtraction before ever adding
+            // offset in, rather than narrowing offset to intcs first (which could silently
+            // truncate a huge, clearly-out-of-range offset down to a value that happens to
+            // land inside [start_, end_]) or computing origin + offset directly (which can
+            // overflow longcs itself for an offset near LONGCS_MAX) -- both confirmed as real
+            // bugs via a standalone repro before this fix (a ~4-billion-offset silently
+            // "succeeded" with a bogus position, and a huge start+length in Slice below hit
+            // genuine UBSan-flagged signed overflow).
+            longcs originInt = static_cast<longcs>(origin.GetInteger());
+            if (originInt < static_cast<longcs>(start_) || originInt > static_cast<longcs>(end_) ||
+                offset > static_cast<longcs>(end_) - originInt)
                 throw ArgumentOutOfRangeException("offset");
-            return System::SequencePosition(nullptr, pos);
+            return System::SequencePosition(nullptr, static_cast<intcs>(originInt + offset));
         }
 
         /**
