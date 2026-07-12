@@ -1,10 +1,45 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `1ed69e2`) — 11734 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `88b0ded`) — 11743 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11734 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11743 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — follow-up to ticket 295
+
+Continuing the same autonomous run. Commit: 88b0ded. Self-initiated follow-up (per the previous
+checkpoint's own "worth a quick pass on UInt32" note) found two more systemic `Parse` gaps while
+checking UInt32:
+
+1. `SByte`/`UInt16`/`UInt32::Parse` all called `stoi`/`stoul(s)` without capturing the parse-end
+   position — trailing garbage (`"5abc"`) silently accepted as `5` instead of throwing.
+2. `Byte`/`UInt16`/`UInt32::Parse` all silently accepted `"-0"` as `0` instead of throwing
+   `OverflowException` — verified against real .NET's `Number.Parsing.cs` that unsigned types
+   reject *any* leading `-`, even an all-zero one, regardless of magnitude. For `UInt16`/`UInt32`
+   this also meant a plain `"-1"` wasn't reliably caught on an LLP64 platform (`unsigned long`
+   same width as `UInt32` → `stoul("-1")` wraps to exactly `MaxValue`, which `v > MaxValue`
+   — not `>=` — doesn't catch).
+
+Fixed all instances, matching `UInt64::Parse`'s already-correct pattern. 9 new regression tests.
+One self-correction along the way: initially assumed `Byte::Parse` also lacked trailing-garbage
+validation (copying the pattern from the actually-broken siblings) — it didn't, an existing test
+already covered it; caught via a duplicate-test-name compile error, removed the redundant test.
+
+This is now the **fifth** systemic-bug-family this session (after `DivRem` zero-check,
+calendar `years*12`/`weeks*7` overflow, `ToString` `stoi` leak, and now `Parse` validation gaps)
+— all found by grepping a sibling family the moment a second instance turned up.
+
+29 tickets closed this autonomous run so far (268-295, minus 279). Zero regressions at any
+point; full suite run after every change.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. The primitive-integer-type family (Byte/SByte/Int16/UInt16/Int32/UInt32/Int64/UInt64)
+should now be fully covered for the `DivRem`-zero-check, `ToString`-`stoi`-leak, and
+`Parse`-trailing-garbage/negative-zero bug shapes — no further sweep needed there barring a new
+pattern surfacing.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — ticket 295 closed, fourth systemic find this run
 
