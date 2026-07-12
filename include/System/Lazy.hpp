@@ -47,7 +47,14 @@ namespace System {
         mutable std::exception_ptr         cachedException_;
         mutable std::atomic<std::thread::id> creatingThreadId_{};
         std::function<T()>                 factory_;
-        mutable bool                       isValueCreated_ = false;
+        // atomic, not plain bool: getIsValueCreatedProperty() reads this with no lock/
+        // call_once involvement, so it must be safely readable while getValueProperty() is
+        // concurrently writing it from another thread (ExecutionAndPublication/PublicationOnly
+        // modes are meant to support exactly this multi-thread-observer pattern, matching real
+        // .NET's Lazy<T>.IsValueCreated). Confirmed via a standalone ThreadSanitizer repro
+        // before this fix: one thread computing the value while another polled
+        // getIsValueCreatedProperty() raced on this field.
+        mutable std::atomic<bool>          isValueCreated_{false};
         LazyThreadSafetyMode               mode_;
 
         // Detects the factory recursively accessing Value()/getValueProperty() on this
