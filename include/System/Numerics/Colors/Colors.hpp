@@ -40,7 +40,7 @@ struct Argb {
     /**
      * @brief Constructs an Argb from a vector with at least 4 elements (A, R, G, B).
      * @param values Source vector; must have at least 4 elements.
-     * @throws std::invalid_argument if @p values has fewer than 4 elements.
+     * @throws System::ArgumentException if @p values has fewer than 4 elements.
      */
     Argb(const std::vector<T>& values) {
         if (values.size() < 4) throw System::ArgumentException("The span is too short to contain a color.", "values");
@@ -164,7 +164,7 @@ struct Rgba {
     /**
      * @brief Constructs an Rgba from a vector with at least 4 elements (R, G, B, A).
      * @param values Source vector; must have at least 4 elements.
-     * @throws std::invalid_argument if @p values has fewer than 4 elements.
+     * @throws System::ArgumentException if @p values has fewer than 4 elements.
      */
     Rgba(const std::vector<T>& values) {
         if (values.size() < 4) throw System::ArgumentException("The span is too short to contain a color.", "values");
