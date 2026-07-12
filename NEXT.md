@@ -1,10 +1,46 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `abbbc21`) — 11787 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a666384`) — 11790 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11787 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11790 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 321 closed, a severe UTF-8 data-loss bug found via hand-tracing the real .NET reference
+
+Continuing the same autonomous run (previous checkpoint covered 320). Commit: a666384 — pushed
+to `origin/feature/work`.
+
+- **321 (Text/Unicode/Utf8.hpp, first audit pass)**: `ToUtf16`'s malformed-sequence handling
+  had a genuinely severe bug. Real .NET's `Utf8.ToUtf16` delegates the "how many bytes to skip
+  per U+FFFD replacement" decision to `Rune.DecodeFromUtf8`, which implements the Unicode
+  Standard's "maximal subpart" algorithm (Ch. 3.9) — consume only the bytes forming a valid
+  prefix before hitting an invalid byte or the end of buffer. The port's "not enough bytes for
+  the promised sequence length" branch instead fired whenever the buffer ran short *regardless
+  of whether the present bytes were even valid continuation bytes*, and swallowed **every**
+  remaining byte into a single replacement. Confirmed via repro: `{0xF0, 'A', 'B'}` (a 4-byte
+  lead byte immediately followed by ordinary ASCII, no continuation bytes at all) produced only
+  `U+FFFD` — `'A'` and `'B'` vanished entirely. Fixed by hand-tracing `Rune.DecodeFromUtf8`'s
+  exact branch logic against three concrete ground-truth cases (a lone lead byte; a lead byte
+  with a genuinely-valid-but-truncated continuation prefix; a lead byte followed by an
+  immediately-invalid byte) and unifying the two previously-separate branches into one scan that
+  reproduces the same behavior exactly.
+
+51 tickets closed this autonomous run so far (268-321, minus 279 and 306). This ticket's
+research method is worth naming explicitly since it differs from the session's two dominant
+techniques so far (UBSan/ASan/TSan repro-before/after for memory/concurrency bugs; grep-the-
+sibling-family for pattern-matching against an already-known-correct precedent): here there was
+no existing precedent anywhere in the codebase, so the only way to establish ground truth was
+**hand-tracing the real .NET reference's exact branch-by-branch logic against concrete byte
+sequences** until a precise, checkable prediction fell out, then confirming the port diverges
+from it empirically. Slower than the other two techniques, but is the right tool specifically
+when the bug is a *logic* mismatch in dense algorithmic code with no simpler proxy for
+correctness (unlike memory-safety bugs, which a sanitizer can always confirm directly).
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 320 closed, third threading bug this session
 
