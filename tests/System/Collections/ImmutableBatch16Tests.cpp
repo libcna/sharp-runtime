@@ -115,6 +115,25 @@ TEST(ImmListBatch16Test, RemoveRange_RemovesSlice) {
     EXPECT_EQ(lst2[1], 5);
 }
 
+TEST(ImmListBatch16Test, RemoveRange_CountExceedsBounds_ThrowsArgumentOutOfRangeException) {
+    // Real .NET's ImmutableList<T>.RemoveRange(int, int) throws ArgumentOutOfRangeException
+    // for an out-of-bounds range (via Requires.Range) -- this previously threw the wrong
+    // type, System::ArgumentException, for this specific case.
+    auto lst = ImmutableList<int>::Create({1, 2, 3});
+    EXPECT_THROW(lst.RemoveRange(1, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(ImmListBatch16Test, RemoveRange_NegativeIndex_ThrowsArgumentOutOfRangeException) {
+    auto lst = ImmutableList<int>::Create({1, 2, 3});
+    EXPECT_THROW(lst.RemoveRange(-1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ImmListBatch16Test, RemoveRange_IndexAtSizeZeroCount_Succeeds) {
+    auto lst = ImmutableList<int>::Create({1, 2, 3});
+    auto lst2 = lst.RemoveRange(3, 0);
+    EXPECT_EQ(lst2.getCountProperty(), 3);
+}
+
 TEST(ImmListBatch16Test, LastIndexOf_Found) {
     auto lst = ImmutableList<int>::Create({1, 2, 3, 2});
     EXPECT_EQ(lst.LastIndexOf(2), 3);

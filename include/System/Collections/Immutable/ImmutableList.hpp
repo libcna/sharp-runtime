@@ -35,12 +35,13 @@ class ImmutableList {
     }
 
     void requireValidRange(intcs index, intcs count) const {
-        if (index < 0)
-            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
-        if (count < 0)
-            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
-        if (static_cast<intcs>(data_->size()) - index < count)
-            throw System::ArgumentException("Offset and length were out of bounds for the array, or count is greater than the number of elements from index to the end of the source collection.");
+        // Matches real .NET's ImmutableList<T>.RemoveRange(int, int) (Requires.Range calls),
+        // which throws ArgumentOutOfRangeException for every violation here -- not
+        // ArgumentException for the bounds check, as this previously did.
+        if (index < 0 || index > static_cast<intcs>(data_->size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than or equal to the size of the collection.");
+        if (count < 0 || index > static_cast<intcs>(data_->size()) - count)
+            throw System::ArgumentOutOfRangeException("count", "Count must refer to a location within the collection.");
     }
 
 public:
