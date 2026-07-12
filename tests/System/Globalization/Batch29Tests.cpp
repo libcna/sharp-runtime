@@ -223,3 +223,12 @@ TEST(HebrewCalendarBatch29Test, ToDateTime_InvalidDay_Throws) {
     HebrewCalendar hc;
     EXPECT_THROW(hc.ToDateTime(5784, 10, 40, 0, 0, 0, 0), System::ArgumentOutOfRangeException);
 }
+
+TEST(HebrewCalendarBatch29Test, ToDateTime_InvalidEra_Throws) {
+    // The era parameter was previously discarded entirely -- GetDaysInMonth was called with
+    // its *default* era argument instead of the caller's actual era, so an invalid era
+    // silently passed validation instead of throwing like real .NET's ToDateTime does
+    // (CheckHebrewYearValue -> CheckEraRange).
+    HebrewCalendar hc;
+    EXPECT_THROW(hc.ToDateTime(5784, 10, 1, 0, 0, 0, 0, 99), System::ArgumentOutOfRangeException);
+}

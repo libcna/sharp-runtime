@@ -388,8 +388,15 @@ System::DateTime HebrewCalendar::AddYears(const System::DateTime& time, int year
 }
 
 System::DateTime HebrewCalendar::ToDateTime(int year, int month, int day, int hour, int minute,
-                                            int second, int millisecond, int /*era*/) const {
-    int daysInMonth = GetDaysInMonth(year, month);
+                                            int second, int millisecond, int era) const {
+    // Real .NET validates era (via CheckHebrewYearValue -> CheckEraRange) before anything
+    // else in ToDateTime. The previous version of this method discarded `era` entirely and
+    // called GetDaysInMonth(year, month) with GetDaysInMonth's *default* era argument
+    // (CurrentEra), so an invalid era passed by the caller was silently never checked.
+    // Passing era through here restores that validation (GetDaysInMonth -> getHebrewYearType
+    // already throws ArgumentOutOfRangeException("era") for anything other than
+    // CurrentEra/HebrewEra).
+    int daysInMonth = GetDaysInMonth(year, month, era);
     if (day < 1 || day > daysInMonth) throw System::ArgumentOutOfRangeException("day");
     return hebrewToGregorian(year, month, day, hour, minute, second, millisecond);
 }
