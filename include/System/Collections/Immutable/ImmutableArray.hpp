@@ -195,8 +195,12 @@ public:
      * @return A new ImmutableArray with the replacement applied.
      */
     [[nodiscard]] ImmutableArray<T> SetItem(intcs index, const T& item) const {
+        // Real .NET's SetItem validates via Requires.Range(index >= 0 && index < Length,
+        // nameof(index)), which throws ArgumentOutOfRangeException -- unlike the raw indexer
+        // (operator[] below), which is a thin wrapper over array access and so throws
+        // IndexOutOfRangeException instead.
         if (index < 0 || index >= getLengthProperty())
-            throw System::IndexOutOfRangeException();
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         (*v)[static_cast<size_t>(index)] = item;
         return ImmutableArray<T>(std::move(v));
@@ -244,8 +248,10 @@ public:
      * @return A new ImmutableArray with the element removed.
      */
     [[nodiscard]] ImmutableArray<T> RemoveAt(intcs index) const {
+        // Real .NET's RemoveAt(index) delegates to RemoveRange(index, 1), whose
+        // Requires.Range checks throw ArgumentOutOfRangeException, not IndexOutOfRangeException.
         if (index < 0 || index >= getLengthProperty())
-            throw System::IndexOutOfRangeException();
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index);
         return ImmutableArray<T>(std::move(v));
