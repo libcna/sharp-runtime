@@ -181,6 +181,60 @@ TEST(ClientWebSocketTests, FullHandshakeSendReceiveClose) {
     serverThread.join();
 }
 
+// Regression test (ticket 264): readFrame() used to read the 64-bit extended payload length
+// straight off the wire with no upper bound, so a malicious/misbehaving server sending a huge
+// length would make readExact()'s buffer.resize(n) attempt a correspondingly huge allocation --
+// throwing a raw std::length_error/std::bad_alloc (invisible to code catching
+// System::Exception&) instead of a clean WebSocketException. The server here sends a frame
+// header claiming a length near UINT64_MAX and never sends any payload bytes at all; the client
+// must reject based on the length alone, before attempting to read (or allocate for) a payload.
+TEST(ClientWebSocketTests, ReceiveAsync_HugeFrameLength_ThrowsWebSocketException) {
+    Socket listener(System::Net::Sockets::AddressFamily::InterNetwork, System::Net::Sockets::SocketType::Stream,
+                     System::Net::Sockets::ProtocolType::Tcp);
+    listener.Bind(IPEndPoint(IPAddress::Loopback, 0));
+    listener.Listen();
+    auto local = std::dynamic_pointer_cast<IPEndPoint>(listener.getLocalEndPointProperty());
+    ASSERT_NE(local, nullptr);
+    SharpRuntime::intcs port = local->getPortProperty();
+
+    std::thread serverThread([&]() {
+        auto serverSocket = listener.Accept();
+
+        std::string request = readUntilHeadersEnd(*serverSocket);
+        size_t keyPos = request.find("Sec-WebSocket-Key: ");
+        ASSERT_NE(keyPos, std::string::npos);
+        size_t keyStart = keyPos + std::string("Sec-WebSocket-Key: ").size();
+        size_t keyEnd = request.find("\r\n", keyStart);
+        std::string key = request.substr(keyStart, keyEnd - keyStart);
+
+        auto digest = testSha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+        std::string accept = System::Convert::ToBase64String(std::vector<SharpRuntime::bytecs>(digest.begin(), digest.end()));
+        std::string response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                "Sec-WebSocket-Accept: " +
+                                accept + "\r\n\r\n";
+        serverSocket->Send(toBytes(response));
+
+        std::vector<SharpRuntime::bytecs> frame;
+        frame.push_back(0x82); // fin=1, opcode=0x2 (binary)
+        frame.push_back(0xFF); // unmasked (server frames aren't masked), length marker = 127 (64-bit extended)
+        uint64_t hugeLen = 0xFFFFFFFFFFFFFFFFULL;
+        for (int i = 7; i >= 0; --i) frame.push_back(static_cast<SharpRuntime::bytecs>((hugeLen >> (i * 8)) & 0xFF));
+        serverSocket->Send(frame);
+
+        serverSocket->Close();
+    });
+
+    ClientWebSocket client;
+    System::Uri uri("ws://127.0.0.1:" + std::to_string(port) + "/");
+    client.ConnectAsync(uri).Wait();
+    EXPECT_EQ(client.getStateProperty(), WebSocketState::Open);
+
+    std::vector<SharpRuntime::bytecs> recvBuf(64);
+    EXPECT_THROW(client.ReceiveAsync(recvBuf).getResultProperty(), WebSocketException);
+
+    serverThread.join();
+}
+
 // Regression test for a wave-3 audit finding: SendAsync/ReceiveAsync used to do
 // buffer.data() + offset with no bounds check against buffer.size() -- an out-of-bounds
 // read (Send) or write (Receive) whenever offset+count exceeded the buffer. Verified
