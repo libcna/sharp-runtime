@@ -20,10 +20,23 @@ namespace System {
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 namespace {
+// Guards every read (localtime_r/tm_gmtoff/tm_zone) or write (setenv("TZ", ...)) of the
+// process-global TZ state. FindSystemTimeZoneById() temporarily overwrites the TZ
+// environment variable to query a different zone; without serializing every reader against
+// that window too, a concurrent Local() call on another thread could transiently observe
+// the wrong zone's offset/name -- a real, reachable bug for any multi-threaded caller, not
+// just a race between two FindSystemTimeZoneById() calls (which alone would already need
+// this). A function-local static avoids static-initialization-order concerns between
+// translation units and works regardless of declaration order within this file.
+std::mutex& tzMutex() {
+    static std::mutex m;
+    return m;
+}
+
 // Detects whether the zone currently active via TZ/localtime_r observes DST at
 // all during the year, rather than just whether DST happens to be active right
 // now (SupportsDaylightSavingTime asks "does this zone have DST rules", not
-// "is DST active this instant").
+// "is DST active this instant"). Callers must already hold tzMutex().
 bool posixZoneObservesDst() {
     time_t now = time(nullptr);
     struct tm nowUtc{};
@@ -63,6 +76,7 @@ const TimeZoneInfo& TimeZoneInfo::Local() {
 #elif defined(__EMSCRIPTEN__)
         return TimeZoneInfo::Utc();
 #else
+        std::lock_guard<std::mutex> lock(tzMutex());
         time_t t = time(nullptr);
         struct tm local_tm {};
         localtime_r(&t, &local_tm);
@@ -87,7 +101,6 @@ static bool zoneFileExists(const std::string& id) {
     struct stat st {};
     return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
-static std::mutex s_tzMutex;
 #endif
 
 // ---------------------------------------------------------------------------
@@ -246,7 +259,7 @@ std::shared_ptr<TimeZoneInfo> TimeZoneInfo::FindSystemTimeZoneById(const std::st
     bool   hasDst      = false;
     std::string abbrev = id;
     {
-        std::lock_guard<std::mutex> lock(s_tzMutex);
+        std::lock_guard<std::mutex> lock(tzMutex());
         const char* saved = getenv("TZ");
         std::string savedStr = saved ? saved : "";
         setenv("TZ", id.c_str(), 1);
