@@ -1,10 +1,50 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `33bd573`) — 11710 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `2bdd68d`) — 11713 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11710 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11713 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 288-290 closed, one severe finding
+
+Continuing the same autonomous run (previous checkpoint covered 286-287). Commits: ba27d3d,
+2bdd68d — pushed to `origin/feature/work`.
+
+- **288 (UnicodeRanges.hpp)**: clean audit via scripted diff (160 block entries + All/None
+  specials, 0 mismatches) — same approach as ticket 284's TlsCipherSuite, the right call for a
+  pure data file.
+- **289 (BitArray.hpp) — the most severe bug found this entire session.** `BitArray(intcs
+  length, bool defaultValue)` had no `ArgumentOutOfRangeException.ThrowIfNegative` check (real
+  .NET has one). This isn't just "wrong exception type" — confirmed via a standalone ASan repro
+  that `BitArray(-1)` is a **genuine, trivially-triggerable heap-buffer-overflow**:
+  `std::vector<bool>`'s internal bit-to-word-count calculation overflows for a
+  `size_t(-1)`-scale request, silently under-allocating while `size()` still reports
+  `SIZE_MAX`. The very first element write (`bits[0] = true`) corrupts adjacent heap memory —
+  confirmed via ASan's "heap-buffer-overflow... WRITE of size 1". Notably, this exact file
+  already had a dedicated prior fix round for "raw std:: exceptions" (ffb887f) that evidently
+  didn't test the constructor specifically. Fixed with the missing bounds check.
+- **290 (XxHash3Shared.cpp)**: no bug found, but a valuable process step — rather than manually
+  reading 336 lines of dense streaming-buffer state-machine code (buffer completion, per-block
+  consumption, multi-block loops, tail-stripe buffering), added randomized differential tests
+  (streaming vs. one-shot digest, 30 lengths spanning every structural boundary × 5 random
+  chunk-split trials × seeded/unseeded × XxHash3/XxHash128 = 600 assertions, all passing). This
+  is a template worth reusing: for any algorithm-critical file where "does the output match a
+  reference" is checkable but the *code* is bit-twiddling-dense, a targeted randomized
+  differential/property test finds real bugs (or gives strong assurance of correctness) far
+  faster and more reliably than manual line tracing.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. 23 tickets closed this autonomous run so far (268-290, minus 279 which needed no code
+changes). Zero regressions at any point; full suite run after every single change. Given the
+severity of ticket 289's finding, if auditing any other class with a `ClassName(intcs length,
+...)`-shaped constructor that hands `length` to a container without an upfront non-negative
+check, treat it as a priority check — grepped once already
+(`explicit.*(intcs.*length`/`explicit.*(SharpRuntime::intcs.*length`) and found no other exact
+matches, but that grep was narrow (exact parameter name/explicit-keyword match) and worth
+re-running with a broader pattern if time allows.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 286-287 closed
 
