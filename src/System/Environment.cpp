@@ -135,9 +135,15 @@ std::string Environment::getMachineNameProperty() {
     if (GetComputerNameA(buf, &size)) return std::string(buf);
     return "";
 #else
+    // Real .NET's Unix MachineName truncates at the first '.' to strip the domain suffix
+    // (Environment.Unix.cs: `int dotPos = hostName.IndexOf('.'); return dotPos < 0 ? hostName :
+    // hostName.Substring(0, dotPos);`) -- gethostname() alone can return a fully-qualified name
+    // like "myhost.example.com" on systems where that's how the hostname is configured.
     char buf[HOST_NAME_MAX + 1];
-    if (gethostname(buf, sizeof(buf)) == 0) return std::string(buf);
-    return "";
+    if (gethostname(buf, sizeof(buf)) != 0) return "";
+    std::string hostName(buf);
+    auto dotPos = hostName.find('.');
+    return dotPos == std::string::npos ? hostName : hostName.substr(0, dotPos);
 #endif
 }
 

@@ -5,6 +5,9 @@
 #include <gtest/gtest.h>
 #include "System/Environment.hpp"
 #include "System/Version.hpp"
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using System::Environment;
 using SharpRuntime::longcs;
@@ -81,6 +84,22 @@ TEST(EnvironmentTests, MachineName_NotEmpty) {
     std::string name = Environment::getMachineNameProperty();
     EXPECT_FALSE(name.empty());
 }
+
+#ifndef _WIN32
+TEST(EnvironmentTests, MachineName_StripsDomainSuffix) {
+    // Real .NET's Unix MachineName truncates at the first '.' to strip the domain suffix
+    // (Environment.Unix.cs: hostName.Substring(0, hostName.IndexOf('.'))). Verify the
+    // property's return value is never longer than the portion of the raw hostname before
+    // its first '.', regardless of whether this particular host's name happens to be
+    // fully-qualified.
+    char raw[256]{};
+    ASSERT_EQ(gethostname(raw, sizeof(raw)), 0);
+    std::string rawHost(raw);
+    auto dotPos = rawHost.find('.');
+    std::string expected = dotPos == std::string::npos ? rawHost : rawHost.substr(0, dotPos);
+    EXPECT_EQ(Environment::getMachineNameProperty(), expected);
+}
+#endif
 
 TEST(EnvironmentTests, UserName_NotEmpty) {
     std::string name = Environment::getUserNameProperty();
