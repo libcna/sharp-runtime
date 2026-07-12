@@ -290,7 +290,20 @@ public:
      * @return true if both sets are equal; otherwise false.
      */
     [[nodiscard]] bool SetEquals(const ImmutableSortedSet<T>& other) const {
-        return *data_ == *other.data_;
+        // Matches ImmutableSortedSet_1.cs's SetEquals: when the two sets don't share a
+        // comparer, `other`'s elements are rehashed under *this* set's comparer
+        // (`new SortedSet<T>(other, this.KeyComparer)`) before comparing -- the same pattern
+        // already applied to IsSubsetOf/Intersect/Except in this file, just missed here. A
+        // direct std::set::operator== compares elements position-wise after each set's own
+        // internal ordering, which gives a wrong (false-negative) result when the two sets use
+        // different comparers even though they contain the identical elements -- confirmed via
+        // a standalone repro before this fix (ascending {1,2,3} vs. descending {1,2,3} compared
+        // unequal). Comparing sizes AFTER rehashing (not before) also correctly catches the
+        // rarer case where a different equivalence notion collapses distinct elements together.
+        auto otherRehashed = makeEmpty(data_->key_comp());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        if (otherRehashed->size() != data_->size()) return false;
+        return *data_ == *otherRehashed;
     }
 
     /**

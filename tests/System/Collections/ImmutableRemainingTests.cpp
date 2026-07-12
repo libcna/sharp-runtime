@@ -542,6 +542,26 @@ TEST(ImmutableSortedSetTests, Intersect_UsesThisSetsComparer) {
     EXPECT_EQ(items[1], 2);
 }
 
+// Regression test for ticket 315: SetEquals previously compared the two backing std::sets
+// directly via operator==, which is a position-wise comparison after each set's OWN internal
+// ordering -- giving a wrong (false-negative) result when the two sets use different comparers
+// even though they contain the identical elements. Verified against ImmutableSortedSet_1.cs's
+// SetEquals: when comparers differ, `other` is rehashed under *this* set's comparer
+// (`new SortedSet<T>(other, this.KeyComparer)`) before comparing -- the same
+// rehash-under-this-set's-comparer pattern IsSubsetOf/Intersect/Except already use, just missed
+// for SetEquals in the same custom-comparer support pass.
+TEST(ImmutableSortedSetTests, SetEquals_SameElementsDifferentComparer_ReturnsTrue) {
+    auto ascending = ImmutableSortedSet<int>::Create({1, 2, 3});
+    auto descending = ImmutableSortedSet<int>::Create([](const int& a, const int& b) { return a > b; }, {1, 2, 3});
+    EXPECT_TRUE(ascending.SetEquals(descending));
+    EXPECT_TRUE(descending.SetEquals(ascending));
+}
+TEST(ImmutableSortedSetTests, SetEquals_DifferentElements_ReturnsFalse) {
+    auto a = ImmutableSortedSet<int>::Create({1, 2, 3});
+    auto b = ImmutableSortedSet<int>::Create([](const int& x, const int& y) { return x > y; }, {1, 2, 4});
+    EXPECT_FALSE(a.SetEquals(b));
+}
+
 TEST(ImmutableHashSetTests, IsSubsetOf_UsesThisSetsComparer) {
     // Verified against ImmutableHashSet_1.cs's private IsSubsetOf: `other` is rehashed
     // under *this* set's comparer before the subset check, so "Hello" (in `sub`, case-
@@ -557,6 +577,25 @@ TEST(ImmutableHashSetTests, IsSupersetOf_UsesThisSetsComparer) {
                                                        {"Hello", "World"});
     auto sub = ImmutableHashSet<std::string>::Create({"HELLO"});
     EXPECT_TRUE(sup.IsSupersetOf(sub));
+}
+
+// Regression test for ticket 315 (found while fixing the sibling ImmutableSortedSet::SetEquals
+// bug -- same class of "missed in the custom-comparer support pass" fix, confirmed by grepping
+// this file too): SetEquals previously compared raw sizes and tested membership via `other`'s
+// own comparer instead of rehashing `other` under *this* set's comparer first (the same pattern
+// IsSubsetOf/IsSupersetOf above already use). A case-insensitive {"Hello"} vs. a case-sensitive
+// {"HELLO","hello"} -- which collapses to the identical single logical element once rehashed
+// case-insensitively -- previously compared unequal (wrong: real .NET's SetEquals rehashes
+// `other` under this's comparer, so they ARE equal).
+TEST(ImmutableHashSetTests, SetEquals_UsesThisSetsComparer) {
+    auto ciSet = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {"Hello"});
+    auto csSet = ImmutableHashSet<std::string>::Create({"HELLO", "hello"});
+    EXPECT_TRUE(ciSet.SetEquals(csSet));
+}
+TEST(ImmutableHashSetTests, SetEquals_DifferentElements_ReturnsFalse) {
+    auto a = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {"Hello"});
+    auto b = ImmutableHashSet<std::string>::Create({"World"});
+    EXPECT_FALSE(a.SetEquals(b));
 }
 
 TEST(ImmutableSortedSetTests, Clear_PreservesCustomComparer) {

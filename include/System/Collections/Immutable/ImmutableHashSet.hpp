@@ -266,8 +266,20 @@ public:
      * @return true if both sets are equal; otherwise false.
      */
     [[nodiscard]] bool SetEquals(const ImmutableHashSet<T>& other) const {
-        if (data_->size() != other.data_->size()) return false;
-        for (const auto& x : *data_) if (!other.Contains(x)) return false;
+        // Matches ImmutableHashSet_1.cs's SetEquals: when the two sets don't share a
+        // comparer, `other`'s elements are rehashed under *this* set's comparer
+        // (`new HashSet<T>(other, origin.EqualityComparer)`) before comparing -- the same
+        // pattern IsSubsetOf/IsSupersetOf in this file already use, just missed here. The
+        // previous version compared raw sizes and tested membership via `other`'s own
+        // comparer, which gives a wrong result when the two sets' equality notions differ --
+        // confirmed via a standalone repro before this fix (a case-insensitive {"Hello"} vs.
+        // a case-sensitive {"HELLO","hello"}, which collapses to the identical single logical
+        // element once rehashed case-insensitively, compared unequal). Comparing sizes AFTER
+        // rehashing (not before) correctly handles this collapsing case.
+        auto otherRehashed = makeEmpty(data_->hash_function(), data_->key_eq());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        if (otherRehashed->size() != data_->size()) return false;
+        for (const auto& x : *data_) if (!otherRehashed->count(x)) return false;
         return true;
     }
 
