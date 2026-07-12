@@ -1,10 +1,117 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `4a94db3`) — 11566 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `a5eace0`) — 11608 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11566 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11608 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run in progress) — 6 tickets closed (254/1486/255/256/258/257), 6 real bugs found and fixed, 4 commits
+
+**Trigger:** user authorized a long unattended autonomous session over the P2/P3 ticket queue
+(see "Autonomous Work Instructions" — full detail in this session's transcript, not
+reproduced here). Pre-authorized scope: ticket #43 (global `int`→`intcs` policy) stays
+**blocked**, not reopened, per explicit user choice at session start — do not resurface it as a
+default next action. Standard workflow from `prompt.md` followed throughout: one ticket at a
+time in priority order, verify every claim against `/rv/tmp/runtime/src/libraries/`, fix real
+bugs (not paper over them), add regression tests, build+test clean, update `plan.sqlite3`,
+commit+push to `feature/work`, move on without stopping.
+
+**This entry will be updated/prepended again as the autonomous run continues** — treat the
+"To resume" section below as authoritative for where to continue, not the specific commit
+hash above (re-run `git log`/the test suite to get current state after any reset).
+
+### Fixed this batch (6 real bugs, 4 commits `4a94db3`..`a5eace0`)
+
+- **`ticket 254`, `include/System/Environment.hpp`/`.cpp`**: `ExpandEnvironmentVariables` used a
+  from-scratch `%VAR%` scanner that diverges from real
+  `Environment.ExpandEnvironmentVariablesCore` (`Environment.UnixOrBrowser.cs`) — when a
+  `%name%` token fails to resolve, real .NET only consumes the opening `%` as literal text and
+  lets the closing `%` double as the next token's opener (verified by hand-tracing the
+  reference algorithm: `"%UNDEFINED%HOME%"` with `HOME` set produces
+  `"%UNDEFINEDworld"`, not `"%UNDEFINED%HOME%"` unexpanded). Rewrote to match exactly, plus
+  guarded `getenv("")` (POSIX-unspecified) for the `"%%"` case, and the public
+  `GetEnvironmentVariable("")` entry point the same way. Also `GetEnvironmentVariables()`'s
+  POSIX branch was missing the `eq > 0` guard the Windows branch in the same function already
+  had (asymmetric within one function) — extracted a shared `splitEnvEntry()` helper.
+  Bonus fix (same file touched): **ticket 1486** — `EnvironmentTests.cpp`'s
+  `TickCount64_Advances` busy-loop signed-int-overflowed under UBSan; widened to `long long`.
+  Commit `d3c6527`.
+- **`ticket 255`, `include/System/Collections/ArrayList.hpp`**: ~13 methods (`Insert`/
+  `InsertRange`, `RemoveRange`, `IndexOf`/`LastIndexOf`'s `startIndex`/`count` overloads,
+  `Reverse(index,count)`, `SetRange`, `GetRange`, `Sort(index,count,...)`,
+  `BinarySearch(index,count,...)`, `Repeat`, plus the `ArrayList(int capacity)` constructor and
+  `Capacity` setter) did **zero** argument validation — an out-of-range `index`/`count` hit
+  `std::vector` iterator arithmetic directly (real UB, not just a wrong-answer bug). Added
+  validation matching `ArrayList.cs` exactly per method, including `LastIndexOf`'s empty-list
+  special case and `Insert`'s `index == count`-is-legal-at-the-end case. Extracted
+  `requireValidRange`/`requireInsertIndexInRange` helpers matching the existing `List<T>`
+  pattern. `CopyTo(void*, int)` structurally cannot validate (raw pointer carries no length) —
+  documented as a known whole-codebase `IList`/`ICollection` interface limitation, not fixed
+  (would need a broader interface redesign). Commit `dce1af8`.
+- **`ticket 256`/`258`, `include/System/TimeSpan.hpp` + `src/System/TimeSpan.cpp`** (one file,
+  both tickets): the 6-arg `TimeToTicks` (used by the `(days,hours,minutes,seconds,
+  milliseconds,microseconds)` constructor) had genuine signed-integer-overflow UB for extreme
+  component values like `days == INT32_MAX` — **confirmed via a standalone UBSan repro** before
+  fixing (habit reconfirmed as worthwhile this session, again). The 3-arg
+  `TimeToTicks(hour,minute,second)` sibling is fine — .NET's own source comment proves its
+  smaller (seconds, not microseconds) scale factor can't overflow int64. Fixed by computing in
+  `uint64_t` (defined wraparound) and converting back via `static_cast`, which is well-defined
+  2's-complement wraparound as of C++20 (project requires C++23) — reproduces .NET's own
+  unchecked-`long`-wraparound-then-range-check semantics exactly, without the UB. Separately,
+  `TryParse` used `sscanf()`, which only checks for a matching *prefix* — `"12:34:56garbage"`
+  silently parsed as `12:34:56` instead of being rejected like real `TimeSpan.Parse`
+  (`FormatException`); added an explicit end-of-string check. Noted, not implemented: real
+  .NET has newer (.NET 7/8) `FromDays(int)`/`FromHours(int)`/`FromMinutes(long)`/
+  `FromSeconds(long)` integer overloads (plus multi-component friends) using `Int128`/
+  `Math.BigMul` — a real API-surface gap, but a separate scope decision, not a bug. Commit
+  `93172be`.
+- **`ticket 257`, `include/System/Math.hpp` + `src/System/Math.cpp`**: `Math::Min`/`Max(double,
+  double)` and `(float,float)` delegated to `std::min`/`std::max`, which do **not** match
+  .NET's actual IEEE 754:2019 `minimum`/`maximum` semantics — confirmed
+  `std::min(5.0, NaN) == 5.0` (not NaN; asymmetric, NaN only propagates as the *first* arg) and
+  `std::min(+0.0, -0.0) == +0.0` (should be `-0.0`, .NET treats +0 as greater than -0). Rewrote
+  both to the exact .NET algorithm — the neighboring `MaxMagnitude`/`MinMagnitude` in the same
+  file already had it right, which is how the inconsistency was spotted. Also `Math::DivRem`
+  (all 4 overloads: out-param/pair-returning × int/long) never checked for a zero divisor —
+  real .NET's CLR `div`/`rem` instructions throw a catchable `DivideByZeroException`
+  automatically; plain C++ integer division by zero is UB (crash/trap). Added an explicit
+  `b == 0` check. **Noted, deliberately not fixed further**: the same
+  int-division-by-zero-is-UB gap is structurally pervasive across the *whole* codebase wherever
+  raw `intcs`/`longcs` division is used (`intcs` is a plain `int32_t` alias, not a
+  checked-arithmetic wrapper class) — fixing `Math::DivRem` specifically is justified since
+  dividing is its entire purpose and it's small/self-contained, but a codebase-wide fix needs a
+  separate architecture decision, not a per-file audit fix. Commit `a5eace0`.
+
+Test count: 11566 → 11608 across this batch (42 new regression tests). All commits pushed to
+`origin/feature/work`. Zero test failures at every checkpoint; build clean (0 errors/0
+warnings) verified after every fix, not just at the end.
+
+### Process notes
+
+- Every fix in this batch was found by actually reading the target file end-to-end against the
+  real `.NET` reference source, not by pattern-matching or assumption — several (TimeSpan's
+  overflow, Math's Min/Max) were only caught by tracing through the reference algorithm by hand
+  or writing a standalone compiled repro, not by inspection alone. Continuing the pattern from
+  prior sessions: this is worth the extra time.
+- Two tickets (256, 258) were the same file's header and `.cpp` split into separate ticket
+  rows — completed together in one pass since auditing one half without the other would have
+  been redundant re-reading. Closed both with one commit; noted explicitly in each ticket's
+  `notes` that it was resolved alongside its sibling.
+
+### To resume
+
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+Next up is **ticket 259** (`include/System/Buffers/Binary/BinaryPrimitives.hpp`). 597 P2 + 6 P3
+tickets remain `todo` as of this checkpoint (out of 1486 total: 783 `done`, 100 `blocked` on
+ticket #43 — left alone per user decision, not a default next action). Continue the same
+per-ticket workflow: read target file fully, verify every non-trivial claim against
+`/rv/tmp/runtime/src/libraries/`, fix real bugs with regression tests, build+test clean,
+update `plan.sqlite3`, commit+push, move to the next ticket without stopping unless a
+genuinely `blocked`/`needs_user` case comes up (mark it precisely and continue with something
+else — never let one blocked ticket stall the whole session).
 
 ## Session checkpoint (2026-07-12) — resolved the one `needs_user` ticket: real UTF8Encoding validation
 
