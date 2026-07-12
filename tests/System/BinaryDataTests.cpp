@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/BinaryData.hpp"
 #include "System/IO/MemoryStream.hpp"
 
@@ -54,6 +55,25 @@ TEST(BinaryDataTests, FromStream_ReadsAllBytes) {
     EXPECT_EQ(bd.getLengthProperty(), 4);
     EXPECT_EQ(bd[0], 10);
     EXPECT_EQ(bd[3], 40);
+}
+
+TEST(BinaryDataTests, Indexer_NegativeIndex_Throws) {
+    // Unchecked `bytes_[static_cast<size_t>(index)]` for a negative index wraps to a huge
+    // unsigned value -- a real out-of-bounds read (confirmed via ASan heap-buffer-overflow),
+    // not a caught exception, prior to this bounds check being added.
+    auto bd = BinaryData::FromString("abc");
+    EXPECT_THROW(bd[-1], System::ArgumentOutOfRangeException);
+}
+
+TEST(BinaryDataTests, Indexer_IndexEqualsLength_Throws) {
+    auto bd = BinaryData::FromString("abc");
+    EXPECT_THROW(bd[3], System::ArgumentOutOfRangeException);
+}
+
+TEST(BinaryDataTests, Indexer_ValidIndex_ReturnsExpectedByte) {
+    auto bd = BinaryData::FromString("abc");
+    EXPECT_EQ(bd[0], static_cast<uint8_t>('a'));
+    EXPECT_EQ(bd[2], static_cast<uint8_t>('c'));
 }
 
 TEST(BinaryDataTests, FromStream_WithMediaType) {

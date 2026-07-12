@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/IO/Stream.hpp"
 #include "System/IO/MemoryStream.hpp"
@@ -313,10 +314,20 @@ namespace System {
 
         /**
          * @brief Provides direct access to the underlying bytes.
+         *
+         * Not present on real .NET's BinaryData (which has no indexer) -- a C++-side
+         * convenience addition. Bounds-checked to match this project's other array-like
+         * accessors (e.g. Span<T>::operator[], mirroring real .NET's own Span<T>.this[int]):
+         * a negative index cast to std::size_t wraps to a huge value, so an unchecked
+         * `bytes_[index]` is a real out-of-bounds read (confirmed via ASan heap-buffer-overflow)
+         * rather than a caught exception.
          * @param index Zero-based byte index.
          * @return The byte at the specified index.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or ≥ Length.
          */
         [[nodiscard]] uint8_t operator[](int index) const {
+            if (static_cast<SharpRuntime::uintcs>(index) >= static_cast<SharpRuntime::uintcs>(bytes_.size()))
+                throw System::ArgumentOutOfRangeException("index");
             return bytes_[static_cast<std::size_t>(index)];
         }
 
