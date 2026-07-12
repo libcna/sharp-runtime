@@ -32,7 +32,15 @@ namespace System::Threading::Tasks {
             std::exception_ptr exception;
         };
 
-        std::shared_ptr<std::future<void>> future_;
+        // shared_future, not future: a Task's shared_ptr-based state is designed to be copied
+        // and handed to multiple consumers (matching real .NET's Task, which supports being
+        // awaited/Wait()'d from more than one caller) -- but std::future::get() is explicitly
+        // documented as unsafe for concurrent calls on the same future instance. Confirmed via
+        // a standalone ThreadSanitizer repro before this fix: two threads calling Wait() on
+        // copies of the same Task (sharing the same underlying future_ via shared_ptr) raced
+        // inside std::future<void>::get()'s internal state teardown. shared_future::get() is
+        // documented safe for concurrent calls (it doesn't consume/invalidate shared state).
+        std::shared_ptr<std::shared_future<void>> future_;
         std::shared_ptr<State>             state_;
         System::Threading::CancellationToken cancellationToken_ = System::Threading::CancellationToken::None();
 
@@ -52,7 +60,7 @@ namespace System::Threading::Tasks {
 #else
             state_ = std::make_shared<State>();
             auto s = state_;
-            future_ = std::make_shared<std::future<void>>(
+            future_ = std::make_shared<std::shared_future<void>>(
                 std::async(std::launch::async, [action, s]() {
                     try {
                         action();
@@ -62,7 +70,7 @@ namespace System::Threading::Tasks {
                         s->isFaulted   = true;
                         s->isCompleted = true;
                     }
-                })
+                }).share()
             );
 #endif
         }
@@ -90,7 +98,7 @@ namespace System::Threading::Tasks {
                 return;
             }
             auto s = state_;
-            future_ = std::make_shared<std::future<void>>(
+            future_ = std::make_shared<std::shared_future<void>>(
                 std::async(std::launch::async, [action, s, token]() {
                     try {
                         action();
@@ -108,7 +116,7 @@ namespace System::Threading::Tasks {
                         s->isFaulted   = true;
                         s->isCompleted = true;
                     }
-                })
+                }).share()
             );
 #endif
         }
@@ -227,7 +235,9 @@ namespace System::Threading::Tasks {
             TResult result{};
         };
 
-        std::shared_ptr<std::future<TResult>> future_;
+        // shared_future, not future -- see Task::future_'s comment above for why (safe for
+        // concurrent Wait()/getResultProperty() calls from multiple threads on the same TaskT).
+        std::shared_ptr<std::shared_future<TResult>> future_;
         std::shared_ptr<State>                state_;
 
         // Pre-completed constructor — used by FromResult; never launches async.
@@ -249,7 +259,7 @@ namespace System::Threading::Tasks {
 #else
             state_ = std::make_shared<State>();
             auto s = state_;
-            future_ = std::make_shared<std::future<TResult>>(
+            future_ = std::make_shared<std::shared_future<TResult>>(
                 std::async(std::launch::async, [func, s]() -> TResult {
                     try {
                         TResult r  = func();
@@ -262,7 +272,7 @@ namespace System::Threading::Tasks {
                         s->isCompleted = true;
                         return TResult{};
                     }
-                })
+                }).share()
             );
 #endif
         }
@@ -274,9 +284,15 @@ namespace System::Threading::Tasks {
 
         /** Blocks until the task finishes and returns the result; re-throws any stored exception. */
         TResult getResultProperty() {
-            if (future_ && future_->valid()) state_->result = future_->get();
+            // Read into a local instead of writing back through state_->result: with future_
+            // now a shared_future, multiple threads may call getResultProperty() concurrently
+            // (that's the whole point of the shared_future switch), and state_->result is a
+            // plain, non-atomic member -- writing to it from every caller would just move the
+            // data race here instead of fixing it. shared_future::get() itself is safe to call
+            // repeatedly/concurrently and already returns the completed value.
+            TResult r = (future_ && future_->valid()) ? future_->get() : state_->result;
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
-            return state_->result;
+            return r;
         }
 
         /** Waits for the task and returns its result; equivalent to getResultProperty(). */
