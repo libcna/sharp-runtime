@@ -1,10 +1,44 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6faf269`) — 11787 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `abbbc21`) — 11787 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11787 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 320 closed, third threading bug this session
+
+Continuing the same autonomous run (previous checkpoint covered 318-319). Commit: abbbc21 —
+pushed to `origin/feature/work`.
+
+- **320 (Lazy.hpp)**: given it's a threading primitive, went straight for a TSan pass rather
+  than starting with logic review (matching the habit established in 308/313). Verified
+  `ExecutionAndPublication`'s `std::call_once`-based core logic is correct (the lambda always
+  completes without letting an exception escape, so the once_flag reaches "done" exactly once
+  and correctly synchronizes `value_`/`cachedException_` visibility) — that part was already
+  solid. But `isValueCreated_` was a plain `bool`: `getValueProperty()` writes it inside
+  `call_once`/under a mutex (both internally synchronized), while `getIsValueCreatedProperty()`
+  read it with **no synchronization at all** — a thread polling `IsValueCreated` while another
+  computes the value races on this field. This matters specifically because
+  `ExecutionAndPublication`/`PublicationOnly` are meant to support exactly this
+  one-computes-others-observe pattern (matching real .NET's `Lazy<T>.IsValueCreated`, which
+  internally uses `Volatile.Read`/interlocked ops for this exact cross-thread visibility
+  guarantee). Confirmed via TSan repro before/after. Fixed by promoting `isValueCreated_` to
+  `std::atomic<bool>` — a minimal, drop-in change.
+
+50 tickets closed this autonomous run so far (268-320, minus 279 and 306). **Three threading
+bugs found this session (308 TimeZoneInfo, 313 Task, 320 Lazy), all via the same TSan-repro
+discipline, all in the same shape**: an innocuous-looking read of shared state with no
+synchronization, sitting right next to correctly-synchronized code that made the file *look*
+thread-safe overall. Worth stating plainly as a standing rule for the rest of this queue: **for
+any file under `System::Threading`, or any file with `mutable`/`static` state touched by a
+`const` method that could plausibly be called from multiple threads, do a TSan pass before
+declaring the file clean** — three-for-three so far on files that got one.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 318-319 closed, two more real bugs (ticket 317 was already done, not skipped)
 
