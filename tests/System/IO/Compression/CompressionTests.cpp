@@ -440,6 +440,26 @@ TEST(ZipArchiveTests, CreateAndReadBack_RoundTrip) {
     EXPECT_EQ(out[2], '!');
 }
 
+// Regression test for ticket 309: the write-mode entry stream's Write(data, offset, count)
+// used `offset` completely unchecked in `data + offset`, computing a pointer before the start
+// of the caller's buffer for a negative offset -- confirmed via a standalone ASan repro as a
+// genuine stack-buffer-overflow read before this fix, not just a wrong-exception-type issue.
+TEST(ZipArchiveTests, EntryWriteStream_NegativeOffset_Throws) {
+    ZipArchive z("/tmp/sharpruntimetest_negoffset.zip", ZipArchiveMode::Create);
+    auto entry = z.CreateEntry("x.txt");
+    std::unique_ptr<System::IO::Stream> s(entry.Open());
+    const uint8_t data[] = {'a', 'b', 'c'};
+    EXPECT_THROW(s->Write(data, -1, 3), System::ArgumentOutOfRangeException);
+}
+
+TEST(ZipArchiveTests, EntryWriteStream_ZeroCount_IsNoOp) {
+    ZipArchive z("/tmp/sharpruntimetest_zerocount.zip", ZipArchiveMode::Create);
+    auto entry = z.CreateEntry("x.txt");
+    std::unique_ptr<System::IO::Stream> s(entry.Open());
+    const uint8_t data[] = {'a', 'b', 'c'};
+    EXPECT_NO_THROW(s->Write(data, 0, 0));
+}
+
 TEST(ZipArchiveTests, CreateMultipleEntries) {
     const char* tmpPath = "/tmp/sharpruntimetest2.zip";
     {

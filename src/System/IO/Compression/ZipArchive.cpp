@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/ZipArchive.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/InvalidDataException.hpp"
 #include "System/IO/MemoryStream.hpp"
@@ -26,6 +27,14 @@ public:
 
     SharpRuntime::intcs Read(SharpRuntime::bytecs*, SharpRuntime::intcs, SharpRuntime::intcs) override { return 0; }
     void Write(const SharpRuntime::bytecs* data, SharpRuntime::intcs offset, SharpRuntime::intcs count) override {
+        // Matches this codebase's established Stream::Write convention (see
+        // MemoryStream::Write): count<=0 is a graceful no-op, but a negative offset was
+        // previously used completely unchecked in `data + offset`, computing a pointer before
+        // the buffer start -- confirmed as a genuine ASan stack-buffer-overflow via a
+        // standalone repro before this fix.
+        if (count <= 0) return;
+        if (offset < 0)
+            throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
         buf_->insert(buf_->end(), data + offset, data + offset + count);
     }
     [[nodiscard]] SharpRuntime::intcs getLengthProperty() const override {
@@ -212,35 +221,57 @@ static void flushWriter(ZipArchiveState& st) {
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_file(&writer, st.filePath.c_str(), 0))
             throw System::IO::IOException("ZipArchive: failed to init writer for " + st.filePath);
-        for (auto& e : existing) {
-            mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
-                                  static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
+        // mz_zip_writer_add_mem/finalize_archive return mz_bool and were previously never
+        // checked, so a write failure (duplicate name, allocation failure, disk full) silently
+        // left a truncated/incomplete zip file on disk with no exception raised at all --
+        // matches the already-established convention just above (init_file's own check) of
+        // treating a miniz failure as IOException, just extended to the calls that were missed.
+        // mz_zip_writer_end must still run on the throw path to release miniz's internal state.
+        try {
+            for (auto& e : existing) {
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                                           static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            for (auto& e : st.pending) {
+                if (st.deletedEntries.count(e.name)) continue;
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
+                                           e.data->data(), e.data->size(),
+                                           static_cast<mz_uint>(e.miniLevel)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            if (!mz_zip_writer_finalize_archive(&writer))
+                throw System::IO::IOException("ZipArchive: failed to finalize " + st.filePath);
+        } catch (...) {
+            mz_zip_writer_end(&writer);
+            throw;
         }
-        for (auto& e : st.pending) {
-            if (st.deletedEntries.count(e.name)) continue;
-            mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                  e.data->data(), e.data->size(),
-                                  static_cast<mz_uint>(e.miniLevel));
-        }
-        mz_zip_writer_finalize_archive(&writer);
         mz_zip_writer_end(&writer);
     } else {
         // Memory-based write — store result back in memBuf
         mz_zip_archive writer{};
         if (!mz_zip_writer_init_heap(&writer, 0, 65536))
             throw System::IO::IOException("ZipArchive: failed to init heap writer");
-        for (auto& e : existing) {
-            mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
-                                  static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION));
-        }
-        for (auto& e : st.pending) {
-            if (st.deletedEntries.count(e.name)) continue;
-            mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                  e.data->data(), e.data->size(),
-                                  static_cast<mz_uint>(e.miniLevel));
-        }
         void* buf = nullptr; size_t sz = 0;
-        mz_zip_writer_finalize_heap_archive(&writer, &buf, &sz);
+        try {
+            for (auto& e : existing) {
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                                           static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            for (auto& e : st.pending) {
+                if (st.deletedEntries.count(e.name)) continue;
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
+                                           e.data->data(), e.data->size(),
+                                           static_cast<mz_uint>(e.miniLevel)))
+                    throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
+            }
+            if (!mz_zip_writer_finalize_heap_archive(&writer, &buf, &sz))
+                throw System::IO::IOException("ZipArchive: failed to finalize heap archive");
+        } catch (...) {
+            mz_zip_writer_end(&writer);
+            throw;
+        }
         mz_zip_writer_end(&writer);
         st.memBuf.assign(reinterpret_cast<SharpRuntime::bytecs*>(buf),
                          reinterpret_cast<SharpRuntime::bytecs*>(buf) + sz);
