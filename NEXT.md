@@ -1,10 +1,65 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `31ba1e3`) — 11692 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `7eda594`) — 11701 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11692 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11701 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 274-277 closed, a whole family of overflow bugs across the date/time types
+
+Continuing the same autonomous run (previous checkpoint covered 268-273+1488). This stretch
+turned into a mini-audit-chain: TimeOnly's overflow bug (274) led directly to finding and fixing
+the *same* bug shape in DateTime (275) and DateTimeOffset (276), because each type's `Add`-style
+methods were written independently instead of sharing one validated implementation. Worth
+internalizing as a process note: **when an Add/arithmetic overflow bug is found in one
+date/time-like type, check its siblings immediately** — TimeOnly → DateTime → DateTimeOffset was
+a 100% hit rate this stretch (3 for 3).
+
+**4 tickets closed: 274 (TimeOnly.hpp), 275 (DateTime.hpp/.cpp), 276 (DateTimeOffset.cpp), 277
+(HebrewCalendar.cpp).** Test count: 11693 → 11701 (10 new regression tests). Commits: a5f18bc,
+4564e43, a5174c2, 7eda594 — all pushed to `origin/feature/work`.
+
+The overflow family, all confirmed via standalone UBSan repros before/after:
+- **TimeOnly::Add(TimeSpan)** added the TimeSpan's raw ticks (up to ~Int64::MaxValue) to this
+  instance's bounded (<1 day) ticks *before* taking `% TicksPerDay` — real signed-overflow UB
+  for a TimeSpan near TimeSpan::MaxValue/MinValue. The fix (reduce modulo *before* adding) was
+  already sitting right next to the bug, correctly implemented in `AddHours`/`AddMinutes`'s
+  `AddTicksWrapped` helper — `Add(TimeSpan)` just didn't reuse it.
+- **DateTime::AddDays(int)/AddHours(int)** multiplied the int argument by TicksPerDay/TicksPerHour
+  with *no upfront bounds check* — overflows int64 for a merely large (not extreme) argument,
+  e.g. `AddDays(1000000000)`. Real .NET's `AddUnits` guards `Math.Abs(value) > maxUnitCount`
+  before multiplying; added the equivalent `MaxDays`/`MaxHours` constants (`MaxTicks /
+  TicksPerUnit`). `AddMinutes`/`AddSeconds`/`AddMilliseconds` turned out NOT to need the same
+  guard — their own Max* bounds exceed `intcs`'s range, so no valid `int` argument can reach the
+  overflow threshold.
+- **DateTime::AddTicks/Add(TimeSpan)/Subtract(TimeSpan)** all did signed `ticks_ +/- delta`
+  directly — UB for a TimeSpan near MaxValue/MinValue. Real .NET's own `AddTicks`/`Subtract`
+  route through `(ulong)(Ticks +/- value)` plus one unsigned comparison; ported the same pattern
+  with genuinely well-defined C++ unsigned arithmetic instead of relying on signed wraparound.
+- **DateTimeOffset::AddMonths/AddYears** were reimplemented from scratch instead of delegating to
+  `DateTime.AddMonths/AddYears` like real .NET does (`AddMonths(int) =>
+  Add(ClockDateTime.AddMonths(months))`) — lost DateTime's own ±120000 bounds check in the
+  process, so `years * 12` overflowed int32 for `years` as small as 200 million. Fixed by
+  delegating, which also deletes ~15 lines of duplicated logic.
+- **HebrewCalendar::ToDateTime** (a different bug class, found while auditing the same
+  date/time area) silently discarded its `era` parameter — called `GetDaysInMonth(year, month)`
+  with *that method's own default* era instead of the caller's actual era, so an invalid era
+  never got validated. The validation machinery (`getHebrewYearType`) already existed and worked
+  correctly elsewhere in the same file; `ToDateTime` just never invoked it with the right value.
+  Noted but did NOT fix: `HijriCalendar::ToDateTime` has the same-looking pattern, but that
+  whole file never validates era anywhere (a different, more systemic simplification, not an
+  isolated oversight) — needs its own verification against real .NET before concluding it's a
+  bug, left for HijriCalendar's own audit ticket.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked` per explicit user decision. When auditing any remaining `Calendar`-derived type
+(HijriCalendar, JapaneseCalendar, TaiwanCalendar, etc.), specifically check whether `ToDateTime`
+passes its `era` parameter through to whatever internal validation exists, rather than silently
+using a default — this exact shape has now been found once (HebrewCalendar) and suspected once
+more (HijriCalendar, unconfirmed).
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 268-273 + 1488 closed, still going
 
