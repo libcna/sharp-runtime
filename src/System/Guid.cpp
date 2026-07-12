@@ -67,19 +67,29 @@ namespace System {
 
         // Parses a run of hex digits (no "0x" prefix; the caller has already consumed
         // it) into a 32-bit value. Sets overflow=true when more than 8 significant hex
-        // digits are present, matching .NET's Guid "X"-format component parsing.
+        // digits are present, matching .NET's Guid "X"-format component parsing (Guid.cs
+        // TryParseHex). Real .NET counts significant digits as it goes and, upon hitting
+        // an invalid character, reports overflow (not a format error) if more than 8
+        // significant digits were already consumed -- overflow takes precedence over an
+        // invalid trailing character. This must mirror that exactly: counting only the
+        // *successfully processed* digits via `processedDigits`, not the raw span length,
+        // matters for a string like "123456789z" (9 valid digits, then invalid 'z').
         bool TryParseHexRun(const std::string& s, uint32_t& outVal, bool& overflow) {
             if (s.empty()) return false;
             std::size_t i = 0;
             while (i < s.size() && s[i] == '0') ++i;
-            std::size_t significantStart = i;
             uint64_t acc = 0;
+            std::size_t processedDigits = 0;
             for (; i < s.size(); ++i) {
                 int v = HexVal(s[i]);
-                if (v < 0) return false;
+                if (v < 0) {
+                    if (processedDigits > 8) overflow = true;
+                    return false;
+                }
                 acc = (acc << 4) | static_cast<uint32_t>(v);
+                ++processedDigits;
             }
-            if (s.size() - significantStart > 8) overflow = true;
+            if (processedDigits > 8) overflow = true;
             outVal = static_cast<uint32_t>(acc & 0xFFFFFFFFull);
             return true;
         }
@@ -185,13 +195,12 @@ namespace System {
                     return GuidParseStatus::Format;
                 }
                 bool overflow = false;
-                if (!TryParseHexRun(s.substr(numStart, termPos - numStart), outVal, overflow)) {
-                    err = MSG_INVALIDCHAR;
-                    return GuidParseStatus::Format;
-                }
-                if (overflow) {
-                    err = MSG_OVERFLOW_U32;
-                    return GuidParseStatus::Overflow;
+                bool ok = TryParseHexRun(s.substr(numStart, termPos - numStart), outVal, overflow);
+                if (!ok || overflow) {
+                    // Matches real .NET's precedence: overflow (9+ significant digits
+                    // already consumed) is reported even if an invalid character follows.
+                    err = overflow ? MSG_OVERFLOW_U32 : MSG_INVALIDCHAR;
+                    return overflow ? GuidParseStatus::Overflow : GuidParseStatus::Format;
                 }
                 pos = termPos + 1;
                 return GuidParseStatus::Ok;
