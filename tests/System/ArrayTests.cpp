@@ -380,3 +380,113 @@ TEST(ArrayTests, LastIndexOf_NotFound) { EXPECT_EQ(Array::LastIndexOf<int>({1,2,
 TEST(ArrayTests, MaxLength_IsPositive) {
     EXPECT_GT(Array::MaxLengthProperty(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Bounds validation (ticket 269): every index/count-taking method in this file previously did
+// zero validation before raw std::vector iterator/index arithmetic -- a negative index in
+// particular, cast to size_t, becomes a huge positive offset: a genuine out-of-bounds access,
+// not just a wrong-answer bug. Matches real .NET Array's own validation exactly (unsigned
+// comparison + subtraction, so large index/length can't integer-overflow past the check either
+// -- same fix already applied this session to Span<T>::Slice and its many siblings).
+// ---------------------------------------------------------------------------
+
+TEST(ArrayTests, Sort_RangeOutOfBounds_Throws) {
+    std::vector<int> v = {3, 1, 2};
+    EXPECT_THROW(Array::Sort(v, 1, 5), System::ArgumentException);
+    EXPECT_THROW(Array::Sort(v, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, Copy_ThreeArg_LengthExceedsSource_Throws) {
+    std::vector<int> src = {1, 2};
+    std::vector<int> dst(5, 0);
+    EXPECT_THROW(Array::Copy(src, dst, 5), System::ArgumentException);
+}
+
+TEST(ArrayTests, Copy_FiveArg_RangeOutOfBounds_Throws) {
+    std::vector<int> src = {1, 2, 3};
+    std::vector<int> dst(3, 0);
+    EXPECT_THROW(Array::Copy(src, 1, dst, 0, 5), System::ArgumentException);
+    EXPECT_THROW(Array::Copy(src, -1, dst, 0, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, Resize_Negative_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::Resize(v, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, IndexOf_NegativeStartIndex_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::IndexOf(v, 1, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, IndexOf_StartIndexPastEnd_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::IndexOf(v, 1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, IndexOf_StartIndexEqualsSize_Legal) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_EQ(Array::IndexOf(v, 1, 3), -1); // legal: an immediately-exhausted search
+}
+
+TEST(ArrayTests, IndexOf_FourArg_CountPastEnd_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::IndexOf(v, 1, 0, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, Reverse_RangeOutOfBounds_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::Reverse(v, 0, 10), System::ArgumentException);
+}
+
+TEST(ArrayTests, Clear_RangeOutOfBounds_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::Clear(v, 0, 10), System::ArgumentException);
+}
+
+TEST(ArrayTests, BinarySearch_RangeOutOfBounds_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::BinarySearch(v, 0, 10, 2), System::ArgumentException);
+}
+
+TEST(ArrayTests, Fill_RangeOutOfBounds_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::Fill(v, 9, 0, 10), System::ArgumentException);
+}
+
+TEST(ArrayTests, FindIndex_NegativeStartIndex_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::FindIndex<int>(v, -1, [](const int&) { return true; }), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, FindIndex_ThreeArg_CountPastEnd_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::FindIndex<int>(v, 0, 10, [](const int&) { return true; }), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, FindLastIndex_StartIndexOutOfRange_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::FindLastIndex<int>(v, 5, [](const int&) { return true; }), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, FindLastIndex_OnEmptyArray_ReturnsNegativeOneWithoutThrowing) {
+    std::vector<int> v;
+    // Matches real .NET's documented empty-array special case: startIndex of -1 or 0 is
+    // accepted "for compatibility reasons" rather than throwing.
+    EXPECT_EQ(Array::FindLastIndex<int>(v, -1, [](const int&) { return true; }), -1);
+}
+
+TEST(ArrayTests, LastIndexOf_StartIndexOutOfRange_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::LastIndexOf(v, 1, 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayTests, LastIndexOf_OnEmptyArray_ReturnsNegativeOneWithoutThrowing) {
+    std::vector<int> v;
+    EXPECT_EQ(Array::LastIndexOf(v, 1, -1), -1);
+}
+
+TEST(ArrayTests, LastIndexOf_FourArg_CountPastStart_Throws) {
+    std::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(Array::LastIndexOf(v, 1, 1, 5), System::ArgumentOutOfRangeException);
+}
