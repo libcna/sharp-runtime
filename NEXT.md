@@ -1,10 +1,82 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `88b0ded`) — 11743 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `b005a46`) — 11756 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11743 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11756 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 299-304 closed, six real bugs found and fixed
+
+Continuing the same autonomous run (previous checkpoint covered 296-298, three clean audits in a
+row). This stretch reversed that trend hard — six consecutive tickets, six confirmed real bugs,
+zero clean audits. Commits: 1db58c0, 55ed2c2, 60166fd, 41e6dc8, 8f52a89, b005a46 — all pushed to
+`origin/feature/work`.
+
+- **299 (ArraySegment.hpp)**: `CopyTo(vector&, destinationIndex)` never validated
+  `destinationIndex >= 0`. A negative index (e.g. `-1`) bypassed the resize-capacity check
+  entirely (since `needed = destinationIndex + count_` could still land inside the existing
+  destination size) and then `destination.begin() + destinationIndex` computed an out-of-bounds
+  iterator — confirmed via UBSan/ASan repro as a genuine heap-buffer-overflow write, not just a
+  wrong-exception-type issue. Also widened the `needed` computation to `longcs` to avoid signed
+  `intcs` overflow for a huge `destinationIndex`. Checked the `Span`/`Memory` family for the same
+  shape — none of them expose a `destinationIndex` parameter on `CopyTo`, so it doesn't recur.
+- **300 (ImmutableList.hpp)**: `RemoveRange`'s bounds-violation branch threw
+  `System::ArgumentException` where real .NET's `Requires.Range` always throws
+  `ArgumentOutOfRangeException`. Rewrote to mirror both of .NET's exact `Requires.Range`
+  conditions (including the `index == size, count == 0` boundary case).
+- **301 (ImmutableArray.hpp)**: `SetItem`/`RemoveAt` both threw `IndexOutOfRangeException` —
+  copied from the raw indexer's exception type by mistake. Real .NET's `SetItem`/`RemoveAt`
+  validate via `Requires.Range` → `ArgumentOutOfRangeException`; only the *raw* indexer
+  (`operator[]`) is an intentionally-unchecked array-access wrapper that legitimately throws
+  `IndexOutOfRangeException` (confirmed against `ImmutableArray_1.Minimal.cs`'s own comment
+  explaining the perf-motivated lack of a check there).
+- **302 (Guid.hpp/.cpp)**: the "X" format's hex-component overflow check
+  (`TryParseHexRun`) only set the overflow flag in the success path. Hitting an invalid
+  character mid-component returned `false` immediately without ever checking whether 9+
+  significant digits had already been consumed — so a component like `"123456789z"` threw
+  `FormatException` where real .NET's `TryParseHex` (which tracks `processedDigits` as it scans
+  and checks the threshold *before* reporting failure) throws `OverflowException`. Fixed by
+  tracking digits incrementally and checking the threshold on the invalid-char path too, plus
+  fixing the caller to consult the overflow flag even when the parse returned false. Also
+  documented (not fixed) that `Guid::NewGuid()`'s static RNG has no synchronization — a real
+  data race under concurrent calls, but this codebase has no established thread-safety policy
+  anywhere, so a one-off mutex here would be an inconsistent unilateral fix; flagged for a future
+  dedicated ticket instead.
+- **303 (BitVector32.hpp)**: `Section`'s 2-arg constructor was **public** (real .NET's is
+  `internal`), and its `mask_`/`offset_` fields had no `private:` label either. This let any
+  client code construct a `Section` with an arbitrary out-of-range offset (e.g. `Section(1,
+  100)`), completely bypassing `CreateSection`'s `offset >= 32` validation — `operator[]`/`set()`
+  would then shift a 32-bit value by an amount ≥ 32, confirmed as real UB via UBSan
+  ("shift exponent 100 is too large"). Fixed by making the constructor and fields private with
+  `friend struct BitVector32;`, matching .NET's actual encapsulation exactly — the exploit no
+  longer even compiles. Three existing tests that used the constructor directly were rewritten to
+  build equivalent sections via `CreateSection` chaining.
+- **304 (XmlDocument.cpp)**: `CreateWhitespace`/`CreateSignificantWhitespace` never validated
+  that their content is actually whitespace-only. Real .NET's `XmlWhitespace`/
+  `XmlSignificantWhiteSpace` constructors both call `CheckOnData` (= `XmlCharType.IsOnlyWhitespace`,
+  exactly tab/LF/CR/space) and throw `ArgumentException` otherwise — the port called tinyxml2's
+  `NewText` directly with no check, so a node typed `Whitespace` could silently hold arbitrary
+  text. Checked sibling factories (`CreateComment`/`CreateCDataSection`/
+  `CreateProcessingInstruction`/`CreateDocumentType`) against their real .NET constructors too —
+  all confirmed to already match (no validation needed, or already present from the prior
+  08d9318 fix), so this was the one gap left in the file.
+
+36 tickets closed this autonomous run so far (268-304, minus 279). This six-ticket stretch is a
+reminder that "large file, already fixed several times" (298: 3 prior rounds; 300/301/303: each
+had 1-3 prior fix commits) does not mean "no bugs left" — every one of these files had passed
+prior review rounds focused on different bug shapes (overflow, UB, API completeness) and still
+had a live, confirmed bug in a shape not previously checked (wrong exception *type* specifically,
+in four of the six cases). **Exception-type parity against the real .NET reference source is
+worth checking explicitly and separately from "does it throw at all" — three of six bugs this
+stretch (300, 301, and half of 302) were the right behavior (throws) with the wrong exception
+type**, which existing tests using bare `EXPECT_THROW(..., System::Exception)`-style broad
+catches would never have caught, but `EXPECT_THROW(..., SpecificExceptionType)` does.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 296-298 closed, all clean
 
