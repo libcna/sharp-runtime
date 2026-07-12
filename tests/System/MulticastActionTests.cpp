@@ -81,3 +81,57 @@ TEST(MulticastActionTests, SnapshotSemanticsSubscribeDuringInvokeAffectsOnlyNext
     action();            // now both handlers run
     EXPECT_EQ(calls, 3); // 1 (prev) + 2 (this invoke)
 }
+
+TEST(MulticastActionTests, AddReturnsATokenAndSubscribesLikePlusEquals) {
+    MulticastAction<int> action;
+    int seen = 0;
+    const auto token = action.Add([&seen](int v) { seen = v; });
+    EXPECT_NE(token, MulticastAction<int>::InvalidToken);
+    action(9);
+    EXPECT_EQ(seen, 9);
+}
+
+TEST(MulticastActionTests, AddOfEmptyHandlerReturnsInvalidTokenAndDoesNotSubscribe) {
+    MulticastAction<int> action;
+    const auto token = action.Add(nullptr);
+    EXPECT_EQ(token, MulticastAction<int>::InvalidToken);
+    EXPECT_TRUE(action.Empty());
+}
+
+TEST(MulticastActionTests, RemoveRemovesOnlyTheIdentifiedSubscription) {
+    MulticastAction<> action;
+    int firstCalls = 0;
+    int secondCalls = 0;
+    const auto firstToken = action.Add([&]() { ++firstCalls; });
+    action.Add([&]() { ++secondCalls; }); // never removed
+
+    EXPECT_TRUE(action.Remove(firstToken));
+    action();
+
+    EXPECT_EQ(firstCalls, 0);
+    EXPECT_EQ(secondCalls, 1);
+}
+
+TEST(MulticastActionTests, RemoveOfUnknownOrAlreadyRemovedTokenIsANoOpReturningFalse) {
+    MulticastAction<> action;
+    const auto token = action.Add([]() {});
+
+    EXPECT_TRUE(action.Remove(token));
+    EXPECT_FALSE(action.Remove(token)); // already removed
+    EXPECT_FALSE(action.Remove(MulticastAction<>::InvalidToken));
+}
+
+TEST(MulticastActionTests, ResubscribingAfterRemoveGetsAFreshToken) {
+    // Motivating use case: CNA::Extended::BaseTransform re-subscribes to every ancestor's
+    // TransformBecameDirty event whenever Parent changes, unsubscribing the old chain first.
+    MulticastAction<> action;
+    int calls = 0;
+    const auto firstToken = action.Add([&]() { ++calls; });
+    ASSERT_TRUE(action.Remove(firstToken));
+
+    const auto secondToken = action.Add([&]() { ++calls; });
+    EXPECT_NE(secondToken, firstToken);
+
+    action();
+    EXPECT_EQ(calls, 1);
+}
