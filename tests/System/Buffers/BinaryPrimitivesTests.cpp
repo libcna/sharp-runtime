@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Buffers/Binary/BinaryPrimitives.hpp"
+#include "System/Int128.hpp"
+#include "System/UInt128.hpp"
 
 using System::Buffers::Binary::BinaryPrimitives;
 using System::ReadOnlySpan;
@@ -208,4 +210,99 @@ TEST(BinaryPrimitivesTest, TryWriteDoubleBigEndian_Success) {
     EXPECT_TRUE(BinaryPrimitives::TryWriteDoubleBigEndian(dst, 9.5));
     ReadOnlySpan<uint8_t> src(buf, 8);
     EXPECT_DOUBLE_EQ(BinaryPrimitives::ReadDoubleBigEndian(src), 9.5);
+}
+
+// ---------------------------------------------------------------------------
+// Int128 / UInt128 -- System::Int128/UInt128 were fully ported elsewhere but this file had no
+// Read/Write/TryRead/TryWrite*Endian or ReverseEndianness overloads for them at all, unlike
+// real .NET (added in .NET 7). Verified byte layout against BinaryPrimitives.Read*Endian.cs by
+// hand-tracing MemoryMarshal.Read<Int128> on a little-endian host and its full-16-byte-reversed
+// counterpart for big-endian.
+// ---------------------------------------------------------------------------
+
+TEST(BinaryPrimitivesTest, ReadInt128LittleEndian_ByteLayout) {
+    // LE layout: low 64 bits occupy the first 8 bytes, high 64 bits the last 8.
+    uint8_t buf[16] = { 1,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0 };
+    ReadOnlySpan<uint8_t> span(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadInt128LittleEndian(span), System::Int128(1));
+}
+
+TEST(BinaryPrimitivesTest, ReadInt128BigEndian_ByteLayout) {
+    // BE layout: high 64 bits occupy the first 8 bytes (each in BE order), low 64 bits the last 8.
+    uint8_t buf[16] = { 0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,1 };
+    ReadOnlySpan<uint8_t> span(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadInt128BigEndian(span), System::Int128(1));
+}
+
+TEST(BinaryPrimitivesTest, WriteAndReadInt128LittleEndian_RoundTrip) {
+    uint8_t buf[16] = {};
+    Span<uint8_t> dst(buf, 16);
+    System::Int128 original(0x0102030405060708ULL, 0x1112131415161718ULL);
+    BinaryPrimitives::WriteInt128LittleEndian(dst, original);
+    ReadOnlySpan<uint8_t> src(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadInt128LittleEndian(src), original);
+}
+
+TEST(BinaryPrimitivesTest, WriteAndReadInt128BigEndian_RoundTrip) {
+    uint8_t buf[16] = {};
+    Span<uint8_t> dst(buf, 16);
+    System::Int128 original(0x0102030405060708ULL, 0x1112131415161718ULL);
+    BinaryPrimitives::WriteInt128BigEndian(dst, original);
+    ReadOnlySpan<uint8_t> src(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadInt128BigEndian(src), original);
+}
+
+TEST(BinaryPrimitivesTest, WriteAndReadUInt128LittleEndian_RoundTrip) {
+    uint8_t buf[16] = {};
+    Span<uint8_t> dst(buf, 16);
+    System::UInt128 original(0xFFEEDDCCBBAA9988ULL, 0x0011223344556677ULL);
+    BinaryPrimitives::WriteUInt128LittleEndian(dst, original);
+    ReadOnlySpan<uint8_t> src(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadUInt128LittleEndian(src), original);
+}
+
+TEST(BinaryPrimitivesTest, WriteAndReadUInt128BigEndian_RoundTrip) {
+    uint8_t buf[16] = {};
+    Span<uint8_t> dst(buf, 16);
+    System::UInt128 original(0xFFEEDDCCBBAA9988ULL, 0x0011223344556677ULL);
+    BinaryPrimitives::WriteUInt128BigEndian(dst, original);
+    ReadOnlySpan<uint8_t> src(buf, 16);
+    EXPECT_EQ(BinaryPrimitives::ReadUInt128BigEndian(src), original);
+}
+
+TEST(BinaryPrimitivesTest, TryReadInt128LittleEndian_TooSmall_ReturnsFalse) {
+    uint8_t buf[15] = {};
+    ReadOnlySpan<uint8_t> src(buf, 15);
+    System::Int128 value(123);
+    EXPECT_FALSE(BinaryPrimitives::TryReadInt128LittleEndian(src, value));
+    EXPECT_EQ(value, System::Int128());
+}
+
+TEST(BinaryPrimitivesTest, TryWriteUInt128BigEndian_TooSmall_ReturnsFalse) {
+    uint8_t buf[15] = {};
+    Span<uint8_t> dst(buf, 15);
+    EXPECT_FALSE(BinaryPrimitives::TryWriteUInt128BigEndian(dst, System::UInt128(1)));
+}
+
+TEST(BinaryPrimitivesTest, ReadInt128LittleEndian_TooSmall_Throws) {
+    uint8_t buf[15] = {};
+    ReadOnlySpan<uint8_t> src(buf, 15);
+    EXPECT_THROW(BinaryPrimitives::ReadInt128LittleEndian(src), System::ArgumentOutOfRangeException);
+}
+
+// The two 64-bit halves both swap position AND each reverses internally -- verified against
+// real .NET's Int128 ReverseEndianness(value) = new Int128(ReverseEndianness(value.Lower),
+// ReverseEndianness(value.Upper)).
+TEST(BinaryPrimitivesTest, ReverseEndianness_Int128) {
+    System::Int128 value(0x0102030405060708ULL, 0x1112131415161718ULL);
+    System::Int128 reversed = BinaryPrimitives::ReverseEndianness(value);
+    EXPECT_EQ(reversed.getUpperProperty(), 0x1817161514131211ULL);
+    EXPECT_EQ(reversed.getLowerProperty(), 0x0807060504030201ULL);
+}
+
+TEST(BinaryPrimitivesTest, ReverseEndianness_UInt128_RoundTrips) {
+    System::UInt128 value(0xFFEEDDCCBBAA9988ULL, 0x0011223344556677ULL);
+    System::UInt128 reversed = BinaryPrimitives::ReverseEndianness(value);
+    System::UInt128 roundTrip = BinaryPrimitives::ReverseEndianness(reversed);
+    EXPECT_EQ(roundTrip, value);
 }

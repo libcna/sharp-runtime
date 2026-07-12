@@ -8,6 +8,14 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Span.hpp"
+// System::Int128/UInt128 themselves #error unconditionally on MSVC (require GCC/Clang's
+// __int128), so including them here must stay conditional -- otherwise this file, which is
+// otherwise fully portable, would silently become MSVC-unsupported too just from adding the
+// Int128/UInt128 overloads below.
+#if !defined(_MSC_VER)
+#  include "System/Int128.hpp"
+#  include "System/UInt128.hpp"
+#endif
 
 namespace System::Buffers::Binary {
 
@@ -389,6 +397,129 @@ namespace System::Buffers::Binary {
             return TryWriteUInt64BigEndian(destination, bits);
         }
 
+#if !defined(_MSC_VER)
+        // -----------------------------------------------------------------------
+        // Int128 / UInt128 (LE/BE, split into two 64-bit halves via System::Int128/UInt128's
+        // getUpperProperty()/getLowerProperty() and (upper,lower) constructor -- both types were
+        // missing from this file entirely even though they're fully ported elsewhere; real .NET
+        // has had Read/Write/TryRead/TryWriteInt128/UInt128*Endian and ReverseEndianness(Int128/
+        // UInt128) since .NET 7. For LE, the low 64 bits occupy the first 8 bytes and the high 64
+        // bits the last 8 (matches MemoryMarshal.Read<Int128> on a little-endian host, which is
+        // what real .NET's own implementation reduces to); BE reverses both which half comes
+        // first AND each half's own byte order -- verified against BinaryPrimitives.Read*Endian.cs.
+        // ReverseEndianness(Half)/(BFloat16) don't exist in real .NET either (both are always
+        // stored/read as a raw 2-byte pattern via the existing 16-bit primitives, no endian-swap
+        // concept beyond that), so Half/BFloat16 support isn't added here -- IntPtr/UIntPtr
+        // (nint/nuint) are also missing, deliberately deferred: their width is platform-dependent
+        // (4 or 8 bytes), which needs a scope decision on which native width this port targets,
+        // not a mechanical add like Int128/UInt128 was.
+        // -----------------------------------------------------------------------
+
+        /** @brief Reads a little-endian Int128 from the first 16 bytes of @p source. */
+        [[nodiscard]] static System::Int128 ReadInt128LittleEndian(System::ReadOnlySpan<uint8_t> source) {
+            checkSize(source.getLengthProperty(), 16, "source");
+            uint64_t lower = ReadUInt64LittleEndian(source.Slice(0, 8));
+            uint64_t upper = ReadUInt64LittleEndian(source.Slice(8, 8));
+            return System::Int128(upper, lower);
+        }
+        /** @brief Reads a little-endian UInt128 from the first 16 bytes of @p source. */
+        [[nodiscard]] static System::UInt128 ReadUInt128LittleEndian(System::ReadOnlySpan<uint8_t> source) {
+            checkSize(source.getLengthProperty(), 16, "source");
+            uint64_t lower = ReadUInt64LittleEndian(source.Slice(0, 8));
+            uint64_t upper = ReadUInt64LittleEndian(source.Slice(8, 8));
+            return System::UInt128(upper, lower);
+        }
+        /** @brief Reads a big-endian Int128 from the first 16 bytes of @p source. */
+        [[nodiscard]] static System::Int128 ReadInt128BigEndian(System::ReadOnlySpan<uint8_t> source) {
+            checkSize(source.getLengthProperty(), 16, "source");
+            uint64_t upper = ReadUInt64BigEndian(source.Slice(0, 8));
+            uint64_t lower = ReadUInt64BigEndian(source.Slice(8, 8));
+            return System::Int128(upper, lower);
+        }
+        /** @brief Reads a big-endian UInt128 from the first 16 bytes of @p source. */
+        [[nodiscard]] static System::UInt128 ReadUInt128BigEndian(System::ReadOnlySpan<uint8_t> source) {
+            checkSize(source.getLengthProperty(), 16, "source");
+            uint64_t upper = ReadUInt64BigEndian(source.Slice(0, 8));
+            uint64_t lower = ReadUInt64BigEndian(source.Slice(8, 8));
+            return System::UInt128(upper, lower);
+        }
+
+        /** @brief Attempts to read a little-endian Int128; returns false if @p source is too small. */
+        [[nodiscard]] static bool TryReadInt128LittleEndian(System::ReadOnlySpan<uint8_t> source, System::Int128& value) {
+            if (source.getLengthProperty() < 16) { value = System::Int128(); return false; }
+            value = ReadInt128LittleEndian(source);
+            return true;
+        }
+        /** @brief Attempts to read a little-endian UInt128; returns false if @p source is too small. */
+        [[nodiscard]] static bool TryReadUInt128LittleEndian(System::ReadOnlySpan<uint8_t> source, System::UInt128& value) {
+            if (source.getLengthProperty() < 16) { value = System::UInt128(); return false; }
+            value = ReadUInt128LittleEndian(source);
+            return true;
+        }
+        /** @brief Attempts to read a big-endian Int128; returns false if @p source is too small. */
+        [[nodiscard]] static bool TryReadInt128BigEndian(System::ReadOnlySpan<uint8_t> source, System::Int128& value) {
+            if (source.getLengthProperty() < 16) { value = System::Int128(); return false; }
+            value = ReadInt128BigEndian(source);
+            return true;
+        }
+        /** @brief Attempts to read a big-endian UInt128; returns false if @p source is too small. */
+        [[nodiscard]] static bool TryReadUInt128BigEndian(System::ReadOnlySpan<uint8_t> source, System::UInt128& value) {
+            if (source.getLengthProperty() < 16) { value = System::UInt128(); return false; }
+            value = ReadUInt128BigEndian(source);
+            return true;
+        }
+
+        /** @brief Writes @p value as little-endian Int128 into the first 16 bytes of @p destination. */
+        static void WriteInt128LittleEndian(System::Span<uint8_t> destination, System::Int128 value) {
+            checkSize(destination.getLengthProperty(), 16, "destination");
+            WriteUInt64LittleEndian(destination.Slice(0, 8), value.getLowerProperty());
+            WriteUInt64LittleEndian(destination.Slice(8, 8), value.getUpperProperty());
+        }
+        /** @brief Writes @p value as little-endian UInt128 into the first 16 bytes of @p destination. */
+        static void WriteUInt128LittleEndian(System::Span<uint8_t> destination, System::UInt128 value) {
+            checkSize(destination.getLengthProperty(), 16, "destination");
+            WriteUInt64LittleEndian(destination.Slice(0, 8), value.getLowerProperty());
+            WriteUInt64LittleEndian(destination.Slice(8, 8), value.getUpperProperty());
+        }
+        /** @brief Writes @p value as big-endian Int128 into the first 16 bytes of @p destination. */
+        static void WriteInt128BigEndian(System::Span<uint8_t> destination, System::Int128 value) {
+            checkSize(destination.getLengthProperty(), 16, "destination");
+            WriteUInt64BigEndian(destination.Slice(0, 8), value.getUpperProperty());
+            WriteUInt64BigEndian(destination.Slice(8, 8), value.getLowerProperty());
+        }
+        /** @brief Writes @p value as big-endian UInt128 into the first 16 bytes of @p destination. */
+        static void WriteUInt128BigEndian(System::Span<uint8_t> destination, System::UInt128 value) {
+            checkSize(destination.getLengthProperty(), 16, "destination");
+            WriteUInt64BigEndian(destination.Slice(0, 8), value.getUpperProperty());
+            WriteUInt64BigEndian(destination.Slice(8, 8), value.getLowerProperty());
+        }
+
+        /** @brief Attempts to write @p value as little-endian Int128; returns false if @p destination is too small. */
+        [[nodiscard]] static bool TryWriteInt128LittleEndian(System::Span<uint8_t> destination, System::Int128 value) {
+            if (destination.getLengthProperty() < 16) return false;
+            WriteInt128LittleEndian(destination, value);
+            return true;
+        }
+        /** @brief Attempts to write @p value as little-endian UInt128; returns false if @p destination is too small. */
+        [[nodiscard]] static bool TryWriteUInt128LittleEndian(System::Span<uint8_t> destination, System::UInt128 value) {
+            if (destination.getLengthProperty() < 16) return false;
+            WriteUInt128LittleEndian(destination, value);
+            return true;
+        }
+        /** @brief Attempts to write @p value as big-endian Int128; returns false if @p destination is too small. */
+        [[nodiscard]] static bool TryWriteInt128BigEndian(System::Span<uint8_t> destination, System::Int128 value) {
+            if (destination.getLengthProperty() < 16) return false;
+            WriteInt128BigEndian(destination, value);
+            return true;
+        }
+        /** @brief Attempts to write @p value as big-endian UInt128; returns false if @p destination is too small. */
+        [[nodiscard]] static bool TryWriteUInt128BigEndian(System::Span<uint8_t> destination, System::UInt128 value) {
+            if (destination.getLengthProperty() < 16) return false;
+            WriteUInt128BigEndian(destination, value);
+            return true;
+        }
+#endif // !defined(_MSC_VER)
+
         // -----------------------------------------------------------------------
         // ReverseEndianness
         // -----------------------------------------------------------------------
@@ -418,6 +549,16 @@ namespace System::Buffers::Binary {
         }
         /** @brief Returns @p value with its bytes reversed. */
         static uint64_t ReverseEndianness(uint64_t value) { return bswap64(value); }
+#if !defined(_MSC_VER)
+        /** @brief Returns @p value with its bytes reversed (the two 64-bit halves swap AND each reverses). */
+        static System::Int128 ReverseEndianness(System::Int128 value) {
+            return System::Int128(bswap64(value.getLowerProperty()), bswap64(value.getUpperProperty()));
+        }
+        /** @brief Returns @p value with its bytes reversed (the two 64-bit halves swap AND each reverses). */
+        static System::UInt128 ReverseEndianness(System::UInt128 value) {
+            return System::UInt128(bswap64(value.getLowerProperty()), bswap64(value.getUpperProperty()));
+        }
+#endif // !defined(_MSC_VER)
 
     private:
         static void checkSize(intcs len, intcs needed, const char* paramName) {
