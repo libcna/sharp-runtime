@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <random>
 
 #include "System/IO/Hashing/Adler32.hpp"
 #include "System/IO/Hashing/Crc32.hpp"
@@ -685,6 +686,79 @@ TEST(HashingTests, XxHash128_StreamingMatchesOneShot_ManySmallChunks) {
 
 TEST(HashingTests, XxHash128_DifferentInputsDifferentHashes) {
     EXPECT_NE(xxHash128Hash(bytes("abc")), xxHash128Hash(bytes("abd")));
+}
+
+// XxHash3Shared.cpp's streaming Append() path (buffer completion, per-block consumption,
+// multi-block loops, tail-stripe buffering) is complex state-machine logic that the existing
+// fixed-pattern streaming tests above only exercise for a handful of hand-picked chunk splits.
+// Randomized differential testing (many lengths x many chunk-split patterns, comparing
+// streaming digest against the one-shot digest of the same bytes) gives much stronger
+// correctness assurance for this kind of bit-twiddling code than manual line-by-line reading
+// -- the same "verify via testing" approach used elsewhere this session for other
+// algorithm-critical files (Utf8Parser's overflow idiom, Random's seeded PRNG). A fixed PRNG
+// seed keeps this deterministic and reproducible across runs.
+TEST(HashingTests, XxHash3_StreamingMatchesOneShot_RandomizedChunkSplits) {
+    std::mt19937 rng(0xC0FFEE);
+    // Lengths chosen to straddle every structural boundary in Append()/DigestLong(): the
+    // internal buffer size (~192 bytes for XxHash3's default secret), a single stripe (64
+    // bytes), a full block, and multi-block inputs, plus small/edge lengths (0, 1, and just
+    // above/below each boundary).
+    std::vector<int> lengths = {0, 1, 2, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65,
+                                 127, 128, 129, 191, 192, 193, 200, 255, 256, 257,
+                                 511, 512, 513, 1000, 2000, 4096, 8192};
+    for (int length : lengths) {
+        std::vector<uint8_t> data(static_cast<size_t>(length));
+        for (auto& b : data) b = static_cast<uint8_t>(rng());
+        uint64_t oneShot = XxHash3::HashToUInt64(data.data(), length, 0);
+        uint64_t oneShotSeeded = XxHash3::HashToUInt64(data.data(), length, 0x1234);
+
+        for (int trial = 0; trial < 5; ++trial) {
+            XxHash3 h;
+            XxHash3 hSeeded(0x1234);
+            int pos = 0;
+            while (pos < length) {
+                int remaining = length - pos;
+                int chunk = remaining == 0 ? 0 : 1 + static_cast<int>(rng() % static_cast<unsigned>(remaining));
+                h.Append(data.data() + pos, chunk);
+                hSeeded.Append(data.data() + pos, chunk);
+                pos += chunk;
+            }
+            ASSERT_EQ(h.GetCurrentHashAsUInt64(), oneShot)
+                << "length=" << length << " trial=" << trial;
+            ASSERT_EQ(hSeeded.GetCurrentHashAsUInt64(), oneShotSeeded)
+                << "length=" << length << " trial=" << trial << " (seeded)";
+        }
+    }
+}
+
+TEST(HashingTests, XxHash128_StreamingMatchesOneShot_RandomizedChunkSplits) {
+    std::mt19937 rng(0xC0FFEE);
+    std::vector<int> lengths = {0, 1, 2, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65,
+                                 127, 128, 129, 191, 192, 193, 200, 255, 256, 257,
+                                 511, 512, 513, 1000, 2000, 4096, 8192};
+    for (int length : lengths) {
+        std::vector<uint8_t> data(static_cast<size_t>(length));
+        for (auto& b : data) b = static_cast<uint8_t>(rng());
+        auto oneShot = XxHash128::HashToHash128(data.data(), length, 0);
+        auto oneShotSeeded = XxHash128::HashToHash128(data.data(), length, 0x1234);
+
+        for (int trial = 0; trial < 5; ++trial) {
+            XxHash128 h;
+            XxHash128 hSeeded(0x1234);
+            int pos = 0;
+            while (pos < length) {
+                int remaining = length - pos;
+                int chunk = remaining == 0 ? 0 : 1 + static_cast<int>(rng() % static_cast<unsigned>(remaining));
+                h.Append(data.data() + pos, chunk);
+                hSeeded.Append(data.data() + pos, chunk);
+                pos += chunk;
+            }
+            ASSERT_EQ(h.GetCurrentHashAsHash128(), oneShot)
+                << "length=" << length << " trial=" << trial;
+            ASSERT_EQ(hSeeded.GetCurrentHashAsHash128(), oneShotSeeded)
+                << "length=" << length << " trial=" << trial << " (seeded)";
+        }
+    }
 }
 
 TEST(HashingTests, XxHash128_TryHash_DestinationTooShort_ReturnsFalse) {
