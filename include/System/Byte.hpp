@@ -304,7 +304,14 @@ namespace System {
         [[nodiscard]] static std::string ToString(bytecs value, const std::string& format) {
             if (format.empty()) return ToString(value);
             char type = format[0];
-            int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             unsigned uv = static_cast<unsigned>(value);
             std::ostringstream oss;
             oss.imbue(std::locale::classic());

@@ -241,3 +241,7 @@ TEST(Int32Tests, IsPositive_False)   { EXPECT_FALSE(Int32::IsPositive(-1)); }
 // ---------------------------------------------------------------------------
 TEST(Int64Tests, ToString_Hex) { EXPECT_EQ(Int64::ToString(255LL, std::string("X")), "FF"); }
 TEST(Int64Tests, ToString_D_Padded) { EXPECT_EQ(Int64::ToString(7LL, std::string("D5")), "00007"); }
+TEST(Int64Tests, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(Int64::ToString(5LL, std::string("Xz")), System::FormatException);
+    EXPECT_THROW(Int64::ToString(5LL, std::string("X99999999999999999999")), System::FormatException);
+}

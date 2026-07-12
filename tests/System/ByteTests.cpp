@@ -67,6 +67,11 @@ TEST(ByteTests, TryParse_TrailingGarbage_ReturnsFalse) {
 TEST(ByteTests, ToString_Zero) { EXPECT_EQ(Byte::ToString(bytecs(0)), "0"); }
 TEST(ByteTests, ToString_MaxValue) { EXPECT_EQ(Byte::ToString(bytecs(255)), "255"); }
 TEST(ByteTests, ToString_Midrange) { EXPECT_EQ(Byte::ToString(bytecs(42)), "42"); }
+TEST(ByteTests, ToString_MalformedWidth_ThrowsFormatException) {
+    // std::stoi's raw std::invalid_argument/out_of_range must not escape as-is.
+    EXPECT_THROW(Byte::ToString(bytecs(5), "Xz"), System::FormatException);
+    EXPECT_THROW(Byte::ToString(bytecs(5), "X99999999999999999999"), System::FormatException);
+}
 
 // ---------------------------------------------------------------------------
 // CompareTo

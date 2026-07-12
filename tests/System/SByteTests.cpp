@@ -29,6 +29,10 @@ TEST(SByteTest, TryParse_Invalid) {
 TEST(SByteTest, ToString_Positive) { EXPECT_EQ(SByte::ToString(sbytecs(7)), "7"); }
 TEST(SByteTest, ToString_Negative) { EXPECT_EQ(SByte::ToString(sbytecs(-5)), "-5"); }
 TEST(SByteTest, ToString_Hex) { EXPECT_EQ(SByte::ToString(sbytecs(255), "X2"), "FF"); }
+TEST(SByteTest, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(SByte::ToString(sbytecs(5), "Xz"), System::FormatException);
+    EXPECT_THROW(SByte::ToString(sbytecs(5), "X99999999999999999999"), System::FormatException);
+}
 
 TEST(SByteTest, Abs_Positive) { EXPECT_EQ(SByte::Abs(sbytecs(5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Negative) { EXPECT_EQ(SByte::Abs(sbytecs(-5)), sbytecs(5)); }

@@ -50,6 +50,11 @@ TEST(UInt16Test, ToStringHex) {
     EXPECT_EQ(UInt16::ToString(255, "X"), "FF");
 }
 
+TEST(UInt16Test, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(UInt16::ToString(5, "Xz"), System::FormatException);
+    EXPECT_THROW(UInt16::ToString(5, "X99999999999999999999"), System::FormatException);
+}
+
 TEST(UInt16Test, ToStringPadded) {
     EXPECT_EQ(UInt16::ToString(10, "D4"), "0010");
 }
