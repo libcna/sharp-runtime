@@ -1,10 +1,64 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `e1cc791`) — 11642 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `8971948`) — 11648 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11642 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11648 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continued again) — ticket #1487 (P1) fully closed, 15 tickets closed total this session
+
+Continuation of the checkpoint below. Ticket `#1487` — the systemic `start+count`/
+`start+length` integer-overflow bounds-check-bypass pattern filed mid-session while auditing
+`Span.hpp` (ticket 265) — is now **fully resolved**. Fixed every occurrence its own
+codebase-wide grep found:
+
+- **`ArraySegment.hpp`** (constructor + `Slice(int,int)`) and **`String.cpp`**
+  (`ToCharArray`): same shape as `Span<T>::Slice`, fixed identically (unsigned comparison +
+  subtraction instead of signed addition).
+- **`MemoryStream.cpp`**/**`UnmanagedMemoryStream.cpp`** `Write()`: a *more severe* variant —
+  `Position` can legally be set arbitrarily far past the end (matching real .NET's own
+  `Position` setter, which allows seeking past `Length`), so `position_+count` can genuinely
+  overflow; a wrapped negative sum would silently bypass the resize/capacity check, letting the
+  subsequent copy **write** through a position wildly beyond the buffer's actual allocation — a
+  real heap/unmanaged buffer overflow, not just a bypassed bounds check. Verified real .NET's
+  own `MemoryStream.Write`/`UnmanagedMemoryStream.WriteCore` compute this exact sum in a wider
+  type (`long`) specifically to avoid it and explicitly check for the overflow — matched with
+  `int64_t` widening (C#'s unchecked overflow is *defined* to wrap; C++'s is UB regardless of
+  "checked" context, so widening rather than relying on wraparound was required).
+- Verified `ReadOnlySequence<T>::Slice` uses `longcs` (int64) for the equivalent sum, not
+  `intcs` (int32) — theoretically the same bug class but the overflow threshold requires
+  sequence lengths near `INT64_MAX`, physically unreachable; noted, not fixed.
+
+6 new regression tests. Commit `8971948`.
+
+**Process incident, worth remembering:** the first attempt to write this ticket's `notes` field
+via `sqlite3 plan.sqlite3 "UPDATE ... SET notes = ... '\`int i = ...\`' ..."` silently corrupted
+the note — bash interprets backticks as command substitution even *inside* the SQL string when
+the whole thing is wrapped in double quotes, so `` `int i = _position + count` `` got executed
+as a (failing) shell command and the code snippet vanished from the saved note. Recovered by
+rewriting the note via a small Python `sqlite3` script instead (immune to shell quoting).
+**Lesson: never put backticks in a double-quoted shell string destined for sqlite3 — use single
+quotes for inline code snippets in ticket notes, or write notes via Python when the content has
+any shell metacharacters at all.**
+
+Test count: 11642 → 11648. All commits pushed to `origin/feature/work`.
+
+### To resume
+
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+With `#1487` closed, this now correctly falls back to the P2 queue: **ticket 266** is next (589
+P2 + 6 P3 remain `todo`, 100 P2 stay `blocked` on ticket #43 per user decision — do not
+resurface it as a default next action). Same workflow as always: read the target file fully,
+verify every non-trivial claim against `/rv/tmp/runtime/src/libraries/`, fix real bugs with
+regression tests (confirm genuine UB with a standalone UBSan repro before *and after* fixing
+when it smells like an overflow case — this has been the single highest-value habit across this
+entire session, having caught 8 separate confirmed-via-repro bugs so far across
+TimeSpan/Int128/Span/Memory/ArraySegment/String/MemoryStream/UnmanagedMemoryStream), build+test
+clean, update `plan.sqlite3` (avoid backticks in notes text — see the process incident above),
+commit+push, move to the next ticket without stopping.
 
 ## Session checkpoint (2026-07-12, autonomous run continued again) — 14 tickets closed total, 3 more real bugs found (264/265/306), new P1 ticket #1487 filed, 2 more commits
 
