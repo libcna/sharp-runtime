@@ -1,10 +1,60 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `5cddb18`) — 11719 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `a655f50`) — 11728 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11719 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11728 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 292-294 closed, systemic calendar overflow fix
+
+Continuing the same autonomous run (previous checkpoint covered 291). Commits: 5cddb18
+(checkpoint), a655f50 — pushed to `origin/feature/work`.
+
+- **292 (CodeAnalysisAttributes.hpp)**: clean audit — pure marker-attribute classes with no
+  computational logic (matches CLAUDE.md's reflection-out-of-scope deviation; nothing in this
+  codebase reads these attributes at runtime). Checked for constructor-parameter copy-paste
+  bugs between near-duplicate classes, found none.
+- **293 (AppDomain.hpp/.cpp)**: clean audit. Noted but didn't fix a real, very-low-probability
+  edge case (none of the three platform-specific executable-path lookups retry with a larger
+  buffer if the path exceeds the fixed stack buffer) — judged not worth the added complexity
+  given PATH_MAX/MAX_PATH sizes vastly exceed realistic path lengths.
+- **294 (PersianCalendar.hpp) — became the largest single-ticket fix of the whole run.** Started
+  as one `PersianCalendar::AddYears` fix (same `years*12` bug class as `DateTimeOffset::AddYears`,
+  ticket 276) — but since this was now a *second* independent instance, grepped every calendar
+  file for the same pattern and found it **systemic across the entire calendar subsystem**,
+  including the `Calendar` base class itself. Fixed 7 confirmed instances in one pass, each
+  verified with a standalone UBSan/ASan repro:
+  - `Calendar::AddYears`/`AddWeeks` (base — inherited by every calendar subclass that doesn't
+    override them, e.g. GregorianCalendar/KoreanCalendar/TaiwanCalendar/ThaiBuddhistCalendar/
+    JapaneseCalendar)
+  - `JulianCalendar::AddMonths` — a virtual override with **no bounds check at all**, unlike the
+    base method it replaces (virtual dispatch means overrides don't inherit the base's checks)
+  - `JulianCalendar::AddYears`
+  - `HebrewCalendar::AddMonths`/`AddYears` — real .NET protects the equivalent arithmetic with a
+    try/catch this port doesn't have
+  - `HijriCalendar::AddYears` and `UmAlQuraCalendar::AddYears` — their sibling `AddMonths` already
+    had the check from an earlier round, `AddYears` was missed
+  - Final sweep: 12 previously-UB call patterns across all 6 affected types, all now throw
+    cleanly with zero sanitizer output.
+
+**Process lesson reinforced a third time this session** (after Utf8Parser's overflow idiom and
+BitArray's constructor): the moment a bug pattern is confirmed in a *second* independent file,
+grep the whole relevant subsystem immediately rather than waiting for each file's own audit
+ticket — this is now consistently where this session's highest-value fixes have come from.
+**Also worth noting**: `JulianCalendar::AddMonths`'s missing check specifically illustrates why
+virtual overrides need their own validation — a base class's bounds check does NOT protect a
+derived class's override, since the override *replaces* the base's method body entirely.
+
+27 tickets closed this autonomous run so far (268-294, minus 279 which needed no code changes).
+Zero regressions at any point; full suite run after every single change.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. If any other calendar-adjacent file surfaces in the queue (RegionInfo, CultureInfo,
+CalendarWeekRule, etc.), it's worth a quick check for the same `X * Y` unguarded-multiplication-
+before-bounds-check shape, though the calendar subsystem itself should now be fully covered.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — ticket 291 closed
 
