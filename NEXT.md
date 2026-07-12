@@ -1,9 +1,94 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `a5eace0`) — 11608 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `9753097`) — 11633 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11608 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11633 tests from 1197 test suites, 0 failures
+```
+
+## Session checkpoint (2026-07-12, autonomous run continued) — 11 tickets closed total, 5 more real bugs found (259-263), 4 more commits
+
+Continuation of the checkpoint below (same autonomous run, same rules: ticket #43 stays
+blocked, standard prompt.md workflow). This entry only covers what's new since that
+checkpoint — see it for the session's trigger/scope/process notes, still accurate.
+
+### Fixed this batch (5 more real bugs across tickets 259-262, 1 clean audit at 263, 4 commits `e9047a8`..`9753097`)
+
+- **`ticket 259`, `include/System/Buffers/Binary/BinaryPrimitives.hpp`**: `System::Int128`/
+  `UInt128` are both fully ported elsewhere but had zero `BinaryPrimitives` support (real .NET
+  added this in .NET 7) — added Read/Write/TryRead/TryWrite\*Endian (16 methods) +
+  `ReverseEndianness` (2 more), byte layout verified by hand-tracing
+  `MemoryMarshal.Read<Int128>` + `ReverseEndianness.cs`. **Important side-finding**: the new
+  methods (and the `Int128.hpp`/`UInt128.hpp` includes) had to be guarded behind
+  `#if !defined(_MSC_VER)`, since those two headers `#error` unconditionally on MSVC just from
+  being included — without the guard this would have silently made the whole
+  previously-portable `BinaryPrimitives.hpp` MSVC-unsupported as a side effect of an unrelated
+  feature add. Half/BFloat16 (also fully ported, real but smaller gap) and IntPtr/UIntPtr
+  (platform-width-dependent, needs a scope decision first) deliberately deferred to a follow-up
+  ticket. Commit `e9047a8`.
+- **`ticket 260`, `src/System/Decimal.cpp`**: thorough audit, **no new bugs found** — this file
+  was already heavily fixed in prior sessions (the `Decimal(double)` UB fix referenced in an
+  earlier checkpoint). Traced arithmetic, rounding (all 4 `Round` overloads × all 5
+  `MidpointRounding` modes), `GetHashCode`/`Equals` consistency, and every constructor against
+  `Decimal.cs` by hand; everything checked out. One pre-existing, deliberate-looking
+  simplification noted but not changed: `TryParse` accepts `,` as an alternative decimal-point
+  spelling (supports German-style `1234,56`) but not English-style thousands grouping
+  (`1,234.56` fails) — this project has no culture support to know which convention a given
+  string uses, so treating both as literal alternative decimal-point spellings (not attempting
+  grouping at all) is a defensible scope choice, not a bug. No commit (no changes).
+- **`ticket 261`, `include/System/Collections/Generic/List.hpp`**: unlike `ArrayList` (ticket
+  255), this file already had proper bounds validation everywhere. Found one real gap: the
+  3-arg `IndexOf(item,startIndex,count)`/`LastIndexOf(item,startIndex,count)` range-bounded
+  overloads were entirely missing (only 1-arg/2-arg existed) despite being part of real .NET
+  `List<T>`'s surface — added both, matching `List.cs` exactly. Noted, not implemented:
+  `Sort`/`BinarySearch` overloads taking an `IComparer<T>` object (only the `Comparison`
+  delegate form and default-comparer `BinarySearch` exist) — `IComparer<T>` already exists in
+  this codebase so it's feasible, left for a follow-up. Commit `762b9133`.
+- **`ticket 262`, `include/System/Int128.hpp`**: the big one this batch — `operator+`/`-`/`*`,
+  unary `operator-()`, and `operator/`/`%` all used raw signed `__int128` arithmetic directly,
+  genuinely overflowing (**confirmed via 5 separate standalone UBSan repros** before fixing —
+  same bug class as this session's earlier `TimeSpan::TimeToTicks` fix, just found five more
+  instances of it in one file). Verified real .NET's *exact* semantics differ by operator group
+  before fixing (traced `Int128.cs` directly): unchecked `+`/`-`/`*` wrap silently on overflow
+  (.NET computes via explicit carry/borrow-based unsigned arithmetic specifically to define
+  this) — fixed by computing via `unsigned __int128` (always well-defined modular wraparound)
+  and converting back via `static_cast` (well-defined 2's-complement reinterpretation per
+  C++20, which this project requires). `operator/` (and `%`, defined in terms of it) is
+  *different*: real .NET explicitly throws `OverflowException` for `MinValue/-1` even in its
+  default unchecked form — added that explicit check instead of trying to wrap it. Verified
+  the fix with a standalone compile+run under `-fsanitize=undefined,address`: zero errors where
+  the old code produced five. Commit `9753097`.
+- **`ticket 263`, `include/System/GC.hpp`**: clean audit, no bugs — confirmed this file is
+  correctly the "stub, correct end state" CLAUDE.md documents (every method genuinely a
+  no-op/zero-return as its own doc-comment claims), API surface essentially complete against
+  real .NET's `GC` (only `AllocateArray<T>`/`AllocateUninitializedArray<T>`/
+  `GetConfigurationVariables()` omitted, each already documented as intentionally
+  impossible/inapplicable). No commit (no changes).
+
+Test count: 11608 → 11633 across this batch (25 new regression tests, all in tickets
+259/261/262 — 260/263 were clean audits with nothing new to test). All commits pushed to
+`origin/feature/work`.
+
+### Process note
+
+- Two of five tickets this batch (260, 263) were legitimate **clean audits** — thoroughly
+  checked, no bug found, no code changed, no commit made (nothing to commit). This is a valid,
+  expected outcome for a stabilization sweep across ~600 files, not a sign of the process
+  slacking — don't feel obligated to manufacture a change where none is warranted. The
+  `plan.sqlite3` `notes` field is what proves the audit actually happened either way.
+
+### To resume
+
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+Next up is **ticket 264**. 592 P2 + 6 P3 tickets remain `todo` (out of 1486 total: 788 `done`,
+100 `blocked` on ticket #43 — left alone per user decision). Same workflow as documented in the
+checkpoint immediately below: read target file fully, verify every non-trivial claim against
+`/rv/tmp/runtime/src/libraries/`, fix real bugs with regression tests (confirm genuine UB with
+a standalone UBSan repro before *and after* fixing when the bug smells like an overflow/UB
+case — this batch alone found 6 such confirmed-via-repro bugs across TimeSpan and Int128),
+build+test clean, update `plan.sqlite3`, commit+push, move to the next ticket without stopping.
 ```
 
 ## Session checkpoint (2026-07-12, autonomous run in progress) — 6 tickets closed (254/1486/255/256/258/257), 6 real bugs found and fixed, 4 commits
