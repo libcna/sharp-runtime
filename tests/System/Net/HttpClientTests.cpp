@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include <thread>
 #include "System/Net/Http/HttpClient.hpp"
+#include "System/Net/IPEndPoint.hpp"
+#include "System/Net/Sockets/Socket.hpp"
 #include "System/Net/Http/HttpMethod.hpp"
 #include "System/Net/Http/HttpContent.hpp"
 #include "System/Net/Http/StringContent.hpp"
@@ -653,4 +656,68 @@ TEST(MultipartFormDataContentTests, IsA_MultipartContent) {
     MultipartFormDataContent c("B");
     MultipartContent* base = &c;
     EXPECT_EQ(base->getContentTypeProperty(), "multipart/form-data; boundary=\"B\"");
+}
+
+// ---------------------------------------------------------------------------
+// performRequest() response-header parsing (ticket 267) -- loopback server, since
+// Content-Length/chunk-size parsing lives inside the file-local performRequest(), not exposed
+// like parseUrl()/parseStatusLine() are for direct unit testing.
+// ---------------------------------------------------------------------------
+
+namespace {
+SharpRuntime::intcs startMockHttpServer(std::shared_ptr<System::Net::Sockets::Socket>& listenerOut) {
+    listenerOut = std::make_shared<System::Net::Sockets::Socket>(
+        System::Net::Sockets::AddressFamily::InterNetwork, System::Net::Sockets::SocketType::Stream,
+        System::Net::Sockets::ProtocolType::Tcp);
+    listenerOut->Bind(System::Net::IPEndPoint(System::Net::IPAddress::Loopback, 0));
+    listenerOut->Listen();
+    auto local = std::dynamic_pointer_cast<System::Net::IPEndPoint>(listenerOut->getLocalEndPointProperty());
+    return local->getPortProperty();
+}
+
+std::vector<SharpRuntime::bytecs> toBytes(const std::string& s) {
+    return std::vector<SharpRuntime::bytecs>(s.begin(), s.end());
+}
+} // namespace
+
+// Regression test (ticket 267): a malformed/non-numeric Content-Length header threw a raw
+// std::invalid_argument straight out of Send()/GetAsync(), invisible to code catching
+// System::Exception&/HttpRequestException& -- same bug class parseUrl()/parseStatusLine() in
+// this same file were already fixed for; this one was missed.
+TEST(HttpClientTests, MalformedContentLengthHeader_ThrowsHttpRequestException) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        server->Receive(reqBuf);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: not-a-number\r\n\r\n"));
+        server->Close();
+    });
+
+    HttpClient client;
+    EXPECT_THROW(client.GetString("http://127.0.0.1:" + std::to_string(port) + "/"), HttpRequestException);
+
+    serverThread.join();
+}
+
+// Regression test (ticket 267): a malformed (non-hex) chunk-size line in a chunked response
+// threw a raw std::invalid_argument the same way.
+TEST(HttpClientTests, MalformedChunkSize_ThrowsHttpRequestException) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        server->Receive(reqBuf);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\ndata\r\n0\r\n\r\n"));
+        server->Close();
+    });
+
+    HttpClient client;
+    EXPECT_THROW(client.GetString("http://127.0.0.1:" + std::to_string(port) + "/"), HttpRequestException);
+
+    serverThread.join();
 }

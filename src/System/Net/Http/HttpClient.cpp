@@ -322,7 +322,19 @@ static std::shared_ptr<HttpResponseMessage> performRequest(
 
         std::string nameLower = strToLower(name);
         if (nameLower == "transfer-encoding") transferEncoding = strToLower(value);
-        if (nameLower == "content-length")    contentLength    = std::stoll(value);
+        if (nameLower == "content-length") {
+            // Unguarded std::stoll() on a server-controlled value -- a malformed or
+            // out-of-range Content-Length (e.g. non-numeric, or too large for long long) threw
+            // a raw std::invalid_argument/std::out_of_range straight out of Send()/GetAsync()/
+            // etc., invisible to code catching System::Exception&/HttpRequestException&. Same
+            // bug class parseUrl()/parseStatusLine() above were already fixed for; this one was
+            // missed.
+            try {
+                contentLength = std::stoll(value);
+            } catch (...) {
+                throw HttpRequestException("HttpClient: malformed Content-Length header: '" + value + "'");
+            }
+        }
     }
 
     // Response body
@@ -341,7 +353,16 @@ static std::shared_ptr<HttpResponseMessage> performRequest(
                 size_t semi = chunkLine.find(';');
                 if (semi != std::string::npos) chunkLine = chunkLine.substr(0, semi);
                 if (chunkLine.empty()) break;
-                size_t chunkSize = std::stoul(chunkLine, nullptr, 16);
+                // Same unguarded-std::sto*-on-server-controlled-input bug as the Content-Length
+                // header above: a malformed (non-hex) or out-of-range chunk-size line threw a
+                // raw std::invalid_argument/std::out_of_range instead of a clean
+                // HttpRequestException.
+                size_t chunkSize;
+                try {
+                    chunkSize = std::stoul(chunkLine, nullptr, 16);
+                } catch (...) {
+                    throw HttpRequestException("HttpClient: malformed chunk size: '" + chunkLine + "'");
+                }
                 if (chunkSize == 0) { recvLine(fd, buf); break; } // trailing CRLF
                 auto chunk = recvExact(fd, buf, chunkSize);
                 bodyBytes.insert(bodyBytes.end(), chunk.begin(), chunk.end());
