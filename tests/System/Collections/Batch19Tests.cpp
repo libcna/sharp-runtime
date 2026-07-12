@@ -208,9 +208,13 @@ TEST(BitVector32Batch19Test, ToStringStatic) {
 }
 
 TEST(BitVector32Batch19Test, Section_Equals) {
-    BitVector32::Section s1(0x0F, 4);
-    BitVector32::Section s2(0x0F, 4);
-    BitVector32::Section s3(0x0F, 8);
+    // Section's constructor is private (matches real .NET's `internal` ctor) -- build via
+    // CreateSection chaining instead: base has mask=0x0F/offset=0, so a Section chained after
+    // it lands at mask=0x0F/offset=4 (0x0F has 4 set bits), and chained twice at offset=8.
+    auto base = BitVector32::CreateSection(15);
+    auto s1 = BitVector32::CreateSection(15, base);
+    auto s2 = BitVector32::CreateSection(15, base);
+    auto s3 = BitVector32::CreateSection(15, s1);
     EXPECT_TRUE(s1.Equals(s2));
     EXPECT_TRUE(s1 == s2);
     EXPECT_FALSE(s1.Equals(s3));
@@ -218,14 +222,17 @@ TEST(BitVector32Batch19Test, Section_Equals) {
 }
 
 TEST(BitVector32Batch19Test, Section_GetHashCode_Stable) {
-    BitVector32::Section s(0x0F, 4);
+    auto base = BitVector32::CreateSection(15);
+    auto s = BitVector32::CreateSection(15, base);
     EXPECT_EQ(s.GetHashCode(), s.GetHashCode());
-    BitVector32::Section s2(0x0F, 4);
+    auto s2 = BitVector32::CreateSection(15, base);
     EXPECT_EQ(s.GetHashCode(), s2.GetHashCode());
 }
 
 TEST(BitVector32Batch19Test, Section_ToString) {
-    BitVector32::Section s(3, 2);
+    // mask=3 (0b11, 2 set bits) chained once lands at offset=2, reproducing Section(3, 2).
+    auto base = BitVector32::CreateSection(3);
+    auto s = BitVector32::CreateSection(3, base);
     std::string t = s.ToString();
     EXPECT_NE(t.find("3"), std::string::npos);
     EXPECT_NE(t.find("2"), std::string::npos);

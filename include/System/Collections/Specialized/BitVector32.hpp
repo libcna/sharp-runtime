@@ -29,16 +29,22 @@ struct BitVector32 {
      * Created via BitVector32::CreateSection.
      */
     struct Section {
+        friend struct BitVector32;
+
+    private:
         SharpRuntime::shortcs mask_;    ///< Bit mask for this section.
         SharpRuntime::shortcs offset_;  ///< Bit offset of this section within the 32-bit value.
 
-        /**
-         * @brief Constructs a Section with the given mask and bit offset.
-         * @param mask   The bit mask for the section.
-         * @param offset The bit offset of the section.
-         */
+        // Matches real .NET's `internal Section(short, short)` constructor: only
+        // BitVector32::CreateSection may construct a Section. Real .NET's offset/mask fields
+        // are also private, exposed only via the read-only Mask/Offset properties below.
+        // A publicly-constructible Section would let client code build one with an
+        // out-of-range offset (e.g. 100), bypassing CreateSection's `offset >= 32` check --
+        // operator[](Section)/set(Section, int) would then shift a 32-bit value by an amount
+        // >= 32, which is undefined behavior in C++ (confirmed via a standalone UBSan repro).
         Section(SharpRuntime::shortcs mask, SharpRuntime::shortcs offset) : mask_(mask), offset_(offset) {}
 
+    public:
         /**
          * @brief Gets the bit mask for this section.
          *
