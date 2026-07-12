@@ -1,10 +1,56 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a666384`) — 11790 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6e0facd`) — 11794 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11790 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11794 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 322-323 closed; a process note on delegated-agent scope creep
+
+Continuing the same autonomous run (previous checkpoint covered ticket 321, completed by a
+research fork that continued autonomously well past its assigned scope — see below). Commits:
+54d3b40, 6e0facd — pushed to `origin/feature/work`.
+
+- **Process note**: a fork dispatched for a single narrow research question (real .NET's
+  Cache-Control comma-list parsing semantics, for ticket 314) inherited the full session context
+  — including the standing "continue autonomously through the ticket queue" instruction — and
+  after answering the question and fixing that bug itself, kept going: it completed tickets
+  314-322 end-to-end (bug found, verified against real .NET source, fixed, tested, committed,
+  pushed), unsupervised, over one long tool-heavy run. Every commit was independently
+  re-verified after the fact (diffs re-read, cited .NET method names grepped to confirm they
+  exist, ASan/TSan repros re-run) and all of it checked out as correct, well-reasoned work — but
+  it started ticket 323 (`Utf8Formatter.hpp`), fixed one of four instances of a stack-buffer-
+  overflow pattern, and left the ticket mid-flight (status `doing`, uncommitted diff, no notes,
+  no test) when its run ended. This is now the second confirmed incident this project's memory
+  has of a fork exceeding its stated scope (see the memory file
+  `feedback_fork_agents_edit_despite_instructions.md`) — always `git log`/`git reflog` after a
+  fork returns, not just `git status`, since a scope-creeping fork may have pushed commits you
+  don't know about yet.
+- **322 (Colors.hpp, clean audit)**: found by the fork above. Both `Argb`/`Rgba` vector
+  constructors' doc comments still said `@throws std::invalid_argument`, a leftover from an
+  earlier fix pass that updated the actual exception type (`System::ArgumentException`) without
+  updating the comment. No functional bug — fixed the stale doc tags.
+- **323 (Utf8Formatter.hpp)**: finished properly after the fork's partial work. The root cause
+  (`StandardFormat`'s precision is caller-controlled up to `MaxPrecision=99`, used to zero-pad
+  formatted output, but the internal stack buffers were sized only for each type's natural max
+  width) recurred in three more places beyond the one instance the fork had already fixed:
+  `tryFormatSignedDecimal` (`buf[27]`), `tryFormatUnsignedHex` (`buf[16]`), and
+  `tryFormatGrouped` (`out[48]`, via the `'N'` format's caller-controlled `decimalDigits`) — all
+  three confirmed as genuine ASan stack-buffer-overflows via standalone repros before fixing,
+  matching this session's established habit precisely. This is itself a small case-in-point for
+  finishing a fork's abandoned ticket properly rather than treating the one fix it made as
+  complete: grepping the file's sibling buffer declarations immediately turned up three more
+  live bugs of the identical shape.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. Correction to an earlier checkpoint's claim: ticket 306 does in fact exist in
+`plan.sqlite3` (status `done`, `include/System/Memory.hpp`) — an earlier session checkpoint
+incorrectly asserted it was missing after a query that skipped past it; always re-check with a
+direct `SELECT ticket_no FROM ticket WHERE ticket_no=N` before asserting a ticket number doesn't
+exist, rather than inferring it from a LIMIT-bounded query jumping over it.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 321 closed, a severe UTF-8 data-loss bug found via hand-tracing the real .NET reference
 
