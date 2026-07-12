@@ -112,6 +112,23 @@ TEST(UInt32Tests, ParseInvalidThrows) {
     EXPECT_THROW(UInt32::Parse("99999999999"),  System::OverflowException);
 }
 
+TEST(UInt32Tests, Parse_TrailingGarbage_Throws) {
+    EXPECT_THROW(UInt32::Parse("5abc"), System::FormatException);
+}
+
+TEST(UInt32Tests, Parse_NegativeValue_Throws) {
+    EXPECT_THROW(UInt32::Parse("-1"), System::OverflowException);
+}
+
+TEST(UInt32Tests, Parse_NegativeZero_Throws) {
+    // Unsigned types reject any leading '-', even "-0". On an LLP64 platform, where
+    // `unsigned long` is the same 32-bit width as UInt32, std::stoul("-1") wraps to
+    // ULONG_MAX == UInt32::MaxValue exactly, which the old `v > MaxValue` (not `>=`) check
+    // did not catch -- and std::stoul("-0") returns the literal 0 on every platform, which
+    // is never caught by any magnitude-based check regardless of width.
+    EXPECT_THROW(UInt32::Parse("-0"), System::OverflowException);
+}
+
 TEST(UInt32Tests, TryParseSuccess) {
     SharpRuntime::uintcs v = 0;
     EXPECT_TRUE(UInt32::TryParse("4294967295", v));

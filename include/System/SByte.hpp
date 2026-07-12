@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -45,14 +46,28 @@ namespace System {
          * @throws System::FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static sbytecs Parse(const std::string& s) {
+            // Unlike Byte/Int16/Int32/Int64/UInt64::Parse, this previously called
+            // std::stoi(s) without capturing the parse-end position, so trailing non-
+            // whitespace garbage (e.g. "5abc") was silently ignored instead of rejected --
+            // confirmed via a standalone repro that std::stoi("5abc") returns 5 without
+            // throwing. Real .NET's NumberStyles.Integer parity requires the entire string
+            // (aside from leading/trailing whitespace) to be consumed.
+            std::size_t pos = 0;
+            int v;
             try {
-                int v = std::stoi(s);
-                if (v < MinValue || v > MaxValue)
-                    throw System::OverflowException("Value was either too large or too small for a signed byte.");
-                return static_cast<int8_t>(v);
-            } catch (const System::OverflowException&) { throw; }
-              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a signed byte."); }
-              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+                v = std::stoi(s, &pos);
+            } catch (const std::out_of_range&) {
+                throw System::OverflowException("Value was either too large or too small for a signed byte.");
+            } catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            if (v < MinValue || v > MaxValue)
+                throw System::OverflowException("Value was either too large or too small for a signed byte.");
+            return static_cast<int8_t>(v);
         }
 
         /**

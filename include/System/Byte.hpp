@@ -250,12 +250,23 @@ namespace System {
          * @brief Parses @p s as a decimal Byte value.
          *
          * C++ counterpart of .NET Byte.Parse(string) with NumberStyles.Integer:
-         * leading/trailing whitespace and a leading sign are tolerated, but any
-         * trailing non-whitespace character is rejected.
+         * leading/trailing whitespace and a leading sign are tolerated, but a leading '-'
+         * always overflows (unsigned types reject any negative sign, even "-0" -- verified
+         * against real .NET's Number.Parsing.cs: `(!TInteger.IsSigned && number.IsNegative)`
+         * is an overflow condition checked independent of magnitude) and any trailing
+         * non-whitespace character is rejected. The general `v < 0` check below catches every
+         * negative case except "-0" specifically, since std::stoi("-0") returns the literal
+         * int 0 (confirmed via a standalone repro) -- not a negative value -- so it previously
+         * passed both the `v < 0` and `v > MaxValue` checks and silently returned 0 instead of
+         * throwing.
          * @throws System::FormatException on bad format.
-         * @throws System::OverflowException if the value is outside [0, 255].
+         * @throws System::OverflowException if the value is outside [0, 255], or the string
+         *         has a leading '-'.
          */
         [[nodiscard]] static bytecs Parse(const std::string& s) {
+            std::size_t start = s.find_first_not_of(" \t\n\r\f\v");
+            if (start != std::string::npos && s[start] == '-')
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             std::size_t pos = 0;
             int v;
             try {

@@ -15,6 +15,15 @@ TEST(SByteTest, MinValue) { EXPECT_EQ(SByte::MinValue, sbytecs(-128)); }
 TEST(SByteTest, Parse_Valid) { EXPECT_EQ(SByte::Parse("42"), sbytecs(42)); }
 TEST(SByteTest, Parse_Negative) { EXPECT_EQ(SByte::Parse("-10"), sbytecs(-10)); }
 TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), System::OverflowException); }
+TEST(SByteTest, Parse_TrailingGarbage_Throws) {
+    // std::stoi(s) without capturing the parse-end position previously accepted trailing
+    // garbage silently (e.g. "5abc" parsed as 5).
+    EXPECT_THROW(SByte::Parse("5abc"), System::FormatException);
+}
+TEST(SByteTest, Parse_NegativeZero_IsZero) {
+    // SByte is signed, so "-0" legitimately parses to 0 (unlike the unsigned integer types).
+    EXPECT_EQ(SByte::Parse("-0"), sbytecs(0));
+}
 
 TEST(SByteTest, TryParse_Valid) {
     sbytecs r = 0;

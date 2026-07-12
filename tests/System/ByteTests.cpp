@@ -30,6 +30,12 @@ TEST(ByteTests, Parse_TooLarge_Throws) {
 TEST(ByteTests, Parse_Invalid_Throws) {
     EXPECT_THROW(Byte::Parse("abc"), System::FormatException);
 }
+TEST(ByteTests, Parse_NegativeZero_Throws) {
+    // Unsigned types reject any leading '-', even "-0" -- std::stoi("-0") returns the
+    // literal int 0 (not negative), which previously passed both the v<0 and v>MaxValue
+    // checks and silently returned 0 instead of throwing OverflowException.
+    EXPECT_THROW(Byte::Parse("-0"), System::OverflowException);
+}
 
 TEST(ByteTests, TryParse_Valid_ReturnsTrue) {
     bytecs r = 0;

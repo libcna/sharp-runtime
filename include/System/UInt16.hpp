@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -33,17 +34,41 @@ namespace System {
 
         /**
          * @brief Converts the string representation of a number to its UInt16 equivalent.
-         * @throws System::OverflowException if the value exceeds UInt16 range.
+         *
+         * C++ counterpart of .NET UInt16.Parse(string) with NumberStyles.Integer: leading/
+         * trailing whitespace and a leading sign are tolerated, but a leading '-' always
+         * overflows (unsigned types reject any negative sign, even "-0" -- verified against
+         * real .NET's Number.Parsing.cs: `(!TInteger.IsSigned && number.IsNegative)` is an
+         * overflow condition checked independent of magnitude) and any trailing non-whitespace
+         * character is rejected. This previously called std::stoul(s) without capturing the
+         * parse-end position (so trailing garbage like "5abc" was silently accepted) and
+         * without rejecting a leading '-' explicitly -- the latter was *usually* still caught
+         * because std::stoul("-1") wraps to a huge unsigned long that exceeds UInt16::MaxValue,
+         * but "-0" wraps to a literal 0 (confirmed via a standalone repro), which is <=
+         * MaxValue and so silently succeeded instead of throwing.
+         * @throws System::OverflowException if the value exceeds UInt16 range, or the string
+         *         has a leading '-'.
          * @throws System::FormatException if the string is not a valid integer.
          */
         static SharpRuntime::ushortcs Parse(const std::string& s) {
+            std::size_t start = s.find_first_not_of(" \t\n\r\f\v");
+            if (start != std::string::npos && s[start] == '-')
+                throw System::OverflowException("Value was either too large or too small for a UInt16.");
+            std::size_t pos = 0;
+            unsigned long v;
             try {
-                unsigned long v = std::stoul(s);
-                if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt16.");
-                return static_cast<uint16_t>(v);
-            } catch (const System::OverflowException&) { throw; }
-              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a UInt16."); }
-              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+                v = std::stoul(s, &pos);
+            } catch (const std::out_of_range&) {
+                throw System::OverflowException("Value was either too large or too small for a UInt16.");
+            } catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt16.");
+            return static_cast<uint16_t>(v);
         }
 
         /**

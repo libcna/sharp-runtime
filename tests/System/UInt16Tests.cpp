@@ -31,6 +31,21 @@ TEST(UInt16Test, ParseOverflowThrows) {
     EXPECT_THROW(UInt16::Parse("65536"), System::OverflowException);
 }
 
+TEST(UInt16Test, Parse_TrailingGarbage_Throws) {
+    EXPECT_THROW(UInt16::Parse("5abc"), System::FormatException);
+}
+
+TEST(UInt16Test, Parse_NegativeValue_Throws) {
+    EXPECT_THROW(UInt16::Parse("-1"), System::OverflowException);
+}
+
+TEST(UInt16Test, Parse_NegativeZero_Throws) {
+    // Unsigned types reject any leading '-', even "-0" -- std::stoul("-0") returns the
+    // literal 0 (not a huge wrapped value), which previously passed the v>MaxValue check
+    // and silently returned 0 instead of throwing OverflowException.
+    EXPECT_THROW(UInt16::Parse("-0"), System::OverflowException);
+}
+
 TEST(UInt16Test, TryParseSuccess) {
     uint16_t result = 0;
     EXPECT_TRUE(UInt16::TryParse("500", result));
