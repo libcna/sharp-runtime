@@ -31,6 +31,14 @@ TEST(TimeSpanTests, ConstructorFull) {
     EXPECT_EQ(ts.getMicrosecondsProperty(), 6);
 }
 
+// The 6-arg constructor's TimeToTicks used signed int64 arithmetic that could genuinely
+// signed-integer-overflow (UB, confirmed via a standalone UBSan repro) for extreme component
+// values -- days == INT32_MAX pushes the intermediate microsecond total ~20x past INT64_MAX.
+// Fixed by computing in uint64_t (defined wraparound); this must still throw, not crash/UB.
+TEST(TimeSpanTests, ConstructorFull_ExtremeDays_ThrowsWithoutUB) {
+    EXPECT_THROW(TimeSpan(2147483647, 0, 0, 0, 0, 0), System::ArgumentOutOfRangeException);
+}
+
 TEST(TimeSpanPropertyTest, GettersFromConstructedTimeSpan) {
     // TimeSpan(d, h, m, s, ms, us)
     TimeSpan ts(1, 2, 3, 4, 5, 6); // 1d 2h 3m 4s 5ms 6us
@@ -405,6 +413,28 @@ TEST(TimeSpanTests, TryParse_Negative) {
     TimeSpan ts;
     EXPECT_TRUE(TimeSpan::TryParse("-01:00:00", ts));
     EXPECT_EQ(ts.getTotalHoursProperty(), -1.0);
+}
+
+// sscanf() only checks that a matching prefix exists, not that the whole input was consumed;
+// this previously let "12:34:56garbage" silently parse as 12:34:56 instead of being rejected,
+// unlike real .NET's TimeSpan.Parse (throws FormatException for any unconsumed trailing text).
+TEST(TimeSpanTests, TryParse_TrailingGarbage_ReturnsFalse) {
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("12:34:56garbage", ts));
+}
+
+TEST(TimeSpanTests, TryParse_TrailingGarbageAfterFraction_ReturnsFalse) {
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("00:00:01.5000000garbage", ts));
+}
+
+TEST(TimeSpanTests, TryParse_TrailingWhitespace_ReturnsFalse) {
+    TimeSpan ts;
+    EXPECT_FALSE(TimeSpan::TryParse("12:34:56 ", ts));
+}
+
+TEST(TimeSpanTests, Parse_TrailingGarbage_ThrowsFormatException) {
+    EXPECT_THROW(TimeSpan::Parse("01:30:00xyz"), System::FormatException);
 }
 
 TEST(TimeSpanTests, TryParse_Invalid_ReturnsFalse) {
