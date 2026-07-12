@@ -41,6 +41,18 @@ namespace System {
         static constexpr longcs MaxTicks            = 3155378975999999999LL;
 
     private:
+        // Matches real .NET's private MaxDays/MaxHours constants (DateTime.cs: `MaxTicks /
+        // TimeSpan.TicksPerDay` etc.) -- AddDays/AddHours must reject a unit count whose
+        // product with TicksPer{Day,Hour} would itself overflow int64 *before* multiplying,
+        // since `static_cast<longcs>(days) * TicksPerDay` for a merely large (not even
+        // extreme) `int` day count is real signed-overflow UB in C++ otherwise (confirmed via
+        // UBSan: 1e9 days or 1e9 hours both overflow). AddMinutes/AddSeconds/AddMilliseconds
+        // don't need an equivalent guard: their own MaxMinutes/MaxSeconds/MaxMilliseconds
+        // bounds exceed intcs's range, so no representable int argument can reach the
+        // multiplication-overflow threshold for those units.
+        static constexpr longcs MaxDays  = MaxTicks / TicksPerDay;
+        static constexpr longcs MaxHours = MaxTicks / TicksPerHour;
+
         longcs ticks_;
 
         /**

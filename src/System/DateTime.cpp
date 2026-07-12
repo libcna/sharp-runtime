@@ -120,31 +120,47 @@ namespace System {
     // -------------------------------------------------------------------------
 
     DateTime DateTime::Add(const TimeSpan& value) const {
-        return DateTime(ticks_ + value.getTicksProperty());
+        return AddTicks(value.getTicksProperty());
     }
 
     DateTime DateTime::AddDays(int days) const {
-        return DateTime(ticks_ + static_cast<longcs>(days) * TicksPerDay);
+        if (days < -MaxDays || days > MaxDays)
+            throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
+        return AddTicks(static_cast<longcs>(days) * TicksPerDay);
     }
 
     DateTime DateTime::AddHours(int hours) const {
-        return DateTime(ticks_ + static_cast<longcs>(hours) * TicksPerHour);
+        if (hours < -MaxHours || hours > MaxHours)
+            throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
+        return AddTicks(static_cast<longcs>(hours) * TicksPerHour);
     }
 
     DateTime DateTime::AddMinutes(int minutes) const {
-        return DateTime(ticks_ + static_cast<longcs>(minutes) * TicksPerMinute);
+        // No upfront Max* bound check needed here (unlike AddDays/AddHours): MaxTicks /
+        // TicksPerMinute exceeds intcs's representable range, so no int argument can make
+        // this multiplication overflow int64.
+        return AddTicks(static_cast<longcs>(minutes) * TicksPerMinute);
     }
 
     DateTime DateTime::AddSeconds(int seconds) const {
-        return DateTime(ticks_ + static_cast<longcs>(seconds) * TicksPerSecond);
+        return AddTicks(static_cast<longcs>(seconds) * TicksPerSecond);
     }
 
     DateTime DateTime::AddMilliseconds(int milliseconds) const {
-        return DateTime(ticks_ + static_cast<longcs>(milliseconds) * TicksPerMillisecond);
+        return AddTicks(static_cast<longcs>(milliseconds) * TicksPerMillisecond);
     }
 
     DateTime DateTime::Subtract(const TimeSpan& value) const {
-        return DateTime(ticks_ - value.getTicksProperty());
+        // Matches real .NET's DateTime.Subtract(TimeSpan): `ulong ticks = (ulong)(Ticks -
+        // value._ticks); if (ticks > MaxTicks) throw;`. Unsigned arithmetic wraps on
+        // overflow/underflow by well-defined C++ semantics (unlike signed, which would be UB
+        // here for a TimeSpan near TimeSpan::MinValue/MaxValue), and the single unsigned
+        // comparison catches every invalid case -- wrapped-negative-to-huge or genuinely
+        // out-of-range -- the same way the constructor's own range check does.
+        const auto diff = static_cast<SharpRuntime::ulongcs>(ticks_) - static_cast<SharpRuntime::ulongcs>(value.getTicksProperty());
+        if (diff > static_cast<SharpRuntime::ulongcs>(MaxTicks))
+            throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
+        return DateTime(static_cast<longcs>(diff));
     }
 
     TimeSpan DateTime::Subtract(const DateTime& value) const {
@@ -152,10 +168,16 @@ namespace System {
     }
 
     DateTime DateTime::AddTicks(longcs value) const {
-        const longcs newTicks = ticks_ + value;
-        if (newTicks < 0 || newTicks > MaxTicks)
-            throw System::ArgumentOutOfRangeException("value", "DateTime: resulting ticks out of range");
-        return DateTime(newTicks);
+        // Matches real .NET's DateTime.AddTicks: `ulong ticks = (ulong)(Ticks + value); if
+        // (ticks > MaxTicks) throw;`. Computing `ticks_ + value` directly in signed int64
+        // arithmetic (the previous version of this method) is undefined behavior in C++ when
+        // it overflows -- confirmed via UBSan for e.g. ticks_ == MaxTicks, value ==
+        // Int64::MaxValue. Unsigned addition wraps by well-defined C++ semantics instead, and
+        // the single unsigned comparison against MaxTicks catches every invalid case.
+        const auto newTicks = static_cast<SharpRuntime::ulongcs>(ticks_) + static_cast<SharpRuntime::ulongcs>(value);
+        if (newTicks > static_cast<SharpRuntime::ulongcs>(MaxTicks))
+            throw System::ArgumentOutOfRangeException("value", "Value to add was out of range.");
+        return DateTime(static_cast<longcs>(newTicks));
     }
 
     DateTime DateTime::AddMonths(int months) const {
