@@ -151,6 +151,9 @@ TEST(ByteTests, DivRem_WithRemainder) {
     EXPECT_EQ(q, bytecs(3));
     EXPECT_EQ(r, bytecs(1));
 }
+TEST(ByteTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(Byte::DivRem(bytecs(10), bytecs(0)), System::DivideByZeroException);
+}
 
 // ---------------------------------------------------------------------------
 // IsEvenInteger / IsOddInteger

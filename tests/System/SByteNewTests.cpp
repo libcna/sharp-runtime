@@ -39,6 +39,9 @@ TEST(SByteNewTests, DivRem_WithRemainder) {
     auto [q, r] = SByte::DivRem(sbytecs(10), sbytecs(3));
     EXPECT_EQ(q, sbytecs(3)); EXPECT_EQ(r, sbytecs(1));
 }
+TEST(SByteNewTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(SByte::DivRem(sbytecs(10), sbytecs(0)), System::DivideByZeroException);
+}
 
 TEST(SByteNewTests, IsEvenInteger_Zero_True) { EXPECT_TRUE(SByte::IsEvenInteger(sbytecs(0))); }
 TEST(SByteNewTests, IsEvenInteger_One_False) { EXPECT_FALSE(SByte::IsEvenInteger(sbytecs(1))); }

@@ -679,6 +679,9 @@ TEST(UInt16Tests, Clamp_AboveMax)         { EXPECT_EQ(UInt16::Clamp(200, 10, 100
 TEST(UInt16Tests, Sign_Zero)              { EXPECT_EQ(UInt16::Sign(0), 0); }
 TEST(UInt16Tests, Sign_Positive)          { EXPECT_EQ(UInt16::Sign(7), 1); }
 TEST(UInt16Tests, DivRem)                 { auto [q, r] = UInt16::DivRem(17, 5); EXPECT_EQ(q, 3u); EXPECT_EQ(r, 2u); }
+TEST(UInt16Tests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(UInt16::DivRem(10, 0), System::DivideByZeroException);
+}
 TEST(UInt16Tests, IsEvenInteger_Even)     { EXPECT_TRUE(UInt16::IsEvenInteger(4)); }
 TEST(UInt16Tests, IsEvenInteger_Odd)      { EXPECT_FALSE(UInt16::IsEvenInteger(3)); }
 TEST(UInt16Tests, IsOddInteger_Odd)       { EXPECT_TRUE(UInt16::IsOddInteger(7)); }

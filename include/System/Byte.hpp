@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -120,8 +121,14 @@ namespace System {
          * @brief Returns the quotient and remainder of @p left / @p right.
          *
          * C++ counterpart of .NET Byte.DivRem(byte, byte).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
          */
         [[nodiscard]] static std::pair<bytecs, bytecs> DivRem(bytecs left, bytecs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return {static_cast<bytecs>(left / right),
                     static_cast<bytecs>(left % right)};
         }

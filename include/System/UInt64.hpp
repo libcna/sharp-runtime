@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -125,9 +126,17 @@ namespace System {
         /** @brief Returns 0 if value is zero; 1 otherwise. */
         static intcs Sign(SharpRuntime::ulongcs value) { return value == 0 ? 0 : 1; }
 
-        /** @brief Divides left by right and returns a (quotient, remainder) pair. */
+        /**
+         * @brief Divides left by right and returns a (quotient, remainder) pair.
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
+         */
         static std::pair<SharpRuntime::ulongcs, SharpRuntime::ulongcs>
         DivRem(SharpRuntime::ulongcs left, SharpRuntime::ulongcs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return { left / right, left % right };
         }
 

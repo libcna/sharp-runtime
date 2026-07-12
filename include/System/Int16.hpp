@@ -14,6 +14,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -132,8 +133,17 @@ public:
     /**
      * @brief Returns the quotient and remainder of @p left / @p right.
      * C++ counterpart of .NET Int16.DivRem(short,short).
+     * @throws System::DivideByZeroException if @p right is zero -- integer division by
+     *         zero is undefined behavior in C++ (a hardware trap, not a catchable
+     *         exception), unlike the CLR's div instruction which .NET surfaces as a
+     *         managed DivideByZeroException; this must be checked explicitly. No
+     *         MinValue/-1 overflow check is needed: short operands promote to int in
+     *         C++ arithmetic (matching the CLR's int32-width IL arithmetic for short),
+     *         so short.MinValue/-1 does not overflow at the width the division runs at.
      */
     [[nodiscard]] static std::pair<SharpRuntime::shortcs, SharpRuntime::shortcs> DivRem(SharpRuntime::shortcs left, SharpRuntime::shortcs right) {
+        if (right == 0)
+            throw System::DivideByZeroException();
         return {static_cast<SharpRuntime::shortcs>(left / right), static_cast<SharpRuntime::shortcs>(left % right)};
     }
 

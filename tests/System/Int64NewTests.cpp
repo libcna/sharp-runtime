@@ -49,6 +49,12 @@ TEST(Int64NewTests, DivRem_Exact) {
     auto [q,r] = Int64::DivRem(10LL, 2LL);
     EXPECT_EQ(q, 5LL); EXPECT_EQ(r, 0LL);
 }
+TEST(Int64NewTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(Int64::DivRem(10LL, 0LL), System::DivideByZeroException);
+}
+TEST(Int64NewTests, DivRem_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Int64::DivRem(Int64::MinValue, -1LL), System::OverflowException);
+}
 TEST(Int64NewTests, DivRem_WithRemainder) {
     auto [q,r] = Int64::DivRem(10LL, 3LL);
     EXPECT_EQ(q, 3LL); EXPECT_EQ(r, 1LL);

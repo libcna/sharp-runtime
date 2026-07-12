@@ -14,6 +14,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Int128.hpp"
 #include "System/OverflowException.hpp"
@@ -154,8 +155,22 @@ namespace System {
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
          * C++ counterpart of .NET Int64.DivRem(long,long).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
+         * @throws System::OverflowException if @p left is MinValue and @p right is -1
+         *         (the mathematical result does not fit in Int64; the CLR's div
+         *         instruction traps on this input and .NET surfaces it as
+         *         OverflowException). int64_t division runs at native width with no
+         *         wider promotion available, so this is real, reachable undefined
+         *         behavior in C++ if left unchecked -- same bug class as Int32::DivRem.
          */
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs left, longcs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
+            if (left == MinValue && right == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return {left / right, left % right};
         }
 
