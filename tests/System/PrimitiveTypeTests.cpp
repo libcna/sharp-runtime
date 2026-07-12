@@ -141,6 +141,11 @@ TEST(Int32Tests, ToString_D_Negative)    { EXPECT_EQ(Int32::ToString(-5, std::st
 TEST(Int32Tests, ToString_G)             { EXPECT_EQ(Int32::ToString(99, std::string("G")), "99"); }
 TEST(Int32Tests, ToString_B_Basic)       { EXPECT_EQ(Int32::ToString(5, std::string("B")), "101"); }
 TEST(Int32Tests, ToString_B_Padded)      { EXPECT_EQ(Int32::ToString(5, std::string("B8")), "00000101"); }
+TEST(Int32Tests, ToString_MalformedWidth_ThrowsFormatException) {
+    // std::stoi's raw std::invalid_argument/out_of_range must not escape as-is.
+    EXPECT_THROW(Int32::ToString(5, std::string("Xz")), System::FormatException);
+    EXPECT_THROW(Int32::ToString(5, std::string("X99999999999999999999")), System::FormatException);
+}
 
 // ---------------------------------------------------------------------------
 // Int32 — arithmetic helpers
@@ -162,9 +167,29 @@ TEST(Int32Tests, DivRem_NegativeDividend) {
     EXPECT_EQ(q, -3);
     EXPECT_EQ(r, -1);
 }
+TEST(Int32Tests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    // Integer division by zero is undefined behavior (hardware trap) in C++, unlike the
+    // CLR's div instruction which .NET surfaces as a catchable DivideByZeroException.
+    EXPECT_THROW(Int32::DivRem(10, 0), System::DivideByZeroException);
+}
+TEST(Int32Tests, DivRem_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Int32::DivRem(Int32::MinValue, -1), System::OverflowException);
+}
 TEST(Int32Tests, Abs_Positive) { EXPECT_EQ(Int32::Abs(42), 42); }
 TEST(Int32Tests, Abs_Negative) { EXPECT_EQ(Int32::Abs(-42), 42); }
 TEST(Int32Tests, Abs_Zero)     { EXPECT_EQ(Int32::Abs(0), 0); }
+TEST(Int32Tests, CopySign_PositiveValuePositiveSign)  { EXPECT_EQ(Int32::CopySign(5, 3), 5); }
+TEST(Int32Tests, CopySign_PositiveValueNegativeSign)  { EXPECT_EQ(Int32::CopySign(5, -3), -5); }
+TEST(Int32Tests, CopySign_NegativeValuePositiveSign)  { EXPECT_EQ(Int32::CopySign(-5, 3), 5); }
+TEST(Int32Tests, CopySign_NegativeValueNegativeSign)  { EXPECT_EQ(Int32::CopySign(-5, -3), -5); }
+TEST(Int32Tests, CopySign_MinValueNegativeSign_ReturnsMinValue) {
+    // MinValue is already negative, so copying a negative sign onto it is a no-op --
+    // must not attempt to negate MinValue, which is undefined behavior in C++.
+    EXPECT_EQ(Int32::CopySign(Int32::MinValue, -1), Int32::MinValue);
+}
+TEST(Int32Tests, CopySign_MinValuePositiveSign_ThrowsOverflowException) {
+    EXPECT_THROW(Int32::CopySign(Int32::MinValue, 1), System::OverflowException);
+}
 TEST(Int32Tests, Clamp_InRange)    { EXPECT_EQ(Int32::Clamp(5, 1, 10), 5); }
 TEST(Int32Tests, Clamp_BelowMin)   { EXPECT_EQ(Int32::Clamp(-5, 1, 10), 1); }
 TEST(Int32Tests, Clamp_AboveMax)   { EXPECT_EQ(Int32::Clamp(15, 1, 10), 10); }

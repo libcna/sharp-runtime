@@ -15,6 +15,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -110,7 +111,14 @@ public:
     static std::string ToString(SharpRuntime::intcs value, const std::string& format) {
         if (format.empty()) return std::to_string(value);
         char type = format[0];
-        int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+        int width = 0;
+        if (format.size() > 1) {
+            try {
+                width = std::stoi(format.substr(1));
+            } catch (const std::exception&) {
+                throw System::FormatException("Format specifier was invalid.");
+            }
+        }
         std::ostringstream oss;
         oss.imbue(std::locale::classic());
         if (type == 'X') {
@@ -202,12 +210,18 @@ public:
      * @param left  The dividend.
      * @param right The divisor.
      * @return A pair {Quotient, Remainder}.
+     * @throws System::DivideByZeroException if @p right is zero -- integer division by
+     *         zero is undefined behavior in C++ (a hardware trap, not a catchable
+     *         exception), unlike the CLR's div instruction which .NET surfaces as a
+     *         managed DivideByZeroException; this must be checked explicitly.
      * @throws System::OverflowException if @p left is MinValue and @p right is -1
      *         (the mathematical result does not fit in Int32; the CLR's div
      *         instruction traps on this input and .NET surfaces it as OverflowException).
      */
     [[nodiscard]] static std::pair<SharpRuntime::intcs, SharpRuntime::intcs>
     DivRem(SharpRuntime::intcs left, SharpRuntime::intcs right) {
+        if (right == 0)
+            throw System::DivideByZeroException();
         if (left == MinValue && right == -1)
             throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         return { left / right, left % right };
@@ -240,16 +254,22 @@ public:
      * @brief Copies the sign of @p sign to the magnitude of @p value.
      *
      * C++ counterpart of .NET Int32.CopySign(int, int).
+     * Real .NET relies on unchecked negation of MinValue wrapping back to MinValue
+     * (C# unchecked arithmetic is defined to wrap) to make the sign<0 branch a no-op for
+     * MinValue. Negating INT32_MIN is undefined behavior in C++, so MinValue is special-cased
+     * explicitly instead of relying on that wraparound.
+     * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
+     *         (there is no positive Int32 representation of MinValue's magnitude).
      */
     [[nodiscard]] static SharpRuntime::intcs CopySign(
             SharpRuntime::intcs value, SharpRuntime::intcs sign) {
-        int32_t absValue = value < 0 ? (value == MinValue ? value : -value) : value;
-        if (sign >= 0) {
-            if (absValue < 0)
+        if (value == MinValue) {
+            if (sign >= 0)
                 throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
-            return absValue;
+            return MinValue;
         }
-        return -absValue;
+        int32_t absValue = value < 0 ? -value : value;
+        return sign >= 0 ? absValue : -absValue;
     }
 
     /**
