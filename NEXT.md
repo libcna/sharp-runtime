@@ -1,10 +1,48 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `efedd98`) — 11708 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `33bd573`) — 11710 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11708 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11710 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 286-287 closed
+
+Continuing the same autonomous run (previous checkpoint covered 282-285). Commits: d0d5668,
+33bd573 — pushed to `origin/feature/work`.
+
+- **286 (ContentDispositionHeaderValue.cpp)**: `tryDecode5987` (RFC 5987 `filename*` decoder)
+  only checked for *at least* 2 single quotes, not *exactly* 2 — real .NET's `TryDecode5987`
+  explicitly rejects a third quote (`quoteIndex == lastQuoteIndex || IndexOf('\'', quoteIndex+1)
+  != lastQuoteIndex`). A well-formed encoder must percent-encode any literal apostrophe in the
+  value, so a raw third quote reliably signals malformed input; this port silently decoded
+  everything after the *second* quote instead of rejecting it.
+- **287 (Random.hpp/.cpp)**: the standout finding this stretch. `Shuffle(std::vector<T>&)` used
+  a completely different algorithm than `Shuffle(Span<T>)` — top-down classic Fisher-Yates
+  (`i: n-1→1, j=Next(i+1)`) vs. real .NET's actual bottom-up loop (`i: 0→n-2, j=Next(i,n)`).
+  Real .NET's `Shuffle(T[])` **delegates entirely** to `Shuffle(Span<T>)` — there's only one
+  algorithm in the reference — so this port's independent vector implementation produced a
+  genuinely different permutation for the same seed, a direct violation of this exact file's own
+  carefully-documented seeded-determinism guarantee (the file had a prior fix round specifically
+  verifying byte-for-byte parity with live Mono reference output for `Next`/`NextDouble`/
+  `NextBytes`). Fixed by making the vector overload delegate to the span overload, matching real
+  .NET exactly. **Process note**: this is the kind of bug that pure code review or "does it
+  compile and pass existing tests" would never catch — the old vector `Shuffle` was internally
+  self-consistent and its own tests (`Shuffle_ChangesOrder`) passed fine — it just diverged
+  silently from its sibling overload and from real .NET. Whenever a class has multiple overloads
+  of what's conceptually "the same operation" (array vs. span, sync vs. async, etc.), it's worth
+  explicitly asking "do these two call the same underlying algorithm, or did someone
+  reimplement it twice?"
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. 20 tickets closed so far this autonomous run (268-287, minus 279 which needed no
+code changes): 268-277 (Half/Array/Matrix4x4/DateTimeFormatInfo/Int32/DivRem-systemic/
+Environment/TimeOnly/DateTime/DateTimeOffset/HebrewCalendar), 278-287 (BinaryData/Ping-
+investigated-and-reverted/Utf8Parser/LinkedList-clean/BigInteger/TlsCipherSuite-clean/
+IPAddress/ContentDispositionHeaderValue/Random). All pushed to `origin/feature/work`, zero
+regressions at any point, full suite run after every single change.
 
 ## Session checkpoint (2026-07-12, autonomous run continuing) — tickets 282-285 closed
 
