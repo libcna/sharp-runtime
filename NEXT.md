@@ -1,10 +1,135 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `8971948`) — 11648 tests passing. Verified via:*
+*Last updated: 2026-07-12 (branch: `feature/work`, HEAD `545fe6c`) — 11651 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11648 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11651 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-12, autonomous run — pausing here) — 17 tickets closed, 2 more real bugs found (266/267), session summary
+
+Continuation of the checkpoints below (same autonomous run). Pausing the run here after a long,
+productive stretch — not blocked on anything, just a natural checkpoint. Everything below this
+point through "Fixed this batch" summarizes the **whole session** for anyone resuming cold;
+skip to "To resume" if you already have context.
+
+### What happened this session, end to end
+
+Started from a clean, fully-classified `plan.sqlite3` `task` table (namespace porting done) with
+the `ticket` table (stabilization work) as the active queue: 609 P2/P3 `todo` at session start.
+User authorized a long unattended run with one constraint (ticket #43, the global `int`→`intcs`
+API policy decision, stays `blocked` — not reopened). Worked the queue sequentially per
+`prompt.md`'s standard workflow (read target file fully, verify every claim against
+`/rv/tmp/runtime/src/libraries/`, fix real bugs with regression tests, build+test clean, update
+`plan.sqlite3`, commit+push, move on without stopping), from ticket 254 through 267, plus
+resolved the one pre-existing `needs_user` ticket (#1161) and filed+resolved a new P1 ticket
+(#1487) discovered mid-session.
+
+**17 tickets closed: 254, 1486, 255, 256, 258, 257, 259, 260, 261, 262, 263, 264, 265, 306,
+1487, 266, 267** (plus #1161 resolved at the very start of this session, before the autonomous
+run began). Two were legitimate clean audits (260 Decimal.cpp, 263 GC.hpp) — thoroughly checked,
+no bug found, nothing to commit. The other 15 all found and fixed **real, verified bugs**, most
+confirmed with a standalone compiled repro (UBSan for overflow/UB cases) before *and after*
+fixing — this was consistently the highest-value habit of the whole session.
+
+Test count: 11557 → 11651 (94 new regression tests, zero regressions at any point — full suite
+was run after every single change, not just at the end). 20 commits pushed to
+`origin/feature/work` (15 fix/feat commits + 5 `docs(NEXT.md)` checkpoints).
+
+### The bugs, roughly by severity
+
+**Serious (memory-safety / crash-class):**
+- `Span<T>`/`ReadOnlySpan<T>`/`Memory<T>`/`ReadOnlyMemory<T>`/`MemoryExtensions`/
+  `ArraySegment<T>`/`String::ToCharArray` (tickets 265/306/1487): bounds checks computed as
+  `start + length > total` directly in 32-bit arithmetic — for large inputs this overflows
+  (confirmed real UB via UBSan) *and* the wrapped negative sum silently **bypasses the bounds
+  check entirely** instead of throwing. Real .NET's own `Span<T>.Slice` source has an explicit
+  comment guarding against exactly this. Two of the affected files had *already-closed* tickets
+  that evidently missed this exact bug — fixed directly rather than left to bitrot, since closed
+  tickets aren't revisited by the queue on their own.
+- `MemoryStream`/`UnmanagedMemoryStream::Write` (ticket 1487): a *more severe* variant of the
+  same root cause — since `Position` can legally be set arbitrarily far past the end (matching
+  real .NET), `position_+count` can genuinely overflow and silently skip the resize/capacity
+  check, so the subsequent copy would **write** through memory wildly beyond the buffer's actual
+  allocation. Real .NET's own source computes this exact sum in a wider type specifically to
+  avoid it; matched with `int64_t` widening.
+- `Int128` `operator+`/`-`/`*`/unary`-`/`/`/`%` (ticket 262): raw signed `__int128` arithmetic,
+  genuinely overflowing for extreme values (5 separate confirmed UBSan repros). Real .NET's
+  unchecked `+`/`-`/`*` wrap silently (fixed via unsigned-arithmetic wraparound); `/`/`%` throw
+  `OverflowException` for `MinValue/-1` even unchecked (matched with an explicit check).
+- `TimeSpan`'s 6-arg `TimeToTicks` (ticket 256/258): real signed-overflow UB for extreme
+  component values (confirmed via UBSan), fixed via `uint64_t` widening.
+- `ClientWebSocket::readFrame()` (ticket 264): unbounded 64-bit frame length read straight off
+  the wire before allocating — a malicious/misbehaving server could trigger a huge allocation
+  attempt (`std::bad_alloc`/`std::length_error`, not catchable as `WebSocketException`). Capped
+  at 256 MiB.
+- `ArrayList` (ticket 255): ~13 methods had **zero** bounds validation at all — out-of-range
+  `index`/`count` hit raw `std::vector` iterator arithmetic directly (UB, not an exception).
+
+**Correctness (wrong behavior on valid or malformed input, not memory-unsafe):**
+- `Math::Min`/`Max(double/float)` (ticket 257): delegated to `std::min`/`std::max`, which don't
+  match .NET's IEEE 754:2019 semantics (NaN propagation asymmetric by argument order; wrong
+  signed-zero tie-break).
+- `Math::DivRem` (ticket 257), `HttpClient` Content-Length/chunk-size (ticket 267): unguarded
+  `std::sto*`/raw division let raw `std::*` exceptions (or a real divide-by-zero trap) escape
+  instead of a catchable `System::` exception — same exception-type-normalization bug class this
+  codebase has fixed repeatedly across sessions.
+- `Environment::ExpandEnvironmentVariables` (ticket 254): a from-scratch scanner that diverges
+  from real .NET's actual (non-obvious) algorithm for how a failed `%name%` token's closing `%`
+  interacts with the next token.
+- `TimeSpan::TryParse` (ticket 256/258): `sscanf`-based parsing accepted trailing garbage
+  (`"12:34:56garbage"` silently parsed as `12:34:56`).
+- `HttpRequestHeaders::isValidHost` (ticket 266): missing NUL-byte rejection present in this
+  same file's sibling validator.
+
+**API completeness (real .NET surface missing, not a bug in what exists):**
+- `BinaryPrimitives` (ticket 259): zero `Int128`/`UInt128` support despite both types being
+  fully ported elsewhere — added 18 methods, and along the way discovered + guarded against a
+  real portability hazard (`Int128.hpp`/`UInt128.hpp` `#error` unconditionally on MSVC just from
+  being included, which would have silently made the whole previously-portable
+  `BinaryPrimitives.hpp` MSVC-unsupported).
+- `List<T>` (ticket 261): missing the 3-arg `IndexOf`/`LastIndexOf(item, startIndex, count)`
+  range-bounded overloads.
+
+### Process notes worth keeping
+
+- **UBSan repros are the single highest-value habit in this codebase's stabilization work.**
+  Every "smells like an overflow" hunch this session turned out to be real when checked with a
+  standalone compiled repro, and the fix was verified to actually eliminate the UB the same way
+  (re-run the repro after fixing, confirm zero sanitizer output). Keep doing this — don't fix an
+  overflow-shaped bug on inspection alone.
+- **A `done` ticket is a claim about the past, not a guarantee about now.** The `Span`/`Memory`
+  bug was found by grepping for the same anti-pattern across the whole codebase after fixing one
+  instance — two of the four files it turned up in already had closed tickets. If you find
+  contradicting evidence about a closed ticket's claims while working on something else, don't
+  let "it's already done" stop you from re-verifying and fixing it.
+- **File a new ticket immediately when a systemic pattern is found mid-ticket**, with a priority
+  reflecting actual severity (not just the current batch's default) — ticket #1487 was P1, not
+  the batch's routine P2, specifically because it was a confirmed memory-safety class. A mental
+  note doesn't survive a context reset; a ticket row does.
+- **Never put backticks in a double-quoted shell string destined for `sqlite3`** — bash
+  interprets them as command substitution even inside a nested SQL string, silently eating the
+  quoted content. Recovered once this session by rewriting the note via a small Python
+  `sqlite3` script instead (immune to shell quoting) — prefer that approach for any ticket note
+  containing code snippets or other shell metacharacters.
+- Two files this session (256/258, 265/306) had two separate ticket rows for the same
+  header+`.cpp` pair — completed both together in one pass each time rather than re-reading the
+  same file twice across two separate sessions.
+
+### To resume
+
+```sql
+sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
+```
+Next up is **ticket 268**. 587 P2 + 6 P3 tickets remain `todo` (100 P2 stay `blocked` on ticket
+#43 — a user decision, not a default next action; do not reopen it without asking). Same
+workflow as every ticket this session: read the target file fully, verify every non-trivial
+claim against `/rv/tmp/runtime/src/libraries/`, fix real bugs with regression tests (confirm
+genuine UB with a standalone UBSan repro before *and after* fixing when it smells like an
+overflow/UB case), build+test clean (`cmake --build build --parallel 8` then
+`./build/SharpRuntimeTests`, expect 11651+ passing), update `plan.sqlite3` (Python for notes
+with code snippets/backticks, not raw shell), commit+push to `feature/work`, move to the next
+ticket without stopping unless a genuinely `blocked`/`needs_user` case comes up.
 
 ## Session checkpoint (2026-07-12, autonomous run continued again) — ticket #1487 (P1) fully closed, 15 tickets closed total this session
 
