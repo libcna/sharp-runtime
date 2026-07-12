@@ -1,10 +1,55 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `451f7d2`) — 11782 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6faf269`) — 11787 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11782 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11787 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 318-319 closed, two more real bugs (ticket 317 was already done, not skipped)
+
+Continuing the same autonomous run (previous checkpoint covered 315-316). Commits: 64a30be,
+6faf269 — pushed to `origin/feature/work`.
+
+- **318 (Net/Http/Headers/HttpResponseHeaders.cpp, first audit pass — only had the original port
+  commit)**: `getAgeProperty()` parsed the Age header via `std::stoll` directly, which tolerates
+  an optional leading `+`/`-` sign. Real .NET's Age header uses `TimeSpanHeaderParser`, whose
+  `HttpRuleParser.GetNumberLength` requires a pure digit run (delta-seconds = `1*DIGIT`, no sign
+  permitted at all) — the exact bug class already fixed this session in
+  `CacheControlHeaderValue::tryParseSeconds` (ticket 314), just not yet applied here since this
+  file hadn't been touched. Confirmed via repro that `"+5"` was silently accepted. Fixed with the
+  same all-digit pre-validation. Also investigated (but did not fix) `tryParseRfc1123`'s
+  unconstrained `sscanf("%d", ...)` widths for the Date header — theoretically UB per the C
+  standard for an out-of-range value, but empirically harmless on this platform (UBSan doesn't
+  instrument precompiled glibc, and the function correctly returned `nullopt` for a
+  deliberately-huge day-of-month field) — flagged as observed-but-unconfirmed rather than
+  speculatively "fixed" with no evidence of an actual problem.
+- **319 (Globalization/TextInfo.hpp)**: `ToTitleCase` split words on whitespace only. Real
+  .NET's actual word-boundary detection (`TextInfo.cs`'s `c_wordSeparatorMask`) treats most
+  punctuation categories — dashes, parens, quotes, other punctuation/symbols — as word
+  separators too (only the apostrophe is a documented exception with bespoke handling). This
+  meant a hyphenated word like `"mary-jane"` was treated as one word and title-cased as
+  `"Mary-jane"` instead of `"Mary-Jane"`. Fixed by extending the word-boundary predicate to
+  include ASCII punctuation other than apostrophe, matching this file's own documented
+  ASCII-only scope (did not attempt the full Unicode-category machinery, digit/mark handling, or
+  the Dutch "ij" special case real .NET also has — genuinely out of scope for a file that already
+  documents itself as ASCII-only). Verified the apostrophe case still matches real .NET's actual
+  behavior after the fix (`"o'brien"` → `"O'brien"`, not `"O'Brien"` — real .NET does not
+  capitalize the letter immediately after an apostrophe).
+
+49 tickets closed this autonomous run so far (268-319, minus 279 and 306 — ticket 317 turned out
+to already be `done`, not a gap). Both tickets this stretch are the same class of finding this
+run has repeatedly produced: an already-known-correct sibling implementation existed elsewhere
+(in-file precedent for 315/316's kind of fix, or a prior-fixed sibling file for 318's exact bug
+shape) or a distinct, previously-un-audited file simply hadn't had its dense algorithmic logic
+checked line-by-line against the real .NET reference yet (319). Continuing to work through the
+`code-audit` P2 queue in ticket-number order; no P0/P1 tickets have surfaced as `todo` this
+entire run.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 315-316 closed, another sibling-family bug plus a wasm32-portability UB fix
 
