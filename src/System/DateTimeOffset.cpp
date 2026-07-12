@@ -193,19 +193,21 @@ namespace System {
     }
 
     DateTimeOffset DateTimeOffset::AddMonths(intcs months) const {
-        int y = getYearProperty(), m = getMonthProperty() + months, d = getDayProperty();
-        y += (m - 1) / 12; m = ((m - 1) % 12 + 12) % 12 + 1;
-        // clamp day to max days in month
-        static const int maxDay[13] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
-        int mx = maxDay[m];
-        if (m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) mx = 29;
-        if (d > mx) d = mx;
-        DateTime newDt(y, m, d, getHourProperty(), getMinuteProperty(), getSecondProperty(), getMillisecondProperty());
-        return DateTimeOffset(newDt, offset_);
+        // Real .NET delegates entirely to DateTime.AddMonths: `AddMonths(int months) =>
+        // Add(ClockDateTime.AddMonths(months))`. The previous version of this method
+        // reimplemented month/year arithmetic from scratch and, in doing so, dropped
+        // DateTime::AddMonths's own bounds validation (months must be in [-120000, 120000])
+        // -- `getMonthProperty() + months` and `years * 12` (in the old AddYears) are both
+        // real signed-integer-overflow UB in C++ for a merely large `months`/`years`
+        // argument (confirmed via UBSan) with no upfront guard to catch it first. Delegating
+        // to the already-fixed, already-validated DateTime::AddMonths matches real .NET and
+        // inherits its overflow safety.
+        return DateTimeOffset(dateTime_.AddMonths(months), offset_);
     }
 
     DateTimeOffset DateTimeOffset::AddYears(intcs years) const {
-        return AddMonths(years * 12);
+        // Real .NET: `AddYears(int years) => Add(ClockDateTime.AddYears(years))`.
+        return DateTimeOffset(dateTime_.AddYears(years), offset_);
     }
 
     DateTimeOffset DateTimeOffset::AddTicks(longcs ticks) const {
