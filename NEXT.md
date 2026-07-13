@@ -1,10 +1,93 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `ae395cb`) — 11999 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `28f91db`) — 12000 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11999 tests from 1198 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12000 tests from 1198 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — `classification-audit` category FULLY DRAINED (all 60 tickets, 5 parallel forks), 8 real gaps found
+
+Continuing the same autonomous run (previous checkpoint covered `ported-type-audit` draining).
+Dispatched 5 parallel forks, 12 namespace-tickets each, covering all 60 `classification-audit`
+tickets (1417-1476) in one round — this category proved genuinely lighter-weight than
+`ported-type-audit`: 4 of 5 forks touched no source files at all (pure `plan.sqlite3` sampling),
+finished in 2-8 minutes each. Verified afterward via `git fetch`+`git log` (no local/origin
+divergence, the one commit landed cleanly), a fresh `cmake --build` + full test run
+(12000/12000), and a direct `SELECT ticket_no, COUNT(*) FROM ticket GROUP BY ticket_no HAVING
+COUNT(*) > 1` to confirm no ticket-number collisions from multiple forks concurrently computing
+`MAX(ticket_no)+1` for their follow-up ticket inserts (none found — all 8 new tickets 1491-1498
+distinct).
+
+**Result: overwhelmingly clean.** Of ~1400+ sampled `task` rows marked `ignored` across all 60
+namespaces, the vast majority were correctly out of scope — internal SIMD/codegen helpers,
+P/Invoke interop layers, reflection/IL-emit internals, Windows-specific COM/ACL/WMI/OLE-DB
+plumbing, legacy/obsolete subsystems (CAS security model, old XSLT engine), and explicit
+broad-framework exclusions (PLINQ, DI containers, expression-tree machinery) — exactly what
+CLAUDE.md's "Known permanent deviations" section already names. **8 genuine gaps found**, each
+correctly handled as a narrow follow-up ticket (not ported inline, not blindly flipping
+`task.status`) per this ticket category's explicit "create tickets for misclassifications, don't
+port broad frameworks" instruction:
+
+- **#1491 System.Diagnostics.Process**: public API, plausibly needed for launching external
+  tools, not implemented anywhere.
+- **#1492 System.Runtime.InteropServices.NativeMemory**: raw aligned allocation (not P/Invoke
+  marshaling, so not actually out of scope despite living in the InteropServices namespace).
+- **#1493 System.Runtime.InteropServices.PosixSignal/PosixSignalRegistration**: cross-platform
+  signal handling.
+- **#1494 SHA3 hash family** (SHA3-256/384/512, Shake128/256, HMACSHA3-256/384/512): marked
+  ignored despite CLAUDE.md's explicit hash-algorithm carve-out ("Hash algorithms... are already
+  ported and remain in scope") — their siblings (SHA1/256/384/512, HMAC, PBKDF2) are already
+  ported, this looks like a straightforward earlier-session oversight, not a scope question.
+- **#1495 System.Security.Cryptography.HKDF**: a key-derivation function, not encryption itself —
+  same reasoning, arguably in scope alongside the other already-ported hash-adjacent primitives.
+- **#1496 System.Net.Http.HttpMessageHandler/DelegatingHandler**: the request pipeline
+  `HttpClient` is actually built on — a synchronous version wouldn't violate this project's
+  existing documented "no async rewrite of the content model" decision.
+- **#1497 System.Threading.LockRecursionException — a plan.sqlite3/reality DRIFT, not a scope
+  error**: the header already exists in the codebase and its sibling types are already marked
+  `ported`; just never got its own `task` row flipped.
+- **#1498 System.Net.Cookie/CookieContainer**: entirely missing despite a fully-ported, heavily
+  audited `HttpClient` — a real gap in an otherwise well-covered area.
+
+**Also fixed inline** (small enough that a follow-up ticket would have been pure overhead):
+`System.ComponentModel.CancelEventHandler` was a trivial one-line missing delegate alias — added
+directly with a test. Commit `28f91db`.
+
+**Also noted, not acted on** (a different workflow's job, not this ticket's): a handful of stale
+`task.status` entries where the row still says non-`ported` despite the type genuinely existing
+and being audited elsewhere this session (`Comparison`, `SequencePosition`,
+`StringNormalizationExtensions` in `System`; `PropertyChangedEventHandler` in
+`System.ComponentModel`). These are drift in the `task` table's bookkeeping, not code gaps —
+flagged in ticket notes for whoever next runs the `task`-table workflow (prompt.md's
+"Initialization" section), not fixed here since changing `task.status` is explicitly a separate
+table/workflow per this ticket category's own scope.
+
+Final verified state: 12000/12000 tests passing (up from 11999 — 1 net new test), 0 errors/0
+warnings, the one commit confirmed on `origin/feature/work` via `git fetch` (no divergence), zero
+ticket-number collisions across 5 concurrent forks each capable of inserting new tickets.
+
+**Milestone**: both `ported-type-audit` (1010 tickets) and `classification-audit` (60 tickets)
+categories are now FULLY DRAINED. `SELECT category, status, COUNT(*) FROM ticket GROUP BY
+category, status` shows only `documentation` (6 todo), `correctness` (2 todo), the newly-created
+follow-up tickets (8 todo, 1491-1498), and `style` (100, permanently blocked on ticket #43)
+remaining in the entire `ticket` table.
+
+### To resume
+Remaining work, in priority+ticket_no order: the 8 new follow-up tickets (1491-1498, mix of
+`ported-type-audit`-shaped real ports — Process, NativeMemory, PosixSignal, SHA3, HKDF,
+HttpMessageHandler, Cookie/CookieContainer — plus one pure `task.status` drift fix for
+LockRecursionException), then `correctness` tickets 1477-1478 (BufferedStream real buffering,
+FileSystemWatcher real OS-level monitoring — both flagged as substantial, real implementation
+work, not audits), then `documentation`/doxygen tickets 1479-1484 (fill Doxygen gaps in 6
+namespace groups). Query: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area,
+title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`. These are few
+enough in number (~16 total) that they likely don't need the parallel-fork treatment — a single
+fork or direct work per ticket is probably more appropriate given each requires real
+implementation/porting work, not a quick audit. Ticket #43 (blocked global int→intcs policy)
+stays `blocked` — never touch. Once this final ~16-ticket tail is done, the entire `ticket` table
+backlog established at the start of this session's "ticket-workflow pivot" (see the much earlier
+checkpoint entry for that pivot) will be fully drained.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — `ported-type-audit` category FULLY DRAINED (final 17-ticket batch), transitioning to `classification-audit`
 
