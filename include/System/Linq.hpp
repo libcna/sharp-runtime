@@ -20,7 +20,16 @@ namespace System::Linq {
      * Partial C++ counterpart of LINQ methods from System.Linq.Enumerable.
      * All operators take a std::vector<T> by value and return a new std::vector.
      *
-     * @note Status: DONE
+     * Implemented: Where, Select, FirstOrDefault, First, LastOrDefault, Any, All, Count,
+     * ToList, Sum, Min, Max, OrderBy, OrderByDescending, Distinct, Reverse, Skip, Take,
+     * Concat, Contains. Not implemented (real .NET's Enumerable surface is 100+ methods):
+     * GroupBy, Join, Zip, SelectMany, ToDictionary, ToHashSet, Average, Aggregate, ElementAt,
+     * SkipWhile, TakeWhile, Except, Intersect, Union, SequenceEqual, Single/SingleOrDefault,
+     * DefaultIfEmpty, Chunk, and more -- add on demand as ported code needs them, per
+     * CLAUDE.md's "No LINQ" policy for code THIS project writes (this class exists only to
+     * support already-ported C#/XNA call sites that use these operators).
+     *
+     * @note Status: PARTIAL
      */
 
     /** @brief Returns elements that satisfy @p predicate. */
