@@ -1,10 +1,34 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `16ad73c`) — 11844 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `4b728b7`) — 11848 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11844 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11848 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 346 closed, a real SIGFPE crash bug
+
+Continuing the same autonomous run (previous checkpoint covered 345). Commit: 4b728b7 — pushed
+to `origin/feature/work`.
+
+- **346 (Math.cpp)**: `Math::DivRem(intcs,intcs,intcs&)`/`DivRem(longcs,longcs,longcs&)` checked
+  only for the zero-divisor case, missing the MinValue/-1 overflow case entirely. Real .NET's
+  `Math.DivRem` relies on the CLR's `idiv` instruction trapping on both failure modes and
+  translating them to `DivideByZeroException`/`OverflowException`; C++ has no such automatic
+  translation. Confirmed via a standalone repro that this doesn't just invoke abstract UB — it
+  raises a real SIGFPE hardware fault and crashes the process outright. Same bug class already
+  fixed in `Int32::DivRem`/`Int64::DivRem` elsewhere in this codebase, just missed in `Math`'s
+  separate, parallel implementation. Fixed both out-param overloads in `Math.cpp`, plus the
+  identical duplicated logic discovered in `Math.hpp`'s two pair-returning `DivRem` overloads
+  (they reimplement the division independently rather than delegating to the out-param
+  versions). Rest of the file (trig/log/exp family, Abs/Min/Max/Clamp/Sign, MaxMagnitude/
+  MinMagnitude, BitIncrement/BitDecrement, etc.) reviewed and confirmed correct against the
+  .NET reference, including several subtle IEEE-754 edge cases already fixed in earlier passes.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 345 closed, real Equals/GetHashCode bugs
 
