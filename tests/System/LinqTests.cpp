@@ -218,6 +218,25 @@ TEST(LinqTests, OrderBy_ByStringLength) {
     EXPECT_EQ(r.back(), "banana");
 }
 
+// Regression tests for ticket 332: real .NET's Enumerable.OrderBy/OrderByDescending are
+// documented as stable sorts -- "if the keys of two elements are equal, the order of the
+// elements is preserved" -- but the port previously used std::sort, which gives no such
+// guarantee. Uses a pair's second element as a distinguishing tiebreaker: all pairs share the
+// same sort key (first element), so only a stable sort preserves their original relative order
+// in the second element.
+TEST(LinqTests, OrderBy_EqualKeys_PreservesOriginalRelativeOrder) {
+    std::vector<std::pair<int, int>> v{{1, 0}, {1, 1}, {1, 2}, {1, 3}, {1, 4}};
+    auto r = OrderBy<std::pair<int, int>, int>(v, [](const std::pair<int, int>& p) { return p.first; });
+    for (size_t i = 0; i < r.size(); ++i)
+        EXPECT_EQ(r[i].second, static_cast<int>(i));
+}
+TEST(LinqTests, OrderByDescending_EqualKeys_PreservesOriginalRelativeOrder) {
+    std::vector<std::pair<int, int>> v{{1, 0}, {1, 1}, {1, 2}, {1, 3}, {1, 4}};
+    auto r = OrderByDescending<std::pair<int, int>, int>(v, [](const std::pair<int, int>& p) { return p.first; });
+    for (size_t i = 0; i < r.size(); ++i)
+        EXPECT_EQ(r[i].second, static_cast<int>(i));
+}
+
 // --- Distinct ---
 
 TEST(LinqTests, Distinct_RemovesDuplicates) {
