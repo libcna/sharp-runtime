@@ -5,6 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/NotSupportedException.hpp"
@@ -28,6 +29,18 @@ using System::Net::Sockets::NetworkStream;
 using System::Net::Sockets::TcpClient;
 using System::Net::Sockets::TcpListener;
 using System::Net::Sockets::UdpClient;
+
+// 2026-07-13 resource-management fix: each of these owns a raw socket fd closed by its
+// destructor -- an implicit shallow copy previously let two instances' destructors both close
+// the same fd. Compile-time check, matching how the original audit finding was itself verified.
+static_assert(!std::is_copy_constructible_v<TcpClient>, "TcpClient must not be copy-constructible");
+static_assert(!std::is_copy_assignable_v<TcpClient>, "TcpClient must not be copy-assignable");
+static_assert(!std::is_copy_constructible_v<TcpListener>, "TcpListener must not be copy-constructible");
+static_assert(!std::is_copy_assignable_v<TcpListener>, "TcpListener must not be copy-assignable");
+static_assert(!std::is_copy_constructible_v<UdpClient>, "UdpClient must not be copy-constructible");
+static_assert(!std::is_copy_assignable_v<UdpClient>, "UdpClient must not be copy-assignable");
+static_assert(!std::is_copy_constructible_v<NetworkStream>, "NetworkStream must not be copy-constructible");
+static_assert(!std::is_copy_assignable_v<NetworkStream>, "NetworkStream must not be copy-assignable");
 
 // ===========================================================================
 // TcpClient

@@ -157,8 +157,13 @@ bool Process::Start() {
     bool redirErr = si.getRedirectStandardErrorProperty();
     if (redirOut && ::pipe(stdoutPipe) != 0)
         throw System::InvalidOperationException(std::string("Failed to create stdout pipe: ") + std::strerror(errno));
-    if (redirErr && ::pipe(stderrPipe) != 0)
+    if (redirErr && ::pipe(stderrPipe) != 0) {
+        // stdoutPipe was already successfully created above -- close it before throwing, or it
+        // leaks both fds (ironic: this failure path fires exactly when fds are scarce, which is
+        // one likely reason ::pipe() just failed).
+        if (redirOut) { ::close(stdoutPipe[0]); ::close(stdoutPipe[1]); }
         throw System::InvalidOperationException(std::string("Failed to create stderr pipe: ") + std::strerror(errno));
+    }
 
     pid_t pid = ::fork();
     if (pid < 0) {

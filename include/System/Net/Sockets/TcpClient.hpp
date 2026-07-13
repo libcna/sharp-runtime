@@ -43,6 +43,15 @@ namespace System::Net::Sockets {
         explicit TcpClient(const IPEndPoint& localEP);
         ~TcpClient();
 
+        // Not copyable: fd_ is a raw owned socket handle closed by the destructor -- an implicit
+        // shallow copy (previously allowed) lets two instances' destructors both close the same
+        // fd, either failing silently or, if the fd was reused in between, closing a handle this
+        // instance doesn't own. Matches Socket's own established copy-deletion. Does not affect
+        // TcpListener::AcceptTcpClient()'s `return TcpClient(fd);`, which is a direct prvalue
+        // construction guaranteed to be copy-elided since C++17 -- no copy or move needed.
+        TcpClient(const TcpClient&) = delete;
+        TcpClient& operator=(const TcpClient&) = delete;
+
         /** @brief Connects to a remote host by name and port. */
         void Connect(const std::string& hostname, intcs port);
 
@@ -79,6 +88,11 @@ namespace System::Net::Sockets {
         explicit TcpListener(const IPEndPoint& localEP);
         TcpListener(const IPAddress& addr, intcs port);
         ~TcpListener();
+
+        // Not copyable: fd_ is a raw owned socket handle closed by the destructor -- see
+        // TcpClient's identical copy-deletion above for the full rationale.
+        TcpListener(const TcpListener&) = delete;
+        TcpListener& operator=(const TcpListener&) = delete;
 
         /** @brief Starts listening for incoming connections (bind + listen). */
         void Start();

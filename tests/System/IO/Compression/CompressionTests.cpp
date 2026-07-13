@@ -62,6 +62,21 @@ using System::IO::Compression::GZipDecoder;
 using System::IO::Compression::GZipEncoder;
 using System::IO::Compression::ZLibDecoder;
 using System::IO::Compression::ZLibEncoder;
+
+namespace {
+// Test double for the 2026-07-13 resource-management fix: verifies DeflateStream/GZipStream/
+// ZLibStream::Close() cleans up zlib state (and doesn't hang/crash on a second Close() call, as
+// the destructor performs) when the inner stream's Write() throws mid-flush.
+class ThrowingWriteStream final : public System::IO::Stream {
+public:
+    System::IO::intcs Read(System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override { return 0; }
+    void Write(const System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override {
+        throw System::IO::IOException("ThrowingWriteStream: simulated write failure.");
+    }
+    void Close() override {}
+    [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+};
+} // namespace
 using System::IO::Stream;
 using System::IO::MemoryStream;
 using System::IO::intcs;
@@ -172,6 +187,17 @@ TEST(GZipStreamTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(gz.Close());
 }
 
+TEST(GZipStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    GZipStream gz(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    // Even with no prior explicit Write(), deflate(Z_FINISH) still emits gzip header/trailer
+    // bytes, so Close()'s flush loop calls inner Write() at least once.
+    EXPECT_THROW(gz.Close(), System::IO::IOException);
+    // A second Close() (mirroring what the destructor does unconditionally) must not re-enter
+    // the failing flush loop, hang, or throw again -- state_->initialized was already cleared.
+    EXPECT_NO_THROW(gz.Close());
+}
+
 TEST(GZipStreamTests, CompressThenDecompress_Roundtrip) {
     MemoryStream compressed;
     {
@@ -270,6 +296,13 @@ TEST(DeflateStreamTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(ds.Close());
 }
 
+TEST(DeflateStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    DeflateStream ds(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(ds.Close(), System::IO::IOException);
+    EXPECT_NO_THROW(ds.Close());
+}
+
 TEST(DeflateStreamTests, CompressThenDecompress_Roundtrip) {
     MemoryStream compressed;
     {
@@ -362,6 +395,13 @@ TEST(ZLibStreamTests, Flush_DoesNotThrow) {
 TEST(ZLibStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_NO_THROW(zl.Close());
+}
+
+TEST(ZLibStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    ZLibStream zl(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(zl.Close(), System::IO::IOException);
     EXPECT_NO_THROW(zl.Close());
 }
 

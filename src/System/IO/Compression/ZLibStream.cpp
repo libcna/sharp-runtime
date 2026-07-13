@@ -153,24 +153,36 @@ void ZLibStream::Close() {
         return;
     }
     auto& s = *state_;
+    // Mark not-initialized before the flush loop below, which can throw via inner_->Write (e.g.
+    // the inner stream hits a broken pipe or a full disk) -- matches BufferedStream::Close()'s
+    // "set closed state before the throwing operation" pattern. Without this, a second Close()
+    // call (the destructor calls Close() unconditionally, with no try/catch) would re-enter the
+    // same failing flush loop, permanently leaking zlib's deflate/inflate state and risking
+    // std::terminate if it fires during this exception's own unwind.
+    s.initialized = false;
     if (mode_ == CompressionMode::Compress) {
         s.zs.next_in  = nullptr;
         s.zs.avail_in = 0;
-        int ret;
-        do {
-            s.zs.next_out  = s.outbuf;
-            s.zs.avail_out = ZlibZLibState::BUFSIZE;
-            ret = deflate(&s.zs, Z_FINISH);
-            SharpRuntime::intcs produced =
-                ZlibZLibState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
-            if (produced > 0 && inner_)
-                inner_->Write(s.outbuf, 0, produced);
-        } while (ret == Z_OK);
+        try {
+            int ret;
+            do {
+                s.zs.next_out  = s.outbuf;
+                s.zs.avail_out = ZlibZLibState::BUFSIZE;
+                ret = deflate(&s.zs, Z_FINISH);
+                SharpRuntime::intcs produced =
+                    ZlibZLibState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
+                if (produced > 0 && inner_)
+                    inner_->Write(s.outbuf, 0, produced);
+            } while (ret == Z_OK);
+        } catch (...) {
+            deflateEnd(&s.zs);
+            if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
+            throw;
+        }
         deflateEnd(&s.zs);
     } else {
         inflateEnd(&s.zs);
     }
-    s.initialized = false;
     if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
 }
 

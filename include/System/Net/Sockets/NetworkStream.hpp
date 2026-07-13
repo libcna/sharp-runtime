@@ -26,6 +26,13 @@ namespace System::Net::Sockets {
         explicit NetworkStream(int fd);
         ~NetworkStream();
 
+        // Not copyable: fd_ is a raw owned socket handle closed by the destructor -- an implicit
+        // shallow copy (previously allowed) lets two instances' destructors both close the same
+        // fd, either failing silently or, if the fd was reused in between, closing a handle this
+        // instance doesn't own. Matches Socket's own established copy-deletion.
+        NetworkStream(const NetworkStream&) = delete;
+        NetworkStream& operator=(const NetworkStream&) = delete;
+
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
         void  Close() override;
