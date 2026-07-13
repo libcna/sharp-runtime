@@ -1,10 +1,84 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `4f87f42`) — 11948 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `28de291`) — 11967 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11948 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11967 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — sixth `ported-type-audit` batch (50 tickets, 3 parallel forks), 2 more memory-safety bugs found
+
+Continuing the same autonomous run (previous checkpoint covered the 50-ticket header/networking
+batch). Same disjoint-file-set parallel-fork pattern, 3 forks: System.Net.Sockets (24 tickets),
+System.Net.WebSockets (12 tickets), a grab-bag of small types — System.Numerics.Colors,
+System.Runtime.CompilerServices/ExceptionServices/InteropServices/Versioning,
+System.Security.SecurityException (14 tickets). Verified afterward via `git fetch`+`git log` (no
+local/origin divergence, all 8 commits landed cleanly) and a fresh `cmake --build` + full test
+run (11967/11967, matching the last fork's self-reported count). Personally re-verified the
+NetworkStream fix's diff directly given its memory-safety relevance.
+
+**Memory safety: two more buffer-overflow bugs, same shape as prior findings this session
+(XxHash32/64, HttpClient recvExact)**:
+- **NetworkStream::Read/Write** (ticket 1003) had ZERO argument validation, unlike this
+  codebase's other `Stream` implementations (`FileStream::Read`/`Write` already validate). A
+  negative `count` wrapped to a huge `size_t` once cast for the `recv()`/`send()` call, letting
+  the kernel write past the end of a small destination buffer — confirmed via an ASan repro
+  (stack-buffer-overflow) before fixing. Added the same offset/count non-negative validation
+  `FileStream` already has, matching real .NET's `Stream.ValidateBufferArguments` contract. 4
+  regression tests. Commit `659e1f0`.
+- **UdpClient::Send** (ticket 1019) cast caller-supplied `bytes` straight to `size_t` with no
+  bounds check against the actual buffer size — confirmed heap-buffer-overflow via ASan repro.
+  Fixed with bounds validation matching real .NET's `Socket.Send` contract. Commit `34177ce`.
+
+**Other real bugs/gaps fixed:**
+- **SocketException** (1009): the parameterless constructor — arguably .NET's most-used overload,
+  capturing the last OS socket error via `errno`/`WSAGetLastError`-equivalent — was entirely
+  missing. Added it. Commit `b840c88`.
+- **IPPacketInformation/LingerOption/UdpReceiveResult/UnixDomainSocketEndPoint** (999/1001/1020/
+  1021): all four had `Equals`/`operator==` but no `GetHashCode()` — an Equals/GetHashCode
+  contract violation inconsistent with real .NET and this codebase's own convention. Added all
+  four. Commits `90b8909`, `28de291`.
+- **Socket** (1007): documented (not redesigned) a `this`-capture dangling-pointer risk in
+  `ConnectAsync`/`AcceptAsync`/`SendAsync`/`ReceiveAsync` (real background-thread dispatch) — same
+  lifetime-contract shape as the earlier `HttpClientJsonExtensions` finding this session. Commit
+  `1271275`.
+- **ValueWebSocketReceiveResult** (1024): missing `messageType` validation — fixed; documented
+  (not redesigned) a matching buffer-lifetime hazard in `SendAsync`/`ReceiveAsync`. Commit
+  `9b1f8ce`.
+- **OSPlatform** (1088): `GetHashCode()` was entirely missing despite a custom case-insensitive
+  `Equals()` — another Equals/GetHashCode contract violation. Added a matching case-insensitive
+  `GetHashCode()`.
+- **RuntimeInformation** (1089): `getOSArchitectureProperty()` unconditionally aliased
+  `getProcessArchitectureProperty()` instead of querying the actual kernel architecture via
+  `uname()` (real .NET's `Interop.Sys.GetOSArchitecture()` — these genuinely differ for a 32-bit
+  process on a 64-bit kernel). Fixed with a `uname()`-based query and fallback. Commit `a0d4eb5`
+  (covers both OSPlatform and RuntimeInformation fixes).
+- **ExceptionDispatchInfo** (1086): documented (not fixed) a real gap — missing
+  `SetCurrentStackTrace`/`SetRemoteStackTrace`, needs a broader `System::Exception` design change,
+  correctly deferred as out of scope for a single audit pass.
+
+TcpClient/TcpListener (already fixed in an earlier session pass) re-verified clean. Ping (audited
+in the prior batch) confirmed to have a real, working unprivileged-ICMP implementation, not a
+stub — the standing "don't build ICMP blind" caution was already satisfied by a prior session.
+No Windows socket support or permessage-deflate attempted — both correctly respected as
+documented out-of-scope decisions.
+
+Final verified state: 11967/11967 tests passing (up from 11948 — 19 net new tests), 0 errors/0
+warnings, all 8 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+Running tally across all six `ported-type-audit` fork batches this session: 251 tickets closed,
+27 real bugs/gaps found and fixed including two security vulnerabilities (Zip Slip, HTTP CRLF
+header injection) and three memory-safety bugs (XxHash32/64, NetworkStream, UdpClient), 0
+regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 3-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary — for anything security/memory-safety-relevant,
+personally read the diff rather than trusting the fork's summary alone. Checkpoint NEXT.md,
+repeat. Ticket #43 stays `blocked`. The `ported-type-audit` backlog is now ~800 done / ~185 todo.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — fifth `ported-type-audit` batch (50 tickets, 3 parallel forks), HTTP header-injection vuln + more real bugs found
 
