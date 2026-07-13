@@ -1,10 +1,46 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by ticket 362, a DB-only ticket). Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 362 closed (namespace-audit), important process discovery
+
+Continuing the same autonomous run (previous checkpoint covered 355). No commit — this ticket was
+a database-consistency check, touched no git-tracked files (plan.sqlite3 is gitignored).
+
+- **362 (namespace-audit: System.Globalization)**: the `code-audit` ticket category (336-355,
+  which this session processed) is now FULLY DRAINED — `sqlite3 plan.sqlite3 "SELECT COUNT(*)
+  FROM ticket WHERE category='code-audit' AND status='todo'"` returns 0. The next tickets by
+  priority+ticket_no are `namespace-audit` category (362+), a DIFFERENT, broader ticket shape.
+  **Important discovery for future sessions**: `plan.sqlite3`'s `ticket` table has MANY more
+  categories than `code-audit` — a status/category breakdown:
+  `code-audit` 122 done/0 todo (drained this session); `namespace-audit` 8 done/1 doing/42 todo;
+  **`ported-type-audit` 612 done/398 todo (by far the largest remaining category)**;
+  `classification-audit` 0 done/60 todo; `correctness` 49 done/2 todo; `documentation` 19
+  done/6 todo; `style` 100 **blocked** (likely tied to ticket #43's blocked global int→intcs
+  policy — do not reopen). `ported-type-audit` tickets are ONE PER .NET TYPE (title "Verify
+  ported type: System.X.Y"), narrower and more tractable than the file-level `code-audit`
+  tickets. For ticket 362 specifically: verified via precise SQL that all 36
+  `task` rows (namespace='System.Globalization', status='ported') have exactly one matching
+  `ported-type-audit` ticket (780-815) — zero orphans either direction — confirming the
+  "create narrower follow-up tickets for any gap found" deliverable this namespace-audit ticket
+  asked for was ALREADY satisfied by an earlier session's pass. 16-21/36 of those tickets are
+  already `done`; the remaining ~15-20 are `todo` and will surface naturally via the standard
+  `SELECT next todo ticket ORDER BY priority, ticket_no` query used throughout this session.
+  Notably, two of the "done" types (JapaneseCalendar/799, NumberFormatInfo/802) were
+  independently re-audited fresh THIS session under separate `code-audit` tickets (348, 347) and
+  EACH still had a real bug found and fixed — confirming "done" `ported-type-audit` status
+  doesn't preclude a later pass finding more issues; the queue naturally continuing into
+  `ported-type-audit` tickets next is expected to be similarly productive.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"` — this will now surface
+either another `namespace-audit` ticket or (once those are drained) the large `ported-type-audit`
+backlog. Ticket #43 stays `blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 355 closed, negative-length memcpy crash
 
