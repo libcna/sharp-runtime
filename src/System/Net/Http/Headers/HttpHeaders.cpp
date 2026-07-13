@@ -21,27 +21,23 @@ namespace System::Net::Http::Headers {
             return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return isHttpTokenChar(static_cast<unsigned char>(c)); });
         }
 
-        // Rejects bare CR/LF/NUL not part of a valid "\r\n " line-folding sequence, matching the
-        // established validation pattern from WebHeaderCollection::CheckBadHeaderValueChars.
+        // Real .NET's System.Net.Http.Headers.HttpHeaders validates values via
+        // HttpRuleParser.ContainsNewLineOrNull -- a FLAT rejection of any '\r', '\n', or '\0'
+        // anywhere in the value, citing RFC 9110 section 5.5-5 ("Field values containing CR, LF,
+        // or NUL characters are invalid and dangerous"). This is deliberately stricter than the
+        // separate, older System.Net.WebHeaderCollection.CheckBadHeaderValueChars (ported as
+        // WebHeaderCollection::CheckBadHeaderValueChars in this codebase), which still tolerates
+        // a "\r\n " / "\r\n\t" obs-fold sequence for HttpWebRequest-era backward compatibility --
+        // real .NET's own comment on that older helper says so explicitly ("we want to be
+        // permissive in what we accept... it would be a breaking change to reject this"). An
+        // earlier version of this function copied that older, more permissive state machine
+        // instead of this type's own stricter reference behavior, which would have let an
+        // embedded "\r\n evil: header" obs-fold sequence through Add() -- a genuine HTTP header
+        // injection vector once ToString() serializes it back out verbatim.
         void checkValueChars(const std::string& value) {
-            int crlf = 0;
-            for (unsigned char c : value) {
-                switch (crlf) {
-                    case 0:
-                        if (c == '\r') crlf = 1;
-                        else if (c == '\n') crlf = 2;
-                        else if (c == 127 || (c < ' ' && c != '\t'))
-                            throw System::FormatException("The value contains invalid control characters.");
-                        break;
-                    case 1:
-                        if (c == '\n') { crlf = 2; break; }
-                        throw System::FormatException("The value contains invalid CRLF characters.");
-                    case 2:
-                        if (c == ' ' || c == '\t') { crlf = 0; break; }
-                        throw System::FormatException("The value contains invalid control characters.");
-                }
+            if (value.find_first_of("\r\n") != std::string::npos || value.find('\0') != std::string::npos) {
+                throw System::FormatException("The value contains invalid CR, LF, or NUL characters.");
             }
-            if (crlf != 0) throw System::FormatException("The value contains invalid CRLF characters.");
         }
     }
 
