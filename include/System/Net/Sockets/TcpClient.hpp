@@ -22,6 +22,14 @@ namespace System::Net::Sockets {
     class TcpClient {
         [[maybe_unused]] int  fd_        = -1;
         [[maybe_unused]] bool connected_ = false;
+        // Verified against TCPClient.cs's GetStream(): `_dataStream ??= new NetworkStream(...)`
+        // -- real .NET creates the NetworkStream once and returns the SAME cached instance on
+        // every subsequent call. This port previously created a brand-new NetworkStream (and,
+        // on Windows, transferred fd_ away entirely) on every call, so a second GetStream() call
+        // returned an unrelated stream on POSIX and outright threw InvalidOperationException on
+        // Windows (since fd_ had already been transferred to the first stream and connected_ was
+        // reset to false).
+        mutable std::shared_ptr<NetworkStream> stream_;
 
         /** @brief Constructs a TcpClient that already owns a connected socket fd (used by TcpListener). */
         explicit TcpClient(int connectedFd);

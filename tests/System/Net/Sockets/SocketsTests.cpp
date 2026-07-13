@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <stdexcept>
+#include <thread>
 #include "System/InvalidOperationException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/IPAddress.hpp"
@@ -89,6 +90,59 @@ TEST(TcpClientTests, GetStream_Throws_WhenNotConnected) {
     TcpClient client;
     EXPECT_THROW((void)client.GetStream(), System::InvalidOperationException);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
+// Regression tests for ticket 336: real .NET's TcpClient.GetStream() caches and returns the SAME
+// NetworkStream instance on every call (TCPClient.cs: `return _dataStream ??= new
+// NetworkStream(Client, true);`). This port previously created a brand-new NetworkStream (a
+// fresh dup()'d fd) on every call -- and on Windows outright transferred fd_ away on the first
+// call, throwing InvalidOperationException on any second call.
+
+TEST(TcpClientTests, GetStream_ReturnsSameCachedInstance_OnRepeatedCalls) {
+    IPEndPoint listenEp(IPAddress::Parse("127.0.0.1"), 0);
+    TcpListener listener(listenEp);
+    listener.Start();
+    int port = listener.getLocalEndpointProperty().getPortProperty();
+
+    std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+    TcpClient client;
+    client.Connect("127.0.0.1", port);
+    serverThread.join();
+    listener.Stop();
+
+    auto s1 = client.GetStream();
+    auto s2 = client.GetStream();
+    EXPECT_EQ(s1.get(), s2.get());
+}
+
+TEST(TcpClientTests, GetStream_NewInstance_AfterReconnect) {
+    IPEndPoint listenEp(IPAddress::Parse("127.0.0.1"), 0);
+    TcpListener listener(listenEp);
+    listener.Start();
+    int port = listener.getLocalEndpointProperty().getPortProperty();
+
+    TcpClient client;
+    {
+        std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+        client.Connect("127.0.0.1", port);
+        serverThread.join();
+    }
+    auto first = client.GetStream();
+    client.Close();
+
+    {
+        std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+        client.Connect("127.0.0.1", port);
+        serverThread.join();
+    }
+    auto second = client.GetStream();
+    listener.Stop();
+
+    EXPECT_NE(first.get(), second.get());
+}
+
+#endif // !_WIN32 && !__EMSCRIPTEN__
 
 // ===========================================================================
 // TcpListener
