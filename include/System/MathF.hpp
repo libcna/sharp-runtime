@@ -4,11 +4,14 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/MidpointRounding.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides constants and static methods for trigonometric, logarithmic,
@@ -162,7 +165,7 @@ namespace System {
          *         comparison-based implementation would silently return 0 for NaN
          *         instead, since all relational comparisons against NaN are false).
          */
-        static int Sign(float x) {
+        static intcs Sign(float x) {
             if (x < 0.0f) return -1;
             if (x > 0.0f) return 1;
             if (x == 0.0f) return 0;
@@ -209,7 +212,7 @@ namespace System {
          * @param digits Number of decimal places.
          * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 6].
          */
-        static float Round(float x, int digits) {
+        static float Round(float x, intcs digits) {
             return Round(x, digits, MidpointRounding::ToEven);
         }
 
@@ -245,7 +248,7 @@ namespace System {
          * @param mode   Rounding convention.
          * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 6].
          */
-        static float Round(float x, int digits, MidpointRounding mode) {
+        static float Round(float x, intcs digits, MidpointRounding mode) {
             if (digits < 0 || digits > 6)
                 throw System::ArgumentOutOfRangeException("digits", "Rounding digits must be between 0 and 6, inclusive.");
             static constexpr float kPower10[] = { 1e0f, 1e1f, 1e2f, 1e3f, 1e4f, 1e5f, 1e6f };
@@ -266,7 +269,7 @@ namespace System {
         /** @brief Returns true if @p x is negative (including -0 and -infinity). */
         static bool IsNegative(float x)            { return std::signbit(x); }
         /** @brief Returns @p x multiplied by 2 raised to the power @p n. */
-        static float ScaleB(float x, int n)        { return std::scalbn(x, n); }
+        static float ScaleB(float x, intcs n)      { return std::scalbn(x, n); }
         /**
          * @brief Returns the base-2 integer exponent of @p x (i.e. floor(log2(|x|))).
          *
@@ -278,10 +281,10 @@ namespace System {
          * explicitly so the result is correct and portable rather than relying on a
          * library-specific sentinel value.
          */
-        static int ILogB(float x) {
-            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<int>::max();
-            if (x == 0.0f) return std::numeric_limits<int>::min();
-            return std::ilogb(x);
+        static intcs ILogB(float x) {
+            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<int32_t>::max();
+            if (x == 0.0f) return std::numeric_limits<int32_t>::min();
+            return static_cast<intcs>(std::ilogb(x));
         }
         /** @brief Returns an estimate of the reciprocal of @p x (1/x). */
         static float ReciprocalEstimate(float x)   { return 1.0f / x; }

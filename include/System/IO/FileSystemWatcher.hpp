@@ -5,12 +5,15 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/ErrorEventHandler.hpp"
 #include "System/IO/FileSystemEventHandler.hpp"
 #include "System/IO/NotifyFilters.hpp"
 #include "System/IO/RenamedEventHandler.hpp"
 
 namespace System::IO {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Listens to the system directory change notifications and raises events when a
@@ -122,8 +125,8 @@ namespace System::IO {
         void setIncludeSubdirectoriesProperty(bool value) { includeSubdirectories_ = value; }
 
         /** @brief Gets or sets the size of the internal buffer, in bytes. Values below 4096 are clamped to 4096, matching .NET. */
-        [[nodiscard]] int getInternalBufferSizeProperty() const { return static_cast<int>(internalBufferSize_); }
-        void setInternalBufferSizeProperty(int value) {
+        [[nodiscard]] intcs getInternalBufferSizeProperty() const { return static_cast<intcs>(internalBufferSize_); }
+        void setInternalBufferSizeProperty(intcs value) {
             internalBufferSize_ = value < 4096 ? 4096u : static_cast<unsigned int>(value);
         }
 
