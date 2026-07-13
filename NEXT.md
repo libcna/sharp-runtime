@@ -1,10 +1,69 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `c9623bf`) — 11891 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `801b4eb`) — 11899 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11891 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11899 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — second `ported-type-audit` batch (39 tickets, 3 parallel forks), 4 more real bugs found
+
+Continuing the same autonomous run (previous checkpoint covered the first 18-ticket batch).
+Dispatched 3 parallel forks on disjoint file sets: System.Collections.Concurrent/Immutable (9
+tickets), System.Collections.ObjectModel/Specialized (11 tickets), System.Diagnostics debugger/
+attribute types (19 tickets). All verified afterward via `git fetch` + `git log` (confirmed no
+divergence between local and origin, all 4 commits landed cleanly) and a fresh
+`cmake --build` + full test run (11899/11899, matching every fork's self-reported count).
+
+- **661-662, 702-706, 710-711, 714 (Concurrent/Immutable, 9 tickets)**: 7 clean. Two doc-comment
+  bugs fixed — `IImmutableQueue`/`IImmutableStack`'s `Pop`/`Peek` doc-comments claimed
+  `std::out_of_range` but the actual (and real-.NET-matching) behavior is
+  `InvalidOperationException`. Also documented (not fixed) a real, pre-existing API gap in
+  `ImmutableList` — missing `Sort`/`Reverse`/`ForEach`/`CopyTo`/`GetRange`/`ConvertAll`/`Find`
+  family/`ToBuilder`/comparer overloads — catalogued in a class-level doc-comment rather than
+  expanding scope mid-audit. Commit `00e8249`.
+- **715-722, 726, 728, 730-731 (ObjectModel/Specialized, 11 tickets)**: 9 clean (several —
+  Collection, KeyedCollection, ObservableCollection, ReadOnlyDictionary, ReadOnlySet,
+  BitVector32, StringCollection — had already been fixed in earlier sessions; re-verified with no
+  new findings). Two real bugs fixed:
+  - **720 ReadOnlyObservableCollection**: constructor registers a `this`-capturing forwarding
+    lambda with the shared source's `CollectionChanged` list; with no user-declared copy/move,
+    compiler-generated copy/move left the lambda pointing at a stale address once the wrapper was
+    copied/moved/destroyed while the source stayed alive. Confirmed via ASan
+    (stack-use-after-scope). Fixed by deleting copy/move ctor+assignment (matches real .NET's
+    reference-type semantics) plus a `static_assert` regression guard. Commit `b06d3b5`.
+  - **730 BitVector32.Section**: `ToString()` used decimal `mask=N, offset=N` labels instead of
+    real .NET's `Section{0x<hex>, 0x<hex>}` format — a wrong-number-base bug, not just paraphrased
+    text. Added a `toLowerHex()` helper matching .NET's `"x"` format specifier and a regression
+    test pinning the exact string. Commit `801b4eb`.
+- **733-751 (System.Diagnostics, 19 tickets)**: 9 trivial attribute/enum tickets clean outright;
+  5 more (`DebuggerHiddenAttribute`, `DebuggerStepThroughAttribute`, `DebuggerNonUserCodeAttribute`,
+  `DebuggerStepperBoundaryAttribute`, `DebuggerDisableUserUnhandledExceptionsAttribute`) had SPDX
+  headers but were missing the required Doxygen class doc-comment — fixed (doc-only).
+  `Debug`/`DebugProvider`/`StackFrame`/`StackFrameExtensions` all clean on deep audit (StackFrame's
+  raw-`int` members correctly left alone — that's blocked ticket #43's territory, not touched).
+  **`Debugger` — real completeness gap fixed**: `DefaultCategory` and
+  `BreakForUserUnhandledException(Exception)` were missing entirely from the .NET reference
+  surface; added both plus a default-argument fix to `Log()`, with 7 new regression tests.
+  Commit `ebfcc11`.
+
+Final verified state: 11899/11899 tests passing (up from 11891 — 8 net new tests), 0 errors/0
+warnings, all 4 commits confirmed on `origin/feature/work` via `git fetch` (no local/origin
+divergence).
+
+**Process note**: the 3-way disjoint-file-set parallel-fork split worked cleanly a second time —
+no build/git contention despite all three running concurrently and two of them finishing within
+seconds of each other. Continuing this pattern for the remaining `ported-type-audit` backlog
+(now ~360 todo) is confirmed to be both safe and much less context-hungry for the orchestrating
+session than doing every audit inline.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 2-4 parallel forks per round using the established prompt template (see recent
+`Agent` calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full
+test run before trusting each round's summary, checkpoint NEXT.md, repeat. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — first `ported-type-audit` batch (18 tickets), real bugs found via parallel forks
 
