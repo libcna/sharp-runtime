@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
@@ -265,9 +266,20 @@ namespace System::Threading::Tasks {
         /**
          * Creates a Task that completes after the specified delay in milliseconds.
          * On Emscripten, throws PlatformNotSupportedException.
-         * @param milliseconds Delay duration in milliseconds.
+         * @param milliseconds Delay duration in milliseconds. -1 is accepted (matching real
+         * .NET's "no timeout" sentinel for API-surface parity) but is NOT given special infinite-
+         * wait semantics here -- std::chrono::milliseconds(-1) passed to sleep_for simply returns
+         * immediately, unlike real .NET's genuine indefinite wait. Implementing a true infinite,
+         * cancellation-aware wait would need a different mechanism than this class's plain
+         * thread+sleep_for model; deferred as a documented simplification.
+         * @throws System::ArgumentOutOfRangeException if @p milliseconds is less than -1,
+         * matching real .NET's Task.Delay(int) (verified against Task.cs).
          */
         static Task Delay(intcs milliseconds) {
+            if (milliseconds < -1) {
+                throw System::ArgumentOutOfRangeException("millisecondsDelay",
+                    "The value needs to be either -1 (signifying an infinite timeout), 0 or a positive integer.");
+            }
 #if defined(__EMSCRIPTEN__)
             (void)milliseconds;
             throw System::PlatformNotSupportedException("Task::Delay requires pthreads (not available on Emscripten).");

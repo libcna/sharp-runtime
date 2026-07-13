@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 #include "System/AggregateException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -123,6 +124,16 @@ TEST(TaskTests, Run_ThrowingAction_IsFaulted) {
 TEST(TaskTests, Delay_CompletesAfterWait) {
     Task t = Task::Delay(1);
     EXPECT_NO_THROW(t.Wait());
+}
+
+TEST(TaskTests, Delay_NegativeOne_DoesNotThrow) {
+    // -1 is a valid sentinel in real .NET's Task.Delay (API-surface parity only -- see
+    // Delay()'s own doc-comment for why this port doesn't give it true infinite-wait semantics).
+    EXPECT_NO_THROW(Task::Delay(-1).Wait());
+}
+
+TEST(TaskTests, Delay_LessThanNegativeOne_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Task::Delay(-2), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

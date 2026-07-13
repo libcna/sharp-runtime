@@ -268,6 +268,28 @@ TEST(MemoryStreamTests, SeekFromEndComputesFromLength) {
     EXPECT_EQ(newPos, 3);
 }
 
+TEST(MemoryStreamTests, SeekBeforeBeginning_ThrowsIOException) {
+    // Regression for a 2026-07-13 exception-type mismatch fix: Stream::Seek() previously routed
+    // through setPositionProperty() for validation, which throws ArgumentOutOfRangeException --
+    // but real .NET's MemoryStream.Seek (SeekCore) throws IOException specifically for a
+    // resulting position before the start of the stream, a different validation rule from the
+    // Position setter's own (still-correct) ArgumentOutOfRangeException for a direct assignment.
+    MemoryStream ms;
+    uint8_t payload[] = {1, 2, 3, 4, 5};
+    ms.Write(payload, 0, 5);
+    ms.setPositionProperty(0);
+    EXPECT_THROW(ms.Seek(-5, SeekOrigin::Current), System::IO::IOException);
+    EXPECT_THROW(ms.Seek(-1, SeekOrigin::Begin), System::IO::IOException);
+}
+
+TEST(MemoryStreamTests, DirectNegativePositionAssignment_StillThrowsArgumentOutOfRangeException) {
+    // The direct Position-setter path is unaffected by the Seek() fix above -- it's a genuinely
+    // different real-.NET validation rule (verified against MemoryStream.cs's Position setter,
+    // which calls ArgumentOutOfRangeException.ThrowIfNegative unconditionally).
+    MemoryStream ms;
+    EXPECT_THROW(ms.setPositionProperty(-1), System::ArgumentOutOfRangeException);
+}
+
 TEST(MemoryStreamTests, SetLengthTruncates) {
     MemoryStream ms;
     uint8_t payload[] = {1, 2, 3, 4, 5};
