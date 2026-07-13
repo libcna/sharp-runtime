@@ -1,10 +1,31 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `e14ac46`) — 11837 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `978dc76`) — 11841 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11837 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11841 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 341 closed
+
+Continuing the same autonomous run (previous checkpoint covered 339-340). Commits: 02d7a16,
+978dc76 — both pushed to `origin/feature/work`.
+
+- **341 (Collections/Generic/Dictionary.hpp)**: this file had already been through two dedicated
+  audit/fix passes earlier this session (bounds/argument validation, enumeration-invalidation
+  docs) — confirmed no new correctness bugs on this pass. One API-completeness gap fixed:
+  `EnsureCapacity` returned `void`, but real .NET's `Dictionary<TKey,TValue>.EnsureCapacity(int)`
+  returns the resulting capacity — ported code capturing the return value would fail to compile.
+  Changed to return `intcs` (`bucket_count()` after `reserve()`, the closest honest
+  approximation, since `std::unordered_map` has no direct equivalent of .NET's internal
+  entries-array length). A sibling-family grep found the identical gap in `List.hpp` (ticket 261,
+  already closed) and `HashSet.hpp` (ticket 324, already closed) — fixed both the same way.
+  `OrderedDictionary.hpp` already returned `intcs` correctly.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 339-340 closed
 
