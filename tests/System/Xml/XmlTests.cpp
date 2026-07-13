@@ -94,6 +94,33 @@ TEST(XmlReaderTests, CreateFromString_DoesNotThrow) {
     EXPECT_NE(r, nullptr);
 }
 
+// Regression tests for ticket 349: Create(inputUri)'s file-vs-content heuristic previously
+// treated ANY string containing '/' as a file path -- misclassifying extremely common XML
+// content (self-closing tags like "<br/>", URLs in attribute/text content) and sending it to
+// LoadFile(), which fails and throws a misleading "parse error" for perfectly valid XML text.
+// A whitespace-trimmed string starting with '<' is now checked first and always treated as
+// content, since a file path essentially never starts with '<'.
+TEST(XmlReaderTests, Create_ContentWithSelfClosingTag_ParsesAsContentNotFilePath) {
+    // "<br/>" contains '/', which the old heuristic misread as a path separator.
+    std::unique_ptr<XmlReader> r(XmlReader::Create("<root><br/></root>"));
+    EXPECT_TRUE(r->Read());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+    EXPECT_EQ(r->getNameProperty(), "root");
+}
+
+TEST(XmlReaderTests, Create_ContentWithUrlAttribute_ParsesAsContentNotFilePath) {
+    // A namespace-URI-style attribute value contains multiple '/' characters.
+    std::unique_ptr<XmlReader> r(XmlReader::Create("<root xmlns=\"http://example.com/ns\"/>"));
+    EXPECT_TRUE(r->Read());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+}
+
+TEST(XmlReaderTests, Create_LeadingWhitespaceThenContent_ParsesAsContent) {
+    std::unique_ptr<XmlReader> r(XmlReader::Create("   \n<root/>"));
+    EXPECT_TRUE(r->Read());
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Element);
+}
+
 TEST(XmlReaderTests, FirstRead_ReturnsTrueAndElementNode) {
     std::unique_ptr<XmlReader> r(XmlReader::CreateFromString(kSimpleXml));
     EXPECT_TRUE(r->Read());
@@ -225,6 +252,22 @@ TEST(XmlReaderTests, ReadElementContentAsString_ReturnsText) {
     r->Read(); // <msg>
     std::string text = r->ReadElementContentAsString();
     EXPECT_EQ(text, "hello world");
+}
+
+// Regression test for ticket 349: ReadElementContentAsString() didn't track element nesting
+// depth, so a NESTED child element's own EndElement event was indistinguishable from the
+// enclosing element's end. For "<a><b>x</b>y</a>", the old code hit <b>'s EndElement first,
+// mistook it for </a>, returned "x" (dropping "y" entirely), and left the reader positioned
+// mid-content (on the Text("y") node) instead of past </a> -- corrupting every subsequent Read()
+// call, not just the returned string. Verifies both the returned content and that the reader
+// ends up correctly positioned past the enclosing element's own EndElement.
+TEST(XmlReaderTests, ReadElementContentAsString_NestedElement_DoesNotCorruptPositionOrTruncate) {
+    std::unique_ptr<XmlReader> r(XmlReader::CreateFromString("<root><a><b>x</b>y</a>z</root>"));
+    r->Read(); // <root>
+    r->Read(); // <a>
+    (void)r->ReadElementContentAsString(); // must consume through </a>, whatever it returns
+    EXPECT_EQ(r->getNodeTypeProperty(), XmlNodeType::Text);
+    EXPECT_EQ(r->getValueProperty(), "z");
 }
 
 // Regression test for a wave-3 audit finding: CDATA sections were reported as plain

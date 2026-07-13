@@ -227,15 +227,27 @@ std::string XmlReader::ReadElementContentAsString() {
     std::string result;
     // advance past the Element node we're sitting on
     Read();
+    // Tracks nesting depth of any child elements encountered along the way. Without this, a
+    // nested child element's OWN EndElement event was indistinguishable from the enclosing
+    // element's end -- e.g. for "<a><b>x</b>y</a>", the loop would hit <b>'s EndElement first,
+    // treat it as </a>, break early (returning "x" instead of "xy"), and leave the reader
+    // positioned mid-content (on the Text("y") node) rather than past </a> -- corrupting every
+    // subsequent Read() call, not just the returned string.
+    int depth = 0;
     while (state_->pos >= 0 &&
            state_->pos < static_cast<int>(state_->events.size())) {
         const auto& ev = state_->events[static_cast<size_t>(state_->pos)];
         if (ev.type == XmlNodeType::EndElement) {
-            Read(); // consume the end-element
-            break;
-        }
-        if (ev.type == XmlNodeType::Text || ev.type == XmlNodeType::CDATA)
+            if (depth == 0) {
+                Read(); // consume our own end-element
+                break;
+            }
+            --depth;
+        } else if (ev.type == XmlNodeType::Element) {
+            if (!ev.isEmptyElement) ++depth; // self-closing elements have no matching EndElement
+        } else if (depth == 0 && (ev.type == XmlNodeType::Text || ev.type == XmlNodeType::CDATA)) {
             result += ev.value;
+        }
         Read();
     }
     return result;
@@ -277,8 +289,18 @@ static XmlReader* createFromDoc(std::unique_ptr<XmlReaderState> st) {
 
 XmlReader* XmlReader::Create(const std::string& inputUri) {
     auto st = std::make_unique<XmlReaderState>();
-    // Heuristic: treat as file path if it ends with .xml or contains a path separator
-    bool isFile = (inputUri.find('/') != std::string::npos ||
+    // Heuristic: treat as file path if it ends with .xml or contains a path separator --
+    // UNLESS the (whitespace-trimmed) input starts with '<', which is an unambiguous, much
+    // stronger signal that this is XML content rather than a path (a file path essentially
+    // never starts with '<'). Without this check, ANY XML content containing a '/' character
+    // -- extremely common: self-closing tags like "<br/>", URLs in attribute/text content, XML
+    // namespace URIs almost always being "http://..." -- was misclassified as a file path and
+    // sent to LoadFile(), which fails (no such file) and throws a misleading "parse error" for
+    // perfectly valid XML text.
+    std::size_t firstNonSpace = inputUri.find_first_not_of(" \t\r\n");
+    bool looksLikeContent = firstNonSpace != std::string::npos && inputUri[firstNonSpace] == '<';
+    bool isFile = !looksLikeContent &&
+                  (inputUri.find('/') != std::string::npos ||
                    inputUri.find('\\') != std::string::npos ||
                    (inputUri.size() >= 4 &&
                     inputUri.substr(inputUri.size() - 4) == ".xml"));
