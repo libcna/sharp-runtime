@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Globalization/Calendar.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents the Thai Buddhist calendar.
@@ -16,8 +19,8 @@ namespace System::Globalization {
  */
 class ThaiBuddhistCalendar : public Calendar {
 public:
-    static constexpr int ThaiBuddhistEra = 1;   ///< The only era value for this calendar.
-    static constexpr int GregorianOffset = 543;  ///< Years added to the Gregorian year to get the Buddhist Era year.
+    static constexpr intcs ThaiBuddhistEra = 1;   ///< The only era value for this calendar.
+    static constexpr intcs GregorianOffset = 543;  ///< Years added to the Gregorian year to get the Buddhist Era year.
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -55,7 +58,7 @@ public:
      * C++ counterpart of .NET ThaiBuddhistCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 2572 = Gregorian 2029 + 543).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
+    [[nodiscard]] intcs getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
@@ -64,7 +67,7 @@ public:
      * @param value The new maximum two-digit year.
      * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) override {
+    void setTwoDigitYearMaxProperty(intcs value) override {
         VerifyWritable();
         twoDigitYearMax_ = value;
     }
@@ -75,14 +78,14 @@ public:
      * C++ counterpart of .NET ThaiBuddhistCalendar.GetEra(DateTime).
      * @return Always ThaiBuddhistEra (1).
      */
-    [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return ThaiBuddhistEra; }
+    [[nodiscard]] intcs GetEra(const System::DateTime& /*time*/) const override { return ThaiBuddhistEra; }
 
     /**
      * @brief Returns the number of eras in this calendar.
      *
      * @return Always 1; the Thai Buddhist calendar has a single era.
      */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
 
     /**
      * @brief Gets the list of era identifiers supported by this calendar.
@@ -90,7 +93,7 @@ public:
      * C++ counterpart of .NET ThaiBuddhistCalendar.Eras.
      * @return A vector containing {ThaiBuddhistEra}.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {ThaiBuddhistEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {ThaiBuddhistEra}; }
 
     /**
      * @brief Returns the Buddhist Era year for the given DateTime.
@@ -100,7 +103,7 @@ public:
      * @param time The DateTime to convert.
      * @return The Buddhist Era year (Gregorian year + 543).
      */
-    [[nodiscard]] int GetYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetYear(const System::DateTime& time) const override {
         return time.getYearProperty() + GregorianOffset;
     }
 
@@ -113,8 +116,8 @@ public:
      * @param era  Era (unused; always ThaiBuddhistEra).
      * @return true if the corresponding Gregorian year is a leap year.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int /*era*/ = CurrentEra) const override {
-        int gy = year - GregorianOffset;
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs /*era*/ = CurrentEra) const override {
+        intcs gy = year - GregorianOffset;
         return (gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0);
     }
 
@@ -123,7 +126,7 @@ public:
      *
      * C++ counterpart of .NET ThaiBuddhistCalendar.IsLeapMonth(int, int, int).
      */
-    [[nodiscard]] bool IsLeapMonth(int /*year*/, int /*month*/, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapMonth(intcs /*year*/, intcs /*month*/, intcs /*era*/ = CurrentEra) const override {
         return false;
     }
 
@@ -137,7 +140,7 @@ public:
      * @param era   Era (unused).
      * @return true if the date is February 29 in a leap year.
      */
-    [[nodiscard]] bool IsLeapDay(int year, int month, int day, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapDay(intcs year, intcs month, intcs day, intcs /*era*/ = CurrentEra) const override {
         return month == 2 && day == 29 && IsLeapYear(year);
     }
 
@@ -152,7 +155,7 @@ public:
      * @return Number of days in the specified month.
      * @throws System::ArgumentOutOfRangeException if @p month is not in [1, 12].
      */
-    [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInMonth(intcs year, intcs month, intcs /*era*/ = CurrentEra) const override {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
         return (month == 2 && IsLeapYear(year)) ? 29 : days[month];
@@ -166,7 +169,7 @@ public:
      * @param era  Era (unused).
      * @return 366 for leap years, 365 otherwise.
      */
-    [[nodiscard]] int GetDaysInYear(int year, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInYear(intcs year, intcs /*era*/ = CurrentEra) const override {
         return IsLeapYear(year) ? 366 : 365;
     }
 
@@ -185,13 +188,13 @@ public:
      * @param era         Era (unused).
      * @return The Gregorian DateTime corresponding to the given Buddhist date components.
      */
-    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                int second, int millisecond, int /*era*/ = CurrentEra) const override {
+    System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                intcs second, intcs millisecond, intcs /*era*/ = CurrentEra) const override {
         return System::DateTime(year - GregorianOffset, month, day, hour, minute, second, millisecond);
     }
 
 private:
-    int twoDigitYearMax_{2572};
+    intcs twoDigitYearMax_{2572};
 };
 
 } // namespace System::Globalization
