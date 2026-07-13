@@ -262,3 +262,10 @@ TEST(Int64Tests, ToString_MalformedWidth_ThrowsFormatException) {
     EXPECT_THROW(Int64::ToString(5LL, std::string("Xz")), System::FormatException);
     EXPECT_THROW(Int64::ToString(5LL, std::string("X99999999999999999999")), System::FormatException);
 }
+// Regression for ticket 337: real .NET's Int64.ToString supports the "B"/"b" binary format
+// specifier (Number.Formatting.cs's FormatInt64, added in .NET 8) same as Int32; this port's
+// Int64::ToString(value, format) was missing it entirely (silently falling through to plain
+// decimal) even though Int32::ToString already implemented it correctly.
+TEST(Int64Tests, ToString_B_Basic)  { EXPECT_EQ(Int64::ToString(5LL, std::string("B")), "101"); }
+TEST(Int64Tests, ToString_B_Padded) { EXPECT_EQ(Int64::ToString(5LL, std::string("B8")), "00000101"); }
+TEST(Int64Tests, ToString_B_Zero)   { EXPECT_EQ(Int64::ToString(0LL, std::string("B")), "0"); }

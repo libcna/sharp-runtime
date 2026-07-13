@@ -76,7 +76,7 @@ namespace System {
         [[nodiscard]] static std::string ToString(longcs value) { return std::to_string(value); }
 
         /**
-         * @brief Converts @p value to a string using format specifier ("X","x","D","d","G","g").
+         * @brief Converts @p value to a string using format specifier ("X","x","D","d","G","g","B","b").
          * C++ counterpart of .NET Int64.ToString(string).
          */
         [[nodiscard]] static std::string ToString(longcs value, const std::string& format) {
@@ -115,6 +115,21 @@ namespace System {
                 return std::to_string(value);
             }
             if (type == 'G' || type == 'g') return std::to_string(value);
+            // Verified against Number.Formatting.cs's FormatInt64: the "B"/"b" standard numeric
+            // format specifier (binary, added in .NET 8) reinterprets the value's raw bit
+            // pattern as unsigned (UInt64ToBinaryStr((ulong)value, digits)) -- same convention
+            // Int64's "X" branch above already follows for hex, and matching Int32::ToString's
+            // existing "B"/"b" support in this codebase.
+            if (type == 'B' || type == 'b') {
+                if (value == 0) {
+                    return std::string(width > 0 ? static_cast<size_t>(width) : 1u, '0');
+                }
+                std::string bits;
+                uint64_t uv = static_cast<uint64_t>(value);
+                while (uv > 0) { bits = static_cast<char>('0' + (uv & 1)) + bits; uv >>= 1; }
+                while (static_cast<int>(bits.size()) < width) bits = "0" + bits;
+                return bits;
+            }
             return std::to_string(value);
         }
 
@@ -245,16 +260,22 @@ namespace System {
         /**
          * @brief Copies the sign of @p sign to the magnitude of @p value.
          * C++ counterpart of .NET Int64.CopySign(long, long).
+         * Real .NET relies on unchecked negation of MinValue wrapping back to MinValue
+         * (C# unchecked arithmetic is defined to wrap) to make the sign<0 branch a no-op for
+         * MinValue. Negating INT64_MIN is undefined behavior in C++ (confirmed via UBSan), so
+         * MinValue is special-cased explicitly instead of relying on that wraparound -- same fix
+         * shape as Int32::CopySign.
          * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
-         *         (its magnitude does not fit in a signed Int64).
+         *         (there is no positive Int64 representation of MinValue's magnitude).
          */
         [[nodiscard]] static longcs CopySign(longcs value, longcs sign) {
-            longcs absValue = value < 0 ? (value == MinValue ? value : -value) : value;
-            if (sign >= 0) {
-                if (absValue < 0) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
-                return absValue;
+            if (value == MinValue) {
+                if (sign >= 0)
+                    throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
+                return MinValue;
             }
-            return -absValue;
+            longcs absValue = value < 0 ? -value : value;
+            return sign >= 0 ? absValue : -absValue;
         }
 
         /**

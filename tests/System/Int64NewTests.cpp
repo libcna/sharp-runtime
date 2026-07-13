@@ -106,6 +106,13 @@ TEST(Int64NewTests, CopySign_NegativeSign_ReturnsNegative) { EXPECT_EQ(Int64::Co
 TEST(Int64NewTests, CopySign_MinValue_NonNegativeSign_Throws) {
     EXPECT_THROW(Int64::CopySign(Int64::MinValue, 1LL), System::OverflowException);
 }
+// Regression for ticket 337: MinValue is already negative, so copying a negative sign onto it is
+// a no-op -- must not attempt to negate MinValue, which is undefined behavior in C++ (real .NET
+// relies on C#'s well-defined unchecked-arithmetic wraparound for this exact case). Confirmed via
+// UBSan that the pre-fix `-absValue` expression was reachable, real UB for this input.
+TEST(Int64NewTests, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
+    EXPECT_EQ(Int64::CopySign(Int64::MinValue, -1LL), Int64::MinValue);
+}
 
 TEST(Int64NewTests, IsNegative_True)  { EXPECT_TRUE(Int64::IsNegative(-1LL)); }
 TEST(Int64NewTests, IsNegative_False) { EXPECT_FALSE(Int64::IsNegative(0LL)); }
