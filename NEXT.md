@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `0713156`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `2be9c3c`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,10 +66,11 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`0713156`), via `cmake --build build --parallel 4`.
+(`2be9c3c`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12371/12371 passing**, 1223 test suites, via
-`./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
+**Test status**: last verified **12378/12378 passing**, 1224 test suites, via
+`./build/SharpRuntimeTests`, at the same HEAD (also verified flake-free across 3 additional full
+runs plus 20 repeats of the `Task::WhenAny` suite specifically). Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
@@ -96,8 +97,8 @@ executable verification surface in this repo.
   dependency-free `bench/StringBenchmark.cpp` harness (gated behind
   `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF). No other hot-path type (`List<T>`,
   `StringBuilder`, `Dictionary`, etc.) has been profiled.
-- Remaining documented API gaps: `Task.WhenAny`, `ImmutableList`'s missing LINQ-family methods —
-  full list in §5.
+- Remaining documented API gaps: `ImmutableList`'s missing LINQ-family methods — full list in §5
+  (`Task.WhenAny` was implemented 2026-07-13, see §3 — the last remaining `Task` gap is closed).
 
 ---
 
@@ -272,6 +273,25 @@ rounds in this codebase**: always grep for `TEST(<TypeName>Tests,` across the WH
 tree, not just the one file whose name matches the type — this codebase's test suite grew
 incrementally across many `BatchNN`/`TicketNNNN`/feature-named files, not one file per type.
 
+**`Task::WhenAny`** (`2be9c3c`) — the last remaining documented `Task` gap. Returns
+`TaskT<Task>`, matching real .NET's contract exactly: the wrapper always completes successfully
+with its Result set to the first-completed input task, even if that task faulted or was
+canceled — callers inspect the winning `Task`'s own state separately. Spawns one watcher thread
+per input task (no native `std::future` "first of N" combinator exists); the first to observe
+its task completing wins via an atomic compare-exchange and notifies a shared
+`condition_variable`. **Caught one real bug via testing before this landed**: an early version
+`join()`'d every watcher thread, including losing ones still blocked on a slower task — making
+`WhenAny` consistently take as long as the SLOWEST input task, exactly backwards from its
+contract. A timing regression test (fast task racing a 500ms slow task, asserting elapsed time
+stays low) caught this deterministically — the first sign was the test failing at exactly the
+slow task's sleep duration on every run, not an intermittent flake, which is what pointed to a
+logic bug rather than scheduling jitter. Fixed by `detach()`-ing watchers instead of `join()`ing
+them: each one captures its own `Task` copy by value (not a reference into the enclosing stack
+frame) plus `shared_ptr` copies of the synchronization primitives, so it's self-contained and
+safe to keep running in the background after `WhenAny` returns — matching real .NET's own
+behavior of not canceling non-winning tasks. 7 new regression tests; verified flake-free across
+20 repeats of the suite plus 3 full-test-suite runs. Test count grew from 12371 to 12378.
+
 ---
 
 ## 4. Current blocker / main problem
@@ -320,8 +340,6 @@ update this section (and the whole file) once you understand what changed.
 - `TaskCompletionSource<TResult>.Task` property is missing entirely — an architectural gap, since
   this port's `Task` always launches immediately on construction with no "pending" bridge mode to
   hang a `TaskCompletionSource` off of.
-- `Task.WhenAny` is still missing — needs a race-free "first of N" mechanism deserving its own
-  design pass (`Task.WhenAll` was implemented 2026-07-13, see §3).
 - `System::Xml::Linq::XText`'s `WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
   the way real .NET does when the parent is an `XDocument` — needs a larger `XmlWriter` change to
   close correctly (a `WriteWhitespace` primitive doesn't exist in this port's `XmlWriter` at all).
@@ -469,7 +487,8 @@ this section actionable): build/test baseline re-verify; `TypedReference` classi
 (false-alarm, no change needed); `Task::WhenAll`; `NumberStyles.Currency`/`AllowThousands` for
 all 8 integer types; `Channel::CreateUnboundedPrioritized`; a `String` performance-audit pilot;
 a full post-pilot audit round (resource-management fixes, `String::Format` validation,
-`Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions).
+`Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions); `Task::WhenAny` (the
+last remaining documented `Task` gap).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
@@ -485,13 +504,16 @@ next, or ask the user first if unsure which to prioritize.
    note), resource-management/RAII (4 real bugs, fixed), and `plan.sqlite3` drift (clean). Categories
    NOT yet covered: compiler-warning audit under a stricter flag set (e.g. `-Wshadow`,
    `-Wconversion`), duplicated-implementation search, missing edge-case handling in recently-added
-   code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized` work from this session is itself
-   a good target for a fresh pair of eyes), or a real sanitizer run (ASan/TSan) across the full
-   test suite (never done in this project's history per §5's "Needs verification" list).
+   code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this
+   session is itself a good target for a fresh pair of eyes), or a real sanitizer run (ASan/TSan)
+   across the full test suite (never done in this project's history per §5's "Needs verification"
+   list — `Task::WhenAny`'s detach()'d background watcher threads in particular would benefit from
+   a TSan pass, given this class's history of real ThreadSanitizer-caught races).
 
-3. **`Task.WhenAny`.** Still deferred (§5) — needs a race-free "first of N" completion-signaling
-   mechanism, a genuinely harder design than `WhenAll` was. Worth scoping as its own careful pass
-   given this class's history of real ThreadSanitizer-caught races.
+3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
+   since this port's `Task` always launches immediately on construction with no "pending" bridge
+   mode. Would need design thought about how to represent a Task that doesn't yet have a
+   `std::async` backing it.
 
 ---
 
@@ -523,7 +545,7 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 0713156 (12371/12371 tests
+Read NEXT.md first. It reflects the repository state as of HEAD 2be9c3c (12378/12378 tests
 passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
