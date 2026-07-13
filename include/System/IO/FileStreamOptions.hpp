@@ -2,12 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/FileShare.hpp"
 #include "System/IO/FileOptions.hpp"
 
 namespace System::IO {
+
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /** Specifies options used for creating a FileStream. */
     class FileStreamOptions {
@@ -21,9 +25,9 @@ namespace System::IO {
         /** Additional options that apply when creating the FileStream. */
         FileOptions Options = FileOptions::None;
         /** Number of bytes to preallocate on disk; 0 means no preallocation. */
-        long long  PreallocationSize = 0;
+        longcs     PreallocationSize = 0;
         /** Size of the internal buffer in bytes. */
-        int        BufferSize = 4096;
+        intcs      BufferSize = 4096;
 
         /** Initializes FileStreamOptions with default values. */
         FileStreamOptions() = default;
