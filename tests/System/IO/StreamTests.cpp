@@ -360,7 +360,11 @@ TEST(MemoryStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
 // Regression test for a wave-3 audit finding: Close() cleared the underlying buffer,
 // contradicting its own doc comment ("no-op for MemoryStream") and real .NET's
 // MemoryStream.Dispose(bool), which explicitly leaves the buffer and position untouched
-// ("Don't set buffer to null - allow TryGetBuffer, GetBuffer & ToArray to work").
+// ("Don't set buffer to null - allow TryGetBuffer, GetBuffer & ToArray to work"). Ticket 1724
+// (post-stabilization-audit) later added disposed-state tracking: Length/Position (and
+// Read/Write/Seek) now correctly throw ObjectDisposedException once closed, matching real
+// .NET's _isOpen guard -- so this test now checks the buffer survives Close() via ToArray()
+// only, which (like GetBuffer()) deliberately stays usable post-dispose in real .NET.
 TEST(MemoryStreamTests, Close_DoesNotClearBufferOrPosition) {
     MemoryStream ms;
     uint8_t data[] = {1, 2, 3, 4};
@@ -370,12 +374,40 @@ TEST(MemoryStreamTests, Close_DoesNotClearBufferOrPosition) {
 
     ms.Close();
 
-    EXPECT_EQ(ms.getLengthProperty(), 4);
-    EXPECT_EQ(ms.getPositionProperty(), 4);
     auto arr = ms.ToArray();
     ASSERT_EQ(arr.size(), 4u);
     EXPECT_EQ(arr[0], 1);
     EXPECT_EQ(arr[3], 4);
+}
+
+TEST(MemoryStreamTests, Close_ThenReadWriteSeekLengthPosition_ThrowsObjectDisposedException) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    ms.Write(data, 0, 4);
+    ms.Close();
+
+    uint8_t buf[4];
+    EXPECT_THROW(ms.Read(buf, 0, 4), System::ObjectDisposedException);
+    EXPECT_THROW(ms.Write(data, 0, 4), System::ObjectDisposedException);
+    EXPECT_THROW(ms.WriteByte(5), System::ObjectDisposedException);
+    EXPECT_THROW(ms.getLengthProperty(), System::ObjectDisposedException);
+    EXPECT_THROW(ms.getPositionProperty(), System::ObjectDisposedException);
+    EXPECT_THROW(ms.setPositionProperty(0), System::ObjectDisposedException);
+    EXPECT_THROW(ms.SetLength(10), System::ObjectDisposedException);
+    EXPECT_FALSE(ms.getCanSeekProperty());
+}
+
+TEST(MemoryStreamTests, Close_ThenGetBufferAndToArray_StillWork) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    ms.Write(data, 0, 4);
+    ms.Close();
+
+    // Matches real .NET: GetBuffer()/ToArray() deliberately remain usable after Dispose()/Close().
+    const auto& buffer = ms.GetBuffer();
+    EXPECT_EQ(buffer.size(), 4u);
+    auto arr = ms.ToArray();
+    EXPECT_EQ(arr.size(), 4u);
 }
 
 // ---------------------------------------------------------------------------
