@@ -3,8 +3,11 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Text::Encodings::Web {
+
+    using SharpRuntime::intcs;
 
     /** Encodes strings for safe embedding in HTML by escaping special characters. */
     class HtmlEncoder {
@@ -33,8 +36,8 @@ namespace System::Text::Encodings::Web {
         }
 
         /** HTML-encodes a substring defined by startIndex and characterCount. */
-        std::string Encode(const std::string& value, std::size_t startIndex, int characterCount) const {
-            return Encode(value.substr(startIndex, static_cast<std::size_t>(characterCount)));
+        std::string Encode(const std::string& value, intcs startIndex, intcs characterCount) const {
+            return Encode(value.substr(static_cast<std::size_t>(startIndex), static_cast<std::size_t>(characterCount)));
         }
     };
 
