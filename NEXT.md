@@ -1,10 +1,61 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `06e4255`) — 12173 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `8618d19`) — 12173 tests passing (audit was find-only, no code changes). Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
 ```
+
+## New: fresh post-stabilization audit — 20 verified findings, 19 new tickets (1710-1728, category `post-stabilization-audit`)
+
+User explicitly asked for a fresh audit that does NOT assume the completed ticket table means
+the runtime is perfect, across 8 named risk categories (API inconsistencies, undocumented .NET
+deviations, `NotImplementedException` residue, stub classes, platform problems, exception type
+mismatches, hidden silent-wrong-behavior, missing tests). Full writeup:
+**`POST_STABILIZATION_AUDIT.md`** (repo root, committed `8618d19`) — read that file for complete
+details; this is a pointer, not a duplicate.
+
+Methodology: 7 parallel FIND-ONLY forks (no fixes, no file changes), each swept the whole
+codebase for one or two categories, verified every candidate against the real .NET reference
+source and/or a standalone repro before reporting, explicitly declining to pad with speculative
+findings. Every finding was re-checked by the orchestrating session before ticketing.
+
+**Result: 20 concrete findings (9 High, 8 Medium, 3 Low)**, all backed by evidence — several
+repro-confirmed via direct execution, not just code-read plausibility. Highlights:
+- `Convert::ToXxx(double/float)` truncates instead of rounding (systemic across 8 methods,
+  repro-confirmed against real .NET's actual banker's-rounding algorithm) — ticket 1710.
+- `Dictionary`/`SortedDictionary`'s non-const indexer silently auto-inserts a default value
+  instead of throwing `KeyNotFoundException` — the exact bug `ConcurrentDictionary` already fixed
+  via a `ValueProxy` wrapper, never propagated to its non-concurrent siblings — ticket 1712.
+- **Systemic**: all 11 generic collections (`List`, `Dictionary`, `HashSet`, etc.) lack version
+  tracking, so enumerators never detect concurrent modification (UB via dangling
+  reference/iterator on reallocation, or silent wrong-result iteration otherwise) — the legacy
+  `System.Collections` types already have this exact fix, never applied to the generic ones —
+  ticket 1713 (large, will fan out per-type when implemented).
+- `MemoryStream::Write` AND `DeflateStream`/`GZipStream`/`ZLibStream::Write` (4 call sites, same
+  copy-pasted bug) silently no-op on invalid arguments; a negative offset causes a confirmed
+  out-of-bounds READ, not just a no-op — tickets 1714/1715.
+- `Span<T>` indexer throws the wrong exception type (`ArgumentOutOfRangeException` instead of
+  .NET's `IndexOutOfRangeException`) — ticket 1711.
+- `ConcurrentDictionary::GetOrAdd`/`AddOrUpdate` holds its lock across the user-supplied callback
+  → reentrancy deadlock on a realistic memoization pattern — ticket 1716.
+
+One finding (`getCurrent()` naming violation, systemic across 30 occurrences/14 files — worse
+than the single known instance found earlier this session) is deliberately filed as
+needs-user-decision, not auto-fixable, since it's the same broad-refactor shape as ticket #43
+(int→intcs) and needs the same kind of explicit authorization before touching.
+
+### To resume
+All 19 new tickets are `todo` in the `post-stabilization-audit` category, prioritized P1
+(6 tickets — real correctness/memory-safety bugs) through P3 (4 tickets — documentation/
+needs-decision/lower-risk test gaps). No fixes have been applied yet — this was a find-and-ticket
+pass only, per the user's explicit instruction. `sqlite3 plan.sqlite3 "SELECT ticket_no,
+priority, title FROM ticket WHERE category='post-stabilization-audit' ORDER BY priority,
+ticket_no;"` to see the queue. Natural next step if the user wants to proceed: work these 19
+tickets the same way as the rest of this session's ticket-workflow (parallel forks by
+disjoint-file-set, verify via `git fetch`+rebuild+full-test-run, checkpoint). Ticket 1727
+(`getCurrent()`) needs an explicit user decision before any code changes — do not fix without
+asking, matching the #43 precedent.
 
 ## Re-verified this checkpoint: `plan.sqlite3` has nothing blocked, nothing pending, anywhere
 
