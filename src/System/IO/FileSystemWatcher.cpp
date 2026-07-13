@@ -5,6 +5,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/IO/Directory.hpp"
 #include "System/IO/IOException.hpp"
+#include "System/PlatformNotSupportedException.hpp"
 
 #if defined(__linux__)
 #define SHARP_RUNTIME_FSW_LINUX 1
@@ -239,12 +240,16 @@ namespace System::IO {
 
 #else // !SHARP_RUNTIME_FSW_LINUX
 
-    // No OS-level watch backend implemented for this platform yet (see the class doc-comment) --
-    // EnableRaisingEvents is tracked faithfully but no real monitoring occurs, matching the
-    // original stub behavior rather than throwing PlatformNotSupportedException, since ported C#
-    // code that merely constructs+enables a watcher without asserting on delivered events should
-    // still run.
-    void FileSystemWatcher::startWatchingIfPossible() {}
+    // No OS-level watch backend implemented for this platform (see the class doc-comment).
+    // Matches CLAUDE.md's platform-abstraction rule: on an unsupported platform, throw
+    // System::PlatformNotSupportedException rather than silently degrading to a no-op -- a
+    // silently-inert watcher that never fires a single event is a worse failure mode than a
+    // loud, immediate exception at the point EnableRaisingEvents is actually turned on.
+    void FileSystemWatcher::startWatchingIfPossible() {
+        throw System::PlatformNotSupportedException(
+            "FileSystemWatcher requires Linux inotify support; no watch backend is implemented "
+            "for this platform.");
+    }
     void FileSystemWatcher::stopWatchingIfRunning() {}
     void FileSystemWatcher::watchLoop() {}
 
