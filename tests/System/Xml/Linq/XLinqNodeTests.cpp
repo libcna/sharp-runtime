@@ -710,3 +710,54 @@ TEST(ExtensionsTests, Ancestors_ReturnsParentChain) {
     EXPECT_EQ(ancestors[0], mid.get());
     EXPECT_EQ(ancestors[1], root.get());
 }
+
+// Real .NET's Extensions.cs also exposes Attributes(source, name), Ancestors(source, name), and
+// AncestorsAndSelf(source[, name]) -- all four were missing from this port's Extensions.hpp
+// despite AncestorsAndSelf being explicitly listed as in-scope in the file's own class
+// doc-comment. Added to close that gap.
+
+TEST(ExtensionsTests, Attributes_WithNameFilter) {
+    auto e1 = std::make_shared<XElement>("a");
+    e1->Add(std::make_shared<XAttribute>("k1", "v1"));
+    e1->Add(std::make_shared<XAttribute>("k2", "x"));
+    auto e2 = std::make_shared<XElement>("b");
+    e2->Add(std::make_shared<XAttribute>("k1", "v2"));
+    std::vector<std::shared_ptr<XElement>> source{e1, e2};
+    auto result = System::Xml::Linq::Extensions::Attributes(source, XName("k1"));
+    ASSERT_EQ(result.size(), 2u);
+    EXPECT_EQ(result[0]->getValueProperty(), "v1");
+    EXPECT_EQ(result[1]->getValueProperty(), "v2");
+}
+
+TEST(ExtensionsTests, Ancestors_WithNameFilter) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    auto leaf = std::make_shared<XElement>("leaf");
+    root->Add(mid);
+    mid->Add(leaf);
+    std::vector<std::shared_ptr<XNode>> source{std::static_pointer_cast<XNode>(leaf)};
+    auto ancestors = System::Xml::Linq::Extensions::Ancestors(source, XName("root"));
+    ASSERT_EQ(ancestors.size(), 1u);
+    EXPECT_EQ(ancestors[0], root.get());
+}
+
+TEST(ExtensionsTests, AncestorsAndSelf_IncludesSourceElement) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    root->Add(mid);
+    std::vector<std::shared_ptr<XElement>> source{mid};
+    auto result = System::Xml::Linq::Extensions::AncestorsAndSelf(source);
+    ASSERT_EQ(result.size(), 2u);
+    EXPECT_EQ(result[0], mid.get());
+    EXPECT_EQ(result[1], root.get());
+}
+
+TEST(ExtensionsTests, AncestorsAndSelf_WithNameFilter) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    root->Add(mid);
+    std::vector<std::shared_ptr<XElement>> source{mid};
+    auto result = System::Xml::Linq::Extensions::AncestorsAndSelf(source, XName("root"));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0], root.get());
+}

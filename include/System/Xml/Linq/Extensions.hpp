@@ -75,6 +75,20 @@ namespace System::Xml::Linq::Extensions {
         return result;
     }
 
+    /** @return As Attributes(source), filtered to attributes named @p name. */
+    template <std::ranges::input_range R>
+    [[nodiscard]] std::vector<std::shared_ptr<XAttribute>> Attributes(const R& source, const XName& name)
+        requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XElement>>
+    {
+        std::vector<std::shared_ptr<XAttribute>> result;
+        for (const std::shared_ptr<XElement>& e : source) {
+            if (!e) continue;
+            auto a = e->Attribute(name);
+            if (a) result.push_back(a);
+        }
+        return result;
+    }
+
     /** @return All child nodes of every container in @p source, in source order. */
     template <std::ranges::input_range R>
     [[nodiscard]] std::vector<std::shared_ptr<XNode>> Nodes(const R& source)
@@ -146,6 +160,56 @@ namespace System::Xml::Linq::Extensions {
             if (!n) continue;
             for (XElement* e = n->getParentProperty(); e != nullptr; e = e->getParentProperty()) {
                 result.push_back(e);
+            }
+        }
+        return result;
+    }
+
+    /** @return As Ancestors(source), filtered to ancestor elements named @p name. */
+    template <std::ranges::input_range R>
+    [[nodiscard]] std::vector<XElement*> Ancestors(const R& source, const XName& name)
+        requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XNode>>
+    {
+        std::vector<XElement*> result;
+        for (const std::shared_ptr<XNode>& n : source) {
+            if (!n) continue;
+            for (XElement* e = n->getParentProperty(); e != nullptr; e = e->getParentProperty()) {
+                if (e->getNameProperty() == name) result.push_back(e);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @return As Ancestors(source), but each source element is itself included first (before its
+     * own ancestors), matching real .NET's `AncestorsAndSelf`. Only defined for a source of
+     * XElement (not any XNode), matching real .NET's overload constraint — "self" only makes
+     * sense when the source item is itself an element.
+     */
+    template <std::ranges::input_range R>
+    [[nodiscard]] std::vector<XElement*> AncestorsAndSelf(const R& source)
+        requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XElement>>
+    {
+        std::vector<XElement*> result;
+        for (const std::shared_ptr<XElement>& el : source) {
+            if (!el) continue;
+            for (XElement* e = el.get(); e != nullptr; e = e->getParentProperty()) {
+                result.push_back(e);
+            }
+        }
+        return result;
+    }
+
+    /** @return As AncestorsAndSelf(source), filtered to elements named @p name. */
+    template <std::ranges::input_range R>
+    [[nodiscard]] std::vector<XElement*> AncestorsAndSelf(const R& source, const XName& name)
+        requires std::convertible_to<std::ranges::range_value_t<R>, std::shared_ptr<XElement>>
+    {
+        std::vector<XElement*> result;
+        for (const std::shared_ptr<XElement>& el : source) {
+            if (!el) continue;
+            for (XElement* e = el.get(); e != nullptr; e = e->getParentProperty()) {
+                if (e->getNameProperty() == name) result.push_back(e);
             }
         }
         return result;
