@@ -1,10 +1,36 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `9cfbf30`) — 11850 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `47cfd51`) — 11856 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11850 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11856 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 348 closed, unvalidated era-relative years
+
+Continuing the same autonomous run (previous checkpoint covered 347). Commit: 47cfd51 — pushed
+to `origin/feature/work`.
+
+- **348 (Globalization/JapaneseCalendar.hpp)**: investigated and RULED OUT a suspected bug —
+  `GetEra()`'s Meiji-era boundary check (year-only, no month/day, unlike the other 4 eras)
+  initially looked inconsistent with `MinSupportedDateTime`=1868-10-23, but tracing through
+  `GregorianCalendarHelper.GetEra` and `JapaneseCalendar.cs`'s built-in `EraInfo` fallback table
+  confirmed real .NET's own Meiji boundary is January 1, 1868 (a separate, looser constant than
+  `MinSupportedDateTime`) — the port's check exactly matches. One real bug found and fixed:
+  `eraYearToGregorian` (the shared helper behind `IsLeapYear`/`ToDateTime`, and transitively
+  `GetDaysInMonth`/`GetDaysInYear`) performed no validation at all, silently computing a
+  nonsensical Gregorian year for any out-of-range era-relative year or invalid era. Verified
+  against `GregorianCalendarHelper.cs`'s `GetYearOffset(throwOnError: true)` — the shared
+  validation path every equivalent .NET method routes through — which throws for a negative
+  year, a year outside `[1, maxEraYear]` for the resolved era (bounds read directly from the
+  .NET `EraInfo` table: Reiwa 7981, Heisei 31, Showa 64, Taisho 15, Meiji 45), or an unknown era
+  value. Concrete failure mode: `IsLeapYear(100, HeiseiEra)` computed Gregorian year 2088
+  instead of rejecting 100 as outside Heisei's actual `[1,31]` span.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 347 closed, malformed UTF-8 slipped through validation
 
