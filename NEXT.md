@@ -1,10 +1,101 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `faf053c`) — 11999 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `ae395cb`) — 11999 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11999 tests from 1198 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — `ported-type-audit` category FULLY DRAINED (final 17-ticket batch), transitioning to `classification-audit`
+
+Continuing the same autonomous run (previous checkpoint covered the 60-ticket TPL/Xml/Channels
+batch). Final `ported-type-audit` batch: 4 System.Xml.Linq tickets (XObjectChangeEventArgs,
+XProcessingInstruction, XStreamingElement, XText) + 13 System.Xml.XPath tickets (IXPathNavigable,
+XPathDocument, XPathException, XPathExpression, XPathItem, XPathNamespaceScope, XPathNavigator,
+XPathNodeIterator, XPathNodeType, XPathResultType, XmlCaseOrder, XmlDataType, XmlSortOrder). 16
+clean (XPathNavigator's `ComparePosition`/`CompareSiblings` algorithm traced step-by-step and
+confirmed correct). **XText** (1403): real .NET's `WriteTo` calls `WriteWhitespace` vs
+`WriteString` depending on whether the parent is `XDocument`, and validates that only
+whitespace-only text can be a direct `XDocument` child — this port's `XmlWriter` has no
+`WriteWhitespace` primitive at all, so neither behavior is replicable without a larger
+`XmlWriter` change. Documented via doc-comment rather than a partial/misleading fix. Commit
+`ae395cb`. Verified via `git fetch`+`git log` (no divergence) and a fresh `cmake --build` + full
+test run: 11999/11999 unchanged (docs-only commit).
+
+**Milestone**: `SELECT COUNT(*) FROM ticket WHERE category='ported-type-audit' AND status='todo'`
+now returns **0** — the entire 1010-ticket `ported-type-audit` category (612 done at the start of
+this session's fork-batch phase, all closed via 9 rounds of parallel forks) is fully drained.
+
+**Final tally across all nine `ported-type-audit` fork batches this session**: 396 tickets closed
+(across tickets 636-1416), 41 real bugs/gaps found and fixed, including:
+- 2 security vulnerabilities: **Zip Slip path traversal** (`ZipFileExtensions::ExtractToDirectory`)
+  and **HTTP CRLF/obs-fold header injection** (`HttpHeaders::checkValueChars`).
+- 4 memory-safety bugs (confirmed via ASan repros): **XxHash32/XxHash64** OOB write on negative
+  length (same shape as an earlier-session XxHash3 fix), **NetworkStream::Read/Write** and
+  **UdpClient::Send** buffer overflows from missing argument validation.
+- Core Task Parallel Library bugs: **ParallelLoopResult.LowestBreakIteration** never populated,
+  **ValueTask&lt;TResult&gt;** permanently-incomplete default constructor + missing
+  Task-wrapping constructor, **TaskFactory.StartNew&lt;TResult&gt;** ignoring the default
+  cancellation token.
+- Several Equals/GetHashCode contract violations (OSPlatform, IPPacketInformation, LingerOption,
+  UdpReceiveResult, UnixDomainSocketEndPoint all had Equals but no GetHashCode).
+- Numerous parsing/formatting correctness bugs across HTTP header value types, CompositeFormat,
+  RuntimeInformation's OS-vs-process architecture detection, and more — see prior checkpoint
+  entries above for full per-batch detail.
+- 0 regressions across the entire phase; every batch verified via `git fetch`+`git log`+rebuild+
+  full-test-run before being trusted, with extra scrutiny (personal diff review, repeated test
+  runs) for anything security/memory-safety/concurrency-relevant.
+
+**Process pattern that worked well and should be reused**: for a large, well-defined ticket
+backlog, group tickets by disjoint file-set/directory, dispatch one `Agent` fork per group
+(subagent_type: "fork", so it inherits full session context) with a detailed, self-contained
+prompt covering methodology + explicit scope boundaries + the "stay within directory X" isolation
+instruction, let forks run in parallel (3-4 at a time was the sweet spot — occasional transient
+build-directory contention was observed and always self-resolved via retry, never caused
+corruption), then ALWAYS independently verify via `git fetch`+`git log`+fresh rebuild+full test
+run rather than trusting a fork's self-reported summary alone.
+
+### Next phase: `classification-audit` (60 tickets, 0 done — untouched all session)
+
+Different, lighter-weight methodology than `ported-type-audit` — NOT a deep code audit. Each
+ticket's shape (title "Sample ignored classification: <namespace>"): sample the `task` table rows
+in that namespace where `status='ignored'` (NOTE: the actual stored value is `'ignored'`, not
+`'ignore'` — `SELECT status, COUNT(*) FROM task GROUP BY status` shows `ignored` 15049 rows vs a
+much smaller legacy `ignore` 137 rows; query `status IN ('ignore','ignored')` to catch both),
+verify they're truly out of scope for CNA/mobile-eggbert (a C++ game-code runtime) per
+CLAUDE.md's classification criteria (reflection/IL-emit/GC-internals/P-invoke/serialization-infra
+= permanent deviation, OR genuinely irrelevant/duplicate/not-applicable to game code), and ONLY
+create narrow follow-up tickets for obvious misclassifications that would affect games — do NOT
+port broad frameworks, do NOT change `task.status` inline as part of this ticket (per prompt.md,
+that's the separate `task`-table workflow, not this ticket's job — this ticket's deliverable is
+narrow follow-up tickets, same "create tickets for gaps found" pattern as `namespace-audit`).
+Namespace sizes range from 66 to 805 ignored rows per ticket — sampling a representative subset
+(e.g. 15-30 rows, more for very large namespaces) is sufficient, not exhaustive review; the
+ticket's own acceptance_criteria says "at least a representative sample was reviewed."
+
+Spot-checked `System.Buffers` (94 ignored rows) personally before delegating: sample rows were
+all internal SIMD/state-machine implementation details of `SearchValues<T>`'s optimized paths
+(`AhoCorasick`, `Any1CharPackedSearchValues`, `CaseInsensitiveAscii`, etc.) — correctly out of
+scope, no misclassification. Expect most namespaces in this batch to be similarly clean: many are
+obviously irrelevant to a game engine on their face (System.DirectoryServices.*, System.Data.Odbc/
+OleDb, System.CodeDom, Microsoft.CSharp.RuntimeBinder.Semantics, Microsoft.Quic,
+System.Speech.Internal.SapiInterop, System.Reflection.Emit, System.Security.Permissions, etc.).
+Since this phase is pure `plan.sqlite3` querying with no source changes expected in the common
+case (only when a genuine misclassification surfaces), more tickets can be batched per fork than
+in the `ported-type-audit` phase, and more forks can likely run concurrently since most won't
+touch the shared `build/` directory at all.
+
+### To resume
+Query the classification-audit queue: `sqlite3 plan.sqlite3 "SELECT ticket_no, area, description
+FROM ticket WHERE category='classification-audit' AND status='todo' ORDER BY ticket_no;"`. Group
+~10-15 namespace-tickets per fork, dispatch several in parallel, verify via `git fetch`+`git log`
++rebuild+test only if a fork reports source changes (skip the rebuild/test step for
+no-changes-found forks to save time — but do verify their `plan.sqlite3` ticket closures via a
+`SELECT ... status` check same as always). Checkpoint NEXT.md, repeat. After `classification-audit`
+drains, the remaining ticket categories are: `documentation`/`doxygen` (6 todo, "Fill Doxygen gaps
+in X public types"), `correctness` (2 todo — BufferedStream real buffering, FileSystemWatcher
+real OS-level monitoring, both P2), and `style` (100, permanently **blocked** on ticket #43 — do
+not touch). Ticket #43 stays `blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — eighth `ported-type-audit` batch (60 tickets, 4 parallel forks), core TPL bugs found (Task/Parallel/ValueTask)
 
