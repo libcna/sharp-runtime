@@ -126,6 +126,62 @@ TEST(TaskTests, Delay_CompletesAfterWait) {
 }
 
 // ===========================================================================
+// Task::WhenAll
+// ===========================================================================
+
+TEST(TaskWhenAllTests, EmptyVector_ReturnsCompletedTask) {
+    Task t = Task::WhenAll({});
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskWhenAllTests, AllSucceed_CompletesSuccessfully) {
+    std::atomic<int> counter{0};
+    std::vector<Task> tasks;
+    for (int i = 0; i < 5; ++i) {
+        tasks.push_back(Task::Run([&counter]() { ++counter; }));
+    }
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_NO_THROW(all.Wait());
+    EXPECT_TRUE(all.getIsCompletedSuccessfullyProperty());
+    EXPECT_EQ(counter.load(), 5);
+}
+
+TEST(TaskWhenAllTests, EveryTaskRuns_EvenIfEarlierOneFaults) {
+    // WhenAll must not short-circuit: every input task should still run to completion even
+    // though an earlier one in the vector faults, matching real .NET's "wait for all" contract.
+    std::atomic<int> ranCount{0};
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() { throw std::runtime_error("first task fails"); }));
+    for (int i = 0; i < 4; ++i) {
+        tasks.push_back(Task::Run([&ranCount]() { ++ranCount; }));
+    }
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), std::runtime_error);
+    EXPECT_EQ(ranCount.load(), 4);
+}
+
+TEST(TaskWhenAllTests, OneFaults_WaitRethrowsFirstFault) {
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() { throw std::runtime_error("boom"); }));
+    tasks.push_back(Task::Run([]() {}));
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), std::runtime_error);
+    EXPECT_TRUE(all.getIsFaultedProperty());
+}
+
+TEST(TaskWhenAllTests, OneCanceled_NoFault_WaitThrowsTaskCanceledException) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() {}, cts.getTokenProperty()));
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+// ===========================================================================
 // TaskT<TResult>
 // ===========================================================================
 

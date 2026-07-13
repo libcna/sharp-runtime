@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -28,17 +29,14 @@ namespace System::Threading::Tasks {
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
     //
-    // Known gap (documented, not implemented in this pass): Task.WhenAll(IEnumerable<Task>) and
-    // Task.WhenAny(IEnumerable<Task>) do not exist anywhere in this port, despite being two of
-    // the most commonly used static Task methods in real .NET code. WhenAll would be a small,
-    // low-risk addition following the same "wait each, rethrow first exception directly" pattern
-    // already established by Wait()'s documented AggregateException-wrapping simplification.
-    // WhenAny is materially harder: std::future has no native "wait for first of N" primitive,
-    // so a correct, race-free implementation needs a shared completion-signaling mechanism (e.g.
-    // a condition variable each task's completion callback notifies) -- given this Task/TaskT
-    // pair's history of real ThreadSanitizer-caught races around shared_future (see future_'s
-    // comment above), that is substantial new work deserving its own careful pass rather than a
-    // rushed addition during a single audit ticket.
+    // Known gap (documented, not implemented): Task.WhenAny(IEnumerable<Task>) does not exist in
+    // this port (Task.WhenAll was added -- see its own doc-comment for the exact simplifications
+    // applied). WhenAny is materially harder than WhenAll was: std::future has no native "wait
+    // for first of N" primitive, so a correct, race-free implementation needs a shared
+    // completion-signaling mechanism (e.g. a condition variable each task's completion callback
+    // notifies) -- given this Task/TaskT pair's history of real ThreadSanitizer-caught races
+    // around shared_future (see future_'s comment above), that is substantial new work deserving
+    // its own careful pass rather than a rushed addition alongside WhenAll.
     class Task {
         struct State {
             std::atomic<bool> isCompleted{false};
@@ -221,6 +219,47 @@ namespace System::Threading::Tasks {
             t.state_->isCanceled  = true;
             t.state_->isCompleted = true;
             return t;
+        }
+
+        /**
+         * Creates a Task that completes when all of the provided tasks have completed.
+         *
+         * C++ counterpart of .NET Task.WhenAll(IEnumerable&lt;Task&gt;). All input tasks are
+         * waited on to completion (not short-circuited on the first fault, matching real .NET).
+         * If one or more faulted, the FIRST fault encountered (in input order) is rethrown when
+         * the returned Task is later Wait()'d — unlike real .NET, which wraps ALL faulted tasks'
+         * exceptions in a single AggregateException. This follows the same "rethrow directly,
+         * don't wrap in AggregateException" simplification already established by this class's
+         * own Wait() (see its doc-comment). If no task faulted but at least one was canceled,
+         * the returned Task's Wait() throws TaskCanceledException — as a consequence of routing
+         * through the existing action-based Task constructor (which has no way to directly set
+         * the Canceled state from inside the action), the returned Task reports Faulted (not
+         * Canceled) via getStatusProperty()/getIsCanceledProperty() in that case, a further
+         * simplification versus real .NET's exact Canceled-state propagation.
+         *
+         * @param tasks The tasks to wait on. Real .NET's Task.WhenAll(Array.Empty&lt;Task&gt;())
+         *              returns an already-completed task rather than throwing — verified against
+         *              the .NET reference — so an empty @p tasks is likewise valid here and
+         *              returns CompletedTask() directly without spawning a thread.
+         * @return A Task that completes once every task in @p tasks has completed.
+         */
+        static Task WhenAll(std::vector<Task> tasks) {
+            if (tasks.empty()) return Task::CompletedTask();
+            return Task([tasks]() mutable {
+                std::exception_ptr firstFault;
+                bool anyCanceled = false;
+                for (auto& t : tasks) {
+                    try {
+                        t.Wait();
+                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
+                        anyCanceled = true;
+                    } catch (...) {
+                        if (!firstFault) firstFault = std::current_exception();
+                    }
+                }
+                if (firstFault) std::rethrow_exception(firstFault);
+                if (anyCanceled) throw System::Threading::Tasks::TaskCanceledException();
+            });
         }
 
         /**
