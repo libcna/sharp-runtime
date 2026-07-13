@@ -1,10 +1,36 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `9543c24`) — 11881 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11881 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 355 closed, negative-length memcpy crash
+
+Continuing the same autonomous run (previous checkpoint covered 354). Commit: 702c587 — pushed
+to `origin/feature/work`.
+
+- **355 (IO/Hashing/XxHash3.cpp)**: leveraged the extensive existing official xxHash test-vector
+  coverage (all 7 vectors across every length-dispatch branch already passing) as strong evidence
+  the core bit-manipulation algorithm itself is correct, and focused the audit on argument
+  validation instead — an area value-correctness test vectors don't exercise. Found and fixed a
+  severe, confirmed memory-safety bug: no entry point (`Append`, `Hash` x2, `TryHash`,
+  `HashToUInt64`) validated that `length` is non-negative. Confirmed via a standalone repro that a
+  negative `intcs` length, once cast to an unsigned type, wraps to a value near
+  `UINT32_MAX`/`SIZE_MAX` — turning the internal `memcpy` call in the shared streaming `Append()`
+  into an immediate crash / massive out-of-bounds access. Fixed at two choke points:
+  `HashToUInt64Impl` (the shared implementation behind all 4 one-shot entry points) and
+  `Detail::XxHash3Shared::Append` (the streaming entry point, shared by both `XxHash3::Append`
+  and `XxHash128::Append` — confirmed protected via a regression test). The shared file already
+  has its own closed audit ticket, but the bug was found via direct investigation from
+  `XxHash3.cpp`'s own `Append()` delegating into it — consistent with this session's established
+  practice of fixing a confirmed bug wherever it's reachable.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 354 closed, TryParse could throw + UTC-format bugs
 
