@@ -24,6 +24,19 @@ namespace System::Timers {
      * (`ISynchronizeInvoke`-based marshaling is a WinForms/UI-thread concept with no equivalent
      * in this runtime — `Elapsed` is always raised directly from the timer's background thread,
      * matching how `System::Threading::Timer` itself already works here).
+     *
+     * @note Lifetime contract: the background timer callback captures `this` directly (see
+     * Timer.cpp's `startTimerThread()`), and the underlying `System::Threading::Timer::Dispose()`
+     * detaches its thread rather than joining it. Destroying (or `Close()`-ing) a `Timer` does
+     * not guarantee an in-flight callback invocation has finished — a callback that is already
+     * executing when the `Timer` is destroyed can dereference a dangling `this`. Callers must
+     * ensure a `Timer` outlives any callback it might still be dispatching, e.g. by not
+     * destroying it from within its own `Elapsed` handler and by providing external
+     * synchronization if destruction can race with a pending tick. This is the same class of
+     * this-capture-into-background-thread hazard documented on `Socket`'s async methods and
+     * `ClientWebSocket`'s Send/ReceiveAsync — not redesigned here for the same reason: fixing it
+     * needs a broader ownership change (e.g. `enable_shared_from_this`/`weak_ptr` in the
+     * callback), out of scope for a single audit pass.
      */
     class Timer {
         double interval_ = 100;
