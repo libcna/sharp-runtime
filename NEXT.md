@@ -1,10 +1,116 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `116ae68`) — 12173 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `90b6533`) — 12173 tests passing. Verified via:*
 ```
-cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
+cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
 ```
+
+## MILESTONE: ticket #43 (global int→intcs policy) unblocked and fully rolled out — the `ticket` table is now 100% `done`
+
+The user explicitly authorized unblocking ticket #43 this session (previously blocked long-term
+per CLAUDE.md rule #10's caution about a 449+-file broad header refactor risking CNA breakage).
+Re-verified first: `SharpRuntime::intcs`/`longcs`/`shortcs`/`uintcs`/`ulongcs`/`ushortcs`/
+`bytecs`/`sbytecs` are plain `using` aliases for `int32_t`/`int64_t`/`int16_t`/`uint32_t`/
+`uint64_t`/`uint16_t`/`uint8_t`/`int8_t` — on every realistic target platform this makes the
+conversion a PURE TYPE-ALIAS SUBSTITUTION with identical underlying representation and identical
+mangled names, not an ABI-breaking change; the real risk was scope/mechanical-error, not binary
+compatibility. Presented this via `AskUserQuestion` with three options (fix everything / scope to
+recently-touched files only / stay blocked) — user chose full rollout.
+
+Unblocked all 100 `style` category tickets (136-235, "Audit public int usage in <file>") from
+`blocked` to `todo` and processed them across two rounds:
+
+**Round 1 — 6 parallel forks (~17 tickets each)**: made strong initial progress but the user
+interrupted mid-run due to CPU heat (`sensors` Tctl was climbing) and asked to pause. All 6 forks
+stopped via `TaskStop`. 5 of 10 tickets left `doing` had real uncommitted diffs (Byte, Default
+ValueAttribute, DateTime, Calendar, EncodingInfo) — verified each compiled clean and passed the
+full suite, then committed directly rather than re-dispatching forks for such a small residual.
+The other 5 `doing` tickets had zero diff (killed before any edit) and were reset to `todo`.
+
+**Round 2 — reduced to 2 parallel forks per the user's explicit "less parallel, watch CPU" ask**,
+each capped at `cmake --build --parallel 2` (down from 4) to reduce system load further. CPU
+temperature was monitored via `sensors` (`Tctl`, the k10temp sensor) between rounds — stayed in
+the 48-69°C range throughout, briefly approaching but never reaching a 75°C caution threshold the
+user set. One fork in this round self-paused partway through out of its own caution (10 of 20
+tickets done) and reported waiting on a temperature notification that would never actually
+arrive since its own turn had ended — this is a pattern worth remembering for future sessions:
+a forked agent cannot reliably "wait and resume later" on its own; the orchestrating session must
+own that pacing decision and re-dispatch remaining work itself rather than trusting a fork to
+self-resume. The remaining ~9 tickets from that stalled fork, plus a few stragglers, were finished
+directly in the main session (not re-forked) once CPU was confirmed cool, since the residual was
+small enough not to need agent overhead.
+
+**Bugs found along the way** (confirming int-family conversion work surfaces real correctness
+issues, not just style): `Int64`'s `LeadingZeroCount`/`PopCount`/`TrailingZeroCount`/`Log2` had
+been using the WRONG integer width (should have promoted to `longcs`-width results, were
+truncating) — fixed as part of the conversion pass (commit `b3b4ae3`). `StackFrame.hpp`'s public
+members — explicitly flagged by an earlier regression-audit round as "exactly the pattern covered
+by blocked ticket #43, deliberately left untouched at the time" — were finally converted now that
+#43 is unblocked. `HtmlEncoder::Encode(value, startIndex, characterCount)`'s `startIndex` was
+typed `std::size_t` instead of matching real .NET's `int` signature — corrected to `intcs`
+alongside the width conversion.
+
+Final verified state: 12173/12173 tests passing (unchanged — this was overwhelmingly a
+type-alias-only change with no behavior change, aside from the Int64 width bug fix above which
+was already covered by existing test assertions), 0 errors/0 warnings, all commits confirmed on
+`origin/feature/work` via `git fetch` (no divergence) after the full rollout.
+
+## FULL SESSION MILESTONE: every category in the entire `ticket` table is now `done`
+
+`SELECT category, status, COUNT(*) FROM ticket GROUP BY category, status` — **every single row is
+now `done`, zero exceptions**:
+```
+build                done     7
+classification-audit done    60
+code-audit            done  122
+correctness           done   51
+database               done    9
+documentation          done   25
+legal                  done    1
+namespace-audit        done   51
+platform               done    7
+ported-type-audit      done 1020
+regression-audit       done  211
+status-audit           done   37
+style                  done  103
+test                   done    1
+tooling                done    3
+workflow                done    1
+```
+Total: 1712 tickets, all `done`. `style` was the LAST remaining non-`done` category (previously
+100 `blocked`), and its unblocking + completion this session closes out the entire backlog with
+zero exceptions — not even a permanently-blocked residual remains.
+
+### To resume
+There is no more pre-scoped work anywhere in `plan.sqlite3`'s `ticket` table. The `task` table
+(tracks individual .NET types, a separate workflow per `prompt.md`) also has zero `''`/`todo`
+rows as of the last check this session. A few small, specific leads were noted along the way but
+NOT acted on (out of scope for whichever ticket surfaced them):
+- A few `task` rows with stale `status` (should be `ported` but aren't flagged): `Comparison`,
+  `SequencePosition`, `StringNormalizationExtensions` (System namespace — actually these WERE
+  already corrected earlier this session, see the classification-audit-round checkpoint),
+  `PropertyChangedEventHandler` (System.ComponentModel — also already corrected), `TypedReference`
+  (possibly misclassified `ignore` despite being a legitimate complete stub — NOT yet corrected,
+  worth a look).
+- `Task.WhenAll`/`Task.WhenAny` (documented missing surface, `Task<TResult>` continuation gaps),
+  `TaskCompletionSource<TResult>.Task` property (missing entirely — architectural gap, this port's
+  `Task` always launches immediately with no "pending" bridge mode).
+- `System::Xml::XText`'s `WriteWhitespace`-vs-`WriteString` gap (needs a larger `XmlWriter`
+  change to close properly).
+- `UnboundedPrioritizedChannelOptions<T>` references a `Channel::CreateUnboundedPrioritized()`
+  factory that doesn't exist — needs a genuinely different priority-queue-backed channel variant.
+- Several documented "reduced scope, deferred" items scattered across checkpoint entries above
+  (ImmutableList's missing Sort/Reverse/ForEach/etc., `AppDomain`'s honest no-op stubs, `Process`'s
+  deliberately-narrow POSIX core, `Cookie`/`CookieContainer`'s missing eviction/SameSite policies).
+
+None of these rise to "next obvious task" — they're scattered, small, and mostly already
+consciously deferred with a documented reason. A genuinely fresh session should either: (1) ask
+the user for new direction, (2) re-run the `task`-table Step 1 query to check for any newly
+un-classified .NET types that may have appeared, or (3) consider a THIRD re-audit pass now that
+even the second-pass categories (`regression-audit`, `code-audit`'s pre-session slice,
+`status-audit`) are themselves hours-old — though this has genuinely diminishing justification
+each additional pass, per this session's own running commentary on the topic.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — `status-audit` category: 37 tickets from 2026-07-09, in-code status markers verified/corrected (3 parallel forks)
 
