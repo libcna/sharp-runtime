@@ -2,11 +2,13 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -111,6 +113,46 @@ TEST(CollectionTests, RemoveAt_RemovesByIndex) {
     c.RemoveAt(1);
     EXPECT_EQ(c.getCountProperty(), 2);
     EXPECT_EQ(c[1], 30);
+}
+
+TEST(CollectionTests, CopyTo_CopiesToVector) {
+    Collection<int> c;
+    c.Add(1); c.Add(2); c.Add(3);
+    std::vector<int> dest(5, 0);
+    c.CopyTo(dest, 1);
+    EXPECT_EQ(dest[0], 0);
+    EXPECT_EQ(dest[1], 1);
+    EXPECT_EQ(dest[2], 2);
+    EXPECT_EQ(dest[3], 3);
+    EXPECT_EQ(dest[4], 0);
+}
+
+TEST(CollectionTests, CopyTo_NegativeIndex_Throws) {
+    Collection<int> c;
+    c.Add(1);
+    std::vector<int> dest(5, 0);
+    EXPECT_THROW(c.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(CollectionTests, CopyTo_DestTooSmall_Throws) {
+    Collection<int> c;
+    c.Add(1); c.Add(2); c.Add(3);
+    std::vector<int> dest(2, 0);
+    EXPECT_THROW(c.CopyTo(dest, 0), System::ArgumentException);
+}
+
+// Regression for ticket 339: the bounds check `index + getCountProperty() >
+// destination.size()` is signed-integer-overflow UB for a large index (confirmed via UBSan) --
+// and worse than UB in the abstract: the wraparound can make the check evaluate false when it
+// should be true, silently skipping the throw and letting the copy loop write out of bounds.
+// Rewritten as a subtraction-based check (matching List<T>.CopyTo's own `array.Length -
+// arrayIndex < Count`), which cannot overflow since index and destination.size() are both
+// already known non-negative at that point.
+TEST(CollectionTests, CopyTo_LargeIndexPastDestSize_ThrowsInsteadOfOverflowing) {
+    Collection<int> c;
+    c.Add(1); c.Add(2); c.Add(3);
+    std::vector<int> dest(5, 0);
+    EXPECT_THROW(c.CopyTo(dest, std::numeric_limits<intcs>::max() - 2), System::ArgumentException);
 }
 
 // ===========================================================================

@@ -14,6 +14,7 @@
 #include "System/Collections/ObjectModel/ReadOnlyDictionary.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/NotSupportedException.hpp"
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -144,6 +145,16 @@ TEST(ReadOnlyCollectionBatch18Test, CopyTo_OutOfRange_Throws) {
     ReadOnlyCollection<int> col(std::vector<int>{1, 2, 3});
     std::vector<int> dest(2, 0); // too small
     EXPECT_THROW(col.CopyTo(dest, 0), System::ArgumentException);
+}
+
+// Regression for ticket 339: same overflow-prone-check fix as Collection<T>::CopyTo (see its
+// test of the same name for the full rationale) -- `index + getCountProperty() >
+// destination.size()` is signed-integer-overflow UB for a large index, and the wraparound could
+// make the check wrongly evaluate false, skipping the bounds throw entirely.
+TEST(ReadOnlyCollectionBatch18Test, CopyTo_LargeIndexPastDestSize_ThrowsInsteadOfOverflowing) {
+    ReadOnlyCollection<int> col(std::vector<int>{1, 2, 3});
+    std::vector<int> dest(5, 0);
+    EXPECT_THROW(col.CopyTo(dest, std::numeric_limits<SharpRuntime::intcs>::max() - 2), System::ArgumentException);
 }
 
 TEST(ReadOnlyCollectionBatch18Test, CountAndIndexer) {

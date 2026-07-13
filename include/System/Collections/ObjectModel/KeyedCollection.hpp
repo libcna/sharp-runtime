@@ -207,6 +207,11 @@ public:
         return this->items_[static_cast<size_t>(it->second)];
     }
 
+    // Note: the inherited index-based operator[](intcs) returns a plain T& (see
+    // Collection<T>::operator[]'s doc comment), so `keyedCollection[i] = newItem;` writes
+    // directly into storage WITHOUT going through SetItem() -- the internal keyIndex_ is left
+    // stale after such an assignment. Use Remove()+Add() (or Insert()) instead when the key
+    // index must stay in sync; those paths do run SetItem/InsertItem/RemoveItem.
     using Collection<TItem>::operator[];
 
 private:

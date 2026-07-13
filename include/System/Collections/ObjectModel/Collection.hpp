@@ -155,7 +155,15 @@ public:
     void CopyTo(std::vector<T>& destination, intcs index) const {
         if (index < 0)
             throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
-        if (index + getCountProperty() > static_cast<intcs>(destination.size()))
+        // Verified against List<T>.CopyTo's own bounds check (`array.Length - arrayIndex <
+        // Count`): a subtraction-based check, not addition. `index + getCountProperty() >
+        // destination.size()` is signed-integer-overflow UB for a large index (confirmed via
+        // UBSan) -- and worse than UB in the abstract: the wraparound can make the check
+        // evaluate false when it should be true, silently skipping the bounds throw and letting
+        // the loop below write out of bounds into destination. index is already known
+        // non-negative here, and destination.size() cast to intcs is likewise non-negative, so
+        // the subtraction cannot itself overflow.
+        if (static_cast<intcs>(destination.size()) - index < getCountProperty())
             throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
         for (intcs i = 0; i < getCountProperty(); ++i)
             destination[static_cast<size_t>(index + i)] = items_[static_cast<size_t>(i)];
@@ -192,6 +200,19 @@ public:
      * @brief Returns a reference to the element at the specified index.
      *
      * C++ counterpart of .NET Collection<T>.Item[int] setter.
+     * @note .NET's indexer setter (`this[index] = value`) dispatches through the virtual
+     *       `SetItem(index, value)` hook, so a derived class overriding `SetItem` (e.g. to keep
+     *       an auxiliary index in sync, as `KeyedCollection<TKey,TItem>` does) sees every
+     *       assignment. A C++ reference has no equivalent interception point: code that writes
+     *       `collection[index] = value` assigns directly into the backing storage and never
+     *       calls `SetItem`, silently skipping that hook. This is an inherent C++-reference-vs-
+     *       C#-property gap, not a bug to fix locally -- documented rather than "solved" with an
+     *       assignment-intercepting proxy type, which would be a much larger, riskier API change
+     *       (affecting every existing caller of this operator) than a single audit ticket
+     *       warrants. Callers of a `SetItem`-overriding derived class that need the hook to run
+     *       must call a dedicated mutator instead of the plain indexer (e.g.
+     *       `KeyedCollection::SetItem` isn't public, but `Remove`+`Add`/`Insert` do run the
+     *       hooks).
      * @param index The zero-based index.
      * @return A reference to the element.
      * @throws System::ArgumentOutOfRangeException if index is out of range.
