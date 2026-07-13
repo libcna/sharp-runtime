@@ -465,17 +465,26 @@ namespace System
         /** @brief Returns the base-2 integer logarithm of @p x (std::ilogb). */
         [[nodiscard]] static intcs ILogB(double x) { return static_cast<intcs>(std::ilogb(x)); }
 
+#if !defined(_MSC_VER)
         /**
          * @brief Multiplies two 64-bit signed integers and returns the full 128-bit product.
          *
          * The high 64 bits of the product are stored in @p high.
          * C++ counterpart of .NET Math.BigMul(long, long, out long).
+         *
+         * MSVC-unsupported: relies on the GCC/Clang `__int128` extension (see CLAUDE.md's
+         * documented, permanent __int128-dependency policy -- the same reasoning as
+         * System::Int128/UInt128). Guarded out here rather than left to fail with a raw
+         * "__int128 is not a recognized built-in type" compiler error, matching the pattern
+         * already established in System::Buffers::Binary::BinaryPrimitives for its
+         * Int128/UInt128 overloads.
          */
         static longcs BigMul(longcs a, longcs b, longcs& high) {
             __int128 product = static_cast<__int128>(a) * static_cast<__int128>(b);
             high = static_cast<longcs>(product >> 64);
             return static_cast<longcs>(product);
         }
+#endif // !defined(_MSC_VER)
 
         /**
          * @brief Divides @p a by @p b and returns {quotient, remainder} as a pair.
