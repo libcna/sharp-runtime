@@ -148,3 +148,80 @@ TEST(UInt128Test, IsEvenOddPow2) {
     EXPECT_TRUE(UInt128::IsPow2(UInt128(0, 8)));
     EXPECT_FALSE(UInt128::IsPow2(UInt128(0, 6)));
 }
+
+// ---------------------------------------------------------------------------
+// Parse / TryParse / ToString(format) -- regression: these were entirely
+// missing despite Int128 (the signed sibling) already having them.
+// ---------------------------------------------------------------------------
+
+TEST(UInt128Test, Parse_SimpleDecimal_RoundTrips) {
+    UInt128 v = UInt128::Parse("12345678901234567890");
+    EXPECT_EQ(v.ToString(), "12345678901234567890");
+}
+
+TEST(UInt128Test, Parse_Zero) {
+    EXPECT_TRUE(UInt128::Parse("0") == UInt128::Zero());
+}
+
+TEST(UInt128Test, Parse_MaxValue_RoundTrips) {
+    UInt128 v = UInt128::Parse(UInt128::MaxValue().ToString());
+    EXPECT_TRUE(v == UInt128::MaxValue());
+}
+
+TEST(UInt128Test, Parse_LeadingPlus_Accepted) {
+    UInt128 v = UInt128::Parse("+42");
+    EXPECT_TRUE(v == UInt128(0, 42));
+}
+
+TEST(UInt128Test, Parse_LeadingMinus_ThrowsOverflow) {
+    EXPECT_THROW(UInt128::Parse("-1"), System::OverflowException);
+}
+
+TEST(UInt128Test, Parse_LeadingMinusZero_ThrowsOverflow) {
+    EXPECT_THROW(UInt128::Parse("-0"), System::OverflowException);
+}
+
+TEST(UInt128Test, Parse_Empty_ThrowsFormat) {
+    EXPECT_THROW(UInt128::Parse(""), System::FormatException);
+}
+
+TEST(UInt128Test, Parse_NonDigit_ThrowsFormat) {
+    EXPECT_THROW(UInt128::Parse("12a34"), System::FormatException);
+}
+
+TEST(UInt128Test, Parse_ExceedsMaxValue_ThrowsOverflow) {
+    // MaxValue is 340282366920938463463374607431768211455; append a digit to overflow.
+    EXPECT_THROW(UInt128::Parse("3402823669209384634633746074317682114550"), System::OverflowException);
+}
+
+TEST(UInt128Test, TryParse_Valid_ReturnsTrue) {
+    UInt128 result;
+    EXPECT_TRUE(UInt128::TryParse("999", result));
+    EXPECT_TRUE(result == UInt128(0, 999));
+}
+
+TEST(UInt128Test, TryParse_Invalid_ReturnsFalseAndZero) {
+    UInt128 result(0, 123);
+    EXPECT_FALSE(UInt128::TryParse("-5", result));
+    EXPECT_TRUE(result == UInt128::Zero());
+}
+
+TEST(UInt128Test, ToString_HexFormat) {
+    UInt128 v(0x1, 0xABCD);
+    EXPECT_EQ(v.ToString("X"), "1000000000000ABCD");
+}
+
+TEST(UInt128Test, ToString_HexFormatLowercase) {
+    UInt128 v(0, 0xABCD);
+    EXPECT_EQ(v.ToString("x"), "abcd");
+}
+
+TEST(UInt128Test, ToString_DecimalWithWidth) {
+    UInt128 v(0, 5);
+    EXPECT_EQ(v.ToString("D10"), "0000000005");
+}
+
+TEST(UInt128Test, ToString_EmptyFormat_MatchesPlainToString) {
+    UInt128 v(0, 42);
+    EXPECT_EQ(v.ToString(""), v.ToString());
+}

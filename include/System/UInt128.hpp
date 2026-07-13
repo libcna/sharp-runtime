@@ -9,6 +9,8 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/DivideByZeroException.hpp"
+#include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 
 #if defined(_MSC_VER)
 #  error "UInt128 requires unsigned __int128 (GCC/Clang only). MSVC is not supported for this type."
@@ -115,6 +117,94 @@ namespace System {
             while (v > 0) { s += char('0' + (int)(v % 10)); v /= 10; }
             std::reverse(s.begin(), s.end());
             return s;
+        }
+
+        /**
+         * @brief Converts the value of this UInt128 to its equivalent string representation,
+         * using the specified format.
+         *
+         * C++ counterpart of .NET UInt128.ToString(string). Supports "X"/"x" (hexadecimal),
+         * "D"/"d" (decimal), and "G"/"g" (general), each optionally followed by a minimum
+         * field width (e.g. "X32"), zero-padded. Mirrors Int128::ToString(string) minus the
+         * sign handling, since UInt128 is never negative.
+         * @param format The numeric format specifier.
+         * @return A string containing the formatted representation of this value.
+         */
+        [[nodiscard]] std::string ToString(const std::string& format) const {
+            if (format.empty()) return ToString();
+            char type = format[0];
+            int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            if (type == 'X' || type == 'x') {
+                unsigned __int128 uv = value_;
+                std::string s;
+                if (uv == 0) {
+                    s = "0";
+                } else {
+                    while (uv > 0) {
+                        int digit = static_cast<int>(uv & 0xF);
+                        s += static_cast<char>(digit < 10 ? '0' + digit : (type == 'X' ? 'A' : 'a') + (digit - 10));
+                        uv >>= 4;
+                    }
+                    std::reverse(s.begin(), s.end());
+                }
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            if (type == 'D' || type == 'd') {
+                std::string s = ToString();
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            return ToString();
+        }
+
+        /**
+         * @brief Converts the string representation of a number to its UInt128 equivalent.
+         *
+         * C++ counterpart of .NET UInt128.Parse(string) with NumberStyles.Integer: a leading
+         * '-' always overflows (unsigned types reject any negative sign, even "-0"), matching
+         * the Parse convention already established for UInt16/UInt32/UInt64 in this codebase --
+         * unlike Int128::Parse's simplified single-FormatException TryParse wrapper, this
+         * distinguishes FormatException (bad characters/empty string) from OverflowException
+         * (value out of [0, MaxValue] range or a leading '-'), matching real .NET's actual
+         * UInt128 parsing behavior (Number.ParseUInt128 throws OverflowException specifically
+         * on range violations).
+         * @throws System::FormatException if @p s is not a valid integer string.
+         * @throws System::OverflowException if @p s has a leading '-' or the value exceeds
+         *         UInt128's range.
+         */
+        static UInt128 Parse(const std::string& s) {
+            if (s.empty())
+                throw System::FormatException("Input string was not in a correct format.");
+            std::size_t i = 0;
+            if (s[i] == '-')
+                throw System::OverflowException("Value was either too large or too small for a UInt128.");
+            if (s[i] == '+') ++i;
+            if (i == s.size())
+                throw System::FormatException("Input string was not in a correct format.");
+
+            constexpr unsigned __int128 kMax = ~static_cast<unsigned __int128>(0);
+            unsigned __int128 val = 0;
+            for (; i < s.size(); ++i) {
+                if (s[i] < '0' || s[i] > '9')
+                    throw System::FormatException("Input string was not in a correct format.");
+                unsigned int digit = static_cast<unsigned int>(s[i] - '0');
+                if (val > (kMax - digit) / 10)
+                    throw System::OverflowException("Value was either too large or too small for a UInt128.");
+                val = val * 10 + digit;
+            }
+            return UInt128(val);
+        }
+
+        /**
+         * @brief Tries to convert a string to its UInt128 equivalent.
+         * @param s      A string containing the number to convert.
+         * @param result Set to the parsed value on success, or 0 on failure.
+         * @return true if @p s was converted successfully; false otherwise.
+         */
+        static bool TryParse(const std::string& s, UInt128& result) {
+            try { result = Parse(s); return true; }
+            catch (...) { result = UInt128(); return false; }
         }
 
         /**
