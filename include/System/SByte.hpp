@@ -120,15 +120,15 @@ namespace System {
         }
 
         /** @brief Compares @p a to @p b. C++ counterpart of .NET SByte.CompareTo(sbyte). */
-        [[nodiscard]] static int CompareTo(sbytecs a, sbytecs b) noexcept {
-            return static_cast<int>(a) - static_cast<int>(b);
+        [[nodiscard]] static SharpRuntime::intcs CompareTo(sbytecs a, sbytecs b) noexcept {
+            return static_cast<SharpRuntime::intcs>(a) - static_cast<SharpRuntime::intcs>(b);
         }
 
         /** @brief Returns true if @p a equals @p b. C++ counterpart of .NET SByte.Equals(sbyte). */
         [[nodiscard]] static bool Equals(sbytecs a, sbytecs b) noexcept { return a == b; }
 
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET SByte.GetHashCode(). */
-        [[nodiscard]] static int GetHashCode(sbytecs value) noexcept { return static_cast<int>(value); }
+        [[nodiscard]] static SharpRuntime::intcs GetHashCode(sbytecs value) noexcept { return static_cast<SharpRuntime::intcs>(value); }
 
         /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET SByte.Clamp(sbyte,sbyte,sbyte). */
         [[nodiscard]] static sbytecs Clamp(sbytecs value, sbytecs min, sbytecs max) noexcept {
@@ -142,7 +142,7 @@ namespace System {
         [[nodiscard]] static sbytecs Min(sbytecs x, sbytecs y) noexcept { return x < y ? x : y; }
 
         /** @brief Returns -1 if negative, 0 if zero, 1 if positive. C++ counterpart of .NET Math.Sign(sbyte). */
-        [[nodiscard]] static int Sign(sbytecs value) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs Sign(sbytecs value) noexcept {
             return (value > 0) - (value < 0);
         }
 
@@ -224,7 +224,7 @@ namespace System {
          * @brief Rotates @p value left by @p rotateAmount bits within an 8-bit field.
          * C++ counterpart of .NET SByte.RotateLeft(sbyte, int).
          */
-        [[nodiscard]] static sbytecs RotateLeft(sbytecs value, int rotateAmount) noexcept {
+        [[nodiscard]] static sbytecs RotateLeft(sbytecs value, SharpRuntime::intcs rotateAmount) noexcept {
             uint8_t uv = static_cast<uint8_t>(value);
             int shift = rotateAmount & 7;
             return static_cast<sbytecs>((uv << shift) | (uv >> (8 - shift)));
@@ -234,7 +234,7 @@ namespace System {
          * @brief Rotates @p value right by @p rotateAmount bits within an 8-bit field.
          * C++ counterpart of .NET SByte.RotateRight(sbyte, int).
          */
-        [[nodiscard]] static sbytecs RotateRight(sbytecs value, int rotateAmount) noexcept {
+        [[nodiscard]] static sbytecs RotateRight(sbytecs value, SharpRuntime::intcs rotateAmount) noexcept {
             uint8_t uv = static_cast<uint8_t>(value);
             int shift = rotateAmount & 7;
             return static_cast<sbytecs>((uv >> shift) | (uv << (8 - shift)));
