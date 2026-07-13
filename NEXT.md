@@ -1,10 +1,64 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `801b4eb`) — 11899 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `773eb36`) — 11919 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11899 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11919 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — third `ported-type-audit` batch (40 tickets, 3 parallel forks), 6 more real gaps found
+
+Continuing the same autonomous run (previous checkpoint covered the 39-ticket batch). Same
+3-way disjoint-file-set parallel-fork pattern: System.Diagnostics real-logic types (5 tickets),
+System.Diagnostics.CodeAnalysis attributes (23 tickets), System.Globalization (12 tickets).
+Verified afterward via `git fetch`+`git log` (no local/origin divergence, all 3 commits landed
+cleanly) and a fresh `cmake --build` + full test run (11919/11919, matching the last fork's
+self-reported count).
+
+- **752-756 (System.Diagnostics, 5 tickets)**: StackTrace/StackTraceHiddenAttribute/
+  UnreachableException clean (doc-comment gaps filled). **Stopwatch** was missing the .NET 7+
+  static `GetElapsedTime(startingTimestamp[, endingTimestamp])` overloads and `ToString()` —
+  added both with tests. **Trace** had no `IndentLevel`/`IndentSize`/`Indent()`/`Unindent()` at
+  all despite `Debug` already having the equivalent pattern — added matching thread-local-storage
+  support. Documented (not attempted) the larger remaining `Trace` gap: `TraceListenerCollection`,
+  `CorrelationManager`, `WriteIf`/`WriteLineIf` family. Commit `a0c0a2a`.
+  - **782-807 (System.Globalization, 12 tickets)**: 10 clean (8 enums verified byte-exact,
+  DaylightTime, SortVersion). **CultureNotFoundException**'s `Message` never appended the invalid
+  culture name/ID that real .NET's override always includes — fixed via the same
+  `AlreadyComposedTag` pattern from this session's earlier `ArgumentOutOfRangeException` fix
+  (ticket 353), 6 new regression tests. **ISOWeek** was missing `GetWeekOfYear(DateOnly)`/
+  `GetYear(DateOnly)`/`ToDateOnly(int,int,DayOfWeek)` overloads — added (core week-numbering
+  algorithm itself was independently re-verified against known ISO-8601 edge cases and found
+  correct, no bug there despite this namespace's track record of real bugs this session). Commit
+  `773eb36`.
+- **757-779 (System.Diagnostics.CodeAnalysis, 23 tickets)**: 17 clean. **6 real data-model gaps
+  fixed** (these are stub attributes by design — no runtime effect is correct — but their *stored
+  data shape* must still match .NET's actual constructor/property surface): `MemberNotNullAttribute`/
+  `MemberNotNullWhenAttribute` only stored a single member name instead of an array, making
+  multi-member annotation impossible — renamed `getMemberProperty()` → `getMembersProperty()`
+  returning `vector<string>`, added the multi-member ctor. `RequiresDynamicCodeAttribute`/
+  `RequiresUnreferencedCodeAttribute` were both missing the `ExcludeStatics` bool property.
+  `StringSyntaxAttribute` was missing the `Arguments` (params object array) ctor overload and 3 of
+  15 syntax-kind constants (`CSharp`/`FSharp`/`VisualBasic`). `ExcludeFromCodeCoverageAttribute`'s
+  `Justification` was get-only instead of `get;set;`. Rewrote 2 existing tests that used the old
+  single-string API, added 13 new regression tests. Commit `d138cbd`.
+
+Final verified state: 11919/11919 tests passing (up from 11899 — 20 net new tests), 0 errors/0
+warnings, all 3 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+Running tally across all three `ported-type-audit` fork batches this session: 97 tickets closed,
+10 real bugs/gaps found and fixed (ArrayList value-equality, 3x Hashtable, ReadOnlyObservableCollection
+dangling-this, BitVector32.Section hex format, Debugger missing members, Stopwatch/Trace missing
+members, CultureNotFoundException message, ISOWeek missing overloads, CodeAnalysis attributes'
+6 data-model gaps), 0 regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 2-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary, checkpoint NEXT.md, repeat. Ticket #43 stays `blocked`.
+The `ported-type-audit` backlog is now ~652 done / ~340 todo.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — second `ported-type-audit` batch (39 tickets, 3 parallel forks), 4 more real bugs found
 
