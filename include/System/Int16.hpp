@@ -77,10 +77,9 @@ public:
      * 16-bit signed integer equivalent.
      *
      * C++ counterpart of .NET Int16.Parse(string, NumberStyles, IFormatProvider). @p provider
-     * is accepted for API-surface parity but ignored. Supports NumberStyles.Integer and
-     * NumberStyles.HexNumber (hex reinterpreted as a two's-complement bit pattern) -- see
-     * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar and
-     * the deliberate scope decision on AllowThousands/AllowDecimalPoint/etc.
+     * is accepted for API-surface parity but ignored. Supports NumberStyles.Integer, .Number,
+     * .Currency, and .HexNumber (hex reinterpreted as a two's-complement bit pattern) -- see
+     * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
      * @throws System::FormatException if the string is not in a correct format for @p style.
      * @throws System::OverflowException if the value exceeds Int16 range.
      */

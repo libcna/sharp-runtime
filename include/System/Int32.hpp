@@ -94,13 +94,12 @@ public:
      *
      * C++ counterpart of .NET Int32.Parse(string, NumberStyles, IFormatProvider). @p provider
      * is accepted for API-surface parity but ignored (this port has no culture-aware number
-     * formatting). Supports NumberStyles.Integer (leading/trailing whitespace, leading sign)
-     * and NumberStyles.HexNumber (leading/trailing whitespace, hex digits, no sign -- a hex
-     * string is reinterpreted as a two's-complement bit pattern, matching real .NET's actual
-     * semantics: Parse("FFFFFFFF", NumberStyles.HexNumber) yields -1, not an overflow).
-     * AllowThousands/AllowDecimalPoint/AllowCurrencySymbol/AllowParentheses/AllowExponent are
-     * not implemented -- see include/System/detail/IntegerNumberStylesParser.hpp's own
-     * doc-comment for the deliberate scope decision.
+     * formatting; separators/currency symbol use NumberFormatInfo.InvariantInfo's fixed
+     * defaults). Supports NumberStyles.Integer, .Number, .Currency, and .HexNumber (hex is
+     * reinterpreted as a two's-complement bit pattern, matching real .NET's actual semantics:
+     * Parse("FFFFFFFF", NumberStyles.HexNumber) yields -1, not an overflow) -- see
+     * include/System/detail/IntegerNumberStylesParser.hpp's own doc-comment for the exact
+     * supported grammar and its one remaining scope gap (AllowExponent).
      * @throws System::FormatException if the string is not in a correct format for @p style.
      * @throws System::OverflowException if the value exceeds Int32 range.
      */

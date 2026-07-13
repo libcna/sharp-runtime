@@ -307,7 +307,7 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.Parse(string, NumberStyles, IFormatProvider). @p
          * provider is accepted for API-surface parity but ignored. Supports
-         * NumberStyles.Integer and NumberStyles.HexNumber -- see
+         * NumberStyles.Integer, .Number, .Currency, and .HexNumber -- see
          * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
          * @throws System::FormatException if the string is not in a correct format for @p style.
          * @throws System::OverflowException if the value is outside [0, 255].

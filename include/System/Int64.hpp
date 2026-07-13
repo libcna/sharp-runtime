@@ -82,7 +82,7 @@ namespace System {
          *
          * C++ counterpart of .NET Int64.Parse(string, NumberStyles, IFormatProvider). @p
          * provider is accepted for API-surface parity but ignored. Supports
-         * NumberStyles.Integer and NumberStyles.HexNumber (hex reinterpreted as a
+         * NumberStyles.Integer, .Number, .Currency, and .HexNumber (hex reinterpreted as a
          * two's-complement bit pattern) -- see
          * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
          * @throws System::FormatException if the string is not in a correct format for @p style.
