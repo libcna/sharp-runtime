@@ -46,7 +46,7 @@ namespace System::Threading {
          * deadline computed as now()+milliseconds(-1) would already be in the past, so -1
          * must be special-cased to skip the deadline check entirely.
          */
-        static bool SpinUntil(std::function<bool()> condition, int millisecondsTimeout) {
+        static bool SpinUntil(std::function<bool()> condition, SharpRuntime::intcs millisecondsTimeout) {
             if (millisecondsTimeout == -1) {
                 SpinWait sw;
                 while (!condition()) sw.SpinOnce();
