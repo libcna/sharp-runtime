@@ -28,7 +28,14 @@ namespace System::Net::Http {
         /** Creates a new instance with the specified message. */
         explicit HttpRequestException(const std::string& message) : System::Exception(message) {}
 
-        /** Creates a new instance with a message and inner exception. */
+        /**
+         * @brief Creates a new instance with a message and inner exception.
+         * @note Real .NET copies `inner.HResult` onto this exception's own HResult when
+         * @p inner is non-null. This runtime doesn't propagate HResult from a `std::exception_ptr`
+         * inner exception anywhere in the codebase (extracting it needs a rethrow/catch, and no
+         * type in this port currently does that for inner exceptions), so this is a known,
+         * project-wide gap rather than something specific to this one type.
+         */
         HttpRequestException(const std::string& message, std::exception_ptr inner)
             : System::Exception(message, inner) {}
 

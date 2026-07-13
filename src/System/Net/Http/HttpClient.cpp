@@ -214,12 +214,24 @@ static std::string recvLine(SocketFd fd, std::string& buf) {
 }
 
 // Read exactly `count` bytes, drawing from buf first.
+//
+// Bug fix: if the connection closes (recv() returns <= 0) before `count` bytes have arrived,
+// this previously just broke out of the loop and returned whatever partial data had been
+// accumulated -- a dropped connection mid-response (e.g. server crash, network failure while
+// streaming a Content-Length-bounded or chunked body) silently produced a truncated-but-
+// "successful"-looking HttpResponseMessage instead of a catchable error. Real .NET surfaces this
+// as an IOException with HttpRequestError.ResponseEnded ("The response ended prematurely.");
+// mirrored here via the matching HttpRequestException overload for consistency with every other
+// malformed-response failure path in this file.
 static std::vector<uint8_t> recvExact(SocketFd fd, std::string& buf, size_t count) {
     while (buf.size() < count) {
         char tmp[4096];
         size_t want = std::min(sizeof(tmp), count - buf.size());
         int n = static_cast<int>(::recv(fd, tmp, static_cast<int>(want), 0));
-        if (n <= 0) break;
+        if (n <= 0) {
+            throw HttpRequestException(HttpRequestError::ResponseEnded,
+                "HttpClient: connection closed before the full response body was received.");
+        }
         buf.append(tmp, static_cast<size_t>(n));
     }
     size_t take = std::min(buf.size(), count);

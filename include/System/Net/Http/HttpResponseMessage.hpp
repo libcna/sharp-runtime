@@ -41,10 +41,15 @@ public:
     /**
      * @brief Throws HttpRequestException if the response indicates failure.
      *
-     * C++ counterpart of .NET HttpResponseMessage.EnsureSuccessStatusCode().
+     * C++ counterpart of .NET HttpResponseMessage.EnsureSuccessStatusCode(), which returns
+     * `this` to allow fluent chaining (e.g. `response.EnsureSuccessStatusCode().Content...`);
+     * returns a const reference to self here for the same purpose, matching this method's
+     * existing const-qualification. All existing call sites in this codebase already ignore the
+     * return value, so this is a purely additive change.
+     * @return *this.
      */
-    void EnsureSuccessStatusCode() const {
-        if (getIsSuccessStatusCodeProperty()) return;
+    const HttpResponseMessage& EnsureSuccessStatusCode() const {
+        if (getIsSuccessStatusCodeProperty()) return *this;
 
         size_t firstNonSpace = reasonPhrase_.find_first_not_of(" \t\r\n");
         std::string message = "Response status code does not indicate success: " +

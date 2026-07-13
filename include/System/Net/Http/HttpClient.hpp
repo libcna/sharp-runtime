@@ -17,9 +17,17 @@ namespace System::Net::Http {
 
 /**
  * Sends HTTP/1.1 requests and receives HTTP responses.
- * 
+ *
  * Supports HTTP (plain TCP, port 80 by default). HTTPS is not currently supported.
  * On Emscripten, all methods throw System::PlatformNotSupportedException.
+ *
+ * @note Unlike real .NET's HttpClient (which follows 3xx redirects by default via
+ * AllowAutoRedirect), this port never follows redirects -- Send() returns the raw 3xx response
+ * with its Location header intact rather than transparently re-requesting it. Following
+ * redirects correctly needs cross-host header/body semantics (which headers survive a redirect,
+ * how each 301/302/303/307/308 status differs in whether the method/body carry over, loop
+ * detection) that go beyond a single audit-pass fix; documented here as a known, disclosed gap
+ * rather than a bug to silently work around.
  */
 class HttpClient {
 public:

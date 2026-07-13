@@ -86,6 +86,22 @@ TEST(HttpMethodTests, Constructor_EmbeddedNul_Throws) {
     EXPECT_THROW(HttpMethod(std::string("GE\0T", 4)), System::FormatException);
 }
 
+TEST(HttpMethodTests, Parse_KnownMethod_CaseInsensitive_ReturnsSingleton) {
+    EXPECT_EQ(HttpMethod::Parse("get").getMethodProperty(), "GET");
+    EXPECT_EQ(HttpMethod::Parse("POST").getMethodProperty(), "POST");
+    EXPECT_EQ(HttpMethod::Parse("Delete").getMethodProperty(), "DELETE");
+}
+
+TEST(HttpMethodTests, Parse_UnknownMethod_ConstructsNew) {
+    HttpMethod m = HttpMethod::Parse("PROPFIND");
+    EXPECT_EQ(m.getMethodProperty(), "PROPFIND");
+}
+
+TEST(HttpMethodTests, Parse_Invalid_Throws) {
+    EXPECT_THROW(HttpMethod::Parse(""), System::ArgumentException);
+    EXPECT_THROW(HttpMethod::Parse("GET /foo"), System::FormatException);
+}
+
 TEST(HttpMethodTests, TraceConnectQuery_Methods) {
     EXPECT_EQ(HttpMethod::Trace().getMethodProperty(), "TRACE");
     EXPECT_EQ(HttpMethod::Connect().getMethodProperty(), "CONNECT");
@@ -484,6 +500,14 @@ TEST(HttpIOExceptionTests, IsA_IOException) {
     EXPECT_NE(std::string(base->what()).find("x"), std::string::npos);
 }
 
+TEST(HttpIOExceptionTests, DefaultMessage_FallsBackToIOExceptionDefault) {
+    HttpIOException ex(HttpRequestError::ConnectionError);
+    std::string msg = ex.getMessageProperty();
+    EXPECT_NE(msg.find("I/O error occurred."), std::string::npos);
+    EXPECT_NE(msg.find("ConnectionError"), std::string::npos);
+    EXPECT_NE(msg.front(), ' ');
+}
+
 TEST(HttpProtocolExceptionTests, StoresErrorCodeAndHttpProtocolErrorCategory) {
     HttpProtocolException ex(0x1, "stream error", nullptr);
     EXPECT_EQ(ex.getErrorCodeProperty(), 0x1);
@@ -713,6 +737,28 @@ TEST(HttpClientTests, MalformedChunkSize_ThrowsHttpRequestException) {
         std::vector<SharpRuntime::bytecs> reqBuf(4096);
         server->Receive(reqBuf);
         server->Send(toBytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\ndata\r\n0\r\n\r\n"));
+        server->Close();
+    });
+
+    HttpClient client;
+    EXPECT_THROW(client.GetString("http://127.0.0.1:" + std::to_string(port) + "/"), HttpRequestException);
+
+    serverThread.join();
+}
+
+// Regression test (ticket 932): a server that closes the connection before delivering all
+// `Content-Length`-declared bytes previously made recvExact() silently return the truncated data
+// it had so far, so the caller saw a "successful" (but incomplete) response instead of an error.
+TEST(HttpClientTests, ConnectionClosedBeforeContentLengthBytes_ThrowsHttpRequestException) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        server->Receive(reqBuf);
+        // Declares 100 bytes of body but sends only 5, then closes.
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nhello"));
         server->Close();
     });
 
