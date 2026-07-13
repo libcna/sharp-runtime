@@ -1,10 +1,27 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `90b6533`) — 12173 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `06e4255`) — 12173 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
 ```
+
+## Re-verified this checkpoint: `plan.sqlite3` has nothing blocked, nothing pending, anywhere
+
+Direct re-check, both tables, full status breakdown (not a sample):
+```
+sqlite3 plan.sqlite3 "SELECT status, COUNT(*) FROM ticket GROUP BY status;"
+  done|1709
+sqlite3 plan.sqlite3 "SELECT status, COUNT(*) FROM task GROUP BY status;"
+  ignore|137
+  ignored|15023
+  ported|1041
+```
+`ticket`: every one of 1709 rows is `done` — no `blocked`/`todo`/`doing`/`needs_user`/`wontfix`
+rows exist at all. `task`: only `ported`/`ignore`/`ignored` appear — no `''`/`todo`/`tobedecided`
+rows exist. (Note: an earlier checkpoint entry below states the ticket total as "1712" — that was
+an arithmetic slip made while summing the category breakdown by hand; 1709 is the correct,
+directly-queried total and is what should be trusted going forward.)
 
 ## MILESTONE: ticket #43 (global int→intcs policy) unblocked and fully rolled out — the `ticket` table is now 100% `done`
 
