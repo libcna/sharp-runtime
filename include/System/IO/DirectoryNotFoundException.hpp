@@ -9,8 +9,11 @@ namespace System::IO {
     class DirectoryNotFoundException : public IOException {
         std::string directoryPath_;
     public:
+        /** Initializes a new DirectoryNotFoundException with a default message. */
         DirectoryNotFoundException();
+        /** Initializes a new DirectoryNotFoundException with the specified message. */
         explicit DirectoryNotFoundException(const char* message);
+        /** Initializes a new DirectoryNotFoundException with the specified message. */
         explicit DirectoryNotFoundException(const std::string& message);
         /** Initializes a DirectoryNotFoundException with a message and an inner exception. */
         DirectoryNotFoundException(const std::string& message, std::exception_ptr inner);
