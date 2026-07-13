@@ -1,10 +1,35 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `cb57a4e`) — 11868 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `da8a70b`) — 11875 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11868 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11875 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 352 closed, a real out-of-bounds read
+
+Continuing the same autonomous run (previous checkpoint covered 351). Commit: da8a70b — pushed
+to `origin/feature/work`.
+
+- **352 (BitConverter.hpp/.cpp)**: `ToString(vector, startIndex)` computed `length =
+  value.size() - startIndex` with no validation, then delegated to the raw-pointer 3-arg
+  `ToString`, which also had no bounds checking. For a negative `startIndex`, this produced an
+  inflated length and read `value[startIndex + i]` starting at `value[-1]` on the first
+  iteration — a genuine out-of-bounds read, not merely wrong output. For `startIndex` beyond the
+  vector's size, the computed negative length caused the loop to silently produce an empty
+  string instead of throwing, as real .NET does. Fixed by adding a new 3-arg vector overload
+  with full array-length-aware validation matching `BitConverter.cs`'s
+  `ToString(byte[], int, int)` exactly, including its quirky-but-real boundary case
+  (`startIndex == size` on a non-empty vector throws, not returns empty). The 2-arg overload now
+  delegates to it, matching .NET's own delegation chain. Also added the checks possible without
+  buffer-length info to the raw-pointer overload, which remains used directly for raw C-array
+  interop. Rest of the file (all `GetBytes`/`ToXxx`/bit-reinterpretation overloads) reviewed and
+  confirmed correct — native-endianness-dependent `memcpy` matches real .NET's own behavior.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 351 closed, missing index-accessor API surface
 
