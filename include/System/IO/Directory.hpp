@@ -14,7 +14,14 @@ namespace System::IO {
      *
      * Partial C++ counterpart of .NET System.IO.Directory.
      *
-     * @note Status: Partial
+     * @note Status: Partial — covers the common Exists/CreateDirectory/Delete/Move/GetFiles/
+     * GetDirectories/GetCurrentDirectory/SetCurrentDirectory surface. Not ported: symbolic-link
+     * operations (CreateSymbolicLink, ResolveLinkTarget), Enumerate* streaming variants (only the
+     * eager vector-returning Get* forms exist), the static path-based timestamp accessors
+     * (Directory.GetCreationTime/GetLastAccessTime/GetLastWriteTime and their setters — the
+     * equivalent instance-level getCreationTimeProperty()/getLastWriteTimeProperty()/etc. exist
+     * on System::IO::FileSystemInfo instead), GetLogicalDrives, GetDirectoryRoot, GetParent, and
+     * recursive SearchOption/EnumerationOptions-based search overloads.
      */
     class Directory {
     public:
