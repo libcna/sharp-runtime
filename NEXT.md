@@ -6,6 +6,29 @@ cmake --build build --parallel 8          # Debug, default config — 0 errors/0
 ./build/SharpRuntimeTests                 # 11813 tests from 1197 test suites, 0 failures
 ```
 
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 330-331 closed, both clean audits
+
+Continuing the same autonomous run (previous checkpoint covered 329). No new commits this
+stretch — both clean audits.
+
+- **330 (NameValueCollection.hpp)**: already swept for the "raw std:: exception escapes" bug
+  class this session found repeatedly elsewhere (including in the immediately-prior ticket,
+  329's StringBuilder). Checked `Add`/`Set` for the ticket-310-shaped exception-safety issue
+  (index vector mutated before the hashmap) — present in shape, but since name/value are fixed
+  to `std::string` (not a generic/templated element), the only realistic trigger is
+  `std::bad_alloc`, matching the sibling `OrderedDictionary` (Specialized) finding from ticket
+  311's follow-up that was explicitly judged not worth a dedicated fix. Consistent call, not
+  fixed here either.
+- **331 (SByte.hpp)**: already thoroughly audited earlier this session (ticket 295's addendum +
+  the primitive-integer-type DivRem/ToString sweep). Re-verified all of that is still correctly
+  in place, plus checked the bit-twiddling methods (RotateLeft/Right, LeadingZeroCount,
+  MaxMagnitude/MinMagnitude, Log2/Log10) against the reference — all correct.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
+
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 329 closed, a fifth "raw std:: exception escapes" instance in one file
 
 Continuing the same autonomous run (previous checkpoint covered 328). Commit: 1e47b40 — pushed
