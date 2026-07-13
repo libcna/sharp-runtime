@@ -6,6 +6,33 @@ cmake --build build --parallel 8          # Debug, default config — 0 errors/0
 ./build/SharpRuntimeTests                 # 11798 tests from 1197 test suites, 0 failures
 ```
 
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 325-326 closed, both clean audits
+
+Continuing the same autonomous run (previous checkpoint covered 324). No new commits this
+stretch — both were clean audits with no code changes needed, though 325 involved substantial
+verification effort worth recording.
+
+- **325 (Threading/Channels/Channel.hpp)**: this file has a real history of subtle concurrency
+  bugs (3 prior fix commits: capacity-0 deadlock, closeError propagation, a use-after-free from
+  capturing raw `this`), so this pass combined code re-review with empirical TSan stress
+  testing rather than relying on inspection alone. Ran 4 independent multi-threaded stress
+  scenarios (basic MPMC via TryRead/TryWrite, the capacity-0 rendezvous edge case x20, close-
+  with-error propagation to concurrently-blocked readers, and concurrent writers against all
+  three `BoundedChannelFullMode` drop modes under real contention) plus a fifth exercising the
+  `ReadAsync()`/`WriteAsync()` Task-wrapping layer specifically — all clean under TSan, all
+  produced correct results. The last one incidentally re-validates ticket 313's Task/
+  shared_future fix under realistic nested-Task usage.
+- **326 (EventHandler.hpp)**: small, well-implemented file with 4 prior fix commits. Verified
+  `Raise()`'s snapshot-then-iterate pattern correctly matches C#'s actual multicast-delegate
+  invocation semantics, including that an exception from one handler aborts remaining handlers
+  in the same Raise() call (matching real .NET, not a bug) — a subtlety worth double-checking
+  since it's easy to assume "exception-isolated per-handler" incorrectly.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
+
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 324 closed, self-aliasing UB in Except/SymmetricExceptWith
 
 Continuing the same autonomous run (previous checkpoint covered 322-323). Commit: a4b6a43 —
