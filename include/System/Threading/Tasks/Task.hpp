@@ -4,14 +4,17 @@
 #pragma once
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -26,18 +29,10 @@ namespace System::Threading::Tasks {
     using SharpRuntime::intcs;
 
     class TaskFactory;
+    template<typename TResult> class TaskT;
 
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
-    //
-    // Known gap (documented, not implemented): Task.WhenAny(IEnumerable<Task>) does not exist in
-    // this port (Task.WhenAll was added -- see its own doc-comment for the exact simplifications
-    // applied). WhenAny is materially harder than WhenAll was: std::future has no native "wait
-    // for first of N" primitive, so a correct, race-free implementation needs a shared
-    // completion-signaling mechanism (e.g. a condition variable each task's completion callback
-    // notifies) -- given this Task/TaskT pair's history of real ThreadSanitizer-caught races
-    // around shared_future (see future_'s comment above), that is substantial new work deserving
-    // its own careful pass rather than a rushed addition alongside WhenAll.
     class Task {
         struct State {
             std::atomic<bool> isCompleted{false};
@@ -264,6 +259,26 @@ namespace System::Threading::Tasks {
         }
 
         /**
+         * Creates a TaskT<Task> that completes with the first task in @p tasks to reach a
+         * terminal state (RanToCompletion, Faulted, OR Canceled).
+         *
+         * C++ counterpart of .NET Task.WhenAny(IEnumerable&lt;Task&gt;). Matches real .NET's own
+         * documented contract exactly: the RETURNED task always itself completes successfully
+         * with its Result set to the first-completed input Task -- even if that inner task
+         * faulted or was canceled. The caller inspects the winning Task's own status/exception
+         * separately (e.g. via getIsFaultedProperty() or Wait()); this wrapper never propagates
+         * the winning task's own exception.
+         *
+         * Body is defined out-of-line, after TaskT's own definition later in this file -- same
+         * forward-declaration pattern Factory() already uses, since TaskT<Task> can only be
+         * instantiated once TaskT's full template definition is visible.
+         *
+         * @param tasks The tasks to wait on. Must be non-empty.
+         * @throws System::ArgumentException if @p tasks is empty, matching real .NET.
+         */
+        static TaskT<Task> WhenAny(std::vector<Task> tasks);
+
+        /**
          * Creates a Task that completes after the specified delay in milliseconds.
          * On Emscripten, throws PlatformNotSupportedException.
          * @param milliseconds Delay duration in milliseconds. -1 is accepted (matching real
@@ -458,5 +473,61 @@ namespace System::Threading::Tasks {
             return TaskT<TResult>(std::move(func), std::move(token));
         }
     };
+
+    // Out-of-line since TaskT<Task> can only be instantiated once TaskT's definition above is
+    // visible -- see WhenAny's own declaration/doc-comment inside class Task for the full
+    // rationale and .NET-parity contract.
+    //
+    // std::future/std::shared_future has no native "wait for first of N" combinator, so this
+    // spawns one lightweight watcher thread per input task, each calling Wait() on its own copy
+    // of that Task (shared_future::get() is documented safe for concurrent calls -- see Task's
+    // own future_ comment above). The first watcher to observe its task completing wins via an
+    // atomic compare-exchange and notifies a shared condition variable; every other watcher's
+    // result is simply discarded. The atomic CAS (not the mutex) is what decides the winner;
+    // the mutex/condition_variable pair exists purely to wake the blocked caller thread without
+    // busy-polling, and is race-free by the standard wait(lock, predicate)/notify protocol (a
+    // watcher can't reach notify_all() until it acquires the same mutex the waiting thread either
+    // never released [if the predicate was already true] or released atomically with entering the
+    // wait queue [if it wasn't] -- no window exists where a notify can be sent with no one either
+    // already registered to receive it or about to see the predicate already satisfied).
+    //
+    // Watchers are detach()'d, never join()'d: joining would block this function on EVERY
+    // watcher, including "losing" ones still waiting on a slower task -- defeating WhenAny's
+    // entire "return once the first completes" contract (confirmed via a real repro: an early
+    // join()-based version of this consistently took as long as the slowest input task, not the
+    // fastest). Each detached watcher captures its own Task COPY (by value, not a reference into
+    // this function's stack frame) plus shared_ptr copies of mutex/cv/winnerIndex, so it stays
+    // fully self-contained and safe to keep running in the background after this function
+    // returns -- matching real .NET's own behavior, where non-winning tasks are not canceled and
+    // simply keep running independently.
+    //
+    // This is a real cost -- N extra OS threads per WhenAny call, on top of the N already spawned
+    // by the input tasks themselves -- but matches this port's existing "simple thread-per-task,
+    // not tuned for extreme contention" model used throughout this class and Channel<T>.
+    inline TaskT<Task> Task::WhenAny(std::vector<Task> tasks) {
+        if (tasks.empty()) {
+            throw System::ArgumentException("The tasks argument contains no tasks.", "tasks");
+        }
+        return TaskT<Task>([tasks]() mutable -> Task {
+            auto mutex = std::make_shared<std::mutex>();
+            auto cv = std::make_shared<std::condition_variable>();
+            auto winnerIndex = std::make_shared<std::atomic<int>>(-1);
+
+            for (size_t i = 0; i < tasks.size(); ++i) {
+                std::thread([task = tasks[i], i, mutex, cv, winnerIndex]() mutable {
+                    try { task.Wait(); } catch (...) {}
+                    int expected = -1;
+                    if (winnerIndex->compare_exchange_strong(expected, static_cast<int>(i))) {
+                        std::lock_guard<std::mutex> lock(*mutex);
+                        cv->notify_all();
+                    }
+                }).detach();
+            }
+
+            std::unique_lock<std::mutex> lock(*mutex);
+            cv->wait(lock, [&] { return winnerIndex->load() >= 0; });
+            return tasks[static_cast<size_t>(winnerIndex->load())];
+        });
+    }
 
 } // namespace System::Threading::Tasks

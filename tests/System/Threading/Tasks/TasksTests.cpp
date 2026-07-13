@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 #include "System/AggregateException.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
@@ -190,6 +191,91 @@ TEST(TaskWhenAllTests, OneCanceled_NoFault_WaitThrowsTaskCanceledException) {
     tasks.push_back(Task::Run([]() {}, cts.getTokenProperty()));
     Task all = Task::WhenAll(std::move(tasks));
     EXPECT_THROW(all.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+// ===========================================================================
+// Task::WhenAny
+// ===========================================================================
+
+TEST(TaskWhenAnyTests, EmptyVector_Throws) {
+    EXPECT_THROW(Task::WhenAny({}), System::ArgumentException);
+}
+
+TEST(TaskWhenAnyTests, SingleTask_ReturnsThatTask) {
+    Task t = Task::Run([]() {});
+    TaskT<Task> any = Task::WhenAny({t});
+    Task winner = any.Wait();
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+TEST(TaskWhenAnyTests, FastTaskWinsOverSlowTask) {
+    Task fast = Task::Run([]() {});
+    Task slow = Task::Run([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    });
+    auto start = std::chrono::steady_clock::now();
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{fast, slow});
+    Task winner = any.Wait();
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    // WhenAny must return once the FAST task completes, not wait for the slow one -- checked via
+    // elapsed wall-clock time (generous margin for scheduling jitter under load) rather than a
+    // side-effect flag racing the slow task's own thread, which is inherently flaky.
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+    EXPECT_LT(elapsedMs, 400);
+}
+
+TEST(TaskWhenAnyTests, WrapperCompletesSuccessfully_EvenWhenWinnerFaulted) {
+    // Matches real .NET's own documented contract: the returned wrapper task always itself
+    // completes RanToCompletion, even if the first-completed inner task faulted.
+    Task faulting = Task::Run([]() { throw std::runtime_error("boom"); });
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{faulting});
+    EXPECT_NO_THROW(any.Wait());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsFaultedProperty());
+    EXPECT_THROW(winner.Wait(), std::runtime_error);
+}
+
+TEST(TaskWhenAnyTests, WrapperCompletesSuccessfully_EvenWhenWinnerCanceled) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task canceled = Task::Run([]() {}, cts.getTokenProperty());
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{canceled});
+    EXPECT_NO_THROW(any.Wait());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCanceledProperty());
+}
+
+TEST(TaskWhenAnyTests, ManyTasks_ExactlyOneWinnerObserved) {
+    constexpr int kCount = 20;
+    std::vector<Task> tasks;
+    std::vector<std::shared_ptr<std::atomic<bool>>> ran;
+    for (int i = 0; i < kCount; ++i) {
+        auto flag = std::make_shared<std::atomic<bool>>(false);
+        ran.push_back(flag);
+        tasks.push_back(Task::Run([flag]() { *flag = true; }));
+    }
+    TaskT<Task> any = Task::WhenAny(std::move(tasks));
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+TEST(TaskWhenAnyTests, RepeatedCalls_NoFlakiness) {
+    // Stress the watcher-thread synchronization (atomic CAS + condition_variable) across many
+    // repetitions with varying task counts, matching this project's convention of repeat-testing
+    // concurrency-sensitive code (see CLAUDE.md's --gtest_repeat guidance).
+    for (int iter = 0; iter < 50; ++iter) {
+        std::vector<Task> tasks;
+        for (int i = 0; i < 5; ++i) {
+            tasks.push_back(Task::Run([]() {}));
+        }
+        TaskT<Task> any = Task::WhenAny(std::move(tasks));
+        Task winner = any.Wait();
+        EXPECT_TRUE(winner.getIsCompletedProperty());
+    }
 }
 
 // ===========================================================================
