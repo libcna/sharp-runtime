@@ -200,6 +200,33 @@ TEST(DebugTraceTests, Trace_Flush_DoesNotThrow) {
     EXPECT_NO_THROW(Trace::Flush());
 }
 
+TEST(DebugTraceTests, Trace_IndentLevel_DefaultsToZero) {
+    EXPECT_EQ(Trace::getIndentLevelProperty(), 0);
+}
+
+TEST(DebugTraceTests, Trace_Indent_IncrementsLevel) {
+    Trace::setIndentLevelProperty(0);
+    Trace::Indent();
+    EXPECT_EQ(Trace::getIndentLevelProperty(), 1);
+    Trace::Unindent();
+    EXPECT_EQ(Trace::getIndentLevelProperty(), 0);
+}
+
+TEST(DebugTraceTests, Trace_IndentLevel_ClampsNegativeToZero) {
+    Trace::setIndentLevelProperty(-5);
+    EXPECT_EQ(Trace::getIndentLevelProperty(), 0);
+}
+
+TEST(DebugTraceTests, Trace_IndentSize_DefaultsToFour) {
+    EXPECT_EQ(Trace::getIndentSizeProperty(), 4);
+}
+
+TEST(DebugTraceTests, Trace_IndentSize_ClampsNegativeToZero) {
+    Trace::setIndentSizeProperty(-1);
+    EXPECT_EQ(Trace::getIndentSizeProperty(), 0);
+    Trace::setIndentSizeProperty(4); // restore default for other tests
+}
+
 // ---------------------------------------------------------------------------
 // Debugger tests
 // ---------------------------------------------------------------------------

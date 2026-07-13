@@ -114,6 +114,30 @@ namespace System::Diagnostics {
                        Clock::now().time_since_epoch()).count() / 100LL;
         }
 
+        /**
+         * @brief Gets the elapsed time since @p startingTimestamp, a value previously retrieved
+         * via GetTimestamp().
+         */
+        [[nodiscard]] static System::TimeSpan GetElapsedTime(longcs startingTimestamp) {
+            return GetElapsedTime(startingTimestamp, GetTimestamp());
+        }
+
+        /**
+         * @brief Gets the elapsed time between two timestamps previously retrieved via
+         * GetTimestamp(). Both @p startingTimestamp and @p endingTimestamp are already expressed
+         * in Frequency (100-ns tick) units on this port, so no unit conversion is needed --
+         * real .NET's own s_tickFrequency scaling factor reduces to exactly 1.0 here since
+         * Frequency == TimeSpan.TicksPerSecond.
+         */
+        [[nodiscard]] static System::TimeSpan GetElapsedTime(longcs startingTimestamp, longcs endingTimestamp) {
+            return System::TimeSpan::FromTicks(endingTimestamp - startingTimestamp);
+        }
+
+        /** @brief Returns the elapsed time formatted the same way as Elapsed.ToString(). */
+        [[nodiscard]] std::string ToString() const {
+            return getElapsedProperty().ToString();
+        }
+
     private:
         [[nodiscard]] longcs currentNs() const {
             longcs ns = elapsed_ns_;

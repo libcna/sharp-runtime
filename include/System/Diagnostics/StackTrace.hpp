@@ -11,8 +11,17 @@ namespace System::Diagnostics {
 
     /**
      * @brief Represents an ordered collection of stack frames.
-     * 
+     *
      * Partial C++ counterpart of .NET System.Diagnostics.StackTrace.
+     *
+     * @note Status: Partial. Real .NET's parameterless/skipFrames/Exception constructors walk
+     * the live call stack or an exception's captured stack via the runtime's stack-unwinding
+     * machinery -- this port has no such capability (no reflection, no managed stack walker), so
+     * this type is a plain container built from an explicit, caller-supplied list of frames
+     * (e.g. frames captured manually via platform APIs like backtrace() on POSIX). Missing
+     * relative to real .NET: the capturing constructors themselves, GetMethod()-based frame
+     * introspection (StackFrame here has no MethodBase equivalent -- no reflection), and
+     * FileName/FileLineNumber-aware ToString() formatting variants.
      */
     class StackTrace {
         std::vector<StackFrame> frames_;
