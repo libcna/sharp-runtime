@@ -34,6 +34,7 @@ using System::Xml::XmlWriter;
 using System::Xml::Linq::XAttribute;
 using System::Xml::Linq::XCData;
 using System::Xml::Linq::XComment;
+using System::Xml::Linq::XDeclaration;
 using System::Xml::Linq::XDocument;
 using System::Xml::Linq::XDocumentType;
 using System::Xml::Linq::XElement;
@@ -371,6 +372,24 @@ TEST(XDocumentTypeTests, FieldsAndSerialization) {
 TEST(XDocumentTypeTests, PublicAndSystemId) {
     XDocumentType dt("html", "-//W3C//DTD XHTML 1.0//EN", "xhtml1.dtd", "");
     EXPECT_EQ(dt.ToString(), "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"xhtml1.dtd\">");
+}
+
+// Real .NET's XDeclaration.ToString() omits each of version/encoding/standalone individually
+// when unset (null) -- it does NOT default-fill version to "1.0" the way an earlier version of
+// this port's ToString() did (inconsistent with how encoding/standalone were already handled).
+TEST(XDeclarationTests, ToString_AllFieldsSet) {
+    XDeclaration decl("1.0", "utf-8", "yes");
+    EXPECT_EQ(decl.ToString(), "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>");
+}
+
+TEST(XDeclarationTests, ToString_EmptyVersion_OmitsVersionAttribute) {
+    XDeclaration decl("", "utf-8", "");
+    EXPECT_EQ(decl.ToString(), "<?xml encoding=\"utf-8\"?>");
+}
+
+TEST(XDeclarationTests, ToString_AllFieldsEmpty_JustXmlPI) {
+    XDeclaration decl("", "", "");
+    EXPECT_EQ(decl.ToString(), "<?xml?>");
 }
 
 // ===========================================================================
