@@ -515,15 +515,36 @@ namespace System
         // MidpointRounding overloads for Round
         // ------------------------------------------------------------------
 
+        /**
+         * @brief Rounds @p value to the nearest integer, ties to even, independent of the
+         * ambient floating-point rounding-mode register.
+         *
+         * Deliberately does NOT use std::nearbyint/std::rint -- both follow the CURRENT
+         * fesetround() mode rather than always implementing ties-to-even, so under a non-default
+         * rounding mode (e.g. FE_UPWARD, which some SIMD/audio libraries set process-wide)
+         * nearbyint(2.5) silently returns 3.0 instead of 2.0. std::floor/std::fmod are, by
+         * contrast, specified with fixed rounding behavior independent of fesetround, so this
+         * implementation is immune regardless of what a third-party library elsewhere in the
+         * same process has set the rounding mode to.
+         */
+        static double roundToEvenImpl(double value) {
+            double floorVal = std::floor(value);
+            double diff = value - floorVal;
+            if (diff < 0.5) return floorVal;
+            if (diff > 0.5) return floorVal + 1.0;
+            // Exact tie: round to the even neighbor.
+            return (std::fmod(floorVal, 2.0) == 0.0) ? floorVal : floorVal + 1.0;
+        }
+
         /** @brief Rounds @p value to the nearest integer using the specified rounding convention. */
         [[nodiscard]] static double Round(double value, MidpointRounding mode) {
             switch (mode) {
-                case MidpointRounding::ToEven:             return std::nearbyint(value);
+                case MidpointRounding::ToEven:             return roundToEvenImpl(value);
                 case MidpointRounding::AwayFromZero:       return std::round(value);
                 case MidpointRounding::ToZero:             return std::trunc(value);
                 case MidpointRounding::ToNegativeInfinity: return std::floor(value);
                 case MidpointRounding::ToPositiveInfinity: return std::ceil(value);
-                default:                                   return std::nearbyint(value);
+                default:                                   return roundToEvenImpl(value);
             }
         }
 
