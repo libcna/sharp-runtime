@@ -3,12 +3,15 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <climits>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/FileAttributes.hpp"
 #include "System/IO/MatchCasing.hpp"
 #include "System/IO/MatchType.hpp"
 #include "System/IO/SearchTarget.hpp"
 
 namespace System::IO {
+
+    using SharpRuntime::intcs;
 
     /** Options for controlling file-system enumeration behaviour. */
     class EnumerationOptions {
@@ -20,9 +23,9 @@ namespace System::IO {
         /** When true, special entries such as "." and ".." are returned. */
         bool ReturnSpecialDirectories   = false;
         /** Maximum recursion depth; INT_MAX means unlimited. */
-        int  MaxRecursionDepth          = INT_MAX;
+        intcs  MaxRecursionDepth        = INT_MAX;
         /** Suggested buffer size in bytes; 0 means no suggestion (platform default). */
-        int  BufferSize                 = 0;
+        intcs  BufferSize               = 0;
         /** Controls case sensitivity when matching names. */
         MatchCasing  MatchCasingValue   = MatchCasing::PlatformDefault;
         /** Controls how search patterns are interpreted. */
