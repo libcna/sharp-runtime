@@ -1,10 +1,86 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1ef8ba4`) — 11932 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `4f87f42`) — 11948 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11932 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11948 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — fifth `ported-type-audit` batch (50 tickets, 3 parallel forks), HTTP header-injection vuln + more real bugs found
+
+Continuing the same autonomous run (previous checkpoint covered the 54-ticket batch). Same
+disjoint-file-set parallel-fork pattern, 3 forks this round: System.Net.Http.Headers (25
+tickets), System.Net.Http.Json + System.Net.Mime + System.Net.Security (10 tickets),
+System.Net.NetworkInformation (15 tickets). Verified afterward via `git fetch`+`git log` (no
+local/origin divergence, all 8 commits landed cleanly) and a fresh `cmake --build` + full test
+run (11948/11948, matching the last fork's self-reported count). Also personally verified the
+CRLF-injection fix's diff directly (see below) given its security relevance.
+
+**Security: HTTP header (CRLF/obs-fold) injection** in `HttpHeaders::checkValueChars` (ticket
+954) — the port's value validator used the same permissive `"\r\n "` obs-fold-tolerant state
+machine as the separate, older `WebHeaderCollection::CheckBadHeaderValueChars` (which real .NET
+deliberately keeps permissive for `HttpWebRequest`-era backward compatibility, per its own source
+comment). But real .NET's actual `System.Net.Http.Headers.HttpHeaders` validates via
+`HttpRuleParser.ContainsNewLineOrNull` — a FLAT rejection of any `\r`/`\n`/`\0` anywhere in the
+value (RFC 9110 §5.5-5: "Field values containing CR, LF, or NUL characters are invalid and
+dangerous"). The port had copied the wrong sibling type's validation logic, so a value like
+`"bar\r\n evil: value"` passed `Add()` unrejected — a genuine header-injection vector once
+`ToString()` serializes headers back into raw wire format. Fixed by replacing the state machine
+with a flat CR/LF/NUL scan; added regression tests for the obs-fold-shaped and embedded-NUL
+cases. Commit `292ad60`.
+
+**Other real bugs fixed in `System.Net.Http.Headers` (25-ticket batch, commits `c5f8dc5`,
+`92a4d3a`, `72870f1`, `e18cb1b`, `4f87f42`)**: quality-value (`q=`) parsing in
+`StringWithQualityHeaderValue`/`MediaTypeWithQualityHeaderValue`/`TransferCodingWithQualityHeaderValue`
+used bare `std::stod`, accepting a leading dot/sign/scientific-notation that real .NET's grammar
+rejects — fixed with a shared grammar guard. `NameValueHeaderValue`/
+`NameValueWithParametersHeaderValue`'s `TryParse` silently accepted invalid values like
+`"foo="` (empty trailing value) and `"a=b=c"` (unquoted value containing `=`) that real .NET's
+parser rejects. `EntityTagHeaderValue::TryParse` rejected whitespace between the `W/` prefix and
+the quoted tag that real .NET accepts. Two doc-comment exception-type mismatches
+(`std::out_of_range` → `ArgumentOutOfRangeException`) also fixed. 15 of 25 tickets were clean
+with no changes.
+
+**System.Net.Security (5 tickets, part of the 10-ticket batch)**: `SslApplicationProtocol::ToString()`
+(ticket 995) claimed a hex-dump fallback for invalid UTF-8 in its doc-comment but never actually
+validated anything — just blindly reinterpreted raw bytes as a string. Added a strict UTF-8
+validator and the exact `0xNN 0xNN ...` lowercase hex format real .NET produces. Commit `a9ae9c2`.
+AuthenticationLevel/EncryptionPolicy/SslPolicyErrors/TlsCipherSuite (337 enum values total)
+verified byte-exact against the .NET reference. No TLS/SslStream implementation attempted —
+correctly out of scope per CLAUDE.md.
+
+**System.Net.Http.Json (part of the 10-ticket batch)**: `HttpClientJsonExtensions` (973) —
+documented, not redesigned — every method captures `HttpClient&` by reference into a task that
+runs on a real background thread (`std::async(std::launch::async, ...)`), unlike the sibling
+`HttpContentJsonExtensions` which safely captures a `shared_ptr` by value. This is a
+dangling-reference risk if the caller doesn't keep the client alive until the task completes;
+added an explicit doc-comment on the lifetime contract rather than changing the parameter type
+(an API-surface change beyond audit scope). Commit `58e88a7`.
+
+**System.Net.NetworkInformation (15 tickets)**: entirely clean — no bugs found. Notably `Ping`
+has a REAL, WORKING unprivileged-ICMP implementation validated end-to-end in this sandbox (not a
+stub, contrary to the standing "don't build ICMP blind" caution — a prior session already
+confirmed unprivileged ICMP works here and implemented it for real). `NetworkInterface`'s
+POSIX-only `getifaddrs()` usage properly guarded, no POSIX leakage into public headers.
+`PhysicalAddress` verified line-by-line against the .NET reference including exact
+`FormatException` message text.
+
+Final verified state: 11948/11948 tests passing (up from 11932 — 16 net new tests), 0 errors/0
+warnings, all 8 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+Running tally across all five `ported-type-audit` fork batches this session: 201 tickets closed,
+21 real bugs/gaps found and fixed including two security vulnerabilities (Zip Slip path
+traversal, HTTP CRLF header injection) and one memory-safety bug (XxHash32/64 OOB write), 0
+regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 3-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary — for anything security-relevant, personally read the
+diff rather than trusting the fork's summary alone. Checkpoint NEXT.md, repeat. Ticket #43 stays
+`blocked`. The `ported-type-audit` backlog is now ~750 done / ~235 todo.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — fourth `ported-type-audit` batch (54 tickets, 4 parallel forks), Zip Slip vuln + memory-safety bug found
 
