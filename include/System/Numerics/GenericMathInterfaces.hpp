@@ -5,13 +5,16 @@
 // Stub interfaces from System.Numerics generic math (.NET 7+).
 // C++ templates naturally cover the same use cases; these stubs exist for API name compatibility.
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Numerics {
+
+    using SharpRuntime::intcs;
 
     /** Base interface for all numeric types, mirroring .NET INumberBase<TSelf>. */
     template<typename TSelf>
     struct INumberBase {
-        static constexpr int Radix = 2; ///< Radix (base) of the numeric representation.
+        static constexpr intcs Radix = 2; ///< Radix (base) of the numeric representation.
         virtual ~INumberBase() = default;
     };
 
@@ -170,7 +173,7 @@ namespace System::Numerics {
     struct IRootFunctions {
         static TSelf Cbrt(TSelf x);            ///< Returns the cube root of x.
         static TSelf Hypot(TSelf x, TSelf y);  ///< Returns sqrt(x*x + y*y), computed without undue overflow/underflow.
-        static TSelf RootN(TSelf x, int n);    ///< Returns the n-th root of x.
+        static TSelf RootN(TSelf x, intcs n);  ///< Returns the n-th root of x.
         static TSelf Sqrt(TSelf x);            ///< Returns the square root of x.
     };
 
