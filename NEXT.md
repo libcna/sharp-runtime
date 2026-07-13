@@ -1,10 +1,101 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1c25c57`) — 12144 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a560451`) — 12168 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12144 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12168 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — 100 pre-session `code-audit` "large file" tickets re-verified (6 parallel forks), 9 more real bugs found including a stack-overflow DoS and a third XxHash memory-safety bug
+
+Continuing the same autonomous run (previous checkpoint covered the 211-ticket `regression-audit`
+round). Applied the same "audit the pre-session-done pool" pattern one level up: `code-audit`
+had 122 done tickets total, of which only 20 (336-355) were this session's own fresh pass — the
+other 102 were "Stabilization audit for large file X" tickets from PRIOR sessions (2 of which,
+1487-1488, were verified to already be high-quality systemic-bug fixes from earlier in this same
+long-running session and excluded). Dispatched 6 parallel forks (~16-17 tickets each) over the
+remaining 100 (tickets 236-335), each instructed to check `git log` per-file first and do a
+LIGHT re-verification for files already deeply covered by this session's other passes
+(ported-type-audit/regression-audit), reserving FULL fresh audits — using this ticket category's
+own broader lens (excessive inline implementation, missing tests, exception semantics, platform
+assumptions, documentation drift, `.cpp`-split opportunities) — for genuinely untouched files.
+
+Verified afterward via `git fetch`+`git log` (no local/origin divergence, all commits landed
+cleanly) and a fresh `cmake --build` + full test run (12168/12168). One benign git-index race
+occurred: two concurrent forks staged changes in the shared working tree at the same moment, so
+the XxHash128 fix (ticket 311) landed inside a different fork's `ConcurrentStack` commit
+(`6938b54`, ticket 327) instead of its own — verified the fix content is correct and present in
+the pushed code regardless of attribution; both tickets' notes already documented this
+accurately, no correction needed.
+
+**Result: 9 more real bugs/gaps found, including a DoS-shaped crash and a third instance of the
+XxHash negative-length memory-safety pattern**:
+
+- **Security/DoS: unbounded recursion in the XPath parser** (`XPathAstInternal.cpp`, ticket 236)
+  — the hand-written recursive-descent parser's `ParseExpr()` (reached via `(`, function-call
+  arguments, predicate `[`) and `ParseUnary()` (repeated unary minus) had no recursion-depth
+  bound, so a deeply nested or malformed XPath expression drives unbounded C++ call-stack
+  recursion — a stack-overflow crash, not a catchable `XPathException`. Fixed with a
+  `DepthGuard` RAII helper (threshold 500) at both recursive choke points. Commit `be29be6`.
+- **Memory safety: `XxHash128`'s one-shot entry points** (ticket 311) — the THIRD instance this
+  session of the exact XxHash negative-length bug shape (after XxHash32/64 in an earlier round):
+  `HashToHash128Impl` cast `intcs length` to `uintcs` with no negative-length guard. None of the
+  5 one-shot entry points (`Hash`×3, `TryHash`, `HashToHash128`) validated length — the earlier
+  ticket-355 fix only covered the streaming `Append()` path via `Detail::XxHash3Shared::Append`,
+  which these one-shot callers never touch. Confirmed via ASan repro (SEGV from OOB read). Fixed
+  with the same guard pattern as XxHash3/32/64.
+- **`Matrix4x4`** (270): missing `GetHashCode` (an Equals/GetHashCode contract violation — the
+  Nth instance of this specific bug SHAPE this session, after OSPlatform/IPPacketInformation/
+  LingerOption/UdpReceiveResult/UnixDomainSocketEndPoint) and missing `Lerp`. Both added.
+  Documented ~20 missing factory methods as a deliberate deferred gap. Commit `ff6a809`.
+- **`DateTimeFormatInfo`** (271): `GetAllDateTimePatterns(char)` threw on `'o'/'O'/'U'` instead
+  of returning valid patterns; the no-arg overload returned 7 hardcoded fields instead of
+  looping over all standard formats like real .NET. Both fixed. Commit `5c7d0ac`.
+- **`Environment::SetCurrentDirectory`** (273): silently ignored `chdir()` failure and had no
+  empty-path validation — fixed to throw, matching this codebase's established error pattern.
+  Commit `3167768`.
+- **`LinkedList::CopyTo`** (282): conflated two distinct .NET exception types
+  (`ArgumentOutOfRangeException` vs `ArgumentException`) into one — fixed to match the real
+  two-stage check exactly. Commit `d7e1e9b`.
+- **`ConcurrentStack`** (327): a genuine TEST-COVERAGE gap, not a code bug — the class's own
+  doc-comment promises all public members are thread-safe, but all 19 prior tests were
+  single-threaded, so the thread-safety claim was never actually exercised under real
+  concurrency. Added an 8-thread push/pop stress test verifying no lost updates. Commit `6938b54`.
+
+**Everything else was clean** — either a light re-verification confirming files already deeply
+covered this session (String, Char, Convert, Guid, Decimal, TimeSpan, Math, Int128, GC,
+ClientWebSocket, Span, HttpRequestHeaders, HttpClient, Half, Array, DateTime/DateTimeOffset,
+BinaryData, Utf8Parser, IPAddress, TlsCipherSuite, ContentDispositionHeaderValue, Random,
+UnicodeRanges, BitArray, OperatingSystem, CodeAnalysisAttributes, Byte, ArraySegment,
+ImmutableList/Array/SortedSet/SortedDictionary/Dictionary, Guid.hpp, PersianCalendar,
+XPathNavigator.cpp, XmlNode.cpp, Memory, MathF, TimeZoneInfo.cpp, Task.hpp, Lazy, Utf8.hpp,
+Colors.hpp, Utf8Formatter, HashSet, SByte, Linq.hpp, Thread.hpp) or a genuine full audit that
+found nothing wrong (AppDomain, HebrewCalendar's AddMonths increment-order logic, BigInteger's
+Knuth Algorithm D implementation traced byte/structurally-exact, TimeOnly, OrderedDictionary
+×2, XmlDocument.cpp, ReadOnlySequence, ZipArchive, IdnMapping, CacheControlHeaderValue,
+StringComparer, CompareInfo, TextInfo, BitVector32, EventHandler, NameValueCollection,
+ImmutableSortedDictionary/Dictionary).
+
+Final verified state: 12168/12168 tests passing (up from 12144 — 24 net new tests), 0 errors/0
+warnings, all commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+**Running tally, autonomous continuation after the "entire backlog drained" milestone**:
+`regression-audit` (211 tickets, 10 bugs) + this `code-audit` re-verification round (100 tickets,
+9 bugs) = 311 additional tickets processed, 19 more real bugs/gaps found on top of the 41 found
+in the original first-pass sweep — strong evidence that "re-audit already-done work" continues to
+be a genuinely high-yield activity, not diminishing-returns busywork, at least through this
+second full pass.
+
+### To resume
+Both new second-pass categories (`regression-audit`, and the 100-ticket pre-session slice of
+`code-audit`) are now fully drained. Remaining options (same menu as before, still applicable):
+(1) re-run the `task`-table workflow for drift, (2) ask the user about unblocking ticket #43,
+(3) check whether OTHER categories have a similarly-identifiable pre-session/never-re-audited
+pool worth a third pass (e.g. `correctness` 51 done, `status-audit` 37 done, `namespace-audit` 51
+done — namespace-audit and correctness's newer tickets were mostly this-session already;
+status-audit is entirely unexplored territory this session and worth a first look at what it
+actually contains), or (4) await further explicit direction. Ticket #43 stays `blocked` — never
+touch without being asked again.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — new `regression-audit` category: 211 tickets, second pass on pre-session-done `System` root types, 10 more real bugs found
 
