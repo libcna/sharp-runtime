@@ -20,6 +20,7 @@
 namespace System {
 
     using SharpRuntime::bytecs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents an 8-bit unsigned integer.
@@ -52,8 +53,8 @@ namespace System {
          * C++ counterpart of .NET Byte.CompareTo(byte).
          * @return Negative if a < b, zero if equal, positive if a > b.
          */
-        [[nodiscard]] static int CompareTo(bytecs a, bytecs b) noexcept {
-            return static_cast<int>(a) - static_cast<int>(b);
+        [[nodiscard]] static intcs CompareTo(bytecs a, bytecs b) noexcept {
+            return static_cast<intcs>(a) - static_cast<intcs>(b);
         }
 
         /**
@@ -72,8 +73,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.GetHashCode().
          */
-        [[nodiscard]] static int GetHashCode(bytecs value) noexcept {
-            return static_cast<int>(value);
+        [[nodiscard]] static intcs GetHashCode(bytecs value) noexcept {
+            return static_cast<intcs>(value);
         }
 
         // -----------------------------------------------------------------------
@@ -113,7 +114,7 @@ namespace System {
          * C++ counterpart of .NET Byte.Sign(byte).
          * Bytes are unsigned so the result is never -1.
          */
-        [[nodiscard]] static int Sign(bytecs value) noexcept {
+        [[nodiscard]] static intcs Sign(bytecs value) noexcept {
             return value == 0 ? 0 : 1;
         }
 
@@ -202,8 +203,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.RotateLeft(byte, int).
          */
-        [[nodiscard]] static bytecs RotateLeft(bytecs value, int rotateAmount) noexcept {
-            int r = rotateAmount & 7;
+        [[nodiscard]] static bytecs RotateLeft(bytecs value, intcs rotateAmount) noexcept {
+            intcs r = rotateAmount & 7;
             return static_cast<bytecs>((value << r) | (value >> ((8 - r) & 7)));
         }
 
@@ -212,8 +213,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.RotateRight(byte, int).
          */
-        [[nodiscard]] static bytecs RotateRight(bytecs value, int rotateAmount) noexcept {
-            int r = rotateAmount & 7;
+        [[nodiscard]] static bytecs RotateRight(bytecs value, intcs rotateAmount) noexcept {
+            intcs r = rotateAmount & 7;
             return static_cast<bytecs>((value >> r) | (value << ((8 - r) & 7)));
         }
 
