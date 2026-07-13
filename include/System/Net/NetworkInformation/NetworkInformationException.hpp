@@ -4,9 +4,12 @@
 #pragma once
 #include <cerrno>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ComponentModel/Win32Exception.hpp"
 
 namespace System::Net::NetworkInformation {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides NetworkInformation exceptions to the application.
@@ -25,13 +28,13 @@ namespace System::Net::NetworkInformation {
         NetworkInformationException() : Win32Exception(errno) {}
 
         /** @brief Constructs with the given native error code. */
-        explicit NetworkInformationException(int errorCode) : Win32Exception(errorCode) {}
+        explicit NetworkInformationException(intcs errorCode) : Win32Exception(errorCode) {}
 
         /** @brief Constructs with a custom message and no specific native error code. */
         explicit NetworkInformationException(const std::string& message) : Win32Exception(0, message) {}
 
         /** @return The native error code (same as getNativeErrorCodeProperty()). */
-        [[nodiscard]] int getErrorCodeProperty() const { return getNativeErrorCodeProperty(); }
+        [[nodiscard]] intcs getErrorCodeProperty() const { return getNativeErrorCodeProperty(); }
     };
 
 } // namespace System::Net::NetworkInformation
