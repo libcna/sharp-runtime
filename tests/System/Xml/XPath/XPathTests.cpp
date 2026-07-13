@@ -738,6 +738,41 @@ TEST(XPathErrorTests, Compile_UnterminatedString_Throws) {
     EXPECT_THROW(XPathExpression::Compile("book[@id='bk101]"), XPathException);
 }
 
+// The hand-written recursive-descent parser recurses through ParseExpr() for '(', function-call
+// arguments, and predicate '[', and through ParseUnary() for repeated unary minus. Without a
+// depth guard, a deeply nested expression drives unbounded C++ call-stack recursion (a stack
+// overflow crash, not a catchable exception). These confirm the guard throws XPathException well
+// before the process could ever crash, for each of the three recursive shapes.
+TEST(XPathErrorTests, Compile_DeeplyNestedParens_ThrowsInsteadOfCrashing) {
+    std::string expr(600, '(');
+    expr += "1";
+    expr.append(600, ')');
+    EXPECT_THROW(XPathExpression::Compile(expr), XPathException);
+}
+
+TEST(XPathErrorTests, Compile_DeeplyNestedUnaryMinus_ThrowsInsteadOfCrashing) {
+    std::string expr(600, '-');
+    expr += "1";
+    EXPECT_THROW(XPathExpression::Compile(expr), XPathException);
+}
+
+TEST(XPathErrorTests, Compile_DeeplyNestedFunctionCalls_ThrowsInsteadOfCrashing) {
+    std::string expr;
+    for (int i = 0; i < 600; ++i) expr += "not(";
+    expr += "1";
+    for (int i = 0; i < 600; ++i) expr += ")";
+    EXPECT_THROW(XPathExpression::Compile(expr), XPathException);
+}
+
+// A moderately-nested expression (well under the 500-level guard threshold) must still compile
+// successfully -- the guard must not be so tight it rejects realistic, legitimate expressions.
+TEST(XPathErrorTests, Compile_ModeratelyNestedParens_StillCompiles) {
+    std::string expr(50, '(');
+    expr += "1";
+    expr.append(50, ')');
+    EXPECT_NO_THROW(XPathExpression::Compile(expr));
+}
+
 TEST(XPathErrorTests, Select_NonNodeSetExpression_Throws) {
     auto doc = LoadCatalog();
     std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());

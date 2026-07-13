@@ -158,9 +158,32 @@ namespace System::Xml::XPath {
             return s == "comment" || s == "text" || s == "processing-instruction" || s == "node";
         }
 
+        // This is a hand-written recursive-descent parser with no inherent bound on nesting: '(',
+        // function-call arguments, and predicate '[' all recurse back through ParseExpr(), and
+        // repeated unary minus recurses through ParseUnary() directly. Without a depth guard, an
+        // adversarial or accidentally-malformed input (e.g. thousands of nested parens, or a long
+        // run of unary minuses) drives unbounded C++ call-stack recursion -- a stack overflow
+        // (undefined behavior / hard crash), not a catchable XPathException. Real .NET's own
+        // XPath engine is immune to this class of issue since it isn't a naive recursive-descent
+        // parser over arbitrary user text the same way; this port's simpler grammar-subset parser
+        // needed its own guard. kMaxParseDepth is generous for any realistic XPath expression
+        // (deepest real-world expressions rarely exceed a few dozen levels) while still bounding
+        // the C++ call stack well within its typical default limit.
+        constexpr int kMaxParseDepth = 500;
+
         class Parser {
             Lexer lexer_;
             Token cur_;
+            int depth_ = 0;
+
+            struct DepthGuard {
+                Parser& p;
+                explicit DepthGuard(Parser& parser) : p(parser) {
+                    if (++p.depth_ > kMaxParseDepth)
+                        throw XPathException("XPath expression is too deeply nested.");
+                }
+                ~DepthGuard() { --p.depth_; }
+            };
 
         public:
             explicit Parser(const std::string& src) : lexer_(src) { cur_ = lexer_.Next(); }
@@ -189,7 +212,7 @@ namespace System::Xml::XPath {
                 return n;
             }
 
-            std::shared_ptr<AstNode> ParseExpr() { return ParseOr(); }
+            std::shared_ptr<AstNode> ParseExpr() { DepthGuard guard(*this); return ParseOr(); }
 
             std::shared_ptr<AstNode> ParseOr() {
                 auto l = ParseAnd();
@@ -242,6 +265,7 @@ namespace System::Xml::XPath {
             }
             std::shared_ptr<AstNode> ParseUnary() {
                 if (At(TokKind::Minus)) {
+                    DepthGuard guard(*this);
                     Advance();
                     auto n = std::make_shared<AstNode>();
                     n->kind = AstKind::UnaryMinus;
