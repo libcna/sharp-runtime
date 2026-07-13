@@ -334,3 +334,115 @@ TEST(StackTests, TryPeek_ReturnsTopWithoutRemoving) {
     EXPECT_EQ(v, 7);
     EXPECT_EQ(s.getCountProperty(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Queue<T>::GetEnumerator() -- fail-fast version-checked enumeration
+// (post-stabilization-audit finding #4 / ticket 1713: this port previously had
+// no enumeration support at all for Queue<T>/Stack<T>, and by extension no
+// version-checked fail-fast contract matching real .NET's InvalidOperationException
+// on concurrent modification during iteration.)
+// ---------------------------------------------------------------------------
+
+TEST(QueueTests, GetEnumerator_IteratesFrontToBack) {
+    Queue<int> q;
+    q.Enqueue(1); q.Enqueue(2); q.Enqueue(3);
+    auto* it = q.GetEnumerator();
+    std::vector<int> seen;
+    while (it->MoveNext()) seen.push_back(it->Current());
+    delete it;
+    EXPECT_EQ(seen, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(QueueTests, GetEnumerator_NoModification_DoesNotThrow) {
+    Queue<int> q;
+    q.Enqueue(1); q.Enqueue(2);
+    auto* it = q.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    EXPECT_TRUE(it->MoveNext());
+    EXPECT_FALSE(it->MoveNext());
+    delete it;
+}
+
+TEST(QueueTests, GetEnumerator_EnqueueDuringIteration_Throws) {
+    Queue<int> q;
+    q.Enqueue(1); q.Enqueue(2);
+    auto* it = q.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    q.Enqueue(3);
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}
+
+TEST(QueueTests, GetEnumerator_DequeueDuringIteration_Throws) {
+    Queue<int> q;
+    q.Enqueue(1); q.Enqueue(2); q.Enqueue(3);
+    auto* it = q.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    q.Dequeue();
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}
+
+TEST(QueueTests, GetEnumerator_ClearDuringIteration_Throws) {
+    Queue<int> q;
+    q.Enqueue(1); q.Enqueue(2);
+    auto* it = q.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    q.Clear();
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}
+
+// ---------------------------------------------------------------------------
+// Stack<T>::GetEnumerator() -- fail-fast version-checked enumeration, top-to-bottom
+// ---------------------------------------------------------------------------
+
+TEST(StackTests, GetEnumerator_IteratesTopToBottom) {
+    Stack<int> s;
+    s.Push(1); s.Push(2); s.Push(3);
+    auto* it = s.GetEnumerator();
+    std::vector<int> seen;
+    while (it->MoveNext()) seen.push_back(it->Current());
+    delete it;
+    EXPECT_EQ(seen, (std::vector<int>{3, 2, 1}));
+}
+
+TEST(StackTests, GetEnumerator_NoModification_DoesNotThrow) {
+    Stack<int> s;
+    s.Push(1); s.Push(2);
+    auto* it = s.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    EXPECT_TRUE(it->MoveNext());
+    EXPECT_FALSE(it->MoveNext());
+    delete it;
+}
+
+TEST(StackTests, GetEnumerator_PushDuringIteration_Throws) {
+    Stack<int> s;
+    s.Push(1); s.Push(2);
+    auto* it = s.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    s.Push(3);
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}
+
+TEST(StackTests, GetEnumerator_PopDuringIteration_Throws) {
+    Stack<int> s;
+    s.Push(1); s.Push(2); s.Push(3);
+    auto* it = s.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    s.Pop();
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}
+
+TEST(StackTests, GetEnumerator_ClearDuringIteration_Throws) {
+    Stack<int> s;
+    s.Push(1); s.Push(2);
+    auto* it = s.GetEnumerator();
+    EXPECT_TRUE(it->MoveNext());
+    s.Clear();
+    EXPECT_THROW(it->MoveNext(), InvalidOperationException);
+    delete it;
+}

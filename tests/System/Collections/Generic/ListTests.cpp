@@ -7,6 +7,7 @@
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <string>
 #include <vector>
 
@@ -402,6 +403,49 @@ TEST(GenLinkedListTests, GetEnumerator) {
     int sum = 0;
     while (e->MoveNext()) sum += e->Current();
     EXPECT_EQ(sum, 6);
+    delete e;
+}
+
+// post-stabilization-audit finding #4 / ticket 1713: GetEnumerator()'s Enumerator must detect
+// structural modification during iteration and throw InvalidOperationException, matching real
+// .NET's fail-fast contract.
+TEST(GenLinkedListTests, GetEnumerator_NoModification_DoesNotThrow) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_AddLastDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.AddLast(3);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_RemoveFirstDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.RemoveFirst();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_ClearDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.Clear();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
     delete e;
 }
 

@@ -199,6 +199,78 @@ TEST(GenSortedListTest, KeysAndValuesSorted) {
     EXPECT_EQ(keys[2], "c");
 }
 
+// post-stabilization-audit finding #4 / ticket 1713: non-const operator[] must split get/set
+// semantics like Dictionary (ticket 1712) -- the getter throws KeyNotFoundException on a missing
+// key rather than silently inserting a default value, and GetEnumerator()'s Enumerator must
+// detect structural modification and throw InvalidOperationException.
+
+TEST(GenSortedListTest, NonConstIndexer_MissingKeyRead_Throws) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1);
+    EXPECT_THROW((void)(int)sl["missing"], KeyNotFoundException);
+    EXPECT_EQ(sl.getCountProperty(), 1);  // confirms the read did NOT insert a default
+}
+
+TEST(GenSortedListTest, NonConstIndexer_Write_InsertsOrUpdates) {
+    SortedList<std::string, int> sl;
+    sl["a"] = 1;
+    EXPECT_EQ(sl.getCountProperty(), 1);
+    EXPECT_EQ((int)sl["a"], 1);
+    sl["a"] = 2;
+    EXPECT_EQ(sl.getCountProperty(), 1);
+    EXPECT_EQ((int)sl["a"], 2);
+}
+
+TEST(GenSortedListTest, GetEnumerator_IteratesInKeyOrder) {
+    SortedList<std::string, int> sl;
+    sl.Add("c", 3); sl.Add("a", 1); sl.Add("b", 2);
+    auto* e = sl.GetEnumerator();
+    std::vector<int> seen;
+    while (e->MoveNext()) seen.push_back(e->Current());
+    delete e;
+    EXPECT_EQ(seen, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(GenSortedListTest, GetEnumerator_NoModification_DoesNotThrow) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1); sl.Add("b", 2);
+    auto* e = sl.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
+
+TEST(GenSortedListTest, GetEnumerator_AddDuringIteration_Throws) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1);
+    auto* e = sl.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    sl.Add("b", 2);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenSortedListTest, GetEnumerator_RemoveAtDuringIteration_Throws) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1); sl.Add("b", 2);
+    auto* e = sl.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    sl.RemoveAt(0);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenSortedListTest, GetEnumerator_ClearDuringIteration_Throws) {
+    SortedList<std::string, int> sl;
+    sl.Add("a", 1); sl.Add("b", 2);
+    auto* e = sl.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    sl.Clear();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
 // ---- Stack<int> ----
 TEST(GenStackTest, PushPop) {
     Stack<int> s;

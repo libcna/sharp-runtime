@@ -8,7 +8,9 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/IEnumerator.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -20,11 +22,15 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.SortedList<TKey,TValue>.
  * Backed by std::map<TKey,TValue>; provides O(log n) key access and O(n) index access.
  *
- * @note Unlike .NET's SortedList<TKey,TValue>, iterators do not detect concurrent
- * modification: .NET throws InvalidOperationException if the list is structurally
- * modified while an enumerator is active, but sharp-runtime's iterators follow
- * plain std::map invalidation rules instead. Do not mutate the list while
- * iterating it directly.
+ * @note GetEnumerator()'s Enumerator detects structural modification (Add/TryAdd/Remove/
+ * RemoveAt/Clear/indexer-insert) during iteration via a version counter, matching .NET's
+ * InvalidOperationException fail-fast contract (see List<T>/ArrayList's Enumerator in this
+ * codebase for the same established pattern). Directly using begin()/end() STL iterators still
+ * follows plain std::map invalidation rules, not .NET's version-checked contract -- only the
+ * GetEnumerator()-returned Enumerator is fail-fast. Matching real .NET's own SortedList.cs, the
+ * version counter also bumps on a same-key value overwrite through the indexer setter or
+ * SetValueAtIndex (not just structural insert/remove) -- unlike, e.g., List<T>'s index-assignment,
+ * which does NOT bump its version for a value-only update.
  *
  * @tparam TKey   The type of the keys (must support operator<).
  * @tparam TValue The type of the values.
@@ -32,6 +38,30 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class SortedList {
     std::map<TKey, TValue> map_;
+    intcs version_ = 0;
+
+    class Enumerator : public IEnumerator<TValue> {
+        const SortedList<TKey, TValue>* list_;
+        intcs version_;
+        intcs index_ = -1;
+    public:
+        explicit Enumerator(const SortedList<TKey, TValue>* list) : list_(list), version_(list->version_) {}
+        bool MoveNext() override {
+            if (version_ != list_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            return ++index_ < static_cast<intcs>(list_->map_.size());
+        }
+        void Reset() override {
+            if (version_ != list_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            index_ = -1;
+        }
+        [[nodiscard]] const TValue& Current() const override {
+            auto it = list_->map_.begin();
+            std::advance(it, index_);
+            return it->second;
+        }
+    };
 
 public:
     /** @brief Initializes a new empty SortedList. */
@@ -46,14 +76,47 @@ public:
     [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(map_.size()); }
 
     /**
+     * @brief A proxy for `sortedList[key]` that throws on read of a missing key while still
+     * supporting `sortedList[key] = value` to insert-or-update, matching .NET's split get/set
+     * indexer semantics on top of a single C++ `operator[]`. Mirrors the same fix already
+     * applied to Dictionary::ValueProxy (see that class for the precedent) -- but NOTE the
+     * version-bump semantics genuinely differ: real .NET's SortedList.cs bumps `version` on
+     * EVERY setter call, including a same-key overwrite (verified: `this[key]`'s setter does
+     * `values[i] = value; version++;` even on the existing-key branch), unlike Dictionary's
+     * setter, which only bumps on a brand-new key insert.
+     */
+    class ValueProxy {
+        SortedList* owner_;
+        TKey key_;
+    public:
+        ValueProxy(SortedList* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+        /** Reads the current value; throws KeyNotFoundException if the key is absent. */
+        operator const TValue&() const {
+            auto it = owner_->map_.find(key_);
+            if (it == owner_->map_.end())
+                throw KeyNotFoundException("The given key was not present in the dictionary.");
+            return it->second;
+        }
+
+        /** Inserts or overwrites the value for this key; always bumps the version counter. */
+        ValueProxy& operator=(const TValue& value) {
+            owner_->map_[key_] = value;
+            ++owner_->version_;
+            return *this;
+        }
+    };
+
+    /**
      * @brief Gets or sets the value associated with the specified key.
      *
-     * C++ counterpart of .NET SortedList<TKey,TValue>.Item[TKey].
-     * Inserts a default value if the key is absent.
+     * C++ counterpart of .NET SortedList<TKey,TValue>.Item[TKey]. The getter throws
+     * System::Collections::Generic::KeyNotFoundException if @p key is absent (it does NOT
+     * insert a default, unlike std::map::operator[]); the setter inserts or overwrites.
      * @param key The key whose value to get or set.
-     * @return A reference to the associated value.
+     * @return A proxy convertible to `const TValue&` (read) or assignable from `TValue` (write).
      */
-    TValue& operator[](const TKey& key) { return map_[key]; }
+    [[nodiscard]] ValueProxy operator[](const TKey& key) { return ValueProxy(this, key); }
 
     /**
      * @brief Gets the value associated with the specified key (const).
@@ -80,6 +143,7 @@ public:
     void Add(const TKey& key, const TValue& value) {
         if (map_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
+        ++version_;
     }
 
     /**
@@ -92,6 +156,7 @@ public:
     bool TryAdd(const TKey& key, const TValue& value) {
         if (map_.count(key)) return false;
         map_[key] = value;
+        ++version_;
         return true;
     }
 
@@ -102,7 +167,11 @@ public:
      * @param key The key of the element to remove.
      * @return true if the element was removed; otherwise false.
      */
-    bool Remove(const TKey& key) { return map_.erase(key) > 0; }
+    bool Remove(const TKey& key) {
+        bool removed = map_.erase(key) > 0;
+        if (removed) ++version_;
+        return removed;
+    }
 
     /**
      * @brief Removes the element at the specified zero-based index.
@@ -116,6 +185,7 @@ public:
         auto it = map_.begin();
         std::advance(it, index);
         map_.erase(it);
+        ++version_;
     }
 
     /**
@@ -161,6 +231,7 @@ public:
         auto it = map_.begin();
         std::advance(it, index);
         it->second = value;
+        ++version_;
     }
 
     /**
@@ -279,15 +350,27 @@ public:
      *
      * C++ counterpart of .NET SortedList<TKey,TValue>.Clear().
      */
-    void Clear() { map_.clear(); }
+    void Clear() { map_.clear(); ++version_; }
 
-    /** @brief Returns an iterator to the beginning of the list (STL interop). */
+    /**
+     * @brief Returns a version-checked enumerator over the values in key-ascending order.
+     *
+     * C++ counterpart of .NET SortedList<TKey,TValue>.GetEnumerator() (matching .NET's own
+     * ValueList.GetEnumerator() shape, which enumerates values). Throws InvalidOperationException
+     * from MoveNext()/Reset() if the SortedList is structurally modified during enumeration.
+     * @return A newly allocated IEnumerator<TValue>*; caller owns the returned object.
+     */
+    IEnumerator<TValue>* GetEnumerator() {
+        return new Enumerator(this);
+    }
+
+    /** @brief Returns an iterator to the beginning of the list (STL interop, not version-checked). */
     auto begin()       { return map_.begin(); }
-    /** @brief Returns an iterator past the end of the list (STL interop). */
+    /** @brief Returns an iterator past the end of the list (STL interop, not version-checked). */
     auto end()         { return map_.end(); }
-    /** @brief Returns a const iterator to the beginning of the list (STL interop). */
+    /** @brief Returns a const iterator to the beginning of the list (STL interop, not version-checked). */
     auto begin() const { return map_.cbegin(); }
-    /** @brief Returns a const iterator past the end of the list (STL interop). */
+    /** @brief Returns a const iterator past the end of the list (STL interop, not version-checked). */
     auto end()   const { return map_.cend(); }
 };
 
