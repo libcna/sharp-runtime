@@ -1,10 +1,86 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `773eb36`) — 11919 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1ef8ba4`) — 11932 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11919 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11932 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — fourth `ported-type-audit` batch (54 tickets, 4 parallel forks), Zip Slip vuln + memory-safety bug found
+
+Continuing the same autonomous run (previous checkpoint covered the 40-ticket batch). Same
+disjoint-file-set parallel-fork pattern, this round with 4 forks: System.Globalization remainder
++ System.IO.Hashing (13 tickets), System.IO.Compression (18 applicable tickets), System.IO.
+IsolatedStorage + System.Linq.Enumerable (6 tickets), System.Net.Http (17 tickets). Verified
+afterward via `git fetch`+`git log` (no local/origin divergence, all 5 commits landed cleanly)
+and a fresh `cmake --build` + full test run (11932/11932, matching the last fork's self-reported
+count). One fork noted transient build-directory contention with a concurrent sibling (binary
+briefly missing/non-executable mid-build) — resolved by retrying `cmake --build`, no source
+corruption; worth remembering as an expected, harmless side effect of 3-4 way parallel forks all
+rebuilding the same `build/` directory.
+
+**Two notable findings this round:**
+
+- **Security: Zip Slip path-traversal vulnerability** in `ZipFileExtensions::ExtractToDirectory`
+  (ticket 891) — entry names like `"../../etc/passwd"` were combined via `Path::Combine` with no
+  bounds check, so extracting an untrusted zip could write files anywhere on disk the process can
+  reach, entirely outside the destination directory. Fixed by porting real .NET's own
+  `ExtractRelativeToDirectoryCheckIfFile` guard exactly: resolve the destination directory to a
+  full path with a trailing separator once, then for every entry resolve its full destination
+  path and verify it's still prefixed by the destination directory before writing — the trailing
+  separator specifically prevents a `"dest-evil"` false-prefix match against `"dest"`. Regression
+  test creates a zip with a `"../evil.txt"` entry and confirms extraction throws and the escaped
+  file is never written. Commit `1ef8ba4`.
+- **Memory safety: XxHash32/XxHash64 had the same OOB-write bug as the already-fixed XxHash3**
+  (ticket 355, earlier this session) — both hash algorithms buffer independently rather than
+  routing through the shared `Detail::XxHash3Shared` that got the negative-length fix, so neither
+  validated `length >= 0` on `Append()`. A negative length reaches `memcpy` via
+  `static_cast<size_t>` once a prior partial `Append()` call has primed the internal buffer —
+  same out-of-bounds-write shape, just in two sibling algorithms the original fix's "grep the
+  sibling family" pass didn't reach (XxHash32.cpp/XxHash64.cpp are separate files from
+  XxHash3Shared.cpp). Fixed both with the same `length >= 0` guard; 4 regression tests (single-call
+  and primed-buffer cases for each). Commit `fa06546`.
+
+**Other real bugs/gaps fixed this round:**
+- **DeflateEncoder::GetMaxCompressedLength** (876): silently truncated inputs above ~4GiB on
+  platforms where `unsigned long` (zlib's `uLong`) is 32-bit (Windows) — ported real .NET's exact
+  2^31-threshold + managed-formula fallback. GZipEncoder/ZLibEncoder inherit the fix since they
+  delegate to this method. Commit `c87d51b`.
+- **HttpClient** (932): `recvExact()` silently returned truncated data instead of throwing when a
+  server closed the connection mid-response before all expected bytes arrived — now throws
+  `HttpRequestException(HttpRequestError::ResponseEnded, ...)`, matching real .NET's exact error
+  category. Loopback-server regression test added.
+- **HttpIOException** (935): default (no-message) constructor produced a bare `" (Unknown)"`
+  string with no base text — now falls back to `"I/O error occurred."`.
+- **HttpMethod** (936): `Parse()` was entirely missing from the API surface — added with tests.
+  Commit `9642065` (covers 932/935/936 plus doc-comment expansions on HttpContent/
+  HttpRequestMessage and an additive `EnsureSuccessStatusCode()` fluent-return change).
+- **System.Linq.Enumerable** (908): doc-comment said `Status: DONE` but the type is actually a
+  partial LINQ port — corrected to `PARTIAL` with a catalog of implemented vs. missing surface
+  (this project's CLAUDE.md "No LINQ" rule applies to code THIS project writes internally, not to
+  auditing an existing LINQ port — the distinction was correctly respected). Commit `13c5e2c`.
+- **CultureNotFoundException/ISOWeek** — see prior checkpoint entry (this round's Globalization
+  work was IO.Hashing + 3 small enum/logic tickets, the CultureNotFoundException/ISOWeek fixes
+  were the *previous* round).
+
+Final verified state: 11932/11932 tests passing (up from 11919 — 13 net new tests), 0 errors/0
+warnings, all 5 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+Running tally across all four `ported-type-audit` fork batches this session: 151 tickets closed,
+16 real bugs/gaps found and fixed including one security vulnerability (Zip Slip) and one
+memory-safety bug (XxHash32/64 OOB write), 0 regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 3-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary, checkpoint NEXT.md, repeat. Ticket #43 stays `blocked`.
+There is also a separate `classification-audit` category (0 done/60 todo, untouched all session)
+with a different methodology (sampling ignored/ignore task rows per namespace, not per-type
+audits) — worth picking up once `ported-type-audit` naturally interleaves past it in
+priority+ticket_no order, or as a deliberate next phase once this backlog is smaller. The
+`ported-type-audit` backlog is now ~700 done / ~285 todo.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — third `ported-type-audit` batch (40 tickets, 3 parallel forks), 6 more real gaps found
 
