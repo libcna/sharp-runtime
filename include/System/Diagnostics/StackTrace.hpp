@@ -5,9 +5,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Diagnostics/StackFrame.hpp"
 
 namespace System::Diagnostics {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents an ordered collection of stack frames.
@@ -37,15 +40,15 @@ namespace System::Diagnostics {
         explicit StackTrace(const std::vector<StackFrame>& frames) : frames_(frames) {}
 
         /** @return The number of frames in the stack trace. */
-        [[nodiscard]] int getFrameCountProperty() const { return static_cast<int>(frames_.size()); }
+        [[nodiscard]] intcs getFrameCountProperty() const { return static_cast<intcs>(frames_.size()); }
 
         /**
          * @brief Returns the frame at the specified @p index.
          * @param index Zero-based frame index.
          * @return Pointer to the StackFrame, or nullptr if @p index is out of range.
          */
-        [[nodiscard]] const StackFrame* GetFrame(int index) const {
-            if (index < 0 || index >= static_cast<int>(frames_.size())) return nullptr;
+        [[nodiscard]] const StackFrame* GetFrame(intcs index) const {
+            if (index < 0 || index >= static_cast<intcs>(frames_.size())) return nullptr;
             return &frames_[index];
         }
 

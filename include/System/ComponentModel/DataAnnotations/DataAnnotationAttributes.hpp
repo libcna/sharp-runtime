@@ -3,9 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Attribute.hpp"
 
 namespace System::ComponentModel::DataAnnotations {
+
+    using SharpRuntime::intcs;
 
     /** Base class for validation attributes. */
     class ValidationAttribute : public System::Attribute {
@@ -49,7 +52,7 @@ namespace System::ComponentModel::DataAnnotations {
         RangeAttribute(double min, double max) : minimum_(min), maximum_(max) {}
 
         /** Integer overload — @param min and @p max are promoted to double. */
-        RangeAttribute(int min, int max) : minimum_(static_cast<double>(min)), maximum_(static_cast<double>(max)) {}
+        RangeAttribute(intcs min, intcs max) : minimum_(static_cast<double>(min)), maximum_(static_cast<double>(max)) {}
 
         /** @return The minimum allowed value. */
         [[nodiscard]] double getMinimumProperty() const { return minimum_; }
@@ -60,42 +63,42 @@ namespace System::ComponentModel::DataAnnotations {
 
     /** Specifies the maximum and minimum string length. */
     class StringLengthAttribute : public ValidationAttribute {
-        int maximumLength_;
-        int minimumLength_ = 0;
+        intcs maximumLength_;
+        intcs minimumLength_ = 0;
     public:
         /** @param maximumLength Maximum allowed string length. */
-        explicit StringLengthAttribute(int maximumLength) : maximumLength_(maximumLength) {}
+        explicit StringLengthAttribute(intcs maximumLength) : maximumLength_(maximumLength) {}
 
         /** @return The maximum allowed string length. */
-        [[nodiscard]] int getMaximumLengthProperty() const { return maximumLength_; }
+        [[nodiscard]] intcs getMaximumLengthProperty() const { return maximumLength_; }
 
         /** @return The minimum allowed string length. */
-        [[nodiscard]] int getMinimumLengthProperty() const { return minimumLength_; }
+        [[nodiscard]] intcs getMinimumLengthProperty() const { return minimumLength_; }
 
         /** Sets the minimum allowed string length. */
-        void setMinimumLengthProperty(int v) { minimumLength_ = v; }
+        void setMinimumLengthProperty(intcs v) { minimumLength_ = v; }
     };
 
     /** Specifies the maximum length of array or string data. */
     class MaxLengthAttribute : public ValidationAttribute {
-        int length_;
+        intcs length_;
     public:
         /** @param length Maximum length; -1 means unlimited. */
-        explicit MaxLengthAttribute(int length = -1) : length_(length) {}
+        explicit MaxLengthAttribute(intcs length = -1) : length_(length) {}
 
         /** @return The maximum allowed length. */
-        [[nodiscard]] int getLengthProperty() const { return length_; }
+        [[nodiscard]] intcs getLengthProperty() const { return length_; }
     };
 
     /** Specifies the minimum length of array or string data. */
     class MinLengthAttribute : public ValidationAttribute {
-        int length_;
+        intcs length_;
     public:
         /** @param length Minimum required length. */
-        explicit MinLengthAttribute(int length) : length_(length) {}
+        explicit MinLengthAttribute(intcs length) : length_(length) {}
 
         /** @return The minimum required length. */
-        [[nodiscard]] int getLengthProperty() const { return length_; }
+        [[nodiscard]] intcs getLengthProperty() const { return length_; }
     };
 
     /** Specifies that a data field value must match the given regular expression. */
@@ -126,7 +129,7 @@ namespace System::ComponentModel::DataAnnotations {
         std::string Prompt;             ///< Watermark / prompt text.
         std::string GroupName;          ///< Group the field belongs to.
         std::string ShortName;          ///< Abbreviated display name.
-        int Order    = 0;               ///< Display order.
+        intcs Order  = 0;                ///< Display order.
         bool AutoGenerateField  = true; ///< Whether to auto-generate a field for this property.
         bool AutoGenerateFilter = true; ///< Whether to auto-generate a filter for this property.
     };

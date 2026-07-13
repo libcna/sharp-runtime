@@ -4,10 +4,13 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IFormatProvider.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents a composite format string along with the arguments to be formatted.
@@ -54,8 +57,8 @@ namespace System {
          *
          * C++ counterpart of .NET FormattableString.ArgumentCount.
          */
-        [[nodiscard]] virtual int getArgumentCountProperty() const {
-            return static_cast<int>(args_.size());
+        [[nodiscard]] virtual intcs getArgumentCountProperty() const {
+            return static_cast<intcs>(args_.size());
         }
 
         // -----------------------------------------------------------------------
@@ -70,7 +73,7 @@ namespace System {
          * @return The string argument at @p index.
          * @throws System::IndexOutOfRangeException if @p index is out of bounds.
          */
-        [[nodiscard]] virtual const std::string& GetArgument(int index) const {
+        [[nodiscard]] virtual const std::string& GetArgument(intcs index) const {
             if (index < 0 || static_cast<std::size_t>(index) >= args_.size())
                 throw System::IndexOutOfRangeException();
             return args_[static_cast<std::size_t>(index)];
