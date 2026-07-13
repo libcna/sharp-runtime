@@ -130,6 +130,30 @@ namespace System::Text
         [[nodiscard]] bool Empty() const;
 
         /**
+         * Copies @p count characters starting at @p sourceIndex into @p destination starting
+         * at @p destinationIndex.
+         *
+         * C++ counterpart of .NET StringBuilder.CopyTo(int, char[], int, int). @p destinationLength
+         * is the caller-supplied total capacity of @p destination, used to validate the copy
+         * fits (real .NET can infer array length from the CLR array object itself; a raw C++
+         * pointer carries no length, so this port requires the caller to state it explicitly).
+         * @param sourceIndex Zero-based index in this instance at which copying begins.
+         * @param destination Pointer to the destination char buffer.
+         * @param destinationLength Total capacity of @p destination.
+         * @param destinationIndex Zero-based index in @p destination at which copying begins.
+         * @param count Number of characters to copy.
+         * @throws System::ArgumentNullException if @p destination is null.
+         * @throws System::ArgumentOutOfRangeException if @p count, @p sourceIndex, or
+         *         @p destinationIndex is negative, or @p sourceIndex is greater than
+         *         getLengthProperty().
+         * @throws System::ArgumentException if @p sourceIndex + count exceeds
+         *         getLengthProperty(), or @p destinationIndex + count exceeds
+         *         @p destinationLength.
+         */
+        void CopyTo(intcs sourceIndex, char* destination, intcs destinationLength,
+                    intcs destinationIndex, intcs count) const;
+
+        /**
          * Appends the string representation of the specified 64-bit integer value.
          * @param value Long integer value to append.
          * @return Reference to this instance.

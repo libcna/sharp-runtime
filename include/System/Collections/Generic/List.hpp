@@ -10,6 +10,7 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/IList.hpp"
@@ -134,6 +135,50 @@ class List : public IList<T> {
             auto it = std::find(items_.begin(), items_.end(), item);
             if (it == items_.end()) return -1;
             return static_cast<intcs>(it - items_.begin());
+        }
+
+        /**
+         * @brief Copies the entire list to a compatible one-dimensional array, starting at
+         * @p arrayIndex.
+         *
+         * C++ counterpart of .NET List<T>.CopyTo(T[], int). @p array must point to a buffer of
+         * at least @p arrayIndex + Count elements; @p arrayLength is the caller-supplied total
+         * capacity of that buffer, used to validate the copy fits (real .NET can infer array
+         * length from the CLR array object itself; a raw C++ pointer carries no length, so this
+         * port requires the caller to state it explicitly).
+         * @throws System::ArgumentNullException if @p array is null.
+         * @throws System::ArgumentOutOfRangeException if @p arrayIndex is negative.
+         * @throws System::ArgumentException if @p arrayLength - @p arrayIndex is less than
+         *         Count (the destination is too small to hold the copy).
+         */
+        void CopyTo(T* array, intcs arrayLength, intcs arrayIndex = 0) const
+        {
+            if (array == nullptr)
+                throw System::ArgumentNullException("array");
+            if (arrayIndex < 0)
+                throw System::ArgumentOutOfRangeException("arrayIndex", "Non-negative number required.");
+            if (arrayLength - arrayIndex < static_cast<intcs>(items_.size()))
+                throw System::ArgumentException("Destination array was not long enough. Check the destination index, length, and the array's lower bounds.");
+            std::copy(items_.begin(), items_.end(), array + arrayIndex);
+        }
+
+        /**
+         * @brief Copies the entire list to a compatible destination @p std::vector, starting at
+         * @p arrayIndex.
+         *
+         * C++ counterpart of .NET List<T>.CopyTo(T[]) / CopyTo(int, T[], int, int) collapsed
+         * into a single convenience overload for this codebase's std::vector-based idiom.
+         * @throws System::ArgumentOutOfRangeException if @p arrayIndex is negative.
+         * @throws System::ArgumentException if @p destination is too small to hold the copy
+         *         starting at @p arrayIndex.
+         */
+        void CopyTo(std::vector<T>& destination, intcs arrayIndex = 0) const
+        {
+            if (arrayIndex < 0)
+                throw System::ArgumentOutOfRangeException("arrayIndex", "Non-negative number required.");
+            if (static_cast<intcs>(destination.size()) - arrayIndex < static_cast<intcs>(items_.size()))
+                throw System::ArgumentException("Destination array was not long enough. Check the destination index, length, and the array's lower bounds.");
+            std::copy(items_.begin(), items_.end(), destination.begin() + arrayIndex);
         }
 
         void Insert(intcs index, const T& item) override
