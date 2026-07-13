@@ -1,10 +1,69 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `8618d19`) — 12173 tests passing (audit was find-only, no code changes). Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `ed58a5a`) — 12211 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12211 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — first 6 post-stabilization-audit tickets fixed (all P1), 3 reduced-parallelism forks
+
+User asked to fix the post-stabilization-audit tickets "postupně" (gradually/step by step) —
+interpreted as: don't blast all 19 into parallel forks at once, use reduced parallelism (matching
+the earlier CPU-heat-driven precedent: `cmake --build --parallel 2`), and work through them in
+priority order. First round: all 6 P1 tickets (the highest-severity confirmed bugs), dispatched
+as 3 forks of 2 tickets each on disjoint files. Ticket 1713 (the large 11-file systemic
+generic-collections version-tracking gap) was deliberately deferred to its own dedicated round
+given its scope. Verified afterward via `git fetch`+`git log` (no local/origin divergence, all 6
+commits landed cleanly), a fresh `cmake --build --parallel 2` + full test run (12211/12211), and
+personally re-read the two highest-impact diffs (`Convert` rounding, `Dictionary` KeyNotFoundException)
+directly.
+
+- **1710 (`Convert::ToXxx` rounding)**: fixed by delegating `ToByte`/`ToInt16`/`ToUInt16`/
+  `ToSByte(double|float)` to `ToInt32(double)`, matching real .NET's own delegation pattern
+  exactly. `ToInt32`/`ToInt64(double)` now round via `Math::Round` before range-checking.
+  `ToUInt32`/`ToUInt64(double)` gained the same rounding with a nearest-representable-double
+  boundary-check trick (since `INT64_MAX`/`UINT64_MAX` aren't exactly representable as `double`).
+  **Found and fixed a second bug not in the original ticket text while fixing the family**:
+  `ToInt64(float)` was a separate bare truncating cast that didn't even delegate to
+  `ToInt64(double)` — fixed to delegate. `ToInt64(double)`'s missing overflow check also fixed
+  (`ToInt64(1e20)` now throws `OverflowException` instead of silently returning `LLONG_MIN`).
+  Repro-confirmed: `ToInt32(2.9)` now `3`, `ToInt32(3.5)` now `4` (tie-to-even). 8 pre-existing
+  tests that had codified the wrong truncating behavior were fixed alongside. Commit `ed58a5a`.
+- **1711 (`Span<T>` exception type)**: all 3 indexer occurrences now throw
+  `IndexOutOfRangeException` instead of `ArgumentOutOfRangeException`, matching real .NET.
+  `Slice()` correctly left as `ArgumentOutOfRangeException` (a different real-.NET convention).
+  Commit `a9a21c0`.
+- **1712 (`Dictionary`/`SortedDictionary` silent auto-insert)**: applied the exact `ValueProxy`
+  pattern `ConcurrentDictionary` already uses to distinguish get-intent (throws
+  `KeyNotFoundException` on missing key) from set-intent (inserts) — a single C++ `operator[]`
+  can't otherwise express .NET's split get/set indexer semantics. Setter path unchanged (still
+  correctly inserts on missing key). Commit `6948175`.
+- **1716 (`ConcurrentDictionary` reentrancy deadlock)**: `GetOrAdd`/`AddOrUpdate` restructured to
+  check-under-lock → call-factory-outside-lock → re-acquire-and-commit (checking again in case
+  another thread inserted while unlocked), matching real .NET's documented contract that the
+  factory may run without the lock held and may run more than once under contention. Confirmed
+  fixed via 4 reentrant-callback regression tests, repeated 3x with no flakiness. Commit `57ddc49`.
+- **1714/1715 (`MemoryStream`/`DeflateStream`/`GZipStream`/`ZLibStream::Write` missing
+  validation)**: all 4 `Write` methods (`MemoryStream` plus the 3 compression stream wrappers,
+  which shared a byte-identical copy-pasted gap) gained the same buffer/offset/count validation
+  their sibling `Read` methods (or real .NET's base contract) already had. Both fixes
+  ASan-repro-confirmed: the negative-offset out-of-bounds read is eliminated post-fix. Commits
+  `c9c7526`, `e244f25`.
+
+Final verified state: 12211/12211 tests passing (up from 12173 — 38 net new regression tests), 0
+errors/0 warnings, all 6 commits confirmed on `origin/feature/work` via `git fetch` (no
+divergence).
+
+### To resume
+13 tickets remain in `post-stabilization-audit`: the large systemic 1713 (generic-collections
+version tracking, deliberately deferred to its own round), P2 tickets 1717-1719, 1721-1725, and
+P3 tickets 1720, 1726, 1728. Ticket 1727 (`getCurrent()` naming) stays untouched pending explicit
+user decision — do not fix without asking, matching the ticket-#43 precedent. Query:
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo' ORDER BY priority, ticket_no;"`. Continue
+with reduced parallelism (`--parallel 2`, 2-3 concurrent forks) per the user's "postupně"
+pacing request — this is a standing preference for this ticket category, not a one-time ask.
 
 ## New: fresh post-stabilization audit — 20 verified findings, 19 new tickets (1710-1728, category `post-stabilization-audit`)
 
