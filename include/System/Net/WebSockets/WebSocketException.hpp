@@ -3,10 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ComponentModel/Win32Exception.hpp"
 #include "System/Net/WebSockets/WebSocketError.hpp"
 
 namespace System::Net::WebSockets {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief The exception thrown when an error occurs while performing a WebSocket operation.
@@ -44,7 +47,7 @@ namespace System::Net::WebSockets {
         [[nodiscard]] WebSocketError getWebSocketErrorCodeProperty() const { return errorCode_; }
 
         /** @return The native error code (0 unless explicitly set — see note above). */
-        [[nodiscard]] int getErrorCodeProperty() const { return getNativeErrorCodeProperty(); }
+        [[nodiscard]] intcs getErrorCodeProperty() const { return getNativeErrorCodeProperty(); }
 
     private:
         static std::string messageFor(WebSocketError error) {
