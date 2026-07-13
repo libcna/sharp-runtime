@@ -1,10 +1,38 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `da8a70b`) — 11875 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `c67ec99`) — 11877 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11875 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11877 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 353 closed, wide-reaching message fix
+
+Continuing the same autonomous run (previous checkpoint covered 352). Commit: c67ec99 — pushed
+to `origin/feature/work`.
+
+- **353 (ArgumentOutOfRangeException.hpp/.cpp)**: real .NET's `ArgumentOutOfRangeException.Message`
+  override always appends `"Actual value was {actualValue}."` after the `"(Parameter 'x')"`
+  marker whenever an actual value was supplied — a defining, always-present feature of this
+  exception type's message. The 3-arg constructor stored `actualValue_` (so
+  `getActualValueProperty()` worked) but never wove it into the message text itself, so every
+  exception thrown via this constructor — and by extension every one of the 9
+  `ThrowIfZero`/`ThrowIfNegative`/etc. static helpers, which all route through it — was missing
+  this suffix across the whole codebase. Fixing this required a small addition since
+  `ArgumentException` composes its message eagerly at construction with no existing way for a
+  derived class to insert a suffix after the parameter-name marker without double-appending it —
+  added a protected `AlreadyComposedTag` constructor overload plus a protected
+  `AppendParamNameSuffix()` helper to `ArgumentException`. Verified via a full rebuild (touches
+  widely-included headers) and the complete test suite with zero regressions across all 11877
+  tests. Deliberately left as a documented, low-priority gap: a few `ThrowIfXxx` variants' primary
+  message wording differs from .NET's exact prose (paraphrasing of already-present information,
+  not missing information) — matches this session's established practice of not chasing verbatim
+  message-text parity for its own sake.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 352 closed, a real out-of-bounds read
 
