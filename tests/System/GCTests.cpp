@@ -247,7 +247,12 @@ TEST(GCTests, TryStartNoGCRegion_WithDisallowFullBlockingGC_ReturnsFalse) {
 }
 
 TEST(GCTests, TryStartNoGCRegion_WithLohSize_ReturnsFalse) {
-    EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024, 512LL * 1024));
+    // Explicit SharpRuntime::longcs cast on the second argument: longcs is int64_t, which on
+    // LP64 platforms (Linux/macOS x86_64) is `long`, a DISTINCT type from the `long long` of a
+    // bare LL literal even though both are 64 bits -- passing two bare `long long` values here
+    // would make this call ambiguous between the (longcs,bool) and (longcs,longcs) overloads,
+    // since long long->longcs and long long->bool are equally-ranked standard conversions.
+    EXPECT_FALSE(GC::TryStartNoGCRegion(1024LL * 1024, static_cast<SharpRuntime::longcs>(512LL * 1024)));
 }
 
 TEST(GCTests, TryStartNoGCRegion_WithLohSizeAndDisallowFullBlockingGC_ReturnsFalse) {
