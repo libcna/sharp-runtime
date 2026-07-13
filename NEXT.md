@@ -1,6 +1,6 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `3404022`) — 12305 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `503a2fb`) — 12305 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12305 tests from 1220 test suites, 0 failures
