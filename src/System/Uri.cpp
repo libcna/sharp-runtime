@@ -4,6 +4,7 @@
 #include "System/Uri.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/UriFormatException.hpp"
+#include <algorithm>
 #include <cctype>
 #include <functional>
 
@@ -188,12 +189,24 @@ void Uri::parse(const std::string& uriString) {
         (bracketClose == std::string::npos || colonPos > bracketClose)) {
         std::string portStr = authority.substr(colonPos + 1);
         if (!portStr.empty()) {
-            try {
-                port_ = std::stoi(portStr);
-                host_ = authority.substr(0, colonPos);
-            } catch (...) {
-                host_ = authority;
+            // Verified against Uri.cs's port-parsing loop (throws ParsingError.BadPort, which
+            // surfaces as UriFormatException, for any non-digit character in the port position
+            // or a value > 0xFFFF). The previous code let std::stoi's exception on a
+            // non-numeric or int-overflowing port fall through to `host_ = authority`, which
+            // mangled host_ into the WHOLE "host:badport" text (colon and all) instead of
+            // rejecting the URI -- and a successfully-parsed but out-of-range port (e.g.
+            // "http://host:99999/") wasn't range-checked at all.
+            bool validDigits = std::all_of(portStr.begin(), portStr.end(),
+                [](char c) { return std::isdigit(static_cast<unsigned char>(c)); });
+            long parsedPort = -1;
+            if (validDigits) {
+                try { parsedPort = std::stol(portStr); }
+                catch (...) { validDigits = false; }
             }
+            if (!validDigits || parsedPort > 65535)
+                throw System::UriFormatException("Invalid URI: Invalid port specified.");
+            port_ = static_cast<intcs>(parsedPort);
+            host_ = authority.substr(0, colonPos);
         } else {
             host_ = authority.substr(0, colonPos);
         }
@@ -229,7 +242,16 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
         *this = baseUri;
         return;
     }
-    if (relativeUri.find("://") != std::string::npos) {
+    // Verified against Uri.cs's CreateUri/ResolveHelper: relativeUri is parsed standalone
+    // first, and if IT is itself absolute -- whether hierarchical ("scheme://...") OR opaque
+    // ("scheme:rest", e.g. "mailto:x@y.com", "urn:isbn:123") -- the result is built entirely
+    // from it, discarding the base entirely. The previous check only recognized the "://"
+    // hierarchical form via a raw substring search, so an opaque absolute relativeUri (no "//")
+    // was incorrectly treated as a relative path segment to merge with the base instead of
+    // being used directly. findSchemeColon() (defined above, already used by parse() for this
+    // exact detection) recognizes both forms, since it only requires a valid scheme token
+    // followed by ':' -- whatever follows (including "//") doesn't matter to it.
+    if (findSchemeColon(relativeUri) != std::string::npos) {
         parse(relativeUri);
         return;
     }
@@ -254,7 +276,14 @@ Uri::Uri(const Uri& baseUri, const std::string& relativeUri) {
     }
     mergedPath = removeDotSegments(mergedPath);
 
-    std::string combined = baseUri.scheme_ + "://" + baseUri.host_;
+    // RFC 3986 §5.3: "if defined, userinfo, host, port [are] copied from base" into the merged
+    // authority. The previous code omitted baseUri.userInfo_ entirely, so combining a base URI
+    // that carries embedded credentials (e.g. "http://user:pass@example.com/path/") with a
+    // relative reference silently dropped them from the result.
+    std::string combined = baseUri.scheme_ + "://";
+    if (!baseUri.userInfo_.empty())
+        combined += baseUri.userInfo_ + '@';
+    combined += baseUri.host_;
     if (baseUri.port_ != defaultPortForScheme(baseUri.scheme_) && baseUri.port_ != -1)
         combined += ':' + std::to_string(baseUri.port_);
     combined += mergedPath;
@@ -285,7 +314,22 @@ std::string Uri::getAuthorityProperty() const {
 }
 
 bool Uri::getIsLoopbackProperty() const {
-    return host_ == "localhost" || host_ == "127.0.0.1" || host_ == "::1";
+    // Verified against Uri.cs's loopback detection (DomainNameHelper.ParseCanonicalName matches
+    // "localhost"/"loopback" via StringComparison.OrdinalIgnoreCase; IPv6AddressHelper
+    // recognizes "::1"). The previous `host_ == "::1"` comparison could never match: host_
+    // retains its surrounding brackets for a parsed IPv6 literal (e.g. "[::1]", matching .NET's
+    // own bracketed Host property for IPv6 -- see parse()'s authority-splitting logic above), so
+    // this branch was unreachable dead code. Also made the "localhost" comparison
+    // case-insensitive and added the "loopback" alias, matching .NET's actual comparison.
+    // (Broader IPv4 127.0.0.0/8 recognition -- .NET treats any address with first octet 127 as
+    // loopback, not just 127.0.0.1 -- is intentionally left as a known gap rather than a naive
+    // prefix check, which would risk misclassifying a domain name like
+    // "127.0.0.1.example.com" as loopback.)
+    std::string lowerHost = host_;
+    std::transform(lowerHost.begin(), lowerHost.end(), lowerHost.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowerHost == "localhost" || lowerHost == "loopback" ||
+           lowerHost == "127.0.0.1" || lowerHost == "[::1]";
 }
 
 std::string Uri::ToString() const { return absoluteUri_; }
