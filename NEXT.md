@@ -42,6 +42,38 @@ FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"` — this
 either another `namespace-audit` ticket or (once those are drained) the large `ported-type-audit`
 backlog. Ticket #43 stays `blocked`.
 
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 363-367 closed (namespace-audit batch)
+
+Continuing the same autonomous run (previous checkpoint covered 362). No commits — all five are
+database-consistency checks touching no git-tracked files (plan.sqlite3 is gitignored).
+
+Processed 5 more `namespace-audit` tickets with the same methodology established for 362 (precise
+SQL comparison of `task` rows marked `ported` in the namespace against `ported-type-audit` ticket
+rows for that namespace, checking for orphans either direction, sampling a couple of `todo`
+tickets for well-formedness):
+
+- **363 (System.Text)**: 33 task rows, 33 matching tickets, zero orphans. 8/33 done, 25/33 todo.
+- **364 (System.Text.Json.Serialization)**: 31/31, zero orphans, 0/31 done — untouched namespace,
+  good future target.
+- **365 (System.Security.Cryptography)**: 29/29, zero orphans, **all 29 already done**. Verified
+  the 29 "ported" types are exactly the hash-algorithm family (MD5/SHA*/HMAC/PBKDF2),
+  RandomNumberGenerator, and small exception/support types — consistent with CLAUDE.md's
+  documented scope decision (symmetric/asymmetric crypto, X.509, TLS excluded; hashes remain in
+  scope). No inconsistency.
+- **366 (System.Net.Http.Headers)**: 25/25, zero orphans, 0/25 done.
+- **367 (System.Diagnostics)**: 24/24, zero orphans, 0/24 done.
+
+Every namespace checked so far has PERFECT task/ticket consistency — the `ported-type-audit`
+backlog (see ticket 362's checkpoint entry above for the full category breakdown: 612 done / 398
+todo) appears to already be a complete, accurate mirror of the `task` table across namespaces
+audited so far. No new tickets needed for any of these five.
+
+### To resume
+Query the next ticket the same way. Given the pattern holding across 6 namespaces now, continuing
+namespace-audit tickets is expected to keep being a quick consistency-check pass rather than deep
+per-file work — but don't assume this holds for EVERY remaining namespace without checking; keep
+verifying via the same SQL comparison each time. Ticket #43 stays `blocked`.
+
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 355 closed, negative-length memcpy crash
 
 Continuing the same autonomous run (previous checkpoint covered 354). Commit: 702c587 — pushed
