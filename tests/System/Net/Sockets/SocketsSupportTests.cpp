@@ -240,3 +240,15 @@ TEST(UnixDomainSocketEndPointTests, Equality) {
     EXPECT_EQ(a, b);
     EXPECT_NE(a, c);
 }
+
+TEST(UnixDomainSocketEndPointTests, GetHashCode_EqualInstancesMatch) {
+    UnixDomainSocketEndPoint a("/tmp/a.sock");
+    UnixDomainSocketEndPoint b("/tmp/a.sock");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(UnixDomainSocketEndPointTests, GetHashCode_DifferingPathDiffers) {
+    UnixDomainSocketEndPoint a("/tmp/a.sock");
+    UnixDomainSocketEndPoint c("/tmp/b.sock");
+    EXPECT_NE(a.GetHashCode(), c.GetHashCode());
+}
