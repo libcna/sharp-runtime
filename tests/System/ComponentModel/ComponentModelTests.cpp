@@ -425,6 +425,14 @@ TEST(CancelEventArgsTests, InheritsFromEventArgs) {
     SUCCEED();
 }
 
+TEST(CancelEventArgsTests, CancelEventHandler_InvokesAndCanSetCancel) {
+    System::ComponentModel::CancelEventHandler handler =
+        [](void*, CancelEventArgs& e) { e.Cancel = true; };
+    CancelEventArgs e;
+    handler(nullptr, e);
+    EXPECT_TRUE(e.Cancel);
+}
+
 // ===========================================================================
 // IChangeTracking
 // ===========================================================================
