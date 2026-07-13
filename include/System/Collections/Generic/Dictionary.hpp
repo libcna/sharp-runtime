@@ -195,14 +195,20 @@ public:
     /**
      * @brief Ensures the internal bucket count can hold at least capacity entries without rehashing.
      *
-     * C++ counterpart of .NET Dictionary<TKey,TValue>.EnsureCapacity(int).
+     * C++ counterpart of .NET Dictionary<TKey,TValue>.EnsureCapacity(int), which returns the
+     * resulting capacity (`_entries.Length` after the call, or the pre-existing capacity if it
+     * was already >= the requested value) rather than void -- added to match that signature.
+     * std::unordered_map has no direct equivalent of .NET's internal entries-array length, so
+     * bucket_count() after reserve() is returned as the closest honest approximation.
      * @param capacity The minimum number of entries the dictionary should be able to hold.
+     * @return The resulting capacity.
      * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
-    void EnsureCapacity(intcs capacity) {
+    intcs EnsureCapacity(intcs capacity) {
         if (capacity < 0)
             throw System::ArgumentOutOfRangeException("capacity");
         map_.reserve(static_cast<std::size_t>(capacity));
+        return static_cast<intcs>(map_.bucket_count());
     }
 
     /**

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include "System/Collections/Generic/Dictionary.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include <string>
 
@@ -121,4 +122,18 @@ TEST(DictionaryTest, EnsureCapacityAndTrimExcess) {
     d.Add("x", 1);
     d.TrimExcess();
     EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+// Regression for ticket 341: EnsureCapacity previously returned void, but real .NET's
+// Dictionary<TKey,TValue>.EnsureCapacity(int) returns the resulting capacity -- added to match
+// that signature (return value ported code may capture).
+TEST(DictionaryTest, EnsureCapacity_ReturnsResultingCapacity) {
+    Dictionary<std::string, int> d;
+    SharpRuntime::intcs cap = d.EnsureCapacity(100);
+    EXPECT_GE(cap, 100);
+}
+
+TEST(DictionaryTest, EnsureCapacity_NegativeThrows) {
+    Dictionary<std::string, int> d;
+    EXPECT_THROW(d.EnsureCapacity(-1), System::ArgumentOutOfRangeException);
 }
