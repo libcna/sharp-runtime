@@ -1,10 +1,114 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `28f91db`) — 12000 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `224c9e7`) — 12100 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12000 tests from 1198 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12100 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — all 8 classification-audit follow-up tickets implemented (5 parallel forks), real feature work
+
+Continuing the same autonomous run (previous checkpoint covered `classification-audit` draining).
+Dispatched 5 parallel forks on disjoint directories to implement the 8 follow-up tickets found by
+the classification-audit sweep — this round was genuinely NEW FEATURE WORK, not audits. Verified
+afterward via `git fetch`+`git log` (no local/origin divergence, all 7 commits landed cleanly), a
+fresh `cmake --build` + full test run (12100/12100), AND 3 repeated runs of the
+concurrency/signal/subprocess-relevant test filter (168 tests, PosixSignal/Process/
+FileSystemWatcher/BufferedStream/Cookie/HttpClient/DelegatingHandler/SHA3/HKDF/NativeMemory) to
+rule out flakiness given how much of this batch involves threads, signals, and subprocesses.
+Personally spot-checked the PosixSignal macro-collision fix (see below) directly in the header.
+
+- **1477 BufferedStream — real implementation**: was a pure pass-through stub. Implemented a
+  shared read/write buffer matching .NET's semantics (small writes batch until buffer-full/Flush/
+  Close, reads fill the buffer in one syscall and serve subsequent small reads from it,
+  operations ≥ bufferSize bypass the buffer entirely). Close()/destructor now flush pending
+  writes — critical, since without this buffering would silently lose data. Commit `27ca900`.
+- **1478 FileSystemWatcher — real implementation**: was a complete stub. Implemented a real
+  Linux inotify backend (IN_CREATE/IN_DELETE/IN_MODIFY/IN_ATTRIB/IN_MOVED_FROM/IN_MOVED_TO →
+  Created/Deleted/Changed/Renamed, paired move events merged into one Renamed). **Proactively
+  avoided the dangling-`this`-in-background-thread hazard this session documented-but-left-
+  unfixed elsewhere (Socket/ClientWebSocket/Timer)** — the watch thread is joined via
+  eventfd+poll wakeup, never detached; copy/move deleted since a live watch thread can't be
+  safely relocated. 0 flakiness across 5 repeated runs (fork's own check, reconfirmed here).
+  Commit `0628ecc`.
+- **1491 Process — real implementation**: genuinely missing entirely. Implemented a POSIX core
+  (`fork`/`execvp`/`waitpid`, guarded `#ifdef`, throws `PlatformNotSupportedException` on
+  Windows/Emscripten): `Start` (instance + 3 static overloads), `WaitForExit`
+  (blocking/timeout), `Kill` (single + process-tree via `killpg`), `ExitCode`/`HasExited`/`Id`,
+  `GetCurrentProcess`, optional captured-text stdout/stderr redirection via background reader
+  threads (avoids the classic full-pipe-buffer deadlock). Deliberately deferred process
+  enumeration, resource-usage introspection, async I/O, `UseShellExecute`. Commit `1b7189c`.
+- **1497 LockRecursionException — confirmed plan/reality drift, not a real gap**: already fully
+  implemented, actively used by `ReaderWriterLockSlim`/`SpinLock`, well-tested — just never got
+  `task.status` flipped from `ignored`. Corrected. No source changes.
+- **1494/1495 SHA3 family + HKDF — real implementation**: SHA3-256/384/512 and Shake128/256
+  sharing one Keccak-f[1600] permutation core, plus HMACSHA3-256/384/512 wrappers, matching this
+  codebase's established "shared choke point" pattern (same shape as the earlier XxHash3Shared
+  fix). Verified against NIST FIPS 202 test vectors, cross-checked independently via Python's
+  `hashlib`/`hmac` rather than memorized hex. HKDF (`Extract`/`Expand`/`DeriveKey`, RFC 5869)
+  verified against RFC 5869 Appendix A Test Cases 1 and 3, cross-checked via a from-scratch
+  Python reference implementation. All new code independently run under ASan/UBSan before
+  integration (zero findings). Commit `8f13866`.
+- **1496/1498 HttpMessageHandler/DelegatingHandler + Cookie/CookieContainer — real
+  implementation**: extracted the socket-level logic from `HttpClient::Send` into a new
+  `HttpClientHandler : HttpMessageHandler`; `DelegatingHandler` wraps an inner handler (throws
+  `InvalidOperationException` if unset, matching real .NET); `HttpClient` gained a
+  handler-chain constructor. Stays fully synchronous per this project's existing content-model
+  decision. New `Cookie`/`CookieCollection`/`CookieContainer`/`CookieException` (RFC 6265
+  domain/path matching) wired into `HttpClientHandler`: outgoing requests get an automatic
+  `Cookie:` header, `Set-Cookie:` response headers are captured back into the container (required
+  special-casing since `HttpResponseMessage`'s header map only keeps one value per name — a
+  genuine multi-value-header limitation worth remembering for future header-related work).
+  Deferred: eviction/aging policies, SameSite, Version-1/2 quoting. 24 new tests including 3
+  loopback-server end-to-end tests. Commit `05d5024`.
+- **1492 NativeMemory — real implementation**: thin wrapper over the C allocator —
+  `Alloc`/`AllocZeroed`/`Realloc`/`Free` plus alignment-aware `AlignedAlloc`/`AlignedRealloc`/
+  `AlignedFree` (C11 `aligned_alloc` on POSIX, `_aligned_malloc` family on Windows), plus
+  `Clear`/`Copy`/`Fill`. Overflow-checked `elementCount*elementSize`. `AlignedRealloc` has no
+  portable POSIX aligned-realloc primitive, so it allocates-fresh+copies+frees — documented as a
+  real, deliberate behavioral difference, not silently glossed over. Commit `2e8c847`.
+- **1493 PosixSignal/PosixSignalContext/PosixSignalRegistration — real implementation, with a
+  sharp catch**: real async-signal-safe design — the raw OS handler only sets a `volatile
+  sig_atomic_t` flag and writes one byte to a self-pipe (both async-signal-safe); a dedicated
+  background watcher thread does all actual dispatch (arbitrary C++, allocation, exceptions
+  included). `Cancel` suppresses the OS default disposition via temporary `SIG_DFL`+re-raise,
+  matching real .NET. **Found that real .NET's enum member names (`SIGHUP`, `SIGINT`, etc.) are
+  literally `#define`d as macros by `<signal.h>`** — including transitively via GoogleTest's
+  death-test support — so `PosixSignal::SIGHUP`-shaped tokens would be silently corrupted by the
+  preprocessor in any translation unit that also includes POSIX signal APIs. Renamed enum
+  members to `Sighup`/`Sigint`/etc. (numeric values unchanged, exact match to .NET), documented
+  as a FORCED, non-optional deviation (not a style choice) directly in the header. Verified via a
+  standalone ASan/UBSan repro run 5x with no flakiness, including confirming `Cancel` on
+  `SIGTERM` actually keeps the process alive. Commit `224c9e7`.
+
+**Also fixed inline** (too small to warrant its own ticket): `System.ComponentModel.
+CancelEventHandler` — a trivial one-line missing delegate alias, found during the
+classification-audit sweep itself. Commit `28f91db`.
+
+Final verified state: 12100/12100 tests passing (up from 12000 — 100 net new tests across 8
+substantial new-feature tickets), 0 errors/0 warnings, all 7 commits confirmed on
+`origin/feature/work` via `git fetch` (no divergence), no flakiness across repeated runs of the
+concurrency/signal/subprocess-relevant test filter.
+
+**Milestone**: `SELECT category, status, COUNT(*) FROM ticket GROUP BY category, status` now
+shows every category fully drained except `documentation` (6 todo — the doxygen-gap-filling
+tickets 1479-1484) and the permanently-`blocked` `style` category (100, tied to ticket #43 — do
+not touch). `ported-type-audit` now totals 1020 done (up from 1010 — the 8 follow-up tickets
+plus one pre-existing count off-by-slightly).
+
+### To resume
+Only 6 tickets remain in the entire actionable backlog: `sqlite3 plan.sqlite3 "SELECT ticket_no,
+title FROM ticket WHERE status='todo' ORDER BY ticket_no;"` → 1479-1484, "Fill Doxygen gaps in
+<namespace-group> public types" (System root, Collections.Generic, Threading, IO, Text,
+Numerics). This is comment-only work (add missing Doxygen `/** */` blocks to public types lacking
+them, copying/adapting from .NET XML doc-comments per CLAUDE.md's porting-checklist item #3
+where the meaning translates cleanly) — genuinely low-risk, but touches a WIDE file footprint per
+ticket, so if parallelizing across forks, watch for overlap (e.g. the System.IO doxygen ticket
+could touch the same `BufferedStream.hpp`/`FileSystemWatcher.hpp` files just modified in this
+batch — do this round AFTER confirming those aren't mid-flight elsewhere, which they aren't as of
+this checkpoint). Once these 6 are done, the entire `ticket` table backlog established at the
+start of this session's "ticket-workflow pivot" will be fully drained except the permanently-
+blocked `style` category. Ticket #43 stays `blocked` — never touch.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — `classification-audit` category FULLY DRAINED (all 60 tickets, 5 parallel forks), 8 real gaps found
 
