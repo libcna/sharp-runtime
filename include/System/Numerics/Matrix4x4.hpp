@@ -8,13 +8,28 @@
 #include <sstream>
 #include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/HashCode.hpp"
 #include "System/Numerics/Vector3.hpp"
 #include "System/Numerics/Vector4.hpp"
 #include "System/Numerics/Quaternion.hpp"
 
 namespace System::Numerics {
 
-/** <summary>Represents a 4x4 matrix.</summary> */
+/**
+ * <summary>Represents a 4x4 matrix.</summary>
+ *
+ * This port implements the core arithmetic/factory surface (Add/Subtract/Multiply/Negate,
+ * Transpose/Invert/GetDeterminant, CreateTranslation/CreateScale/CreateRotationX-Y-Z,
+ * CreateFromQuaternion/CreateFromYawPitchRoll, CreateLookAt, CreatePerspectiveFieldOfView,
+ * CreateOrthographic) but deliberately omits a number of real .NET Matrix4x4 members not yet
+ * needed by this project's consumers: the "LeftHanded" variant of every camera/projection
+ * factory, CreateBillboard/CreateBillboardLeftHanded, CreateConstrainedBillboard(LeftHanded),
+ * CreateFromAxisAngle, CreateOrthographicOffCenter(LeftHanded), CreatePerspective(LeftHanded)/
+ * CreatePerspectiveOffCenter(LeftHanded), CreateReflection, CreateRotationX/Y/Z's centerPoint
+ * overload, CreateScale's centerPoint overloads, CreateShadow, CreateViewport(LeftHanded),
+ * CreateWorld, Decompose (scale/rotation/translation extraction), and Transform(Matrix4x4,
+ * Quaternion). Add on demand rather than porting the full surface speculatively.
+ */
 struct Matrix4x4 {
     float M11{}; ///< Row 1, column 1 element.
     float M12{}; ///< Row 1, column 2 element.
@@ -80,6 +95,15 @@ struct Matrix4x4 {
     /** Inequality comparison. */
     bool operator!=(const Matrix4x4& o) const { return !Equals(o); }
 
+    /** Returns a hash code combining all sixteen elements, so that equal matrices hash equal. */
+    [[nodiscard]] int GetHashCode() const {
+        int row1 = System::HashCode::Combine(M11,M12,M13,M14);
+        int row2 = System::HashCode::Combine(M21,M22,M23,M24);
+        int row3 = System::HashCode::Combine(M31,M32,M33,M34);
+        int row4 = System::HashCode::Combine(M41,M42,M43,M44);
+        return System::HashCode::Combine(row1,row2,row3,row4);
+    }
+
     /** Adds two matrices element-wise. */
     Matrix4x4 operator+(const Matrix4x4& r) const {
         return {M11+r.M11,M12+r.M12,M13+r.M13,M14+r.M14,
@@ -144,6 +168,25 @@ struct Matrix4x4 {
 
     /** Negates all elements of @p m. */
     static Matrix4x4 Negate(Matrix4x4 m)                { return -m; }
+
+    /**
+     * Performs a linear interpolation between two matrices, element-wise.
+     * @param a       The first matrix (returned when @p amount is 0).
+     * @param b       The second matrix (returned when @p amount is 1).
+     * @param amount  The relative weighting of @p b.
+     */
+    static Matrix4x4 Lerp(const Matrix4x4& a, const Matrix4x4& b, float amount) {
+        return {
+            a.M11+(b.M11-a.M11)*amount, a.M12+(b.M12-a.M12)*amount,
+            a.M13+(b.M13-a.M13)*amount, a.M14+(b.M14-a.M14)*amount,
+            a.M21+(b.M21-a.M21)*amount, a.M22+(b.M22-a.M22)*amount,
+            a.M23+(b.M23-a.M23)*amount, a.M24+(b.M24-a.M24)*amount,
+            a.M31+(b.M31-a.M31)*amount, a.M32+(b.M32-a.M32)*amount,
+            a.M33+(b.M33-a.M33)*amount, a.M34+(b.M34-a.M34)*amount,
+            a.M41+(b.M41-a.M41)*amount, a.M42+(b.M42-a.M42)*amount,
+            a.M43+(b.M43-a.M43)*amount, a.M44+(b.M44-a.M44)*amount
+        };
+    }
 
     /** Returns the transpose of @p m (rows become columns). */
     static Matrix4x4 Transpose(const Matrix4x4& m) {
