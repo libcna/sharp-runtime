@@ -300,7 +300,10 @@ namespace System
         /**
          * @brief Splits @p value on a single character delimiter.
          *
-         * C++ counterpart of .NET String.Split(char).
+         * C++ counterpart of .NET String.Split(char). An empty @p value returns a single-element
+         * result containing that empty string (`{""}`), matching real .NET's
+         * CreateSplitArrayOfThisAsSoleValue short-circuit for a zero-length input -- verified
+         * against String.Manipulation.cs.
          */
         static std::vector<std::string> Split(const std::string& value, char delimiter);
 

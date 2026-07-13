@@ -45,6 +45,58 @@ TEST(StringTests, Split_StringDelimiter_NoMatch) {
     EXPECT_EQ(r[0], "hello");
 }
 
+// --- Split (single-char delimiter) ---
+// Regression coverage for the 2026-07-13 performance pass (stringstream -> manual find/substr
+// scan), which also fixed a pre-existing correctness bug -- see String::Split(value, char)'s
+// doc-comment and String.cpp's own comment for the .NET-reference verification.
+
+TEST(StringTests, Split_Char_EmptyValue_ReturnsSingleEmptyString) {
+    // Matches real .NET's "".Split(',') == {""} (String.Manipulation.cs's
+    // CreateSplitArrayOfThisAsSoleValue short-circuit for a zero-length input) -- the pre-fix
+    // stringstream-based implementation incorrectly returned an empty vector here.
+    auto r = String::Split("", ',');
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "");
+}
+
+TEST(StringTests, Split_Char_NoDelimiterFound) {
+    auto r = String::Split("hello", ',');
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "hello");
+}
+
+TEST(StringTests, Split_Char_MultipleDelimiters) {
+    auto r = String::Split("a,b,c", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "b");
+    EXPECT_EQ(r[2], "c");
+}
+
+TEST(StringTests, Split_Char_TrailingDelimiter_YieldsTrailingEmptyString) {
+    auto r = String::Split("a,b,", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "b");
+    EXPECT_EQ(r[2], "");
+}
+
+TEST(StringTests, Split_Char_LeadingDelimiter_YieldsLeadingEmptyString) {
+    auto r = String::Split(",a,b", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "");
+    EXPECT_EQ(r[1], "a");
+    EXPECT_EQ(r[2], "b");
+}
+
+TEST(StringTests, Split_Char_ConsecutiveDelimiters_YieldEmptyStringsBetween) {
+    auto r = String::Split("a,,b", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "");
+    EXPECT_EQ(r[2], "b");
+}
+
 // --- IsNullOrWhiteSpace ---
 
 TEST(StringTests, IsNullOrWhiteSpace_Empty) {
