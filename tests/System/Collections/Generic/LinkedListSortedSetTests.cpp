@@ -472,6 +472,21 @@ TEST(SortedSetTests, SymmetricExceptWith_EmptyOther_Unchanged) {
     a.SymmetricExceptWith(b);
     EXPECT_EQ(a.getCountProperty(), 2);
 }
+// Regression tests: ExceptWith/SymmetricExceptWith previously erased from data_ while
+// iterating other.data_ with no guard for `other` aliasing `this` -- real UB (an iterator to
+// an erased element, used again by the range-for loop), matching the identical bug just found
+// and fixed in HashSet<T> (ticket 324). Real .NET's SortedSet<T> explicitly special-cases
+// `other == this` in both methods for exactly this reason.
+TEST(SortedSetTests, ExceptWith_Self_ClearsSet) {
+    SortedSet<int> a{1, 2, 3, 4, 5};
+    a.ExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
+}
+TEST(SortedSetTests, SymmetricExceptWith_Self_ClearsSet) {
+    SortedSet<int> a{1, 2, 3, 4, 5};
+    a.SymmetricExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
+}
 TEST(SortedSetTests, IsProperSubsetOf_True) {
     SortedSet<int> a{1, 2};
     SortedSet<int> b{1, 2, 3};

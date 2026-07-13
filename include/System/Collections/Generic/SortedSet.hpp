@@ -135,6 +135,13 @@ public:
      * @param other The set of elements to remove.
      */
     void ExceptWith(const SortedSet<T>& other) {
+        // Same self-aliasing hazard as System::Collections::Generic::HashSet<T>::ExceptWith
+        // (ticket 324): without this guard, `s.ExceptWith(s)` iterates other.data_ while
+        // erasing from the exact same std::set, using an iterator the standard says is
+        // invalidated by that very erase call -- real UB even where it doesn't reliably crash
+        // under a given std::set implementation. Real .NET's SortedSet<T>.ExceptWith has the
+        // identical `if (other == this) { Clear(); return; }` special case.
+        if (&other == this) { data_.clear(); return; }
         for (const auto& x : other.data_) data_.erase(x);
     }
 
@@ -145,6 +152,9 @@ public:
      * @param other The set to compare to.
      */
     void SymmetricExceptWith(const SortedSet<T>& other) {
+        // Same self-aliasing hazard and fix as ExceptWith above -- real .NET's
+        // SortedSet<T>.SymmetricExceptWith also special-cases `other == this`.
+        if (&other == this) { data_.clear(); return; }
         for (const auto& x : other.data_) {
             auto it = data_.find(x);
             if (it != data_.end()) data_.erase(it);

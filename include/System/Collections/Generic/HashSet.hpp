@@ -162,6 +162,13 @@ public:
      * @param other The collection of elements to remove.
      */
     void ExceptWith(const HashSet<T>& other) {
+        // Real .NET explicitly special-cases `other == this` ("a set minus itself is the
+        // empty set") before the general loop -- without it, iterating other.set_ while
+        // erasing from set_ is erasing from the exact same std::unordered_set being iterated
+        // whenever the caller passes the set itself (e.g. `s.ExceptWith(s)`), which is a real,
+        // confirmed heap-use-after-free (ASan) since erase() invalidates the very iterator the
+        // range-for loop is using to walk other.set_.
+        if (&other == this) { set_.clear(); return; }
         for (const auto& item : other.set_) set_.erase(item);
     }
 
@@ -172,6 +179,12 @@ public:
      * @param other The other set.
      */
     void SymmetricExceptWith(const HashSet<T>& other) {
+        // Same self-aliasing hazard and fix as ExceptWith above: real .NET special-cases
+        // `other == this` ("the symmetric difference of a set with itself is the empty set")
+        // before the general loop, which here would otherwise erase from set_ while iterating
+        // that exact same container via other.set_ -- confirmed as a genuine ASan
+        // heap-use-after-free before this fix.
+        if (&other == this) { set_.clear(); return; }
         std::vector<T> toAdd;
         for (const auto& item : other.set_) {
             if (!Contains(item)) toAdd.push_back(item);
