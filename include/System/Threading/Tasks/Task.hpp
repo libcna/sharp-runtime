@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
@@ -19,6 +20,8 @@
 #endif
 
 namespace System::Threading::Tasks {
+
+    using SharpRuntime::intcs;
 
     class TaskFactory;
 
@@ -225,7 +228,7 @@ namespace System::Threading::Tasks {
          * On Emscripten, throws PlatformNotSupportedException.
          * @param milliseconds Delay duration in milliseconds.
          */
-        static Task Delay(int milliseconds) {
+        static Task Delay(intcs milliseconds) {
 #if defined(__EMSCRIPTEN__)
             (void)milliseconds;
             throw System::PlatformNotSupportedException("Task::Delay requires pthreads (not available on Emscripten).");
