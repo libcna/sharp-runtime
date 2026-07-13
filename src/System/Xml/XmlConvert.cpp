@@ -225,6 +225,11 @@ namespace System::Xml {
         if (std::isinf(value)) return value < 0 ? "-INF" : "INF";
         return System::Double::ToString(value);
     }
+    // KNOWN GAP (audited, not fixed -- see ToTimeSpan(string) below for the matching Parse-side
+    // gap and the full rationale for leaving both undone here): real .NET's
+    // XmlConvert.ToString(TimeSpan) formats using the XML Schema `duration` lexical form
+    // (PnYnMnDTnHnMnS, e.g. "P1DT2H3M4S"), not .NET's native TimeSpan.ToString() colon-separated
+    // format ("1.02:03:04") that this port's TimeSpan::ToString() produces.
     std::string XmlConvert::ToString(const System::TimeSpan& value) { return value.ToString(); }
     std::string XmlConvert::ToString(const System::DateTime& value) { return value.ToString(); }
     std::string XmlConvert::ToString(const System::DateTime& value, const std::string& format) { return value.ToString(format); }
@@ -252,7 +257,13 @@ namespace System::Xml {
         throw System::FormatException("String '" + s + "' was not recognized as a valid Boolean.");
     }
     SharpRuntime::charcs XmlConvert::ToChar(const std::string& s) { return System::Char::Parse(s); }
-    System::Decimal XmlConvert::ToDecimal(const std::string& s) { return System::Decimal::Parse(s); }
+    // Verified against XmlConvert.cs's ToDecimal(string), which passes NumberStyles.
+    // AllowLeadingWhite | AllowTrailingWhite to decimal.Parse. System::Decimal::TryParse
+    // tolerates NO whitespace at all (any non-digit/dot/comma/sign character anywhere fails
+    // immediately), so XML decimal content with surrounding whitespace -- common from document
+    // formatting/indentation -- previously threw FormatException; same bug class as
+    // ToSingle/ToDouble below.
+    System::Decimal XmlConvert::ToDecimal(const std::string& s) { return System::Decimal::Parse(TrimXmlWhitespace(s)); }
     SharpRuntime::sbytecs XmlConvert::ToSByte(const std::string& s) { return System::SByte::Parse(s); }
     SharpRuntime::shortcs XmlConvert::ToInt16(const std::string& s) { return System::Int16::Parse(s); }
     SharpRuntime::intcs XmlConvert::ToInt32(const std::string& s) { return System::Int32::Parse(s); }
@@ -266,18 +277,37 @@ namespace System::Xml {
     // tokens before falling through to ordinary numeric parsing -- valid schema input like
     // "INF" previously failed to parse (Single::Parse/Double::Parse only recognize .NET's own
     // "Infinity"/"-Infinity" spelling).
+    //
+    // Also fixed here: the fallback path called Parse(s) with the ORIGINAL untrimmed string
+    // instead of the already-computed `trimmed` one. Single::Parse/Double::Parse delegate to
+    // std::from_chars, which -- unlike .NET's float.Parse/double.Parse -- does NOT skip leading
+    // or trailing whitespace at all (confirmed via a standalone repro: from_chars fails outright
+    // on " 3.14 ", never even reaching the digits). Since XML element/attribute text content
+    // commonly has surrounding whitespace from document formatting/indentation (e.g.
+    // "<value> 3.14 </value>"), this silently threw FormatException for extremely common,
+    // perfectly valid XML Schema float/double content.
     float XmlConvert::ToSingle(const std::string& s) {
         std::string trimmed = TrimXmlWhitespace(s);
         if (trimmed == "-INF") return -std::numeric_limits<float>::infinity();
         if (trimmed == "INF") return std::numeric_limits<float>::infinity();
-        return System::Single::Parse(s);
+        return System::Single::Parse(trimmed);
     }
     double XmlConvert::ToDouble(const std::string& s) {
         std::string trimmed = TrimXmlWhitespace(s);
         if (trimmed == "-INF") return -std::numeric_limits<double>::infinity();
         if (trimmed == "INF") return std::numeric_limits<double>::infinity();
-        return System::Double::Parse(s);
+        return System::Double::Parse(trimmed);
     }
+    // KNOWN GAP (audited, not fixed): real .NET's XmlConvert.ToTimeSpan parses the XML Schema
+    // `duration` lexical form (PnYnMnDTnHnMnS, e.g. "P1DT2H3M4S") via a dedicated XsdDuration
+    // parser -- an entirely different grammar from .NET's native TimeSpan.Parse() colon-
+    // separated format ("1.02:03:04") that this port's TimeSpan::Parse() expects. A correct fix
+    // needs a full XSD duration parser/formatter pair (matching ToString(TimeSpan) above) --
+    // optional Y/M/D/H/M/S components, sign handling, fractional seconds, and .NET's specific
+    // TimeSpan-from-duration conversion rules (e.g. how a duration's Y/M components, which have
+    // no fixed length, map onto TimeSpan's fixed-length representation) -- a substantially
+    // larger undertaking than a single-pass audit fix, so documented rather than attempted here
+    // (same call as several other structural gaps found this session: too large/risky to rush).
     System::TimeSpan XmlConvert::ToTimeSpan(const std::string& s) { return System::TimeSpan::Parse(s); }
     System::DateTime XmlConvert::ToDateTime(const std::string& s) { return System::DateTime::Parse(s); }
     System::DateTime XmlConvert::ToDateTime(const std::string& s, const std::string& /*format*/) { return System::DateTime::Parse(s); }

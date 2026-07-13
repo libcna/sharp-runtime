@@ -234,6 +234,29 @@ TEST(XmlConvertTests, InfinityRoundTrip_Double) {
     EXPECT_EQ(XmlConvert::ToDouble(XmlConvert::ToString(negInf)), negInf);
 }
 
+// Regression tests for ticket 350: ToSingle/ToDouble/ToDecimal computed a trimmed copy of the
+// input for the INF/-INF token check but then called Parse() with the ORIGINAL untrimmed string
+// for the general numeric fallback path. Single::Parse/Double::Parse delegate to
+// std::from_chars, which -- unlike .NET's float.Parse/double.Parse -- does not skip leading or
+// trailing whitespace at all; Decimal::TryParse tolerates no whitespace whatsoever either. XML
+// element/attribute text content commonly has surrounding whitespace from document formatting
+// (e.g. "<value> 3.14 </value>"), so these previously threw FormatException for perfectly valid,
+// common XML Schema numeric content. Verified against XmlConvert.cs, whose ToSingle/ToDouble/
+// ToDecimal all explicitly pass NumberStyles.AllowLeadingWhite | AllowTrailingWhite.
+TEST(XmlConvertTests, ToDouble_TrimsSurroundingWhitespaceBeforeNumericParse) {
+    EXPECT_DOUBLE_EQ(XmlConvert::ToDouble(" 3.14 "), 3.14);
+    EXPECT_DOUBLE_EQ(XmlConvert::ToDouble("\t3.14\n"), 3.14);
+}
+
+TEST(XmlConvertTests, ToSingle_TrimsSurroundingWhitespaceBeforeNumericParse) {
+    EXPECT_FLOAT_EQ(XmlConvert::ToSingle(" 3.14 "), 3.14f);
+}
+
+TEST(XmlConvertTests, ToDecimal_TrimsSurroundingWhitespaceBeforeNumericParse) {
+    EXPECT_NO_THROW(XmlConvert::ToDecimal(" 3.14 "));
+    EXPECT_EQ(XmlConvert::ToDecimal(" 3.14 ").ToString(), "3.14");
+}
+
 TEST(XmlConvertTests, GuidRoundTrip) {
     System::Guid g = System::Guid::NewGuid();
     EXPECT_EQ(XmlConvert::ToGuid(XmlConvert::ToString(g)), g);
