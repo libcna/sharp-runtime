@@ -149,7 +149,15 @@ public:
 
 private:
     static bool tryFormatUnsignedDecimal(uint64_t v, intcs minDigits, System::Span<uint8_t> dest, intcs& written) {
-        char buf[26];
+        // minDigits comes from StandardFormat's precision, which the type validates to
+        // [0, MaxPrecision] = [0, 99] at construction -- a caller-controlled, publicly
+        // reachable value via e.g. StandardFormat('D', 99). The buffer must hold the larger
+        // of the natural max digit count (20, for UINT64_MAX) and minDigits itself, since the
+        // zero-padding loop below writes up to minDigits characters regardless of the actual
+        // value's width. Confirmed via a standalone ASan repro before this fix: TryFormat(5,
+        // dest, written, StandardFormat('D', 99)) triggered a genuine stack-buffer-overflow
+        // write past the previous 26-byte buffer.
+        char buf[100];
         intcs len = 0;
         if (v == 0) { buf[len++] = '0'; }
         else { while (v > 0) { buf[len++] = static_cast<char>('0' + v % 10); v /= 10; } }
@@ -164,7 +172,12 @@ private:
     static bool tryFormatSignedDecimal(int64_t v, intcs minDigits, System::Span<uint8_t> dest, intcs& written) {
         bool neg = v < 0;
         uint64_t u = neg ? static_cast<uint64_t>(-(v + 1)) + 1 : static_cast<uint64_t>(v);
-        char buf[27];
+        // Same sizing rationale as tryFormatUnsignedDecimal's buf[100] above (minDigits is
+        // caller-controlled up to StandardFormat::MaxPrecision=99), plus one extra byte for
+        // the sign character. Confirmed via a standalone ASan repro before this fix:
+        // TryFormat(int64_t, dest, written, StandardFormat('D', 99)) overflowed the previous
+        // 27-byte buffer.
+        char buf[101];
         intcs len = 0;
         if (u == 0) { buf[len++] = '0'; }
         else { while (u > 0) { buf[len++] = static_cast<char>('0' + u % 10); u /= 10; } }
@@ -182,7 +195,12 @@ private:
         uint64_t mask = (byteWidth >= 8) ? ~0ULL : ((1ULL << (byteWidth * 8)) - 1);
         v &= mask;
         const char* digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
-        char buf[16];
+        // Same sizing rationale as tryFormatUnsignedDecimal's buf[100] (minDigits is
+        // caller-controlled up to StandardFormat::MaxPrecision=99) -- 16 hex digits covers
+        // UINT64_MAX's natural width but not a caller-requested minDigits up to 99. Confirmed
+        // via a standalone ASan repro before this fix: TryFormat(uint64_t, dest, written,
+        // StandardFormat('X', 99)) overflowed the previous 16-byte buffer.
+        char buf[100];
         intcs len = 0;
         if (v == 0) { buf[len++] = '0'; }
         else { while (v > 0) { buf[len++] = digits[v & 0xF]; v >>= 4; } }
@@ -203,7 +221,13 @@ private:
         else { while (v > 0) { digitsBuf[dlen++] = static_cast<char>('0' + v % 10); v /= 10; } }
         std::reverse(digitsBuf, digitsBuf + dlen);
 
-        char out[48];
+        // decimalDigits is caller-controlled up to StandardFormat::MaxPrecision=99 (the 'N'
+        // format's precision selects the number of post-decimal-point zeros written below).
+        // Max needed: 1 sign + 20 magnitude digits (UINT64_MAX) + up to 6 grouping commas +
+        // 1 decimal point + up to 99 zeros = 127; sized generously to 150. Confirmed via a
+        // standalone ASan repro before this fix: TryFormat(uint64_t, dest, written,
+        // StandardFormat('N', 99)) overflowed the previous 48-byte buffer.
+        char out[150];
         intcs olen = 0;
         if (neg) out[olen++] = '-';
         for (intcs i = 0; i < dlen; ++i) {

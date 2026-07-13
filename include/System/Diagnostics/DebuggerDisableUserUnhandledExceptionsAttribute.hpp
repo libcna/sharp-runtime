@@ -5,5 +5,13 @@
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics {
-    class DebuggerDisableUserUnhandledExceptionsAttribute : public System::Attribute {};
+
+/**
+ * @brief Prevents an attached debugger from breaking on user-unhandled exceptions caught by a method with this attribute.
+ *
+ * C++ counterpart of .NET System.Diagnostics.DebuggerDisableUserUnhandledExceptionsAttribute.
+ * A pure marker attribute — carries no state and has no runtime behavior.
+ */
+class DebuggerDisableUserUnhandledExceptionsAttribute : public System::Attribute {};
+
 } // namespace System::Diagnostics

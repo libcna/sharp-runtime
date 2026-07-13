@@ -46,9 +46,20 @@ namespace System
         return std::min(a, b);
     }
 
-    double Math::Min(double a, double b)
+    double Math::Min(double val1, double val2)
     {
-        return std::min(a, b);
+        // Matches the IEEE 754:2019 `minimum` function (propagates NaN regardless of which
+        // argument it's in, and treats +0 as greater than -0) -- std::min() does neither:
+        // std::min(5.0, NaN) == 5.0 (should be NaN, since NaN only propagates when it's the
+        // *first* argument to the typical `b < a ? b : a` implementation), and
+        // std::min(+0.0, -0.0) == +0.0 (should be -0.0).
+        if (val1 != val2)
+        {
+            if (!std::isnan(val1))
+                return val1 < val2 ? val1 : val2;
+            return val1;
+        }
+        return std::signbit(val1) ? val1 : val2;
     }
 
     intcs Math::Max(intcs a, intcs b)
@@ -56,9 +67,17 @@ namespace System
         return std::max(a, b);
     }
 
-    double Math::Max(double a, double b)
+    double Math::Max(double val1, double val2)
     {
-        return std::max(a, b);
+        // See Math::Min(double,double) above -- same IEEE 754:2019 `maximum` mismatch with
+        // std::max().
+        if (val1 != val2)
+        {
+            if (!std::isnan(val1))
+                return val2 < val1 ? val1 : val2;
+            return val1;
+        }
+        return std::signbit(val2) ? val1 : val2;
     }
 
     intcs Math::Clamp(intcs value, intcs min, intcs max)
@@ -188,6 +207,18 @@ namespace System
 
     intcs Math::DivRem(intcs a, intcs b, intcs& result)
     {
+        // Verified against Math.cs's DivRem(int,int,out int): the C# source has no explicit
+        // check for either failure mode -- it relies on the CLR's underlying idiv instruction
+        // trapping on both divide-by-zero AND MinValue/-1 overflow, which the runtime then
+        // translates into DivideByZeroException / OverflowException respectively. C++ has no
+        // such automatic trap-to-exception translation: integer division is undefined behavior
+        // on both inputs, and MinValue/-1 specifically raises a real SIGFPE hardware fault on
+        // x86 (confirmed via a standalone repro -- this crashed the process, not merely UB in
+        // the abstract), matching the same bug class already fixed in Int32::DivRem/
+        // Int64::DivRem elsewhere in this codebase but missed here.
+        if (b == 0) throw System::DivideByZeroException();
+        if (a == std::numeric_limits<intcs>::min() && b == -1)
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         intcs q = a / b;
         result  = a % b;
         return q;
@@ -195,6 +226,10 @@ namespace System
 
     longcs Math::DivRem(longcs a, longcs b, longcs& result)
     {
+        // See Math::DivRem(intcs,intcs,intcs&) above -- same fix, same rationale.
+        if (b == 0) throw System::DivideByZeroException();
+        if (a == std::numeric_limits<longcs>::min() && b == -1)
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         longcs q = a / b;
         result   = a % b;
         return q;

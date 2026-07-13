@@ -2,11 +2,16 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DateOnly.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
+#include "System/TimeOnly.hpp"
 
 namespace System::Globalization {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides static helpers for ISO 8601 week-based calendars.
@@ -28,11 +33,21 @@ public:
      * @param date The date to query.
      * @return The ISO 8601 week number (1–53).
      */
-    static int GetWeekOfYear(const System::DateTime& date) {
+    static intcs GetWeekOfYear(const System::DateTime& date) {
         int week = getWeekNumber(date);
         if (week < MinWeek) return GetWeeksInYear(date.getYearProperty() - 1);
         if (week > 52 && GetWeeksInYear(date.getYearProperty()) == 52) return MinWeek;
         return week;
+    }
+
+    /**
+     * @brief Returns the ISO 8601 week number for the given date.
+     * C++ counterpart of .NET ISOWeek.GetWeekOfYear(DateOnly).
+     * @param date The date to query.
+     * @return The ISO 8601 week number (1–53).
+     */
+    static intcs GetWeekOfYear(const System::DateOnly& date) {
+        return GetWeekOfYear(date.ToDateTime(System::TimeOnly()));
     }
 
     /**
@@ -43,12 +58,22 @@ public:
      * @param date The date to query.
      * @return The ISO 8601 week-year.
      */
-    static int GetYear(const System::DateTime& date) {
+    static intcs GetYear(const System::DateTime& date) {
         int week = getWeekNumber(date);
         int year = date.getYearProperty();
         if (week < MinWeek) return year - 1;
         if (week > 52 && GetWeeksInYear(year) == 52) return year + 1;
         return year;
+    }
+
+    /**
+     * @brief Returns the ISO 8601 week-year for the given date.
+     * C++ counterpart of .NET ISOWeek.GetYear(DateOnly).
+     * @param date The date to query.
+     * @return The ISO 8601 week-year.
+     */
+    static intcs GetYear(const System::DateOnly& date) {
+        return GetYear(date.ToDateTime(System::TimeOnly()));
     }
 
     /**
@@ -61,7 +86,7 @@ public:
      * @return 52 or 53.
      * @throws System::ArgumentOutOfRangeException if @p year is outside 1..9999.
      */
-    static int GetWeeksInYear(int year) {
+    static intcs GetWeeksInYear(intcs year) {
         if (year < MinYear || year > MaxYear) throw System::ArgumentOutOfRangeException("year");
         auto p = [](long long y) -> int {
             long long cent = y / 100;
@@ -81,7 +106,7 @@ public:
      * @return The Gregorian DateTime equivalent to the given ISO week date.
      * @throws System::ArgumentOutOfRangeException if @p year, @p week, or @p dayOfWeek is out of range.
      */
-    static System::DateTime ToDateTime(int year, int week, System::DayOfWeek dayOfWeek) {
+    static System::DateTime ToDateTime(intcs year, intcs week, System::DayOfWeek dayOfWeek) {
         if (year < MinYear || year > MaxYear) throw System::ArgumentOutOfRangeException("year");
         if (week < MinWeek || week > MaxWeek) throw System::ArgumentOutOfRangeException("week");
         int dowValue = static_cast<int>(dayOfWeek);
@@ -94,13 +119,27 @@ public:
     }
 
     /**
+     * @brief Maps an ISO week date to the equivalent Gregorian DateOnly.
+     *
+     * C++ counterpart of .NET ISOWeek.ToDateOnly(int, int, DayOfWeek).
+     * @param year      The ISO week-numbering year (1–9999).
+     * @param week      The ISO week number (1–53).
+     * @param dayOfWeek The day of week within the ISO week (Sunday may be given as 0 or 7).
+     * @return The Gregorian DateOnly equivalent to the given ISO week date.
+     * @throws System::ArgumentOutOfRangeException if @p year, @p week, or @p dayOfWeek is out of range.
+     */
+    static System::DateOnly ToDateOnly(intcs year, intcs week, System::DayOfWeek dayOfWeek) {
+        return System::DateOnly::FromDateTime(ToDateTime(year, week, dayOfWeek));
+    }
+
+    /**
      * @brief Returns the DateTime of the first day (Monday) of ISO week 1 in the given year.
      *
      * C++ counterpart of .NET ISOWeek.GetYearStart(int).
      * @param year The ISO week-year.
      * @return The Monday that begins ISO week 1.
      */
-    static System::DateTime GetYearStart(int year) {
+    static System::DateTime GetYearStart(intcs year) {
         return ToDateTime(year, MinWeek, System::DayOfWeek::Monday);
     }
 
@@ -111,7 +150,7 @@ public:
      * @param year The ISO week-year.
      * @return The Sunday that ends the last ISO week of @p year.
      */
-    static System::DateTime GetYearEnd(int year) {
+    static System::DateTime GetYearEnd(intcs year) {
         return ToDateTime(year, GetWeeksInYear(year), System::DayOfWeek::Sunday);
     }
 

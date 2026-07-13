@@ -54,6 +54,18 @@ namespace System {
         setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
     }
 
+    ArgumentException::ArgumentException(const std::string& composedMessage,
+                                         const std::string& paramName,
+                                         AlreadyComposedTag)
+        : SystemException(composedMessage), paramName_(paramName) {
+        setHResultProperty(static_cast<SharpRuntime::intcs>(0x80070057)); // COR_E_ARGUMENT
+    }
+
+    std::string ArgumentException::AppendParamNameSuffix(const std::string& message,
+                                                          const std::string& paramName) {
+        return appendParamName(message, paramName);
+    }
+
     void ArgumentException::ThrowIfNullOrEmpty(const std::string& argument,
                                                const std::string& paramName) {
         if (argument.empty()) {

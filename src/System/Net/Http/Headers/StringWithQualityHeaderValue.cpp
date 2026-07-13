@@ -44,6 +44,22 @@ namespace System::Net::Http::Headers {
             }
         }
 
+        // Matches real .NET's HttpRuleParser.GetNumberLength(input, start, allowDecimal: true)
+        // grammar: digits with at most one '.', no leading dot (".5" is invalid, "0.5" required),
+        // no sign, no exponent. A trailing dot with no digits after ("1.") is valid. std::stod
+        // alone is far more permissive (accepts a leading dot, a sign, and scientific notation
+        // like "1e0"), which would let TryParse silently accept quality values real .NET rejects.
+        bool isValidQualityNumber(const std::string& s) {
+            if (s.empty() || s[0] == '.') return false;
+            bool haveDot = false, haveDigit = false;
+            for (char c : s) {
+                if (c >= '0' && c <= '9') haveDigit = true;
+                else if (c == '.' && !haveDot) haveDot = true;
+                else return false;
+            }
+            return haveDigit;
+        }
+
         // Formats like .NET's "0.0##" custom numeric format: 1-3 decimal digits, trailing zeros
         // beyond the first decimal digit trimmed.
         std::string formatQuality(double quality) {
@@ -116,6 +132,7 @@ namespace System::Net::Http::Headers {
         if (numEnd == std::string::npos) return false;
         numberStr = numberStr.substr(0, numEnd + 1);
 
+        if (!isValidQualityNumber(numberStr)) return false;
         double quality;
         try {
             size_t pos = 0;

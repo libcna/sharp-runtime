@@ -83,7 +83,7 @@ TEST(TimerTests, BeginInitEndInit_DelaysEnable) {
 
 TEST(TimersDescriptionAttributeTests, StoresDescription) {
     TimersDescriptionAttribute attr("Fires when the interval elapses.");
-    EXPECT_EQ(attr.Description, "Fires when the interval elapses.");
+    EXPECT_EQ(attr.getDescriptionProperty(), "Fires when the interval elapses.");
 }
 
 TEST(ElapsedEventArgsTests, StoresSignalTime) {

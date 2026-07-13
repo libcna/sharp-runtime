@@ -119,6 +119,51 @@ public:
     }
 
     /**
+     * @brief Gets the key corresponding to the specified index.
+     *
+     * C++ counterpart of .NET SortedList<TKey,TValue>.GetKeyAtIndex(int).
+     * @param index The zero-based index of the key within the entire SortedList.
+     * @return The key at the specified index.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
+     */
+    [[nodiscard]] const TKey& GetKeyAtIndex(intcs index) const {
+        if (index < 0 || index >= getCountProperty()) throw System::ArgumentOutOfRangeException("index");
+        auto it = map_.begin();
+        std::advance(it, index);
+        return it->first;
+    }
+
+    /**
+     * @brief Gets the value corresponding to the specified index.
+     *
+     * C++ counterpart of .NET SortedList<TKey,TValue>.GetValueAtIndex(int).
+     * @param index The zero-based index of the value within the entire SortedList.
+     * @return The value at the specified index.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
+     */
+    [[nodiscard]] const TValue& GetValueAtIndex(intcs index) const {
+        if (index < 0 || index >= getCountProperty()) throw System::ArgumentOutOfRangeException("index");
+        auto it = map_.begin();
+        std::advance(it, index);
+        return it->second;
+    }
+
+    /**
+     * @brief Updates the value corresponding to the specified index.
+     *
+     * C++ counterpart of .NET SortedList<TKey,TValue>.SetValueAtIndex(int, TValue).
+     * @param index The zero-based index of the value within the entire SortedList.
+     * @param value The value with which to replace the entry at the specified index.
+     * @throws System::ArgumentOutOfRangeException if the index is out of range.
+     */
+    void SetValueAtIndex(intcs index, const TValue& value) {
+        if (index < 0 || index >= getCountProperty()) throw System::ArgumentOutOfRangeException("index");
+        auto it = map_.begin();
+        std::advance(it, index);
+        it->second = value;
+    }
+
+    /**
      * @brief Determines whether the list contains the specified key.
      *
      * C++ counterpart of .NET SortedList<TKey,TValue>.ContainsKey(TKey).

@@ -88,6 +88,69 @@ TEST(HashtableTests, Add_DuplicateKey_Throws) {
     EXPECT_THROW(ht.Add("a", std::any(2)), System::ArgumentException);
 }
 
+// Regression test: GetEnumerator() previously returned nullptr unconditionally (a stub),
+// violating IDictionary's contract that GetEnumerator() always returns a working enumerator.
+TEST(HashtableTests, GetEnumerator_IteratesAllEntries) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    ht.Add("b", std::any(2));
+    ht.Add("c", std::any(3));
+
+    IDictionaryEnumerator* e = ht.GetEnumerator();
+    ASSERT_NE(e, nullptr);
+    int count = 0;
+    int sum = 0;
+    while (e->MoveNext()) {
+        DictionaryEntry entry = e->getEntryProperty();
+        sum += std::any_cast<int>(entry.getValueProperty());
+        ++count;
+    }
+    EXPECT_EQ(count, 3);
+    EXPECT_EQ(sum, 6);
+    delete e;
+}
+
+TEST(HashtableTests, GetEnumerator_CurrentBeforeMoveNext_Throws) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    IDictionaryEnumerator* e = ht.GetEnumerator();
+    EXPECT_THROW(e->getEntryProperty(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(HashtableTests, GetEnumerator_ModifiedDuringEnumeration_Throws) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    ht.Add("b", std::any(2));
+    IDictionaryEnumerator* e = ht.GetEnumerator();
+    ASSERT_TRUE(e->MoveNext());
+    ht.Add("c", std::any(3));
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+// Regression test: CopyTo() was previously a no-op stub; now copies DictionaryEntry elements.
+TEST(HashtableTests, CopyTo_CopiesAllEntriesAsDictionaryEntry) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    ht.Add("b", std::any(2));
+    std::vector<DictionaryEntry> dest(2);
+    ht.CopyTo(dest.data(), 0);
+    int sum = 0;
+    for (const auto& entry : dest) sum += std::any_cast<int>(entry.getValueProperty());
+    EXPECT_EQ(sum, 3);
+}
+
+// Regression test: ContainsValue() previously compared only std::any::type(), so it would
+// report a false positive for any value of a type already present in the table.
+TEST(HashtableTests, ContainsValue_ComparesByValueNotJustType) {
+    Hashtable ht;
+    ht.Add("a", std::any(1));
+    ht.Add("b", std::any(2));
+    EXPECT_TRUE(ht.ContainsValue(std::any(2)));
+    EXPECT_FALSE(ht.ContainsValue(std::any(99)));
+}
+
 // --- Ascii ---
 TEST(AsciiTests, IsValid) {
     EXPECT_TRUE(System::Text::Ascii::IsValid("hello"));

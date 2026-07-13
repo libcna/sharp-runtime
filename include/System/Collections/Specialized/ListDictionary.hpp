@@ -5,9 +5,12 @@
 #include <any>
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 
 namespace System::Collections::Specialized {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief A simple ordered key-value dictionary backed by a linked-list style vector of pairs.
@@ -47,7 +50,7 @@ public:
      * C++ counterpart of .NET ListDictionary.Count.
      * @return The number of entries.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_.size()); }
 
     /**
      * @brief Gets a value indicating whether the dictionary contains no elements.

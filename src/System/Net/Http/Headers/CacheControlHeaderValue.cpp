@@ -229,7 +229,15 @@ namespace System::Net::Http::Headers {
 
         for (const auto& rawSegment : splitTopLevel(input)) {
             std::string segment = trim(rawSegment);
-            if (segment.empty()) return false;
+            // Empty list elements (leading/trailing/consecutive commas) are ignorable, not a
+            // parse error -- matches RFC 7230's #rule ABNF and real .NET's actual behavior.
+            // Verified against BaseHeaderParser.TryParseValue + HeaderUtilities.
+            // GetNextNonEmptyOrWhitespaceIndex (CacheControlHeaderValue.cs's
+            // MultipleValueNameValueParser has supportsMultipleValues=true, which enables the
+            // "skipEmptyValues" loop that silently consumes any run of ,-separated empty
+            // elements, both leading, trailing, and between real values). This previously
+            // rejected the whole header for e.g. "no-cache," or "no-cache,,no-store".
+            if (segment.empty()) continue;
 
             size_t eq = segment.find('=');
             std::string name = trim(eq == std::string::npos ? segment : segment.substr(0, eq));

@@ -6,6 +6,7 @@
 #include <string>
 #include "System/Net/EndPoint.hpp"
 #include "System/Net/Sockets/AddressFamily.hpp"
+#include "System/String.hpp"
 
 namespace System::Net::Sockets {
 
@@ -61,6 +62,9 @@ namespace System::Net::Sockets {
         [[nodiscard]] bool Equals(const UnixDomainSocketEndPoint& other) const { return path_ == other.path_; }
         bool operator==(const UnixDomainSocketEndPoint& o) const { return Equals(o); }
         bool operator!=(const UnixDomainSocketEndPoint& o) const { return !Equals(o); }
+
+        /** @brief C++ counterpart of .NET UnixDomainSocketEndPoint.GetHashCode() -- _path.GetHashCode(). */
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const { return System::String::GetHashCode(path_); }
     };
 
 } // namespace System::Net::Sockets

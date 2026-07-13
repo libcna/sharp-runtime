@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -78,7 +79,14 @@ namespace System {
         static std::string ToString(SharpRuntime::ulongcs value, const std::string& format) {
             if (format.empty()) return ToString(value);
             char type = format[0];
-            int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             std::ostringstream oss;
             oss.imbue(std::locale::classic());
             if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << value; return oss.str(); }
@@ -125,9 +133,17 @@ namespace System {
         /** @brief Returns 0 if value is zero; 1 otherwise. */
         static intcs Sign(SharpRuntime::ulongcs value) { return value == 0 ? 0 : 1; }
 
-        /** @brief Divides left by right and returns a (quotient, remainder) pair. */
+        /**
+         * @brief Divides left by right and returns a (quotient, remainder) pair.
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
+         */
         static std::pair<SharpRuntime::ulongcs, SharpRuntime::ulongcs>
         DivRem(SharpRuntime::ulongcs left, SharpRuntime::ulongcs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return { left / right, left % right };
         }
 

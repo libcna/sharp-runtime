@@ -161,7 +161,11 @@ public:
     void CopyTo(std::vector<T>& destination, intcs index) const {
         if (index < 0)
             throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
-        if (index + getCountProperty() > static_cast<intcs>(destination.size()))
+        // Same overflow-prone-check fix as Collection<T>::CopyTo -- see its comment. A
+        // subtraction-based check matches List<T>.CopyTo's own `array.Length - arrayIndex <
+        // Count` and cannot overflow here since index and destination.size() are both already
+        // known non-negative at this point.
+        if (static_cast<intcs>(destination.size()) - index < getCountProperty())
             throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
         for (intcs i = 0; i < getCountProperty(); ++i)
             destination[static_cast<size_t>(index + i)] = (*items_)[static_cast<size_t>(i)];

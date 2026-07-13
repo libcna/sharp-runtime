@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <stdexcept>
+#include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 
@@ -24,11 +25,11 @@ namespace System::Globalization {
  */
 class JapaneseCalendar : public Calendar {
 public:
-    static constexpr int MeijiEra  = 1; ///< Meiji era identifier (1868-09-08 – 1912-07-29).
-    static constexpr int TaishoEra = 2; ///< Taisho era identifier (1912-07-30 – 1926-12-24).
-    static constexpr int ShowaEra  = 3; ///< Showa era identifier (1926-12-25 – 1989-01-07).
-    static constexpr int HeiseiEra = 4; ///< Heisei era identifier (1989-01-08 – 2019-04-30).
-    static constexpr int ReiwaEra  = 5; ///< Reiwa era identifier (from 2019-05-01).
+    static constexpr intcs MeijiEra  = 1; ///< Meiji era identifier (1868-09-08 – 1912-07-29).
+    static constexpr intcs TaishoEra = 2; ///< Taisho era identifier (1912-07-30 – 1926-12-24).
+    static constexpr intcs ShowaEra  = 3; ///< Showa era identifier (1926-12-25 – 1989-01-07).
+    static constexpr intcs HeiseiEra = 4; ///< Heisei era identifier (1989-01-08 – 2019-04-30).
+    static constexpr intcs ReiwaEra  = 5; ///< Reiwa era identifier (from 2019-05-01).
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -67,7 +68,7 @@ public:
      * C++ counterpart of .NET JapaneseCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year in the current era (default 99).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
+    [[nodiscard]] intcs getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
@@ -76,7 +77,7 @@ public:
      * @param value The new maximum two-digit year.
      * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) override {
+    void setTwoDigitYearMaxProperty(intcs value) override {
         VerifyWritable();
         twoDigitYearMax_ = value;
     }
@@ -86,7 +87,7 @@ public:
      *
      * @return Always 5 (Meiji through Reiwa).
      */
-    [[nodiscard]] int GetErasCount() const override { return 5; }
+    [[nodiscard]] intcs GetErasCount() const override { return 5; }
 
     /**
      * @brief Gets the list of era identifiers supported by this calendar.
@@ -94,7 +95,7 @@ public:
      * C++ counterpart of .NET JapaneseCalendar.Eras.
      * @return A vector of era identifiers, most recent era first.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override {
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override {
         return {ReiwaEra, HeiseiEra, ShowaEra, TaishoEra, MeijiEra};
     }
 
@@ -106,7 +107,7 @@ public:
      * @return The era identifier (1–5).
      * @throws System::ArgumentOutOfRangeException if @p time precedes the Meiji era (1868-09-08).
      */
-    [[nodiscard]] int GetEra(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetEra(const System::DateTime& time) const override {
         int y = time.getYearProperty(), m = time.getMonthProperty(), d = time.getDayProperty();
         if (y > 2019 || (y == 2019 && (m > 5 || (m == 5 && d >= 1)))) return ReiwaEra;
         if (y > 1989 || (y == 1989 && (m > 1 || (m == 1 && d >= 8)))) return HeiseiEra;
@@ -124,7 +125,7 @@ public:
      * @param time The date to query.
      * @return The era-relative year (1-based).
      */
-    [[nodiscard]] int GetYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetYear(const System::DateTime& time) const override {
         int era = GetEra(time);
         int gy  = time.getYearProperty();
         switch (era) {
@@ -146,7 +147,7 @@ public:
      * @param era  Era identifier (1–5); CurrentEra (0) defaults to Reiwa.
      * @return true if the corresponding Gregorian year is a leap year.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int era = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs era = CurrentEra) const override {
         int gy = eraYearToGregorian(year, era == CurrentEra ? ReiwaEra : era);
         return (gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0);
     }
@@ -156,7 +157,7 @@ public:
      *
      * C++ counterpart of .NET JapaneseCalendar.IsLeapMonth(int, int, int).
      */
-    [[nodiscard]] bool IsLeapMonth(int /*year*/, int /*month*/, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapMonth(intcs /*year*/, intcs /*month*/, intcs /*era*/ = CurrentEra) const override {
         return false;
     }
 
@@ -170,7 +171,7 @@ public:
      * @param era   Era identifier; CurrentEra defaults to Reiwa.
      * @return true if the date is February 29 in a leap year.
      */
-    [[nodiscard]] bool IsLeapDay(int year, int month, int day, int era = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapDay(intcs year, intcs month, intcs day, intcs era = CurrentEra) const override {
         return month == 2 && day == 29 && IsLeapYear(year, era);
     }
 
@@ -183,7 +184,7 @@ public:
      * @param era   Era identifier; CurrentEra defaults to Reiwa.
      * @return Number of days in the specified month.
      */
-    [[nodiscard]] int GetDaysInMonth(int year, int month, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInMonth(intcs year, intcs month, intcs era = CurrentEra) const override {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         return (month == 2 && IsLeapYear(year, era)) ? 29 : days[month];
     }
@@ -196,7 +197,7 @@ public:
      * @param era  Era identifier; CurrentEra defaults to Reiwa.
      * @return 366 for leap years, 365 otherwise.
      */
-    [[nodiscard]] int GetDaysInYear(int year, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInYear(intcs year, intcs era = CurrentEra) const override {
         return IsLeapYear(year, era) ? 366 : 365;
     }
 
@@ -215,29 +216,55 @@ public:
      * @param era         Era identifier; CurrentEra defaults to Reiwa.
      * @return The Gregorian DateTime corresponding to the given Japanese date components.
      */
-    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                int second, int millisecond, int era = CurrentEra) const override {
+    System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                intcs second, intcs millisecond, intcs era = CurrentEra) const override {
         int gy = eraYearToGregorian(year, era == CurrentEra ? ReiwaEra : era);
         return System::DateTime(gy, month, day, hour, minute, second, millisecond);
     }
 
 private:
-    int twoDigitYearMax_{99};
+    intcs twoDigitYearMax_{99};
 
     /**
      * @brief Converts an era-relative year to the corresponding Gregorian year.
      * @param year Era-relative year (1-based within era).
      * @param era  Era identifier (1–5).
      * @return The Gregorian year.
+     * @throws System::ArgumentOutOfRangeException if @p year is negative, outside the valid
+     *         [1, maxEraYear] range for @p era, or @p era is not one of the 5 known eras.
      */
     static int eraYearToGregorian(int year, int era) {
+        // Verified against GregorianCalendarHelper.cs's GetYearOffset(throwOnError: true) --
+        // the shared validation path real .NET's JapaneseCalendar.GetGregorianYear/IsLeapYear/
+        // GetDaysInMonth/GetDaysInYear/ToDateTime all route through: year must be non-negative
+        // AND within [1, maxEraYear] for the resolved era (maxEraYear taken directly from
+        // JapaneseCalendar.cs's built-in EraInfo table: Reiwa 9999-2018, Heisei 2019-1988,
+        // Showa 1989-1925, Taisho 1926-1911, Meiji 1912-1867), and era must be one of the 5
+        // known values. This port previously performed none of that validation, silently
+        // computing (and using) a nonsensical Gregorian year for any out-of-range era-relative
+        // year or era value instead of throwing -- e.g. IsLeapYear(100, HeiseiEra) computed
+        // Gregorian year 2088 instead of rejecting 100 as outside Heisei's actual [1,31] range.
+        if (year < 0)
+            throw System::ArgumentOutOfRangeException("year", "Non-negative number required.");
+        int maxYear;
+        switch (era) {
+            case ReiwaEra:  maxYear = 9999 - 2018; break;
+            case HeiseiEra: maxYear = 2019 - 1988; break;
+            case ShowaEra:  maxYear = 1989 - 1925; break;
+            case TaishoEra: maxYear = 1926 - 1911; break;
+            case MeijiEra:  maxYear = 1912 - 1867; break;
+            default:
+                throw System::ArgumentOutOfRangeException("era", "Era value was not valid.");
+        }
+        if (year < 1 || year > maxYear)
+            throw System::ArgumentOutOfRangeException("year",
+                "Valid values are between 1 and " + std::to_string(maxYear) + ", inclusive.");
         switch (era) {
             case ReiwaEra:  return 2018 + year;
             case HeiseiEra: return 1988 + year;
             case ShowaEra:  return 1925 + year;
             case TaishoEra: return 1911 + year;
-            case MeijiEra:  return 1867 + year;
-            default:        return year;
+            default:        return 1867 + year; // MeijiEra
         }
     }
 };

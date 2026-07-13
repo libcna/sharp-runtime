@@ -246,12 +246,25 @@ public:
      * @brief Returns a new set containing only elements present in exactly one of the two sets.
      *
      * C++ counterpart of .NET ImmutableHashSet<T>.SymmetricExcept(IEnumerable<T>).
+     * Verified against ImmutableHashSet_1.cs's private SymmetricExcept: @p other is first
+     * rehashed into a set under *this* set's comparer (`ImmutableHashSet.CreateRange(
+     * origin.EqualityComparer, other)`) before the difference is computed. This port previously
+     * toggled directly over @p other's raw elements (iterated under @p other's own comparer): if
+     * two of @p other's elements are distinct under @p other's comparer but collapse to the same
+     * logical element under *this* set's comparer, the toggle runs twice for that logical
+     * element and cancels itself out, silently dropping it from the result. Confirmed via a
+     * standalone repro (this: case-insensitive empty set; other: case-sensitive {"A","a"}) --
+     * toggling over other's raw elements produced an empty result where real .NET (and the
+     * rehash-first fix here) correctly produces {"A"}. Same bug class as the SetEquals fix
+     * above, just for the toggle-based set operation instead of a size/membership comparison.
      * @param other The other set.
      * @return A new ImmutableHashSet with the symmetric difference.
      */
     [[nodiscard]] ImmutableHashSet<T> SymmetricExcept(const ImmutableHashSet<T>& other) const {
+        auto otherRehashed = makeEmpty(data_->hash_function(), data_->key_eq());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
         auto s = std::make_shared<SetT>(*data_);
-        for (const auto& x : *other.data_) {
+        for (const auto& x : *otherRehashed) {
             if (s->count(x)) s->erase(x);
             else s->insert(x);
         }
@@ -266,8 +279,20 @@ public:
      * @return true if both sets are equal; otherwise false.
      */
     [[nodiscard]] bool SetEquals(const ImmutableHashSet<T>& other) const {
-        if (data_->size() != other.data_->size()) return false;
-        for (const auto& x : *data_) if (!other.Contains(x)) return false;
+        // Matches ImmutableHashSet_1.cs's SetEquals: when the two sets don't share a
+        // comparer, `other`'s elements are rehashed under *this* set's comparer
+        // (`new HashSet<T>(other, origin.EqualityComparer)`) before comparing -- the same
+        // pattern IsSubsetOf/IsSupersetOf in this file already use, just missed here. The
+        // previous version compared raw sizes and tested membership via `other`'s own
+        // comparer, which gives a wrong result when the two sets' equality notions differ --
+        // confirmed via a standalone repro before this fix (a case-insensitive {"Hello"} vs.
+        // a case-sensitive {"HELLO","hello"}, which collapses to the identical single logical
+        // element once rehashed case-insensitively, compared unequal). Comparing sizes AFTER
+        // rehashing (not before) correctly handles this collapsing case.
+        auto otherRehashed = makeEmpty(data_->hash_function(), data_->key_eq());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        if (otherRehashed->size() != data_->size()) return false;
+        for (const auto& x : *data_) if (!otherRehashed->count(x)) return false;
         return true;
     }
 

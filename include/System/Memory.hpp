@@ -81,8 +81,14 @@ namespace System {
         Memory(std::vector<T>& array, intcs start, intcs length)
             : data_(&array), offset_(start), length_(length)
         {
-            if (start < 0 || length < 0 ||
-                start + length > static_cast<intcs>(array.size()))
+            // start+length (both intcs/int32) can itself signed-overflow for large start/length,
+            // silently bypassing this check instead of throwing -- confirmed real UB via a
+            // standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket 265);
+            // fixed the same way real .NET's Span<T>.Slice(int,int) does: unsigned comparison,
+            // subtraction instead of addition.
+            auto sz = static_cast<intcs>(array.size());
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(sz) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(sz - start))
                 throw System::ArgumentOutOfRangeException("start");
         }
 
@@ -154,7 +160,10 @@ namespace System {
          */
         [[nodiscard]] Memory<T> Slice(intcs start, intcs length) const
         {
-            if (start < 0 || length < 0 || start + length > length_)
+            // See the (vector&, start, length) constructor above: same overflow-bypasses-the-
+            // check bug, same fix.
+            if (static_cast<SharpRuntime::uintcs>(start) > static_cast<SharpRuntime::uintcs>(length_) ||
+                static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(length_ - start))
                 throw System::ArgumentOutOfRangeException("start");
             if (data_ == nullptr) return Memory<T>{};
             return Memory<T>(*data_, offset_ + start, length);

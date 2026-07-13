@@ -150,6 +150,36 @@ TEST(CacheControlHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_FALSE(CacheControlHeaderValue::TryParse("max-age=abc", result));
 }
 
+// Regression tests for ticket 314: TryParse rejected any empty list element (leading, trailing,
+// or a run of consecutive commas between real directives) as a hard parse failure. Verified
+// against real .NET's actual parsing chain (CacheControlHeaderValue.cs's
+// MultipleValueNameValueParser -> BaseHeaderParser.TryParseValue ->
+// HeaderUtilities.GetNextNonEmptyOrWhitespaceIndex, which has supportsMultipleValues=true and
+// therefore loops to silently skip any run of ,-separated empty elements) -- matches RFC 7230's
+// #rule ABNF, where empty list elements are explicitly ignorable, not an error.
+TEST(CacheControlHeaderValueTests, TryParse_TrailingComma_Succeeds) {
+    CacheControlHeaderValue result;
+    ASSERT_TRUE(CacheControlHeaderValue::TryParse("no-cache,", result));
+    EXPECT_TRUE(result.getNoCacheProperty());
+}
+TEST(CacheControlHeaderValueTests, TryParse_LeadingComma_Succeeds) {
+    CacheControlHeaderValue result;
+    ASSERT_TRUE(CacheControlHeaderValue::TryParse(",no-cache", result));
+    EXPECT_TRUE(result.getNoCacheProperty());
+}
+TEST(CacheControlHeaderValueTests, TryParse_DoubleCommaBetweenDirectives_Succeeds) {
+    CacheControlHeaderValue result;
+    ASSERT_TRUE(CacheControlHeaderValue::TryParse("no-cache,,no-store", result));
+    EXPECT_TRUE(result.getNoCacheProperty());
+    EXPECT_TRUE(result.getNoStoreProperty());
+}
+TEST(CacheControlHeaderValueTests, TryParse_AllCommasNoDirectives_ReturnsDefaults) {
+    CacheControlHeaderValue result;
+    ASSERT_TRUE(CacheControlHeaderValue::TryParse(",,,", result));
+    EXPECT_FALSE(result.getNoCacheProperty());
+    EXPECT_FALSE(result.getNoStoreProperty());
+}
+
 TEST(CacheControlHeaderValueTests, Equals_SameFlags) {
     auto a = CacheControlHeaderValue::Parse("no-store, max-age=100");
     auto b = CacheControlHeaderValue::Parse("no-store, max-age=100");

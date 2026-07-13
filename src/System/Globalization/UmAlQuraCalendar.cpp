@@ -170,7 +170,7 @@ long long UmAlQuraCalendar::absoluteDateUAQ(int year, int month, int day) {
 // Calendar overrides
 // ---------------------------------------------------------------------------
 
-int UmAlQuraCalendar::GetEra(const System::DateTime& /*time*/) const { return UmAlQuraEra; }
+intcs UmAlQuraCalendar::GetEra(const System::DateTime& /*time*/) const { return UmAlQuraEra; }
 
 int UmAlQuraCalendar::getDatePart(const System::DateTime& time, int part) const {
     int hy, hm, hd;
@@ -182,39 +182,39 @@ int UmAlQuraCalendar::getDatePart(const System::DateTime& time, int part) const 
     return static_cast<int>(absoluteDateUAQ(hy, hm, hd) - absoluteDateUAQ(hy, 1, 1) + 1);
 }
 
-int UmAlQuraCalendar::GetYear(const System::DateTime& time) const {
+intcs UmAlQuraCalendar::GetYear(const System::DateTime& time) const {
     return getDatePart(time, PartYear);
 }
 
-int UmAlQuraCalendar::GetMonth(const System::DateTime& time) const {
+intcs UmAlQuraCalendar::GetMonth(const System::DateTime& time) const {
     return getDatePart(time, PartMonth);
 }
 
-int UmAlQuraCalendar::GetDayOfMonth(const System::DateTime& time) const {
+intcs UmAlQuraCalendar::GetDayOfMonth(const System::DateTime& time) const {
     return getDatePart(time, PartDay);
 }
 
-int UmAlQuraCalendar::GetDayOfYear(const System::DateTime& time) const {
+intcs UmAlQuraCalendar::GetDayOfYear(const System::DateTime& time) const {
     return getDatePart(time, PartDayOfYear);
 }
 
-bool UmAlQuraCalendar::IsLeapYear(int year, int era) const {
+bool UmAlQuraCalendar::IsLeapYear(intcs year, intcs era) const {
     checkYear(year, era);
     return daysInYear(year) == 355;
 }
 
-int UmAlQuraCalendar::GetDaysInMonth(int year, int month, int era) const {
+intcs UmAlQuraCalendar::GetDaysInMonth(intcs year, intcs month, intcs era) const {
     checkYearMonth(year, month, era);
     int flags = s_yearInfo[year - MinCalendarYear].flags;
     return ((flags >> (month - 1)) & 1) ? 30 : 29;
 }
 
-int UmAlQuraCalendar::GetDaysInYear(int year, int era) const {
+intcs UmAlQuraCalendar::GetDaysInYear(intcs year, intcs era) const {
     checkYear(year, era);
     return daysInYear(year);
 }
 
-System::DateTime UmAlQuraCalendar::AddMonths(const System::DateTime& time, int months) const {
+System::DateTime UmAlQuraCalendar::AddMonths(const System::DateTime& time, intcs months) const {
     if (months < -120000 || months > 120000) throw System::ArgumentOutOfRangeException("months");
     int y = GetYear(time), m = GetMonth(time), d = GetDayOfMonth(time);
     int i = m - 1 + months;
@@ -228,12 +228,19 @@ System::DateTime UmAlQuraCalendar::AddMonths(const System::DateTime& time, int m
     return System::DateTime(ticks);
 }
 
-System::DateTime UmAlQuraCalendar::AddYears(const System::DateTime& time, int years) const {
+System::DateTime UmAlQuraCalendar::AddYears(const System::DateTime& time, intcs years) const {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large years argument (same bug class fixed in
+    // Calendar::AddYears/JulianCalendar::AddYears/PersianCalendar::AddYears/
+    // HebrewCalendar::AddYears/HijriCalendar::AddYears). Validated against the equivalent
+    // bound AddMonths (above) already enforces (120000 / 12 = 10000).
+    if (years < -10000 || years > 10000)
+        throw System::ArgumentOutOfRangeException("years");
     return AddMonths(time, years * 12);
 }
 
-System::DateTime UmAlQuraCalendar::ToDateTime(int year, int month, int day, int hour, int minute,
-                                              int second, int millisecond, int era) const {
+System::DateTime UmAlQuraCalendar::ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                              intcs second, intcs millisecond, intcs era) const {
     checkYearMonth(year, month, era);
     int daysInMonth = GetDaysInMonth(year, month, era);
     if (day < 1 || day > daysInMonth) throw System::ArgumentOutOfRangeException("day");

@@ -16,9 +16,11 @@ namespace System::IO {
         InternalBufferOverflowException() : System::SystemException() {
             setHResultProperty(InternalBufferOverflowHResult);
         }
+        /** Initializes a new InternalBufferOverflowException with the specified message. */
         explicit InternalBufferOverflowException(const std::string& message) : System::SystemException(message) {
             setHResultProperty(InternalBufferOverflowHResult);
         }
+        /** Initializes a new InternalBufferOverflowException with a message and an inner exception. */
         InternalBufferOverflowException(const std::string& message, std::exception_ptr inner)
             : System::SystemException(message, std::move(inner)) {
             setHResultProperty(InternalBufferOverflowHResult);

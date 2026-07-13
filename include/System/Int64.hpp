@@ -14,6 +14,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/Int128.hpp"
 #include "System/OverflowException.hpp"
@@ -75,13 +76,20 @@ namespace System {
         [[nodiscard]] static std::string ToString(longcs value) { return std::to_string(value); }
 
         /**
-         * @brief Converts @p value to a string using format specifier ("X","x","D","d","G","g").
+         * @brief Converts @p value to a string using format specifier ("X","x","D","d","G","g","B","b").
          * C++ counterpart of .NET Int64.ToString(string).
          */
         [[nodiscard]] static std::string ToString(longcs value, const std::string& format) {
             if (format.empty()) return std::to_string(value);
             char type = format[0];
-            int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             std::ostringstream oss;
             oss.imbue(std::locale::classic());
             if (type == 'X') {
@@ -107,6 +115,21 @@ namespace System {
                 return std::to_string(value);
             }
             if (type == 'G' || type == 'g') return std::to_string(value);
+            // Verified against Number.Formatting.cs's FormatInt64: the "B"/"b" standard numeric
+            // format specifier (binary, added in .NET 8) reinterprets the value's raw bit
+            // pattern as unsigned (UInt64ToBinaryStr((ulong)value, digits)) -- same convention
+            // Int64's "X" branch above already follows for hex, and matching Int32::ToString's
+            // existing "B"/"b" support in this codebase.
+            if (type == 'B' || type == 'b') {
+                if (value == 0) {
+                    return std::string(width > 0 ? static_cast<size_t>(width) : 1u, '0');
+                }
+                std::string bits;
+                uint64_t uv = static_cast<uint64_t>(value);
+                while (uv > 0) { bits = static_cast<char>('0' + (uv & 1)) + bits; uv >>= 1; }
+                while (static_cast<int>(bits.size()) < width) bits = "0" + bits;
+                return bits;
+            }
             return std::to_string(value);
         }
 
@@ -114,7 +137,7 @@ namespace System {
          * @brief Compares @p a to @p b and returns a signed integer.
          * C++ counterpart of .NET Int64.CompareTo(long).
          */
-        [[nodiscard]] static int CompareTo(longcs a, longcs b) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs CompareTo(longcs a, longcs b) noexcept {
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -122,8 +145,8 @@ namespace System {
         [[nodiscard]] static bool Equals(longcs a, longcs b) noexcept { return a == b; }
 
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET Int64.GetHashCode(). */
-        [[nodiscard]] static int GetHashCode(longcs value) noexcept {
-            return static_cast<int>(value ^ (static_cast<uint64_t>(value) >> 32));
+        [[nodiscard]] static SharpRuntime::intcs GetHashCode(longcs value) noexcept {
+            return static_cast<SharpRuntime::intcs>(value ^ (static_cast<uint64_t>(value) >> 32));
         }
 
         /**
@@ -147,15 +170,29 @@ namespace System {
         [[nodiscard]] static longcs Min(longcs x, longcs y) noexcept { return x < y ? x : y; }
 
         /** @brief Returns -1 if negative, 0 if zero, 1 if positive. C++ counterpart of .NET Math.Sign(long). */
-        [[nodiscard]] static int Sign(longcs value) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs Sign(longcs value) noexcept {
             return (value > 0) - (value < 0);
         }
 
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
          * C++ counterpart of .NET Int64.DivRem(long,long).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
+         * @throws System::OverflowException if @p left is MinValue and @p right is -1
+         *         (the mathematical result does not fit in Int64; the CLR's div
+         *         instruction traps on this input and .NET surfaces it as
+         *         OverflowException). int64_t division runs at native width with no
+         *         wider promotion available, so this is real, reachable undefined
+         *         behavior in C++ if left unchecked -- same bug class as Int32::DivRem.
          */
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs left, longcs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
+            if (left == MinValue && right == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return {left / right, left % right};
         }
 
@@ -170,30 +207,44 @@ namespace System {
             return value > 0 && (value & (value - 1)) == 0;
         }
 
-        /** @brief Returns the number of leading zero bits. C++ counterpart of .NET Int64.LeadingZeroCount(long). */
-        [[nodiscard]] static int LeadingZeroCount(longcs value) noexcept {
-            return std::countl_zero(static_cast<uint64_t>(value));
+        /**
+         * @brief Returns the number of leading zero bits.
+         * C++ counterpart of .NET Int64.LeadingZeroCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.LeadingZeroCount returns @c long (not
+         * @c int) -- matched here via @c longcs rather than @c intcs.
+         */
+        [[nodiscard]] static longcs LeadingZeroCount(longcs value) noexcept {
+            return static_cast<longcs>(std::countl_zero(static_cast<uint64_t>(value)));
         }
 
-        /** @brief Returns the number of set bits. C++ counterpart of .NET Int64.PopCount(long). */
-        [[nodiscard]] static int PopCount(longcs value) noexcept {
-            return std::popcount(static_cast<uint64_t>(value));
+        /**
+         * @brief Returns the number of set bits.
+         * C++ counterpart of .NET Int64.PopCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.PopCount returns @c long (not @c int).
+         */
+        [[nodiscard]] static longcs PopCount(longcs value) noexcept {
+            return static_cast<longcs>(std::popcount(static_cast<uint64_t>(value)));
         }
 
-        /** @brief Returns the number of trailing zero bits. C++ counterpart of .NET Int64.TrailingZeroCount(long). */
-        [[nodiscard]] static int TrailingZeroCount(longcs value) noexcept {
+        /**
+         * @brief Returns the number of trailing zero bits.
+         * C++ counterpart of .NET Int64.TrailingZeroCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.TrailingZeroCount returns @c long (not
+         * @c int).
+         */
+        [[nodiscard]] static longcs TrailingZeroCount(longcs value) noexcept {
             if (value == 0) return 64;
-            return std::countr_zero(static_cast<uint64_t>(value));
+            return static_cast<longcs>(std::countr_zero(static_cast<uint64_t>(value)));
         }
 
         /** @brief Rotates @p value left by @p rotateAmount bits. C++ counterpart of .NET Int64.RotateLeft(long,int). */
-        [[nodiscard]] static longcs RotateLeft(longcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static longcs RotateLeft(longcs value, SharpRuntime::intcs rotateAmount) noexcept {
             return static_cast<longcs>(
                 std::rotl(static_cast<uint64_t>(value), rotateAmount));
         }
 
         /** @brief Rotates @p value right by @p rotateAmount bits. C++ counterpart of .NET Int64.RotateRight(long,int). */
-        [[nodiscard]] static longcs RotateRight(longcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static longcs RotateRight(longcs value, SharpRuntime::intcs rotateAmount) noexcept {
             return static_cast<longcs>(
                 std::rotr(static_cast<uint64_t>(value), rotateAmount));
         }
@@ -202,12 +253,13 @@ namespace System {
          * @brief Returns the floor of the base-2 logarithm of @p value.
          * C++ counterpart of .NET Int64.Log2(long). Matches .NET: Log2(0) is 0, not an error
          * (BitOperations.Log2(0) is documented to return 0).
+         * @note Real .NET's IBinaryNumber&lt;long&gt;.Log2 returns @c long (not @c int).
          * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
-        [[nodiscard]] static int Log2(longcs value) {
+        [[nodiscard]] static longcs Log2(longcs value) {
             if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
             if (value == 0) return 0;
-            return std::bit_width(static_cast<uint64_t>(value)) - 1;
+            return static_cast<longcs>(std::bit_width(static_cast<uint64_t>(value)) - 1);
         }
 
         /**
@@ -223,16 +275,22 @@ namespace System {
         /**
          * @brief Copies the sign of @p sign to the magnitude of @p value.
          * C++ counterpart of .NET Int64.CopySign(long, long).
+         * Real .NET relies on unchecked negation of MinValue wrapping back to MinValue
+         * (C# unchecked arithmetic is defined to wrap) to make the sign<0 branch a no-op for
+         * MinValue. Negating INT64_MIN is undefined behavior in C++ (confirmed via UBSan), so
+         * MinValue is special-cased explicitly instead of relying on that wraparound -- same fix
+         * shape as Int32::CopySign.
          * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
-         *         (its magnitude does not fit in a signed Int64).
+         *         (there is no positive Int64 representation of MinValue's magnitude).
          */
         [[nodiscard]] static longcs CopySign(longcs value, longcs sign) {
-            longcs absValue = value < 0 ? (value == MinValue ? value : -value) : value;
-            if (sign >= 0) {
-                if (absValue < 0) throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
-                return absValue;
+            if (value == MinValue) {
+                if (sign >= 0)
+                    throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
+                return MinValue;
             }
-            return -absValue;
+            longcs absValue = value < 0 ? -value : value;
+            return sign >= 0 ? absValue : -absValue;
         }
 
         /**

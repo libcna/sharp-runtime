@@ -215,27 +215,45 @@ namespace System::Text::Unicode {
                 }
 
                 if (valid && len > 1) {
-                    if (si + len > source.size()) {
-                        if (!isFinalBlock) {
-                            bytesRead = static_cast<intcs>(si);
-                            charsWritten = static_cast<intcs>(di);
-                            return System::Buffers::OperationStatus::NeedMoreData;
-                        }
-                        valid = false;
-                        len = source.size() - si; // consume only what remains as the invalid subsequence
-                    } else {
-                        for (size_t k = 1; k < len; ++k) {
-                            auto bk = static_cast<unsigned char>(source[si + k]);
-                            if ((bk & 0xC0) != 0x80) {
-                                valid = false;
-                                len = k; // only the bytes up to (not including) the bad one are consumed
-                                break;
+                    // Scan continuation bytes up to whichever comes first: an invalid
+                    // continuation byte, or the end of the available buffer -- this determines
+                    // the "maximal subpart" of the ill-formed sequence per the Unicode
+                    // Standard's replacement recommendation (Ch. 3.9), which real .NET follows
+                    // via Rune.DecodeFromUtf8 (Utf8.ToUtf16 delegates to it for exactly this
+                    // purpose after writing a replacement char). The previous version had a
+                    // separate upfront "not enough bytes for the promised length" branch that
+                    // consumed EVERY remaining byte as one replacement, even when some of
+                    // those bytes weren't even valid continuation bytes and should have been
+                    // preserved/reprocessed as their own characters -- confirmed via a
+                    // standalone repro: {0xF0, 'A', 'B'} (a 4-byte lead byte followed by two
+                    // ordinary ASCII bytes, no continuation bytes at all) previously produced
+                    // only U+FFFD, silently swallowing 'A' and 'B', instead of U+FFFD + "AB".
+                    size_t k = 1;
+                    for (; k < len; ++k) {
+                        if (si + k >= source.size()) {
+                            // Ran out of buffer before completing the promised sequence length.
+                            if (!isFinalBlock) {
+                                bytesRead = static_cast<intcs>(si);
+                                charsWritten = static_cast<intcs>(di);
+                                return System::Buffers::OperationStatus::NeedMoreData;
                             }
-                            cp = (cp << 6) | (bk & 0x3Fu);
-                        }
-                        if (valid && (cp < minCp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))) {
                             valid = false;
+                            break;
                         }
+                        auto bk = static_cast<unsigned char>(source[si + k]);
+                        if ((bk & 0xC0) != 0x80) {
+                            valid = false;
+                            break;
+                        }
+                        cp = (cp << 6) | (bk & 0x3Fu);
+                    }
+                    if (!valid) {
+                        len = k; // maximal subpart: only the lead byte + validated continuation bytes so far
+                    } else if (cp < minCp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+                        valid = false;
+                        // len stays at the full promised length: overlong/surrogate/out-of-range
+                        // is only detectable once the whole sequence has been read, matching
+                        // the pre-existing (already-correct) behavior for this case.
                     }
                 }
 

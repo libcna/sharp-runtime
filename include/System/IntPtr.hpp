@@ -7,10 +7,14 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/OverflowException.hpp"
 
 namespace System
 {
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
+
     /**
      * @brief A platform-specific type used to represent a pointer or a handle.
      *
@@ -37,7 +41,7 @@ namespace System
         static const IntPtr MinValue;
 
         /** @brief The size, in bytes, of an IntPtr on the current platform. C++ counterpart of .NET IntPtr.Size. */
-        static constexpr int Size = static_cast<int>(sizeof(intptr_t));
+        static constexpr intcs Size = static_cast<intcs>(sizeof(intptr_t));
 
         /** @brief Returns true if both IntPtr instances hold the same value. */
         [[nodiscard]] bool operator==(const IntPtr& other) const { return value == other.value; }
@@ -59,14 +63,14 @@ namespace System
          * @throws System::OverflowException if the value does not fit in a 32-bit signed integer
          *         (only possible when @c intptr_t is 64-bit on this platform).
          */
-        [[nodiscard]] int32_t ToInt32() const {
+        [[nodiscard]] intcs ToInt32() const {
             if (value > std::numeric_limits<int32_t>::max() || value < std::numeric_limits<int32_t>::min())
                 throw System::OverflowException("Arithmetic operation resulted in an overflow.");
-            return static_cast<int32_t>(value);
+            return static_cast<intcs>(value);
         }
 
         /** @brief Converts the value of this instance to a 64-bit signed integer. C++ counterpart of .NET IntPtr.ToInt64(). */
-        [[nodiscard]] int64_t ToInt64() const { return static_cast<int64_t>(value); }
+        [[nodiscard]] longcs ToInt64() const { return static_cast<longcs>(value); }
 
         /** @brief Converts the value of this instance to a raw pointer. C++ counterpart of .NET IntPtr.ToPointer(). */
         [[nodiscard]] void* ToPointer() const { return reinterpret_cast<void*>(value); }
@@ -77,7 +81,7 @@ namespace System
          * C++ counterpart of .NET IntPtr.CompareTo(nint).
          * @return -1 if less than @p other; 0 if equal; 1 if greater than @p other.
          */
-        [[nodiscard]] int CompareTo(const IntPtr& other) const noexcept {
+        [[nodiscard]] intcs CompareTo(const IntPtr& other) const noexcept {
             return (value < other.value) ? -1 : (value > other.value) ? 1 : 0;
         }
 
@@ -85,8 +89,8 @@ namespace System
         [[nodiscard]] bool Equals(const IntPtr& other) const noexcept { return value == other.value; }
 
         /** @brief Returns the hash code for this instance. C++ counterpart of .NET IntPtr.GetHashCode(). */
-        [[nodiscard]] int GetHashCode() const noexcept {
-            return static_cast<int>(static_cast<int64_t>(value) ^ (static_cast<uint64_t>(value) >> 32));
+        [[nodiscard]] intcs GetHashCode() const noexcept {
+            return static_cast<intcs>(static_cast<int64_t>(value) ^ (static_cast<uint64_t>(value) >> 32));
         }
 
         /** @brief Converts the value of this instance to its decimal string representation. C++ counterpart of .NET IntPtr.ToString(). */
@@ -97,7 +101,7 @@ namespace System
          *
          * C++ counterpart of .NET IntPtr.Add(nint, int) / operator+(nint, int).
          */
-        [[nodiscard]] static IntPtr Add(const IntPtr& pointer, int offset) {
+        [[nodiscard]] static IntPtr Add(const IntPtr& pointer, intcs offset) {
             return IntPtr(static_cast<intptr_t>(pointer.value + offset));
         }
 
@@ -106,14 +110,14 @@ namespace System
          *
          * C++ counterpart of .NET IntPtr.Subtract(nint, int) / operator-(nint, int).
          */
-        [[nodiscard]] static IntPtr Subtract(const IntPtr& pointer, int offset) {
+        [[nodiscard]] static IntPtr Subtract(const IntPtr& pointer, intcs offset) {
             return IntPtr(static_cast<intptr_t>(pointer.value - offset));
         }
 
         /** @brief Adds an offset to the value of a pointer. C++ counterpart of .NET IntPtr operator+(nint, int). */
-        friend IntPtr operator+(const IntPtr& pointer, int offset) { return Add(pointer, offset); }
+        friend IntPtr operator+(const IntPtr& pointer, intcs offset) { return Add(pointer, offset); }
         /** @brief Subtracts an offset from the value of a pointer. C++ counterpart of .NET IntPtr operator-(nint, int). */
-        friend IntPtr operator-(const IntPtr& pointer, int offset) { return Subtract(pointer, offset); }
+        friend IntPtr operator-(const IntPtr& pointer, intcs offset) { return Subtract(pointer, offset); }
     };
 
     inline const IntPtr IntPtr::Zero{intptr_t(0)};

@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <type_traits>
 
 using System::Collections::ObjectModel::ObservableCollection;
 using System::Collections::ObjectModel::ReadOnlyObservableCollection;
@@ -93,6 +94,17 @@ TEST(ReadOnlyObservableCollectionBatch19Test, ForwardsCollectionChangedFromSourc
     src->Add(42);
     EXPECT_TRUE(fired);
 }
+
+// The constructor registers a forwarding callback with the shared source that captures `this`.
+// Copying or moving the wrapper would leave that callback pointing at the wrong (or, once the
+// original is destroyed, dangling) object while the shared source keeps invoking it -- confirmed
+// via an ASan repro (stack-use-after-scope) before this class was made non-copyable/non-movable.
+// This static_assert is the regression guard: it fails to compile if copy/move is ever
+// re-enabled without an accompanying re-registration fix.
+static_assert(!std::is_copy_constructible_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_copy_assignable_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_move_constructible_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_move_assignable_v<ReadOnlyObservableCollection<int>>);
 
 // ===========================================================================
 // ReadOnlySet
@@ -208,9 +220,13 @@ TEST(BitVector32Batch19Test, ToStringStatic) {
 }
 
 TEST(BitVector32Batch19Test, Section_Equals) {
-    BitVector32::Section s1(0x0F, 4);
-    BitVector32::Section s2(0x0F, 4);
-    BitVector32::Section s3(0x0F, 8);
+    // Section's constructor is private (matches real .NET's `internal` ctor) -- build via
+    // CreateSection chaining instead: base has mask=0x0F/offset=0, so a Section chained after
+    // it lands at mask=0x0F/offset=4 (0x0F has 4 set bits), and chained twice at offset=8.
+    auto base = BitVector32::CreateSection(15);
+    auto s1 = BitVector32::CreateSection(15, base);
+    auto s2 = BitVector32::CreateSection(15, base);
+    auto s3 = BitVector32::CreateSection(15, s1);
     EXPECT_TRUE(s1.Equals(s2));
     EXPECT_TRUE(s1 == s2);
     EXPECT_FALSE(s1.Equals(s3));
@@ -218,18 +234,34 @@ TEST(BitVector32Batch19Test, Section_Equals) {
 }
 
 TEST(BitVector32Batch19Test, Section_GetHashCode_Stable) {
-    BitVector32::Section s(0x0F, 4);
+    auto base = BitVector32::CreateSection(15);
+    auto s = BitVector32::CreateSection(15, base);
     EXPECT_EQ(s.GetHashCode(), s.GetHashCode());
-    BitVector32::Section s2(0x0F, 4);
+    auto s2 = BitVector32::CreateSection(15, base);
     EXPECT_EQ(s.GetHashCode(), s2.GetHashCode());
 }
 
 TEST(BitVector32Batch19Test, Section_ToString) {
-    BitVector32::Section s(3, 2);
+    // mask=3 (0b11, 2 set bits) chained once lands at offset=2, reproducing Section(3, 2).
+    auto base = BitVector32::CreateSection(3);
+    auto s = BitVector32::CreateSection(3, base);
     std::string t = s.ToString();
     EXPECT_NE(t.find("3"), std::string::npos);
     EXPECT_NE(t.find("2"), std::string::npos);
     EXPECT_EQ(BitVector32::Section::ToString(s), t);
+}
+
+TEST(BitVector32Batch19Test, Section_ToString_MatchesDotNetHexFormat) {
+    // Real .NET: $"Section{{0x{Mask:x}, 0x{Offset:x}}}" -- lowercase hex, no leading zeros, no
+    // field-name labels. An earlier version of this port used decimal "mask=N, offset=N" labels,
+    // a real format mismatch (wrong number base, not just paraphrased text).
+    auto base = BitVector32::CreateSection(15);       // mask=15 (0xf), offset=0
+    auto s = BitVector32::CreateSection(15, base);     // mask=15 (0xf), offset=4
+    EXPECT_EQ(s.ToString(), "Section{0xf, 0x4}");
+    EXPECT_EQ(BitVector32::Section::ToString(s), "Section{0xf, 0x4}");
+
+    auto zero = BitVector32::CreateSection(1);         // mask=1 (0x1), offset=0
+    EXPECT_EQ(zero.ToString(), "Section{0x1, 0x0}");
 }
 
 TEST(BitVector32Batch19Test, CreateMaskSequence) {

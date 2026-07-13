@@ -103,6 +103,32 @@ TEST(MathTests, MaxDoubleBasic) {
     EXPECT_NEAR(Math::Max(-1.5, 2.5), 2.5, kEps);
 }
 
+// Math::Min/Max(double,double) previously delegated to std::min/std::max, which don't match
+// .NET's IEEE 754:2019 minimum/maximum semantics: NaN must propagate regardless of which
+// argument position it's in (std::min(5.0, NaN) == 5.0, not NaN, since NaN comparisons are
+// always false and std::min's typical `b < a ? b : a` then just returns `a`), and +0 must be
+// treated as strictly greater than -0.
+TEST(MathTests, MinDouble_NaN_AsFirstArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Min(std::numeric_limits<double>::quiet_NaN(), 1.0)));
+}
+TEST(MathTests, MinDouble_NaN_AsSecondArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Min(1.0, std::numeric_limits<double>::quiet_NaN())));
+}
+TEST(MathTests, MaxDouble_NaN_AsFirstArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Max(std::numeric_limits<double>::quiet_NaN(), 1.0)));
+}
+TEST(MathTests, MaxDouble_NaN_AsSecondArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Max(1.0, std::numeric_limits<double>::quiet_NaN())));
+}
+TEST(MathTests, MinDouble_PositiveAndNegativeZero_ReturnsNegativeZero) {
+    EXPECT_TRUE(std::signbit(Math::Min(0.0, -0.0)));
+    EXPECT_TRUE(std::signbit(Math::Min(-0.0, 0.0)));
+}
+TEST(MathTests, MaxDouble_PositiveAndNegativeZero_ReturnsPositiveZero) {
+    EXPECT_FALSE(std::signbit(Math::Max(0.0, -0.0)));
+    EXPECT_FALSE(std::signbit(Math::Max(-0.0, 0.0)));
+}
+
 // ---------------------------------------------------------------------------
 // Clamp
 // ---------------------------------------------------------------------------
@@ -362,6 +388,32 @@ TEST(MathTests, DivRem_Basic) {
     EXPECT_EQ(rem, 2);
 }
 
+// Plain C++ integer division by zero is undefined behavior (unlike the CLR's `div`/`rem`
+// instructions, which raise a catchable DivideByZeroException); DivRem must check explicitly
+// to get equivalent, catchable behavior instead of a crash.
+TEST(MathTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    int rem = 0;
+    EXPECT_THROW(Math::DivRem(17, 0, rem), System::DivideByZeroException);
+}
+
+TEST(MathTests, DivRem_Pair_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(Math::DivRem(17, 0), System::DivideByZeroException);
+}
+
+// Regression for ticket 346: int.MinValue / -1 is a real hardware trap (SIGFPE on x86, confirmed
+// via a standalone repro) in plain C++ integer division, matching the CLR's idiv instruction
+// which surfaces this exact case as a catchable OverflowException. DivRem previously checked
+// only for the zero-divisor case, missing this second hardware-trap hazard entirely -- same bug
+// class already fixed in Int32::DivRem/Int64::DivRem elsewhere in this codebase but missed here.
+TEST(MathTests, DivRem_MinValueByNegativeOne_ThrowsOverflowException) {
+    int rem = 0;
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<int>::min(), -1, rem), System::OverflowException);
+}
+
+TEST(MathTests, DivRem_Pair_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<int>::min(), -1), System::OverflowException);
+}
+
 // ---------------------------------------------------------------------------
 // BigMul
 // ---------------------------------------------------------------------------
@@ -478,6 +530,19 @@ TEST(MathTests, Abs_Float_Negative)  { EXPECT_EQ(Math::Abs(-3.5f), 3.5f); }
 TEST(MathTests, Abs_Float_Positive)  { EXPECT_EQ(Math::Abs(2.0f),  2.0f); }
 TEST(MathTests, Min_Float_Basic)     { EXPECT_EQ(Math::Min(1.5f, 2.5f), 1.5f); }
 TEST(MathTests, Max_Float_Basic)     { EXPECT_EQ(Math::Max(1.5f, 2.5f), 2.5f); }
+// Same std::min/std::max NaN/signed-zero mismatch as the double overload above, fixed alongside it.
+TEST(MathTests, MinFloat_NaN_AsSecondArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Min(1.0f, std::numeric_limits<float>::quiet_NaN())));
+}
+TEST(MathTests, MaxFloat_NaN_AsSecondArg_Propagates) {
+    EXPECT_TRUE(std::isnan(Math::Max(1.0f, std::numeric_limits<float>::quiet_NaN())));
+}
+TEST(MathTests, MinFloat_PositiveAndNegativeZero_ReturnsNegativeZero) {
+    EXPECT_TRUE(std::signbit(Math::Min(0.0f, -0.0f)));
+}
+TEST(MathTests, MaxFloat_PositiveAndNegativeZero_ReturnsPositiveZero) {
+    EXPECT_FALSE(std::signbit(Math::Max(0.0f, -0.0f)));
+}
 TEST(MathTests, Clamp_Float_Below)   { EXPECT_EQ(Math::Clamp(0.0f, 1.0f, 10.0f), 1.0f); }
 TEST(MathTests, Clamp_Float_Above)   { EXPECT_EQ(Math::Clamp(20.0f, 1.0f, 10.0f), 10.0f); }
 TEST(MathTests, Clamp_Float_InRange) { EXPECT_EQ(Math::Clamp(5.0f, 1.0f, 10.0f), 5.0f); }
@@ -516,6 +581,27 @@ TEST(MathTests, DivRem_Long_Exact) {
     Math::DivRem(static_cast<SharpRuntime::longcs>(9LL),
                  static_cast<SharpRuntime::longcs>(3LL), rem);
     EXPECT_EQ(rem, 0LL);
+}
+
+TEST(MathTests, DivRem_Long_ByZero_ThrowsDivideByZeroException) {
+    SharpRuntime::longcs rem = 0;
+    EXPECT_THROW(Math::DivRem(static_cast<SharpRuntime::longcs>(9LL),
+                               static_cast<SharpRuntime::longcs>(0LL), rem),
+                 System::DivideByZeroException);
+}
+
+// Regression for ticket 346: same MinValue/-1 hardware-trap fix as the intcs overload above.
+TEST(MathTests, DivRem_Long_MinValueByNegativeOne_ThrowsOverflowException) {
+    SharpRuntime::longcs rem = 0;
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<SharpRuntime::longcs>::min(),
+                               static_cast<SharpRuntime::longcs>(-1LL), rem),
+                 System::OverflowException);
+}
+
+TEST(MathTests, DivRem_Pair_Long_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<SharpRuntime::longcs>::min(),
+                               static_cast<SharpRuntime::longcs>(-1LL)),
+                 System::OverflowException);
 }
 
 // ---------------------------------------------------------------------------

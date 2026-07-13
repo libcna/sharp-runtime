@@ -20,6 +20,15 @@ TEST(BitArrayTest, ConstructWithDefault) {
     EXPECT_TRUE(ba.HasAllSet());
 }
 
+TEST(BitArrayTest, ConstructWithNegativeLength_Throws) {
+    // Without this check, a negative length cast to size_t wraps to a huge value passed
+    // directly to std::vector<bool>'s constructor -- confirmed via a standalone ASan repro
+    // that this was a genuine heap-buffer-overflow (std::vector<bool>'s internal
+    // bit-to-word-count calculation overflows for a size_t(-1)-scale request, silently
+    // under-allocating while claiming a huge size()), not merely the wrong exception type.
+    EXPECT_THROW(BitArray(-1), System::ArgumentOutOfRangeException);
+}
+
 TEST(BitArrayTest, SetAndGet) {
     BitArray ba(8);
     ba.Set(3, true);

@@ -85,19 +85,37 @@ TEST(DoesNotReturnIfAttributeTests, ParameterValue_False) {
 // MemberNotNullAttribute
 // ===========================================================================
 
-TEST(MemberNotNullAttributeTests, Member_Stored) {
+TEST(MemberNotNullAttributeTests, SingleMember_Stored) {
     MemberNotNullAttribute attr("_field");
-    EXPECT_EQ(attr.getMemberProperty(), "_field");
+    ASSERT_EQ(attr.getMembersProperty().size(), 1u);
+    EXPECT_EQ(attr.getMembersProperty()[0], "_field");
+}
+
+TEST(MemberNotNullAttributeTests, MultipleMembers_Stored) {
+    MemberNotNullAttribute attr(std::vector<std::string>{"_a", "_b", "_c"});
+    ASSERT_EQ(attr.getMembersProperty().size(), 3u);
+    EXPECT_EQ(attr.getMembersProperty()[0], "_a");
+    EXPECT_EQ(attr.getMembersProperty()[1], "_b");
+    EXPECT_EQ(attr.getMembersProperty()[2], "_c");
 }
 
 // ===========================================================================
 // MemberNotNullWhenAttribute
 // ===========================================================================
 
-TEST(MemberNotNullWhenAttributeTests, ReturnValueAndMember_Stored) {
+TEST(MemberNotNullWhenAttributeTests, ReturnValueAndSingleMember_Stored) {
     MemberNotNullWhenAttribute attr(true, "_field");
     EXPECT_TRUE(attr.getReturnValueProperty());
-    EXPECT_EQ(attr.getMemberProperty(), "_field");
+    ASSERT_EQ(attr.getMembersProperty().size(), 1u);
+    EXPECT_EQ(attr.getMembersProperty()[0], "_field");
+}
+
+TEST(MemberNotNullWhenAttributeTests, ReturnValueAndMultipleMembers_Stored) {
+    MemberNotNullWhenAttribute attr(false, std::vector<std::string>{"_a", "_b"});
+    EXPECT_FALSE(attr.getReturnValueProperty());
+    ASSERT_EQ(attr.getMembersProperty().size(), 2u);
+    EXPECT_EQ(attr.getMembersProperty()[0], "_a");
+    EXPECT_EQ(attr.getMembersProperty()[1], "_b");
 }
 
 // ===========================================================================
@@ -119,6 +137,13 @@ TEST(RequiresUnreferencedCodeAttributeTests, Url_Stored) {
     EXPECT_EQ(attr.getUrlProperty(), "https://example.com");
 }
 
+TEST(RequiresUnreferencedCodeAttributeTests, ExcludeStatics_DefaultFalse_Settable) {
+    RequiresUnreferencedCodeAttribute attr("msg");
+    EXPECT_FALSE(attr.getExcludeStaticsProperty());
+    attr.setExcludeStaticsProperty(true);
+    EXPECT_TRUE(attr.getExcludeStaticsProperty());
+}
+
 // ===========================================================================
 // RequiresDynamicCodeAttribute
 // ===========================================================================
@@ -133,6 +158,13 @@ TEST(RequiresDynamicCodeAttributeTests, Url_Stored) {
     EXPECT_EQ(attr.getUrlProperty(), "https://docs.example.com");
 }
 
+TEST(RequiresDynamicCodeAttributeTests, ExcludeStatics_DefaultFalse_Settable) {
+    RequiresDynamicCodeAttribute attr("msg");
+    EXPECT_FALSE(attr.getExcludeStaticsProperty());
+    attr.setExcludeStaticsProperty(true);
+    EXPECT_TRUE(attr.getExcludeStaticsProperty());
+}
+
 // ===========================================================================
 // ExcludeFromCodeCoverageAttribute
 // ===========================================================================
@@ -145,6 +177,12 @@ TEST(ExcludeFromCodeCoverageAttributeTests, DefaultCtor_JustificationEmpty) {
 TEST(ExcludeFromCodeCoverageAttributeTests, Justification_Stored) {
     ExcludeFromCodeCoverageAttribute attr("Stub method");
     EXPECT_EQ(attr.getJustificationProperty(), "Stub method");
+}
+
+TEST(ExcludeFromCodeCoverageAttributeTests, SetJustification_Stored) {
+    ExcludeFromCodeCoverageAttribute attr;
+    attr.setJustificationProperty("Generated code");
+    EXPECT_EQ(attr.getJustificationProperty(), "Generated code");
 }
 
 // ===========================================================================
@@ -177,6 +215,21 @@ TEST(StringSyntaxAttributeTests, StaticConstants_Correct) {
     EXPECT_EQ(std::string(StringSyntaxAttribute::Regex), "Regex");
     EXPECT_EQ(std::string(StringSyntaxAttribute::Json), "Json");
     EXPECT_EQ(std::string(StringSyntaxAttribute::Uri), "Uri");
+    EXPECT_EQ(std::string(StringSyntaxAttribute::CSharp), "C#");
+    EXPECT_EQ(std::string(StringSyntaxAttribute::FSharp), "F#");
+    EXPECT_EQ(std::string(StringSyntaxAttribute::VisualBasic), "Visual Basic");
+}
+
+TEST(StringSyntaxAttributeTests, Arguments_DefaultEmpty) {
+    StringSyntaxAttribute attr("Regex");
+    EXPECT_TRUE(attr.getArgumentsProperty().empty());
+}
+
+TEST(StringSyntaxAttributeTests, Arguments_Stored) {
+    StringSyntaxAttribute attr("CompositeFormat", std::vector<std::any>{1, std::string("x")});
+    ASSERT_EQ(attr.getArgumentsProperty().size(), 2u);
+    EXPECT_EQ(std::any_cast<int>(attr.getArgumentsProperty()[0]), 1);
+    EXPECT_EQ(std::any_cast<std::string>(attr.getArgumentsProperty()[1]), "x");
 }
 
 // ===========================================================================

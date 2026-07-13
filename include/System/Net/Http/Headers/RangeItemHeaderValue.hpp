@@ -21,7 +21,7 @@ namespace System::Net::Http::Headers {
         /**
          * @brief Constructs a range item. At least one of @p from / @p to must be present.
          * @throws System::ArgumentException if both @p from and @p to are empty.
-         * @throws std::out_of_range if either value is negative, or @p from &gt; @p to.
+         * @throws System::ArgumentOutOfRangeException if either value is negative, or @p from &gt; @p to.
          */
         RangeItemHeaderValue(std::optional<SharpRuntime::longcs> from, std::optional<SharpRuntime::longcs> to);
 

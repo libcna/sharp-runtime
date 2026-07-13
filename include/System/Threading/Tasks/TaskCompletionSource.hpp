@@ -32,6 +32,19 @@ namespace System::Threading::Tasks {
      * racing a TrySet* call could both observe "not yet completed" and both proceed to call
      * promise_.set_value()/set_exception(), and the loser would throw an uncaught
      * std::future_error instead of TrySet* returning false as .NET guarantees.
+     *
+     * @note Known gap (documented, not implemented in this pass): real .NET's
+     * TaskCompletionSource<TResult> exposes a `Task<TResult> Task { get; }` property -- arguably
+     * the entire point of the type, since it's what lets producer code hand a not-yet-completed
+     * Task to consumer code written against the Task API, then complete it later out-of-band.
+     * This port has no equivalent: GetResult()/Wait() block the calling thread directly instead
+     * of returning a TaskT<TResult>/Task handle. Adding one is not a small addition: real .NET's
+     * Task supports a private "pending, no delegate, externally completed later" construction
+     * mode that TaskCompletionSource's internal Task is built with; this port's Task/TaskT
+     * always launches an async lambda immediately on construction (see Task.hpp) with no such
+     * pending mode, so bridging the two would need a genuine new construction path threaded
+     * through both types -- a real architectural change, not something to retrofit during a
+     * single audit ticket.
      */
     template<typename TResult>
     class TaskCompletionSource {

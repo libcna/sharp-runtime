@@ -13,7 +13,11 @@ namespace System {
      * @brief Defines methods that convert the value of the implementing type
      * to a common language runtime type.
      *
-     * C++ counterpart of .NET System.IConvertible.
+     * C++ counterpart of .NET System.IConvertible. Real .NET's conversion methods each take an
+     * `IFormatProvider` parameter for culture-aware conversions (e.g.
+     * `bool ToBoolean(IFormatProvider provider)`); this port omits it, a deliberate
+     * simplification since implementers so far (DBNull) always throw regardless of provider.
+     * Reintroduce the parameter if a future culture-sensitive implementer needs it.
      */
     class IConvertible {
     public:

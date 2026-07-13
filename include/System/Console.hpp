@@ -573,7 +573,7 @@ namespace System {
          * @param frequency Tone frequency in hertz (ignored).
          * @param duration  Duration in milliseconds (ignored).
          */
-        static void Beep(int frequency, int duration) {
+        static void Beep(intcs frequency, intcs duration) {
             (void)frequency; (void)duration;
             std::cout << '\a' << std::flush;
         }

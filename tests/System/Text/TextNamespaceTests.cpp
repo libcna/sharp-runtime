@@ -12,6 +12,7 @@
 #include "System/Text/StringBuilderRuneEnumerator.hpp"
 #include "System/Text/StringRuneEnumerator.hpp"
 #include "System/Text/UTF32Encoding.hpp"
+#include "System/Text/UTF8Encoding.hpp"
 #include "System/Text/UnicodeEncoding.hpp"
 
 using namespace System::Text;
@@ -257,6 +258,84 @@ TEST(UTF32EncodingTests, GetString_SurrogateCodeUnit_ReplacesWithFFFD) {
     };
     std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
     EXPECT_EQ(result, "\xEF\xBF\xBD"); // U+FFFD
+}
+
+// --- UTF8Encoding (GetBytes/GetString now validate well-formedness via the fallback objects,
+// instead of an unvalidated byte passthrough) --------------------------------------------------
+
+TEST(UTF8EncodingTests, RoundTrip_Ascii) {
+    UTF8Encoding enc;
+    auto bytes = enc.GetBytes("Hi!");
+    EXPECT_EQ(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())), "Hi!");
+}
+
+TEST(UTF8EncodingTests, RoundTrip_NonAscii) {
+    UTF8Encoding enc;
+    std::string original = "caf\xC3\xA9"; // "café"
+    auto bytes = enc.GetBytes(original);
+    ASSERT_EQ(bytes.size(), original.size());
+    EXPECT_EQ(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())), original);
+}
+
+TEST(UTF8EncodingTests, RoundTrip_SupplementaryPlane) {
+    UTF8Encoding enc;
+    std::string original = "\xF0\x9F\x98\x80"; // U+1F600
+    auto bytes = enc.GetBytes(original);
+    EXPECT_EQ(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())), original);
+}
+
+// GetBytes()/GetString() used to be a raw byte passthrough with zero well-formedness
+// validation in either direction. Verified before fixing: a bad continuation byte reached the
+// output completely unexamined instead of triggering the (already-existing but previously
+// unused anywhere in the codebase) EncoderFallback/DecoderFallback machinery.
+TEST(UTF8EncodingTests, GetBytes_BadContinuationByte_ReplacesWithFFFD) {
+    UTF8Encoding enc;
+    // 0xC2 is a valid 2-byte lead but 'A' (0x41) is not a continuation byte.
+    auto bytes = enc.GetBytes(std::string("\xC2\x41"));
+    ASSERT_EQ(bytes.size(), 4u); // U+FFFD (3 bytes) + 'A' (1 byte), resuming after the bad lead byte
+    EXPECT_EQ(static_cast<uint8_t>(bytes[0]), 0xEF);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[1]), 0xBF);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[2]), 0xBD);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[3]), 'A');
+}
+
+TEST(UTF8EncodingTests, GetBytes_OverlongEncoding_ReplacesWithFFFD) {
+    UTF8Encoding enc;
+    auto bytes = enc.GetBytes(std::string("\xC0\x80")); // overlong encoding of U+0000
+    // Each ill-formed byte resyncs individually -> two U+FFFD (3 bytes each), not one.
+    ASSERT_EQ(bytes.size(), 6u);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[0]), 0xEF);
+    EXPECT_EQ(static_cast<uint8_t>(bytes[3]), 0xEF);
+}
+
+TEST(UTF8EncodingTests, GetString_TruncatedSequence_ReplacesWithFFFD) {
+    UTF8Encoding enc;
+    std::vector<SharpRuntime::bytecs> bytes = {0xE2, 0x82}; // truncated 3-byte sequence
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD\xEF\xBF\xBD"); // one U+FFFD per bad byte
+}
+
+TEST(UTF8EncodingTests, GetString_SurrogateEncodedDirectly_ReplacesWithFFFD) {
+    UTF8Encoding enc;
+    // ED A0 80 is the CESU-8/WTF-8 encoding of U+D800 -- structurally decodable but forbidden
+    // in real UTF-8 since surrogate code points can't be encoded directly.
+    std::vector<SharpRuntime::bytecs> bytes = {0xED, 0xA0, 0x80};
+    std::string result = enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size()));
+    EXPECT_EQ(result, "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD"); // resyncs one byte at a time
+}
+
+TEST(UTF8EncodingTests, GetBytes_WithExceptionFallback_ThrowsEncoderFallbackException) {
+    UTF8Encoding enc;
+    enc.setEncoderFallbackProperty(EncoderFallback::ExceptionFallback());
+    EXPECT_THROW(enc.GetBytes(std::string("\xC2\x41")), EncoderFallbackException);
+}
+
+TEST(UTF8EncodingTests, GetString_WithExceptionFallback_ThrowsDecoderFallbackException) {
+    UTF8Encoding enc;
+    enc.setDecoderFallbackProperty(DecoderFallback::ExceptionFallback());
+    std::vector<SharpRuntime::bytecs> bytes = {0xC2, 0x41};
+    EXPECT_THROW(enc.GetString(bytes.data(), 0, static_cast<SharpRuntime::intcs>(bytes.size())),
+                 DecoderFallbackException);
 }
 
 // --- StringRuneEnumerator / RunePosition / StringBuilderRuneEnumerator ------------------------

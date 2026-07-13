@@ -64,6 +64,18 @@ namespace System::Text::Json::Nodes {
             items_.erase(items_.begin() + index);
         }
 
+        /**
+         * @brief Removes the first occurrence of @p item (by pointer identity) from the array.
+         * C++ counterpart of .NET JsonArray's IList&lt;JsonNode?&gt;.Remove(JsonNode?).
+         * @return true if @p item was found and removed; false otherwise.
+         */
+        bool Remove(const std::shared_ptr<JsonNode>& item) {
+            intcs idx = IndexOf(item);
+            if (idx < 0) return false;
+            RemoveAt(idx);
+            return true;
+        }
+
         /** @brief Removes all items from the array. */
         void Clear() {
             for (auto& item : items_) if (item) item->DetachParent();

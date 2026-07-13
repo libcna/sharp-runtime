@@ -53,6 +53,9 @@ TEST(Int16NewTests, DivRem_WithRemainder) {
     auto [q,r] = Int16::DivRem(10, 3);
     EXPECT_EQ(q, 3); EXPECT_EQ(r, 1);
 }
+TEST(Int16NewTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(Int16::DivRem(10, 0), System::DivideByZeroException);
+}
 
 TEST(Int16NewTests, IsEvenInteger_Zero_True) { EXPECT_TRUE(Int16::IsEvenInteger(0)); }
 TEST(Int16NewTests, IsEvenInteger_One_False) { EXPECT_FALSE(Int16::IsEvenInteger(1)); }

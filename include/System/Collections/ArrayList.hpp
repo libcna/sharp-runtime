@@ -18,6 +18,42 @@ namespace System::Collections {
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
+namespace detail {
+
+/**
+ * @brief Best-effort std::any value equality for ArrayList's typed Contains/IndexOf/
+ * LastIndexOf overloads.
+ *
+ * Real .NET compares elements via Object.Equals, which works for any boxed value because
+ * every .NET type carries a virtual Equals; std::any has no equivalent built-in equality
+ * operator. Common primitive/string types are compared by actual value here. Types outside
+ * that known set report as never-equal rather than matching purely on type() -- an earlier
+ * version of this code compared only item.type() == value.type(), which caused false-positive
+ * matches (e.g. searching a list of ints [1,2,3] for the value 0 would "find" index 0, since
+ * only the type was compared).
+ */
+inline bool arrayListValueEquals(const std::any& a, const std::any& b) {
+    if (a.type() != b.type()) return false;
+    if (const auto* p = std::any_cast<std::string>(&a))            return *p == *std::any_cast<std::string>(&b);
+    if (const auto* p = std::any_cast<const char*>(&a))            return std::string(*p) == std::string(*std::any_cast<const char*>(&b));
+    if (const auto* p = std::any_cast<bool>(&a))                   return *p == *std::any_cast<bool>(&b);
+    if (const auto* p = std::any_cast<int>(&a))                    return *p == *std::any_cast<int>(&b);
+    if (const auto* p = std::any_cast<long>(&a))                   return *p == *std::any_cast<long>(&b);
+    if (const auto* p = std::any_cast<long long>(&a))              return *p == *std::any_cast<long long>(&b);
+    if (const auto* p = std::any_cast<unsigned int>(&a))           return *p == *std::any_cast<unsigned int>(&b);
+    if (const auto* p = std::any_cast<unsigned long>(&a))          return *p == *std::any_cast<unsigned long>(&b);
+    if (const auto* p = std::any_cast<unsigned long long>(&a))     return *p == *std::any_cast<unsigned long long>(&b);
+    if (const auto* p = std::any_cast<double>(&a))                 return *p == *std::any_cast<double>(&b);
+    if (const auto* p = std::any_cast<float>(&a))                  return *p == *std::any_cast<float>(&b);
+    if (const auto* p = std::any_cast<char>(&a))                   return *p == *std::any_cast<char>(&b);
+    if (const auto* p = std::any_cast<void*>(&a))                  return *p == *std::any_cast<void*>(&b);
+    // Unknown type with no recognized equality operator: never match, rather than a
+    // false-positive type-only match.
+    return false;
+}
+
+} // namespace detail
+
 /**
  * @brief Implements the IList interface using an array whose size is dynamically increased.
  *
@@ -45,8 +81,12 @@ public:
     /**
      * @brief Constructs an ArrayList with the specified initial capacity.
      * @param capacity Initial reserved capacity.
+     * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
      */
-    explicit ArrayList(int capacity) { _items.reserve(static_cast<size_t>(capacity)); }
+    explicit ArrayList(intcs capacity) {
+        System::ArgumentOutOfRangeException::ThrowIfNegative(capacity, "capacity");
+        _items.reserve(static_cast<size_t>(capacity));
+    }
 
     /**
      * @brief Constructs an ArrayList by copying all elements from @p c via GetEnumerator().
@@ -72,7 +112,7 @@ public:
      *
      * C++ counterpart of .NET ArrayList.Count.
      */
-    [[nodiscard]] int getCountProperty() const override { return static_cast<int>(_items.size()); }
+    [[nodiscard]] intcs getCountProperty() const override { return static_cast<intcs>(_items.size()); }
 
     /**
      * @brief Copies the elements of the list into the given buffer starting at @p index.
@@ -81,7 +121,7 @@ public:
      * @param array Pointer to a std::any[] destination buffer.
      * @param index Zero-based index at which copying begins.
      */
-    void CopyTo(void* array, int index) override {
+    void CopyTo(void* array, intcs index) override {
         auto* dest = static_cast<std::any*>(array);
         for (size_t i = 0; i < _items.size(); ++i)
             dest[static_cast<size_t>(index) + i] = _items[i];
@@ -92,14 +132,21 @@ public:
      *
      * C++ counterpart of .NET ArrayList.Capacity.
      */
-    [[nodiscard]] int getCapacityProperty() const { return static_cast<int>(_items.capacity()); }
+    [[nodiscard]] intcs getCapacityProperty() const { return static_cast<intcs>(_items.capacity()); }
 
     /**
      * @brief Sets the capacity, reserving at least @p value elements in the internal storage.
      *
      * C++ counterpart of .NET ArrayList.Capacity setter.
+     * @throws System::ArgumentOutOfRangeException if @p value is less than getCountProperty().
+     * @note Unlike real .NET, this can only grow capacity, never shrink it (std::vector::reserve()
+     *       is a no-op for a smaller value) -- use TrimToSize() to shrink to the current count.
      */
-    void setCapacityProperty(int value) { _items.reserve(static_cast<size_t>(value)); }
+    void setCapacityProperty(intcs value) {
+        if (value < static_cast<intcs>(_items.size()))
+            throw System::ArgumentOutOfRangeException("value", "capacity was less than the current size.");
+        _items.reserve(static_cast<size_t>(value));
+    }
 
     /**
      * @brief Returns false; ArrayList is never read-only.
@@ -166,13 +213,13 @@ public:
      * fail-fast enumeration correctness matters.
      * @param index Zero-based index.
      */
-    std::any& operator[](int index) { return _items.at(static_cast<size_t>(index)); }
+    std::any& operator[](intcs index) { return _items.at(static_cast<size_t>(index)); }
 
     /**
      * @brief Returns a const reference to the element at the given index.
      * @param index Zero-based index.
      */
-    const std::any& operator[](int index) const { return _items.at(static_cast<size_t>(index)); }
+    const std::any& operator[](intcs index) const { return _items.at(static_cast<size_t>(index)); }
 
     // -----------------------------------------------------------------------
     // Add
@@ -194,10 +241,10 @@ public:
      * @param value Value to add.
      * @return Zero-based index at which the value was inserted.
      */
-    int Add(const std::any& value) {
+    intcs Add(const std::any& value) {
         _items.push_back(value);
         ++version_;
-        return static_cast<int>(_items.size()) - 1;
+        return static_cast<intcs>(_items.size()) - 1;
     }
 
     /**
@@ -228,7 +275,7 @@ public:
      * C++ counterpart of .NET ArrayList.Remove(object).
      */
     void Remove(void* value) override {
-        int idx = IndexOf(value);
+        intcs idx = IndexOf(value);
         if (idx >= 0) RemoveAt(idx);
     }
 
@@ -239,7 +286,7 @@ public:
      * @param index Zero-based index of the element to remove.
      */
     void RemoveAt(SharpRuntime::intcs index) override {
-        if (index < 0 || index >= static_cast<int>(_items.size())) throw System::ArgumentOutOfRangeException("index");
+        if (index < 0 || index >= static_cast<intcs>(_items.size())) throw System::ArgumentOutOfRangeException("index");
         _items.erase(_items.begin() + index);
         ++version_;
     }
@@ -248,8 +295,11 @@ public:
      * @brief Removes @p count elements starting at @p index.
      *
      * C++ counterpart of .NET ArrayList.RemoveRange(int, int).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    void RemoveRange(int index, int count) {
+    void RemoveRange(intcs index, intcs count) {
+        requireValidRange(index, count);
         if (count <= 0) return;
         _items.erase(_items.begin() + index, _items.begin() + index + count);
         ++version_;
@@ -275,7 +325,7 @@ public:
      */
     bool Contains(const std::any& value) const {
         for (const auto& item : _items)
-            if (item.type() == value.type()) return true;
+            if (detail::arrayListValueEquals(item, value)) return true;
         return false;
     }
 
@@ -285,7 +335,7 @@ public:
      * C++ counterpart of .NET ArrayList.IndexOf(object).
      */
     SharpRuntime::intcs IndexOf(void* value) const override {
-        for (int i = 0; i < static_cast<int>(_items.size()); ++i)
+        for (intcs i = 0; i < static_cast<intcs>(_items.size()); ++i)
             if (std::any_cast<void*>(&_items[i]) && std::any_cast<void*>(_items[i]) == value) return i;
         return -1;
     }
@@ -295,9 +345,9 @@ public:
      *
      * C++ counterpart of .NET ArrayList.IndexOf(object).
      */
-    int IndexOf(const std::any& value) const {
-        for (int i = 0; i < static_cast<int>(_items.size()); ++i)
-            if (_items[i].type() == value.type()) return i;
+    intcs IndexOf(const std::any& value) const {
+        for (intcs i = 0; i < static_cast<intcs>(_items.size()); ++i)
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -305,10 +355,14 @@ public:
      * @brief Returns the first type-matching element at or after @p startIndex, or -1.
      *
      * C++ counterpart of .NET ArrayList.IndexOf(object, int).
+     * @throws System::ArgumentOutOfRangeException if @p startIndex is greater than getCountProperty().
      */
-    int IndexOf(const std::any& value, int startIndex) const {
-        for (int i = startIndex; i < static_cast<int>(_items.size()); ++i)
-            if (_items[i].type() == value.type()) return i;
+    intcs IndexOf(const std::any& value, intcs startIndex) const {
+        intcs size = static_cast<intcs>(_items.size());
+        if (startIndex > size)
+            throw System::ArgumentOutOfRangeException("startIndex", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        for (intcs i = startIndex; i < size; ++i)
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -316,11 +370,18 @@ public:
      * @brief Returns the first type-matching element in [@p startIndex, @p startIndex+@p count), or -1.
      *
      * C++ counterpart of .NET ArrayList.IndexOf(object, int, int).
+     * @throws System::ArgumentOutOfRangeException if @p startIndex is greater than getCountProperty(),
+     *         or if @p count is negative or the range extends past the end of the list.
      */
-    int IndexOf(const std::any& value, int startIndex, int count) const {
-        int end = startIndex + count;
-        for (int i = startIndex; i < end && i < static_cast<int>(_items.size()); ++i)
-            if (_items[i].type() == value.type()) return i;
+    intcs IndexOf(const std::any& value, intcs startIndex, intcs count) const {
+        intcs size = static_cast<intcs>(_items.size());
+        if (startIndex > size)
+            throw System::ArgumentOutOfRangeException("startIndex", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        if (count < 0 || startIndex > size - count)
+            throw System::ArgumentOutOfRangeException("count", "Count must be positive and count must refer to a location within the string/array/collection.");
+        intcs end = startIndex + count;
+        for (intcs i = startIndex; i < end && i < size; ++i)
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -329,32 +390,44 @@ public:
      *
      * C++ counterpart of .NET ArrayList.LastIndexOf(object).
      */
-    int LastIndexOf(const std::any& value) const {
-        for (int i = static_cast<int>(_items.size()) - 1; i >= 0; --i)
-            if (_items[i].type() == value.type()) return i;
-        return -1;
+    intcs LastIndexOf(const std::any& value) const {
+        return LastIndexOf(value, static_cast<intcs>(_items.size()) - 1, static_cast<intcs>(_items.size()));
     }
 
     /**
      * @brief Searches backward from @p startIndex for the last type-matching element, or -1.
      *
      * C++ counterpart of .NET ArrayList.LastIndexOf(object, int).
+     * @throws System::ArgumentOutOfRangeException if @p startIndex is greater than or equal to
+     *         getCountProperty().
      */
-    int LastIndexOf(const std::any& value, int startIndex) const {
-        for (int i = startIndex; i >= 0; --i)
-            if (_items[i].type() == value.type()) return i;
-        return -1;
+    intcs LastIndexOf(const std::any& value, intcs startIndex) const {
+        if (startIndex >= static_cast<intcs>(_items.size()))
+            throw System::ArgumentOutOfRangeException("startIndex", "Index was out of range. Must be non-negative and less than the size of the collection.");
+        return LastIndexOf(value, startIndex, startIndex + 1);
     }
 
     /**
      * @brief Searches backward in [@p startIndex-@p count+1, @p startIndex] for the last type-matching element.
      *
      * C++ counterpart of .NET ArrayList.LastIndexOf(object, int, int).
+     * @throws System::ArgumentOutOfRangeException if @p startIndex or @p count is negative on a
+     *         non-empty list, or if the range they describe is out of bounds. A negative
+     *         @p startIndex on an empty list quietly returns -1, matching .NET's own special case.
      */
-    int LastIndexOf(const std::any& value, int startIndex, int count) const {
-        int lo = startIndex - count + 1;
-        for (int i = startIndex; i >= lo && i >= 0; --i)
-            if (_items[i].type() == value.type()) return i;
+    intcs LastIndexOf(const std::any& value, intcs startIndex, intcs count) const {
+        intcs size = static_cast<intcs>(_items.size());
+        if (size != 0) {
+            System::ArgumentOutOfRangeException::ThrowIfNegative(startIndex, "startIndex");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+        }
+        if (size == 0) return -1;
+        if (startIndex >= size || count > startIndex + 1)
+            throw System::ArgumentOutOfRangeException(startIndex >= size ? "startIndex" : "count",
+                "Index was out of range. Must be non-negative and less than the size of the collection.");
+        intcs lo = startIndex - count + 1;
+        for (intcs i = startIndex; i >= lo; --i)
+            if (detail::arrayListValueEquals(_items[static_cast<size_t>(i)], value)) return i;
         return -1;
     }
 
@@ -366,16 +439,22 @@ public:
      * @brief Inserts a raw pointer at the specified index.
      *
      * C++ counterpart of .NET ArrayList.Insert(int, object).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
+     *         getCountProperty() (insertion at the end, i.e. index == count, is legal).
      */
     void Insert(SharpRuntime::intcs index, void* value) override {
+        requireInsertIndexInRange(index);
         _items.insert(_items.begin() + index, value);
         ++version_;
     }
 
     /**
      * @brief Inserts a typed value at the specified index.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
+     *         getCountProperty().
      */
-    void Insert(int index, const std::any& value) {
+    void Insert(intcs index, const std::any& value) {
+        requireInsertIndexInRange(index);
         _items.insert(_items.begin() + index, value);
         ++version_;
     }
@@ -384,8 +463,11 @@ public:
      * @brief Inserts all elements of @p c starting at the specified index.
      *
      * C++ counterpart of .NET ArrayList.InsertRange(int, ICollection).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than
+     *         getCountProperty().
      */
-    void InsertRange(int index, const std::vector<std::any>& c) {
+    void InsertRange(intcs index, const std::vector<std::any>& c) {
+        requireInsertIndexInRange(index);
         if (c.empty()) return;
         _items.insert(_items.begin() + index, c.begin(), c.end());
         ++version_;
@@ -406,8 +488,11 @@ public:
      * @brief Reverses the order of @p count elements starting at @p index.
      *
      * C++ counterpart of .NET ArrayList.Reverse(int, int).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    void Reverse(int index, int count) {
+    void Reverse(intcs index, intcs count) {
+        requireValidRange(index, count);
         std::reverse(_items.begin() + index, _items.begin() + index + count);
         ++version_;
     }
@@ -416,8 +501,13 @@ public:
      * @brief Copies elements from @p c over the list starting at @p index.
      *
      * C++ counterpart of .NET ArrayList.SetRange(int, ICollection).
+     * @throws System::ArgumentOutOfRangeException if @p index is negative or the range
+     *         [@p index, @p index+@p c.size()) doesn't fit within the current list.
      */
-    void SetRange(int index, const std::vector<std::any>& c) {
+    void SetRange(intcs index, const std::vector<std::any>& c) {
+        intcs count = static_cast<intcs>(c.size());
+        if (index < 0 || index > static_cast<intcs>(_items.size()) - count)
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
         if (c.empty()) return;
         for (size_t i = 0; i < c.size(); ++i)
             _items[static_cast<size_t>(index) + i] = c[i];
@@ -428,8 +518,11 @@ public:
      * @brief Returns a new ArrayList containing @p count elements starting at @p index.
      *
      * C++ counterpart of .NET ArrayList.GetRange(int, int).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    [[nodiscard]] ArrayList GetRange(int index, int count) const {
+    [[nodiscard]] ArrayList GetRange(intcs index, intcs count) const {
+        requireValidRange(index, count);
         ArrayList result;
         result._items.insert(result._items.end(),
                              _items.begin() + index,
@@ -459,8 +552,11 @@ public:
      * @brief Sorts @p count elements starting at @p index using the specified comparer.
      *
      * C++ counterpart of .NET ArrayList.Sort(int, int, IComparer).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    void Sort(int index, int count, const IComparer& comparer) {
+    void Sort(intcs index, intcs count, const IComparer& comparer) {
+        requireValidRange(index, count);
         std::stable_sort(_items.begin() + index, _items.begin() + index + count,
             [&comparer](const std::any& a, const std::any& b) {
                 return comparer.Compare(&a, &b) < 0;
@@ -478,20 +574,23 @@ public:
      * C++ counterpart of .NET ArrayList.BinarySearch(object, IComparer).
      * @return Index of the found element, or bitwise complement of insertion point if not found.
      */
-    [[nodiscard]] int BinarySearch(const std::any& value, const IComparer& comparer) const {
-        return BinarySearch(0, static_cast<int>(_items.size()), value, comparer);
+    [[nodiscard]] intcs BinarySearch(const std::any& value, const IComparer& comparer) const {
+        return BinarySearch(0, static_cast<intcs>(_items.size()), value, comparer);
     }
 
     /**
      * @brief Binary-searches [@p index, @p index+@p count) for @p value using @p comparer.
      *
      * C++ counterpart of .NET ArrayList.BinarySearch(int, int, object, IComparer).
+     * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
+     * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      * @return Index of the found element, or bitwise complement of insertion point if not found.
      */
-    [[nodiscard]] int BinarySearch(int index, int count, const std::any& value, const IComparer& comparer) const {
-        int lo = index, hi = index + count - 1;
+    [[nodiscard]] intcs BinarySearch(intcs index, intcs count, const std::any& value, const IComparer& comparer) const {
+        requireValidRange(index, count);
+        intcs lo = index, hi = index + count - 1;
         while (lo <= hi) {
-            int mid = lo + (hi - lo) / 2;
+            intcs mid = lo + (hi - lo) / 2;
             int cmp = comparer.Compare(&_items[static_cast<size_t>(mid)], &value);
             if (cmp == 0) return mid;
             if (cmp < 0) lo = mid + 1;
@@ -537,10 +636,12 @@ public:
      * @brief Returns an ArrayList with @p count copies of @p value.
      *
      * C++ counterpart of .NET ArrayList.Repeat(object, int).
+     * @throws System::ArgumentOutOfRangeException if @p count is negative.
      */
-    [[nodiscard]] static ArrayList Repeat(const std::any& value, int count) {
+    [[nodiscard]] static ArrayList Repeat(const std::any& value, intcs count) {
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
         ArrayList result(count);
-        for (int i = 0; i < count; ++i) result.Add(value);
+        for (intcs i = 0; i < count; ++i) result.Add(value);
         return result;
     }
 
@@ -569,7 +670,7 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p index or @p count is negative.
      * @throws System::ArgumentException if [@p index, @p index+@p count) is out of bounds.
      */
-    IEnumerator* GetEnumerator(int index, int count) {
+    IEnumerator* GetEnumerator(intcs index, intcs count) {
         if (index < 0) throw System::ArgumentOutOfRangeException("index");
         if (count < 0) throw System::ArgumentOutOfRangeException("count");
         if (static_cast<size_t>(index) + static_cast<size_t>(count) > _items.size())
@@ -579,6 +680,28 @@ public:
 
 private:
     std::vector<std::any> _items;
+
+    // Matches .NET ArrayList's range-validation contract (used by BinarySearch(index,count,...)/
+    // GetRange/RemoveRange/Reverse(index,count)/Sort(index,count,...), each of which calls this
+    // exact 3-check sequence in ArrayList.cs): negative index/count -> ArgumentOutOfRangeException;
+    // range extending past the end -> ArgumentException. Previously entirely absent from all of
+    // these methods, so an out-of-range index/count reached std::vector iterator arithmetic
+    // (UB, not a clean exception) instead.
+    void requireValidRange(intcs index, intcs count) const {
+        if (index < 0)
+            throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (static_cast<intcs>(_items.size()) - index < count)
+            throw System::ArgumentException("Offset and length were out of bounds for the array, or count is greater than the number of elements from index to the end of the source collection.");
+    }
+
+    // Matches .NET ArrayList's Insert/InsertRange validation: unlike element-access indices,
+    // index == count (inserting at the end) is explicitly legal.
+    void requireInsertIndexInRange(intcs index) const {
+        if (index < 0 || index > static_cast<intcs>(_items.size()))
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+    }
 
     /**
      * @brief Enumerator over an ArrayList (or a sub-range of one), matching the fail-fast

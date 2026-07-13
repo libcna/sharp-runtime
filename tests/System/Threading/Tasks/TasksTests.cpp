@@ -151,6 +151,63 @@ TEST(TaskTTests, Run_StringResult) {
     EXPECT_EQ(t.Wait(), "hello");
 }
 
+TEST(TaskTTests, GetStatusProperty_MatchesTaskLifecycle) {
+    TaskT<int> t = TaskT<int>::FromResult(1);
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::RanToCompletion);
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskTTests, Faulted_IsNotCompletedSuccessfully) {
+    TaskT<int> t = TaskT<int>::Run([]() -> int { throw std::runtime_error("fail"); });
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::Faulted);
+    EXPECT_FALSE(t.getIsCompletedSuccessfullyProperty());
+}
+
+// ===========================================================================
+// TaskT<TResult> cooperative cancellation (mirrors the Task cancellation tests below --
+// TaskT previously had no CancellationToken constructor at all, an asymmetry with Task)
+// ===========================================================================
+
+TEST(TaskTCancellationTests, PreCanceledToken_TaskIsImmediatelyCanceled) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    std::atomic<bool> ran{false};
+    TaskT<int> t([&ran]() { ran = true; return 1; }, cts.getTokenProperty());
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskTCancellationTests, FuncThrowsOperationCanceled_MatchingToken_ReportsCanceled) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    TaskT<int> t([&cts, token]() -> int {
+        cts.Cancel();
+        token.ThrowIfCancellationRequested();
+        return 1;
+    }, token);
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(t.getIsFaultedProperty());
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::Canceled);
+}
+
+TEST(TaskTCancellationTests, FuncThrowsOtherException_ReportsFaultedNotCanceled) {
+    CancellationTokenSource cts;
+    TaskT<int> t([]() -> int { throw std::runtime_error("boom"); }, cts.getTokenProperty());
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
+TEST(TaskTCancellationTests, RunWithToken_GetCancellationTokenProperty_ReturnsSameToken) {
+    CancellationTokenSource cts;
+    TaskT<int> t = TaskT<int>::Run([]() { return 42; }, cts.getTokenProperty());
+    EXPECT_EQ(t.Wait(), 42);
+    EXPECT_FALSE(t.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
 // ===========================================================================
 // TaskCompletionSource<TResult>
 // ===========================================================================
@@ -328,9 +385,51 @@ TEST(ValueTaskTTests, FromException_GetResult_Throws) {
     EXPECT_THROW(vt.getResultProperty(), std::runtime_error);
 }
 
-TEST(ValueTaskTTests, DefaultCtor_NotCompleted) {
+// Regression test for a wave-7 audit finding: the default constructor previously set
+// completed_ = false, permanently "incomplete" with no way to ever complete it (no wrapped
+// task, no setter). Verified against ValueTask<TResult>.IsCompleted (`if (obj == null) return
+// true;`): real .NET's "no backing Task/IValueTaskSource" state is always completed, holding
+// default(TResult) -- not permanently pending.
+TEST(ValueTaskTTests, DefaultCtor_IsCompletedWithDefaultResult) {
     ValueTaskT<int> vt;
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
+    EXPECT_FALSE(vt.getIsFaultedProperty());
+    EXPECT_EQ(vt.getResultProperty(), 0);
+}
+
+// Regression tests for a wave-7 audit finding: ValueTaskT had no TaskT<TResult>-wrapping
+// constructor at all, unlike the sibling ValueTask's Task-wrapping constructor -- meaning it
+// could only ever represent an already-known synchronous result/exception, never a still-running
+// async operation. These mirror the existing ValueTask FromTask_* tests above.
+
+TEST(ValueTaskTTests, FromTaskT_CompletedTask_IsCompleted) {
+    ValueTaskT<int> vt(TaskT<int>::FromResult(7));
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
+    EXPECT_EQ(vt.getResultProperty(), 7);
+}
+
+TEST(ValueTaskTTests, FromTaskT_AlreadyFaultedTask_GetResult_Rethrows) {
+    auto ex = std::make_exception_ptr(std::runtime_error("taskT faulted"));
+    ValueTaskT<int> vt(TaskT<int>::Run([ex]() -> int { std::rethrow_exception(ex); }));
+    EXPECT_THROW(vt.getResultProperty(), std::runtime_error);
+    EXPECT_TRUE(vt.getIsFaultedProperty());
+}
+
+TEST(ValueTaskTTests, FromTaskT_StillRunning_LaterObservesCompletion) {
+    std::promise<void> release;
+    std::shared_future<void> releaseFuture = release.get_future().share();
+    TaskT<int> t([releaseFuture]() -> int {
+        releaseFuture.wait();
+        return 99;
+    });
+    ValueTaskT<int> vt(std::move(t));
     EXPECT_FALSE(vt.getIsCompletedProperty());
+    release.set_value();
+    EXPECT_EQ(vt.getResultProperty(), 99);
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
 }
 
 // ===========================================================================
@@ -645,6 +744,27 @@ TEST(TaskFactoryTests, StartNewWithResult_ReturnsValue) {
     EXPECT_EQ(t.Wait(), 42);
 }
 
+TEST(TaskFactoryTests, StartNewWithResultAndToken_ObservesCancellation) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    TaskFactory factory;
+    std::atomic<bool> ran{false};
+    TaskT<int> t = factory.StartNew<int>([&ran]() -> int { ran = true; return 1; },
+                                          cts.getTokenProperty());
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+}
+
+TEST(TaskFactoryTests, StartNewWithResult_UsesFactoryDefaultToken) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    TaskFactory factory(cts.getTokenProperty());
+    std::atomic<bool> ran{false};
+    TaskT<int> t = factory.StartNew<int>([&ran]() -> int { ran = true; return 1; });
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+}
+
 TEST(TaskFactoryTests, TaskDotFactory_StartNew_ExecutesAction) {
     std::atomic<bool> ran{false};
     Task t = Task::Factory().StartNew([&ran]() { ran = true; });
@@ -745,4 +865,51 @@ TEST(ParallelWithLoopStateTests, ForEach_StopStopsSchedulingFurtherIterations) {
 TEST(ParallelLoopResultTests, LowestBreakIteration_DefaultsToNullopt) {
     ParallelLoopResult result;
     EXPECT_FALSE(result.getLowestBreakIterationProperty().has_value());
+}
+
+// Regression tests for a wave-7 audit finding: ParallelLoopResult::getLowestBreakIterationProperty()
+// had a getter but was never populated anywhere in For/ForEach -- Break() only set the shared
+// "stopped" flag and never recorded which iteration called it, so this property always returned
+// nullopt even when Break() genuinely ran. Fixed by tracking the minimum Break()-calling index via
+// a shared atomic, with the Parallel dispatcher stamping each dispatched iteration's own state copy
+// with its index before invoking the body (mirrors ParallelLoopState.cs's own per-iteration design).
+
+TEST(ParallelLoopResultTests, For_Break_RecordsCallingIterationAsLowestBreakIteration) {
+    // Only iteration 5 ever calls Break(), so the result is deterministic regardless of scheduling.
+    auto result = Parallel::For(0, 20,
+        std::function<void(int, System::Threading::Tasks::ParallelLoopState&)>(
+            [](int i, System::Threading::Tasks::ParallelLoopState& state) {
+                if (i == 5) state.Break();
+            }));
+    ASSERT_TRUE(result.getLowestBreakIterationProperty().has_value());
+    EXPECT_EQ(result.getLowestBreakIterationProperty().value(), 5);
+}
+
+TEST(ParallelLoopResultTests, ForEach_Break_RecordsCallingSourcePositionAsLowestBreakIteration) {
+    std::vector<int> items(20);
+    for (int i = 0; i < 20; ++i) items[static_cast<size_t>(i)] = i * 100; // values distinct from positions
+    auto result = Parallel::ForEach<int>(items,
+        std::function<void(int, System::Threading::Tasks::ParallelLoopState&)>(
+            [](int value, System::Threading::Tasks::ParallelLoopState& state) {
+                if (value == 300) state.Break(); // source position 3
+            }));
+    ASSERT_TRUE(result.getLowestBreakIterationProperty().has_value());
+    EXPECT_EQ(result.getLowestBreakIterationProperty().value(), 3);
+}
+
+TEST(ParallelLoopResultTests, Stop_DoesNotPopulateLowestBreakIteration) {
+    auto result = Parallel::For(0, 20,
+        std::function<void(int, System::Threading::Tasks::ParallelLoopState&)>(
+            [](int i, System::Threading::Tasks::ParallelLoopState& state) {
+                if (i == 5) state.Stop();
+            }));
+    EXPECT_FALSE(result.getLowestBreakIterationProperty().has_value());
+}
+
+TEST(ParallelLoopStateTests, Break_TracksLowestCallingIteration) {
+    System::Threading::Tasks::ParallelLoopState state;
+    EXPECT_FALSE(state.getLowestBreakIterationProperty().has_value());
+    state.Break();
+    ASSERT_TRUE(state.getLowestBreakIterationProperty().has_value());
+    EXPECT_EQ(state.getLowestBreakIterationProperty().value(), 0);
 }

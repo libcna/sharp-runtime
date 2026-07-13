@@ -273,6 +273,18 @@ TEST(MemoryStreamTests, WriteByteOnReadOnlyThrowsNotSupportedException) {
     EXPECT_THROW(ms.WriteByte(9), System::NotSupportedException);
 }
 
+// Regression test (ticket 1487): Position can legally be set arbitrarily far past the end
+// (matching real .NET), so position_+count in Write() could genuinely signed-overflow --
+// confirmed real UB via a standalone UBSan repro on the identical pattern in Span<T>::Slice
+// (ticket 265) -- and worse, silently bypass the resize check, corrupting memory. Matches real
+// .NET's own MemoryStream.Write, which explicitly throws IOException for this exact case.
+TEST(MemoryStreamTests, Write_PositionPlusCountOverflows_ThrowsIOException) {
+    MemoryStream ms;
+    ms.setPositionProperty(2147483647);
+    uint8_t buf[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    EXPECT_THROW(ms.Write(buf, 0, 10), System::IO::IOException);
+}
+
 TEST(MemoryStreamTests, ReadByteReturnsBytesThenMinusOne) {
     uint8_t src[] = {0x41, 0x42};
     MemoryStream ms(src, 2);
@@ -558,6 +570,20 @@ TEST(UnmanagedMemoryStreamTests, WriteBeyondCapacity_Throws) {
     UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
     uint8_t payload[] = {1, 2, 3};
     EXPECT_THROW(ums.Write(payload, 0, 3), System::NotSupportedException);
+}
+
+// Regression test (ticket 1487): Position can legally be set arbitrarily far past the end
+// (matching real .NET), so position_+count in Write() could genuinely signed-overflow --
+// confirmed real UB via a standalone UBSan repro on the identical pattern in Span<T>::Slice
+// (ticket 265) -- and worse, silently bypass the capacity check, corrupting memory. Matches
+// real .NET's own UnmanagedMemoryStream.WriteCore, which computes the sum in `long` to avoid
+// exactly this and throws NotSupportedException once genuinely beyond capacity.
+TEST(UnmanagedMemoryStreamTests, Write_PositionPlusCountOverflows_ThrowsInsteadOfBypassingCheck) {
+    uint8_t data[2] = {};
+    UnmanagedMemoryStream ums(data, 0, 2, FileAccess::ReadWrite);
+    ums.setPositionProperty(2147483647);
+    uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    EXPECT_THROW(ums.Write(payload, 0, 10), System::NotSupportedException);
 }
 
 TEST(UnmanagedMemoryStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {

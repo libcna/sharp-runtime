@@ -343,8 +343,16 @@ namespace System {
          * C++ counterpart of .NET Half.GetHashCode(): all NaNs and both zeros hash the same.
          */
         [[nodiscard]] intcs GetHashCode() const noexcept {
+            // Real Half.GetHashCode() does `bits &= PositiveInfinityBits` (an AND-mask, not an
+            // assignment): for NaN this is a no-op in effect (the exponent field is already
+            // all-ones, so it survives the 0x7C00 mask unchanged, giving 0x7C00), but for zero
+            // (+0 or -0, exponent field 0) it masks everything away to 0 -- NOT 0x7C00.
+            // Assigning b=0x7C00 unconditionally for both cases (the previous code here) still
+            // satisfied the hash contract (equal values -- verified via Equals() above, which
+            // does treat +0/-0 and all NaNs as mutually equal -- still hashed equally), but
+            // didn't match .NET's actual hash value for zero.
             uint16_t b = bits;
-            if (IsNaN(*this) || (bits & 0x7FFF) == 0) b = 0x7C00;
+            if (IsNaN(*this) || (bits & 0x7FFF) == 0) b &= 0x7C00;
             return static_cast<intcs>(b);
         }
 

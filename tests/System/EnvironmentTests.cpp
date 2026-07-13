@@ -3,8 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <algorithm>
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Environment.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/Version.hpp"
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using System::Environment;
 using SharpRuntime::longcs;
@@ -39,6 +44,12 @@ TEST(EnvironmentTests, GetEnvironmentVariable_KnownVar_DoesNotThrow) {
 TEST(EnvironmentTests, GetEnvironmentVariable_NonExistent_ReturnsEmpty) {
     std::string val = Environment::GetEnvironmentVariable("SHARP_RUNTIME_NONEXISTENT_VAR_XYZ_12345");
     EXPECT_TRUE(val.empty());
+}
+
+// getenv("") is unspecified by POSIX; this must not crash and must behave like "not found",
+// matching real .NET's GetEnvironmentVariable("") (returns null, no exception).
+TEST(EnvironmentTests, GetEnvironmentVariable_EmptyName_ReturnsEmpty) {
+    EXPECT_TRUE(Environment::GetEnvironmentVariable("").empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +87,22 @@ TEST(EnvironmentTests, MachineName_NotEmpty) {
     EXPECT_FALSE(name.empty());
 }
 
+#ifndef _WIN32
+TEST(EnvironmentTests, MachineName_StripsDomainSuffix) {
+    // Real .NET's Unix MachineName truncates at the first '.' to strip the domain suffix
+    // (Environment.Unix.cs: hostName.Substring(0, hostName.IndexOf('.'))). Verify the
+    // property's return value is never longer than the portion of the raw hostname before
+    // its first '.', regardless of whether this particular host's name happens to be
+    // fully-qualified.
+    char raw[256]{};
+    ASSERT_EQ(gethostname(raw, sizeof(raw)), 0);
+    std::string rawHost(raw);
+    auto dotPos = rawHost.find('.');
+    std::string expected = dotPos == std::string::npos ? rawHost : rawHost.substr(0, dotPos);
+    EXPECT_EQ(Environment::getMachineNameProperty(), expected);
+}
+#endif
+
 TEST(EnvironmentTests, UserName_NotEmpty) {
     std::string name = Environment::getUserNameProperty();
     EXPECT_FALSE(name.empty());
@@ -88,7 +115,9 @@ TEST(EnvironmentTests, TickCount64_Positive) {
 
 TEST(EnvironmentTests, TickCount64_Advances) {
     SharpRuntime::longcs t1 = Environment::getTickCount64Property();
-    volatile int sink = 0;
+    // int would signed-overflow well before 10,000,000 (true sum is ~5*10^13); volatile long long
+    // burns the same CPU time without UB (found via UBSan, ticket 1486).
+    volatile long long sink = 0;
     for (int i = 0; i < 10000000; ++i) sink += i;
     SharpRuntime::longcs t2 = Environment::getTickCount64Property();
     (void)sink;
@@ -135,6 +164,33 @@ TEST(EnvironmentTests, ExpandEnvVars_UnknownVar_Preserved) {
 
 TEST(EnvironmentTests, ExpandEnvVars_NoVars_Unchanged) {
     EXPECT_EQ(Environment::ExpandEnvironmentVariables("no vars here"), "no vars here");
+}
+
+TEST(EnvironmentTests, ExpandEnvVars_EmptyString_ReturnsEmpty) {
+    EXPECT_EQ(Environment::ExpandEnvironmentVariables(""), "");
+}
+
+TEST(EnvironmentTests, ExpandEnvVars_MultipleVars) {
+    Environment::SetEnvironmentVariable("SHARP_EXPAND_A", "foo");
+    Environment::SetEnvironmentVariable("SHARP_EXPAND_B", "bar");
+    std::string r = Environment::ExpandEnvironmentVariables("%SHARP_EXPAND_A%-%SHARP_EXPAND_B%");
+    EXPECT_EQ(r, "foo-bar");
+}
+
+// Real .NET's ExpandEnvironmentVariablesCore (Environment.UnixOrBrowser.cs) has a non-obvious
+// property: when a %name% token fails to resolve, only the *opening* '%' is emitted as literal
+// text -- the closing '%' is left to double as the opening delimiter of the next token, instead
+// of both percents being consumed as one failed pair. Verified against the real algorithm by
+// hand-tracing it; a naive "find the next '%' and consume both" scanner (this function's
+// previous implementation) does not reproduce this.
+TEST(EnvironmentTests, ExpandEnvVars_FailedTokenClosingPercentStartsNextToken) {
+    Environment::SetEnvironmentVariable("SHARP_EXPAND_OVERLAP_HOME", "world");
+    std::string r = Environment::ExpandEnvironmentVariables("%SHARP_EXPAND_OVERLAP_UNDEFINED%SHARP_EXPAND_OVERLAP_HOME%");
+    EXPECT_EQ(r, "%SHARP_EXPAND_OVERLAP_UNDEFINEDworld");
+}
+
+TEST(EnvironmentTests, ExpandEnvVars_AdjacentPercents_Unchanged) {
+    EXPECT_EQ(Environment::ExpandEnvironmentVariables("%%"), "%%");
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +253,19 @@ TEST(EnvironmentTests, SetCurrentDirectory_ThenGetReflectsChange) {
     EXPECT_EQ(Environment::GetCurrentDirectory(), "/tmp");
     // Restore
     Environment::SetCurrentDirectory(original);
+}
+
+TEST(EnvironmentTests, SetCurrentDirectory_NonexistentPath_Throws) {
+    // Regression: chdir()'s return value was previously ignored entirely, silently leaving
+    // the working directory unchanged instead of surfacing the failure like real .NET does.
+    EXPECT_THROW(Environment::SetCurrentDirectory("/this/path/does/not/exist/hopefully"),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(EnvironmentTests, SetCurrentDirectory_EmptyPath_Throws) {
+    // Regression: real .NET's setter calls ArgumentException.ThrowIfNullOrEmpty(value) before
+    // touching the OS; this port previously had no such check.
+    EXPECT_THROW(Environment::SetCurrentDirectory(""), System::ArgumentException);
 }
 
 // ---------------------------------------------------------------------------

@@ -4,11 +4,13 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -36,18 +38,30 @@ namespace System {
 
         /**
          * @brief Parses @p s as a decimal UInt32 value.
-         * C++ counterpart of .NET UInt32.Parse(string).
+         *
+         * C++ counterpart of .NET UInt32.Parse(string) with NumberStyles.Integer: leading/
+         * trailing whitespace and a leading sign are tolerated, but a leading '-' always
+         * overflows (unsigned types reject any negative sign, even "-0" -- verified against
+         * real .NET's Number.Parsing.cs: `(!TInteger.IsSigned && number.IsNegative)` is an
+         * overflow condition checked independent of magnitude) and any trailing non-whitespace
+         * character is rejected. This previously called std::stoul(s) without capturing the
+         * parse-end position (so trailing garbage like "5abc" was silently accepted) and
+         * without rejecting a leading '-' explicitly. The latter is not just an "-0" edge
+         * case here: on an LLP64 platform (e.g. Windows, where `unsigned long` is 32 bits,
+         * the same width as UInt32), std::stoul("-1") wraps to ULONG_MAX == UInt32::MaxValue
+         * exactly, which the old `v > MaxValue` check does NOT catch (`>`, not `>=`) --
+         * Parse("-1") would have silently returned 4294967295 on such a platform.
          * @throws System::FormatException on bad format.
-         * @throws System::OverflowException on overflow.
+         * @throws System::OverflowException on overflow, or if the string has a leading '-'.
          */
         [[nodiscard]] static uintcs Parse(const std::string& s) {
+            std::size_t start = s.find_first_not_of(" \t\n\r\f\v");
+            if (start != std::string::npos && s[start] == '-')
+                throw System::OverflowException("Value was either too large or too small for a UInt32.");
+            std::size_t pos = 0;
+            unsigned long v;
             try {
-                unsigned long v = std::stoul(s);
-                if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt32.");
-                return static_cast<uint32_t>(v);
-            }
-            catch (const System::OverflowException&) {
-                throw;
+                v = std::stoul(s, &pos);
             }
             catch (const std::out_of_range&) {
                 throw System::OverflowException("Value was either too large or too small for a UInt32.");
@@ -55,6 +69,12 @@ namespace System {
             catch (...) {
                 throw System::FormatException("Input string was not in a correct format.");
             }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            if (v > MaxValue) throw System::OverflowException("Value was either too large or too small for a UInt32.");
+            return static_cast<uint32_t>(v);
         }
 
         /**
@@ -103,8 +123,14 @@ namespace System {
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
          * C++ counterpart of .NET UInt32.DivRem(uint,uint).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
          */
         [[nodiscard]] static std::pair<uintcs, uintcs> DivRem(uintcs left, uintcs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return {left / right, left % right};
         }
 

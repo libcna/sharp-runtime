@@ -41,6 +41,18 @@ namespace System {
         static constexpr longcs MaxTicks            = 3155378975999999999LL;
 
     private:
+        // Matches real .NET's private MaxDays/MaxHours constants (DateTime.cs: `MaxTicks /
+        // TimeSpan.TicksPerDay` etc.) -- AddDays/AddHours must reject a unit count whose
+        // product with TicksPer{Day,Hour} would itself overflow int64 *before* multiplying,
+        // since `static_cast<longcs>(days) * TicksPerDay` for a merely large (not even
+        // extreme) `int` day count is real signed-overflow UB in C++ otherwise (confirmed via
+        // UBSan: 1e9 days or 1e9 hours both overflow). AddMinutes/AddSeconds/AddMilliseconds
+        // don't need an equivalent guard: their own MaxMinutes/MaxSeconds/MaxMilliseconds
+        // bounds exceed intcs's range, so no representable int argument can reach the
+        // multiplication-overflow threshold for those units.
+        static constexpr longcs MaxDays  = MaxTicks / TicksPerDay;
+        static constexpr longcs MaxHours = MaxTicks / TicksPerHour;
+
         longcs ticks_;
 
         /**
@@ -91,7 +103,7 @@ namespace System {
          * @param day    Day of month (1–max for the given month/year).
          * @throws std::out_of_range if any component is out of range.
          */
-        DateTime(int year, int month, int day);
+        DateTime(intcs year, intcs month, intcs day);
 
         /**
          * @brief Initializes a new instance with date and time components.
@@ -104,7 +116,7 @@ namespace System {
          * @param second  Second (0–59).
          * @throws std::out_of_range if any component is out of range.
          */
-        DateTime(int year, int month, int day, int hour, int minute, int second);
+        DateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute, intcs second);
 
         /**
          * @brief Initializes a new instance with date, time, and millisecond components.
@@ -118,8 +130,8 @@ namespace System {
          * @param millisecond  Millisecond (0–999).
          * @throws std::out_of_range if any component is out of range.
          */
-        DateTime(int year, int month, int day,
-                 int hour, int minute, int second, int millisecond);
+        DateTime(intcs year, intcs month, intcs day,
+                 intcs hour, intcs minute, intcs second, intcs millisecond);
 
         /** @brief The smallest possible value of DateTime (0001-01-01 00:00:00). */
         static const DateTime MinValue;
@@ -138,37 +150,37 @@ namespace System {
         /**
          * @brief Gets the year component of this instance (1–9999).
          */
-        [[nodiscard]] int getYearProperty() const;
+        [[nodiscard]] intcs getYearProperty() const;
 
         /**
          * @brief Gets the month component of this instance (1–12).
          */
-        [[nodiscard]] int getMonthProperty() const;
+        [[nodiscard]] intcs getMonthProperty() const;
 
         /**
          * @brief Gets the day-of-month component of this instance (1–31).
          */
-        [[nodiscard]] int getDayProperty() const;
+        [[nodiscard]] intcs getDayProperty() const;
 
         /**
          * @brief Gets the hour component of this instance (0–23).
          */
-        [[nodiscard]] int getHourProperty() const;
+        [[nodiscard]] intcs getHourProperty() const;
 
         /**
          * @brief Gets the minute component of this instance (0–59).
          */
-        [[nodiscard]] int getMinuteProperty() const;
+        [[nodiscard]] intcs getMinuteProperty() const;
 
         /**
          * @brief Gets the second component of this instance (0–59).
          */
-        [[nodiscard]] int getSecondProperty() const;
+        [[nodiscard]] intcs getSecondProperty() const;
 
         /**
          * @brief Gets the millisecond component of this instance (0–999).
          */
-        [[nodiscard]] int getMillisecondProperty() const;
+        [[nodiscard]] intcs getMillisecondProperty() const;
 
         /**
          * @brief Gets the day of the week represented by this instance.
@@ -180,7 +192,7 @@ namespace System {
         /**
          * @brief Gets the day of the year represented by this instance (1–366).
          */
-        [[nodiscard]] int getDayOfYearProperty() const;
+        [[nodiscard]] intcs getDayOfYearProperty() const;
 
         /**
          * @brief Adds the specified time span to this instance.
@@ -196,7 +208,7 @@ namespace System {
          * @param days Number of days to add (may be negative).
          * @return A new DateTime.
          */
-        [[nodiscard]] DateTime AddDays(int days) const;
+        [[nodiscard]] DateTime AddDays(intcs days) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of hours added.
@@ -204,7 +216,7 @@ namespace System {
          * @param hours Number of hours to add (may be negative).
          * @return A new DateTime.
          */
-        [[nodiscard]] DateTime AddHours(int hours) const;
+        [[nodiscard]] DateTime AddHours(intcs hours) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of minutes added.
@@ -212,7 +224,7 @@ namespace System {
          * @param minutes Number of minutes to add (may be negative).
          * @return A new DateTime.
          */
-        [[nodiscard]] DateTime AddMinutes(int minutes) const;
+        [[nodiscard]] DateTime AddMinutes(intcs minutes) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of seconds added.
@@ -220,7 +232,7 @@ namespace System {
          * @param seconds Number of seconds to add (may be negative).
          * @return A new DateTime.
          */
-        [[nodiscard]] DateTime AddSeconds(int seconds) const;
+        [[nodiscard]] DateTime AddSeconds(intcs seconds) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of milliseconds added.
@@ -228,7 +240,7 @@ namespace System {
          * @param milliseconds Number of milliseconds to add (may be negative).
          * @return A new DateTime.
          */
-        [[nodiscard]] DateTime AddMilliseconds(int milliseconds) const;
+        [[nodiscard]] DateTime AddMilliseconds(intcs milliseconds) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of 100-nanosecond ticks added.
@@ -249,7 +261,7 @@ namespace System {
          * @return A new DateTime.
          * @throws std::out_of_range if @p months is out of range or the resulting year is outside [1, 9999].
          */
-        [[nodiscard]] DateTime AddMonths(int months) const;
+        [[nodiscard]] DateTime AddMonths(intcs months) const;
 
         /**
          * @brief Returns a new DateTime with the specified number of years added.
@@ -261,7 +273,7 @@ namespace System {
          * @return A new DateTime.
          * @throws std::out_of_range if @p value is out of range or the resulting year is outside [1, 9999].
          */
-        [[nodiscard]] DateTime AddYears(int value) const;
+        [[nodiscard]] DateTime AddYears(intcs value) const;
 
         /**
          * @brief Subtracts the specified time span from this instance.
@@ -373,7 +385,7 @@ namespace System {
          * C++ counterpart of .NET DateTime.IsLeapYear(int).
          * @throws std::out_of_range if @p year is outside [1, 9999].
          */
-        [[nodiscard]] static bool IsLeapYear(int year);
+        [[nodiscard]] static bool IsLeapYear(intcs year);
 
         /**
          * @brief Returns the number of days in the specified month and year.
@@ -381,7 +393,7 @@ namespace System {
          * C++ counterpart of .NET DateTime.DaysInMonth(int, int).
          * @throws std::out_of_range if @p month is outside [1, 12] or @p year is outside [1, 9999].
          */
-        [[nodiscard]] static int DaysInMonth(int year, int month);
+        [[nodiscard]] static intcs DaysInMonth(intcs year, intcs month);
 
         [[nodiscard]] bool operator==(const DateTime& other) const;
         [[nodiscard]] bool operator!=(const DateTime& other) const;

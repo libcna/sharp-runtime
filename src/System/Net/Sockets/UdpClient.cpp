@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/UdpClient.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
 #include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
@@ -181,6 +182,13 @@ int UdpClient::Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes) {
     (void)dgram; (void)bytes;
     throw System::PlatformNotSupportedException("UdpClient is not supported on Emscripten.");
 #else
+    // Real .NET's UdpClient.Send(byte[], int, ...) routes through Socket.Send's
+    // ValidateBufferArguments, which rejects a `bytes` count outside [0, dgram.Length]. This
+    // port previously cast `bytes` straight to size_t with no check at all -- confirmed via a
+    // standalone ASan repro that an oversized (or negative, wrapping to huge) count reads past
+    // the end of `dgram` (heap-buffer-overflow).
+    if (static_cast<uint32_t>(bytes) > dgram.size())
+        throw System::ArgumentOutOfRangeException("bytes");
     if (!hasRemote_)
         throw System::InvalidOperationException("UdpClient::Send: must call Connect() before Send().");
     auto n = ::send(toSk(fd_), reinterpret_cast<const char*>(dgram.data()),

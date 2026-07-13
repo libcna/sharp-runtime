@@ -29,7 +29,16 @@ namespace System::Threading {
      * Partial C++ counterpart of .NET System.Threading.Timer.
      * Uses a dedicated std::thread instead of a thread pool.
      *
-     * @note Status: Partial — no thread-pool; uses std::thread.
+     * @note Status: Partial — no thread-pool; uses one dedicated std::thread per Timer instead.
+     * Only the `(callback, state, int dueTime, int period)` constructor and matching
+     * `Change(int, int)` are implemented; the TimeSpan/uint/long-typed constructor and Change
+     * overloads, the callback-only (self-registering) constructor, static `ActiveCount`,
+     * `Dispose(WaitHandle)`, and `DisposeAsync()` are not ported. `Change()` returns `void` here
+     * vs. real .NET's `bool` success indicator. The implemented core (due-time/period rescheduling,
+     * pause via dueTime=-1, mid-callback Change() handling) is verified against real .NET's
+     * TimerQueueTimer behavior and uses shared_ptr-based state ownership specifically to avoid a
+     * dangling-`this` hazard in the background thread (contrast with System::Timers::Timer, a
+     * different type in a different namespace, which has a documented `this`-capture hazard).
      */
     class Timer {
         // Shared state owned jointly by the Timer and the background thread.

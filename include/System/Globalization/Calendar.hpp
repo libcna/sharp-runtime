@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
@@ -13,6 +15,8 @@
 #include "System/Globalization/CalendarWeekRule.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents time in divisions such as weeks, months, and years.
@@ -23,7 +27,7 @@ namespace System::Globalization {
  * as needed for other calendar systems.
  */
 class Calendar {
-    mutable int twoDigitYearMax_ = -1;
+    mutable intcs twoDigitYearMax_ = -1;
 
 protected:
     /**
@@ -40,7 +44,7 @@ protected:
 
 public:
     /** @brief Constant representing the current era. */
-    static constexpr int CurrentEra = 0;
+    static constexpr intcs CurrentEra = 0;
 
     /** @brief Virtual destructor for safe polymorphic destruction. */
     virtual ~Calendar() = default;
@@ -73,7 +77,7 @@ public:
      * fallback behaviour elsewhere (IsLeapYear, GetDaysInMonth). Calendar-specific
      * subclasses override this default to match their own .NET defaults.
      */
-    [[nodiscard]] virtual int getTwoDigitYearMaxProperty() const {
+    [[nodiscard]] virtual intcs getTwoDigitYearMaxProperty() const {
         if (twoDigitYearMax_ == -1) twoDigitYearMax_ = 2049;
         return twoDigitYearMax_;
     }
@@ -84,7 +88,7 @@ public:
      * C++ counterpart of .NET Calendar.TwoDigitYearMax (setter).
      * @throws System::InvalidOperationException if this calendar instance is read-only.
      */
-    virtual void setTwoDigitYearMaxProperty(int value) {
+    virtual void setTwoDigitYearMaxProperty(intcs value) {
         VerifyWritable();
         twoDigitYearMax_ = value;
     }
@@ -95,7 +99,7 @@ public:
      * C++ counterpart of .NET Calendar.Eras.
      * @return A vector containing {CurrentEra}.
      */
-    [[nodiscard]] virtual std::vector<int> getErasProperty() const { return {CurrentEra}; }
+    [[nodiscard]] virtual std::vector<intcs> getErasProperty() const { return {CurrentEra}; }
 
     /**
      * @brief Gets the earliest date and time supported by this calendar.
@@ -124,7 +128,7 @@ public:
      * @param time The DateTime to extract the year from.
      * @return The year component.
      */
-    [[nodiscard]] virtual int GetYear(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetYear(const System::DateTime& time) const {
         return time.getYearProperty();
     }
 
@@ -135,7 +139,7 @@ public:
      * @param time The DateTime to extract the month from.
      * @return The month component (1–12).
      */
-    [[nodiscard]] virtual int GetMonth(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetMonth(const System::DateTime& time) const {
         return time.getMonthProperty();
     }
 
@@ -146,7 +150,7 @@ public:
      * @param time The DateTime to query.
      * @return The day-of-month (1–31).
      */
-    [[nodiscard]] virtual int GetDayOfMonth(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetDayOfMonth(const System::DateTime& time) const {
         return time.getDayProperty();
     }
 
@@ -168,7 +172,7 @@ public:
      * @param time The DateTime to query.
      * @return The day-of-year (1–366).
      */
-    [[nodiscard]] virtual int GetDayOfYear(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetDayOfYear(const System::DateTime& time) const {
         return time.getDayOfYearProperty();
     }
 
@@ -179,7 +183,7 @@ public:
      * @param time The DateTime to query.
      * @return The hour component (0–23).
      */
-    [[nodiscard]] virtual int GetHour(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetHour(const System::DateTime& time) const {
         return time.getHourProperty();
     }
 
@@ -190,7 +194,7 @@ public:
      * @param time The DateTime to query.
      * @return The minute component (0–59).
      */
-    [[nodiscard]] virtual int GetMinute(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetMinute(const System::DateTime& time) const {
         return time.getMinuteProperty();
     }
 
@@ -201,7 +205,7 @@ public:
      * @param time The DateTime to query.
      * @return The second component (0–59).
      */
-    [[nodiscard]] virtual int GetSecond(const System::DateTime& time) const {
+    [[nodiscard]] virtual intcs GetSecond(const System::DateTime& time) const {
         return time.getSecondProperty();
     }
 
@@ -223,7 +227,7 @@ public:
      * @param time The DateTime to query.
      * @return Always CurrentEra (0) in the base implementation.
      */
-    [[nodiscard]] virtual int GetEra(const System::DateTime& /*time*/) const { return CurrentEra; }
+    [[nodiscard]] virtual intcs GetEra(const System::DateTime& /*time*/) const { return CurrentEra; }
 
     /**
      * @brief Returns the number of eras in this calendar.
@@ -231,7 +235,7 @@ public:
      * Helper method not present in .NET API; use getErasProperty().size() for .NET compatibility.
      * @return Always 1 in the base implementation.
      */
-    [[nodiscard]] virtual int GetErasCount() const { return 1; }
+    [[nodiscard]] virtual intcs GetErasCount() const { return 1; }
 
     /**
      * @brief Returns the number of months in the specified year and era.
@@ -241,7 +245,7 @@ public:
      * @param era  The era (default CurrentEra).
      * @return Always 12 in the base (Gregorian) implementation.
      */
-    [[nodiscard]] virtual int GetMonthsInYear(int /*year*/, int /*era*/ = CurrentEra) const {
+    [[nodiscard]] virtual intcs GetMonthsInYear(intcs /*year*/, intcs /*era*/ = CurrentEra) const {
         return 12;
     }
 
@@ -253,7 +257,7 @@ public:
      * @param era  The era (default CurrentEra).
      * @return Always 0 in the base implementation (no leap month in Gregorian).
      */
-    [[nodiscard]] virtual int GetLeapMonth(int /*year*/, int /*era*/ = CurrentEra) const {
+    [[nodiscard]] virtual intcs GetLeapMonth(intcs /*year*/, intcs /*era*/ = CurrentEra) const {
         return 0;
     }
 
@@ -265,7 +269,7 @@ public:
      * @param era  The era (default CurrentEra).
      * @return true if @p year is a leap year; otherwise false.
      */
-    [[nodiscard]] virtual bool IsLeapYear(int year, int /*era*/ = CurrentEra) const {
+    [[nodiscard]] virtual bool IsLeapYear(intcs year, intcs /*era*/ = CurrentEra) const {
         return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
     }
 
@@ -278,7 +282,7 @@ public:
      * @param era   The era (default CurrentEra).
      * @return Always false in the base (Gregorian) implementation.
      */
-    [[nodiscard]] virtual bool IsLeapMonth(int /*year*/, int /*month*/, int /*era*/ = CurrentEra) const {
+    [[nodiscard]] virtual bool IsLeapMonth(intcs /*year*/, intcs /*month*/, intcs /*era*/ = CurrentEra) const {
         return false;
     }
 
@@ -292,7 +296,7 @@ public:
      * @param era   The era (default CurrentEra).
      * @return true if the date is February 29 in a leap year; otherwise false.
      */
-    [[nodiscard]] virtual bool IsLeapDay(int year, int month, int day, int era = CurrentEra) const {
+    [[nodiscard]] virtual bool IsLeapDay(intcs year, intcs month, intcs day, intcs era = CurrentEra) const {
         return month == 2 && day == 29 && IsLeapYear(year, era);
     }
 
@@ -310,8 +314,8 @@ public:
      *         check, indexing the internal days-per-month table with an out-of-range month is
      *         undefined behavior, not a thrown exception.
      */
-    [[nodiscard]] virtual int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const {
-        static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    [[nodiscard]] virtual intcs GetDaysInMonth(intcs year, intcs month, intcs /*era*/ = CurrentEra) const {
+        static const intcs days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         if (month < 1 || month > 12) throw System::ArgumentOutOfRangeException("month");
         if (month == 2 && IsLeapYear(year)) return 29;
         return days[month];
@@ -325,35 +329,35 @@ public:
      * @param era  The era (default CurrentEra).
      * @return 366 for leap years, 365 otherwise.
      */
-    [[nodiscard]] virtual int GetDaysInYear(int year, int era = CurrentEra) const {
+    [[nodiscard]] virtual intcs GetDaysInYear(intcs year, intcs era = CurrentEra) const {
         return IsLeapYear(year, era) ? 366 : 365;
     }
 
 private:
     /** @brief C++ counterpart of .NET Calendar.GetFirstDayWeekOfYear(DateTime, int) (internal helper for CalendarWeekRule::FirstDay). */
-    [[nodiscard]] int GetFirstDayWeekOfYear(const System::DateTime& time, int firstDayOfWeek) const {
-        int dayOfYear = GetDayOfYear(time) - 1;
-        int dayForJan1 = static_cast<int>(GetDayOfWeek(time)) - (dayOfYear % 7);
-        int offset = (dayForJan1 - firstDayOfWeek + 14) % 7;
+    [[nodiscard]] intcs GetFirstDayWeekOfYear(const System::DateTime& time, intcs firstDayOfWeek) const {
+        intcs dayOfYear = GetDayOfYear(time) - 1;
+        intcs dayForJan1 = static_cast<intcs>(GetDayOfWeek(time)) - (dayOfYear % 7);
+        intcs offset = (dayForJan1 - firstDayOfWeek + 14) % 7;
         return (dayOfYear + offset) / 7 + 1;
     }
 
     /** @brief C++ counterpart of .NET Calendar.GetWeekOfYearOfMinSupportedDateTime(int, int). */
-    [[nodiscard]] int GetWeekOfYearOfMinSupportedDateTime(int firstDayOfWeek, int minimumDaysInFirstWeek) const {
+    [[nodiscard]] intcs GetWeekOfYearOfMinSupportedDateTime(intcs firstDayOfWeek, intcs minimumDaysInFirstWeek) const {
         const System::DateTime minSupported = getMinSupportedDateTimeProperty();
-        int dayOfYear = GetDayOfYear(minSupported) - 1;
-        int dayOfWeekOfFirstOfYear = static_cast<int>(GetDayOfWeek(minSupported)) - dayOfYear % 7;
+        intcs dayOfYear = GetDayOfYear(minSupported) - 1;
+        intcs dayOfWeekOfFirstOfYear = static_cast<intcs>(GetDayOfWeek(minSupported)) - dayOfYear % 7;
 
-        int offset = (firstDayOfWeek + 7 - dayOfWeekOfFirstOfYear) % 7;
+        intcs offset = (firstDayOfWeek + 7 - dayOfWeekOfFirstOfYear) % 7;
         if (offset == 0 || offset >= minimumDaysInFirstWeek) {
             return 1;
         }
 
-        int daysInYearBeforeMinSupportedYear = getDaysInYearBeforeMinSupportedYearProperty() - 1;
-        int dayOfWeekOfFirstOfPreviousYear = dayOfWeekOfFirstOfYear - 1 - (daysInYearBeforeMinSupportedYear % 7);
+        intcs daysInYearBeforeMinSupportedYear = getDaysInYearBeforeMinSupportedYearProperty() - 1;
+        intcs dayOfWeekOfFirstOfPreviousYear = dayOfWeekOfFirstOfYear - 1 - (daysInYearBeforeMinSupportedYear % 7);
 
-        int daysInInitialPartialWeek = (firstDayOfWeek - dayOfWeekOfFirstOfPreviousYear + 14) % 7;
-        int day = daysInYearBeforeMinSupportedYear - daysInInitialPartialWeek;
+        intcs daysInInitialPartialWeek = (firstDayOfWeek - dayOfWeekOfFirstOfPreviousYear + 14) % 7;
+        intcs day = daysInYearBeforeMinSupportedYear - daysInInitialPartialWeek;
         if (daysInInitialPartialWeek >= minimumDaysInFirstWeek) {
             day += 7;
         }
@@ -362,16 +366,16 @@ private:
     }
 
     /** @brief C++ counterpart of .NET Calendar.GetWeekOfYearFullDays(DateTime, int, int) (internal helper for FirstFullWeek/FirstFourDayWeek). */
-    [[nodiscard]] int GetWeekOfYearFullDays(const System::DateTime& time, int firstDayOfWeek, int fullDays) const {
-        int dayOfYear = GetDayOfYear(time) - 1;
-        int dayForJan1 = static_cast<int>(GetDayOfWeek(time)) - (dayOfYear % 7);
+    [[nodiscard]] intcs GetWeekOfYearFullDays(const System::DateTime& time, intcs firstDayOfWeek, intcs fullDays) const {
+        intcs dayOfYear = GetDayOfYear(time) - 1;
+        intcs dayForJan1 = static_cast<intcs>(GetDayOfWeek(time)) - (dayOfYear % 7);
 
-        int offset = (firstDayOfWeek - dayForJan1 + 14) % 7;
+        intcs offset = (firstDayOfWeek - dayForJan1 + 14) % 7;
         if (offset != 0 && offset >= fullDays) {
             offset -= 7;
         }
 
-        int day = dayOfYear - offset;
+        intcs day = dayOfYear - offset;
         if (day >= 0) {
             return day / 7 + 1;
         }
@@ -391,7 +395,7 @@ protected:
      * @return 365 by default; overridden by calendars whose minimum year is a leap year
      *         or otherwise irregular.
      */
-    [[nodiscard]] virtual int getDaysInYearBeforeMinSupportedYearProperty() const { return 365; }
+    [[nodiscard]] virtual intcs getDaysInYearBeforeMinSupportedYearProperty() const { return 365; }
 
 public:
     /**
@@ -404,25 +408,25 @@ public:
      * @return The week number (1-based).
      * @throws System::ArgumentOutOfRangeException if @p firstDayOfWeek or @p rule is out of range.
      */
-    [[nodiscard]] virtual int GetWeekOfYear(const System::DateTime& time,
+    [[nodiscard]] virtual intcs GetWeekOfYear(const System::DateTime& time,
                                              CalendarWeekRule rule,
                                              System::DayOfWeek firstDayOfWeek) const {
         if (firstDayOfWeek < System::DayOfWeek::Sunday || firstDayOfWeek > System::DayOfWeek::Saturday) {
             throw System::ArgumentOutOfRangeException("firstDayOfWeek",
-                std::to_string(static_cast<int>(firstDayOfWeek)),
+                std::to_string(static_cast<intcs>(firstDayOfWeek)),
                 "Value must be within the range for the DayOfWeek enumeration.");
         }
 
         switch (rule) {
             case CalendarWeekRule::FirstDay:
-                return GetFirstDayWeekOfYear(time, static_cast<int>(firstDayOfWeek));
+                return GetFirstDayWeekOfYear(time, static_cast<intcs>(firstDayOfWeek));
             case CalendarWeekRule::FirstFullWeek:
-                return GetWeekOfYearFullDays(time, static_cast<int>(firstDayOfWeek), 7);
+                return GetWeekOfYearFullDays(time, static_cast<intcs>(firstDayOfWeek), 7);
             case CalendarWeekRule::FirstFourDayWeek:
-                return GetWeekOfYearFullDays(time, static_cast<int>(firstDayOfWeek), 4);
+                return GetWeekOfYearFullDays(time, static_cast<intcs>(firstDayOfWeek), 4);
             default:
                 throw System::ArgumentOutOfRangeException("rule",
-                    std::to_string(static_cast<int>(rule)),
+                    std::to_string(static_cast<intcs>(rule)),
                     "Value must be within the range for the CalendarWeekRule enumeration.");
         }
     }
@@ -438,10 +442,24 @@ public:
      * rejects Feb 29 in a non-leap year) where .NET clamps silently.
      * @param time  The starting DateTime.
      * @param years The number of years to add.
+     * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      * @return A new DateTime offset by @p years, with the day clamped if the target month is
      *         shorter than the source day (e.g. Feb 29 -> Feb 28 in a non-leap year).
+     *
+     * `years * 12` computed directly with no upfront bounds check is real signed-integer-
+     * overflow UB in C++ for a merely large (not extreme) years argument -- unlike real .NET,
+     * where the identical `AddMonths(time, years * 12)` expression relies on C#'s well-defined
+     * unchecked-arithmetic wraparound (confirmed via UBSan). AddMonths (below) already rejects
+     * |months| > 120000 before doing arithmetic, so validating years against the equivalent
+     * bound (120000 / 12 = 10000) here, before the multiply, rejects nothing AddMonths would
+     * have accepted anyway -- it only moves the rejection earlier, before the overflow-prone
+     * multiplication. This exact bug class was already fixed once in this same file (see
+     * AddMonths's own doc comment below) but missed here in the sibling method.
      */
-    virtual System::DateTime AddYears(const System::DateTime& time, int years) const {
+    virtual System::DateTime AddYears(const System::DateTime& time, intcs years) const {
+        if (years < -10000 || years > 10000)
+            throw System::ArgumentOutOfRangeException("years", std::to_string(years),
+                "Valid values are between -10000 and 10000, inclusive.");
         return AddMonths(time, years * 12);
     }
 
@@ -451,7 +469,7 @@ public:
      * C++ counterpart of .NET Calendar.AddMonths(DateTime, int). Verified against
      * GregorianCalendar.cs's AddMonths, which rejects |months| > 120000 before doing any
      * arithmetic: without that check, a caller-supplied @p months near INT_MAX/INT_MIN makes
-     * `(year-1)*12 + (month-1) + months` overflow signed int -- confirmed via a standalone
+     * `(year-1)*12 + (month-1) + months` overflow signed 32-bit int -- confirmed via a standalone
      * UBSan repro that AddMonths(<year 9999 date>, INT_MAX) silently produced a nonsensical
      * negative "year" instead of throwing, rather than the clean, documented exception .NET's
      * bounds check produces. 120000 months (10000 years) safely covers every representable
@@ -461,14 +479,14 @@ public:
      * @return A new DateTime offset by @p months.
      * @throws System::ArgumentOutOfRangeException if @p months is outside [-120000, 120000].
      */
-    virtual System::DateTime AddMonths(const System::DateTime& time, int months) const {
+    virtual System::DateTime AddMonths(const System::DateTime& time, intcs months) const {
         if (months < -120000 || months > 120000)
             throw System::ArgumentOutOfRangeException("months", std::to_string(months),
                 "Valid values are between -120000 and 120000, inclusive.");
-        int totalMonths = (time.getYearProperty() - 1) * 12 + (time.getMonthProperty() - 1) + months;
-        int year  = totalMonths / 12 + 1;
-        int month = totalMonths % 12 + 1;
-        int day   = std::min(time.getDayProperty(), GetDaysInMonth(year, month));
+        intcs totalMonths = (time.getYearProperty() - 1) * 12 + (time.getMonthProperty() - 1) + months;
+        intcs year  = totalMonths / 12 + 1;
+        intcs month = totalMonths % 12 + 1;
+        intcs day   = std::min(time.getDayProperty(), GetDaysInMonth(year, month));
         return System::DateTime(year, month, day,
                                 time.getHourProperty(), time.getMinuteProperty(),
                                 time.getSecondProperty());
@@ -477,13 +495,25 @@ public:
     /**
      * @brief Returns a DateTime that is the specified number of weeks from the given DateTime.
      *
-     * C++ counterpart of .NET Calendar.AddWeeks(DateTime, int).
+     * C++ counterpart of .NET Calendar.AddWeeks(DateTime, int). Real .NET's implementation is
+     * `AddDays(time, weeks * 7)` with no upfront check, relying on C#'s well-defined unchecked-
+     * arithmetic wraparound for `weeks * 7`. That expression is real signed-integer-overflow UB
+     * in C++ for a merely large (not extreme) weeks argument -- same bug class as AddYears
+     * above. Computes the product in a wider type first so the multiplication itself can never
+     * overflow, then lets DateTime::AddDays's own bounds check (already validated against
+     * DateTime::MaxDays) reject anything outside DateTime's representable range, rather than
+     * duplicating that bound here.
      * @param time  The starting DateTime.
      * @param weeks The number of weeks to add.
+     * @throws System::ArgumentOutOfRangeException if `weeks * 7` doesn't fit in a 32-bit int.
      * @return A new DateTime offset by @p weeks * 7 days.
      */
-    virtual System::DateTime AddWeeks(const System::DateTime& time, int weeks) const {
-        return time.AddDays(weeks * 7);
+    virtual System::DateTime AddWeeks(const System::DateTime& time, intcs weeks) const {
+        long long totalDays = static_cast<long long>(weeks) * 7;
+        if (totalDays < std::numeric_limits<intcs>::min() || totalDays > std::numeric_limits<intcs>::max())
+            throw System::ArgumentOutOfRangeException("weeks", std::to_string(weeks),
+                "Value was either too large or too small for an Int32.");
+        return time.AddDays(static_cast<intcs>(totalDays));
     }
 
     /**
@@ -494,7 +524,7 @@ public:
      * @param days The number of days to add.
      * @return A new DateTime offset by @p days.
      */
-    virtual System::DateTime AddDays(const System::DateTime& time, int days) const {
+    virtual System::DateTime AddDays(const System::DateTime& time, intcs days) const {
         return time.AddDays(days);
     }
 
@@ -506,7 +536,7 @@ public:
      * @param hours The number of hours to add.
      * @return A new DateTime offset by @p hours.
      */
-    virtual System::DateTime AddHours(const System::DateTime& time, int hours) const {
+    virtual System::DateTime AddHours(const System::DateTime& time, intcs hours) const {
         return time.AddHours(hours);
     }
 
@@ -518,7 +548,7 @@ public:
      * @param minutes The number of minutes to add.
      * @return A new DateTime offset by @p minutes.
      */
-    virtual System::DateTime AddMinutes(const System::DateTime& time, int minutes) const {
+    virtual System::DateTime AddMinutes(const System::DateTime& time, intcs minutes) const {
         return time.AddMinutes(minutes);
     }
 
@@ -530,7 +560,7 @@ public:
      * @param seconds The number of seconds to add.
      * @return A new DateTime offset by @p seconds.
      */
-    virtual System::DateTime AddSeconds(const System::DateTime& time, int seconds) const {
+    virtual System::DateTime AddSeconds(const System::DateTime& time, intcs seconds) const {
         return time.AddSeconds(seconds);
     }
 
@@ -560,9 +590,9 @@ public:
      * @param era         The era (default CurrentEra; ignored in base implementation).
      * @return The DateTime corresponding to the given components.
      */
-    virtual System::DateTime ToDateTime(int year, int month, int day,
-                                        int hour, int minute, int second,
-                                        int millisecond, int /*era*/ = CurrentEra) const {
+    virtual System::DateTime ToDateTime(intcs year, intcs month, intcs day,
+                                        intcs hour, intcs minute, intcs second,
+                                        intcs millisecond, intcs /*era*/ = CurrentEra) const {
         return System::DateTime(year, month, day, hour, minute, second, millisecond);
     }
 
@@ -577,10 +607,10 @@ public:
      * @return A four-digit year.
      * @throws System::ArgumentOutOfRangeException if @p year is negative.
      */
-    virtual int ToFourDigitYear(int year) const {
+    virtual intcs ToFourDigitYear(intcs year) const {
         System::ArgumentOutOfRangeException::ThrowIfNegative(year, "year");
         if (year < 100) {
-            int max = getTwoDigitYearMaxProperty();
+            intcs max = getTwoDigitYearMaxProperty();
             return (max / 100 - (year > max % 100 ? 1 : 0)) * 100 + year;
         }
         return year;

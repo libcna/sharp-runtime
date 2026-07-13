@@ -28,9 +28,9 @@ class GregorianCalendar : public Calendar {
     }
 
 public:
-    static constexpr int ADEra   = 1;    ///< Anno Domini era identifier.
-    static constexpr int MinYear = 1;    ///< Minimum supported Gregorian year.
-    static constexpr int MaxYear = 9999; ///< Maximum supported Gregorian year.
+    static constexpr intcs ADEra   = 1;    ///< Anno Domini era identifier.
+    static constexpr intcs MinYear = 1;    ///< Minimum supported Gregorian year.
+    static constexpr intcs MaxYear = 9999; ///< Maximum supported Gregorian year.
 
     /**
      * @brief Constructs a GregorianCalendar with the Localized type.
@@ -85,7 +85,7 @@ public:
      * C++ counterpart of .NET GregorianCalendar.Eras.
      * @return A vector containing {ADEra}.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {ADEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {ADEra}; }
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -93,14 +93,14 @@ public:
      * C++ counterpart of .NET GregorianCalendar.GetEra(DateTime).
      * @return Always ADEra (1); the Gregorian calendar has a single era.
      */
-    [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return ADEra; }
+    [[nodiscard]] intcs GetEra(const System::DateTime& /*time*/) const override { return ADEra; }
 
     /**
      * @brief Returns the number of eras in this calendar.
      *
      * @return Always 1; the Gregorian calendar has only the Anno Domini era.
      */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
 
     /**
      * @brief Determines whether the specified year is a Gregorian leap year.
@@ -111,7 +111,7 @@ public:
      * @param era  The era (ignored; always AD).
      * @return true if @p year is a leap year; otherwise false.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int era = Calendar::CurrentEra) const override {
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs era = Calendar::CurrentEra) const override {
         (void)era;
         return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
     }

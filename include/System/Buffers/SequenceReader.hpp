@@ -8,6 +8,8 @@
 
 namespace System::Buffers {
 
+    using SharpRuntime::longcs;
+
     /**
      * @brief Provides forward-only, low-allocation reading of a ReadOnlySequence&lt;T&gt;.
      *
@@ -39,16 +41,16 @@ namespace System::Buffers {
          * @brief Returns the number of elements consumed so far.
          * @return Consumed element count.
          */
-        [[nodiscard]] long long getConsumedProperty() const noexcept {
-            return static_cast<long long>(consumed_);
+        [[nodiscard]] longcs getConsumedProperty() const noexcept {
+            return static_cast<longcs>(consumed_);
         }
 
         /**
          * @brief Returns the number of elements remaining to be read.
          * @return Remaining element count.
          */
-        [[nodiscard]] long long getRemainingProperty() const noexcept {
-            return static_cast<long long>(total() - consumed_);
+        [[nodiscard]] longcs getRemainingProperty() const noexcept {
+            return static_cast<longcs>(total() - consumed_);
         }
 
         /**
@@ -64,7 +66,7 @@ namespace System::Buffers {
          * @return Current position within the underlying sequence.
          */
         [[nodiscard]] System::SequencePosition getPositionProperty() const noexcept {
-            return sequence_.GetPosition(static_cast<long long>(consumed_));
+            return sequence_.GetPosition(static_cast<longcs>(consumed_));
         }
 
         /**
@@ -94,7 +96,7 @@ namespace System::Buffers {
          * @param count Number of elements to skip.
          * @throws System::ArgumentOutOfRangeException if count exceeds remaining elements.
          */
-        void Advance(long long count) {
+        void Advance(longcs count) {
             if (count < 0 || count > getRemainingProperty())
                 throw System::ArgumentOutOfRangeException("count");
             consumed_ += static_cast<int>(count);
@@ -121,7 +123,7 @@ namespace System::Buffers {
          * @throws System::ArgumentOutOfRangeException if count is negative or exceeds
          *         getConsumedProperty().
          */
-        void Rewind(long long count) {
+        void Rewind(longcs count) {
             if (count < 0 || count > getConsumedProperty())
                 throw System::ArgumentOutOfRangeException("count");
             consumed_ -= static_cast<int>(count);
@@ -135,8 +137,8 @@ namespace System::Buffers {
          * @brief Returns the total length of the underlying sequence.
          * @return Total number of elements in the sequence.
          */
-        [[nodiscard]] long long getLengthProperty() const noexcept {
-            return static_cast<long long>(total());
+        [[nodiscard]] longcs getLengthProperty() const noexcept {
+            return static_cast<longcs>(total());
         }
 
         /**
@@ -196,8 +198,8 @@ namespace System::Buffers {
          * C++ counterpart of .NET SequenceReader&lt;T&gt;.AdvancePast(T).
          * @return Number of elements skipped.
          */
-        int AdvancePast(const T& value) {
-            int count = 0;
+        longcs AdvancePast(const T& value) {
+            longcs count = 0;
             while (consumed_ < total() && segment_[consumed_] == value) {
                 ++consumed_;
                 ++count;

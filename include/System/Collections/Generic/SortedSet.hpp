@@ -135,6 +135,13 @@ public:
      * @param other The set of elements to remove.
      */
     void ExceptWith(const SortedSet<T>& other) {
+        // Same self-aliasing hazard as System::Collections::Generic::HashSet<T>::ExceptWith
+        // (ticket 324): without this guard, `s.ExceptWith(s)` iterates other.data_ while
+        // erasing from the exact same std::set, using an iterator the standard says is
+        // invalidated by that very erase call -- real UB even where it doesn't reliably crash
+        // under a given std::set implementation. Real .NET's SortedSet<T>.ExceptWith has the
+        // identical `if (other == this) { Clear(); return; }` special case.
+        if (&other == this) { data_.clear(); return; }
         for (const auto& x : other.data_) data_.erase(x);
     }
 
@@ -145,6 +152,9 @@ public:
      * @param other The set to compare to.
      */
     void SymmetricExceptWith(const SortedSet<T>& other) {
+        // Same self-aliasing hazard and fix as ExceptWith above -- real .NET's
+        // SortedSet<T>.SymmetricExceptWith also special-cases `other == this`.
+        if (&other == this) { data_.clear(); return; }
         for (const auto& x : other.data_) {
             auto it = data_.find(x);
             if (it != data_.end()) data_.erase(it);
@@ -225,9 +235,24 @@ public:
      * @brief Returns a view of elements in the inclusive range [@p lower, @p upper].
      *
      * C++ counterpart of .NET SortedSet<T>.GetViewBetween(T, T).
+     *
+     * @warning KNOWN DIVERGENCE FROM .NET, audited and left as documented rather than fixed:
+     * real .NET's GetViewBetween returns `new TreeSubSet(this, lowerValue, upperValue, ...)`, a
+     * genuine bidirectional LIVE VIEW backed by the SAME underlying tree as the original set --
+     * elements added to or removed from the view (within [lower, upper]) are reflected in the
+     * original set and vice versa. This port instead returns an independent COPY: mutating the
+     * returned SortedSet<T> has no effect on the original, and mutating the original after
+     * calling GetViewBetween is not reflected in the already-returned copy either. A faithful
+     * live view is not achievable on top of std::set (which has no notion of a mutable,
+     * bounded, write-through sub-range view) without replacing this type's entire internal
+     * representation with a hand-rolled tree structure matching .NET's own -- an architectural
+     * change far beyond a single audit ticket's scope, so this is documented rather than
+     * attempted. Ported C# code that relies on GetViewBetween's write-through semantics (e.g.
+     * `set.GetViewBetween(a, b).Add(x)` expecting `x` to also appear in the original set) will
+     * silently behave differently here.
      * @param lower The minimum value (inclusive).
      * @param upper The maximum value (inclusive).
-     * @return A new SortedSet<T> containing elements in the range.
+     * @return A new, independent SortedSet<T> containing a snapshot of elements in the range.
      * @throws System::ArgumentException if @p lower is greater than @p upper.
      */
     [[nodiscard]] SortedSet<T> GetViewBetween(const T& lower, const T& upper) const {

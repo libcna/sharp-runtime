@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <stdexcept>
+#include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/IPAddress.hpp"
@@ -14,6 +16,7 @@
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/Net/Sockets/UdpClient.hpp"
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#  include <cerrno>
 #  include <sys/socket.h>
 #  include <sys/un.h>
 #  include <unistd.h>
@@ -64,6 +67,18 @@ TEST(TcpClientTests, Connect_ConnectionRefused_SocketErrorCodeIsConnectionRefuse
     }
 }
 
+TEST(SocketExceptionTests, DefaultConstructor_CapturesLastErrno) {
+    // Real .NET's parameterless SocketException() captures the last OS socket error
+    // (Interop.Sys.GetLastErrorInfo() on Unix). This port had no equivalent constructor at all;
+    // added one that reads errno and reuses the same TranslateErrno() helper every other socket
+    // call site uses. Force a known errno (ENOTSOCK, via a bad fstat-style call) then construct.
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    errno = ENOTSOCK;
+    System::Net::Sockets::SocketException ex;
+    EXPECT_EQ(ex.getSocketErrorCodeProperty(), System::Net::Sockets::SocketError::NotSocket);
+#endif
+}
+
 TEST(TcpClientTests, Connect_EndPoint_ConnectionRefused_Throws) {
     TcpClient client;
     IPEndPoint ep(IPAddress::Loopback, 1);
@@ -89,6 +104,59 @@ TEST(TcpClientTests, GetStream_Throws_WhenNotConnected) {
     TcpClient client;
     EXPECT_THROW((void)client.GetStream(), System::InvalidOperationException);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+
+// Regression tests for ticket 336: real .NET's TcpClient.GetStream() caches and returns the SAME
+// NetworkStream instance on every call (TCPClient.cs: `return _dataStream ??= new
+// NetworkStream(Client, true);`). This port previously created a brand-new NetworkStream (a
+// fresh dup()'d fd) on every call -- and on Windows outright transferred fd_ away on the first
+// call, throwing InvalidOperationException on any second call.
+
+TEST(TcpClientTests, GetStream_ReturnsSameCachedInstance_OnRepeatedCalls) {
+    IPEndPoint listenEp(IPAddress::Parse("127.0.0.1"), 0);
+    TcpListener listener(listenEp);
+    listener.Start();
+    int port = listener.getLocalEndpointProperty().getPortProperty();
+
+    std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+    TcpClient client;
+    client.Connect("127.0.0.1", port);
+    serverThread.join();
+    listener.Stop();
+
+    auto s1 = client.GetStream();
+    auto s2 = client.GetStream();
+    EXPECT_EQ(s1.get(), s2.get());
+}
+
+TEST(TcpClientTests, GetStream_NewInstance_AfterReconnect) {
+    IPEndPoint listenEp(IPAddress::Parse("127.0.0.1"), 0);
+    TcpListener listener(listenEp);
+    listener.Start();
+    int port = listener.getLocalEndpointProperty().getPortProperty();
+
+    TcpClient client;
+    {
+        std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+        client.Connect("127.0.0.1", port);
+        serverThread.join();
+    }
+    auto first = client.GetStream();
+    client.Close();
+
+    {
+        std::thread serverThread([&]() { (void)listener.AcceptTcpClient(); });
+        client.Connect("127.0.0.1", port);
+        serverThread.join();
+    }
+    auto second = client.GetStream();
+    listener.Stop();
+
+    EXPECT_NE(first.get(), second.get());
+}
+
+#endif // !_WIN32 && !__EMSCRIPTEN__
 
 // ===========================================================================
 // TcpListener
@@ -172,6 +240,25 @@ TEST(UdpClientTests, Send_ThrowsWithoutConnect) {
     EXPECT_THROW((void)client.Send(data, 3), System::InvalidOperationException);
 }
 
+// Regression: Send() previously cast `bytes` straight to size_t with no bounds check at all,
+// letting an oversized (or negative, wrapping to huge) count read past the end of the datagram
+// buffer -- confirmed via a standalone ASan repro (heap-buffer-overflow) before this fix.
+TEST(UdpClientTests, Send_BytesExceedsBufferSize_Throws) {
+    UdpClient client;
+    IPEndPoint ep(IPAddress::Loopback, 12345);
+    client.Connect(ep);
+    std::vector<SharpRuntime::bytecs> data = {0x01, 0x02, 0x03};
+    EXPECT_THROW((void)client.Send(data, 1000), System::ArgumentOutOfRangeException);
+}
+
+TEST(UdpClientTests, Send_NegativeBytes_Throws) {
+    UdpClient client;
+    IPEndPoint ep(IPAddress::Loopback, 12345);
+    client.Connect(ep);
+    std::vector<SharpRuntime::bytecs> data = {0x01, 0x02, 0x03};
+    EXPECT_THROW((void)client.Send(data, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(UdpClientTests, Close_NoThrow) {
     UdpClient client;
     EXPECT_NO_THROW(client.Close());
@@ -233,6 +320,46 @@ TEST(NetworkStreamTests, CanRead_False_AfterClose) {
     ::close(fds[1]);
     ns.Close();
     EXPECT_FALSE(ns.getCanReadProperty());
+}
+
+// Regression: Read/Write had no argument validation at all, unlike this codebase's other Stream
+// implementations (e.g. FileStream::Read). A negative `count` wrapped to a huge size_t once cast
+// for the recv()/send() call, letting the kernel write past the end of a small destination
+// buffer -- confirmed via an ASan repro (stack-buffer-overflow) before this fix.
+TEST(NetworkStreamTests, Read_NegativeCount_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {};
+    EXPECT_THROW(ns.Read(buffer, 0, -1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Read_NegativeOffset_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {};
+    EXPECT_THROW(ns.Read(buffer, -1, 1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Write_NegativeCount_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ns.Write(buffer, 0, -1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Write_NegativeOffset_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ns.Write(buffer, -1, 1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
 }
 
 #endif // !_WIN32 && !__EMSCRIPTEN__

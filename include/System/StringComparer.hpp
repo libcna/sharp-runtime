@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -167,7 +168,11 @@ namespace System {
          * C++ counterpart of .NET OrdinalComparer.GetHashCode(string).
          */
         [[nodiscard]] SharpRuntime::intcs GetHashCode(const std::string& s) const override {
-            std::size_t h = std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+            // Widen to a fixed 64-bit type before shifting by 32 -- std::size_t is only 32
+            // bits on some targets (e.g. Emscripten's wasm32), where "h >> 32" would shift by
+            // the full width of the type (UB). Matches the identical fix already established
+            // in String::GetHashCode (src/System/String.cpp).
+            const auto h = static_cast<std::uint64_t>(std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s));
             return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
         }
     };
@@ -233,7 +238,9 @@ namespace System {
          * C++ counterpart of .NET CultureAwareComparer.GetHashCode(string).
          */
         [[nodiscard]] SharpRuntime::intcs GetHashCode(const std::string& s) const override {
-            std::size_t h = std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s);
+            // See OrdinalComparer::GetHashCode's comment: widen before shifting by 32 to
+            // avoid UB on targets where std::size_t is 32 bits (e.g. Emscripten's wasm32).
+            const auto h = static_cast<std::uint64_t>(std::hash<std::string>{}(ignoreCase_ ? toLower(s) : s));
             return static_cast<SharpRuntime::intcs>(h ^ (h >> 32));
         }
     };

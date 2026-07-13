@@ -158,6 +158,20 @@ TEST(UriTests, Loopback_ExternalHost_IsNotLoopback) {
     EXPECT_FALSE(u.getIsLoopbackProperty());
 }
 
+// Regression for ticket 340: the previous `host_ == "::1"` comparison could never match, since
+// a parsed IPv6 literal's host_ retains its surrounding brackets ("[::1]", matching .NET's own
+// bracketed Host property for IPv6). Also verifies "localhost" is matched case-insensitively,
+// per Uri.cs's DomainNameHelper (StringComparison.OrdinalIgnoreCase).
+TEST(UriTests, Loopback_IPv6_IsLoopback) {
+    Uri u("http://[::1]:8080/");
+    EXPECT_TRUE(u.getIsLoopbackProperty());
+}
+
+TEST(UriTests, Loopback_LocalhostUppercase_IsLoopback) {
+    Uri u("http://LOCALHOST/");
+    EXPECT_TRUE(u.getIsLoopbackProperty());
+}
+
 // ---------------------------------------------------------------------------
 // Relative URI
 // ---------------------------------------------------------------------------
@@ -311,4 +325,79 @@ TEST(UriTests, DefaultPort_UnregisteredScheme_IsMinusOne) {
     // "ssh" is not a .NET built-in scheme and has no default port.
     Uri u("ssh://host/");
     EXPECT_EQ(u.getPortProperty(), -1);
+}
+
+// ---------------------------------------------------------------------------
+// Malformed port — verified against Uri.cs's port-parsing loop (ParsingError.BadPort for a
+// non-digit character in the port position, or a value > 0xFFFF; both surface as
+// UriFormatException). The previous code let std::stoi's exception fall through to
+// `host_ = authority`, silently mangling host_ into the whole "host:badport" text instead of
+// rejecting the URI, and didn't range-check a successfully-parsed but oversized port at all.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Port_NonNumeric_Throws) {
+    EXPECT_THROW(Uri("http://example.com:abc/path"), System::UriFormatException);
+}
+
+TEST(UriTests, Port_TooLarge_Throws) {
+    EXPECT_THROW(Uri("http://example.com:99999/path"), System::UriFormatException);
+}
+
+TEST(UriTests, Port_IntOverflow_Throws) {
+    EXPECT_THROW(Uri("http://example.com:99999999999999999999/path"), System::UriFormatException);
+}
+
+TEST(UriTests, Port_MaxValid_Parsed) {
+    Uri u("http://example.com:65535/path");
+    EXPECT_EQ(u.getPortProperty(), 65535);
+}
+
+// ---------------------------------------------------------------------------
+// Combine with an opaque (non-"//"-form) absolute relativeUri — verified against Uri.cs's
+// CreateUri/ResolveHelper: relativeUri is parsed standalone first, and if it is itself absolute
+// (hierarchical OR opaque), the base is discarded entirely. The previous check only recognized
+// the "://" hierarchical form via a raw substring search.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Combine_OpaqueAbsoluteRelative_DiscardsBase) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "mailto:user@example.com");
+    EXPECT_EQ(combined.getSchemeProperty(), "mailto");
+    EXPECT_EQ(combined.getAbsolutePathProperty(), "user@example.com");
+}
+
+TEST(UriTests, Combine_UrnAbsoluteRelative_DiscardsBase) {
+    Uri base("http://example.com/a/b/");
+    Uri combined(base, "urn:isbn:0-395-36341-1");
+    EXPECT_EQ(combined.getSchemeProperty(), "urn");
+}
+
+// ---------------------------------------------------------------------------
+// Combine preserves the base's userInfo — RFC 3986 §5.3: "if defined, userinfo, host, port
+// [are] copied from base" into the merged authority. The previous code omitted
+// baseUri.userInfo_ entirely when reconstructing the merged authority string.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, Combine_PreservesBaseUserInfo) {
+    Uri base("http://user:pass@example.com/a/b/");
+    Uri combined(base, "c");
+    EXPECT_EQ(combined.getUserInfoProperty(), "user:pass");
+    EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://user:pass@example.com/a/b/c");
+}
+
+// ---------------------------------------------------------------------------
+// OriginalString -- was entirely missing from this port (C++ counterpart of
+// .NET Uri.OriginalString), unlike getAbsoluteUriProperty() which existed but
+// is documented (per real .NET semantics) to sometimes differ.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, OriginalString_MatchesConstructorInput) {
+    Uri u("http://example.com/path?q=1#frag");
+    EXPECT_EQ(u.getOriginalStringProperty(), "http://example.com/path?q=1#frag");
+}
+
+TEST(UriTests, OriginalString_WorksForRelativeUri) {
+    // Real .NET's AbsoluteUri throws for a relative Uri; OriginalString never does.
+    Uri u("relative/path", UriKind::Relative);
+    EXPECT_EQ(u.getOriginalStringProperty(), "relative/path");
 }

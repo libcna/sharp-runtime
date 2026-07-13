@@ -157,13 +157,33 @@ namespace System {
 
         /** @brief Returns the query string (includes leading '?' if non-empty). */
         [[nodiscard]] const std::string& getQueryProperty()    const noexcept { return query_; }
-        /** @brief Sets the query string (with or without leading '?'). */
-        void setQueryProperty(const std::string& v)                           { query_ = v; }
+        /**
+         * @brief Sets the query string (with or without leading '?').
+         *
+         * C++ counterpart of .NET UriBuilder.Query. Real .NET's setter normalizes by
+         * prepending '?' when the supplied value is non-empty and doesn't already start with
+         * one, so a subsequent getQueryProperty() always returns the '?'-prefixed form --
+         * this port previously stored the raw value verbatim, so
+         * setQueryProperty("foo=bar")/getQueryProperty() round-tripped to "foo=bar" instead of
+         * "?foo=bar" (confirmed via a standalone repro before fixing). ToString() itself was
+         * unaffected since it already compensated by conditionally prepending '?' at render
+         * time, but the property getter's return value diverged from .NET's actual contract.
+         */
+        void setQueryProperty(const std::string& v) {
+            query_ = (!v.empty() && v[0] != '?') ? '?' + v : v;
+        }
 
         /** @brief Returns the fragment (includes leading '#' if non-empty). */
         [[nodiscard]] const std::string& getFragmentProperty() const noexcept { return fragment_; }
-        /** @brief Sets the fragment (with or without leading '#'). */
-        void setFragmentProperty(const std::string& v)                        { fragment_ = v; }
+        /**
+         * @brief Sets the fragment (with or without leading '#').
+         *
+         * C++ counterpart of .NET UriBuilder.Fragment. Same normalize-on-set fix as
+         * setQueryProperty() above, mirroring real .NET's Fragment setter.
+         */
+        void setFragmentProperty(const std::string& v) {
+            fragment_ = (!v.empty() && v[0] != '#') ? '#' + v : v;
+        }
 
         /** @brief Returns the user-name component of the user-info. */
         [[nodiscard]] const std::string& getUserNameProperty() const noexcept { return userName_; }

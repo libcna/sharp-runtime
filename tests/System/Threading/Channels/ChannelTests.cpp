@@ -57,6 +57,24 @@ TEST(ChannelTests, BoundedChannel_DropOldest) {
     EXPECT_EQ(b, 3);
 }
 
+// Verified against BoundedChannel.cs's DropNewest handling (DequeueTail): the item removed to
+// make room is the most-recently-written one, not the oldest -- easy to accidentally swap with
+// DropOldest's DequeueHead, so this pins the distinction explicitly rather than relying only on
+// DropOldest's existing coverage.
+TEST(ChannelTests, BoundedChannel_DropNewest) {
+    BoundedChannelOptions options(2);
+    options.FullMode = BoundedChannelFullMode::DropNewest;
+    auto channel = Channel<int>::CreateBounded(options);
+    channel.Writer->TryWrite(1);
+    channel.Writer->TryWrite(2);
+    EXPECT_TRUE(channel.Writer->TryWrite(3)); // drops 2 (newest), keeps [1,3]
+    int a, b;
+    channel.Reader->TryRead(a);
+    channel.Reader->TryRead(b);
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 3);
+}
+
 TEST(ChannelTests, BoundedChannel_DropWrite) {
     BoundedChannelOptions options(1);
     options.FullMode = BoundedChannelFullMode::DropWrite;

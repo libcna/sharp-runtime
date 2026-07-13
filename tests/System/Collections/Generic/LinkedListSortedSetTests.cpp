@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/LinkedList.hpp"
 #include "System/Collections/Generic/SortedSet.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -282,6 +284,43 @@ TEST(LinkedListTests, AddAfter_NodeFromOtherList_ThrowsInvalidOperationException
     EXPECT_THROW(ll1.AddAfter(foreignNode, 2), System::InvalidOperationException);
 }
 
+TEST(LinkedListTests, CopyTo_Basic) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    std::vector<int> dest(5, 0);
+    ll.CopyTo(dest, 1);
+    EXPECT_EQ(dest[0], 0);
+    EXPECT_EQ(dest[1], 1);
+    EXPECT_EQ(dest[2], 2);
+    EXPECT_EQ(dest[3], 3);
+    EXPECT_EQ(dest[4], 0);
+}
+
+TEST(LinkedListTests, CopyTo_NegativeIndex_ThrowsArgumentOutOfRangeException) {
+    LinkedList<int> ll;
+    ll.AddLast(1);
+    std::vector<int> dest(5, 0);
+    EXPECT_THROW(ll.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(LinkedListTests, CopyTo_IndexBeyondEmptyDest_ThrowsArgumentOutOfRangeException) {
+    // Regression: real .NET's LinkedList<T>.CopyTo treats "index > array.Length" as a distinct
+    // ArgumentOutOfRangeException, separate from the ArgumentException thrown for insufficient
+    // remaining space -- an out-of-bounds index against an EMPTY source list previously threw
+    // the wrong exception type (ArgumentException) here, since both cases were conflated into
+    // one check.
+    LinkedList<int> ll; // empty
+    std::vector<int> dest(3, 0);
+    EXPECT_THROW(ll.CopyTo(dest, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(LinkedListTests, CopyTo_InsufficientSpace_ThrowsArgumentException) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    std::vector<int> dest(2, 0);
+    EXPECT_THROW(ll.CopyTo(dest, 0), System::ArgumentException);
+}
+
 // ---------------------------------------------------------------------------
 // SortedSet<T>
 // ---------------------------------------------------------------------------
@@ -471,6 +510,21 @@ TEST(SortedSetTests, SymmetricExceptWith_EmptyOther_Unchanged) {
     SortedSet<int> b;
     a.SymmetricExceptWith(b);
     EXPECT_EQ(a.getCountProperty(), 2);
+}
+// Regression tests: ExceptWith/SymmetricExceptWith previously erased from data_ while
+// iterating other.data_ with no guard for `other` aliasing `this` -- real UB (an iterator to
+// an erased element, used again by the range-for loop), matching the identical bug just found
+// and fixed in HashSet<T> (ticket 324). Real .NET's SortedSet<T> explicitly special-cases
+// `other == this` in both methods for exactly this reason.
+TEST(SortedSetTests, ExceptWith_Self_ClearsSet) {
+    SortedSet<int> a{1, 2, 3, 4, 5};
+    a.ExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
+}
+TEST(SortedSetTests, SymmetricExceptWith_Self_ClearsSet) {
+    SortedSet<int> a{1, 2, 3, 4, 5};
+    a.SymmetricExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
 }
 TEST(SortedSetTests, IsProperSubsetOf_True) {
     SortedSet<int> a{1, 2};

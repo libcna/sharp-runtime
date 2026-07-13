@@ -4,8 +4,11 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides information about the version of Unicode used to compare and order strings.
@@ -15,7 +18,7 @@ namespace System::Globalization {
  * and Unicode tables.
  */
 class SortVersion {
-    int fullVersion_;
+    intcs fullVersion_;
     std::array<uint8_t, 16> sortId_ = {};
 
 public:
@@ -25,7 +28,7 @@ public:
      * C++ counterpart of .NET SortVersion(int, Guid) — Guid defaults to all zeros.
      * @param fullVersion The full numeric version of the sort tables.
      */
-    explicit SortVersion(int fullVersion)
+    explicit SortVersion(intcs fullVersion)
         : fullVersion_(fullVersion) {}
 
     /**
@@ -35,7 +38,7 @@ public:
      * @param fullVersion The full numeric version of the sort tables.
      * @param sortId      A 16-byte identifier for the sort tables.
      */
-    SortVersion(int fullVersion, const std::array<uint8_t, 16>& sortId)
+    SortVersion(intcs fullVersion, const std::array<uint8_t, 16>& sortId)
         : fullVersion_(fullVersion), sortId_(sortId) {}
 
     /**
@@ -44,7 +47,7 @@ public:
      * C++ counterpart of .NET SortVersion.FullVersion.
      * @return The full version integer.
      */
-    [[nodiscard]] int getFullVersionProperty() const { return fullVersion_; }
+    [[nodiscard]] intcs getFullVersionProperty() const { return fullVersion_; }
 
     /**
      * @brief Gets the globally unique identifier for the sort tables.
@@ -71,8 +74,8 @@ public:
      * C++ counterpart of .NET SortVersion.GetHashCode().
      * @return A hash derived from fullVersion and the first 4 bytes of sortId.
      */
-    [[nodiscard]] int GetHashCode() const {
-        int h = fullVersion_;
+    [[nodiscard]] intcs GetHashCode() const {
+        intcs h = fullVersion_;
         for (int i = 0; i < 4 && i < static_cast<int>(sortId_.size()); ++i)
             h = h * 31 + sortId_[i];
         return h;

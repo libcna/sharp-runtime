@@ -8,6 +8,7 @@
 #include "System/Attribute.hpp"
 #include "System/Text/Json/Serialization/JsonNumberHandling.hpp"
 #include "System/Text/Json/Serialization/JsonObjectCreationHandling.hpp"
+#include "System/Text/Json/Serialization/JsonUnknownDerivedTypeHandling.hpp"
 #include "System/Text/Json/Serialization/JsonUnmappedMemberHandling.hpp"
 
 namespace System::Text::Json::Serialization {
@@ -145,8 +146,14 @@ namespace System::Text::Json::Serialization {
     /** @brief Enables polymorphic type serialization for a base class. */
     class JsonPolymorphicAttribute : public JsonAttribute {
     public:
-        /** @brief Controls how unknown derived types are handled. */
-        bool UnknownDerivedTypeHandling = false;
+        /**
+         * @brief Controls how unknown derived types are handled.
+         * @note Real .NET types this JsonUnknownDerivedTypeHandling, not bool -- an earlier
+         * version of this port declared it as bool, which would silently discard everything but
+         * FailSerialization/FallBackToBaseType and could never represent
+         * FallBackToNearestAncestor.
+         */
+        JsonUnknownDerivedTypeHandling UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling::FailSerialization;
         /** @brief Controls whether unrecognized type discriminators are ignored. */
         bool IgnoreUnrecognizedTypeDiscriminators = false;
         /** @brief The JSON property name used as a type discriminator. */

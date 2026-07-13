@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <cstdint>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System {
 
@@ -18,7 +19,7 @@ namespace System {
         /** @brief The segment object (may be null for single-segment sequences). */
         void* object_ = nullptr;
         /** @brief The integer offset within the segment. */
-        int   integer_ = 0;
+        SharpRuntime::intcs integer_ = 0;
 
         /** @brief Default constructor — represents position zero with no segment. */
         SequencePosition() = default;
@@ -28,13 +29,13 @@ namespace System {
          * @param object  Pointer to the segment object (may be null).
          * @param integer Integer offset within the segment.
          */
-        SequencePosition(void* object, int integer) noexcept
+        SequencePosition(void* object, SharpRuntime::intcs integer) noexcept
             : object_(object), integer_(integer) {}
 
         /** @brief Returns the segment object pointer. */
         [[nodiscard]] void* GetObject() const noexcept { return object_; }
         /** @brief Returns the integer offset. */
-        [[nodiscard]] int   GetInteger() const noexcept { return integer_; }
+        [[nodiscard]] SharpRuntime::intcs GetInteger() const noexcept { return integer_; }
 
         /** @brief Returns true if both positions refer to the same location. */
         [[nodiscard]] bool operator==(const SequencePosition& o) const noexcept {

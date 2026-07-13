@@ -737,6 +737,12 @@ TEST(StringTests, ToCharArray_Range_Basic) {
 TEST(StringTests, ToCharArray_Range_OutOfBounds_Throws) {
     EXPECT_THROW(String::ToCharArray("hi", 1, 5), System::ArgumentOutOfRangeException);
 }
+// Regression test (ticket 1487): startIndex+length used to be computed directly in intcs
+// (int32) arithmetic, which overflows for large inputs and silently bypasses the bounds check
+// instead of throwing -- same bug class as Span<T>::Slice (ticket 265).
+TEST(StringTests, ToCharArray_Range_StartIndexPlusLengthOverflow_Throws) {
+    EXPECT_THROW(String::ToCharArray("hi", 2147483647, 10), System::ArgumentOutOfRangeException);
+}
 TEST(StringTests, ToCharArray_Range_ZeroLength) {
     auto v = String::ToCharArray("hello", 2, 0);
     EXPECT_TRUE(v.empty());

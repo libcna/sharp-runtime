@@ -34,6 +34,7 @@ using System::Xml::XmlWriter;
 using System::Xml::Linq::XAttribute;
 using System::Xml::Linq::XCData;
 using System::Xml::Linq::XComment;
+using System::Xml::Linq::XDeclaration;
 using System::Xml::Linq::XDocument;
 using System::Xml::Linq::XDocumentType;
 using System::Xml::Linq::XElement;
@@ -373,6 +374,24 @@ TEST(XDocumentTypeTests, PublicAndSystemId) {
     EXPECT_EQ(dt.ToString(), "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"xhtml1.dtd\">");
 }
 
+// Real .NET's XDeclaration.ToString() omits each of version/encoding/standalone individually
+// when unset (null) -- it does NOT default-fill version to "1.0" the way an earlier version of
+// this port's ToString() did (inconsistent with how encoding/standalone were already handled).
+TEST(XDeclarationTests, ToString_AllFieldsSet) {
+    XDeclaration decl("1.0", "utf-8", "yes");
+    EXPECT_EQ(decl.ToString(), "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>");
+}
+
+TEST(XDeclarationTests, ToString_EmptyVersion_OmitsVersionAttribute) {
+    XDeclaration decl("", "utf-8", "");
+    EXPECT_EQ(decl.ToString(), "<?xml encoding=\"utf-8\"?>");
+}
+
+TEST(XDeclarationTests, ToString_AllFieldsEmpty_JustXmlPI) {
+    XDeclaration decl("", "", "");
+    EXPECT_EQ(decl.ToString(), "<?xml?>");
+}
+
 // ===========================================================================
 // WriteTo(XmlWriter&)
 // ===========================================================================
@@ -709,4 +728,55 @@ TEST(ExtensionsTests, Ancestors_ReturnsParentChain) {
     ASSERT_EQ(ancestors.size(), 2u);
     EXPECT_EQ(ancestors[0], mid.get());
     EXPECT_EQ(ancestors[1], root.get());
+}
+
+// Real .NET's Extensions.cs also exposes Attributes(source, name), Ancestors(source, name), and
+// AncestorsAndSelf(source[, name]) -- all four were missing from this port's Extensions.hpp
+// despite AncestorsAndSelf being explicitly listed as in-scope in the file's own class
+// doc-comment. Added to close that gap.
+
+TEST(ExtensionsTests, Attributes_WithNameFilter) {
+    auto e1 = std::make_shared<XElement>("a");
+    e1->Add(std::make_shared<XAttribute>("k1", "v1"));
+    e1->Add(std::make_shared<XAttribute>("k2", "x"));
+    auto e2 = std::make_shared<XElement>("b");
+    e2->Add(std::make_shared<XAttribute>("k1", "v2"));
+    std::vector<std::shared_ptr<XElement>> source{e1, e2};
+    auto result = System::Xml::Linq::Extensions::Attributes(source, XName("k1"));
+    ASSERT_EQ(result.size(), 2u);
+    EXPECT_EQ(result[0]->getValueProperty(), "v1");
+    EXPECT_EQ(result[1]->getValueProperty(), "v2");
+}
+
+TEST(ExtensionsTests, Ancestors_WithNameFilter) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    auto leaf = std::make_shared<XElement>("leaf");
+    root->Add(mid);
+    mid->Add(leaf);
+    std::vector<std::shared_ptr<XNode>> source{std::static_pointer_cast<XNode>(leaf)};
+    auto ancestors = System::Xml::Linq::Extensions::Ancestors(source, XName("root"));
+    ASSERT_EQ(ancestors.size(), 1u);
+    EXPECT_EQ(ancestors[0], root.get());
+}
+
+TEST(ExtensionsTests, AncestorsAndSelf_IncludesSourceElement) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    root->Add(mid);
+    std::vector<std::shared_ptr<XElement>> source{mid};
+    auto result = System::Xml::Linq::Extensions::AncestorsAndSelf(source);
+    ASSERT_EQ(result.size(), 2u);
+    EXPECT_EQ(result[0], mid.get());
+    EXPECT_EQ(result[1], root.get());
+}
+
+TEST(ExtensionsTests, AncestorsAndSelf_WithNameFilter) {
+    auto root = std::make_shared<XElement>("root");
+    auto mid = std::make_shared<XElement>("mid");
+    root->Add(mid);
+    std::vector<std::shared_ptr<XElement>> source{mid};
+    auto result = System::Xml::Linq::Extensions::AncestorsAndSelf(source, XName("root"));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0], root.get());
 }

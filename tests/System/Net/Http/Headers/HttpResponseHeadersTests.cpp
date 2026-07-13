@@ -29,6 +29,22 @@ TEST(HttpResponseHeadersTests, Age_Invalid_ReturnsNullopt) {
     EXPECT_FALSE(h.getAgeProperty().has_value());
 }
 
+// Regression test for ticket 318: real .NET's Age header uses TimeSpanHeaderParser, whose
+// HttpRuleParser.GetNumberLength counts a run of pure DIGIT characters (delta-seconds =
+// 1*DIGIT grammar, no sign allowed at all). getAgeProperty used std::stoll directly, whose
+// leading-sign tolerance let "+5" through -- the same bug class already fixed in
+// CacheControlHeaderValue::tryParseSeconds for max-age/s-maxage/min-fresh.
+TEST(HttpResponseHeadersTests, Age_LeadingPlusSign_ReturnsNullopt) {
+    HttpResponseHeaders h;
+    h.Add("Age", "+5");
+    EXPECT_FALSE(h.getAgeProperty().has_value());
+}
+TEST(HttpResponseHeadersTests, Age_LeadingMinusSign_ReturnsNullopt) {
+    HttpResponseHeaders h;
+    h.Add("Age", "-5");
+    EXPECT_FALSE(h.getAgeProperty().has_value());
+}
+
 TEST(HttpResponseHeadersTests, ETag_RoundTrips) {
     HttpResponseHeaders h;
     h.setETagProperty(EntityTagHeaderValue("\"abc123\""));

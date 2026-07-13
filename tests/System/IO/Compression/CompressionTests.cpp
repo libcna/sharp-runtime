@@ -147,6 +147,29 @@ TEST(GZipStreamTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(gz.Close());
 }
 
+TEST(GZipStreamTests, CompressThenDecompress_Roundtrip) {
+    MemoryStream compressed;
+    {
+        GZipStream gz(&compressed, CompressionMode::Compress, /*leaveOpen=*/true);
+        std::string payload = "GZipStream roundtrip payload, long enough to compress well.";
+        gz.Write(reinterpret_cast<const uint8_t*>(payload.data()), 0, static_cast<int>(payload.size()));
+        gz.Close();
+    }
+
+    const auto& buf = compressed.ToArray();
+    // A gzip stream starts with the fixed 2-byte magic number 0x1F 0x8B.
+    ASSERT_GE(buf.size(), 2u);
+    EXPECT_EQ(buf[0], 0x1Fu);
+    EXPECT_EQ(buf[1], 0x8Bu);
+
+    MemoryStream source(buf.data(), static_cast<int>(buf.size()));
+    GZipStream ungz(&source, CompressionMode::Decompress, /*leaveOpen=*/true);
+    uint8_t out[128] = {};
+    int n = ungz.Read(out, 0, 128);
+    std::string result(reinterpret_cast<char*>(out), static_cast<size_t>(n));
+    EXPECT_EQ(result, "GZipStream roundtrip payload, long enough to compress well.");
+}
+
 // ===========================================================================
 // DeflateStream
 // ===========================================================================
@@ -199,6 +222,26 @@ TEST(DeflateStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_NO_THROW(ds.Close());
+}
+
+TEST(DeflateStreamTests, CompressThenDecompress_Roundtrip) {
+    MemoryStream compressed;
+    {
+        DeflateStream ds(&compressed, CompressionMode::Compress, /*leaveOpen=*/true);
+        std::string payload = "DeflateStream roundtrip payload, long enough to compress well.";
+        ds.Write(reinterpret_cast<const uint8_t*>(payload.data()), 0, static_cast<int>(payload.size()));
+        ds.Close();
+    }
+
+    const auto& buf = compressed.ToArray();
+    ASSERT_GT(buf.size(), 0u);
+
+    MemoryStream source(buf.data(), static_cast<int>(buf.size()));
+    DeflateStream unds(&source, CompressionMode::Decompress, /*leaveOpen=*/true);
+    uint8_t out[128] = {};
+    int n = unds.Read(out, 0, 128);
+    std::string result(reinterpret_cast<char*>(out), static_cast<size_t>(n));
+    EXPECT_EQ(result, "DeflateStream roundtrip payload, long enough to compress well.");
 }
 
 // ===========================================================================
@@ -438,6 +481,26 @@ TEST(ZipArchiveTests, CreateAndReadBack_RoundTrip) {
     EXPECT_EQ(out[0], 'H');
     EXPECT_EQ(out[1], 'i');
     EXPECT_EQ(out[2], '!');
+}
+
+// Regression test for ticket 309: the write-mode entry stream's Write(data, offset, count)
+// used `offset` completely unchecked in `data + offset`, computing a pointer before the start
+// of the caller's buffer for a negative offset -- confirmed via a standalone ASan repro as a
+// genuine stack-buffer-overflow read before this fix, not just a wrong-exception-type issue.
+TEST(ZipArchiveTests, EntryWriteStream_NegativeOffset_Throws) {
+    ZipArchive z("/tmp/sharpruntimetest_negoffset.zip", ZipArchiveMode::Create);
+    auto entry = z.CreateEntry("x.txt");
+    std::unique_ptr<System::IO::Stream> s(entry.Open());
+    const uint8_t data[] = {'a', 'b', 'c'};
+    EXPECT_THROW(s->Write(data, -1, 3), System::ArgumentOutOfRangeException);
+}
+
+TEST(ZipArchiveTests, EntryWriteStream_ZeroCount_IsNoOp) {
+    ZipArchive z("/tmp/sharpruntimetest_zerocount.zip", ZipArchiveMode::Create);
+    auto entry = z.CreateEntry("x.txt");
+    std::unique_ptr<System::IO::Stream> s(entry.Open());
+    const uint8_t data[] = {'a', 'b', 'c'};
+    EXPECT_NO_THROW(s->Write(data, 0, 0));
 }
 
 TEST(ZipArchiveTests, CreateMultipleEntries) {
@@ -712,6 +775,16 @@ TEST(DeflateEncoderDecoderTests, GetMaxCompressedLength_NegativeThrows) {
     EXPECT_THROW(DeflateEncoder::GetMaxCompressedLength(-1), System::ArgumentOutOfRangeException);
 }
 
+// Regression test: for inputs above 2^31, GetMaxCompressedLength must not truncate the length
+// through a 32-bit zlib uLong before computing the bound (a real hazard on platforms where
+// `unsigned long` is 32 bits, e.g. Windows) -- it must use the managed zlib-ng formula fallback
+// instead and still return a value strictly larger than the (untruncated) input.
+TEST(DeflateEncoderDecoderTests, GetMaxCompressedLength_AboveTwoGiB_DoesNotTruncate) {
+    const SharpRuntime::longcs above2GiB = (SharpRuntime::longcs(1) << 31) + 12345;
+    SharpRuntime::longcs bound = DeflateEncoder::GetMaxCompressedLength(above2GiB);
+    EXPECT_GT(bound, above2GiB);
+}
+
 // ===========================================================================
 // GZipDecoder / GZipEncoder (streamless)
 // ===========================================================================
@@ -894,6 +967,33 @@ TEST(ZipFileTests, OpenRead_NonExistentDirectory_Throws) {
     EXPECT_THROW(
         ZipFile::CreateFromDirectory("/tmp/sharp_rt_zipfile_missing_src", "/tmp/sharp_rt_zipfile_missing.zip"),
         System::IO::DirectoryNotFoundException);
+}
+
+// Regression test for a "Zip Slip" path-traversal bug: ExtractToDirectory previously combined a
+// malicious entry name like "../evil.txt" with the destination directory via Path::Combine with
+// no bounds check, so extraction could write files outside the specified destination directory
+// entirely. Real .NET's ExtractRelativeToDirectoryCheckIfFile guards against exactly this by
+// resolving the full destination path and rejecting it with an IOException unless it stays under
+// the destination directory -- mirrored here.
+TEST(ZipFileTests, ExtractToDirectory_EntryEscapesDestination_Throws) {
+    const std::string archivePath = "/tmp/sharp_rt_zipslip_test.zip";
+    const std::string destDir = "/tmp/sharp_rt_zipslip_dest";
+    const std::string escapedFile = "/tmp/sharp_rt_zipslip_evil.txt";
+    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
+
+    {
+        ZipArchive archive(archivePath, ZipArchiveMode::Create);
+        auto entry = archive.CreateEntry("../sharp_rt_zipslip_evil.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'p', 'w', 'n', 'e', 'd'};
+        s->Write(data, 0, 5);
+    }
+
+    EXPECT_THROW(ZipFile::ExtractToDirectory(archivePath, destDir), System::IO::IOException);
+    // The escaped file must never have been written.
+    EXPECT_FALSE(File::Exists(escapedFile));
+
+    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
 }
 
 TEST(ZipFileExtensionsTests, CreateEntryFromFile_ExtractToFile_Roundtrip) {

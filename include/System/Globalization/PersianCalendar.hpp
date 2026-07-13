@@ -7,12 +7,15 @@
 #include <cmath>
 #include <stdexcept>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Math.hpp"
 #include "System/TimeSpan.hpp"
 #include "System/Globalization/Calendar.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Represents the Persian (Solar Hijri) calendar.
@@ -31,7 +34,7 @@ namespace System::Globalization {
  */
 class PersianCalendar : public Calendar {
 public:
-    static constexpr int PersianEra = 1; ///< The only era value for this calendar.
+    static constexpr intcs PersianEra = 1; ///< The only era value for this calendar.
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -73,7 +76,7 @@ public:
      * C++ counterpart of .NET PersianCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 1410).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
+    [[nodiscard]] intcs getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
@@ -83,7 +86,7 @@ public:
      * @throws System::InvalidOperationException if this instance is read-only.
      * @throws System::ArgumentOutOfRangeException if @p value is outside [99, MaxCalendarYear].
      */
-    void setTwoDigitYearMaxProperty(int value) override {
+    void setTwoDigitYearMaxProperty(intcs value) override {
         VerifyWritable();
         if (value < 99 || value > MaxCalendarYear)
             throw System::ArgumentOutOfRangeException("value", std::to_string(value),
@@ -98,7 +101,7 @@ public:
      * @return Always PersianEra (1).
      * @throws System::ArgumentOutOfRangeException if @p time is outside the supported range.
      */
-    [[nodiscard]] int GetEra(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetEra(const System::DateTime& time) const override {
         CheckTicksRange(time.getTicksProperty());
         return PersianEra;
     }
@@ -108,7 +111,7 @@ public:
      *
      * @return Always 1; the Persian calendar has a single era.
      */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
 
     /**
      * @brief Gets the list of era identifiers supported by this calendar.
@@ -116,7 +119,7 @@ public:
      * C++ counterpart of .NET PersianCalendar.Eras.
      * @return A vector containing {PersianEra}.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {PersianEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {PersianEra}; }
 
     /**
      * @brief Returns the Persian year corresponding to the given DateTime.
@@ -125,7 +128,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The Persian year.
      */
-    [[nodiscard]] int GetYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetYear(const System::DateTime& time) const override {
         int y, m, d, doy;
         GetDate(time.getTicksProperty(), y, m, d, doy);
         return y;
@@ -138,7 +141,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The Persian month (1–12).
      */
-    [[nodiscard]] int GetMonth(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetMonth(const System::DateTime& time) const override {
         int y, m, d, doy;
         GetDate(time.getTicksProperty(), y, m, d, doy);
         return m;
@@ -151,7 +154,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The day of the Persian month (1–31).
      */
-    [[nodiscard]] int GetDayOfMonth(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetDayOfMonth(const System::DateTime& time) const override {
         int y, m, d, doy;
         GetDate(time.getTicksProperty(), y, m, d, doy);
         return d;
@@ -167,7 +170,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The day of the Persian year (1–366).
      */
-    [[nodiscard]] int GetDayOfYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetDayOfYear(const System::DateTime& time) const override {
         int y, m, d, doy;
         GetDate(time.getTicksProperty(), y, m, d, doy);
         return doy;
@@ -183,7 +186,7 @@ public:
      * @return true if @p year is a Persian leap year; otherwise false.
      * @throws System::ArgumentOutOfRangeException if @p year or @p era is out of range.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int era = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs era = CurrentEra) const override {
         CheckYearRange(year, era);
         if (year == MaxCalendarYear) return false;
         return (GetAbsoluteDatePersian(year + 1, 1, 1) - GetAbsoluteDatePersian(year, 1, 1)) == 366;
@@ -200,7 +203,7 @@ public:
      * @return The number of days in the specified month.
      * @throws System::ArgumentOutOfRangeException if @p year, @p month, or @p era is out of range.
      */
-    [[nodiscard]] int GetDaysInMonth(int year, int month, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInMonth(intcs year, intcs month, intcs era = CurrentEra) const override {
         CheckYearMonthRange(year, month, era);
         if (month == MaxCalendarMonth && year == MaxCalendarYear) return MaxCalendarDay;
         int daysInMonth = DaysToMonth[static_cast<size_t>(month)] - DaysToMonth[static_cast<size_t>(month) - 1];
@@ -217,7 +220,7 @@ public:
      * @return 366 for leap years, 365 otherwise.
      * @throws System::ArgumentOutOfRangeException if @p year or @p era is out of range.
      */
-    [[nodiscard]] int GetDaysInYear(int year, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInYear(intcs year, intcs era = CurrentEra) const override {
         CheckYearRange(year, era);
         if (year == MaxCalendarYear)
             return DaysToMonth[static_cast<size_t>(MaxCalendarMonth) - 1] + MaxCalendarDay;
@@ -233,7 +236,7 @@ public:
      * @return 12, except MaxCalendarMonth (10) in the final supported year.
      * @throws System::ArgumentOutOfRangeException if @p year or @p era is out of range.
      */
-    [[nodiscard]] int GetMonthsInYear(int year, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetMonthsInYear(intcs year, intcs era = CurrentEra) const override {
         CheckYearRange(year, era);
         return (year == MaxCalendarYear) ? MaxCalendarMonth : 12;
     }
@@ -248,7 +251,7 @@ public:
      * @return Always 0.
      * @throws System::ArgumentOutOfRangeException if @p year or @p era is out of range.
      */
-    [[nodiscard]] int GetLeapMonth(int year, int era = CurrentEra) const override {
+    [[nodiscard]] intcs GetLeapMonth(intcs year, intcs era = CurrentEra) const override {
         CheckYearRange(year, era);
         return 0;
     }
@@ -264,7 +267,7 @@ public:
      * @return Always false.
      * @throws System::ArgumentOutOfRangeException if @p year, @p month, or @p era is out of range.
      */
-    [[nodiscard]] bool IsLeapMonth(int year, int month, int era = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapMonth(intcs year, intcs month, intcs era = CurrentEra) const override {
         CheckYearMonthRange(year, month, era);
         return false;
     }
@@ -282,7 +285,7 @@ public:
      * @return true if the date is month 12, day 30 of a leap year; otherwise false.
      * @throws System::ArgumentOutOfRangeException if any component is out of range.
      */
-    [[nodiscard]] bool IsLeapDay(int year, int month, int day, int era = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapDay(intcs year, intcs month, intcs day, intcs era = CurrentEra) const override {
         int daysInMonth = GetDaysInMonth(year, month, era);
         if (day < 1 || day > daysInMonth)
             throw System::ArgumentOutOfRangeException("day", std::to_string(day),
@@ -305,8 +308,8 @@ public:
      * @return The Gregorian DateTime corresponding to the given Persian date components.
      * @throws System::ArgumentOutOfRangeException if any component is out of range.
      */
-    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                int second, int millisecond, int era = CurrentEra) const override {
+    System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                intcs second, intcs millisecond, intcs era = CurrentEra) const override {
         int daysInMonth = GetDaysInMonth(year, month, era);
         if (day < 1 || day > daysInMonth)
             throw System::ArgumentOutOfRangeException("day", std::to_string(day),
@@ -328,7 +331,7 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p months is outside [-120000, 120000]
      *         or the result falls outside the supported date range.
      */
-    System::DateTime AddMonths(const System::DateTime& time, int months) const override {
+    System::DateTime AddMonths(const System::DateTime& time, intcs months) const override {
         if (months < -120000 || months > 120000)
             throw System::ArgumentOutOfRangeException("months", std::to_string(months),
                 "Valid values are between -120000 and 120000, inclusive.");
@@ -358,12 +361,26 @@ public:
      * @brief Returns a DateTime that is the specified number of years from the given DateTime.
      *
      * C++ counterpart of .NET PersianCalendar.AddYears(DateTime, int). Delegates to
-     * AddMonths(time, years * 12), matching real .NET exactly.
+     * AddMonths(time, years * 12), matching real .NET exactly -- real .NET's own AddYears is
+     * literally `return AddMonths(time, years * 12);` with no upfront check, since C#'s default
+     * unchecked arithmetic is defined to wrap silently on overflow. C++ signed overflow is
+     * undefined behavior for the same expression (confirmed via UBSan: "signed integer
+     * overflow: 200000000 * 12 cannot be represented in type 'int'"), so this validates years
+     * is small enough that the multiplication itself can never overflow before attempting it --
+     * the exact bound AddMonths itself already enforces on its `months` parameter
+     * (120000 / 12 = 10000), so this doesn't reject anything AddMonths would have accepted
+     * anyway; it only moves the rejection earlier, before the overflow-prone multiply. Same
+     * bug class and same fix as DateTime::AddYears (which this port's DateTimeOffset::AddYears
+     * also had until it was fixed to delegate to DateTime::AddYears).
      * @param time  The starting DateTime.
      * @param years The number of years to add (may be negative).
+     * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      * @return A new DateTime offset by @p years Persian years.
      */
-    System::DateTime AddYears(const System::DateTime& time, int years) const override {
+    System::DateTime AddYears(const System::DateTime& time, intcs years) const override {
+        if (years < -10000 || years > 10000)
+            throw System::ArgumentOutOfRangeException("years", std::to_string(years),
+                "Valid values are between -10000 and 10000, inclusive.");
         return AddMonths(time, years * 12);
     }
 
@@ -375,7 +392,7 @@ public:
      * @return A four-digit Persian year.
      * @throws System::ArgumentOutOfRangeException if @p year is negative or exceeds MaxCalendarYear.
      */
-    [[nodiscard]] int ToFourDigitYear(int year) const override {
+    [[nodiscard]] intcs ToFourDigitYear(intcs year) const override {
         System::ArgumentOutOfRangeException::ThrowIfNegative(year, "year");
         if (year < 100) return Calendar::ToFourDigitYear(year);
         if (year > MaxCalendarYear)
@@ -385,7 +402,7 @@ public:
     }
 
 private:
-    int twoDigitYearMax_{1410};
+    intcs twoDigitYearMax_{1410};
 
     static constexpr int MaxCalendarYear  = 9378;
     static constexpr int MaxCalendarMonth = 10;

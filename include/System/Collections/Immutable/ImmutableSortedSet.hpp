@@ -270,12 +270,23 @@ public:
      * @brief Returns a new set containing only elements present in exactly one of the two sets.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.SymmetricExcept(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's SymmetricExcept: @p other is first rehashed
+     * into a set under *this* set's comparer before the difference is computed -- same pattern
+     * as SetEquals/IsSubsetOf above. This port previously toggled directly over @p other's raw
+     * elements (ordered under @p other's own comparer): if two of @p other's elements are
+     * distinct under @p other's comparer but equivalent under *this* set's comparer, the toggle
+     * runs twice for that element and cancels out, silently dropping it from the result. Same
+     * bug class as the SetEquals fix, just for the toggle-based operation; see
+     * ImmutableHashSet::SymmetricExcept's comment for the confirmed repro (case-insensitive vs.
+     * case-sensitive {"A","a"}) demonstrating the failure mode.
      * @param other The other set.
      * @return A new ImmutableSortedSet with the symmetric difference.
      */
     [[nodiscard]] ImmutableSortedSet<T> SymmetricExcept(const ImmutableSortedSet<T>& other) const {
+        auto otherRehashed = makeEmpty(data_->key_comp());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
         auto s = std::make_shared<SetT>(*data_);
-        for (const auto& x : *other.data_) {
+        for (const auto& x : *otherRehashed) {
             if (s->count(x)) s->erase(x);
             else s->insert(x);
         }
@@ -290,7 +301,20 @@ public:
      * @return true if both sets are equal; otherwise false.
      */
     [[nodiscard]] bool SetEquals(const ImmutableSortedSet<T>& other) const {
-        return *data_ == *other.data_;
+        // Matches ImmutableSortedSet_1.cs's SetEquals: when the two sets don't share a
+        // comparer, `other`'s elements are rehashed under *this* set's comparer
+        // (`new SortedSet<T>(other, this.KeyComparer)`) before comparing -- the same pattern
+        // already applied to IsSubsetOf/Intersect/Except in this file, just missed here. A
+        // direct std::set::operator== compares elements position-wise after each set's own
+        // internal ordering, which gives a wrong (false-negative) result when the two sets use
+        // different comparers even though they contain the identical elements -- confirmed via
+        // a standalone repro before this fix (ascending {1,2,3} vs. descending {1,2,3} compared
+        // unequal). Comparing sizes AFTER rehashing (not before) also correctly catches the
+        // rarer case where a different equivalence notion collapses distinct elements together.
+        auto otherRehashed = makeEmpty(data_->key_comp());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
+        if (otherRehashed->size() != data_->size()) return false;
+        return *data_ == *otherRehashed;
     }
 
     /**

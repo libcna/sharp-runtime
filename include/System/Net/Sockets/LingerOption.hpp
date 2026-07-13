@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/HashCode.hpp"
 
 namespace System::Net::Sockets {
 
@@ -34,6 +35,11 @@ namespace System::Net::Sockets {
         }
         bool operator==(const LingerOption& o) const { return Equals(o); }
         bool operator!=(const LingerOption& o) const { return !Equals(o); }
+
+        /** @brief C++ counterpart of .NET LingerOption.GetHashCode() -- HashCode.Combine(Enabled, LingerTime). */
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return System::HashCode::Combine(enabled_, lingerTime_);
+        }
     };
 
 } // namespace System::Net::Sockets

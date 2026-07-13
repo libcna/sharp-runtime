@@ -3,10 +3,13 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/Compression/ZLibCompressionStrategy.hpp"
 
 namespace System::IO::Compression {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides compression options to be used with ZLibStream, DeflateStream, and
@@ -16,21 +19,21 @@ namespace System::IO::Compression {
      */
     class ZLibCompressionOptions {
     private:
-        int compressionLevel_ = -1;
+        intcs compressionLevel_ = -1;
         ZLibCompressionStrategy strategy_ = ZLibCompressionStrategy::Default;
-        int windowLog_ = -1;
+        intcs windowLog_ = -1;
 
     public:
         /** The minimum window log (base-2 logarithm of the window size) for zlib compression. */
-        static constexpr int MinWindowLog = 8;
+        static constexpr intcs MinWindowLog = 8;
         /** The maximum window log (base-2 logarithm of the window size) for zlib compression. */
-        static constexpr int MaxWindowLog = 15;
+        static constexpr intcs MaxWindowLog = 15;
         /** The default window log (base-2 logarithm of the window size) for zlib compression. */
-        static constexpr int DefaultWindowLog = MaxWindowLog;
+        static constexpr intcs DefaultWindowLog = MaxWindowLog;
         /** The minimum compression level accepted by CompressionLevel. */
-        static constexpr int MinQuality = 0;
+        static constexpr intcs MinQuality = 0;
         /** The maximum compression level accepted by CompressionLevel. */
-        static constexpr int MaxQuality = 9;
+        static constexpr intcs MaxQuality = 9;
 
         ZLibCompressionOptions() = default;
 
@@ -42,8 +45,8 @@ namespace System::IO::Compression {
          * (currently equivalent to 6). Default value is -1.
          * @throws System::ArgumentOutOfRangeException if @p value is not -1 and outside [0, 9].
          */
-        [[nodiscard]] int getCompressionLevelProperty() const { return compressionLevel_; }
-        void setCompressionLevelProperty(int value) {
+        [[nodiscard]] intcs getCompressionLevelProperty() const { return compressionLevel_; }
+        void setCompressionLevelProperty(intcs value) {
             if (value != -1) {
                 if (value < MinQuality)
                     throw System::ArgumentOutOfRangeException("value", "Value must be greater than or equal to " + std::to_string(MinQuality) + ".");
@@ -59,9 +62,9 @@ namespace System::IO::Compression {
          */
         [[nodiscard]] ZLibCompressionStrategy getCompressionStrategyProperty() const { return strategy_; }
         void setCompressionStrategyProperty(ZLibCompressionStrategy value) {
-            if (static_cast<int>(value) < static_cast<int>(ZLibCompressionStrategy::Default))
+            if (static_cast<intcs>(value) < static_cast<intcs>(ZLibCompressionStrategy::Default))
                 throw System::ArgumentOutOfRangeException("value", "Value must be greater than or equal to Default.");
-            if (static_cast<int>(value) > static_cast<int>(ZLibCompressionStrategy::Fixed))
+            if (static_cast<intcs>(value) > static_cast<intcs>(ZLibCompressionStrategy::Fixed))
                 throw System::ArgumentOutOfRangeException("value", "Value must be less than or equal to Fixed.");
             strategy_ = value;
         }
@@ -73,8 +76,8 @@ namespace System::IO::Compression {
          * log (currently equivalent to 15, a 32KB window). Default value is -1.
          * @throws System::ArgumentOutOfRangeException if @p value is not -1 and outside [8, 15].
          */
-        [[nodiscard]] int getWindowLogProperty() const { return windowLog_; }
-        void setWindowLogProperty(int value) {
+        [[nodiscard]] intcs getWindowLogProperty() const { return windowLog_; }
+        void setWindowLogProperty(intcs value) {
             if (value != -1) {
                 if (value < MinWindowLog)
                     throw System::ArgumentOutOfRangeException("value", "Value must be greater than or equal to " + std::to_string(MinWindowLog) + ".");

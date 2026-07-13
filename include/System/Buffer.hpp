@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System {
@@ -38,6 +39,12 @@ namespace System {
          * Uses std::memmove, so overlapping source and destination regions are
          * safe — matching .NET, whose BlockCopy copies via Memmove.
          *
+         * @note Unlike the std::vector<T> overloads below, this cannot validate bounds — a raw
+         * pointer carries no length information for either side, matching the same structural
+         * limitation as other raw-pointer buffer methods across this codebase (e.g.
+         * Array::Copy(T*, ...), ArrayList::CopyTo(void*, int)). The caller is responsible for
+         * ensuring both buffers are large enough.
+         *
          * @param src       Pointer to the source region.
          * @param srcOffset Byte offset into @p src.
          * @param dst       Pointer to the destination region.
@@ -62,9 +69,14 @@ namespace System {
          * @param dst       Destination byte vector.
          * @param dstOffset Byte offset into @p dst.
          * @param count     Number of bytes to copy.
+         * @throws System::ArgumentOutOfRangeException if @p srcOffset, @p dstOffset, or
+         *         @p count is negative.
+         * @throws System::ArgumentException if the copied range exceeds either vector's bounds.
          */
         static void BlockCopy(const std::vector<bytecs>& src, intcs srcOffset,
                                std::vector<bytecs>& dst, intcs dstOffset, intcs count) {
+            requireValidBlockCopyRange(static_cast<intcs>(src.size()), srcOffset,
+                                        static_cast<intcs>(dst.size()), dstOffset, count);
             std::memmove(dst.data() + dstOffset,
                          src.data() + srcOffset,
                          static_cast<size_t>(count));
@@ -84,10 +96,16 @@ namespace System {
          * @param dst       Destination vector.
          * @param dstOffset Byte offset into @p dst raw memory.
          * @param count     Number of bytes to copy.
+         * @throws System::ArgumentOutOfRangeException if @p srcOffset, @p dstOffset, or
+         *         @p count is negative.
+         * @throws System::ArgumentException if the copied range exceeds either vector's
+         *         underlying byte-length bounds.
          */
         template<typename T>
         static void BlockCopy(const std::vector<T>& src, intcs srcOffset,
                                std::vector<T>& dst, intcs dstOffset, intcs count) {
+            requireValidBlockCopyRange(static_cast<intcs>(src.size() * sizeof(T)), srcOffset,
+                                        static_cast<intcs>(dst.size() * sizeof(T)), dstOffset, count);
             std::memmove(reinterpret_cast<bytecs*>(dst.data()) + dstOffset,
                          reinterpret_cast<const bytecs*>(src.data()) + srcOffset,
                          static_cast<size_t>(count));
@@ -128,9 +146,12 @@ namespace System {
          * @param  array The vector to read from.
          * @param  index Zero-based byte index into the raw memory.
          * @return The byte at @p index.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or not less than
+         *         the array's total byte length.
          */
         template<typename T>
         static bytecs GetByte(const std::vector<T>& array, intcs index) {
+            requireValidByteIndex(static_cast<intcs>(array.size() * sizeof(T)), index);
             return reinterpret_cast<const bytecs*>(array.data())[index];
         }
 
@@ -144,9 +165,12 @@ namespace System {
          * @param  array The vector to modify.
          * @param  index Zero-based byte index into the raw memory.
          * @param  value The byte value to write.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or not less than
+         *         the array's total byte length.
          */
         template<typename T>
         static void SetByte(std::vector<T>& array, intcs index, bytecs value) {
+            requireValidByteIndex(static_cast<intcs>(array.size() * sizeof(T)), index);
             reinterpret_cast<bytecs*>(array.data())[index] = value;
         }
 
@@ -165,13 +189,13 @@ namespace System {
          * @param destination            Pointer to the destination memory block.
          * @param destinationSizeInBytes Capacity of the destination block in bytes.
          * @param sourceBytesToCopy      Number of bytes to copy.
-         * @throws System::ArgumentOutOfRangeException if
-         *         @p sourceBytesToCopy > @p destinationSizeInBytes.
+         * @throws System::ArgumentOutOfRangeException if @p sourceBytesToCopy is negative or
+         *         exceeds @p destinationSizeInBytes.
          */
         static void MemoryCopy(const void* source, void* destination,
                                 longcs destinationSizeInBytes,
                                 longcs sourceBytesToCopy) {
-            if (sourceBytesToCopy > destinationSizeInBytes)
+            if (sourceBytesToCopy < 0 || sourceBytesToCopy > destinationSizeInBytes)
                 throw ArgumentOutOfRangeException(
                     "sourceBytesToCopy exceeds destinationSizeInBytes");
             std::memmove(destination, source, static_cast<size_t>(sourceBytesToCopy));
@@ -197,6 +221,32 @@ namespace System {
                 throw ArgumentOutOfRangeException(
                     "sourceBytesToCopy exceeds destinationSizeInBytes");
             std::memmove(destination, source, static_cast<size_t>(sourceBytesToCopy));
+        }
+
+    private:
+        // Every std::vector-backed overload above previously did zero bounds validation before
+        // raw memmove/index arithmetic -- a count exceeding either vector's actual size, or a
+        // negative offset/count/index, reaches memmove/pointer-arithmetic unchecked, a genuine
+        // out-of-bounds read/write (confirmed via a standalone ASan repro: BlockCopy with
+        // count=1000 on 4-byte vectors immediately reports heap-buffer-overflow). Matches real
+        // .NET Buffer.BlockCopy's own ArgumentOutOfRangeException.ThrowIfNegative(srcOffset/
+        // dstOffset/count) + unsigned-arithmetic bounds check (uSrcLen < uSrcOffset+uCount ||
+        // uDstLen < uDstOffset+uCount) exactly -- unsigned comparison + addition so large
+        // offset/count can't integer-overflow past the check either.
+        static void requireValidBlockCopyRange(intcs srcLen, intcs srcOffset,
+                                                intcs dstLen, intcs dstOffset, intcs count) {
+            System::ArgumentOutOfRangeException::ThrowIfNegative(srcOffset, "srcOffset");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(dstOffset, "dstOffset");
+            System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+            if (static_cast<SharpRuntime::uintcs>(srcLen) < static_cast<SharpRuntime::uintcs>(srcOffset) + static_cast<SharpRuntime::uintcs>(count) ||
+                static_cast<SharpRuntime::uintcs>(dstLen) < static_cast<SharpRuntime::uintcs>(dstOffset) + static_cast<SharpRuntime::uintcs>(count))
+                throw System::ArgumentException("Offset and length were out of bounds for the array, or count is greater than the number of elements from index to the end of the source collection.");
+        }
+
+        // Matches real .NET Buffer.GetByte/SetByte's (uint)index >= (uint)ByteLength(array) check.
+        static void requireValidByteIndex(intcs byteLength, intcs index) {
+            if (static_cast<SharpRuntime::uintcs>(index) >= static_cast<SharpRuntime::uintcs>(byteLength))
+                throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
         }
     };
 

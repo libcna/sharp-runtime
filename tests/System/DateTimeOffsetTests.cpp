@@ -171,6 +171,36 @@ TEST(DateTimeOffsetTests2, AddTicks_ShiftsClockAndUtc) {
 }
 
 // ---------------------------------------------------------------------------
+// AddMonths / AddYears -- overflow safety
+// ---------------------------------------------------------------------------
+
+TEST(DateTimeOffsetTests2, AddMonths_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `getMonthProperty() + months` computed directly with no upfront bounds check (the
+    // previous, from-scratch reimplementation of this method) is real signed-integer-
+    // overflow UB in C++ for a merely large (not extreme) `months` argument. Real .NET
+    // delegates entirely to DateTime.AddMonths, which already validates months is within
+    // [-120000, 120000] before doing any arithmetic; this must throw the same way.
+    DateTimeOffset dto(2020, 6, 15, 10, 30, 0, TimeSpan::Zero);
+    EXPECT_THROW(dto.AddMonths(1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dto.AddMonths(-1000000000), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeOffsetTests2, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // The previous AddYears computed `years * 12` with no upfront bounds check --
+    // confirmed via UBSan to overflow int32 for e.g. years == 200000000.
+    DateTimeOffset dto(2020, 6, 15, 10, 30, 0, TimeSpan::Zero);
+    EXPECT_THROW(dto.AddYears(200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dto.AddYears(-200000000), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeOffsetTests2, AddMonths_PreservesOffset) {
+    DateTimeOffset dto(2020, 6, 15, 10, 30, 0, TimeSpan::FromHours(5.0));
+    DateTimeOffset shifted = dto.AddMonths(3);
+    EXPECT_EQ(shifted.getMonthProperty(), 9);
+    EXPECT_EQ(shifted.getOffsetProperty(), TimeSpan::FromHours(5.0));
+}
+
+// ---------------------------------------------------------------------------
 // ToLocalTime / ToUniversalTime round trip
 // ---------------------------------------------------------------------------
 

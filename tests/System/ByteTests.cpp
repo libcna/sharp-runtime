@@ -30,6 +30,12 @@ TEST(ByteTests, Parse_TooLarge_Throws) {
 TEST(ByteTests, Parse_Invalid_Throws) {
     EXPECT_THROW(Byte::Parse("abc"), System::FormatException);
 }
+TEST(ByteTests, Parse_NegativeZero_Throws) {
+    // Unsigned types reject any leading '-', even "-0" -- std::stoi("-0") returns the
+    // literal int 0 (not negative), which previously passed both the v<0 and v>MaxValue
+    // checks and silently returned 0 instead of throwing OverflowException.
+    EXPECT_THROW(Byte::Parse("-0"), System::OverflowException);
+}
 
 TEST(ByteTests, TryParse_Valid_ReturnsTrue) {
     bytecs r = 0;
@@ -67,6 +73,11 @@ TEST(ByteTests, TryParse_TrailingGarbage_ReturnsFalse) {
 TEST(ByteTests, ToString_Zero) { EXPECT_EQ(Byte::ToString(bytecs(0)), "0"); }
 TEST(ByteTests, ToString_MaxValue) { EXPECT_EQ(Byte::ToString(bytecs(255)), "255"); }
 TEST(ByteTests, ToString_Midrange) { EXPECT_EQ(Byte::ToString(bytecs(42)), "42"); }
+TEST(ByteTests, ToString_MalformedWidth_ThrowsFormatException) {
+    // std::stoi's raw std::invalid_argument/out_of_range must not escape as-is.
+    EXPECT_THROW(Byte::ToString(bytecs(5), "Xz"), System::FormatException);
+    EXPECT_THROW(Byte::ToString(bytecs(5), "X99999999999999999999"), System::FormatException);
+}
 
 // ---------------------------------------------------------------------------
 // CompareTo
@@ -150,6 +161,9 @@ TEST(ByteTests, DivRem_WithRemainder) {
     auto [q, r] = Byte::DivRem(bytecs(10), bytecs(3));
     EXPECT_EQ(q, bytecs(3));
     EXPECT_EQ(r, bytecs(1));
+}
+TEST(ByteTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(Byte::DivRem(bytecs(10), bytecs(0)), System::DivideByZeroException);
 }
 
 // ---------------------------------------------------------------------------

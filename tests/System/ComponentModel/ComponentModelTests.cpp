@@ -47,12 +47,41 @@ TEST(ComponentModelAttributeTests, DefaultCtor_NoThrow) {
 
 TEST(DescriptionAttributeTests, Constructor_StoresDescription) {
     DescriptionAttribute attr("A helpful description");
-    EXPECT_EQ(attr.Description, "A helpful description");
+    EXPECT_EQ(attr.getDescriptionProperty(), "A helpful description");
 }
 
 TEST(DescriptionAttributeTests, EmptyDescription) {
     DescriptionAttribute attr("");
-    EXPECT_EQ(attr.Description, "");
+    EXPECT_EQ(attr.getDescriptionProperty(), "");
+}
+
+TEST(DescriptionAttributeTests, DefaultCtor_IsEmptyString) {
+    DescriptionAttribute attr;
+    EXPECT_EQ(attr.getDescriptionProperty(), "");
+}
+
+TEST(DescriptionAttributeTests, Default_IsEmptyStringAndIsDefault) {
+    EXPECT_EQ(DescriptionAttribute::Default.getDescriptionProperty(), "");
+    EXPECT_TRUE(DescriptionAttribute::Default.getIsDefaultAttributeProperty());
+}
+
+TEST(DescriptionAttributeTests, IsDefaultAttribute_FalseForNonEmpty) {
+    DescriptionAttribute attr("not default");
+    EXPECT_FALSE(attr.getIsDefaultAttributeProperty());
+}
+
+TEST(DescriptionAttributeTests, Equals_ComparesByValue) {
+    DescriptionAttribute a("same text");
+    DescriptionAttribute b("same text");
+    DescriptionAttribute c("different text");
+    EXPECT_TRUE(a.Equals(b));
+    EXPECT_FALSE(a.Equals(c));
+}
+
+TEST(DescriptionAttributeTests, GetHashCode_MatchesForEqualValues) {
+    DescriptionAttribute a("same text");
+    DescriptionAttribute b("same text");
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
 
 // ===========================================================================
@@ -423,6 +452,14 @@ TEST(CancelEventArgsTests, InheritsFromEventArgs) {
     System::EventArgs& base = e;
     (void)base;
     SUCCEED();
+}
+
+TEST(CancelEventArgsTests, CancelEventHandler_InvokesAndCanSetCancel) {
+    System::ComponentModel::CancelEventHandler handler =
+        [](void*, CancelEventArgs& e) { e.Cancel = true; };
+    CancelEventArgs e;
+    handler(nullptr, e);
+    EXPECT_TRUE(e.Cancel);
 }
 
 // ===========================================================================

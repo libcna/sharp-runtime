@@ -17,6 +17,34 @@ namespace System::Net::Security {
     class SslApplicationProtocol {
         std::vector<SharpRuntime::bytecs> protocol_;
 
+        // Strict UTF-8 validity check (rejects overlong encodings and out-of-range code points),
+        // matching the behavior of .NET's ExceptionFallback UTF-8 decoder closely enough to decide
+        // between the plain-text and hex-dump ToString() paths.
+        [[nodiscard]] bool isValidUtf8() const {
+            size_t i = 0, n = protocol_.size();
+            while (i < n) {
+                SharpRuntime::bytecs b0 = protocol_[i];
+                unsigned c0 = static_cast<unsigned char>(b0);
+                size_t extra;
+                unsigned minCp;
+                if (c0 < 0x80) { ++i; continue; }
+                else if ((c0 & 0xE0) == 0xC0) { extra = 1; minCp = 0x80; }
+                else if ((c0 & 0xF0) == 0xE0) { extra = 2; minCp = 0x800; }
+                else if ((c0 & 0xF8) == 0xF0) { extra = 3; minCp = 0x10000; }
+                else return false;
+                if (i + extra >= n) return false;
+                unsigned cp = c0 & (0xFF >> (extra + 2));
+                for (size_t k = 1; k <= extra; ++k) {
+                    unsigned cb = static_cast<unsigned char>(protocol_[i + k]);
+                    if ((cb & 0xC0) != 0x80) return false;
+                    cp = (cp << 6) | (cb & 0x3F);
+                }
+                if (cp < minCp || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+                i += extra + 1;
+            }
+            return true;
+        }
+
     public:
         SslApplicationProtocol() = default;
 
@@ -48,7 +76,24 @@ namespace System::Net::Security {
 
         /** @return The protocol name decoded as UTF-8, or a hex dump if it isn't valid UTF-8. */
         [[nodiscard]] std::string ToString() const {
-            return std::string(protocol_.begin(), protocol_.end());
+            if (protocol_.empty()) return std::string();
+            if (isValidUtf8()) return std::string(protocol_.begin(), protocol_.end());
+
+            // Real .NET's ExceptionFallback UTF-8 decoder throws on invalid sequences, and
+            // ToString() catches that to fall back to a "0xNN 0xNN ..." hex dump (space-separated,
+            // lowercase, no trailing space) -- mirrored here since this port has no throwing-decoder
+            // equivalent to drive the same try/catch structure.
+            static const char* kHex = "0123456789abcdef";
+            std::string result;
+            result.reserve(protocol_.size() * 5 - 1);
+            for (size_t i = 0; i < protocol_.size(); ++i) {
+                if (i != 0) result += ' ';
+                SharpRuntime::bytecs b = protocol_[i];
+                result += "0x";
+                result += kHex[(b >> 4) & 0xF];
+                result += kHex[b & 0xF];
+            }
+            return result;
         }
 
         /** @brief Defines the HTTP/3.0 ALPN protocol id ("h3"). */

@@ -36,6 +36,7 @@ namespace System::Text {
         bool hasCurrent_ = false;
 
     public:
+        /** @brief Initializes an enumerator over a copy of @p value. */
         explicit StringRuneEnumerator(const std::string& value) : string_(value) {}
 
         /** @return The current Rune. */
@@ -56,6 +57,7 @@ namespace System::Text {
             return true;
         }
 
+        /** @brief Resets the enumerator to its initial position, before the first Rune. */
         void Reset() {
             current_ = Rune();
             nextIndex_ = 0;
@@ -64,10 +66,12 @@ namespace System::Text {
 
         // --- C++ range-based-for adaptor ---------------------------------------------------
 
+        /** @brief Range-based-for support: advances to the first Rune and returns *this. */
         [[nodiscard]] StringRuneEnumerator& begin() {
             hasCurrent_ = MoveNext();
             return *this;
         }
+        /** @brief Range-based-for support: returns the end sentinel. */
         [[nodiscard]] Sentinel end() const { return Sentinel{}; }
         bool operator!=(Sentinel) const { return hasCurrent_; }
         [[nodiscard]] Rune operator*() const { return current_; }

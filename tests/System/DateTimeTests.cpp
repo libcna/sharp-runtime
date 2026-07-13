@@ -56,6 +56,21 @@ TEST(DateTimeTests, AddDays_BeforeMinValue_Throws) {
     EXPECT_THROW(minDate.AddDays(-1), System::ArgumentOutOfRangeException);
 }
 
+TEST(DateTimeTests, AddDays_LargeValue_ThrowsInsteadOfOverflowing) {
+    // static_cast<longcs>(days) * TicksPerDay for a merely large (not extreme) int day
+    // count is real signed-overflow UB in C++ without an upfront bounds check -- must throw
+    // ArgumentOutOfRangeException instead of invoking UB or wrapping to a bogus DateTime.
+    DateTime dt(2000, 1, 1);
+    EXPECT_THROW(dt.AddDays(1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dt.AddDays(-1000000000), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, AddHours_LargeValue_ThrowsInsteadOfOverflowing) {
+    DateTime dt(2000, 1, 1);
+    EXPECT_THROW(dt.AddHours(1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(dt.AddHours(-1000000000), System::ArgumentOutOfRangeException);
+}
+
 TEST(DateTimeTests, EqualityBasedOnTicks) {
     DateTime a(1000LL), b(1000LL), c(2000LL);
     EXPECT_EQ(a, b);
@@ -85,6 +100,19 @@ TEST(DateTimeTests, AddTimeSpanOneSecond) {
     TimeSpan oneSecond = TimeSpan::FromSeconds(1.0);
     DateTime next = dt.Add(oneSecond);
     EXPECT_EQ(next.getTicksProperty(), 1'000'000'000LL + kTicksPerSecond);
+}
+
+TEST(DateTimeTests, Add_TimeSpanNearMaxValue_ThrowsInsteadOfOverflowing) {
+    // ticks_ (bounded to [0, MaxTicks]) + a TimeSpan near TimeSpan::MaxValue's ticks (up to
+    // ~Int64::MaxValue) is real signed-overflow UB in C++ without the unsigned-arithmetic
+    // range check AddTicks now uses -- must throw ArgumentOutOfRangeException.
+    DateTime dt(2000, 1, 1);
+    EXPECT_THROW(dt.Add(TimeSpan::MaxValue), System::ArgumentOutOfRangeException);
+}
+
+TEST(DateTimeTests, Subtract_TimeSpanNearMaxValue_ThrowsInsteadOfOverflowing) {
+    DateTime dt(2000, 1, 1);
+    EXPECT_THROW(dt.Subtract(TimeSpan::MaxValue), System::ArgumentOutOfRangeException);
 }
 
 TEST(DateTimeTests, SubtractTimeSpan) {

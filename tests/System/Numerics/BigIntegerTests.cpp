@@ -66,6 +66,15 @@ TEST(BigIntegerTests, ConstructFromUInt64MaxViaLong) {
     EXPECT_EQ(a.ToString(), "9223372036854775807");
 }
 
+TEST(BigIntegerTests, ConstructFromLongMinValue) {
+    // Negating LONGCS_MIN directly (`-v`) is undefined behavior in C++ (no wider standard
+    // integer type to widen into, unlike the intcs constructor); the correct magnitude is
+    // 2^63 = 9223372036854775808.
+    BigInteger a(static_cast<int64_t>(-9223372036854775807LL - 1)); // INT64_MIN
+    EXPECT_TRUE(a.getIsNegativeProperty());
+    EXPECT_EQ(a.ToString(), "-9223372036854775808");
+}
+
 // ---------------------------------------------------------------------------
 // Parse / ToString roundtrip
 // ---------------------------------------------------------------------------
@@ -386,6 +395,23 @@ TEST(BigIntegerTests, Divide_LargeByLarge) {
     BigInteger q = a / b;
     // Verify reconstruction
     EXPECT_EQ(q * b + (a % b), a);
+}
+
+TEST(BigIntegerTests, DivMod_MultiLimbKnuthD_RemainderInRangeAndReconstructs) {
+    // Exercises the multi-limb (n>=2) Knuth Algorithm D path with a divisor whose top limb is
+    // small relative to BASE (10^9), forcing real normalization (d>1 in divmodMag) -- unlike
+    // Divide_LargeByLarge's divisor, whose top limb is close to BASE-1, giving d==1 (no
+    // normalization). A wrong qhat estimate here would show up either as reconstruction failure
+    // or as a remainder outside [0, |b|), which self-consistency alone (q*b+rem==a) cannot rule
+    // out on its own since any (q,rem) pair differing from the true one by a multiple of b would
+    // also satisfy the identity.
+    BigInteger a = BigInteger::Parse("123456789012345678901234567890123456789");
+    BigInteger b = BigInteger::Parse("987654321098765432109");
+    BigInteger q = a / b;
+    BigInteger r = a % b;
+    EXPECT_EQ(q * b + r, a);
+    EXPECT_TRUE(r.Sign() >= 0);
+    EXPECT_TRUE(r.Abs() < b.Abs());
 }
 
 // ---------------------------------------------------------------------------

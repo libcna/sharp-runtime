@@ -242,6 +242,12 @@ public:
      * @return The value of the variable, or an empty string if not found.
      */
     [[nodiscard]] static std::string GetEnvironmentVariable(const std::string& name) {
+        // getenv("") is unspecified by POSIX ("If name is an empty string ... the behavior is
+        // undefined") -- guard it explicitly rather than relying on every libc happening to
+        // return null gracefully. Real .NET's GetEnvironmentVariable("") returns null (not an
+        // exception; only SetEnvironmentVariable's ValidateVariable rejects an empty name), which
+        // this mirrors with the runtime's empty-string null-equivalent.
+        if (name.empty()) return std::string();
         const char* val = std::getenv(name.c_str());
         return val ? std::string(val) : std::string();
     }

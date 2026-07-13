@@ -60,11 +60,17 @@ namespace System::Net::Http::Headers {
     bool NameValueWithParametersHeaderValue::TryParse(const std::string& input, NameValueWithParametersHeaderValue& parsedValue) {
         size_t semi = input.find(';');
         std::string head = trim(semi == std::string::npos ? input : input.substr(0, semi));
-        if (head.empty()) return false;
 
-        size_t eq = head.find('=');
-        std::string name = trim(eq == std::string::npos ? head : head.substr(0, eq));
-        std::string value = eq == std::string::npos ? "" : trim(head.substr(eq + 1));
+        // Real .NET's GetNameValueWithParametersLength parses the head via the same
+        // NameValueHeaderValue.GetNameValueLength grammar used by plain NameValueHeaderValue
+        // parsing (strict token-or-quoted-string value, no bare trailing '='). Delegate to the
+        // now-hardened NameValueHeaderValue::TryParse instead of re-doing a naive '='-split with
+        // the looser constructor-style validation, so e.g. "name=" or "name=b=c" (an unquoted
+        // value containing '=') are rejected here exactly as they are for a plain NameValueHeaderValue.
+        NameValueHeaderValue headParsed("x");
+        if (!NameValueHeaderValue::TryParse(head, headParsed)) return false;
+        const std::string& name = headParsed.getNameProperty();
+        const std::string& value = headParsed.getValueProperty();
 
         try {
             NameValueWithParametersHeaderValue result = value.empty()

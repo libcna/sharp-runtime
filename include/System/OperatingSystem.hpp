@@ -72,12 +72,27 @@ namespace System {
          * C++ counterpart of .NET OperatingSystem.VersionString.
          */
         [[nodiscard]] std::string getVersionStringProperty() const {
+            // Real .NET's VersionString switches on every PlatformID value (OperatingSystem.cs)
+            // -- this previously only handled Win32NT/Unix/MacOSX, falling through to "Unknown "
+            // for the rest. PlatformID::Other in particular is not a dead/unused case here:
+            // Environment::getOSVersionProperty() constructs it for Emscripten builds, so this
+            // was a real, reachable divergence ("Unknown 0.0" instead of real .NET's "Other
+            // 0.0") for that platform, not just a theoretical gap for the legacy Win32S/
+            // Win32Windows/WinCE/Xbox values.
             std::string name;
             switch (platform_) {
-                case PlatformID::Win32NT:  name = "Microsoft Windows NT "; break;
-                case PlatformID::Unix:     name = "Unix "; break;
-                case PlatformID::MacOSX:   name = "Mac OS X "; break;
-                default:                   name = "Unknown "; break;
+                case PlatformID::Win32S:       name = "Microsoft Win32S "; break;
+                case PlatformID::Win32Windows:
+                    name = (version_.Major > 4 || (version_.Major == 4 && version_.Minor > 0))
+                        ? "Microsoft Windows 98 " : "Microsoft Windows 95 ";
+                    break;
+                case PlatformID::Win32NT:      name = "Microsoft Windows NT "; break;
+                case PlatformID::WinCE:        name = "Microsoft Windows CE "; break;
+                case PlatformID::Unix:         name = "Unix "; break;
+                case PlatformID::Xbox:         name = "Xbox "; break;
+                case PlatformID::MacOSX:       name = "Mac OS X "; break;
+                case PlatformID::Other:        name = "Other "; break;
+                default:                       name = "<unknown> "; break;
             }
             return name + version_.ToString();
         }

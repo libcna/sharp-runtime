@@ -59,13 +59,13 @@ struct Vector2 {
     }
 
     /** @return The component at @p index (0 = X, 1 = Y). @throws System::ArgumentOutOfRangeException on invalid index. */
-    float operator[](int index) const {
+    float operator[](SharpRuntime::intcs index) const {
         if (index == 0) return X;
         if (index == 1) return Y;
         throw System::ArgumentOutOfRangeException("index");
     }
     /** @return A reference to the component at @p index (0 = X, 1 = Y). @throws System::ArgumentOutOfRangeException on invalid index. */
-    float& operator[](int index) {
+    float& operator[](SharpRuntime::intcs index) {
         if (index == 0) return X;
         if (index == 1) return Y;
         throw System::ArgumentOutOfRangeException("index");

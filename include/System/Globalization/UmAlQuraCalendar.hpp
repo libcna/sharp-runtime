@@ -3,9 +3,12 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <stdexcept>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Globalization/Calendar.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * <summary>
@@ -16,16 +19,16 @@ namespace System::Globalization {
  */
 class UmAlQuraCalendar : public Calendar {
 public:
-    static constexpr int UmAlQuraEra     = 1;    ///< The only era value for this calendar.
-    static constexpr int MinCalendarYear = 1318; ///< Minimum supported Um Al Qura year.
-    static constexpr int MaxCalendarYear = 1500; ///< Maximum supported Um Al Qura year.
+    static constexpr intcs UmAlQuraEra     = 1;    ///< The only era value for this calendar.
+    static constexpr intcs MinCalendarYear = 1318; ///< Minimum supported Um Al Qura year.
+    static constexpr intcs MaxCalendarYear = 1500; ///< Maximum supported Um Al Qura year.
 
     /** @return Always UmAlQuraEra (1). */
-    [[nodiscard]] int GetEra(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetEra(const System::DateTime& time) const override;
     /** @return Always 1 — the Um Al Qura calendar has a single era. */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
     /** @return A vector containing {UmAlQuraEra}. C++ counterpart of .NET UmAlQuraCalendar.Eras. */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {UmAlQuraEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {UmAlQuraEra}; }
 
     /** @return Always CalendarAlgorithmType::LunarCalendar. C++ counterpart of .NET UmAlQuraCalendar.AlgorithmType. */
     [[nodiscard]] CalendarAlgorithmType getAlgorithmTypeProperty() const override {
@@ -33,25 +36,25 @@ public:
     }
 
     /** @return The Um Al Qura year corresponding to @p time. */
-    [[nodiscard]] int  GetYear      (const System::DateTime& time) const override;
+    [[nodiscard]] intcs  GetYear      (const System::DateTime& time) const override;
     /** @return The Um Al Qura month (1–12) corresponding to @p time. */
-    [[nodiscard]] int  GetMonth     (const System::DateTime& time) const override;
+    [[nodiscard]] intcs  GetMonth     (const System::DateTime& time) const override;
     /** @return The day of the Um Al Qura month corresponding to @p time. */
-    [[nodiscard]] int  GetDayOfMonth(const System::DateTime& time) const override;
+    [[nodiscard]] intcs  GetDayOfMonth(const System::DateTime& time) const override;
     /** @return The day of the Um Al Qura year corresponding to @p time. */
-    [[nodiscard]] int  GetDayOfYear (const System::DateTime& time) const override;
+    [[nodiscard]] intcs  GetDayOfYear (const System::DateTime& time) const override;
 
     /** @return True if @p year is an Um Al Qura leap year (355 days). */
-    [[nodiscard]] bool IsLeapYear   (int year, int era = CurrentEra) const override;
+    [[nodiscard]] bool IsLeapYear   (intcs year, intcs era = CurrentEra) const override;
     /** @return Number of days in the given Um Al Qura month (29 or 30). */
-    [[nodiscard]] int  GetDaysInMonth (int year, int month, int era = CurrentEra) const override;
+    [[nodiscard]] intcs  GetDaysInMonth (intcs year, intcs month, intcs era = CurrentEra) const override;
     /** @return Number of days in the given Um Al Qura year (354 or 355). */
-    [[nodiscard]] int  GetDaysInYear  (int year, int era = CurrentEra) const override;
+    [[nodiscard]] intcs  GetDaysInYear  (intcs year, intcs era = CurrentEra) const override;
 
     /** @return A new DateTime offset by @p months Um Al Qura months. */
-    [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, int months) const override;
+    [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, intcs months) const override;
     /** @return A new DateTime offset by @p years Um Al Qura years. */
-    [[nodiscard]] System::DateTime AddYears (const System::DateTime& time, int years)  const override;
+    [[nodiscard]] System::DateTime AddYears (const System::DateTime& time, intcs years)  const override;
 
     /**
      * @brief Returns a DateTime from the Um Al Qura date and time components.
@@ -60,8 +63,8 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p day is outside the valid range for
      *         the given Um Al Qura @p year and @p month.
      */
-    [[nodiscard]] System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                              int second, int millisecond, int era = CurrentEra) const override;
+    [[nodiscard]] System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                              intcs second, intcs millisecond, intcs era = CurrentEra) const override;
 
 private:
     struct DateMapping {

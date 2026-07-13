@@ -313,6 +313,17 @@ TEST(PersianCalendarBatch32Test, AddYears_DelegatesToAddMonths) {
     EXPECT_EQ(pc.GetDayOfMonth(result), 1);
 }
 
+TEST(PersianCalendarBatch32Test, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large (not extreme) years argument -- confirmed via
+    // UBSan -- unlike real .NET, where the identical expression relies on C#'s
+    // well-defined unchecked-arithmetic wraparound. Same bug class as DateTime::AddYears.
+    PersianCalendar pc;
+    System::DateTime start = pc.ToDateTime(1403, 1, 1, 0, 0, 0, 0);
+    EXPECT_THROW(pc.AddYears(start, 200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(pc.AddYears(start, -200000000), System::ArgumentOutOfRangeException);
+}
+
 TEST(PersianCalendarBatch32Test, TwoDigitYearMax_ValidatesRange) {
     PersianCalendar pc;
     EXPECT_THROW(pc.setTwoDigitYearMaxProperty(98), System::ArgumentOutOfRangeException);

@@ -1111,6 +1111,7 @@ TEST(BufferedStreamTests, DelegatesWrite_AndRead) {
     BufferedStream bs(&ms);
     uint8_t writeData[] = {1, 2, 3, 4};
     bs.Write(writeData, 0, 4);
+    bs.Flush();
     EXPECT_EQ(ms.getLengthProperty(), 4);
 }
 
@@ -1140,6 +1141,123 @@ TEST(BufferedStreamTests, DelegatesPosition) {
     bs.setPositionProperty(1);
     EXPECT_EQ(bs.getPositionProperty(), 1);
     EXPECT_EQ(ms.getPositionProperty(), 1);
+}
+
+// --- ticket 1477: real internal buffering ---
+
+TEST(BufferedStreamTests, SmallWrite_NotImmediatelyPropagatedToInnerStream) {
+    MemoryStream ms;
+    BufferedStream bs(&ms);
+    uint8_t writeData[] = {1, 2, 3, 4};
+    bs.Write(writeData, 0, 4);
+    // A write far smaller than the buffer should be held internally, not yet reach the inner stream.
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    bs.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 4);
+}
+
+TEST(BufferedStreamTests, MultipleSmallWrites_BatchedIntoOneUnderlyingWrite) {
+    MemoryStream ms;
+    BufferedStream bs(&ms, 64);
+    for (int i = 0; i < 10; ++i) {
+        uint8_t b = static_cast<uint8_t>(i);
+        bs.Write(&b, 0, 1);
+    }
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+    bs.Flush();
+    EXPECT_EQ(ms.getLengthProperty(), 10);
+    ms.setPositionProperty(0);
+    for (int i = 0; i < 10; ++i) {
+        uint8_t out = 0;
+        EXPECT_EQ(ms.Read(&out, 0, 1), 1);
+        EXPECT_EQ(out, static_cast<uint8_t>(i));
+    }
+}
+
+TEST(BufferedStreamTests, WriteLargerThanBufferSize_BypassesBufferDirectly) {
+    MemoryStream ms;
+    BufferedStream bs(&ms, 8);
+    std::vector<uint8_t> data(100, 0x42);
+    bs.Write(data.data(), 0, static_cast<intcs>(data.size()));
+    // Empty buffer + a chunk >= bufferSize goes straight through, per real .NET's bypass threshold.
+    EXPECT_EQ(ms.getLengthProperty(), 100);
+}
+
+TEST(BufferedStreamTests, ReadThroughBuffer_RoundTrip) {
+    MemoryStream ms;
+    uint8_t data[] = {10, 20, 30, 40, 50};
+    ms.Write(data, 0, 5);
+    ms.setPositionProperty(0);
+    BufferedStream bs(&ms);
+    uint8_t out[5] = {};
+    EXPECT_EQ(bs.Read(out, 0, 5), 5);
+    EXPECT_EQ(std::vector<uint8_t>(out, out + 5), std::vector<uint8_t>(data, data + 5));
+}
+
+TEST(BufferedStreamTests, SmallRead_ServedFromInternalBufferOnSubsequentCalls) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4, 5, 6};
+    ms.Write(data, 0, 6);
+    ms.setPositionProperty(0);
+    BufferedStream bs(&ms, 64);
+    uint8_t a = 0, b = 0;
+    EXPECT_EQ(bs.Read(&a, 0, 1), 1);
+    EXPECT_EQ(a, 1);
+    // The first Read should have pulled the whole (short) stream into the internal buffer;
+    // the inner stream's position should already be at EOF even though only 1 byte was consumed.
+    EXPECT_EQ(ms.getPositionProperty(), 6);
+    EXPECT_EQ(bs.Read(&b, 0, 1), 1);
+    EXPECT_EQ(b, 2);
+}
+
+TEST(BufferedStreamTests, Close_FlushesPendingBufferedWrites) {
+    MemoryStream ms;
+    {
+        BufferedStream bs(&ms);
+        uint8_t writeData[] = {9, 9, 9};
+        bs.Write(writeData, 0, 3);
+        bs.Close();
+    }
+    EXPECT_EQ(ms.getLengthProperty(), 3);
+}
+
+TEST(BufferedStreamTests, Destructor_FlushesPendingBufferedWrites) {
+    MemoryStream ms;
+    {
+        BufferedStream bs(&ms);
+        uint8_t writeData[] = {7, 7};
+        bs.Write(writeData, 0, 2);
+    }
+    EXPECT_EQ(ms.getLengthProperty(), 2);
+}
+
+TEST(BufferedStreamTests, BufferSizeConstructor_UsesGivenSize) {
+    MemoryStream ms;
+    BufferedStream bs(&ms, 128);
+    EXPECT_EQ(bs.getBufferSizeProperty(), 128);
+}
+
+TEST(BufferedStreamTests, Constructor_NonPositiveBufferSize_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms1, ms2;
+    EXPECT_THROW(BufferedStream(&ms1, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(BufferedStream(&ms2, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferedStreamTests, WriteThenRead_FlushesPendingWriteBufferFirst) {
+    MemoryStream ms;
+    BufferedStream bs(&ms);
+    uint8_t writeData[] = {1, 2, 3};
+    bs.Write(writeData, 0, 3);
+    bs.setPositionProperty(0);
+    uint8_t out[3] = {};
+    EXPECT_EQ(bs.Read(out, 0, 3), 3);
+    EXPECT_EQ(std::vector<uint8_t>(out, out + 3), std::vector<uint8_t>(writeData, writeData + 3));
+}
+
+TEST(BufferedStreamTests, UnderlyingStreamProperty_ReturnsWrappedStream) {
+    MemoryStream ms;
+    BufferedStream bs(&ms);
+    EXPECT_EQ(bs.getUnderlyingStreamProperty(), &ms);
 }
 
 // ===========================================================================

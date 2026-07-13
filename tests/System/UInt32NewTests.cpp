@@ -41,6 +41,9 @@ TEST(UInt32NewTests, DivRem_WithRemainder) {
     auto [q,r] = UInt32::DivRem(10u, 3u);
     EXPECT_EQ(q, 3u); EXPECT_EQ(r, 1u);
 }
+TEST(UInt32NewTests, DivRem_ByZero_ThrowsDivideByZeroException) {
+    EXPECT_THROW(UInt32::DivRem(10u, 0u), System::DivideByZeroException);
+}
 
 TEST(UInt32NewTests, IsEvenInteger_Zero_True) { EXPECT_TRUE(UInt32::IsEvenInteger(0u)); }
 TEST(UInt32NewTests, IsEvenInteger_One_False) { EXPECT_FALSE(UInt32::IsEvenInteger(1u)); }

@@ -75,6 +75,31 @@ public:
     static const HttpMethod& Patch()   { static HttpMethod m("PATCH");   return m; } ///< The HTTP PATCH method.
     static const HttpMethod& Query()   { static HttpMethod m("QUERY");   return m; } ///< The HTTP QUERY method.
     static const HttpMethod& Connect() { static HttpMethod m("CONNECT"); return m; } ///< The HTTP CONNECT method.
+
+    /**
+     * @brief Parses @p method into an HttpMethod instance.
+     *
+     * C++ counterpart of .NET HttpMethod.Parse(ReadOnlySpan&lt;char&gt;). Returns one of the
+     * known-verb singletons (Get()/Put()/Post()/etc.) for a case-insensitive match against a
+     * known verb name; otherwise constructs (and validates, per the constructor's rules) a new
+     * HttpMethod for the given string.
+     * @throws System::ArgumentException if @p method is empty or all whitespace.
+     * @throws System::FormatException if @p method contains characters not valid in an HTTP token.
+     */
+    [[nodiscard]] static HttpMethod Parse(const std::string& method) {
+        static const HttpMethod* const known[] = {
+            &Get(), &Put(), &Post(), &Delete_(), &Head(), &Options(), &Trace(), &Patch(), &Query(), &Connect(),
+        };
+        for (const HttpMethod* candidate : known) {
+            if (method.size() == candidate->method_.size() &&
+                std::equal(method.begin(), method.end(), candidate->method_.begin(), [](unsigned char a, unsigned char b) {
+                    return std::tolower(a) == std::tolower(b);
+                })) {
+                return *candidate;
+            }
+        }
+        return HttpMethod(method);
+    }
 };
 
 } // namespace System::Net::Http

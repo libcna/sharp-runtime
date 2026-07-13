@@ -44,6 +44,11 @@ TEST(Int16Tests, ToString_HexFormat) {
     EXPECT_EQ(System::Int16::ToString(255, "X"), "FF");
 }
 
+TEST(Int16Tests, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(System::Int16::ToString(5, "Xz"), System::FormatException);
+    EXPECT_THROW(System::Int16::ToString(5, "X99999999999999999999"), System::FormatException);
+}
+
 // ---------------------------------------------------------------------------
 // Int32
 // ---------------------------------------------------------------------------

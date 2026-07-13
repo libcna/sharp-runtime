@@ -105,6 +105,15 @@ TEST(HttpRequestHeadersTests, Host_ContainsWhitespace_Throws) {
     EXPECT_THROW(h.setHostProperty(std::string("bad host")), System::FormatException);
 }
 
+// Regression test (ticket 266): isValidHost() didn't check for an embedded NUL byte, unlike
+// the checkNoNewlineOrNul() helper this same file uses for From/Protocol -- an inconsistency,
+// not a deliberate choice, since a literal NUL is never valid in any HTTP header value.
+TEST(HttpRequestHeadersTests, Host_ContainsNulByte_Throws) {
+    HttpRequestHeaders h;
+    std::string badHost("exa\0mple.com", 12);
+    EXPECT_THROW(h.setHostProperty(badHost), System::FormatException);
+}
+
 TEST(HttpRequestHeadersTests, IfMatch_AddThenGet) {
     HttpRequestHeaders h;
     h.AddIfMatch(EntityTagHeaderValue("\"abc\""));

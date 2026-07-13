@@ -189,7 +189,15 @@ BigInteger::BigInteger(intcs v) {
 
 BigInteger::BigInteger(longcs v) {
     negative_ = v < 0;
-    mag_ = fromUInt64(negative_ ? static_cast<uint64_t>(-v)
+    // Negating v directly (`-v`) is undefined behavior in C++ for v == LONGCS_MIN (confirmed
+    // via UBSan: "negation of -9223372036854775808 cannot be represented in type 'long int'")
+    // -- unlike the intcs constructor above, which safely widens to int64_t before negating
+    // (int64_t can represent -INT32_MIN exactly), there is no wider standard integer type to
+    // widen into here. Compute the magnitude via well-defined unsigned subtraction instead:
+    // `0 - (uint64_t)v` reinterprets v's bit pattern as unsigned first (well-defined in C++20)
+    // and performs the two's-complement negation via unsigned wraparound (also well-defined),
+    // producing the identical, correct magnitude without ever negating a signed value.
+    mag_ = fromUInt64(negative_ ? (0ULL - static_cast<uint64_t>(v))
                                 : static_cast<uint64_t>(v));
 }
 

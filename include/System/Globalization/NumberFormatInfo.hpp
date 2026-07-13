@@ -4,12 +4,15 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Globalization/DigitShapes.hpp"
 
 namespace System::Globalization {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides culture-specific information for formatting and parsing numeric values.
@@ -24,9 +27,9 @@ class NumberFormatInfo {
 
     std::string numberDecimalSeparator_ = ".";
     std::string numberGroupSeparator_   = ",";
-    int numberDecimalDigits_            = 2;
-    int numberNegativePattern_          = 1;
-    std::vector<int> numberGroupSizes_  = {3};
+    intcs numberDecimalDigits_          = 2;
+    intcs numberNegativePattern_        = 1;
+    std::vector<intcs> numberGroupSizes_ = {3};
 
     std::string currencyDecimalSeparator_ = ".";
     std::string currencyGroupSeparator_   = ",";
@@ -34,10 +37,10 @@ class NumberFormatInfo {
     // (NumberFormatInfo.cs: `_currencySymbol = "\x00a4"`) -- not "$", despite what that
     // file's own prose doc-comment table says; the field initializer is ground truth.
     std::string currencySymbol_           = "¤";
-    int currencyDecimalDigits_            = 2;
-    int currencyNegativePattern_          = 0;
-    int currencyPositivePattern_          = 0;
-    std::vector<int> currencyGroupSizes_  = {3};
+    intcs currencyDecimalDigits_          = 2;
+    intcs currencyNegativePattern_        = 0;
+    intcs currencyPositivePattern_        = 0;
+    std::vector<intcs> currencyGroupSizes_ = {3};
 
     std::string negativeSign_           = "-";
     std::string positiveSign_           = "+";
@@ -49,10 +52,10 @@ class NumberFormatInfo {
     std::string perMilleSymbol_          = "\xe2\x80\xb0"; // ‰
     std::string percentDecimalSeparator_ = ".";
     std::string percentGroupSeparator_   = ",";
-    int percentDecimalDigits_            = 2;
-    int percentNegativePattern_          = 0;
-    int percentPositivePattern_          = 0;
-    std::vector<int> percentGroupSizes_  = {3};
+    intcs percentDecimalDigits_          = 2;
+    intcs percentNegativePattern_        = 0;
+    intcs percentPositivePattern_        = 0;
+    std::vector<intcs> percentGroupSizes_ = {3};
 
     DigitShapes digitSubstitution_ = DigitShapes::None;
     std::vector<std::string> nativeDigits_ = {"0","1","2","3","4","5","6","7","8","9"};
@@ -103,15 +106,35 @@ class NumberFormatInfo {
      * to exactly one well-formed codepoint.
      */
     static void CheckNativeDigits(const std::vector<std::string>& nativeDigits) {
+        static constexpr const char* kMsg =
+            "Each member of the NativeDigits array must be a single text element (one or more "
+            "UTF16 code points) and a supplementary character is only allowed if the "
+            "corresponding digit in the Latin script, that is a digit in the range 0 through 9, "
+            "is also a supplementary character.";
         if (nativeDigits.size() != 10)
             throw System::ArgumentException("The NativeDigits array must contain exactly ten members.", "value");
         for (const auto& digit : nativeDigits) {
             if (digit.empty())
-                throw System::ArgumentException("Each member of the NativeDigits array must be a single text element (one or more UTF16 code points) and a supplementary character is only allowed if the corresponding digit in the Latin script, that is a digit in the range 0 through 9, is also a supplementary character.", "value");
+                throw System::ArgumentException(kMsg, "value");
             unsigned char c0 = static_cast<unsigned char>(digit[0]);
-            size_t expectedLen = c0 < 0x80 ? 1 : c0 < 0xE0 ? 2 : c0 < 0xF0 ? 3 : 4;
-            if (digit.size() != expectedLen)
-                throw System::ArgumentException("Each member of the NativeDigits array must be a single text element (one or more UTF16 code points) and a supplementary character is only allowed if the corresponding digit in the Latin script, that is a digit in the range 0 through 9, is also a supplementary character.", "value");
+            // Verified this is a real gap against the method's own stated intent ("must decode
+            // to exactly one well-formed codepoint"): the previous check only compared the
+            // total byte length against what the leading byte's value range implies, without
+            // checking (a) that the leading byte is actually a valid UTF-8 lead byte -- 0x80-
+            // 0xBF are continuation bytes and can never start a sequence -- or (b) that the
+            // subsequent bytes are valid continuation bytes (0x80-0xBF each). Confirmed via a
+            // standalone repro that both a malformed 2-byte sequence with a bad second byte
+            // (e.g. {0xC2, 0x20}) and a bare continuation byte used as if it were a lead byte
+            // (e.g. {0x80, 0x80}) both passed the old length-only check.
+            size_t expectedLen = c0 < 0x80 ? 1 : c0 < 0xC0 ? 0 /* invalid lead byte */
+                                : c0 < 0xE0 ? 2 : c0 < 0xF0 ? 3 : c0 < 0xF8 ? 4 : 0 /* invalid lead byte */;
+            if (expectedLen == 0 || digit.size() != expectedLen)
+                throw System::ArgumentException(kMsg, "value");
+            for (size_t i = 1; i < digit.size(); ++i) {
+                unsigned char ci = static_cast<unsigned char>(digit[i]);
+                if (ci < 0x80 || ci > 0xBF)
+                    throw System::ArgumentException(kMsg, "value");
+            }
         }
     }
 
@@ -200,16 +223,16 @@ public:
     void setNumberGroupSeparatorProperty(const std::string& value) { VerifyWritable(); numberGroupSeparator_ = value; }
 
     /** @brief Number of decimal digits in numeric values. C++ counterpart of .NET NumberFormatInfo.NumberDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
-    [[nodiscard]] int getNumberDecimalDigitsProperty() const { return numberDecimalDigits_; }
-    void setNumberDecimalDigitsProperty(int value) { CheckRange(value, 0, 99); VerifyWritable(); numberDecimalDigits_ = value; }
+    [[nodiscard]] intcs getNumberDecimalDigitsProperty() const { return numberDecimalDigits_; }
+    void setNumberDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); numberDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative numeric values. C++ counterpart of .NET NumberFormatInfo.NumberNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 4]. */
-    [[nodiscard]] int getNumberNegativePatternProperty() const { return numberNegativePattern_; }
-    void setNumberNegativePatternProperty(int value) { CheckRange(value, 0, 4); VerifyWritable(); numberNegativePattern_ = value; }
+    [[nodiscard]] intcs getNumberNegativePatternProperty() const { return numberNegativePattern_; }
+    void setNumberNegativePatternProperty(intcs value) { CheckRange(value, 0, 4); VerifyWritable(); numberNegativePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal point. C++ counterpart of .NET NumberFormatInfo.NumberGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
-    [[nodiscard]] std::vector<int> getNumberGroupSizesProperty() const { return numberGroupSizes_; }
-    void setNumberGroupSizesProperty(const std::vector<int>& value) { VerifyWritable(); CheckGroupSize(value); numberGroupSizes_ = value; }
+    [[nodiscard]] std::vector<intcs> getNumberGroupSizesProperty() const { return numberGroupSizes_; }
+    void setNumberGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); numberGroupSizes_ = value; }
 
     // --- Currency format ---
     /** @brief String that separates the integer from the fractional part in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyDecimalSeparator. @throws System::ArgumentException if @p value is empty. */
@@ -225,20 +248,20 @@ public:
     void setCurrencySymbolProperty(const std::string& value) { VerifyWritable(); currencySymbol_ = value; }
 
     /** @brief Number of decimal digits in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
-    [[nodiscard]] int getCurrencyDecimalDigitsProperty() const { return currencyDecimalDigits_; }
-    void setCurrencyDecimalDigitsProperty(int value) { CheckRange(value, 0, 99); VerifyWritable(); currencyDecimalDigits_ = value; }
+    [[nodiscard]] intcs getCurrencyDecimalDigitsProperty() const { return currencyDecimalDigits_; }
+    void setCurrencyDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); currencyDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 16]. */
-    [[nodiscard]] int getCurrencyNegativePatternProperty() const { return currencyNegativePattern_; }
-    void setCurrencyNegativePatternProperty(int value) { CheckRange(value, 0, 16); VerifyWritable(); currencyNegativePattern_ = value; }
+    [[nodiscard]] intcs getCurrencyNegativePatternProperty() const { return currencyNegativePattern_; }
+    void setCurrencyNegativePatternProperty(intcs value) { CheckRange(value, 0, 16); VerifyWritable(); currencyNegativePattern_ = value; }
 
     /** @brief Format pattern for positive currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyPositivePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 3]. */
-    [[nodiscard]] int getCurrencyPositivePatternProperty() const { return currencyPositivePattern_; }
-    void setCurrencyPositivePatternProperty(int value) { CheckRange(value, 0, 3); VerifyWritable(); currencyPositivePattern_ = value; }
+    [[nodiscard]] intcs getCurrencyPositivePatternProperty() const { return currencyPositivePattern_; }
+    void setCurrencyPositivePatternProperty(intcs value) { CheckRange(value, 0, 3); VerifyWritable(); currencyPositivePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal in currency values. C++ counterpart of .NET NumberFormatInfo.CurrencyGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
-    [[nodiscard]] std::vector<int> getCurrencyGroupSizesProperty() const { return currencyGroupSizes_; }
-    void setCurrencyGroupSizesProperty(const std::vector<int>& value) { VerifyWritable(); CheckGroupSize(value); currencyGroupSizes_ = value; }
+    [[nodiscard]] std::vector<intcs> getCurrencyGroupSizesProperty() const { return currencyGroupSizes_; }
+    void setCurrencyGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); currencyGroupSizes_ = value; }
 
     // --- Sign and special symbols ---
     /** @brief String that denotes a negative number. C++ counterpart of .NET NumberFormatInfo.NegativeSign. */
@@ -279,20 +302,20 @@ public:
     void setPercentGroupSeparatorProperty(const std::string& value) { VerifyWritable(); percentGroupSeparator_ = value; }
 
     /** @brief Number of decimal digits in percent values. C++ counterpart of .NET NumberFormatInfo.PercentDecimalDigits. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 99]. */
-    [[nodiscard]] int getPercentDecimalDigitsProperty() const { return percentDecimalDigits_; }
-    void setPercentDecimalDigitsProperty(int value) { CheckRange(value, 0, 99); VerifyWritable(); percentDecimalDigits_ = value; }
+    [[nodiscard]] intcs getPercentDecimalDigitsProperty() const { return percentDecimalDigits_; }
+    void setPercentDecimalDigitsProperty(intcs value) { CheckRange(value, 0, 99); VerifyWritable(); percentDecimalDigits_ = value; }
 
     /** @brief Format pattern for negative percent values. C++ counterpart of .NET NumberFormatInfo.PercentNegativePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 11]. */
-    [[nodiscard]] int getPercentNegativePatternProperty() const { return percentNegativePattern_; }
-    void setPercentNegativePatternProperty(int value) { CheckRange(value, 0, 11); VerifyWritable(); percentNegativePattern_ = value; }
+    [[nodiscard]] intcs getPercentNegativePatternProperty() const { return percentNegativePattern_; }
+    void setPercentNegativePatternProperty(intcs value) { CheckRange(value, 0, 11); VerifyWritable(); percentNegativePattern_ = value; }
 
     /** @brief Format pattern for positive percent values. C++ counterpart of .NET NumberFormatInfo.PercentPositivePattern. @throws System::ArgumentOutOfRangeException if @p value is outside [0, 3]. */
-    [[nodiscard]] int getPercentPositivePatternProperty() const { return percentPositivePattern_; }
-    void setPercentPositivePatternProperty(int value) { CheckRange(value, 0, 3); VerifyWritable(); percentPositivePattern_ = value; }
+    [[nodiscard]] intcs getPercentPositivePatternProperty() const { return percentPositivePattern_; }
+    void setPercentPositivePatternProperty(intcs value) { CheckRange(value, 0, 3); VerifyWritable(); percentPositivePattern_ = value; }
 
     /** @brief Number of digits in each group left of the decimal in percent values. C++ counterpart of .NET NumberFormatInfo.PercentGroupSizes. Returns a copy, matching .NET. @throws System::ArgumentException if any element is outside [1, 9] (the last element may also be 0). */
-    [[nodiscard]] std::vector<int> getPercentGroupSizesProperty() const { return percentGroupSizes_; }
-    void setPercentGroupSizesProperty(const std::vector<int>& value) { VerifyWritable(); CheckGroupSize(value); percentGroupSizes_ = value; }
+    [[nodiscard]] std::vector<intcs> getPercentGroupSizesProperty() const { return percentGroupSizes_; }
+    void setPercentGroupSizesProperty(const std::vector<intcs>& value) { VerifyWritable(); CheckGroupSize(value); percentGroupSizes_ = value; }
 
     // --- Digit substitution ---
     /** @brief Specifies how a GUI displays the shape of a digit. C++ counterpart of .NET NumberFormatInfo.DigitSubstitution. @throws System::ArgumentException if @p value is not a valid DigitShapes member. */

@@ -59,6 +59,7 @@ namespace System {
             return appendRaw(value.data(), value.size());
         }
 
+        /** @brief C-string overload; see the std::string overload above. */
         bool AppendLiteral(const char* value) {
             return appendRaw(value, std::strlen(value));
         }

@@ -419,12 +419,27 @@ namespace System::Net {
             // representation of 127.0.0.1 (::ffff:127.0.0.1, s_loopbackMappedToIPv6) as
             // loopback, not just the canonical ::1 -- this port previously checked only
             // IPv6Loopback, silently reporting false for a real loopback address.
+            //
+            // Both loopback constants below are function-local statics (lazily initialized on
+            // first call, guaranteed thread-safe since C++11) rather than references to the
+            // IPv6Loopback class-level static: referencing another class-level static object
+            // from a function that could itself run during another translation unit's dynamic
+            // initialization is a static-initialization-order hazard -- the exact bug class
+            // already found and fixed for DateTimeOffset::MinValue/MaxValue/UnixEpoch (see
+            // DateTimeOffset.cpp) -- if some other TU's global constructor called IsLoopback()
+            // before this TU's IPv6Loopback had run its own constructor, IPv6Loopback would
+            // still be in its zero-initialized (0.0.0.0-equivalent, isIPv6_=false) state,
+            // silently misclassifying every address.
             static const IPAddress loopbackMappedToIPv6(
                 std::array<bytecs, 16>{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 127, 0, 0, 1}, 0);
-            return address == IPv6Loopback || address == loopbackMappedToIPv6;
+            static const IPAddress ipv6Loopback(std::array<uint16_t, 8>{0, 0, 0, 0, 0, 0, 0, 1}, 0);
+            return address == ipv6Loopback || address == loopbackMappedToIPv6;
         }
-        uint32_t loopbackMask = LoopbackMaskHostOrder;
-        return (address.addressOrScopeId_ & loopbackMask) == (Loopback.addressOrScopeId_ & loopbackMask);
+        // Same reasoning as above: compare against the literal 127.0.0.1 value directly rather
+        // than the Loopback class-level static, avoiding the identical SIOF hazard.
+        constexpr uint32_t loopbackMask = LoopbackMaskHostOrder;
+        constexpr uint32_t loopbackAddress = 0x7F000001u;
+        return (address.addressOrScopeId_ & loopbackMask) == (loopbackAddress & loopbackMask);
     }
 
     IPAddress IPAddress::Parse(const std::string& s) {

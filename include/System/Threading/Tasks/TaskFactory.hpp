@@ -79,10 +79,24 @@ namespace System::Threading::Tasks {
             return Task::Run(std::move(action), std::move(cancellationToken));
         }
 
-        /** @brief Creates and starts a TaskT<TResult> that runs @p function, returning its result. */
+        /**
+         * @brief Creates and starts a TaskT<TResult> that runs @p function, observing this
+         * factory's default CancellationToken, returning its result.
+         *
+         * @note Previously did not observe defaultCancellationToken_ at all -- an inconsistency
+         * with the non-generic StartNew(action) overload above, which always has. Now that
+         * TaskT<TResult> supports cancellation (see Task.hpp), this overload was fixed to match.
+         */
         template<typename TResult>
         [[nodiscard]] TaskT<TResult> StartNew(std::function<TResult()> function) const {
-            return TaskT<TResult>::Run(std::move(function));
+            return TaskT<TResult>::Run(std::move(function), defaultCancellationToken_);
+        }
+
+        /** @brief Creates and starts a TaskT<TResult> that runs @p function, observing @p cancellationToken. */
+        template<typename TResult>
+        [[nodiscard]] TaskT<TResult> StartNew(std::function<TResult()> function,
+                                               System::Threading::CancellationToken cancellationToken) const {
+            return TaskT<TResult>::Run(std::move(function), std::move(cancellationToken));
         }
     };
 

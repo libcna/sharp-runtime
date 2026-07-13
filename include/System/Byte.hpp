@@ -13,12 +13,14 @@
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
 namespace System {
 
     using SharpRuntime::bytecs;
+    using SharpRuntime::intcs;
 
     /**
      * @brief Represents an 8-bit unsigned integer.
@@ -51,8 +53,8 @@ namespace System {
          * C++ counterpart of .NET Byte.CompareTo(byte).
          * @return Negative if a < b, zero if equal, positive if a > b.
          */
-        [[nodiscard]] static int CompareTo(bytecs a, bytecs b) noexcept {
-            return static_cast<int>(a) - static_cast<int>(b);
+        [[nodiscard]] static intcs CompareTo(bytecs a, bytecs b) noexcept {
+            return static_cast<intcs>(a) - static_cast<intcs>(b);
         }
 
         /**
@@ -71,8 +73,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.GetHashCode().
          */
-        [[nodiscard]] static int GetHashCode(bytecs value) noexcept {
-            return static_cast<int>(value);
+        [[nodiscard]] static intcs GetHashCode(bytecs value) noexcept {
+            return static_cast<intcs>(value);
         }
 
         // -----------------------------------------------------------------------
@@ -112,7 +114,7 @@ namespace System {
          * C++ counterpart of .NET Byte.Sign(byte).
          * Bytes are unsigned so the result is never -1.
          */
-        [[nodiscard]] static int Sign(bytecs value) noexcept {
+        [[nodiscard]] static intcs Sign(bytecs value) noexcept {
             return value == 0 ? 0 : 1;
         }
 
@@ -120,8 +122,14 @@ namespace System {
          * @brief Returns the quotient and remainder of @p left / @p right.
          *
          * C++ counterpart of .NET Byte.DivRem(byte, byte).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly.
          */
         [[nodiscard]] static std::pair<bytecs, bytecs> DivRem(bytecs left, bytecs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return {static_cast<bytecs>(left / right),
                     static_cast<bytecs>(left % right)};
         }
@@ -195,8 +203,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.RotateLeft(byte, int).
          */
-        [[nodiscard]] static bytecs RotateLeft(bytecs value, int rotateAmount) noexcept {
-            int r = rotateAmount & 7;
+        [[nodiscard]] static bytecs RotateLeft(bytecs value, intcs rotateAmount) noexcept {
+            intcs r = rotateAmount & 7;
             return static_cast<bytecs>((value << r) | (value >> ((8 - r) & 7)));
         }
 
@@ -205,8 +213,8 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.RotateRight(byte, int).
          */
-        [[nodiscard]] static bytecs RotateRight(bytecs value, int rotateAmount) noexcept {
-            int r = rotateAmount & 7;
+        [[nodiscard]] static bytecs RotateRight(bytecs value, intcs rotateAmount) noexcept {
+            intcs r = rotateAmount & 7;
             return static_cast<bytecs>((value >> r) | (value << ((8 - r) & 7)));
         }
 
@@ -243,12 +251,23 @@ namespace System {
          * @brief Parses @p s as a decimal Byte value.
          *
          * C++ counterpart of .NET Byte.Parse(string) with NumberStyles.Integer:
-         * leading/trailing whitespace and a leading sign are tolerated, but any
-         * trailing non-whitespace character is rejected.
+         * leading/trailing whitespace and a leading sign are tolerated, but a leading '-'
+         * always overflows (unsigned types reject any negative sign, even "-0" -- verified
+         * against real .NET's Number.Parsing.cs: `(!TInteger.IsSigned && number.IsNegative)`
+         * is an overflow condition checked independent of magnitude) and any trailing
+         * non-whitespace character is rejected. The general `v < 0` check below catches every
+         * negative case except "-0" specifically, since std::stoi("-0") returns the literal
+         * int 0 (confirmed via a standalone repro) -- not a negative value -- so it previously
+         * passed both the `v < 0` and `v > MaxValue` checks and silently returned 0 instead of
+         * throwing.
          * @throws System::FormatException on bad format.
-         * @throws System::OverflowException if the value is outside [0, 255].
+         * @throws System::OverflowException if the value is outside [0, 255], or the string
+         *         has a leading '-'.
          */
         [[nodiscard]] static bytecs Parse(const std::string& s) {
+            std::size_t start = s.find_first_not_of(" \t\n\r\f\v");
+            if (start != std::string::npos && s[start] == '-')
+                throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
             std::size_t pos = 0;
             int v;
             try {
@@ -297,7 +316,14 @@ namespace System {
         [[nodiscard]] static std::string ToString(bytecs value, const std::string& format) {
             if (format.empty()) return ToString(value);
             char type = format[0];
-            int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             unsigned uv = static_cast<unsigned>(value);
             std::ostringstream oss;
             oss.imbue(std::locale::classic());

@@ -150,3 +150,23 @@ TEST(StopwatchTests, Frequency_Is10MHz) {
 TEST(StopwatchTests, IsHighResolution_True) {
     EXPECT_TRUE(Stopwatch::IsHighResolution);
 }
+
+TEST(StopwatchTests, GetElapsedTime_TwoTimestamps_MatchesDelta) {
+    long long start = Stopwatch::GetTimestamp();
+    long long end = start + Stopwatch::Frequency; // exactly 1 second later, in ticks
+    System::TimeSpan elapsed = Stopwatch::GetElapsedTime(start, end);
+    EXPECT_EQ(elapsed.getTicksProperty(), Stopwatch::Frequency);
+}
+
+TEST(StopwatchTests, GetElapsedTime_SingleTimestamp_IsNonNegative) {
+    long long start = Stopwatch::GetTimestamp();
+    System::TimeSpan elapsed = Stopwatch::GetElapsedTime(start);
+    EXPECT_GE(elapsed.getTicksProperty(), 0);
+}
+
+TEST(StopwatchTests, ToString_MatchesElapsedToString) {
+    Stopwatch sw;
+    sw.Start();
+    sw.Stop();
+    EXPECT_EQ(sw.ToString(), sw.getElapsedProperty().ToString());
+}

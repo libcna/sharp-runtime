@@ -99,6 +99,41 @@ TEST(MulticastDelegateTests, Equals_DifferentListPointers_False) {
     EXPECT_FALSE(c1->Equals(*c2));
 }
 
+namespace {
+    void FreeFunctionForDelegateEqualsTest() {}
+    void OtherFreeFunctionForDelegateEqualsTest() {}
+}
+
+// Regression for ticket 345: real .NET's Delegate.Equals compares single-cast delegates by
+// (Method, Target) value-equality, not by object identity -- two distinct delegate instances
+// wrapping the same free function ARE Equals() in .NET. The port previously only ever returned
+// true for the literal same object. A std::function generically can't be compared this way for
+// arbitrary callables (no operator== for lambdas/closures), but the one mechanically comparable
+// case -- both wrapping the identical plain function pointer -- is now handled.
+TEST(MulticastDelegateTests, Equals_SamePlainFunctionPointer_DifferentInstances_True) {
+    auto d1 = std::make_shared<MulticastDelegate>(FreeFunctionForDelegateEqualsTest);
+    auto d2 = std::make_shared<MulticastDelegate>(FreeFunctionForDelegateEqualsTest);
+    EXPECT_TRUE(d1->Equals(*d2));
+    EXPECT_TRUE(*d1 == *d2);
+}
+
+TEST(MulticastDelegateTests, Equals_DifferentPlainFunctionPointers_False) {
+    auto d1 = std::make_shared<MulticastDelegate>(FreeFunctionForDelegateEqualsTest);
+    auto d2 = std::make_shared<MulticastDelegate>(OtherFreeFunctionForDelegateEqualsTest);
+    EXPECT_FALSE(d1->Equals(*d2));
+}
+
+// GetHashCode() previously hashed std::function::target<>()'s return value directly -- the
+// internal storage slot's address, not the wrapped function pointer's value -- so it never
+// actually produced equal hashes for two Delegate objects wrapping the same free function,
+// despite Equals() (after the fix above) now considering them equal, which the hash contract
+// requires.
+TEST(MulticastDelegateTests, GetHashCode_SamePlainFunctionPointer_DifferentInstances_Equal) {
+    auto d1 = std::make_shared<MulticastDelegate>(FreeFunctionForDelegateEqualsTest);
+    auto d2 = std::make_shared<MulticastDelegate>(FreeFunctionForDelegateEqualsTest);
+    EXPECT_EQ(d1->GetHashCode(), d2->GetHashCode());
+}
+
 TEST(MulticastDelegateTests, Equals_DifferentListLength_False) {
     auto t1 = std::make_shared<MulticastDelegate>([]{});
     auto t2 = std::make_shared<MulticastDelegate>([]{});

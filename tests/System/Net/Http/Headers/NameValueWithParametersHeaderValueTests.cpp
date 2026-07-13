@@ -47,6 +47,19 @@ TEST(NameValueWithParametersHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_FALSE(NameValueWithParametersHeaderValue::TryParse("bad name; charset=utf-8", result));
 }
 
+// The head (name[=value]) portion must go through the same strict token-or-quoted-string
+// grammar as a plain NameValueHeaderValue -- real .NET's GetNameValueWithParametersLength
+// delegates to the identical GetNameValueLength parser for the head.
+TEST(NameValueWithParametersHeaderValueTests, TryParse_TrailingEqualsNoValue_ReturnsFalse) {
+    NameValueWithParametersHeaderValue result("x");
+    EXPECT_FALSE(NameValueWithParametersHeaderValue::TryParse("text/plain=; charset=utf-8", result));
+}
+
+TEST(NameValueWithParametersHeaderValueTests, TryParse_UnquotedHeadValueContainingEquals_ReturnsFalse) {
+    NameValueWithParametersHeaderValue result("x");
+    EXPECT_FALSE(NameValueWithParametersHeaderValue::TryParse("a=b=c; charset=utf-8", result));
+}
+
 TEST(NameValueWithParametersHeaderValueTests, Parse_Invalid_Throws) {
     EXPECT_THROW(NameValueWithParametersHeaderValue::Parse("bad name"), System::FormatException);
 }

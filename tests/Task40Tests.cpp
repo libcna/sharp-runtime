@@ -78,6 +78,24 @@ TEST(SpanTests, Slice_SubRange) {
     EXPECT_EQ(sl[2], 4);
 }
 
+// Slice(start, length)'s bounds check used to compute `start + length` directly in intcs
+// (int32) arithmetic, which itself signed-overflows for large start/length -- confirmed real
+// UB via a standalone UBSan repro -- and worse, the wrapped (very negative) sum then compared
+// as <= the span's actual length, silently BYPASSING the check entirely instead of throwing.
+// Real .NET's Span<T>.Slice(int,int) explicitly guards against exactly this by casting to
+// unsigned and using subtraction instead of addition.
+TEST(SpanTests, Slice_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    int arr[] = {1, 2, 3, 4, 5};
+    Span<int> s(arr, 5);
+    EXPECT_THROW(s.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(SpanTests, Slice_NegativeLength_Throws) {
+    int arr[] = {1, 2, 3};
+    Span<int> s(arr, 3);
+    EXPECT_THROW(s.Slice(0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(SpanTests, FromVector_Ctor) {
     std::vector<int> v = {5, 6, 7};
     Span<int> s(v);
@@ -572,6 +590,45 @@ TEST(Int128Tests, Log2_Negative_Throws) {
     EXPECT_THROW(System::Int128::Log2(System::Int128(-1)), System::ArgumentOutOfRangeException);
 }
 
+// operator+/-/* previously used raw signed __int128 arithmetic, which is genuine C++ UB on
+// overflow (confirmed via a standalone UBSan repro) even though real .NET's own unchecked
+// operators are defined to wrap silently -- these lock in the wrapping behavior.
+TEST(Int128Tests, OperatorPlus_MaxValuePlusOne_WrapsToMinValue) {
+    EXPECT_EQ(System::Int128::MaxValue() + System::Int128::One(), System::Int128::MinValue());
+}
+
+TEST(Int128Tests, OperatorMinus_MinValueMinusOne_WrapsToMaxValue) {
+    EXPECT_EQ(System::Int128::MinValue() - System::Int128::One(), System::Int128::MaxValue());
+}
+
+TEST(Int128Tests, OperatorMultiply_Overflow_WrapsWithoutUB) {
+    // MaxValue * 2 overflows; must not crash/UB, just wrap per real .NET's unchecked operator.
+    System::Int128 result = System::Int128::MaxValue() * System::Int128(2);
+    EXPECT_EQ(result, System::Int128(-2));
+}
+
+// Matches real .NET's unchecked unary operator- => Zero - value: negating MinValue wraps back
+// to MinValue itself, a two's-complement quirk (Int128::Abs() is the method that throws for
+// this case, not the raw operator). Confirmed real UB in plain __int128 negation via UBSan.
+TEST(Int128Tests, UnaryNegate_MinValue_WrapsToItself) {
+    EXPECT_EQ(-System::Int128::MinValue(), System::Int128::MinValue());
+}
+
+// Unlike +/-/*, real .NET's Int128 operator/ (and operator%, which is defined in terms of it)
+// explicitly throws OverflowException for MinValue/-1, rather than wrapping -- confirmed real
+// UB in plain __int128 division/modulo for this exact case via a standalone UBSan repro.
+TEST(Int128Tests, OperatorDivide_MinValueByNegativeOne_ThrowsOverflow) {
+    EXPECT_THROW(System::Int128::MinValue() / System::Int128(-1), System::OverflowException);
+}
+
+TEST(Int128Tests, OperatorModulo_MinValueByNegativeOne_ThrowsOverflow) {
+    EXPECT_THROW(System::Int128::MinValue() % System::Int128(-1), System::OverflowException);
+}
+
+TEST(Int128Tests, OperatorDivide_ByZero_ThrowsDivideByZero) {
+    EXPECT_THROW(System::Int128::One() / System::Int128::Zero(), System::DivideByZeroException);
+}
+
 // ===========================================================================
 // UInt128
 // ===========================================================================
@@ -761,6 +818,40 @@ TEST(DateTimeOffsetTests, ToString_WithFormat_O) {
 TEST(DateTimeOffsetTests, ToString_WithFormat_r_ProducesRfc1123) {
     DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::Zero);
     EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 07:28:00 GMT");
+}
+
+// Regression tests for ticket 354: real .NET's TryFormatR/TryFormatu (DateTimeFormat.cs) convert
+// to UTC (subtracting the offset) BEFORE formatting, and "R"/"r" always emits the literal "GMT"
+// (RFC 1123 has no offset notation). The previous code used the ORIGINAL offset-relative clock
+// time directly for BOTH "R" and "u", producing the wrong time and (for "R") an invalid trailing
+// token (the raw offset instead of "GMT") for any non-zero offset.
+TEST(DateTimeOffsetTests, ToString_WithFormat_r_NonZeroOffset_ConvertsToUtcAndAlwaysUsesGmt) {
+    // 07:28 +02:00 == 05:28 UTC.
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 05:28:00 GMT");
+}
+
+TEST(DateTimeOffsetTests, ToString_WithFormat_u_NonZeroOffset_ConvertsToUtc) {
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("u"), "2015-10-21 05:28:00Z");
+}
+
+// Regression for ticket 354: the "O" round-trip format previously omitted the fractional-second
+// component entirely, losing millisecond precision on round-trip.
+TEST(DateTimeOffsetTests, ToString_WithFormat_O_IncludesMilliseconds) {
+    DateTime dt(2024, 6, 15, 10, 30, 0, 123);
+    DateTimeOffset dto(dt, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("O"), "2024-06-15T10:30:00.123+02:00");
+}
+
+// Regression for ticket 354: TryParse's contract is to never throw, only report failure via its
+// bool return -- but the DateTimeOffset(DateTime, TimeSpan) constructor it calls internally
+// validates the offset (must be within +-14 hours) and throws ArgumentOutOfRangeException on
+// violation. A syntactically well-formed offset that exceeds 14 hours previously let that
+// exception escape TryParse uncaught.
+TEST(DateTimeOffsetTests, TryParse_SyntacticallyValidButOutOfRangeOffset_ReturnsFalse) {
+    DateTimeOffset dto;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-01-15T10:30:00+15:00", dto));
 }
 
 // ===========================================================================

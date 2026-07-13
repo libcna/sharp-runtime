@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/MidpointRounding.hpp"
 #include "System/OverflowException.hpp"
 
@@ -183,10 +184,30 @@ namespace System
 
         /** Returns the absolute value of a single-precision float. */
         [[nodiscard]] static float Abs(float value)              { return std::abs(value); }
-        /** Returns the smaller of two single-precision floats. */
-        [[nodiscard]] static float Min(float a, float b)         { return a < b ? a : b; }
-        /** Returns the larger of two single-precision floats. */
-        [[nodiscard]] static float Max(float a, float b)         { return a > b ? a : b; }
+        /**
+         * @brief Returns the smaller of two single-precision floats.
+         *
+         * Matches the IEEE 754:2019 `minimum` function: propagates NaN regardless of which
+         * argument it's in, and treats +0 as greater than -0 -- unlike a naive `a < b ? a : b`
+         * (which found the identical bug fixed in this session's double overload: e.g.
+         * `5.0f < NaN ? ... : ...` is always false, so NaN only propagates when it's the first
+         * argument, not both).
+         */
+        [[nodiscard]] static float Min(float val1, float val2) {
+            if (val1 != val2) {
+                if (!std::isnan(val1)) return val1 < val2 ? val1 : val2;
+                return val1;
+            }
+            return std::signbit(val1) ? val1 : val2;
+        }
+        /** @brief Returns the larger of two single-precision floats (see Min()'s doc-comment). */
+        [[nodiscard]] static float Max(float val1, float val2) {
+            if (val1 != val2) {
+                if (!std::isnan(val1)) return val2 < val1 ? val1 : val2;
+                return val1;
+            }
+            return std::signbit(val2) ? val1 : val2;
+        }
         /**
          * @brief Clamps a single-precision float to [@p min, @p max].
          * @throws System::ArgumentException if @p min is greater than @p max.
@@ -281,9 +302,18 @@ namespace System
         /** @brief Returns the IEEE 754 remainder of @p x divided by @p y. */
         [[nodiscard]] static double IEEERemainder(double x, double y);
 
-        /** @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient. */
+        /**
+         * @brief Divides @p a by @p b and stores the remainder in @p result; returns the quotient.
+         * @throws System::DivideByZeroException if @p b is zero. Unlike real .NET (where the CLR's
+         * `div`/`rem` instructions raise this automatically), plain C++ integer division by zero is
+         * undefined behavior, so this must be checked explicitly to get an equivalent, catchable
+         * failure instead of a crash.
+         */
         static intcs DivRem(intcs a, intcs b, intcs& result);
-        /** @brief Divides @p a by @p b (64-bit) and stores the remainder in @p result; returns the quotient. */
+        /**
+         * @brief Divides @p a by @p b (64-bit) and stores the remainder in @p result; returns the quotient.
+         * @throws System::DivideByZeroException if @p b is zero.
+         */
         static longcs DivRem(longcs a, longcs b, longcs& result);
 
         /** @brief Returns the value with the greater magnitude; if equal magnitudes, returns the positive one. */
@@ -435,24 +465,49 @@ namespace System
         /** @brief Returns the base-2 integer logarithm of @p x (std::ilogb). */
         [[nodiscard]] static intcs ILogB(double x) { return static_cast<intcs>(std::ilogb(x)); }
 
+#if !defined(_MSC_VER)
         /**
          * @brief Multiplies two 64-bit signed integers and returns the full 128-bit product.
          *
          * The high 64 bits of the product are stored in @p high.
          * C++ counterpart of .NET Math.BigMul(long, long, out long).
+         *
+         * MSVC-unsupported: relies on the GCC/Clang `__int128` extension (see CLAUDE.md's
+         * documented, permanent __int128-dependency policy -- the same reasoning as
+         * System::Int128/UInt128). Guarded out here rather than left to fail with a raw
+         * "__int128 is not a recognized built-in type" compiler error, matching the pattern
+         * already established in System::Buffers::Binary::BinaryPrimitives for its
+         * Int128/UInt128 overloads.
          */
         static longcs BigMul(longcs a, longcs b, longcs& high) {
             __int128 product = static_cast<__int128>(a) * static_cast<__int128>(b);
             high = static_cast<longcs>(product >> 64);
             return static_cast<longcs>(product);
         }
+#endif // !defined(_MSC_VER)
 
-        /** @brief Divides @p a by @p b and returns {quotient, remainder} as a pair. */
+        /**
+         * @brief Divides @p a by @p b and returns {quotient, remainder} as a pair.
+         * @throws System::DivideByZeroException if @p b is zero (see the out-param DivRem() overload).
+         * @throws System::OverflowException if @p a is intcs's MinValue and @p b is -1 (see the
+         *         out-param DivRem() overload's comment -- same real hardware-trap hazard,
+         *         confirmed via a standalone repro).
+         */
         [[nodiscard]] static std::pair<intcs, intcs> DivRem(intcs a, intcs b) {
+            if (b == 0) throw System::DivideByZeroException();
+            if (a == std::numeric_limits<intcs>::min() && b == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return { a / b, a % b };
         }
-        /** @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair. */
+        /**
+         * @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair.
+         * @throws System::DivideByZeroException if @p b is zero.
+         * @throws System::OverflowException if @p a is longcs's MinValue and @p b is -1.
+         */
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs a, longcs b) {
+            if (b == 0) throw System::DivideByZeroException();
+            if (a == std::numeric_limits<longcs>::min() && b == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return { a / b, a % b };
         }
 

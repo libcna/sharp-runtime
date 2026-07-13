@@ -116,6 +116,17 @@ public:
  * only invalidates that node's iterator; other iterators remain valid). Do not
  * mutate the list while iterating it directly.
  *
+ * @note Missing surface, and why: real .NET's LinkedListNode<T> is an independently
+ * allocatable object that can exist *detached* from any list (`new LinkedListNode<T>(value)`),
+ * which is why LinkedList<T> exposes AddFirst/AddLast/AddBefore/AddAfter overloads that take an
+ * already-constructed LinkedListNode<T> and attach it (throwing InvalidOperationException if
+ * that node already belongs to a list). This port's LinkedListNode<T> is instead just a
+ * (list pointer, std::list iterator) pair with no independent existence outside a list --
+ * architecturally, there is no way to "pre-construct" a detached node the way .NET's design
+ * allows. Porting the existing-node overloads would need a real design change (a heap-allocated
+ * node type), not a mechanical add, so they're deliberately omitted rather than faked with a
+ * signature that can't preserve the real semantics.
+ *
  * @tparam T The type of elements in the linked list.
  */
 template<typename T>
@@ -360,13 +371,22 @@ public:
      * C++ counterpart of .NET LinkedList<T>.CopyTo(T[], int).
      * @param dest  The destination vector (must have sufficient capacity).
      * @param index The zero-based index in @p dest at which copying begins.
-     * @throws System::ArgumentOutOfRangeException if @p index is negative.
-     * @throws System::ArgumentException if @p dest is not large enough.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative, or if @p index is
+     *         greater than the length of @p dest (real .NET's LinkedList<T>.CopyTo makes this a
+     *         *separate* check from the insufficient-space case below, throwing
+     *         ArgumentOutOfRangeException rather than ArgumentException for it -- e.g. an
+     *         out-of-bounds index against an EMPTY list still throws the range exception, not
+     *         the space one, since there is no "insufficient space" to speak of when there is
+     *         nothing to copy).
+     * @throws System::ArgumentException if @p dest does not have enough remaining room (from
+     *         @p index onward) for every element of this list.
      */
     void CopyTo(std::vector<T>& dest, intcs index) const {
         if (index < 0)
             throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
-        if (static_cast<std::size_t>(index) + list_.size() > dest.size())
+        if (static_cast<std::size_t>(index) > dest.size())
+            throw System::ArgumentOutOfRangeException("index", "Larger than collection size.");
+        if (dest.size() - static_cast<std::size_t>(index) < list_.size())
             throw System::ArgumentException("Destination array is not long enough to copy all the items in the collection.");
         for (const auto& item : list_) {
             dest[static_cast<std::size_t>(index++)] = item;

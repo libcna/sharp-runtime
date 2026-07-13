@@ -35,7 +35,32 @@ Architecture RuntimeInformation::getProcessArchitectureProperty() {
 #endif
 }
 
-Architecture RuntimeInformation::getOSArchitectureProperty() { return getProcessArchitectureProperty(); }
+Architecture RuntimeInformation::getOSArchitectureProperty() {
+    // Real .NET's OSArchitecture queries the actual OS/kernel architecture (Interop.Sys.
+    // GetOSArchitecture(), backed by uname()) rather than the running process' own architecture,
+    // falling back to ProcessArchitecture only if that query is unavailable -- this matters for a
+    // 32-bit process running under a 64-bit kernel (e.g. via WOW64/multilib), where the two
+    // legitimately differ. An earlier version of this port always aliased OSArchitecture to
+    // ProcessArchitecture, silently losing that distinction.
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    return getProcessArchitectureProperty();
+#else
+    struct utsname info{};
+    if (::uname(&info) == 0) {
+        std::string machine(info.machine);
+        if (machine == "x86_64") return Architecture::X64;
+        if (machine == "i386" || machine == "i486" || machine == "i586" || machine == "i686") return Architecture::X86;
+        if (machine == "aarch64" || machine == "arm64") return Architecture::Arm64;
+        if (machine == "armv6l") return Architecture::Armv6;
+        if (machine.substr(0, 3) == "arm") return Architecture::Arm;
+        if (machine == "riscv64") return Architecture::RiscV64;
+        if (machine == "loongarch64") return Architecture::LoongArch64;
+        if (machine == "ppc64le") return Architecture::Ppc64le;
+        if (machine == "s390x") return Architecture::S390x;
+    }
+    return getProcessArchitectureProperty();
+#endif
+}
 
 bool RuntimeInformation::IsOSPlatform(const OSPlatform& osPlatform) {
 #if defined(_WIN32)

@@ -22,10 +22,14 @@ namespace System::Text {
         SharpRuntime::intcs index_ = 0;
 
     public:
+        /** @brief Initializes a new DecoderFallbackException with a default message. */
         DecoderFallbackException() : System::ArgumentException("Value does not fall within the expected range.") {}
+        /** @brief Initializes a new DecoderFallbackException with the specified message. */
         explicit DecoderFallbackException(const std::string& message) : System::ArgumentException(message) {}
+        /** @brief Initializes a new DecoderFallbackException with a message and an inner exception. */
         DecoderFallbackException(const std::string& message, std::exception_ptr innerException)
             : System::ArgumentException(message, innerException) {}
+        /** @brief Initializes a new DecoderFallbackException with the offending byte sequence and its index. */
         DecoderFallbackException(const std::string& message, std::vector<SharpRuntime::bytecs> bytesUnknown,
                                   SharpRuntime::intcs index)
             : System::ArgumentException(message), bytesUnknown_(std::move(bytesUnknown)), index_(index) {}
@@ -124,9 +128,11 @@ namespace System::Text {
     /** @brief Fallback buffer that substitutes DecoderReplacementFallback's replacement string. */
     class DecoderReplacementFallbackBuffer : public DecoderFallbackBuffer {
     public:
+        /** @brief Initializes the buffer with @p fallback's replacement string. */
         explicit DecoderReplacementFallbackBuffer(const DecoderReplacementFallback& fallback) {
             fallbackString_ = fallback.getDefaultStringProperty();
         }
+        /** @brief Prepares the replacement string to be read back; returns true if it is non-empty. */
         bool Fallback(const std::vector<SharpRuntime::bytecs>&, SharpRuntime::intcs) override {
             position_ = 0;
             return !fallbackString_.empty();
@@ -150,9 +156,13 @@ namespace System::Text {
     /** @brief Fallback buffer that always throws DecoderFallbackException. */
     class DecoderExceptionFallbackBuffer : public DecoderFallbackBuffer {
     public:
+        /** @brief Always throws DecoderFallbackException describing the undecodable bytes. */
         bool Fallback(const std::vector<SharpRuntime::bytecs>& bytesUnknown, SharpRuntime::intcs index) override;
+        /** @brief Never reached (Fallback always throws); returns '\0'. */
         char GetNextChar() override { return '\0'; }
+        /** @brief Never reached (Fallback always throws); returns false. */
         bool MovePrevious() override { return false; }
+        /** @return 0; no characters are ever queued since Fallback always throws. */
         [[nodiscard]] SharpRuntime::intcs getRemainingProperty() const override { return 0; }
     };
 

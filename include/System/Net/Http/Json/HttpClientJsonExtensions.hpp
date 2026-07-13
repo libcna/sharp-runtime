@@ -22,6 +22,14 @@ namespace System::Net::Http::Json {
      * doesn't have. `GetFromJsonAsync`/`DeleteFromJsonAsync` return a parsed
      * `System::Text::Json::JsonDocument` instead of a `T`; the `*AsJsonAsync` senders take an
      * `nlohmann::json` value (serialized via JsonContent::Create) instead of an arbitrary `T`.
+     * @note Unlike .NET (where a GC-tracked `HttpClient` reference captured by an async
+     * continuation keeps the object alive automatically), every method here captures @p client
+     * by reference into a `TaskT` that runs its lambda on a real background thread
+     * (`std::async(std::launch::async, ...)`, see Task.hpp). The caller must keep @p client alive
+     * until the returned task completes (e.g. via `getResultProperty()`/`Wait()`) — letting
+     * @p client go out of scope while the task is still in flight is a dangling-reference bug
+     * with no runtime safety net in C++. This mirrors real .NET's own "don't dispose HttpClient
+     * while requests are in flight" contract, just enforced by convention instead of the CLR.
      */
     struct HttpClientJsonExtensions {
         HttpClientJsonExtensions() = delete;

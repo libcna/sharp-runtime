@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Index.hpp"
 
@@ -72,9 +73,9 @@ namespace System {
         /** @brief Holds the resolved offset and length for a given collection size. */
         struct OffsetAndLength {
             /** @brief Zero-based start offset. */
-            int Offset;
+            SharpRuntime::intcs Offset;
             /** @brief Number of elements covered. */
-            int Length;
+            SharpRuntime::intcs Length;
         };
 
         /**
@@ -88,9 +89,9 @@ namespace System {
          * @return Resolved OffsetAndLength value.
          * @throws System::ArgumentOutOfRangeException if the resolved range falls outside [0, length].
          */
-        [[nodiscard]] OffsetAndLength GetOffsetAndLength(int length) const {
-            int start = start_.GetOffset(length);
-            int end   = end_.GetOffset(length);
+        [[nodiscard]] OffsetAndLength GetOffsetAndLength(SharpRuntime::intcs length) const {
+            SharpRuntime::intcs start = start_.GetOffset(length);
+            SharpRuntime::intcs end   = end_.GetOffset(length);
             if (static_cast<unsigned>(end) > static_cast<unsigned>(length) ||
                 static_cast<unsigned>(start) > static_cast<unsigned>(end)) {
                 throw System::ArgumentOutOfRangeException("length");
@@ -113,9 +114,9 @@ namespace System {
          *
          * C++ counterpart of .NET Range.GetHashCode().
          */
-        [[nodiscard]] int GetHashCode() const noexcept {
-            int h1 = start_.getValueProperty() ^ (start_.getIsFromEndProperty() ? 0x10000 : 0);
-            int h2 = end_.getValueProperty()   ^ (end_.getIsFromEndProperty()   ? 0x20000 : 0);
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const noexcept {
+            SharpRuntime::intcs h1 = start_.getValueProperty() ^ (start_.getIsFromEndProperty() ? 0x10000 : 0);
+            SharpRuntime::intcs h2 = end_.getValueProperty()   ^ (end_.getIsFromEndProperty()   ? 0x20000 : 0);
             return h1 ^ (h2 * 397);
         }
 

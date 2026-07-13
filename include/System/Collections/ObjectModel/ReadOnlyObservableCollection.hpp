@@ -60,6 +60,19 @@ public:
             });
     }
 
+    // The constructor above registers a forwarding callback with the shared source that
+    // captures `this`. A copy or move would leave that callback pointing at the wrong (or, once
+    // the original is destroyed, dangling) object while the shared source keeps calling it --
+    // confirmed via ASan (stack-use-after-scope) with a repro that destroys the original after
+    // construction and then mutates the still-alive shared source. Real .NET's
+    // ReadOnlyObservableCollection<T> is a reference type, so this class's copy/move surface was
+    // never actually meaningful; deleting it here just makes that reference-type intent explicit
+    // and safe rather than silently unsafe.
+    ReadOnlyObservableCollection(const ReadOnlyObservableCollection&) = delete;
+    ReadOnlyObservableCollection& operator=(const ReadOnlyObservableCollection&) = delete;
+    ReadOnlyObservableCollection(ReadOnlyObservableCollection&&) = delete;
+    ReadOnlyObservableCollection& operator=(ReadOnlyObservableCollection&&) = delete;
+
     /**
      * @brief Gets an empty ReadOnlyObservableCollection instance.
      *

@@ -53,7 +53,7 @@ public:
      *
      * C++ counterpart of .NET IImmutableStack<T>.Pop().
      * @return A shared_ptr to a new IImmutableStack with the top element removed.
-     * @throws std::out_of_range if the stack is empty.
+     * @throws System::InvalidOperationException if the stack is empty.
      */
     [[nodiscard]] virtual std::shared_ptr<IImmutableStack<T>> Pop() const = 0;
 
@@ -62,7 +62,7 @@ public:
      *
      * C++ counterpart of .NET IImmutableStack<T>.Peek().
      * @return A const reference to the top element.
-     * @throws std::out_of_range if the stack is empty.
+     * @throws System::InvalidOperationException if the stack is empty.
      */
     [[nodiscard]] virtual const T& Peek() const = 0;
 };

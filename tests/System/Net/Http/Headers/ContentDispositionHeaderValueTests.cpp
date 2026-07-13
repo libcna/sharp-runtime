@@ -49,6 +49,18 @@ TEST(ContentDispositionHeaderValueTests, FileNameStar_RoundTrips) {
     EXPECT_EQ(v.getFileNameStarProperty(), "Naïve.txt");
 }
 
+TEST(ContentDispositionHeaderValueTests, FileNameStar_ExtraQuote_TreatedAsMalformed) {
+    // Real .NET's TryDecode5987 requires *exactly* two single quotes in the whole string (the
+    // charset'language'value delimiters) and rejects a third. A well-formed encoder must
+    // percent-encode any literal apostrophe in the value, so a raw third quote indicates
+    // malformed input -- previously silently accepted, decoding everything after the *second*
+    // quote (including the extra quote character) as if it were the value.
+    ContentDispositionHeaderValue v("attachment");
+    v.getParametersProperty().push_back(
+        System::Net::Http::Headers::NameValueHeaderValue("filename*", "UTF-8'en'a'b"));
+    EXPECT_EQ(v.getFileNameStarProperty(), "");
+}
+
 TEST(ContentDispositionHeaderValueTests, FileNameStar_AsciiOnly_NotPercentEncoded) {
     ContentDispositionHeaderValue v("attachment");
     v.setFileNameStarProperty("simple.txt");

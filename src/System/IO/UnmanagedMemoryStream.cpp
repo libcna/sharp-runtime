@@ -77,12 +77,24 @@ namespace System::IO {
         if (!getCanWriteProperty()) throw System::NotSupportedException("Stream does not support writing.");
         validateBufferArguments(buffer, offset, count);
         if (count == 0) return;
-        if (position_ + count > capacity_) {
+        // Position can legally be set arbitrarily far past the end (setPositionProperty only
+        // rejects negative values, matching real .NET's own Position setter). That means
+        // position_+count (both intcs/int32) can genuinely signed-overflow -- confirmed real UB
+        // via a standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket
+        // 265/1487) -- and worse than "just UB": a wrapped negative sum would silently compare
+        // as <= capacity_, bypassing the capacity check entirely, so the memcpy below would
+        // write through buffer_+position_ with position_ wildly beyond the actual unmanaged
+        // allocation -- a real out-of-bounds write, not just a wrong-answer bug. Computed here
+        // in int64_t (always wide enough to hold the sum of two int32 values) to avoid the UB,
+        // matching real .NET's own UnmanagedMemoryStream.WriteCore, which computes this exact
+        // sum in `long` and explicitly checks for overflow before the separate capacity check.
+        int64_t newPosition64 = static_cast<int64_t>(position_) + static_cast<int64_t>(count);
+        if (newPosition64 > static_cast<int64_t>(capacity_)) {
             throw System::NotSupportedException("Unable to expand length of this stream beyond its capacity.");
         }
 
         std::memcpy(buffer_ + position_, buffer + offset, static_cast<size_t>(count));
-        position_ += count;
+        position_ = static_cast<intcs>(newPosition64);
         if (position_ > length_) length_ = position_;
     }
 

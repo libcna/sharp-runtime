@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "System/FormatException.hpp"
 #include "System/NotImplementedException.hpp"
 #include "System/Text/NormalizationForm.hpp"
 #include "System/Text/CompositeFormat.hpp"
@@ -84,6 +85,32 @@ TEST(CompositeFormatTests, getFormatProperty_ReturnsOriginal) {
 TEST(CompositeFormatTests, Parse_RepeatedIndex_MinArgCountOne) {
     auto cf = CompositeFormat::Parse("{0} and {0} again");
     EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 1);
+}
+
+TEST(CompositeFormatTests, Parse_AlignmentAndFormatSpec_MinArgCountCorrect) {
+    auto cf = CompositeFormat::Parse("{0,-5:F2} {1}");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 2);
+}
+
+TEST(CompositeFormatTests, Parse_EscapedBraces_NotTreatedAsPlaceholder) {
+    auto cf = CompositeFormat::Parse("{{literal}} {0}");
+    EXPECT_EQ(cf.getMinimumArgumentCountProperty(), 1);
+}
+
+TEST(CompositeFormatTests, Parse_UnterminatedPlaceholder_Throws) {
+    EXPECT_THROW(CompositeFormat::Parse("Hello {"), System::FormatException);
+}
+
+TEST(CompositeFormatTests, Parse_StrayClosingBrace_Throws) {
+    EXPECT_THROW(CompositeFormat::Parse("Hello } world"), System::FormatException);
+}
+
+TEST(CompositeFormatTests, Parse_NonNumericIndex_Throws) {
+    EXPECT_THROW(CompositeFormat::Parse("{abc}"), System::FormatException);
+}
+
+TEST(CompositeFormatTests, Parse_EmptyIndex_Throws) {
+    EXPECT_THROW(CompositeFormat::Parse("{}"), System::FormatException);
 }
 
 // ===========================================================================

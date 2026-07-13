@@ -93,6 +93,23 @@ TEST(HttpHeadersTests, Add_InvalidValueCrlf_Throws) {
     EXPECT_THROW(h.Add("X-Custom", "bad\r\nvalue"), System::FormatException);
 }
 
+// Real .NET's System.Net.Http.Headers.HttpHeaders rejects ANY embedded CR/LF/NUL, unlike the
+// separate, older WebHeaderCollection which tolerates a "\r\n " obs-fold sequence for backward
+// compatibility -- an obs-fold-shaped value like "bar\r\n evil: value" must still be rejected
+// here (accepting it would let ToString() serialize an injected header line verbatim).
+TEST(HttpHeadersTests, Add_ObsFoldShapedValue_Throws) {
+    TestHeaders h;
+    EXPECT_THROW(h.Add("X-Custom", "bar\r\n evil: value"), System::FormatException);
+}
+
+TEST(HttpHeadersTests, Add_EmbeddedNul_Throws) {
+    TestHeaders h;
+    std::string value = "bad";
+    value += '\0';
+    value += "value";
+    EXPECT_THROW(h.Add("X-Custom", value), System::FormatException);
+}
+
 TEST(HttpHeadersTests, TryAddWithoutValidation_SkipsValidation) {
     TestHeaders h;
     EXPECT_TRUE(h.TryAddWithoutValidation("X-Custom", "value1"));

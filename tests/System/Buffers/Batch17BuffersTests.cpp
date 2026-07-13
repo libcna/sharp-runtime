@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/Binary/BinaryPrimitives.hpp"
 #include "System/Buffers/SequenceReader.hpp"
@@ -249,6 +250,35 @@ TEST(ReadOnlySequenceNewTests, GetPosition_NegativeOffset_Throws) {
     std::vector<int> data{1, 2, 3};
     System::Buffers::ReadOnlySequence<int> seq(data);
     EXPECT_THROW(seq.GetPosition(-1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for ticket 305: GetPosition narrowed `offset` (longcs) to intcs BEFORE
+// bounds-checking it, so a huge offset (e.g. 2^32 + 2) silently truncated to a small value
+// (2) that happened to land inside the valid range, instead of throwing
+// ArgumentOutOfRangeException -- confirmed via a standalone repro returning a bogus position
+// with no throw at all.
+TEST(ReadOnlySequenceNewTests, GetPosition_HugeOffsetThatWouldTruncateInRange_Throws) {
+    std::vector<int> data{1, 2, 3, 4, 5};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    SharpRuntime::longcs hugeOffset = (1LL << 32) + 2; // truncates to 2 as intcs
+    EXPECT_THROW(seq.GetPosition(hugeOffset), System::ArgumentOutOfRangeException);
+}
+
+TEST(ReadOnlySequenceNewTests, GetPosition_MaxLongOffset_ThrowsInsteadOfOverflowing) {
+    std::vector<int> data{1, 2, 3};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    EXPECT_THROW(seq.GetPosition(std::numeric_limits<SharpRuntime::longcs>::max()),
+                 System::ArgumentOutOfRangeException);
+}
+
+// Regression test for ticket 305: Slice(longcs start, longcs length) computed `start + length`
+// directly before validating either argument, which is signed-integer-overflow UB (confirmed
+// via UBSan) for a huge start near LONGCS_MAX combined with any positive length.
+TEST(ReadOnlySequenceNewTests, Slice_LongLong_NearMaxStartDoesNotOverflow_ThrowsOutOfRange) {
+    std::vector<int> data{1, 2, 3};
+    System::Buffers::ReadOnlySequence<int> seq(data);
+    SharpRuntime::longcs nearMaxStart = std::numeric_limits<SharpRuntime::longcs>::max() - 2;
+    EXPECT_THROW(seq.Slice(nearMaxStart, 10), System::ArgumentOutOfRangeException);
 }
 
 TEST(ReadOnlySequenceNewTests, TryGet_ReturnsDataThenFalse) {

@@ -260,6 +260,9 @@ namespace System {
          * @param right     The divisor.
          * @param remainder Set to the remainder of the division.
          * @return The quotient of dividing @p left by @p right.
+         * @throws System::DivideByZeroException if @p right is zero (inherited from operator/).
+         * @throws System::OverflowException if @p left is MinValue and @p right is -1
+         *         (inherited from operator/ -- see its doc-comment for the underlying reason).
          */
         static Int128 DivRem(const Int128& left, const Int128& right, Int128& remainder) {
             Int128 quotient = left / right;
@@ -405,20 +408,60 @@ namespace System {
         // Arithmetic operators
         // ---------------------------------------------------------------
 
-        /** @brief Adds two Int128 values. */
-        Int128 operator+(const Int128& o) const noexcept { return Int128(value_ + o.value_); }
-        /** @brief Subtracts one Int128 from another. */
-        Int128 operator-(const Int128& o) const noexcept { return Int128(value_ - o.value_); }
-        /** @brief Multiplies two Int128 values. */
-        Int128 operator*(const Int128& o) const noexcept { return Int128(value_ * o.value_); }
-        /** @brief Divides an Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        /**
+         * @brief Adds two Int128 values.
+         *
+         * Matches real .NET's default (unchecked) Int128 operator+, which wraps silently on
+         * overflow rather than throwing (only the separate `checked` operator, not modeled by
+         * this port, throws OverflowException) -- computed via unsigned __int128 arithmetic
+         * (always well-defined modular wraparound) and converted back, since raw signed
+         * __int128 overflow is genuine undefined behavior in C++ (confirmed via a standalone
+         * UBSan repro before fixing), unlike C#'s defined-wraparound unchecked semantics.
+         */
+        Int128 operator+(const Int128& o) const noexcept {
+            return Int128(static_cast<__int128>(
+                static_cast<unsigned __int128>(value_) + static_cast<unsigned __int128>(o.value_)));
+        }
+        /** @brief Subtracts one Int128 from another. Wraps silently on overflow (see operator+'s doc-comment). */
+        Int128 operator-(const Int128& o) const noexcept {
+            return Int128(static_cast<__int128>(
+                static_cast<unsigned __int128>(value_) - static_cast<unsigned __int128>(o.value_)));
+        }
+        /** @brief Multiplies two Int128 values. Wraps silently on overflow (see operator+'s doc-comment). */
+        Int128 operator*(const Int128& o) const noexcept {
+            return Int128(static_cast<__int128>(
+                static_cast<unsigned __int128>(value_) * static_cast<unsigned __int128>(o.value_)));
+        }
+        /**
+         * @brief Divides an Int128 by another.
+         *
+         * @throws System::DivideByZeroException if @p o is zero.
+         * @throws System::OverflowException if this value is MinValue and @p o is -1 -- unlike
+         * add/subtract/multiply, real .NET's Int128 operator/ explicitly checks for and throws on this specific
+         * case even in its unchecked form (the magnitude of MaxValue+1 doesn't fit), rather than
+         * wrapping. Confirmed via a standalone UBSan repro that plain __int128 division hits
+         * real UB here too (a different failure mode than the wraparound cases above).
+         */
         Int128 operator/(const Int128& o) const {
             if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            if (value_ == MinValue().value_ && o.value_ == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return Int128(value_ / o.value_);
         }
-        /** @brief Computes the remainder of dividing one Int128 by another. @throws System::DivideByZeroException if @p o is zero. */
+        /**
+         * @brief Computes the remainder of dividing one Int128 by another.
+         *
+         * @throws System::DivideByZeroException if @p o is zero.
+         * @throws System::OverflowException if this value is MinValue and @p o is -1 -- real
+         * .NET's Int128 operator% is defined as `left - (left / right) * right`, so it inherits
+         * operator/'s MinValue/-1 overflow check; matched here directly since plain __int128 `%`
+         * hits the identical UB as `/` for this case (division and remainder share the same
+         * underlying hardware/library operation).
+         */
         Int128 operator%(const Int128& o) const {
             if (o.value_ == 0) throw System::DivideByZeroException("Attempted to divide by zero.");
+            if (value_ == MinValue().value_ && o.value_ == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return Int128(value_ % o.value_);
         }
         /** @brief Computes the bitwise AND of two Int128 values. */
@@ -429,8 +472,18 @@ namespace System {
         Int128 operator^(const Int128& o) const noexcept { return Int128(value_ ^ o.value_); }
         /** @brief Returns the bitwise complement of an Int128. */
         Int128 operator~() const noexcept { return Int128(~value_); }
-        /** @brief Returns the arithmetic negation of an Int128. */
-        Int128 operator-() const noexcept { return Int128(-value_); }
+        /**
+         * @brief Returns the arithmetic negation of an Int128.
+         *
+         * Matches real .NET's unchecked `operator -(Int128 value) => Zero - value`: negating
+         * MinValue wraps back to MinValue itself (a classic two's-complement quirk, not an
+         * error in the unchecked operator -- Int128::Abs() is the method that throws for this
+         * case). Computed via unsigned negation, which is always well-defined, unlike negating
+         * MinValue as a signed __int128 (confirmed real UB via a standalone UBSan repro).
+         */
+        Int128 operator-() const noexcept {
+            return Int128(static_cast<__int128>(-static_cast<unsigned __int128>(value_)));
+        }
         /**
          * @brief Shifts an Int128 left by n bits.
          *

@@ -15,6 +15,14 @@ namespace System::Runtime::ExceptionServices {
      * C++ counterpart of .NET System.Runtime.ExceptionServices.ExceptionDispatchInfo. Built
      * directly on `std::exception_ptr`/`std::rethrow_exception`, which already preserve the
      * original throw context in the same spirit as .NET's captured dispatch state.
+     *
+     * Known gap: real .NET also exposes static `SetCurrentStackTrace(Exception)` /
+     * `SetRemoteStackTrace(Exception, string)` helpers that inject a stack trace string into an
+     * *unthrown* exception instance before it is thrown or rethrown. This port's design is built
+     * around `std::exception_ptr` (which requires an exception already in flight) rather than
+     * `System::Exception` instances directly, and `System::Exception::getStackTraceProperty()`
+     * has no public setter — porting these two methods would need a broader design change to
+     * `System::Exception`'s stack-trace-capture story, out of scope for a single audit pass.
      */
     class ExceptionDispatchInfo {
         std::exception_ptr exception_;

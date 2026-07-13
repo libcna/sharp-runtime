@@ -20,7 +20,16 @@ namespace System::Linq {
      * Partial C++ counterpart of LINQ methods from System.Linq.Enumerable.
      * All operators take a std::vector<T> by value and return a new std::vector.
      *
-     * @note Status: DONE
+     * Implemented: Where, Select, FirstOrDefault, First, LastOrDefault, Any, All, Count,
+     * ToList, Sum, Min, Max, OrderBy, OrderByDescending, Distinct, Reverse, Skip, Take,
+     * Concat, Contains. Not implemented (real .NET's Enumerable surface is 100+ methods):
+     * GroupBy, Join, Zip, SelectMany, ToDictionary, ToHashSet, Average, Aggregate, ElementAt,
+     * SkipWhile, TakeWhile, Except, Intersect, Union, SequenceEqual, Single/SingleOrDefault,
+     * DefaultIfEmpty, Chunk, and more -- add on demand as ported code needs them, per
+     * CLAUDE.md's "No LINQ" policy for code THIS project writes (this class exists only to
+     * support already-ported C#/XNA call sites that use these operators).
+     *
+     * @note Status: PARTIAL
      */
 
     /** @brief Returns elements that satisfy @p predicate. */
@@ -181,24 +190,38 @@ namespace System::Linq {
         return *std::max_element(source.begin(), source.end());
     }
 
-    /** @brief Returns elements sorted ascending by @p keySelector. */
+    /**
+     * @brief Returns elements sorted ascending by @p keySelector.
+     *
+     * C++ counterpart of .NET Enumerable.OrderBy. Real .NET's OrderBy is explicitly documented
+     * as a stable sort ("if the keys of two elements are equal, the order of the elements is
+     * preserved") -- confirmed against the reference source's own internal machinery
+     * (OrderBy.cs's ImplicitlyStableOrderedIterator exists specifically to preserve this
+     * guarantee). std::sort gives no such guarantee (introsort-based implementations may
+     * reorder equal-key elements arbitrarily); std::stable_sort is required to match.
+     */
     template<typename T, typename Key>
     std::vector<T> OrderBy(const std::vector<T>& source,
                            std::function<Key(const T&)> keySelector)
     {
         std::vector<T> result = source;
-        std::sort(result.begin(), result.end(),
+        std::stable_sort(result.begin(), result.end(),
                   [&](const T& a, const T& b) { return keySelector(a) < keySelector(b); });
         return result;
     }
 
-    /** @brief Returns elements sorted descending by @p keySelector. */
+    /**
+     * @brief Returns elements sorted descending by @p keySelector.
+     *
+     * C++ counterpart of .NET Enumerable.OrderByDescending. Same stable-sort requirement as
+     * OrderBy above -- see its comment for the rationale.
+     */
     template<typename T, typename Key>
     std::vector<T> OrderByDescending(const std::vector<T>& source,
                                      std::function<Key(const T&)> keySelector)
     {
         std::vector<T> result = source;
-        std::sort(result.begin(), result.end(),
+        std::stable_sort(result.begin(), result.end(),
                   [&](const T& a, const T& b) { return keySelector(a) > keySelector(b); });
         return result;
     }

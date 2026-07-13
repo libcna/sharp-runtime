@@ -14,6 +14,11 @@ namespace System::Globalization {
 // UTF-8 helpers
 // ---------------------------------------------------------------------------
 
+namespace {
+    // A continuation byte must match the 10xxxxxx bit pattern (RFC 3629).
+    bool isContinuationByte(unsigned char c) { return (c & 0xC0) == 0x80; }
+}
+
 std::u32string IdnMapping::utf8ToCodePoints(const std::string& s) {
     std::u32string out;
     out.reserve(s.size());
@@ -21,17 +26,42 @@ std::u32string IdnMapping::utf8ToCodePoints(const std::string& s) {
     while (i < s.size()) {
         unsigned char c = static_cast<unsigned char>(s[i]);
         char32_t cp;
+        // Each branch below previously trusted the continuation bytes' low 6 bits without
+        // checking their top 2 bits are actually 10xxxxxx, and never rejected overlong
+        // encodings, surrogate code points, or out-of-Unicode-range results -- so malformed
+        // UTF-8 (e.g. a valid lead byte followed by an ordinary ASCII byte instead of a real
+        // continuation byte) was silently misinterpreted as some other, unrelated code point
+        // instead of being rejected. Confirmed via a standalone repro before this fix: "\xC2\x41"
+        // (a valid 2-byte lead byte followed by 'A', not a continuation byte) produced a
+        // garbage Punycode result with no exception at all. This matters for IdnMapping
+        // specifically since domain names routinely originate from untrusted input.
         if (c < 0x80) {
             cp = c; ++i;
-        } else if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
-            cp = (char32_t(c & 0x1F) << 6) | (s[i+1] & 0x3F);
+        } else if ((c & 0xE0) == 0xC0) {
+            if (c < 0xC2 || i + 1 >= s.size() || !isContinuationByte(static_cast<unsigned char>(s[i+1])))
+                throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
+            cp = (char32_t(c & 0x1F) << 6) | (static_cast<unsigned char>(s[i+1]) & 0x3F);
             i += 2;
-        } else if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
-            cp = (char32_t(c & 0x0F) << 12) | ((s[i+1] & 0x3F) << 6) | (s[i+2] & 0x3F);
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 >= s.size() ||
+                !isContinuationByte(static_cast<unsigned char>(s[i+1])) ||
+                !isContinuationByte(static_cast<unsigned char>(s[i+2])))
+                throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
+            cp = (char32_t(c & 0x0F) << 12) | ((static_cast<unsigned char>(s[i+1]) & 0x3F) << 6)
+               | (static_cast<unsigned char>(s[i+2]) & 0x3F);
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF))
+                throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
             i += 3;
-        } else if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
-            cp = (char32_t(c & 0x07) << 18) | ((s[i+1] & 0x3F) << 12)
-               | ((s[i+2] & 0x3F) << 6) | (s[i+3] & 0x3F);
+        } else if ((c & 0xF8) == 0xF0) {
+            if (c > 0xF4 || i + 3 >= s.size() ||
+                !isContinuationByte(static_cast<unsigned char>(s[i+1])) ||
+                !isContinuationByte(static_cast<unsigned char>(s[i+2])) ||
+                !isContinuationByte(static_cast<unsigned char>(s[i+3])))
+                throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
+            cp = (char32_t(c & 0x07) << 18) | ((static_cast<unsigned char>(s[i+1]) & 0x3F) << 12)
+               | ((static_cast<unsigned char>(s[i+2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i+3]) & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF)
+                throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");
             i += 4;
         } else {
             throw System::ArgumentException("IdnMapping: invalid UTF-8 sequence.");

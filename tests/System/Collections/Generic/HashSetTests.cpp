@@ -82,6 +82,26 @@ TEST(HashSetTest, SymmetricExceptWith) {
     EXPECT_TRUE(a.Contains(3));
 }
 
+// Regression tests for ticket 324: ExceptWith/SymmetricExceptWith erased from set_ while
+// iterating other.set_ with no guard for `other` aliasing `this` (e.g. s.ExceptWith(s)) -- when
+// aliased, this erases from the exact same std::unordered_set being iterated, which is a real,
+// confirmed heap-use-after-free (ASan). Real .NET explicitly special-cases `other == this` in
+// both methods ("a set minus/symmetric-differenced with itself is the empty set"); the port had
+// no such check for either.
+TEST(HashSetTest, ExceptWith_Self_ClearsSet) {
+    HashSet<int> a;
+    for (int i = 0; i < 200; ++i) a.Add(i); // enough elements to make iterator invalidation likely to crash under ASan
+    a.ExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
+}
+
+TEST(HashSetTest, SymmetricExceptWith_Self_ClearsSet) {
+    HashSet<int> a;
+    for (int i = 0; i < 200; ++i) a.Add(i);
+    a.SymmetricExceptWith(a);
+    EXPECT_EQ(a.getCountProperty(), 0);
+}
+
 TEST(HashSetTest, SetEquals) {
     HashSet<int> a, b;
     a.Add(1); a.Add(2);

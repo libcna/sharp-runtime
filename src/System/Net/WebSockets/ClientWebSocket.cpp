@@ -312,6 +312,20 @@ ClientWebSocket::RawFrame ClientWebSocket::readFrame() {
         for (int i = 0; i < 8; ++i) len = (len << 8) | ext[static_cast<size_t>(i)];
     }
 
+    // The 64-bit extended length comes directly off the wire with no upper bound otherwise --
+    // a malicious or misbehaving server could send an arbitrarily large value (e.g. close to
+    // UINT64_MAX) and readExact()'s buffer.resize(n) would attempt a correspondingly huge
+    // allocation, throwing a raw std::length_error/std::bad_alloc (invisible to code catching
+    // System::Exception&) instead of a clean, catchable WebSocketException. 256 MiB is a
+    // generous cap for a single WebSocket frame -- comfortably above any realistic legitimate
+    // message -- chosen defensively, matching the existing 16384-byte cap already applied to
+    // the handshake response a few lines up in this same file.
+    constexpr uint64_t kMaxFramePayloadBytes = 256ull * 1024 * 1024;
+    if (len > kMaxFramePayloadBytes) {
+        throw WebSocketException(WebSocketError::HeaderError,
+                                  "The WebSocket frame payload length exceeds the maximum allowed size.");
+    }
+
     bytecs maskKey[4] = {0, 0, 0, 0};
     if (masked) {
         std::vector<bytecs> maskBuf;
@@ -437,8 +451,16 @@ ClientWebSocket::CloseOutputAsync(WebSocketCloseStatus closeStatus, const std::o
 
 System::Threading::Tasks::Task
 ClientWebSocket::CloseAsync(WebSocketCloseStatus closeStatus, const std::optional<std::string>& statusDescription,
-                              System::Threading::CancellationToken cancellationToken) {
-    return System::Threading::Tasks::Task([this, closeStatus, statusDescription, cancellationToken]() {
+                              System::Threading::CancellationToken /*cancellationToken*/) {
+    // Unlike ConnectAsync/SendAsync/ReceiveAsync (which all consistently comment out this same
+    // parameter), this one used to be captured by name and threaded into the lambda without
+    // ever actually being checked anywhere in the close-handshake wait loop below -- silently
+    // misleading, since the parameter's presence implies cancellation works here specifically.
+    // Wiring up real cancellation would need to interrupt the loop's blocking socket read
+    // mid-flight, which only makes sense done consistently across all of this file's async
+    // methods at once, not as a one-off partial fix for just this one; left for a follow-up
+    // ticket, matching the honest "not implemented" stance the other three already take.
+    return System::Threading::Tasks::Task([this, closeStatus, statusDescription]() {
         if (state_ == WebSocketState::Open) {
             sendCloseFrame(closeStatus, statusDescription);
             state_ = WebSocketState::CloseSent;

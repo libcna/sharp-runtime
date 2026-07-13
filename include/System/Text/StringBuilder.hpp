@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 #include "System/String.hpp"
 
@@ -208,8 +209,18 @@ namespace System::Text
         /** @brief Returns the current capacity of the internal buffer. */
         [[nodiscard]] intcs getCapacityProperty() const { return static_cast<intcs>(buffer.capacity()); }
 
-        /** @brief Ensures the internal buffer has at least @p capacity characters reserved. */
-        void EnsureCapacity(intcs capacity) { buffer.reserve(static_cast<std::size_t>(capacity)); }
+        /**
+         * @brief Ensures the internal buffer has at least @p capacity characters reserved.
+         * @throws System::ArgumentOutOfRangeException if @p capacity is negative, matching
+         *         StringBuilder.cs's EnsureCapacity(int) (ArgumentOutOfRangeException.
+         *         ThrowIfNegative). Without this check, a negative capacity wraps to a huge
+         *         size_t and std::string::reserve throws a raw std::length_error instead.
+         */
+        void EnsureCapacity(intcs capacity) {
+            if (capacity < 0)
+                throw System::ArgumentOutOfRangeException("capacity", "Non-negative number required.");
+            buffer.reserve(static_cast<std::size_t>(capacity));
+        }
 
         /**
          * @brief Returns the character at @p index (.NET's indexer).
@@ -251,8 +262,10 @@ namespace System::Text
             bool hasCurrent_ = false;
 
         public:
+            /** @brief Initializes an enumerator that will yield @p chunk as its single chunk. */
             explicit ChunkEnumerator(const std::string& chunk) : chunk_(&chunk) {}
 
+            /** @return The current chunk. */
             [[nodiscard]] const std::string& getCurrentProperty() const { return *chunk_; }
 
             /** @brief Advances to the next chunk. @return false after the single chunk has been yielded once. */
@@ -262,10 +275,12 @@ namespace System::Text
                 return true;
             }
 
+            /** @brief Range-based-for support: advances to the first (only) chunk and returns *this. */
             [[nodiscard]] ChunkEnumerator& begin() {
                 hasCurrent_ = MoveNext();
                 return *this;
             }
+            /** @brief Range-based-for support: returns the end sentinel. */
             [[nodiscard]] Sentinel end() const { return Sentinel{}; }
             bool operator!=(Sentinel) const { return hasCurrent_; }
             [[nodiscard]] const std::string& operator*() const { return *chunk_; }

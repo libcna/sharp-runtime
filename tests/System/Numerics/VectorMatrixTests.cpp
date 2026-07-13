@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
 #include <cmath>
+#include <limits>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 #include "System/Numerics/Vector3.hpp"
@@ -130,6 +131,15 @@ TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_NearGreaterThanFar_Throws) {
 TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_ValidArgs_NoThrow) {
     EXPECT_NO_THROW(Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, 100.0f));
 }
+TEST(Matrix4x4Tests, CreatePerspectiveFieldOfView_InfiniteFar_ProducesFiniteRangeNotNaN) {
+    // Real .NET special-cases farPlaneDistance == +Infinity to range = -1 rather than
+    // evaluating far/(near-far), which would divide inf by -inf and yield NaN.
+    auto m = Matrix4x4::CreatePerspectiveFieldOfView(1.0f, 1.0f, 0.1f, std::numeric_limits<float>::infinity());
+    EXPECT_FALSE(std::isnan(m.M33));
+    EXPECT_FALSE(std::isnan(m.M43));
+    EXPECT_TRUE(near(m.M33, -1.0f));
+    EXPECT_TRUE(near(m.M43, -0.1f));
+}
 TEST(Matrix4x4Tests, TransformVector3) {
     auto m = Matrix4x4::CreateTranslation(10,0,0);
     auto v = Vector3::Transform({0,0,0}, m);
@@ -144,6 +154,36 @@ TEST(Matrix4x4Tests, Transpose) {
     auto t = Matrix4x4::Transpose(m);
     EXPECT_FLOAT_EQ(t.M12, 5.0f);
     EXPECT_FLOAT_EQ(t.M21, 2.0f);
+}
+TEST(Matrix4x4Tests, GetHashCode_EqualMatrices_SameHash) {
+    auto a = Matrix4x4{1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16};
+    auto b = Matrix4x4{1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16};
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+TEST(Matrix4x4Tests, GetHashCode_DifferentMatrices_DifferentHash) {
+    auto a = Matrix4x4::Identity();
+    auto b = Matrix4x4::CreateTranslation(1,2,3);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+TEST(Matrix4x4Tests, Lerp_ZeroAmount_ReturnsFirst) {
+    auto a = Matrix4x4::Identity();
+    auto b = Matrix4x4::CreateTranslation(10,20,30);
+    auto r = Matrix4x4::Lerp(a, b, 0.0f);
+    EXPECT_TRUE(r.Equals(a));
+}
+TEST(Matrix4x4Tests, Lerp_OneAmount_ReturnsSecond) {
+    auto a = Matrix4x4::Identity();
+    auto b = Matrix4x4::CreateTranslation(10,20,30);
+    auto r = Matrix4x4::Lerp(a, b, 1.0f);
+    EXPECT_TRUE(r.Equals(b));
+}
+TEST(Matrix4x4Tests, Lerp_HalfAmount_Midpoint) {
+    auto a = Matrix4x4::CreateTranslation(0,0,0);
+    auto b = Matrix4x4::CreateTranslation(10,20,30);
+    auto r = Matrix4x4::Lerp(a, b, 0.5f);
+    EXPECT_TRUE(near(r.M41, 5.0f));
+    EXPECT_TRUE(near(r.M42, 10.0f));
+    EXPECT_TRUE(near(r.M43, 15.0f));
 }
 
 // --- Quaternion ---

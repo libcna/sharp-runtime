@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -36,16 +37,48 @@ namespace System::Threading::Tasks {
      * one requested) from Stop() (stop scheduling immediately) — both simply prevent further
      * iterations from being launched; iterations already running when Stop/Break is called still
      * run to completion, matching .NET's own guarantee that in-flight iterations are not aborted.
+     * This is a safe simplification specifically because Parallel::For/ForEach dispatch iterations
+     * in strict ascending index/source order (see Parallel below) — by the time any iteration can
+     * observe and act on a Stop/Break request, every lower-indexed iteration has already been
+     * dispatched, so Break()'s ".NET guarantee that lower iterations still run" holds automatically
+     * without needing separate bookkeeping for it.
      */
     class ParallelLoopState {
         std::shared_ptr<std::atomic<bool>> stopped_ = std::make_shared<std::atomic<bool>>(false);
         std::shared_ptr<std::atomic<bool>> exceptional_ = std::make_shared<std::atomic<bool>>(false);
+        // Verified against ParallelLoopState.cs's internal Break<TInt>(iteration, pflags): real
+        // .NET tracks the lowest iteration index that ever called Break(), exposed via
+        // ParallelLoopResult.LowestBreakIteration. This port's Break() previously only set
+        // stopped_ and never touched this value at all -- getLowestBreakIterationProperty() on
+        // the returned ParallelLoopResult always returned nullopt even when Break() genuinely ran,
+        // a dead/unpopulated property with no test coverage beyond its own default value. Fixed by
+        // tracking the minimum via a shared atomic, with currentIteration_ set by the Parallel
+        // dispatcher (via the friend declaration below) immediately before invoking each
+        // iteration's body -- mirroring real .NET's own per-iteration state object design.
+        std::shared_ptr<std::atomic<longcs>> lowestBreakIteration_ =
+            std::make_shared<std::atomic<longcs>>(std::numeric_limits<longcs>::max());
+        longcs currentIteration_ = 0;
+
+        friend class Parallel;
+        void setCurrentIterationForBreakTracking(longcs i) { currentIteration_ = i; }
 
     public:
         /** Requests that the loop stop scheduling further iterations immediately. */
         void Stop() { stopped_->store(true); }
-        /** Requests that the loop stop scheduling iterations after the current one. */
-        void Break() { stopped_->store(true); }
+        /**
+         * Requests that the loop stop scheduling iterations beyond the current one, and records
+         * this iteration's index if it is lower than any previously recorded Break() index (see
+         * ParallelLoopResult::getLowestBreakIterationProperty()).
+         */
+        void Break() {
+            stopped_->store(true);
+            longcs current = lowestBreakIteration_->load();
+            while (currentIteration_ < current) {
+                if (lowestBreakIteration_->compare_exchange_weak(current, currentIteration_)) break;
+                // compare_exchange_weak refreshes `current` with the latest value on failure;
+                // loop re-checks whether currentIteration_ is still lower before retrying.
+            }
+        }
         /** Marks the loop as having encountered an exception in some iteration. */
         void SetExceptional() { exceptional_->store(true); }
         /** Returns true if the current iteration should exit (Stop/Break was requested by any iteration). */
@@ -54,6 +87,13 @@ namespace System::Threading::Tasks {
         [[nodiscard]] bool getIsStoppedProperty() const { return stopped_->load(); }
         /** Returns true if any iteration has thrown an unhandled exception. */
         [[nodiscard]] bool getIsExceptionalProperty() const { return exceptional_->load(); }
+
+        /** Returns the lowest iteration index from which Break() was called, or nullopt if none. */
+        [[nodiscard]] std::optional<longcs> getLowestBreakIterationProperty() const {
+            longcs v = lowestBreakIteration_->load();
+            if (v == std::numeric_limits<longcs>::max()) return std::nullopt;
+            return v;
+        }
     };
 
     /** @brief Reports on the all or portion of a loop that was completed. */
@@ -161,6 +201,7 @@ namespace System::Threading::Tasks {
             std::vector<std::exception_ptr> exceptions;
             for (intcs i = fromInclusive; i < toExclusive; ++i) {
                 if (state.getShouldExitCurrentIterationProperty()) break;
+                state.setCurrentIterationForBreakTracking(i);
                 futures.push_back(std::async(std::launch::async, [body, i, state]() mutable { body(i, state); }));
                 if (static_cast<intcs>(futures.size()) >= maxDeg) {
                     waitAllCollectingExceptions(futures, exceptions);
@@ -171,6 +212,7 @@ namespace System::Threading::Tasks {
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = !state.getIsStoppedProperty();
+            result.lowestBreakIteration_ = state.getLowestBreakIterationProperty();
             return result;
 #endif
         }
@@ -213,8 +255,12 @@ namespace System::Threading::Tasks {
             ParallelLoopState state;
             std::vector<std::future<void>> futures;
             std::vector<std::exception_ptr> exceptions;
+            // Real .NET tracks LowestBreakIteration for ForEach as the element's position within
+            // the (order-preserving) source enumerable, not a value from TSource itself.
+            longcs sourceIndex = 0;
             for (TSource item : source) {
                 if (state.getShouldExitCurrentIterationProperty()) break;
+                state.setCurrentIterationForBreakTracking(sourceIndex++);
                 futures.push_back(std::async(std::launch::async, [body, item, state]() mutable { body(item, state); }));
                 if (static_cast<intcs>(futures.size()) >= maxDeg) {
                     waitAllCollectingExceptions(futures, exceptions);
@@ -225,6 +271,7 @@ namespace System::Threading::Tasks {
             if (!exceptions.empty()) throw System::AggregateException(std::move(exceptions));
             ParallelLoopResult result;
             result.isCompleted_ = !state.getIsStoppedProperty();
+            result.lowestBreakIteration_ = state.getLowestBreakIterationProperty();
             return result;
 #endif
         }

@@ -47,7 +47,13 @@ namespace System::Threading {
      *
      * Partial C++ counterpart of .NET System.Threading.CancellationToken.
      *
-     * @note Status: Partial
+     * @note Status: Partial — implements IsCancellationRequested, ThrowIfCancellationRequested,
+     * Register(callback), and the static None token. Missing relative to real .NET:
+     * CanBeCanceled, WaitHandle, the `bool canceled` constructor, the state-object/
+     * useSynchronizationContext Register overloads, UnsafeRegister, and value-equality
+     * (Equals/GetHashCode/operator==/!=) — this port's CancellationToken is copyable but not
+     * value-comparable. Covers the common "pass a token, check it, register one callback"
+     * pattern; the missing surface is for less-common interop/equality scenarios.
      */
     class CancellationToken {
         std::shared_ptr<Detail::CancellationState> state_;

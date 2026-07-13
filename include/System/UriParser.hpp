@@ -68,10 +68,17 @@ namespace System {
          * @param schemeName The scheme name to check (case-insensitive).
          */
         static bool IsKnownScheme(const std::string& schemeName) {
+            // Matches the exact built-in registration table in real .NET's UriSyntax.cs
+            // (s_table, populated from HttpUri/HttpsUri/WsUri/WssUri/FtpUri/FileUri/GopherUri/
+            // NntpUri/NewsUri/MailToUri/UuidUri/TelnetUri/LdapUri/NetTcpUri/NetPipeUri/
+            // VsMacrosUri) -- this previously listed "wais", which is NOT one of .NET's
+            // registered schemes (a historical RFC 1738 URI scheme, apparently confused for
+            // one), and was missing "ws"/"wss" (WebSocket, common in modern usage), "uuid",
+            // and "vsmacros". Fixed to match the reference table exactly.
             static const char* known[] = {
-                "http", "https", "ftp", "file", "mailto",
-                "gopher", "news", "nntp", "telnet", "wais",
-                "ldap", "net.pipe", "net.tcp"
+                "http", "https", "ws", "wss", "ftp", "file", "gopher",
+                "nntp", "news", "mailto", "uuid", "telnet", "ldap",
+                "net.tcp", "net.pipe", "vsmacros"
             };
             std::string lower = schemeName;
             std::transform(lower.begin(), lower.end(), lower.begin(),

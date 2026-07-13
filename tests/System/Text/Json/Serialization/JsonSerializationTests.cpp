@@ -99,9 +99,15 @@ TEST(JsonDerivedTypeAttributeTests, StoresTypeName) {
 
 TEST(JsonPolymorphicAttributeTests, DefaultFields) {
     JsonPolymorphicAttribute a;
-    EXPECT_FALSE(a.UnknownDerivedTypeHandling);
+    EXPECT_EQ(a.UnknownDerivedTypeHandling, JsonUnknownDerivedTypeHandling::FailSerialization);
     EXPECT_FALSE(a.IgnoreUnrecognizedTypeDiscriminators);
     EXPECT_TRUE(a.TypeDiscriminatorPropertyName.empty());
+}
+
+TEST(JsonPolymorphicAttributeTests, UnknownDerivedTypeHandling_CanBeSetToEachValue) {
+    JsonPolymorphicAttribute a;
+    a.UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling::FallBackToNearestAncestor;
+    EXPECT_EQ(a.UnknownDerivedTypeHandling, JsonUnknownDerivedTypeHandling::FallBackToNearestAncestor);
 }
 
 // ===========================================================================

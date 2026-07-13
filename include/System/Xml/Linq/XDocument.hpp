@@ -36,9 +36,18 @@ namespace System::Xml::Linq {
         /** @return The standalone declaration value (e.g. "yes" or "no"). */
         [[nodiscard]] const std::string& getStandaloneProperty() const { return standalone_; }
 
-        /** @return The serialised processing instruction string. */
+        /**
+         * @return The serialised processing instruction string.
+         *
+         * Matches real .NET's XDeclaration.ToString() exactly: each of version/encoding/
+         * standalone is omitted individually when unset (empty string here stands in for
+         * .NET's nullable-string default, consistent with encoding/standalone's existing
+         * handling below) -- version is NOT defaulted to "1.0" when unset, since real .NET
+         * doesn't default-fill it either.
+         */
         [[nodiscard]] std::string ToString() const {
-            std::string s = "<?xml version=\"" + (version_.empty() ? std::string("1.0") : version_) + "\"";
+            std::string s = "<?xml";
+            if (!version_.empty()) s += " version=\"" + version_ + "\"";
             if (!encoding_.empty()) s += " encoding=\"" + encoding_ + "\"";
             if (!standalone_.empty()) s += " standalone=\"" + standalone_ + "\"";
             s += "?>";

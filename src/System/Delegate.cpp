@@ -4,8 +4,26 @@
 #include "System/Delegate.hpp"
 #include "System/NotImplementedException.hpp"
 #include <functional>
+#include <optional>
 
 namespace System {
+
+namespace {
+    using PlainFnPtr = void(*)();
+
+    // std::function<void()>::target<PlainFnPtr>() returns a pointer to the INTERNAL STORAGE
+    // SLOT holding the wrapped callable, not the wrapped callable's own value -- that slot's
+    // address is always different per std::function instance, even when two instances wrap the
+    // identical free function (confirmed via a standalone repro). Dereferencing it yields the
+    // actual function pointer value, which two distinct std::function objects DO compare equal
+    // on when they wrap the same function. Returns nullopt if invoke_ doesn't hold exactly a
+    // plain function pointer (e.g. it holds a lambda/closure, which can't be compared this way).
+    std::optional<PlainFnPtr> PlainFunctionTarget(const Delegate::ErasedInvoke& invoke) {
+        if (const PlainFnPtr* slot = invoke.target<PlainFnPtr>())
+            return *slot;
+        return std::nullopt;
+    }
+}
 
 bool Delegate::Equals(const Delegate& other) const {
     // Fast path: same object
@@ -13,7 +31,22 @@ bool Delegate::Equals(const Delegate& other) const {
     // Compare invocation lists by pointer
     const auto& la = invocationList_;
     const auto& lb = other.invocationList_;
-    if (la.empty() && lb.empty()) return false; // different single-target objects
+    if (la.empty() && lb.empty()) {
+        // Verified against real .NET's documented Delegate.Equals contract: two single-cast
+        // delegates are equal when they refer to the same method on the same target (a
+        // value-equality comparison), not merely when they're the same object instance. A
+        // std::function generically cannot be compared this way for arbitrary callables -- no
+        // operator== exists for lambdas/closures with captured state, a fundamental, already-
+        // documented C++-vs-C# delegate limitation (see CLAUDE.md) -- but the one mechanically
+        // comparable case, both delegates wrapping the identical plain function pointer, is
+        // handled here (previously this branch was identity-only unconditionally, which was
+        // also inconsistent with GetHashCode() below already assuming function-pointer-based
+        // equality was meaningful, even though its own implementation of that assumption was
+        // itself broken -- see GetHashCode()'s comment).
+        auto ta = PlainFunctionTarget(invoke_);
+        auto tb = PlainFunctionTarget(other.invoke_);
+        return ta.has_value() && tb.has_value() && *ta == *tb;
+    }
     if (la.size() != lb.size()) return false;
     for (std::size_t i = 0; i < la.size(); ++i)
         if (la[i].get() != lb[i].get()) return false;
@@ -33,9 +66,15 @@ std::size_t Delegate::GetHashCode() const noexcept {
         }
         return h;
     }
-    // Single-target: hash the function target pointer if available
-    const void* target = invoke_.target<void(*)()>();
-    if (target) return std::hash<const void*>{}(target);
+    // Single-target: hash the actual wrapped function pointer value when invoke_ holds one, so
+    // that two Delegate objects wrapping the same free function hash equal (required: they are
+    // now Equals() per the fix above). The previous code hashed invoke_.target<>()'s return
+    // value directly -- the internal storage slot's address, not the function pointer's value
+    // -- which never actually produced a consistent hash across distinct std::function
+    // instances wrapping the same function (confirmed via a standalone repro). See
+    // PlainFunctionTarget()'s comment above for the full explanation.
+    if (auto target = PlainFunctionTarget(invoke_))
+        return std::hash<const void*>{}(reinterpret_cast<const void*>(*target));
     return std::hash<const Delegate*>{}(this);
 }
 

@@ -23,6 +23,16 @@ namespace System {
      * Stores the time as hours (0–23), minutes (0–59), seconds (0–59),
      * and milliseconds (0–999). Sub-millisecond precision is not stored
      * but ticks-based conversions account for it at ms granularity.
+     *
+     * @note Missing surface versus real .NET's TimeOnly (all additive, none affect the behavior
+     * of what's already implemented, which was verified against the reference including the
+     * Add/AddTicks overflow-safe modulo formula and IsBetween's unsigned-wraparound arithmetic):
+     * `Deconstruct` (5 tuple-deconstruction overloads), the `(TimeSpan/double, out int
+     * wrappedDays)` overloads of Add/AddHours/AddMinutes, the 5-arg microsecond constructor
+     * overload, and the whole `ParseExact`/`TryParseExact` family plus culture/`DateTimeStyles`-
+     * aware `Parse`/`TryParse` overloads (this port's Parse/TryParse only accept the fixed
+     * "HH:MM:SS"/"HH:MM:SS.fff" shapes). Add on demand rather than porting the full surface
+     * speculatively.
      */
     class TimeOnly {
         intcs hour_   = 0;
@@ -185,11 +195,17 @@ namespace System {
          * @brief Returns a new TimeOnly that adds the given TimeSpan (wraps midnight).
          *
          * C++ counterpart of .NET TimeOnly.Add(TimeSpan).
+         * Real .NET's private AddTicks(long) reduces the delta modulo TicksPerDay *before*
+         * adding it to this instance's (already-bounded) ticks -- `_ticks + TicksPerDay +
+         * (ticks % TicksPerDay)`. Adding the raw, unreduced TimeSpan ticks first (as this
+         * method previously did) can overflow int64 for a TimeSpan near
+         * TimeSpan::MaxValue/MinValue (confirmed via UBSan), since TimeSpan's tick range is
+         * ~Int64 range while this instance's own ticks are bounded to under one day.
          * @param value The TimeSpan to add.
          */
         [[nodiscard]] TimeOnly Add(const TimeSpan& value) const {
-            longcs ticks = (getTicksProperty() + value.getTicksProperty()) % TicksPerDay;
-            if (ticks < 0) ticks += TicksPerDay;
+            longcs deltaModDay = value.getTicksProperty() % TicksPerDay;
+            longcs ticks = (getTicksProperty() + TicksPerDay + deltaModDay) % TicksPerDay;
             return TimeOnly(ticks);
         }
 

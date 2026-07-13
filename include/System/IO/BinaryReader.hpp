@@ -37,6 +37,7 @@ namespace System::IO
         void ReadBytesExact(bytecs* buf, intcs count);
 
     public:
+        /** Initializes a new BinaryReader over @p stream, optionally leaving it open on Dispose. */
         explicit BinaryReader(Stream* stream, bool leaveOpen = false);
         virtual ~BinaryReader();
 

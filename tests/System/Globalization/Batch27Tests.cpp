@@ -452,3 +452,34 @@ TEST(CultureNotFoundExceptionBatch27Test, ParamNameAndIdAndMessageCtor) {
     CultureNotFoundException ex("param", 1234, "culture error");
     EXPECT_EQ(ex.getInvalidCultureIdProperty(), 1234);
 }
+
+// Real .NET's CultureNotFoundException.Message override always appends
+// "{value} is an invalid culture identifier." on a new line whenever an invalid culture
+// name/ID was supplied -- verify the C++ port's message composition matches exactly.
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageIncludesInvalidCultureNameSuffix_WithParamName) {
+    CultureNotFoundException ex("cultureName", "xx-XX", "not found");
+    EXPECT_EQ(ex.getMessageProperty(),
+              "not found (Parameter 'cultureName')\nxx-XX is an invalid culture identifier.");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageIncludesInvalidCultureNameSuffix_NoParamName) {
+    CultureNotFoundException ex("not found", "xx-XX", std::exception_ptr{});
+    EXPECT_EQ(ex.getMessageProperty(), "not found\nxx-XX is an invalid culture identifier.");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageIncludesFormattedInvalidCultureId_NoParamName) {
+    CultureNotFoundException ex("bad id", 9999, std::exception_ptr{});
+    EXPECT_EQ(ex.getMessageProperty(), "bad id\n9999 (0x270f) is an invalid culture identifier.");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageIncludesFormattedInvalidCultureId_WithParamName) {
+    CultureNotFoundException ex("param", 1234, "culture error");
+    EXPECT_EQ(ex.getMessageProperty(),
+              "culture error (Parameter 'param')\n1234 (0x04d2) is an invalid culture identifier.");
+}
+
+TEST(CultureNotFoundExceptionBatch27Test, MessageUnaffectedWhenNoInvalidCultureInfo) {
+    CultureNotFoundException ex("cultureName", "not found");
+    EXPECT_EQ(ex.getMessageProperty(), "not found (Parameter 'cultureName')");
+}

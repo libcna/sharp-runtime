@@ -199,6 +199,27 @@ TEST(MathFTests, Round_Digits_MidpointRounding) {
     EXPECT_NEAR(MathF::Round(2.345f, 2, MidpointRounding::AwayFromZero), 2.35f, 1e-5f);
 }
 
+// Regression tests for ticket 307: Round(float, int[, MidpointRounding]) never validated
+// `digits`, silently accepting any value instead of throwing ArgumentOutOfRangeException for
+// digits outside [0, 6] (real .NET's MathF.cs maxRoundingDigits), and never guarded large
+// magnitudes -- for |x| >= 1e8 (singleRoundLimit), real .NET returns x completely unchanged
+// instead of attempting the multiply/round/divide dance, which for x near FLT_MAX overflows
+// to infinity.
+TEST(MathFTests, Round_DigitsTooLarge_Throws) {
+    EXPECT_THROW(MathF::Round(1.2345f, 7), System::ArgumentOutOfRangeException);
+}
+TEST(MathFTests, Round_NegativeDigits_Throws) {
+    EXPECT_THROW(MathF::Round(1.2345f, -1), System::ArgumentOutOfRangeException);
+}
+TEST(MathFTests, Round_LargeMagnitude_ReturnsUnchanged) {
+    float huge = 3.0e38f;
+    EXPECT_EQ(MathF::Round(huge, 6), huge);
+}
+TEST(MathFTests, Round_JustBelowLimit_StillRounds) {
+    // Sanity check the fix didn't over-widen the guard: values still below 1e8 round normally.
+    EXPECT_NEAR(MathF::Round(1.23456f, 2), 1.23f, 1e-5f);
+}
+
 // ---------------------------------------------------------------------------
 // IsFinite, IsNormal, IsSubnormal, IsNegative
 // ---------------------------------------------------------------------------
@@ -233,6 +254,19 @@ TEST(MathFTests, MinMagnitude_Equal_RetNeg)  { EXPECT_EQ(MathF::MinMagnitude(-3.
 TEST(MathFTests, ILogB_One)    { EXPECT_EQ(MathF::ILogB(1.0f), 0); }
 TEST(MathFTests, ILogB_Two)    { EXPECT_EQ(MathF::ILogB(2.0f), 1); }
 TEST(MathFTests, ILogB_Eight)  { EXPECT_EQ(MathF::ILogB(8.0f), 3); }
+
+// Regression test for ticket 307: std::ilogb's NaN sentinel (FP_ILOGBNAN) is
+// implementation-defined and on glibc is actually INT_MIN, not INT_MAX -- diverging from real
+// .NET's MathF.ILogB(NaN), which always returns int.MaxValue (same as infinity).
+TEST(MathFTests, ILogB_NaN_ReturnsIntMax) {
+    EXPECT_EQ(MathF::ILogB(std::numeric_limits<float>::quiet_NaN()), std::numeric_limits<int>::max());
+}
+TEST(MathFTests, ILogB_Infinity_ReturnsIntMax) {
+    EXPECT_EQ(MathF::ILogB(std::numeric_limits<float>::infinity()), std::numeric_limits<int>::max());
+}
+TEST(MathFTests, ILogB_Zero_ReturnsIntMin) {
+    EXPECT_EQ(MathF::ILogB(0.0f), std::numeric_limits<int>::min());
+}
 
 TEST(MathFTests, ReciprocalEstimate_One)  { EXPECT_FLOAT_EQ(MathF::ReciprocalEstimate(1.0f),  1.0f); }
 TEST(MathFTests, ReciprocalEstimate_Two)  { EXPECT_FLOAT_EQ(MathF::ReciprocalEstimate(2.0f),  0.5f); }

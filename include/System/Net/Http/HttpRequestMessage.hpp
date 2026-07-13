@@ -10,7 +10,17 @@
 
 namespace System::Net::Http {
 
-/** Represents an HTTP request message, mirroring .NET System.Net.Http.HttpRequestMessage. */
+/**
+ * @brief Represents an HTTP request message, mirroring .NET System.Net.Http.HttpRequestMessage.
+ *
+ * @note Deliberately simplified relative to real .NET: RequestUri is a plain string rather than
+ * a System::Uri (avoiding a broad, unrequested refactor of this and other Net.Http call sites),
+ * headers are a raw name/value map rather than the ported HttpRequestHeaders type (this
+ * project's Net/Net.Http subsystems intentionally keep several independent, simplified
+ * header-bag designs rather than unifying them -- see NEXT.md's "Do not do yet" section), and
+ * Version/VersionPolicy are absent since this runtime's HttpClient only supports HTTP/1.1 over
+ * plain TCP.
+ */
 class HttpRequestMessage {
     HttpMethod                                     method_;
     std::string                                    uri_;

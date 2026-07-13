@@ -61,12 +61,28 @@ namespace System {
 
     longcs TimeSpan::TimeToTicks(intcs days, intcs hours, intcs minutes, intcs seconds, intcs milliseconds,
                                  intcs microseconds) {
-        longcs totalMicroseconds = (((longcs) days * 3600 * 24 + (longcs) hours * 3600 + (longcs) minutes * 60 + seconds)
-                                   *
-                                   1000 + milliseconds) * 1000 + microseconds;
-        if (totalMicroseconds > MaxMicroSeconds || totalMicroseconds < MinMicroSeconds)
+        // Computed in uint64_t (defined wraparound on overflow), not signed int64_t like the
+        // rest of this file: verified with a standalone UBSan repro that the previous
+        // signed-arithmetic version invoked real signed-integer-overflow UB for extreme
+        // component values (e.g. days == INT32_MAX) -- the microsecond scale factor here is
+        // 1000x finer than TimeToTicks(hour,minute,second)'s seconds granularity below, which
+        // .NET's own source comments confirm can't overflow int64; this one can. Real .NET's
+        // `long` arithmetic here is unchecked and wraps silently (defined in C#), so computing
+        // in unsigned and converting back to signed reproduces that exact behavior instead of
+        // C++ signed overflow's undefined one -- static_cast from uint64_t to a same-width
+        // signed type for an out-of-range value is well-defined (2's-complement wraparound) as
+        // of C++20, which this project already requires.
+        std::uint64_t totalMicroseconds =
+            ((static_cast<std::uint64_t>(days) * 86400ull
+            + static_cast<std::uint64_t>(hours) * 3600ull
+            + static_cast<std::uint64_t>(minutes) * 60ull
+            + static_cast<std::uint64_t>(seconds))
+            * 1000ull + static_cast<std::uint64_t>(milliseconds)) * 1000ull
+            + static_cast<std::uint64_t>(microseconds);
+        longcs result = static_cast<longcs>(totalMicroseconds);
+        if (result > MaxMicroSeconds || result < MinMicroSeconds)
             throw ArgumentOutOfRangeException("", "TimeSpan overflowed because the duration is too long.");
-        return totalMicroseconds;
+        return result;
     }
 
     TimeSpan &TimeSpan::operator=(const TimeSpan &other) {
@@ -428,6 +444,12 @@ namespace System {
             while (fracDigits < 7) { fracVal *= 10; ++fracDigits; }
             subsecTicks = fracVal;
         }
+
+        // sscanf() above only checks that a matching prefix exists, not that the whole input
+        // was consumed -- e.g. "12:34:56garbage" previously parsed successfully as 12:34:56,
+        // silently discarding "garbage" instead of being rejected like real .NET's
+        // TimeSpan.Parse (a FormatException) would. Reject any unconsumed trailing content.
+        if (*afterSec != '\0') return false;
 
         longcs ticks = static_cast<longcs>(days)    * TicksPerDay
                      + static_cast<longcs>(hours)   * TicksPerHour

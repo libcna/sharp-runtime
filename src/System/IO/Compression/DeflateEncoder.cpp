@@ -90,7 +90,33 @@ namespace System::IO::Compression {
 
     longcs DeflateEncoder::GetMaxCompressedLength(longcs inputLength) {
         if (inputLength < 0) throw System::ArgumentOutOfRangeException("inputLength", "Non-negative number required.");
-        return static_cast<longcs>(compressBound(static_cast<uLong>(inputLength)));
+
+        // zlib's compressBound() takes a uLong, which is only 32 bits wide on platforms where
+        // `unsigned long` is 32 bits (e.g. Windows' LLP64 model) even though longcs (.NET's
+        // `long`) is always 64-bit. Casting an inputLength above 2^32 straight into a 32-bit
+        // uLong silently truncates it, so compressBound would compute its bound from the wrong
+        // (much smaller) size -- an undersized "max compressed length" that downstream buffer
+        // allocation would then silently overflow into. Real .NET's own DeflateEncoder avoids
+        // this exact hazard by only calling the native compressBound() for inputs up to 2^31 and
+        // falling back to zlib-ng's managed quick-strategy formula (a proven safe upper bound)
+        // above that -- mirrored here verbatim so the 32-bit-uLong platforms this port targets
+        // (per CLAUDE.md's Windows support policy) never truncate.
+        if (inputLength <= (longcs(1) << 31)) {
+            return static_cast<longcs>(compressBound(static_cast<uLong>(inputLength)));
+        }
+
+        const auto sourceLength = static_cast<uint64_t>(inputLength);
+        uint64_t maxCompressedLength = sourceLength
+            + (sourceLength == 0 ? 1u : 0u)
+            + (sourceLength < 9 ? 1u : 0u)
+            + ((sourceLength + 7) >> 3)
+            + 3   // DEFLATE_BLOCK_OVERHEAD: (3 + 15 + 6) >> 3
+            + 6;  // ZLIB_WRAPLEN: zlib header (2 bytes) + Adler32 trailer (4 bytes)
+
+        if (maxCompressedLength > static_cast<uint64_t>(INT64_MAX))
+            throw System::ArgumentOutOfRangeException("inputLength");
+
+        return static_cast<longcs>(maxCompressedLength);
     }
 
     OperationStatus DeflateEncoder::Compress(const bytecs* source, intcs sourceLength,

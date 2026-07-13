@@ -740,7 +740,14 @@ namespace System
 
     std::vector<char> String::ToCharArray(const std::string& value, SharpRuntime::intcs startIndex, SharpRuntime::intcs length)
     {
-        if (startIndex < 0 || length < 0 || startIndex + length > static_cast<SharpRuntime::intcs>(value.size()))
+        // startIndex+length (both intcs/int32) can itself signed-overflow for large inputs,
+        // silently bypassing this check instead of throwing -- confirmed real UB via a
+        // standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket 265/1487);
+        // fixed the same way real .NET's Span<T>.Slice(int,int) does: unsigned comparison,
+        // subtraction instead of addition.
+        auto sz = static_cast<SharpRuntime::intcs>(value.size());
+        if (static_cast<SharpRuntime::uintcs>(startIndex) > static_cast<SharpRuntime::uintcs>(sz) ||
+            static_cast<SharpRuntime::uintcs>(length) > static_cast<SharpRuntime::uintcs>(sz - startIndex))
             throw System::ArgumentOutOfRangeException("index", "String::ToCharArray: index out of range");
         return std::vector<char>(value.begin() + startIndex, value.begin() + startIndex + length);
     }

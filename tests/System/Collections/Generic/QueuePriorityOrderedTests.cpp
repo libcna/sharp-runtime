@@ -9,6 +9,7 @@
 #include "System/InvalidOperationException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -208,6 +209,46 @@ TEST(OrderedDictionaryTest, AddDuplicateThrows) {
     OrderedDictionary<std::string, int> d;
     d.Add("a", 1);
     EXPECT_THROW(d.Add("a", 2), System::ArgumentException);
+}
+
+namespace {
+// A value type whose copy constructor throws on demand -- used to simulate Add()/operator[]
+// failing partway through inserting a new entry (e.g. a resource-validating TValue).
+struct ThrowsOnSecondCopy {
+    static inline int copyCount = 0;
+    static inline bool armed = false;
+    int v = 0;
+    ThrowsOnSecondCopy() = default;
+    explicit ThrowsOnSecondCopy(int x) : v(x) {}
+    ThrowsOnSecondCopy(const ThrowsOnSecondCopy& o) : v(o.v) {
+        if (armed && ++copyCount == 2) throw std::runtime_error("simulated copy failure");
+    }
+    ThrowsOnSecondCopy& operator=(const ThrowsOnSecondCopy&) = default;
+};
+}
+
+// Regression test for ticket 310: Add()/TryAdd()/operator[] previously set keyIndex_[key] to
+// the new entry's index BEFORE entries_.emplace_back() actually added it. If emplace_back threw
+// (e.g. TKey/TValue's copy constructor throwing), keyIndex_ was left pointing one-past-the-end
+// of entries_ -- confirmed via a standalone ASan repro as a genuine heap-buffer-overflow on the
+// next lookup of that key (operator[] doesn't bounds-check entries_[it->second]). Fixed by
+// mutating entries_ before keyIndex_, so a failed Add leaves the dictionary fully consistent.
+TEST(OrderedDictionaryTest, Add_ThrowingValueCopy_LeavesDictionaryConsistent) {
+    OrderedDictionary<std::string, ThrowsOnSecondCopy> d;
+    ThrowsOnSecondCopy::copyCount = 0;
+    ThrowsOnSecondCopy::armed = false;
+    d.Add("a", ThrowsOnSecondCopy(1));  // 1st copy (into emplace_back) -- succeeds
+    ThrowsOnSecondCopy::armed = true;
+    EXPECT_THROW(d.Add("b", ThrowsOnSecondCopy(2)), std::runtime_error);  // 2nd copy -- throws
+    ThrowsOnSecondCopy::armed = false;
+
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_FALSE(d.ContainsKey("b"));
+    EXPECT_EQ(d.IndexOf("b"), -1);
+    // The dictionary must remain fully usable -- no corrupted keyIndex_ entries.
+    EXPECT_TRUE(d.ContainsKey("a"));
+    EXPECT_NO_THROW(d.Add("c", ThrowsOnSecondCopy(3)));
+    EXPECT_EQ(d.getCountProperty(), 2);
 }
 
 TEST(OrderedDictionaryTest, IndexerConstMissingKeyThrows) {

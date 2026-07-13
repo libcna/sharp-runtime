@@ -12,6 +12,7 @@
 #include "System/Collections/Generic/SortedDictionary.hpp"
 #include "System/Collections/Generic/SortedList.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 using System::Collections::Generic::List;
@@ -792,6 +793,15 @@ TEST(HashSetTests, TrimExcess_DoesNotLoseEntries) {
     EXPECT_TRUE(s.Contains(3));
 }
 
+// Regression: EnsureCapacity previously returned void, but real .NET's
+// HashSet<T>.EnsureCapacity(int) returns the resulting capacity -- added to match that
+// signature.
+TEST(HashSetTests, EnsureCapacity_ReturnsResultingCapacity) {
+    HashSet<int> s;
+    SharpRuntime::intcs cap = s.EnsureCapacity(200);
+    EXPECT_GE(cap, 200);
+}
+
 // ===========================================================================
 // SortedDictionary
 // ===========================================================================
@@ -894,6 +904,46 @@ TEST(SortedListTests, getValuesProperty_SortedByKey) {
     EXPECT_EQ(vals[0], "a");
     EXPECT_EQ(vals[1], "b");
     EXPECT_EQ(vals[2], "c");
+}
+
+// Regression tests for ticket 351: GetKeyAtIndex/GetValueAtIndex/SetValueAtIndex previously
+// didn't exist on this port at all, despite being core public API in real .NET's
+// SortedList<TKey,TValue> (a type whose whole documented purpose is "sorted by key and
+// accessible by key or index").
+TEST(SortedListTests, GetKeyAtIndex_ReturnsKeyInSortedOrder) {
+    SortedList<int, std::string> sl;
+    sl.Add(30, "c"); sl.Add(10, "a"); sl.Add(20, "b");
+    EXPECT_EQ(sl.GetKeyAtIndex(0), 10);
+    EXPECT_EQ(sl.GetKeyAtIndex(1), 20);
+    EXPECT_EQ(sl.GetKeyAtIndex(2), 30);
+}
+
+TEST(SortedListTests, GetValueAtIndex_ReturnsValueInSortedKeyOrder) {
+    SortedList<int, std::string> sl;
+    sl.Add(30, "c"); sl.Add(10, "a"); sl.Add(20, "b");
+    EXPECT_EQ(sl.GetValueAtIndex(0), "a");
+    EXPECT_EQ(sl.GetValueAtIndex(1), "b");
+    EXPECT_EQ(sl.GetValueAtIndex(2), "c");
+}
+
+TEST(SortedListTests, GetKeyAtIndex_OutOfRange_Throws) {
+    SortedList<int, std::string> sl;
+    sl.Add(1, "a");
+    EXPECT_THROW(sl.GetKeyAtIndex(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(sl.GetKeyAtIndex(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(SortedListTests, SetValueAtIndex_ReplacesValueKeepingKey) {
+    SortedList<int, std::string> sl;
+    sl.Add(10, "a"); sl.Add(20, "b");
+    sl.SetValueAtIndex(0, "z");
+    EXPECT_EQ(sl.GetKeyAtIndex(0), 10);
+    EXPECT_EQ(sl.GetValueAtIndex(0), "z");
+}
+
+TEST(SortedListTests, SetValueAtIndex_OutOfRange_Throws) {
+    SortedList<int, std::string> sl;
+    EXPECT_THROW(sl.SetValueAtIndex(0, "x"), System::ArgumentOutOfRangeException);
 }
 
 // ===========================================================================

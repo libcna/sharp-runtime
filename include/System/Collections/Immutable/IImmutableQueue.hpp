@@ -44,7 +44,7 @@ public:
      *
      * C++ counterpart of .NET IImmutableQueue<T>.Peek().
      * @return A const reference to the front element.
-     * @throws std::out_of_range if the queue is empty.
+     * @throws System::InvalidOperationException if the queue is empty.
      */
     [[nodiscard]] virtual const T& Peek() const = 0;
 

@@ -58,6 +58,14 @@ TEST(MemoryExtensionsTests, AsSpan_Vector_StartAndLengthOutOfRange_Throws) {
     EXPECT_THROW(MemoryExtensions::AsSpan(v, 4, 2), System::ArgumentOutOfRangeException);
 }
 
+// Same overflow-bypasses-the-check bug as Span<T>::Slice (ticket 265/1487): start+length used
+// to be computed directly in intcs (int32) arithmetic, which overflows for large start/length
+// and silently bypasses the check instead of throwing.
+TEST(MemoryExtensionsTests, AsSpan_Vector_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    EXPECT_THROW(MemoryExtensions::AsSpan(v, 2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // Contains
 // ---------------------------------------------------------------------------
@@ -246,6 +254,12 @@ TEST(MemoryExtensionsTests, AsSpan_String_StartOutOfRange_Throws) {
 TEST(MemoryExtensionsTests, AsSpan_String_LengthOutOfRange_Throws) {
     std::string s = "hi";
     EXPECT_THROW(MemoryExtensions::AsSpan(s, 0, 99), System::ArgumentOutOfRangeException);
+}
+
+// Same overflow-bypasses-the-check bug as Span<T>::Slice (ticket 265/1487).
+TEST(MemoryExtensionsTests, AsSpan_String_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::string s = "hi";
+    EXPECT_THROW(MemoryExtensions::AsSpan(s, 2147483647, 10), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------

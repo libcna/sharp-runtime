@@ -107,8 +107,10 @@ namespace System::Xml {
         /**
          * @brief Creates an XmlReader that reads from a file path or raw XML content.
          *
-         * If @p inputUri looks like a file path (contains '/' or '\' or ends with
-         * ".xml") the file is loaded; otherwise treated as raw XML text.
+         * If @p inputUri (after trimming leading whitespace) starts with '<' it is always
+         * treated as raw XML text; otherwise, if it looks like a file path (contains '/' or
+         * '\' or ends with ".xml") the file is loaded, and it is treated as raw XML text
+         * otherwise.
          *
          * @param inputUri  File path or raw XML text.
          * @return Heap-allocated XmlReader; caller owns the pointer.

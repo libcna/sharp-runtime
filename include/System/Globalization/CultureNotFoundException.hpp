@@ -2,9 +2,13 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdio>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 
 namespace System::Globalization {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief The exception thrown when a culture identifier is not available on the current platform.
@@ -15,7 +19,26 @@ namespace System::Globalization {
  */
 class CultureNotFoundException : public System::ArgumentException {
     std::string invalidCultureName_;
-    int invalidCultureId_ = -1;
+    intcs invalidCultureId_ = -1;
+
+    /** @brief Formats an LCID as real .NET's "{0} (0x{0:x4})" -- e.g. 99 -> "99 (0x0063)". */
+    static std::string formatCultureId(intcs id) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%d (0x%04x)", id, id);
+        return buf;
+    }
+
+    /**
+     * @brief Composes the full exception message, matching real .NET's Message override:
+     * base message (with the "(Parameter 'x')" marker already appended, if @p paramName is
+     * non-empty) followed by a newline and "{value} is an invalid culture identifier.",
+     * where {value} is the invalid culture name or a formatted LCID.
+     */
+    static std::string composeMessage(const std::string& message, const std::string& paramName,
+                                       const std::string& invalidCultureValue) {
+        std::string base = paramName.empty() ? message : AppendParamNameSuffix(message, paramName);
+        return base + "\n" + invalidCultureValue + " is an invalid culture identifier.";
+    }
 
 public:
     /**
@@ -64,7 +87,8 @@ public:
      */
     CultureNotFoundException(const std::string& paramName, const std::string& invalidCultureName,
                              const std::string& message)
-        : ArgumentException(message, paramName),
+        : ArgumentException(composeMessage(message, paramName, invalidCultureName), paramName,
+                             AlreadyComposedTag{}),
           invalidCultureName_(invalidCultureName) {}
 
     /**
@@ -77,7 +101,7 @@ public:
      */
     CultureNotFoundException(const std::string& message, const std::string& invalidCultureName,
                              std::exception_ptr inner)
-        : ArgumentException(message, std::move(inner)),
+        : ArgumentException(composeMessage(message, "", invalidCultureName), std::move(inner)),
           invalidCultureName_(invalidCultureName) {}
 
     /**
@@ -88,9 +112,9 @@ public:
      * @param invalidCultureId The LCID that could not be found.
      * @param inner            The inner exception (may be nullptr).
      */
-    CultureNotFoundException(const std::string& message, int invalidCultureId,
+    CultureNotFoundException(const std::string& message, intcs invalidCultureId,
                              std::exception_ptr inner)
-        : ArgumentException(message, std::move(inner)),
+        : ArgumentException(composeMessage(message, "", formatCultureId(invalidCultureId)), std::move(inner)),
           invalidCultureId_(invalidCultureId) {}
 
     /**
@@ -101,9 +125,10 @@ public:
      * @param invalidCultureId The LCID that could not be found.
      * @param message          The error message.
      */
-    CultureNotFoundException(const std::string& paramName, int invalidCultureId,
+    CultureNotFoundException(const std::string& paramName, intcs invalidCultureId,
                              const std::string& message)
-        : ArgumentException(message, paramName),
+        : ArgumentException(composeMessage(message, paramName, formatCultureId(invalidCultureId)),
+                             paramName, AlreadyComposedTag{}),
           invalidCultureId_(invalidCultureId) {}
 
     /**
@@ -122,7 +147,7 @@ public:
      * C++ counterpart of .NET CultureNotFoundException.InvalidCultureId.
      * @return The invalid culture ID, or -1 if not set.
      */
-    [[nodiscard]] int getInvalidCultureIdProperty() const { return invalidCultureId_; }
+    [[nodiscard]] intcs getInvalidCultureIdProperty() const { return invalidCultureId_; }
 };
 
 } // namespace System::Globalization

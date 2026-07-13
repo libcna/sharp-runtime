@@ -15,6 +15,15 @@ TEST(SByteTest, MinValue) { EXPECT_EQ(SByte::MinValue, sbytecs(-128)); }
 TEST(SByteTest, Parse_Valid) { EXPECT_EQ(SByte::Parse("42"), sbytecs(42)); }
 TEST(SByteTest, Parse_Negative) { EXPECT_EQ(SByte::Parse("-10"), sbytecs(-10)); }
 TEST(SByteTest, Parse_OutOfRange_Throws) { EXPECT_THROW(SByte::Parse("200"), System::OverflowException); }
+TEST(SByteTest, Parse_TrailingGarbage_Throws) {
+    // std::stoi(s) without capturing the parse-end position previously accepted trailing
+    // garbage silently (e.g. "5abc" parsed as 5).
+    EXPECT_THROW(SByte::Parse("5abc"), System::FormatException);
+}
+TEST(SByteTest, Parse_NegativeZero_IsZero) {
+    // SByte is signed, so "-0" legitimately parses to 0 (unlike the unsigned integer types).
+    EXPECT_EQ(SByte::Parse("-0"), sbytecs(0));
+}
 
 TEST(SByteTest, TryParse_Valid) {
     sbytecs r = 0;
@@ -29,6 +38,10 @@ TEST(SByteTest, TryParse_Invalid) {
 TEST(SByteTest, ToString_Positive) { EXPECT_EQ(SByte::ToString(sbytecs(7)), "7"); }
 TEST(SByteTest, ToString_Negative) { EXPECT_EQ(SByte::ToString(sbytecs(-5)), "-5"); }
 TEST(SByteTest, ToString_Hex) { EXPECT_EQ(SByte::ToString(sbytecs(255), "X2"), "FF"); }
+TEST(SByteTest, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(SByte::ToString(sbytecs(5), "Xz"), System::FormatException);
+    EXPECT_THROW(SByte::ToString(sbytecs(5), "X99999999999999999999"), System::FormatException);
+}
 
 TEST(SByteTest, Abs_Positive) { EXPECT_EQ(SByte::Abs(sbytecs(5)), sbytecs(5)); }
 TEST(SByteTest, Abs_Negative) { EXPECT_EQ(SByte::Abs(sbytecs(-5)), sbytecs(5)); }

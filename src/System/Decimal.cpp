@@ -112,7 +112,7 @@ Decimal::Decimal(u128 m, uint8_t s, bool n)
 // Public constructors
 // ---------------------------------------------------------------------------
 
-Decimal::Decimal(int v)
+Decimal::Decimal(intcs v)
     : mantissa_(v < 0 ? -(u128)v : u128(v)), scale_(0), negative_(v < 0) {}
 
 Decimal::Decimal(long long v)
@@ -463,7 +463,7 @@ Decimal Decimal::Ceiling(const Decimal& d) {
     return t;
 }
 
-Decimal Decimal::Round(const Decimal& d, int decimals, MidpointRounding mode) {
+Decimal Decimal::Round(const Decimal& d, intcs decimals, MidpointRounding mode) {
     if (decimals < 0 || decimals > 28)
         throw System::ArgumentOutOfRangeException("decimals", "decimals must be in range 0-28.");
     if (d.scale_ <= uint8_t(decimals)) return d;

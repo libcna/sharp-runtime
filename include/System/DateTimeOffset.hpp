@@ -103,27 +103,47 @@ namespace System {
         static const DateTimeOffset UnixEpoch;
 
         // Static factory
+        /** @brief Gets a DateTimeOffset for the current local date and time, with the local UTC offset. */
         [[nodiscard]] static DateTimeOffset getNowProperty();
+        /** @brief Gets a DateTimeOffset for the current UTC date and time, with a zero offset. */
         [[nodiscard]] static DateTimeOffset getUtcNowProperty();
 
         // Component accessors
+        /** @return The DateTime part of this instance, in the instance's own offset. */
         [[nodiscard]] const DateTime& getDateTimeProperty() const;
+        /** @return The time's UTC offset. */
         [[nodiscard]] const TimeSpan& getOffsetProperty() const;
+        /** @return The UTC offset, in whole minutes. */
         [[nodiscard]] intcs getTotalOffsetMinutesProperty() const;
+        /** @return The number of ticks representing the date and time of this instance (offset-local). */
         [[nodiscard]] longcs getTicksProperty() const;
+        /** @return The number of ticks representing the date and time of this instance, in UTC. */
         [[nodiscard]] longcs getUtcTicksProperty() const;
+        /** @return The year component. */
         [[nodiscard]] intcs getYearProperty()        const;
+        /** @return The month component (1-12). */
         [[nodiscard]] intcs getMonthProperty()       const;
+        /** @return The day-of-month component. */
         [[nodiscard]] intcs getDayProperty()         const;
+        /** @return The day of the week. */
         [[nodiscard]] DayOfWeek getDayOfWeekProperty() const;
+        /** @return The day of the year (1-366). */
         [[nodiscard]] intcs getDayOfYearProperty()   const;
+        /** @return The hour component (0-23). */
         [[nodiscard]] intcs getHourProperty()        const;
+        /** @return The minute component (0-59). */
         [[nodiscard]] intcs getMinuteProperty()      const;
+        /** @return The second component (0-59). */
         [[nodiscard]] intcs getSecondProperty()      const;
+        /** @return The millisecond component (0-999). */
         [[nodiscard]] intcs getMillisecondProperty() const;
+        /** @return The time of day, as a TimeSpan since midnight. */
         [[nodiscard]] TimeSpan getTimeOfDayProperty() const;
+        /** @return The date component, with the time set to midnight. */
         [[nodiscard]] DateTime getDateProperty()          const;
+        /** @return The UTC DateTime represented by this instance. */
         [[nodiscard]] DateTime getUtcDateTimeProperty()   const;
+        /** @return The local DateTime represented by this instance. */
         [[nodiscard]] DateTime getLocalDateTimeProperty() const;
 
         /**
@@ -137,17 +157,29 @@ namespace System {
         [[nodiscard]] DateTimeOffset ToOffset(const TimeSpan& offset) const;
 
         // Arithmetic
+        /** @brief Returns a new instance offset by the given TimeSpan. */
         [[nodiscard]] DateTimeOffset Add(const TimeSpan& ts) const;
+        /** @brief Returns a new instance offset by the given number of days. */
         [[nodiscard]] DateTimeOffset AddDays(double days) const;
+        /** @brief Returns a new instance offset by the given number of hours. */
         [[nodiscard]] DateTimeOffset AddHours(double hours) const;
+        /** @brief Returns a new instance offset by the given number of minutes. */
         [[nodiscard]] DateTimeOffset AddMinutes(double minutes) const;
+        /** @brief Returns a new instance offset by the given number of seconds. */
         [[nodiscard]] DateTimeOffset AddSeconds(double seconds) const;
+        /** @brief Returns a new instance offset by the given number of milliseconds. */
         [[nodiscard]] DateTimeOffset AddMilliseconds(double ms) const;
+        /** @brief Returns a new instance offset by the given number of ticks. */
         [[nodiscard]] DateTimeOffset AddTicks(longcs ticks) const;
+        /** @brief Returns a new instance offset by the given number of months. */
         [[nodiscard]] DateTimeOffset AddMonths(intcs months) const;
+        /** @brief Returns a new instance offset by the given number of years. */
         [[nodiscard]] DateTimeOffset AddYears(intcs years) const;
+        /** @brief Returns the TimeSpan between this instance and @p other. */
         [[nodiscard]] TimeSpan Subtract(const DateTimeOffset& other) const;
+        /** @brief Returns a new instance offset backward by the given TimeSpan. */
         [[nodiscard]] DateTimeOffset Subtract(const TimeSpan& ts) const;
+        /** @brief Returns a new instance representing the same point in time, with a zero UTC offset. */
         [[nodiscard]] DateTimeOffset ToUniversalTime() const;
 
         /**
@@ -195,17 +227,25 @@ namespace System {
         [[nodiscard]] longcs ToUnixTimeMilliseconds() const;
 
         // Parsing / formatting
+        /** @brief Parses @p s into a DateTimeOffset. @throws System::FormatException if @p s is not a valid date/time. */
         [[nodiscard]] static DateTimeOffset Parse(const std::string& s);
+        /** @brief Attempts to parse @p s into @p result. @return false if @p s is not a valid date/time. */
         static bool TryParse(const std::string& s, DateTimeOffset& result);
+        /** @brief Returns a string representation using the default round-trip format. */
         [[nodiscard]] std::string ToString() const override;
+        /** @brief Returns a string representation using the given .NET custom/standard format string. */
         [[nodiscard]] std::string ToString(const std::string& format) const;
 
         using Object::Equals;
 
         // Comparison
+        /** @brief Compares two instances by their point in time. @return negative/zero/positive matching first &lt;/==/&gt; second. */
         [[nodiscard]] static intcs Compare(const DateTimeOffset& first, const DateTimeOffset& second);
+        /** @brief Returns true if @p first and @p second represent the same point in time. */
         [[nodiscard]] static bool Equals(const DateTimeOffset& first, const DateTimeOffset& second);
+        /** @brief Compares this instance to @p other by their point in time. @return negative/zero/positive matching this &lt;/==/&gt; other. */
         [[nodiscard]] intcs CompareTo(const DateTimeOffset& other) const;
+        /** @brief Returns true if @p other represents the same point in time as this instance. */
         [[nodiscard]] bool Equals(const DateTimeOffset& other) const;
 
         /**

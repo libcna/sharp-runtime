@@ -150,6 +150,10 @@ void TcpClient::Close() {
         fd_        = -1;
         connected_ = false;
     }
+    // Drop the cached stream so a subsequent Connect()+GetStream() (this port allows reconnecting
+    // a TcpClient after Close(), unlike real .NET where Dispose() is terminal) builds a fresh
+    // NetworkStream instead of returning one bound to the now-closed fd.
+    stream_.reset();
 #endif
 }
 
@@ -177,18 +181,27 @@ std::shared_ptr<NetworkStream> TcpClient::GetStream() const {
 #else
     if (!connected_ || !validFd(fd_))
         throw System::InvalidOperationException("TcpClient::GetStream: client is not connected.");
+    // Verified against TCPClient.cs's GetStream(): `return _dataStream ??= new
+    // NetworkStream(Client, true);` -- real .NET caches and returns the SAME NetworkStream
+    // instance on every call. Previously this created a brand-new stream on every call (a fresh
+    // dup()'d fd on POSIX, or an outright fd-ownership transfer on Windows that left fd_ == -1
+    // and connected_ == false after the first call, so a second call threw
+    // InvalidOperationException there). Caching matches .NET's contract and incidentally removes
+    // that Windows-only second-call bug.
+    if (stream_) return stream_;
 #  if defined(_WIN32)
     // Winsock has no dup() — transfer ownership to the NetworkStream.
     int transferred = fd_;
     const_cast<TcpClient*>(this)->fd_ = -1;
     const_cast<TcpClient*>(this)->connected_ = false;
-    return std::make_shared<NetworkStream>(transferred);
+    stream_ = std::make_shared<NetworkStream>(transferred);
 #  else
     int dupfd = ::dup(fd_);
     if (dupfd < 0)
         throw SocketException(toSocketError(lastErrorCode()), "TcpClient::GetStream: dup() failed: " + netErr());
-    return std::make_shared<NetworkStream>(dupfd);
+    stream_ = std::make_shared<NetworkStream>(dupfd);
 #  endif
+    return stream_;
 #endif
 }
 

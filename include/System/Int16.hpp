@@ -14,6 +14,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -74,7 +75,14 @@ public:
     static std::string ToString(SharpRuntime::shortcs value, const std::string& format) {
         if (format.empty()) return ToString(value);
         char type = format[0];
-        int width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+        int width = 0;
+        if (format.size() > 1) {
+            try {
+                width = std::stoi(format.substr(1));
+            } catch (const std::exception&) {
+                throw System::FormatException("Format specifier was invalid.");
+            }
+        }
         std::ostringstream oss;
         oss.imbue(std::locale::classic());
         if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << (static_cast<unsigned>(value) & 0xFFFFu); return oss.str(); }
@@ -93,7 +101,7 @@ public:
      * @brief Compares @p a to @p b and returns a signed integer.
      * C++ counterpart of .NET Int16.CompareTo(short).
      */
-    [[nodiscard]] static int CompareTo(SharpRuntime::shortcs a, SharpRuntime::shortcs b) noexcept {
+    [[nodiscard]] static SharpRuntime::intcs CompareTo(SharpRuntime::shortcs a, SharpRuntime::shortcs b) noexcept {
         return (a < b) ? -1 : (a > b) ? 1 : 0;
     }
 
@@ -101,7 +109,7 @@ public:
     [[nodiscard]] static bool Equals(SharpRuntime::shortcs a, SharpRuntime::shortcs b) noexcept { return a == b; }
 
     /** @brief Returns a hash code for @p value. C++ counterpart of .NET Int16.GetHashCode(). */
-    [[nodiscard]] static int GetHashCode(SharpRuntime::shortcs value) noexcept { return static_cast<int>(value); }
+    [[nodiscard]] static SharpRuntime::intcs GetHashCode(SharpRuntime::shortcs value) noexcept { return static_cast<SharpRuntime::intcs>(value); }
 
     /**
      * @brief Returns the absolute value of @p value.
@@ -125,15 +133,24 @@ public:
     [[nodiscard]] static SharpRuntime::shortcs Min(SharpRuntime::shortcs x, SharpRuntime::shortcs y) noexcept { return x < y ? x : y; }
 
     /** @brief Returns -1 if negative, 0 if zero, 1 if positive. C++ counterpart of .NET Math.Sign(short). */
-    [[nodiscard]] static int Sign(SharpRuntime::shortcs value) noexcept {
+    [[nodiscard]] static SharpRuntime::intcs Sign(SharpRuntime::shortcs value) noexcept {
         return (value > 0) - (value < 0);
     }
 
     /**
      * @brief Returns the quotient and remainder of @p left / @p right.
      * C++ counterpart of .NET Int16.DivRem(short,short).
+     * @throws System::DivideByZeroException if @p right is zero -- integer division by
+     *         zero is undefined behavior in C++ (a hardware trap, not a catchable
+     *         exception), unlike the CLR's div instruction which .NET surfaces as a
+     *         managed DivideByZeroException; this must be checked explicitly. No
+     *         MinValue/-1 overflow check is needed: short operands promote to int in
+     *         C++ arithmetic (matching the CLR's int32-width IL arithmetic for short),
+     *         so short.MinValue/-1 does not overflow at the width the division runs at.
      */
     [[nodiscard]] static std::pair<SharpRuntime::shortcs, SharpRuntime::shortcs> DivRem(SharpRuntime::shortcs left, SharpRuntime::shortcs right) {
+        if (right == 0)
+            throw System::DivideByZeroException();
         return {static_cast<SharpRuntime::shortcs>(left / right), static_cast<SharpRuntime::shortcs>(left % right)};
     }
 
@@ -148,30 +165,45 @@ public:
         return value > 0 && (value & (value - 1)) == 0;
     }
 
-    /** @brief Returns the number of leading zero bits (of the 16-bit value). C++ counterpart of .NET Int16.LeadingZeroCount(short). */
-    [[nodiscard]] static int LeadingZeroCount(SharpRuntime::shortcs value) noexcept {
-        return std::countl_zero(static_cast<uint16_t>(value));
+    /**
+     * @brief Returns the number of leading zero bits (of the 16-bit value).
+     * C++ counterpart of .NET Int16.LeadingZeroCount(short).
+     * @note Real .NET's IBinaryInteger&lt;short&gt;.LeadingZeroCount returns @c short (not
+     * @c int, unlike the wider integer types) -- matched here via @c shortcs rather than
+     * @c intcs. The max possible result (16) fits comfortably.
+     */
+    [[nodiscard]] static SharpRuntime::shortcs LeadingZeroCount(SharpRuntime::shortcs value) noexcept {
+        return static_cast<SharpRuntime::shortcs>(std::countl_zero(static_cast<uint16_t>(value)));
     }
 
-    /** @brief Returns the number of set bits. C++ counterpart of .NET Int16.PopCount(short). */
-    [[nodiscard]] static int PopCount(SharpRuntime::shortcs value) noexcept {
-        return std::popcount(static_cast<uint16_t>(value));
+    /**
+     * @brief Returns the number of set bits.
+     * C++ counterpart of .NET Int16.PopCount(short).
+     * @note Real .NET's IBinaryInteger&lt;short&gt;.PopCount returns @c short (not @c int).
+     */
+    [[nodiscard]] static SharpRuntime::shortcs PopCount(SharpRuntime::shortcs value) noexcept {
+        return static_cast<SharpRuntime::shortcs>(std::popcount(static_cast<uint16_t>(value)));
     }
 
-    /** @brief Returns the number of trailing zero bits (of the 16-bit value). C++ counterpart of .NET Int16.TrailingZeroCount(short). */
-    [[nodiscard]] static int TrailingZeroCount(SharpRuntime::shortcs value) noexcept {
+    /**
+     * @brief Returns the number of trailing zero bits (of the 16-bit value).
+     * C++ counterpart of .NET Int16.TrailingZeroCount(short).
+     * @note Real .NET's IBinaryInteger&lt;short&gt;.TrailingZeroCount returns @c short (not
+     * @c int).
+     */
+    [[nodiscard]] static SharpRuntime::shortcs TrailingZeroCount(SharpRuntime::shortcs value) noexcept {
         if (value == 0) return 16;
-        return std::countr_zero(static_cast<uint16_t>(value));
+        return static_cast<SharpRuntime::shortcs>(std::countr_zero(static_cast<uint16_t>(value)));
     }
 
     /** @brief Rotates @p value left by @p rotateAmount bits (within 16 bits). C++ counterpart of .NET Int16.RotateLeft(short,int). */
-    [[nodiscard]] static SharpRuntime::shortcs RotateLeft(SharpRuntime::shortcs value, int rotateAmount) noexcept {
+    [[nodiscard]] static SharpRuntime::shortcs RotateLeft(SharpRuntime::shortcs value, SharpRuntime::intcs rotateAmount) noexcept {
         return static_cast<SharpRuntime::shortcs>(
             std::rotl(static_cast<uint16_t>(value), rotateAmount));
     }
 
     /** @brief Rotates @p value right by @p rotateAmount bits (within 16 bits). C++ counterpart of .NET Int16.RotateRight(short,int). */
-    [[nodiscard]] static SharpRuntime::shortcs RotateRight(SharpRuntime::shortcs value, int rotateAmount) noexcept {
+    [[nodiscard]] static SharpRuntime::shortcs RotateRight(SharpRuntime::shortcs value, SharpRuntime::intcs rotateAmount) noexcept {
         return static_cast<SharpRuntime::shortcs>(
             std::rotr(static_cast<uint16_t>(value), rotateAmount));
     }
@@ -179,12 +211,13 @@ public:
     /**
      * @brief Returns the floor of the base-2 logarithm of @p value.
      * C++ counterpart of .NET Int16.Log2(short). Matches .NET: Log2(0) is 0, not an error.
+     * @note Real .NET's IBinaryNumber&lt;short&gt;.Log2 returns @c short (not @c int).
      * @throws System::ArgumentOutOfRangeException if @p value is negative.
      */
-    [[nodiscard]] static int Log2(SharpRuntime::shortcs value) {
+    [[nodiscard]] static SharpRuntime::shortcs Log2(SharpRuntime::shortcs value) {
         if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
         if (value == 0) return 0;
-        return std::bit_width(static_cast<uint16_t>(value)) - 1;
+        return static_cast<SharpRuntime::shortcs>(std::bit_width(static_cast<uint16_t>(value)) - 1);
     }
 };
 

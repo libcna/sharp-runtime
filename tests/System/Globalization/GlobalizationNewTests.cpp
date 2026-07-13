@@ -126,10 +126,46 @@ TEST(JulianCalendarTests, LeapYear) {
     EXPECT_TRUE(cal.IsLeapYear(100));  // Julian: every 4th year
     EXPECT_TRUE(cal.IsLeapYear(400));
 }
+TEST(JulianCalendarTests, AddMonths_LargeValue_ThrowsInsteadOfOverflowing) {
+    // JulianCalendar::AddMonths is a virtual override that replaces (not augments)
+    // Calendar::AddMonths's own |months|>120000 check, and previously had none of its own --
+    // `i = m - 1 + months` is real signed-integer-overflow UB in C++ for a months argument
+    // as simple as INT_MAX.
+    JulianCalendar cal;
+    System::DateTime dt(2024, 1, 1);
+    EXPECT_THROW(cal.AddMonths(dt, 1000000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddMonths(dt, -1000000000), System::ArgumentOutOfRangeException);
+}
+TEST(JulianCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `years * 12` computed directly with no upfront bounds check is real signed-integer-
+    // overflow UB in C++ for a merely large years argument.
+    JulianCalendar cal;
+    System::DateTime dt(2024, 1, 1);
+    EXPECT_THROW(cal.AddYears(dt, 200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddYears(dt, -200000000), System::ArgumentOutOfRangeException);
+}
 TEST(ThaiBuddhistCalendarTests, Year) {
     ThaiBuddhistCalendar cal;
     System::DateTime dt(2024,1,1);
     EXPECT_EQ(cal.GetYear(dt), 2567);
+}
+TEST(ThaiBuddhistCalendarTests, AddYears_LargeValue_ThrowsInsteadOfOverflowing) {
+    // ThaiBuddhistCalendar doesn't override AddYears -- inherits Calendar::AddYears (the
+    // base-class default). `years * 12` computed directly with no upfront bounds check was
+    // real signed-integer-overflow UB in C++ for a merely large years argument; this exercises
+    // the fix at the base-class level, which every non-overriding calendar subclass inherits.
+    ThaiBuddhistCalendar cal;
+    System::DateTime dt(2024, 1, 1);
+    EXPECT_THROW(cal.AddYears(dt, 200000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddYears(dt, -200000000), System::ArgumentOutOfRangeException);
+}
+TEST(ThaiBuddhistCalendarTests, AddWeeks_LargeValue_ThrowsInsteadOfOverflowing) {
+    // `weeks * 7` computed directly with no upfront bounds check was real signed-integer-
+    // overflow UB in C++ for a merely large weeks argument (Calendar::AddWeeks, base class).
+    ThaiBuddhistCalendar cal;
+    System::DateTime dt(2024, 1, 1);
+    EXPECT_THROW(cal.AddWeeks(dt, 400000000), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(cal.AddWeeks(dt, -400000000), System::ArgumentOutOfRangeException);
 }
 TEST(ThaiBuddhistCalendarTests, Eras_ContainsThaiBuddhistEra) {
     ThaiBuddhistCalendar cal;

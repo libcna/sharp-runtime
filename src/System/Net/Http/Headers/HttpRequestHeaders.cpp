@@ -69,7 +69,13 @@ namespace System::Net::Http::Headers {
 
         bool isValidHost(const std::string& value) {
             if (value.empty()) return false;
-            static constexpr std::string_view invalid = " \t\r\n";
+            // Unlike checkNoNewlineOrNul() (used by From/Protocol below), this didn't reject an
+            // embedded NUL byte -- an inconsistency within this same file, not a deliberate
+            // design choice (this is otherwise already a known, accepted simplification of real
+            // HttpRequestHeaders.cs's Host setter, which uses HttpRuleParser.GetHostLength() for
+            // full RFC host-syntax validation, not a simple char blacklist -- reimplementing
+            // that is out of scope here, but rejecting a literal NUL byte isn't).
+            static constexpr std::string_view invalid(" \t\r\n\0", 5);
             return value.find_first_of(invalid) == std::string::npos;
         }
 

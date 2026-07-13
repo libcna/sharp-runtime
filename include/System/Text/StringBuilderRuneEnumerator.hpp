@@ -24,6 +24,7 @@ namespace System::Text {
         bool hasCurrent_ = false;
 
     public:
+        /** @brief Initializes an enumerator over a snapshot of @p value's current contents. */
         explicit StringBuilderRuneEnumerator(const StringBuilder& value) : snapshot_(value.ToString()) {}
 
         /** @return The current Rune. */
@@ -44,16 +45,19 @@ namespace System::Text {
             return true;
         }
 
+        /** @brief Resets the enumerator to its initial position, before the first Rune. */
         void Reset() {
             current_ = Rune();
             nextIndex_ = 0;
             hasCurrent_ = false;
         }
 
+        /** @brief Range-based-for support: advances to the first Rune and returns *this. */
         [[nodiscard]] StringBuilderRuneEnumerator& begin() {
             hasCurrent_ = MoveNext();
             return *this;
         }
+        /** @brief Range-based-for support: returns the end sentinel. */
         [[nodiscard]] Sentinel end() const { return Sentinel{}; }
         bool operator!=(Sentinel) const { return hasCurrent_; }
         [[nodiscard]] Rune operator*() const { return current_; }

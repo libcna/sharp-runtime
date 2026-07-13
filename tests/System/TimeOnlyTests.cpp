@@ -193,6 +193,16 @@ TEST(TimeOnlyTests, Add_TimeSpan_WrapsMidnight) {
     EXPECT_EQ(r.getMinuteProperty(), 30);
 }
 
+TEST(TimeOnlyTests, Add_TimeSpan_NearMaxValue_DoesNotOverflow) {
+    // Adding this instance's (bounded, < 1 day) ticks directly to a TimeSpan near
+    // TimeSpan::MaxValue's ticks (~Int64::MaxValue) is signed-integer-overflow UB in C++ if
+    // done before reducing modulo TicksPerDay -- must reduce first, matching real .NET's
+    // AddTicks algorithm.
+    TimeOnly t(12, 0);
+    EXPECT_NO_THROW({ auto r = t.Add(TimeSpan::MaxValue); (void)r; });
+    EXPECT_NO_THROW({ auto r = t.Add(TimeSpan::MinValue); (void)r; });
+}
+
 // ---------------------------------------------------------------------------
 // Equals / CompareTo / GetHashCode
 // ---------------------------------------------------------------------------

@@ -79,6 +79,22 @@ namespace System {
         /** @brief Returns the entire URI string (the value passed to the constructor). */
         [[nodiscard]] const std::string& getAbsoluteUriProperty()  const;
 
+        /**
+         * @brief Returns a string representation of this Uri as originally supplied.
+         *
+         * C++ counterpart of .NET Uri.OriginalString -- was entirely missing from this port
+         * despite being a commonly-used property (many call sites specifically want the
+         * pristine original input rather than AbsoluteUri, since real .NET's AbsoluteUri
+         * throws InvalidOperationException for a relative Uri while OriginalString never
+         * throws). This implementation stores the raw constructor input verbatim as its
+         * internal absoluteUri_ field with no canonicalization/re-escaping pass (a consequence
+         * of this class's disclosed "no percent-encoding/decoding" limitation), so in this
+         * port OriginalString and AbsoluteUri are the same underlying value -- unlike real
+         * .NET, where AbsoluteUri is a canonicalized reconstruction (lower-cased scheme/host,
+         * percent-encoded, default port stripped) that can differ from OriginalString.
+         */
+        [[nodiscard]] const std::string& getOriginalStringProperty() const { return absoluteUri_; }
+
         /** @brief Returns the scheme (e.g. "https"), lower-case as parsed. */
         [[nodiscard]] const std::string& getSchemeProperty()        const;
 

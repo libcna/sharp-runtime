@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <string>
+#include <thread>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/ErrorEventHandler.hpp"
 #include "System/IO/FileSystemEventHandler.hpp"
 #include "System/IO/NotifyFilters.hpp"
@@ -11,18 +13,25 @@
 
 namespace System::IO {
 
+    using SharpRuntime::intcs;
+
     /**
      * @brief Listens to the system directory change notifications and raises events when a
      * directory or file within a directory changes.
      *
      * C++ counterpart of .NET System.IO.FileSystemWatcher.
      *
-     * @note Status: STUB. Property/event API surface matches .NET (path/filter validation,
-     * NotifyFilter masking, EnableRaisingEvents state), so ported C# code that constructs a
-     * watcher and registers handlers compiles and runs without crashing. Real OS-level file
-     * system monitoring (inotify/FSEvents/ReadDirectoryChangesW) is NOT implemented — enabling
-     * the watcher does not actually observe file system changes, and registered handlers are
-     * never invoked. This is a documented gap, not a silent one.
+     * @note Status: PARTIAL. On Linux, enabling the watcher (EnableRaisingEvents = true) starts
+     * a real background thread backed by inotify that observes Created/Deleted/Changed/Renamed
+     * events in the watched directory and invokes the registered handler vectors -- matching
+     * real .NET's semantics for the common single-directory, non-recursive case. Deliberately
+     * NOT implemented, matching this project's "document, don't rush" precedent for large
+     * feature gaps: recursive subdirectory watching (IncludeSubdirectories is tracked but has
+     * no effect -- would require walking the whole tree, adding a watch per subdirectory, and
+     * handling directories created/removed while already watching), and any non-Linux backend
+     * (FSEvents on macOS, ReadDirectoryChangesW on Windows) -- on those platforms this remains
+     * the original stub: the flag is tracked faithfully, but no real monitoring occurs. This is
+     * a documented gap, not a silent one.
      */
     class FileSystemWatcher {
         std::string directory_;
@@ -31,6 +40,19 @@ namespace System::IO {
         bool includeSubdirectories_ = false;
         bool enabled_ = false;
         unsigned int internalBufferSize_ = 8192;
+
+        // Backing state for the real inotify-based watch thread (Linux only; unused elsewhere).
+        // A FileSystemWatcher with a live watch thread can never be safely copied or moved (the
+        // thread captures `this` for the lifetime of the watch), so copy/move are deleted below
+        // rather than leaving a dangling-`this` hazard for a caller to discover the hard way.
+        int inotifyFd_ = -1;
+        int watchDescriptor_ = -1;
+        int stopEventFd_ = -1;
+        std::thread watchThread_;
+
+        void startWatchingIfPossible();
+        void stopWatchingIfRunning();
+        void watchLoop();
 
         static constexpr int ValidNotifyFiltersMask =
             static_cast<int>(NotifyFilters::Attributes)    | static_cast<int>(NotifyFilters::CreationTime) |
@@ -65,6 +87,14 @@ namespace System::IO {
          */
         FileSystemWatcher(const std::string& path, const std::string& filter);
 
+        FileSystemWatcher(const FileSystemWatcher&) = delete;
+        FileSystemWatcher& operator=(const FileSystemWatcher&) = delete;
+        FileSystemWatcher(FileSystemWatcher&&) = delete;
+        FileSystemWatcher& operator=(FileSystemWatcher&&) = delete;
+
+        /** Stops any active watch thread (joining it) before the watcher is destroyed. */
+        ~FileSystemWatcher();
+
         /**
          * @brief Gets or sets the path of the directory to watch.
          * @throws System::ArgumentException if @p value is empty or is not an existing directory.
@@ -95,20 +125,22 @@ namespace System::IO {
         void setIncludeSubdirectoriesProperty(bool value) { includeSubdirectories_ = value; }
 
         /** @brief Gets or sets the size of the internal buffer, in bytes. Values below 4096 are clamped to 4096, matching .NET. */
-        [[nodiscard]] int getInternalBufferSizeProperty() const { return static_cast<int>(internalBufferSize_); }
-        void setInternalBufferSizeProperty(int value) {
+        [[nodiscard]] intcs getInternalBufferSizeProperty() const { return static_cast<intcs>(internalBufferSize_); }
+        void setInternalBufferSizeProperty(intcs value) {
             internalBufferSize_ = value < 4096 ? 4096u : static_cast<unsigned int>(value);
         }
 
         /**
          * @brief Gets or sets whether the component is enabled.
          *
-         * @note This is a documented STUB: setting this to true does not start any real OS-level
-         * file system monitoring, since none is implemented. The flag is tracked faithfully so
-         * ported C# code reading EnableRaisingEvents back gets the value it set.
+         * On Linux, setting this to true starts a real inotify-backed watch thread for the
+         * configured directory (see the class doc-comment for what is and isn't covered).
+         * On other platforms this remains a documented stub: the flag is tracked faithfully so
+         * ported C# code reading EnableRaisingEvents back gets the value it set, but no real
+         * monitoring occurs.
          */
         [[nodiscard]] bool getEnableRaisingEventsProperty() const { return enabled_; }
-        void setEnableRaisingEventsProperty(bool value) { enabled_ = value; }
+        void setEnableRaisingEventsProperty(bool value);
     };
 
 } // namespace System::IO

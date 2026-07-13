@@ -91,8 +91,17 @@ public:
     TValue& operator[](const TKey& key) {
         auto it = keyIndex_.find(key);
         if (it != keyIndex_.end()) return entries_[it->second].second;
-        keyIndex_[key] = entries_.size();
+        // Mutate entries_ (the operation more likely to throw -- TValue{}'s construction
+        // and the pair's move/copy into the vector) BEFORE keyIndex_. The previous order
+        // (keyIndex_ first) left keyIndex_ pointing one-past-the-end of entries_ if
+        // emplace_back threw, so any subsequent unchecked lookup (this operator[]'s own
+        // `entries_[it->second]` above, or the const overload) read out of bounds --
+        // confirmed as a genuine ASan heap-buffer-overflow via a standalone repro using a
+        // TValue whose copy constructor throws. This order is exception-neutral: if
+        // emplace_back throws, keyIndex_ is untouched and the dictionary is unchanged.
+        std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, TValue{});
+        keyIndex_[key] = newIndex;
         return entries_.back().second;
     }
 
@@ -121,8 +130,11 @@ public:
      */
     void Add(const TKey& key, const TValue& value) {
         if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
-        keyIndex_[key] = entries_.size();
+        // See operator[]'s comment: entries_ must be mutated before keyIndex_ is updated,
+        // so a throwing TKey/TValue copy leaves keyIndex_ untouched instead of desynced.
+        std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
+        keyIndex_[key] = newIndex;
     }
 
     /**
@@ -135,8 +147,10 @@ public:
      */
     bool TryAdd(const TKey& key, const TValue& value) {
         if (keyIndex_.count(key)) return false;
-        keyIndex_[key] = entries_.size();
+        // See operator[]'s comment: entries_ must be mutated before keyIndex_ is updated.
+        std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
+        keyIndex_[key] = newIndex;
         return true;
     }
 

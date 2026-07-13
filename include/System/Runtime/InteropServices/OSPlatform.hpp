@@ -4,7 +4,9 @@
 #pragma once
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 
 namespace System::Runtime::InteropServices {
@@ -38,6 +40,15 @@ namespace System::Runtime::InteropServices {
         }
         bool operator==(const OSPlatform& o) const { return Equals(o); }
         bool operator!=(const OSPlatform& o) const { return !Equals(o); }
+
+        /**
+         * @brief Returns a case-insensitive hash of the platform name.
+         * C++ counterpart of .NET OSPlatform.GetHashCode() (StringComparer.OrdinalIgnoreCase.GetHashCode(Name)).
+         * Matches Equals()'s case-insensitive comparison, satisfying the Equals/GetHashCode contract.
+         */
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return static_cast<SharpRuntime::intcs>(std::hash<std::string>{}(toUpperAscii(name_)));
+        }
 
         [[nodiscard]] std::string ToString() const { return name_; }
 

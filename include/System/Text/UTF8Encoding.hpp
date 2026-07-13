@@ -12,12 +12,18 @@ namespace System::Text {
      *
      * Partial C++ counterpart of .NET System.Text.UTF8Encoding.
      *
-     * @note Status: Implemented
+     * @note Status: Implemented. GetBytes()/GetString() validate that the input is well-formed
+     * UTF-8 and route ill-formed byte sequences through getEncoderFallbackProperty()/
+     * getDecoderFallbackProperty() (one byte substituted/thrown per invalid position, then
+     * resuming) instead of passing bytes through unvalidated. The default fallback (set by the
+     * constructor, overridable via setDecoderFallbackProperty()/setEncoderFallbackProperty())
+     * replaces with U+FFFD, matching real UTF8Encoding.SetDefaultFallbacks() -- not the generic
+     * Encoding base class's "?" default, which is correct only for single-byte code pages.
      */
     class UTF8Encoding : public Encoding {
     public:
-        /** Default constructor. */
-        UTF8Encoding() = default;
+        /** Default constructor; sets the U+FFFD replacement fallback .NET uses for UTF-8. */
+        UTF8Encoding();
         ~UTF8Encoding() override = default;
 
         /** Encodes a string to a UTF-8 byte sequence. */

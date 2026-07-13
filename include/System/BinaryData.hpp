@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ReadOnlyMemory.hpp"
 #include "System/IO/Stream.hpp"
 #include "System/IO/MemoryStream.hpp"
@@ -18,6 +19,8 @@
 #include "System/IO/IOException.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief A lightweight abstraction for a payload of bytes that supports
@@ -113,8 +116,8 @@ namespace System {
          * @brief Gets the number of bytes in this data.
          * @return Byte count.
          */
-        [[nodiscard]] int getLengthProperty() const noexcept {
-            return static_cast<int>(bytes_.size());
+        [[nodiscard]] intcs getLengthProperty() const noexcept {
+            return static_cast<intcs>(bytes_.size());
         }
 
         /**
@@ -288,7 +291,7 @@ namespace System {
          * @return ReadOnlyMemory&lt;uint8_t&gt; over the backing store.
          */
         [[nodiscard]] ReadOnlyMemory<uint8_t> ToMemory() const noexcept {
-            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<intcs>(bytes_.size()));
         }
 
         /**
@@ -313,10 +316,20 @@ namespace System {
 
         /**
          * @brief Provides direct access to the underlying bytes.
+         *
+         * Not present on real .NET's BinaryData (which has no indexer) -- a C++-side
+         * convenience addition. Bounds-checked to match this project's other array-like
+         * accessors (e.g. Span<T>::operator[], mirroring real .NET's own Span<T>.this[int]):
+         * a negative index cast to std::size_t wraps to a huge value, so an unchecked
+         * `bytes_[index]` is a real out-of-bounds read (confirmed via ASan heap-buffer-overflow)
+         * rather than a caught exception.
          * @param index Zero-based byte index.
          * @return The byte at the specified index.
+         * @throws System::ArgumentOutOfRangeException if @p index is negative or ≥ Length.
          */
-        [[nodiscard]] uint8_t operator[](int index) const {
+        [[nodiscard]] uint8_t operator[](intcs index) const {
+            if (static_cast<SharpRuntime::uintcs>(index) >= static_cast<SharpRuntime::uintcs>(bytes_.size()))
+                throw System::ArgumentOutOfRangeException("index");
             return bytes_[static_cast<std::size_t>(index)];
         }
 
@@ -327,7 +340,7 @@ namespace System {
          * C++ counterpart of .NET implicit operator ReadOnlyMemory&lt;byte&gt;.
          */
         operator ReadOnlyMemory<uint8_t>() const noexcept {
-            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+            return ReadOnlyMemory<uint8_t>(bytes_.data(), static_cast<intcs>(bytes_.size()));
         }
 
         /**
@@ -337,7 +350,7 @@ namespace System {
          * C++ counterpart of .NET implicit operator ReadOnlySpan&lt;byte&gt;.
          */
         operator ReadOnlySpan<uint8_t>() const noexcept {
-            return ReadOnlySpan<uint8_t>(bytes_.data(), static_cast<int>(bytes_.size()));
+            return ReadOnlySpan<uint8_t>(bytes_.data(), static_cast<intcs>(bytes_.size()));
         }
 
         /**
@@ -368,13 +381,13 @@ namespace System {
          * (base.GetHashCode(), marked [EditorBrowsable(Never)]). In C++ a content-based
          * hash is more useful and consistent with the content-based Equals above.
          */
-        [[nodiscard]] int GetHashCode() const noexcept {
-            std::size_t h = std::hash<int>{}(getLengthProperty());
+        [[nodiscard]] intcs GetHashCode() const noexcept {
+            std::size_t h = std::hash<intcs>{}(getLengthProperty());
             h ^= std::hash<std::string>{}(mediaType_) + 0x9e3779b9 + (h << 6) + (h >> 2);
             if (!bytes_.empty()) {
                 h ^= std::hash<uint8_t>{}(bytes_[0]) + 0x9e3779b9 + (h << 6) + (h >> 2);
             }
-            return static_cast<int>(h & 0x7fffffff);
+            return static_cast<intcs>(h & 0x7fffffff);
         }
     };
 

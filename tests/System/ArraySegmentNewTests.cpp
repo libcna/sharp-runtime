@@ -85,6 +85,30 @@ TEST(ArraySegmentTests, Slice1Arg_Negative_Throws) {
     EXPECT_THROW(seg.Slice(-1), System::ArgumentOutOfRangeException);
 }
 
+// Regression tests (ticket 1487): offset+count (constructor) / index+count (Slice(int,int))
+// used to be computed directly in intcs (int32) arithmetic, which overflows for large inputs
+// and silently bypasses the bounds check instead of throwing -- same bug class as
+// Span<T>::Slice (ticket 265), confirmed via a standalone UBSan repro before fixing.
+TEST(ArraySegmentTests, Constructor_OffsetPlusCountOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3};
+    EXPECT_THROW((ArraySegment<int>(v, 2147483647, 10)), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArraySegmentTests, Slice2Arg_IndexPlusCountOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v);
+    EXPECT_THROW(seg.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArraySegmentTests, Slice2Arg_ValidRange_Works) {
+    std::vector<int> v{10, 20, 30, 40, 50};
+    ArraySegment<int> seg(v);
+    ArraySegment<int> s = seg.Slice(1, 3);
+    EXPECT_EQ(s.getCountProperty(), 3);
+    EXPECT_EQ(s[0], 20);
+    EXPECT_EQ(s[2], 40);
+}
+
 TEST(ArraySegmentTests, Slice1Arg_CorrectElements) {
     std::vector<int> v{10, 20, 30, 40};
     ArraySegment<int> seg(v);
@@ -139,6 +163,17 @@ TEST(ArraySegmentTests, CopyTo_VectorWithOffset_ExpandsDest) {
     EXPECT_EQ(dest[3], 7);
     EXPECT_EQ(dest[4], 8);
 }
+
+TEST(ArraySegmentTests, CopyTo_VectorNegativeDestinationIndex_Throws) {
+    // destinationIndex + count_ (e.g. -1 + 5 = 4) previously bypassed the resize
+    // check against a large-enough destination, then destination.begin() + (-1)
+    // computed an out-of-bounds iterator -- a genuine heap-buffer-overflow write.
+    std::vector<int> v{1, 2, 3, 4, 5};
+    ArraySegment<int> seg(v);
+    std::vector<int> dest(10, 0);
+    EXPECT_THROW(seg.CopyTo(dest, -1), System::ArgumentOutOfRangeException);
+}
+
 
 // ---------------------------------------------------------------------------
 // CopyTo(ArraySegment)

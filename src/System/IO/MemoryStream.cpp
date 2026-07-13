@@ -4,6 +4,7 @@
 #include "System/IO/MemoryStream.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/NotSupportedException.hpp"
 #include <algorithm>
 
@@ -42,10 +43,27 @@ namespace System::IO
         // had written.
         if (!writable_) throw System::NotSupportedException("Stream does not support writing.");
         if (buffer == nullptr || count <= 0) return;
-        if (position_ + count > static_cast<intcs>(data_.size()))
-            data_.resize(static_cast<size_t>(position_ + count));
+        // Position can legally be set arbitrarily far past the end (setPositionProperty only
+        // rejects negative values, matching real .NET's own Position setter, which allows
+        // seeking past Length -- the resize just happens lazily on the next Write). That means
+        // position_+count (both intcs/int32) can genuinely signed-overflow -- confirmed real UB
+        // via a standalone UBSan repro on the identical pattern in Span<T>::Slice (ticket
+        // 265/1487) -- and worse than "just UB": computing it directly as intcs and wrapping to
+        // a negative sum would silently compare as <= data_.size(), skipping the resize, so the
+        // std::copy below would write through data_.begin()+position_ with position_ wildly
+        // beyond the vector's actual allocation -- a real heap buffer overflow. Computed here in
+        // int64_t (always wide enough to hold the sum of two int32 values without overflow) to
+        // avoid the UB entirely, matching real .NET's own MemoryStream.Write, which computes
+        // this exact sum and explicitly checks for the overflow, throwing
+        // IOException(SR.IO_StreamTooLong).
+        int64_t newLength64 = static_cast<int64_t>(position_) + static_cast<int64_t>(count);
+        if (newLength64 > static_cast<int64_t>(SharpRuntime::INTCS_MAX))
+            throw System::IO::IOException("Stream was too long.");
+        intcs newLength = static_cast<intcs>(newLength64);
+        if (newLength > static_cast<intcs>(data_.size()))
+            data_.resize(static_cast<size_t>(newLength));
         std::copy(buffer + offset, buffer + offset + count, data_.begin() + position_);
-        position_ += count;
+        position_ = newLength;
     }
 
     void MemoryStream::WriteByte(bytecs value)

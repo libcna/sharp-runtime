@@ -156,6 +156,26 @@ TEST(JsonArrayTests, RemoveAt_RemovesItem) {
     EXPECT_EQ(arr[0]->AsValue().GetInt32(), 2);
 }
 
+TEST(JsonArrayTests, Remove_ExistingItem_RemovesAndDetaches) {
+    JsonArray arr;
+    auto item1 = JsonValue::Create(static_cast<SharpRuntime::intcs>(1));
+    auto item2 = JsonValue::Create(static_cast<SharpRuntime::intcs>(2));
+    arr.Add(item1);
+    arr.Add(item2);
+    EXPECT_TRUE(arr.Remove(item1));
+    EXPECT_EQ(arr.getCountProperty(), 1);
+    EXPECT_EQ(arr[0]->AsValue().GetInt32(), 2);
+    EXPECT_EQ(item1->getParentProperty(), nullptr);
+}
+
+TEST(JsonArrayTests, Remove_NotPresent_ReturnsFalse) {
+    JsonArray arr;
+    arr.Add(JsonValue::Create(static_cast<SharpRuntime::intcs>(1)));
+    auto notInArray = JsonValue::Create(static_cast<SharpRuntime::intcs>(99));
+    EXPECT_FALSE(arr.Remove(notInArray));
+    EXPECT_EQ(arr.getCountProperty(), 1);
+}
+
 TEST(JsonArrayTests, Insert_InsertsAtIndex) {
     JsonArray arr;
     arr.Add(JsonValue::Create(static_cast<SharpRuntime::intcs>(1)));

@@ -36,7 +36,14 @@ namespace System::Net::Http {
         }
 
         static std::string combineMessage(const std::string& message, HttpRequestError error) {
-            return message + " (" + httpRequestErrorToString(error) + ")";
+            // When no message is supplied, real .NET's base Exception.Message falls back to a
+            // generic "Exception of type '...' was thrown." rather than an empty string; this
+            // port instead reuses IOException's own default text (matching the argless
+            // IOException() constructor) since it is more informative and this project doesn't
+            // chase verbatim fallback-message parity. Without this fallback, an empty `message`
+            // produced a bare " (Unknown)" string with no base text at all.
+            const std::string& base_ = message.empty() ? std::string("I/O error occurred.") : message;
+            return base_ + " (" + httpRequestErrorToString(error) + ")";
         }
 
     public:

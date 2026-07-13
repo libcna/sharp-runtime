@@ -13,13 +13,13 @@
 
 namespace System::Threading {
 
-    int Thread::GetCurrentProcessorId() {
+    intcs Thread::GetCurrentProcessorId() {
 #if defined(_WIN32)
-        return static_cast<int>(GetCurrentProcessorNumber());
+        return static_cast<intcs>(GetCurrentProcessorNumber());
 #elif defined(__EMSCRIPTEN__)
         return 0;
 #elif defined(__linux__)
-        return static_cast<int>(sched_getcpu());
+        return static_cast<intcs>(sched_getcpu());
 #else
         return 0;
 #endif

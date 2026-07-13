@@ -5,5 +5,13 @@
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics {
-    class DebuggerStepperBoundaryAttribute : public System::Attribute {};
+
+/**
+ * @brief Indicates the code following the attribute is to be executed in run, not step, mode.
+ *
+ * C++ counterpart of .NET System.Diagnostics.DebuggerStepperBoundaryAttribute.
+ * A pure marker attribute — carries no state and has no runtime behavior.
+ */
+class DebuggerStepperBoundaryAttribute : public System::Attribute {};
+
 } // namespace System::Diagnostics

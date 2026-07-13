@@ -107,6 +107,21 @@ TEST(ImmutableCollectionTests, ArraySetItemReturnsNewInstance) {
     EXPECT_EQ(b.getLengthProperty(), 3);
 }
 
+TEST(ImmutableCollectionTests, ArraySetItemOutOfRangeThrowsArgumentOutOfRangeException) {
+    // Real .NET's SetItem validates via Requires.Range, which throws
+    // ArgumentOutOfRangeException -- this previously threw IndexOutOfRangeException,
+    // copying the raw-indexer's exception type by mistake.
+    auto a = ImmutableArray<int>::Create({1, 2, 3});
+    EXPECT_THROW(a.SetItem(5, 99), System::ArgumentOutOfRangeException);
+}
+
+TEST(ImmutableCollectionTests, ArrayRemoveAtOutOfRangeThrowsArgumentOutOfRangeException) {
+    // Real .NET's RemoveAt(index) delegates to RemoveRange(index, 1), whose Requires.Range
+    // checks throw ArgumentOutOfRangeException -- this previously threw IndexOutOfRangeException.
+    auto a = ImmutableArray<int>::Create({1, 2, 3});
+    EXPECT_THROW(a.RemoveAt(5), System::ArgumentOutOfRangeException);
+}
+
 TEST(ImmutableCollectionTests, ArrayInsertReturnsNewInstance) {
     auto a = ImmutableArray<int>::Create({1, 3});
     auto b = a.Insert(1, 2);

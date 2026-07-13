@@ -150,7 +150,7 @@ public:
      * C++ counterpart of .NET IdnMapping.GetHashCode().
      * @return A hash code derived from AllowUnassigned and UseStd3AsciiRules.
      */
-    [[nodiscard]] int GetHashCode() const {
+    [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
         return (allowUnassigned_ ? 1 : 0) | (useStd3_ ? 2 : 0);
     }
 

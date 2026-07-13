@@ -65,6 +65,32 @@ TEST(Utf8ParserTest, ParseUInt64Large) {
     EXPECT_EQ(v, UINT64_MAX);
 }
 
+TEST(Utf8ParserTest, ParseUInt64_OneOverMax_Fails) {
+    uint64_t v = 0; int n = 0;
+    EXPECT_FALSE(Utf8Parser::TryParse(span("18446744073709551616"), v, n));
+    EXPECT_EQ(n, 0);
+}
+
+TEST(Utf8ParserTest, ParseUInt64_MultiWrapOverflow_Fails) {
+    // "184467440737095516159" (UINT64_MAX*10+9, a 21-digit genuinely-overflowing value) was
+    // previously silently ACCEPTED by an overflow check that only tested `next < v` *after*
+    // the multiply -- not airtight for a multiply-by-10 accumulator; the true value wraps
+    // around 2^64 more than once for inputs in this range, landing back above the previous
+    // accumulator value by coincidence. Verified via a 200k-case randomized brute-force
+    // cross-check against __uint128_t ground truth before/after the fix.
+    uint64_t v = 0; int n = 0;
+    EXPECT_FALSE(Utf8Parser::TryParse(span("184467440737095516159"), v, n));
+    EXPECT_EQ(n, 0);
+}
+
+TEST(Utf8ParserTest, ParseUInt64_N_MultiWrapOverflow_Fails) {
+    // Same overflow-detection idiom, same bug, in the 'N' (grouped) format's digit
+    // accumulator.
+    uint64_t v = 0; int n = 0;
+    EXPECT_FALSE(Utf8Parser::TryParse(span("184,467,440,737,095,516,159"), v, n, 'N'));
+    EXPECT_EQ(n, 0);
+}
+
 TEST(Utf8ParserTest, ParseUInt8) {
     uint8_t v = 0; int n = 0;
     EXPECT_TRUE(Utf8Parser::TryParse(span("255"), v, n));

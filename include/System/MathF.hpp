@@ -4,10 +4,14 @@
 #pragma once
 #include <cmath>
 #include <limits>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/ArithmeticException.hpp"
 #include "System/MidpointRounding.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides constants and static methods for trigonometric, logarithmic,
@@ -161,7 +165,7 @@ namespace System {
          *         comparison-based implementation would silently return 0 for NaN
          *         instead, since all relational comparisons against NaN are false).
          */
-        static int Sign(float x) {
+        static intcs Sign(float x) {
             if (x < 0.0f) return -1;
             if (x > 0.0f) return 1;
             if (x == 0.0f) return 0;
@@ -206,10 +210,10 @@ namespace System {
          * (`Round(x, digits, MidpointRounding.ToEven)`) - NOT away-from-zero.
          * @param x      Value to round.
          * @param digits Number of decimal places.
+         * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 6].
          */
-        static float Round(float x, int digits) {
-            float factor = std::pow(10.0f, static_cast<float>(digits));
-            return std::nearbyintf(x * factor) / factor;
+        static float Round(float x, intcs digits) {
+            return Round(x, digits, MidpointRounding::ToEven);
         }
 
         /**
@@ -230,13 +234,30 @@ namespace System {
 
         /**
          * @brief Rounds @p x to @p digits decimal places using the specified rounding convention.
+         *
+         * C++ counterpart of .NET MathF.Round(float, int, MidpointRounding). Matches
+         * real .NET's exact guards: @p digits must be in [0, 6] (MathF.cs's
+         * maxRoundingDigits, distinct from Math.Round(double)'s 0-15 range, since
+         * float's ~7 significant decimal digits can't usefully support more), and for
+         * |x| >= 1e8 (singleRoundLimit) the value is returned completely unchanged
+         * rather than attempting the multiply/round/divide dance -- which would
+         * otherwise risk overflowing to infinity for x near FLT_MAX (confirmed via a
+         * standalone repro before this fix: Round(3.0e38f, 6) returned `inf`).
          * @param x      Value to round.
          * @param digits Number of decimal places.
          * @param mode   Rounding convention.
+         * @throws System::ArgumentOutOfRangeException if @p digits is outside [0, 6].
          */
-        static float Round(float x, int digits, MidpointRounding mode) {
-            float factor = std::pow(10.0f, static_cast<float>(digits));
-            return Round(x * factor, mode) / factor;
+        static float Round(float x, intcs digits, MidpointRounding mode) {
+            if (digits < 0 || digits > 6)
+                throw System::ArgumentOutOfRangeException("digits", "Rounding digits must be between 0 and 6, inclusive.");
+            static constexpr float kPower10[] = { 1e0f, 1e1f, 1e2f, 1e3f, 1e4f, 1e5f, 1e6f };
+            constexpr float kSingleRoundLimit = 1e8f;
+            if (std::fabs(x) < kSingleRoundLimit) {
+                float power10 = kPower10[digits];
+                x = Round(x * power10, mode) / power10;
+            }
+            return x;
         }
 
         /** @brief Returns true if @p x is finite (not NaN or infinity). */
@@ -248,9 +269,23 @@ namespace System {
         /** @brief Returns true if @p x is negative (including -0 and -infinity). */
         static bool IsNegative(float x)            { return std::signbit(x); }
         /** @brief Returns @p x multiplied by 2 raised to the power @p n. */
-        static float ScaleB(float x, int n)        { return std::scalbn(x, n); }
-        /** @brief Returns the base-2 integer exponent of @p x (i.e. floor(log2(|x|))). */
-        static int   ILogB(float x)                { return std::ilogb(x); }
+        static float ScaleB(float x, intcs n)      { return std::scalbn(x, n); }
+        /**
+         * @brief Returns the base-2 integer exponent of @p x (i.e. floor(log2(|x|))).
+         *
+         * C++ counterpart of .NET MathF.ILogB(float). Real .NET always returns
+         * int.MaxValue for both infinity AND NaN, and int.MinValue for zero. std::ilogb's
+         * NaN sentinel (FP_ILOGBNAN) is implementation-defined and on glibc is actually
+         * INT_MIN, not INT_MAX -- confirmed via a standalone repro before this fix
+         * (MathF::ILogB(NaN) returned INT_MIN here, diverging from .NET). Handled
+         * explicitly so the result is correct and portable rather than relying on a
+         * library-specific sentinel value.
+         */
+        static intcs ILogB(float x) {
+            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<intcs>::max();
+            if (x == 0.0f) return std::numeric_limits<intcs>::min();
+            return static_cast<intcs>(std::ilogb(x));
+        }
         /** @brief Returns an estimate of the reciprocal of @p x (1/x). */
         static float ReciprocalEstimate(float x)   { return 1.0f / x; }
         /** @brief Returns an estimate of the reciprocal square root of @p x (1/sqrt(x)). */

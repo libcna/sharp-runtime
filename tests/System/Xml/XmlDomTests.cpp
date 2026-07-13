@@ -430,6 +430,40 @@ TEST(XmlCharacterDataTests, CreateCDataSection_HasCorrectType) {
     EXPECT_EQ(cdata->getDataProperty(), "<raw>");
 }
 
+TEST(XmlCharacterDataTests, CreateWhitespace_ValidWhitespace_DoesNotThrow) {
+    XmlDocument doc;
+    auto* ws = doc.CreateWhitespace(" \t\r\n ");
+    EXPECT_EQ(ws->getNodeTypeProperty(), XmlNodeType::Whitespace);
+    EXPECT_EQ(ws->getDataProperty(), " \t\r\n ");
+}
+
+TEST(XmlCharacterDataTests, CreateWhitespace_EmptyString_DoesNotThrow) {
+    XmlDocument doc;
+    EXPECT_NO_THROW(doc.CreateWhitespace(""));
+}
+
+// Regression test for a code-audit finding (ticket 304): CreateWhitespace never validated that
+// its content is actually all whitespace, unlike real .NET's XmlWhitespace constructor (whose
+// CheckOnData check throws ArgumentException for any non-whitespace character), so a node
+// claiming to be Whitespace-typed could silently hold arbitrary text.
+TEST(XmlCharacterDataTests, CreateWhitespace_NonWhitespaceContent_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateWhitespace("not whitespace!"), System::ArgumentException);
+}
+
+TEST(XmlCharacterDataTests, CreateSignificantWhitespace_ValidWhitespace_DoesNotThrow) {
+    XmlDocument doc;
+    auto* ws = doc.CreateSignificantWhitespace("  ");
+    EXPECT_EQ(ws->getNodeTypeProperty(), XmlNodeType::SignificantWhitespace);
+}
+
+// Same bug as CreateWhitespace above -- CreateSignificantWhitespace shared the same missing
+// validation (XmlSignificantWhiteSpace.cs's constructor has the identical CheckOnData check).
+TEST(XmlCharacterDataTests, CreateSignificantWhitespace_NonWhitespaceContent_Throws) {
+    XmlDocument doc;
+    EXPECT_THROW(doc.CreateSignificantWhitespace("abc"), System::ArgumentException);
+}
+
 TEST(XmlCharacterDataTests, AppendData_AppendsToExistingText) {
     XmlDocument doc;
     auto* t = doc.CreateTextNode("Hello");

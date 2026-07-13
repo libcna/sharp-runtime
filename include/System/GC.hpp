@@ -5,12 +5,16 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/GCCollectionMode.hpp"
 #include "System/GCGenerationInfo.hpp"
 #include "System/GCNotificationStatus.hpp"
 #include "System/TimeSpan.hpp"
 
 namespace System {
+
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /**
      * @brief Specifies the kind of garbage collection.
@@ -32,31 +36,31 @@ namespace System {
      */
     struct GCMemoryInfo {
         /** @brief Gets the total available memory for the GC to use. */
-        [[nodiscard]] long long getTotalAvailableMemoryBytesProperty() const noexcept { return 0LL; }
+        [[nodiscard]] longcs getTotalAvailableMemoryBytesProperty() const noexcept { return 0LL; }
         /** @brief Gets the memory load reported by the OS. */
-        [[nodiscard]] long long getMemoryLoadBytesProperty()           const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getMemoryLoadBytesProperty()           const noexcept { return 0LL; }
         /** @brief Gets the heap size. */
-        [[nodiscard]] long long getHeapSizeBytesProperty()             const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getHeapSizeBytesProperty()             const noexcept { return 0LL; }
         /** @brief Gets the fragmented space in the heap. */
-        [[nodiscard]] long long getFragmentedBytesProperty()           const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getFragmentedBytesProperty()           const noexcept { return 0LL; }
         /** @brief Gets the high memory load threshold. */
-        [[nodiscard]] long long getHighMemoryLoadThresholdBytesProperty() const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getHighMemoryLoadThresholdBytesProperty() const noexcept { return 0LL; }
         /** @brief Gets the total committed memory. */
-        [[nodiscard]] long long getTotalCommittedBytesProperty()       const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getTotalCommittedBytesProperty()       const noexcept { return 0LL; }
         /** @brief Gets the index of the collection that produced this info. */
-        [[nodiscard]] long long getIndexProperty()                     const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getIndexProperty()                     const noexcept { return 0LL; }
         /** @brief Gets the generation this info belongs to. */
-        [[nodiscard]] int       getGenerationProperty()                const noexcept { return 0; }
+        [[nodiscard]] intcs     getGenerationProperty()                const noexcept { return 0; }
         /** @brief Returns true when this info was produced by a concurrent GC. */
         [[nodiscard]] bool      getConcurrentProperty()                const noexcept { return false; }
         /** @brief Returns true when this info was produced by a compacting GC. */
         [[nodiscard]] bool      getCompactedProperty()                 const noexcept { return false; }
         /** @brief Gets the number of pinned objects the GC observed. */
-        [[nodiscard]] long long getPinnedObjectsCountProperty()        const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getPinnedObjectsCountProperty()        const noexcept { return 0LL; }
         /** @brief Gets the number of objects ready for finalization this GC observed. */
-        [[nodiscard]] long long getFinalizationPendingCountProperty()  const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getFinalizationPendingCountProperty()  const noexcept { return 0LL; }
         /** @brief Gets the number of bytes promoted to the next generation. */
-        [[nodiscard]] long long getPromotedBytesProperty()             const noexcept { return 0LL; }
+        [[nodiscard]] longcs    getPromotedBytesProperty()             const noexcept { return 0LL; }
         /** @brief Gets the percentage of time spent paused for this GC, relative to its duration. */
         [[nodiscard]] double    getPauseTimePercentageProperty()       const noexcept { return 0.0; }
         /** @brief Gets per-generation size/fragmentation info; always empty in this port. */
@@ -108,7 +112,7 @@ namespace System {
          * C++ counterpart of .NET GC.Collect(int).
          * No-op in this port.
          */
-        static void Collect(int generation) { (void)generation; }
+        static void Collect(intcs generation) { (void)generation; }
 
         /**
          * @brief Forces a garbage collection with the specified mode.
@@ -116,7 +120,7 @@ namespace System {
          * C++ counterpart of .NET GC.Collect(int, GCCollectionMode).
          * No-op in this port.
          */
-        static void Collect(int generation, GCCollectionMode mode) {
+        static void Collect(intcs generation, GCCollectionMode mode) {
             (void)generation; (void)mode;
         }
 
@@ -126,7 +130,7 @@ namespace System {
          * C++ counterpart of .NET GC.Collect(int, GCCollectionMode, bool).
          * No-op in this port.
          */
-        static void Collect(int generation, GCCollectionMode mode, bool blocking) {
+        static void Collect(intcs generation, GCCollectionMode mode, bool blocking) {
             (void)generation; (void)mode; (void)blocking;
         }
 
@@ -136,7 +140,7 @@ namespace System {
          * C++ counterpart of .NET GC.Collect(int, GCCollectionMode, bool, bool).
          * No-op in this port.
          */
-        static void Collect(int generation, GCCollectionMode mode, bool blocking, bool compacting) {
+        static void Collect(intcs generation, GCCollectionMode mode, bool blocking, bool compacting) {
             (void)generation; (void)mode; (void)blocking; (void)compacting;
         }
 
@@ -150,7 +154,7 @@ namespace System {
          * C++ counterpart of .NET GC.GetTotalMemory(bool).
          * Always returns 0 in this port.
          */
-        [[nodiscard]] static long long GetTotalMemory(bool forceFullCollection) {
+        [[nodiscard]] static longcs GetTotalMemory(bool forceFullCollection) {
             (void)forceFullCollection;
             return 0LL;
         }
@@ -161,7 +165,7 @@ namespace System {
          * C++ counterpart of .NET GC.GetTotalAllocatedBytes(bool).
          * Always returns 0 in this port.
          */
-        [[nodiscard]] static long long GetTotalAllocatedBytes(bool precise = false) {
+        [[nodiscard]] static longcs GetTotalAllocatedBytes(bool precise = false) {
             (void)precise;
             return 0LL;
         }
@@ -172,7 +176,7 @@ namespace System {
          * C++ counterpart of .NET GC.GetAllocatedBytesForCurrentThread().
          * Always returns 0 in this port.
          */
-        [[nodiscard]] static long long GetAllocatedBytesForCurrentThread() { return 0LL; }
+        [[nodiscard]] static longcs GetAllocatedBytesForCurrentThread() { return 0LL; }
 
         /**
          * @brief Returns the total time spent pausing for GC since the process started.
@@ -211,10 +215,10 @@ namespace System {
          * C++ counterpart of .NET GC.MaxGeneration.
          * Returns 2 (matching .NET's 3-generation model: gen0, gen1, gen2).
          */
-        [[nodiscard]] static int getMaxGenerationProperty() { return 2; }
+        [[nodiscard]] static intcs getMaxGenerationProperty() { return 2; }
 
         /** @brief Alias kept for backward compatibility. */
-        [[nodiscard]] static int MaxGeneration() { return 2; }
+        [[nodiscard]] static intcs MaxGeneration() { return 2; }
 
         /**
          * @brief Returns the current GC generation of the object pointed to by @p obj.
@@ -222,7 +226,7 @@ namespace System {
          * C++ counterpart of .NET GC.GetGeneration(object).
          * Always returns 0 in this port.
          */
-        [[nodiscard]] static int GetGeneration(void*) { return 0; }
+        [[nodiscard]] static intcs GetGeneration(void*) { return 0; }
 
         /**
          * @brief Returns the number of times GC has occurred for the specified generation.
@@ -230,7 +234,7 @@ namespace System {
          * C++ counterpart of .NET GC.CollectionCount(int).
          * Always returns 0 in this port.
          */
-        [[nodiscard]] static int CollectionCount(int generation) {
+        [[nodiscard]] static intcs CollectionCount(intcs generation) {
             (void)generation;
             return 0;
         }
@@ -289,7 +293,7 @@ namespace System {
          * C++ counterpart of .NET GC.AddMemoryPressure(long).
          * No-op in this port.
          */
-        static void AddMemoryPressure(long long bytesAllocated) { (void)bytesAllocated; }
+        static void AddMemoryPressure(longcs bytesAllocated) { (void)bytesAllocated; }
 
         /**
          * @brief Informs the runtime that unmanaged memory has been released.
@@ -297,7 +301,7 @@ namespace System {
          * C++ counterpart of .NET GC.RemoveMemoryPressure(long).
          * No-op in this port.
          */
-        static void RemoveMemoryPressure(long long bytesAllocated) { (void)bytesAllocated; }
+        static void RemoveMemoryPressure(longcs bytesAllocated) { (void)bytesAllocated; }
 
         /**
          * @brief Updates the runtime on the current memory limit.
@@ -318,7 +322,7 @@ namespace System {
          * C++ counterpart of .NET GC.TryStartNoGCRegion(long).
          * Always returns false in this port (no GC to suppress).
          */
-        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize) {
+        [[nodiscard]] static bool TryStartNoGCRegion(longcs totalSize) {
             (void)totalSize;
             return false;
         }
@@ -330,7 +334,7 @@ namespace System {
          * C++ counterpart of .NET GC.TryStartNoGCRegion(long, bool).
          * Always returns false in this port (no GC to suppress).
          */
-        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, bool disallowFullBlockingGC) {
+        [[nodiscard]] static bool TryStartNoGCRegion(longcs totalSize, bool disallowFullBlockingGC) {
             (void)totalSize; (void)disallowFullBlockingGC;
             return false;
         }
@@ -342,7 +346,7 @@ namespace System {
          * C++ counterpart of .NET GC.TryStartNoGCRegion(long, long).
          * Always returns false in this port (no GC to suppress).
          */
-        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, long long lohSize) {
+        [[nodiscard]] static bool TryStartNoGCRegion(longcs totalSize, longcs lohSize) {
             (void)totalSize; (void)lohSize;
             return false;
         }
@@ -354,7 +358,7 @@ namespace System {
          * C++ counterpart of .NET GC.TryStartNoGCRegion(long, long, bool).
          * Always returns false in this port (no GC to suppress).
          */
-        [[nodiscard]] static bool TryStartNoGCRegion(long long totalSize, long long lohSize,
+        [[nodiscard]] static bool TryStartNoGCRegion(longcs totalSize, longcs lohSize,
                                                       bool disallowFullBlockingGC) {
             (void)totalSize; (void)lohSize; (void)disallowFullBlockingGC;
             return false;
@@ -375,7 +379,7 @@ namespace System {
          * C++ counterpart of .NET GC.RegisterNoGCRegionCallback(long, Action).
          * No-op in this port.
          */
-        static void RegisterNoGCRegionCallback(long long totalSize,
+        static void RegisterNoGCRegionCallback(longcs totalSize,
                                                std::function<void()> callback) {
             (void)totalSize; (void)callback;
         }
@@ -391,8 +395,8 @@ namespace System {
          * C++ counterpart of .NET GC.RegisterForFullGCNotification(int, int).
          * No-op in this port.
          */
-        static void RegisterForFullGCNotification(int maxGenerationThreshold,
-                                                   int largeObjectHeapThreshold) {
+        static void RegisterForFullGCNotification(intcs maxGenerationThreshold,
+                                                   intcs largeObjectHeapThreshold) {
             (void)maxGenerationThreshold; (void)largeObjectHeapThreshold;
         }
 
@@ -415,7 +419,7 @@ namespace System {
          * value for "this API doesn't apply to the current GC configuration".
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCApproach(
-            int millisecondsTimeout = -1)
+            intcs millisecondsTimeout = -1)
         {
             (void)millisecondsTimeout;
             return GCNotificationStatus::NotApplicable;
@@ -442,7 +446,7 @@ namespace System {
          * WaitForFullGCApproach(int)'s doc-comment for why.
          */
         [[nodiscard]] static GCNotificationStatus WaitForFullGCComplete(
-            int millisecondsTimeout = -1)
+            intcs millisecondsTimeout = -1)
         {
             (void)millisecondsTimeout;
             return GCNotificationStatus::NotApplicable;
@@ -470,7 +474,7 @@ namespace System {
          *
          * Convenience wrapper kept for existing callers; prefer GetGCMemoryInfo().
          */
-        [[nodiscard]] static long long GetGCMemoryInfo_TotalAvailableMemoryBytes() {
+        [[nodiscard]] static longcs GetGCMemoryInfo_TotalAvailableMemoryBytes() {
             return 0LL;
         }
     };

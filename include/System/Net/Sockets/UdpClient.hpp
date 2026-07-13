@@ -10,6 +10,8 @@
 
 namespace System::Net::Sockets {
 
+    using SharpRuntime::intcs;
+
     /**
      * @brief Provides UDP network services.
      *
@@ -29,7 +31,7 @@ namespace System::Net::Sockets {
         UdpClient();
 
         /** @brief Creates a UDP socket bound to the given local port. */
-        explicit UdpClient(int port);
+        explicit UdpClient(intcs port);
 
         /** @brief Creates a UDP socket bound to the given local endpoint. */
         explicit UdpClient(const Net::IPEndPoint& localEP);
@@ -37,13 +39,13 @@ namespace System::Net::Sockets {
         ~UdpClient();
 
         /** @brief Sets the default remote host/port for subsequent Send calls. */
-        void Connect(const std::string& hostname, int port);
+        void Connect(const std::string& hostname, intcs port);
 
         /** @brief Sets the default remote endpoint for subsequent Send calls. */
         void Connect(const Net::IPEndPoint& remoteEP);
 
         /** @brief Sends a datagram to the default remote endpoint (must call Connect first). */
-        int Send(const std::vector<SharpRuntime::bytecs>& dgram, int bytes);
+        intcs Send(const std::vector<SharpRuntime::bytecs>& dgram, intcs bytes);
 
         /** @brief Receives a UDP datagram; fills remoteEP with the sender's endpoint. */
         std::vector<SharpRuntime::bytecs> Receive(Net::IPEndPoint& remoteEP);

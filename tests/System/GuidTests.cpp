@@ -511,6 +511,27 @@ TEST(GuidTests, Parse_X_OverflowingByteComponentThrowsOverflow) {
         System::OverflowException);
 }
 
+// Regression test for ticket 302: real .NET's Guid TryParseHex counts significant digits as
+// it scans and, upon hitting an invalid character, reports Overflow_UInt32 (not a format
+// error) if more than 8 significant digits were already consumed -- overflow takes precedence
+// over a trailing invalid character. The port previously bailed out with FormatException as
+// soon as it saw the invalid character, without ever checking whether the digit count already
+// exceeded 8, so a 9-significant-digit component followed by garbage threw the wrong exception
+// type (FormatException instead of OverflowException).
+TEST(GuidTests, Parse_X_OverflowBeforeInvalidChar_ThrowsOverflowNotFormat) {
+    EXPECT_THROW(
+        Guid::Parse("{0x123456789z,0x351d,0x4694,{0x93,0x92,0x03,0xac,0xc5,0x87,0x0e,0xb1}}"),
+        System::OverflowException);
+}
+
+// Boundary check: exactly 8 significant digits (not >8) followed by an invalid character is
+// still a plain format error, not overflow -- confirms the fix didn't over-widen the precedence.
+TEST(GuidTests, Parse_X_ExactlyEightDigitsThenInvalidChar_ThrowsFormat) {
+    EXPECT_THROW(
+        Guid::Parse("{0x12345678z,0x351d,0x4694,{0x93,0x92,0x03,0xac,0xc5,0x87,0x0e,0xb1}}"),
+        System::FormatException);
+}
+
 // ---------------------------------------------------------------------------
 // TryFormat / TryFormatUtf8
 // ---------------------------------------------------------------------------

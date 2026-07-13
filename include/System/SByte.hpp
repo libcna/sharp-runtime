@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdint>
 #include <iomanip>
 #include <limits>
@@ -13,6 +14,7 @@
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 
@@ -44,14 +46,28 @@ namespace System {
          * @throws System::FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static sbytecs Parse(const std::string& s) {
+            // Unlike Byte/Int16/Int32/Int64/UInt64::Parse, this previously called
+            // std::stoi(s) without capturing the parse-end position, so trailing non-
+            // whitespace garbage (e.g. "5abc") was silently ignored instead of rejected --
+            // confirmed via a standalone repro that std::stoi("5abc") returns 5 without
+            // throwing. Real .NET's NumberStyles.Integer parity requires the entire string
+            // (aside from leading/trailing whitespace) to be consumed.
+            std::size_t pos = 0;
+            int v;
             try {
-                int v = std::stoi(s);
-                if (v < MinValue || v > MaxValue)
-                    throw System::OverflowException("Value was either too large or too small for a signed byte.");
-                return static_cast<int8_t>(v);
-            } catch (const System::OverflowException&) { throw; }
-              catch (const std::out_of_range&) { throw System::OverflowException("Value was either too large or too small for a signed byte."); }
-              catch (...) { throw System::FormatException("Input string was not in a correct format."); }
+                v = std::stoi(s, &pos);
+            } catch (const std::out_of_range&) {
+                throw System::OverflowException("Value was either too large or too small for a signed byte.");
+            } catch (...) {
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            for (; pos < s.size(); ++pos) {
+                if (!std::isspace(static_cast<unsigned char>(s[pos])))
+                    throw System::FormatException("Input string was not in a correct format.");
+            }
+            if (v < MinValue || v > MaxValue)
+                throw System::OverflowException("Value was either too large or too small for a signed byte.");
+            return static_cast<int8_t>(v);
         }
 
         /**
@@ -72,7 +88,14 @@ namespace System {
         [[nodiscard]] static std::string ToString(sbytecs value, const std::string& format) {
             if (format.empty()) return ToString(value);
             char type = format[0];
-            int  width = format.size() > 1 ? std::stoi(format.substr(1)) : 0;
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
             std::ostringstream oss;
             oss.imbue(std::locale::classic());
             if (type == 'X') {
@@ -97,15 +120,15 @@ namespace System {
         }
 
         /** @brief Compares @p a to @p b. C++ counterpart of .NET SByte.CompareTo(sbyte). */
-        [[nodiscard]] static int CompareTo(sbytecs a, sbytecs b) noexcept {
-            return static_cast<int>(a) - static_cast<int>(b);
+        [[nodiscard]] static SharpRuntime::intcs CompareTo(sbytecs a, sbytecs b) noexcept {
+            return static_cast<SharpRuntime::intcs>(a) - static_cast<SharpRuntime::intcs>(b);
         }
 
         /** @brief Returns true if @p a equals @p b. C++ counterpart of .NET SByte.Equals(sbyte). */
         [[nodiscard]] static bool Equals(sbytecs a, sbytecs b) noexcept { return a == b; }
 
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET SByte.GetHashCode(). */
-        [[nodiscard]] static int GetHashCode(sbytecs value) noexcept { return static_cast<int>(value); }
+        [[nodiscard]] static SharpRuntime::intcs GetHashCode(sbytecs value) noexcept { return static_cast<SharpRuntime::intcs>(value); }
 
         /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET SByte.Clamp(sbyte,sbyte,sbyte). */
         [[nodiscard]] static sbytecs Clamp(sbytecs value, sbytecs min, sbytecs max) noexcept {
@@ -119,7 +142,7 @@ namespace System {
         [[nodiscard]] static sbytecs Min(sbytecs x, sbytecs y) noexcept { return x < y ? x : y; }
 
         /** @brief Returns -1 if negative, 0 if zero, 1 if positive. C++ counterpart of .NET Math.Sign(sbyte). */
-        [[nodiscard]] static int Sign(sbytecs value) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs Sign(sbytecs value) noexcept {
             return (value > 0) - (value < 0);
         }
 
@@ -201,7 +224,7 @@ namespace System {
          * @brief Rotates @p value left by @p rotateAmount bits within an 8-bit field.
          * C++ counterpart of .NET SByte.RotateLeft(sbyte, int).
          */
-        [[nodiscard]] static sbytecs RotateLeft(sbytecs value, int rotateAmount) noexcept {
+        [[nodiscard]] static sbytecs RotateLeft(sbytecs value, SharpRuntime::intcs rotateAmount) noexcept {
             uint8_t uv = static_cast<uint8_t>(value);
             int shift = rotateAmount & 7;
             return static_cast<sbytecs>((uv << shift) | (uv >> (8 - shift)));
@@ -211,7 +234,7 @@ namespace System {
          * @brief Rotates @p value right by @p rotateAmount bits within an 8-bit field.
          * C++ counterpart of .NET SByte.RotateRight(sbyte, int).
          */
-        [[nodiscard]] static sbytecs RotateRight(sbytecs value, int rotateAmount) noexcept {
+        [[nodiscard]] static sbytecs RotateRight(sbytecs value, SharpRuntime::intcs rotateAmount) noexcept {
             uint8_t uv = static_cast<uint8_t>(value);
             int shift = rotateAmount & 7;
             return static_cast<sbytecs>((uv >> shift) | (uv << (8 - shift)));
@@ -220,8 +243,18 @@ namespace System {
         /**
          * @brief Returns the quotient and remainder of @p left / @p right.
          * C++ counterpart of .NET SByte.DivRem(sbyte,sbyte).
+         * @throws System::DivideByZeroException if @p right is zero -- integer division
+         *         by zero is undefined behavior in C++ (a hardware trap, not a catchable
+         *         exception), unlike the CLR's div instruction which .NET surfaces as a
+         *         managed DivideByZeroException; this must be checked explicitly. No
+         *         MinValue/-1 overflow check is needed: sbyte operands promote to int in
+         *         C++ arithmetic (matching the CLR's int32-width IL arithmetic for
+         *         sbyte), so sbyte.MinValue/-1 does not overflow at the width the
+         *         division runs at.
          */
         [[nodiscard]] static std::pair<sbytecs, sbytecs> DivRem(sbytecs left, sbytecs right) {
+            if (right == 0)
+                throw System::DivideByZeroException();
             return {static_cast<sbytecs>(left / right),
                     static_cast<sbytecs>(left % right)};
         }

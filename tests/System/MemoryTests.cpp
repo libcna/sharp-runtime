@@ -182,6 +182,20 @@ TEST(MemoryTests, Slice2_OutOfRange_Throws) {
     EXPECT_THROW(m.Slice(0, 10), System::ArgumentOutOfRangeException);
 }
 
+// Same overflow-bypasses-the-check bug as Span<T>::Slice (ticket 265/1487): start+length used
+// to be computed directly in intcs (int32) arithmetic, which overflows for large start/length
+// and silently bypasses the check instead of throwing.
+TEST(MemoryTests, Slice2_StartPlusLengthOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3};
+    Memory<int> m(v);
+    EXPECT_THROW(m.Slice(2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
+TEST(MemoryTests, Constructor_StartPlusCountOverflow_ThrowsInsteadOfBypassingCheck) {
+    std::vector<int> v{1, 2, 3};
+    EXPECT_THROW(Memory<int>(v, 2147483647, 10), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // CopyTo / TryCopyTo
 // ---------------------------------------------------------------------------

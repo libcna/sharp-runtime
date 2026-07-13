@@ -5,5 +5,13 @@
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics {
-    class DebuggerHiddenAttribute : public System::Attribute {};
+
+/**
+ * @brief Marks a method, property, or constructor that a debugger should step over rather than into.
+ *
+ * C++ counterpart of .NET System.Diagnostics.DebuggerHiddenAttribute.
+ * A pure marker attribute — carries no state and has no runtime behavior.
+ */
+class DebuggerHiddenAttribute : public System::Attribute {};
+
 } // namespace System::Diagnostics

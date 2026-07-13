@@ -143,6 +143,15 @@ namespace System::Net::Http::Headers {
             if (firstQuote == std::string::npos) return false;
             size_t secondQuote = value.find('\'', firstQuote + 1);
             if (secondQuote == std::string::npos) return false;
+            // Real .NET's TryDecode5987 requires *exactly* two single quotes in the whole
+            // string (the charset'language'value delimiters):
+            // `quoteIndex == lastQuoteIndex || input.IndexOf('\'', quoteIndex + 1) !=
+            // lastQuoteIndex` rejects both "fewer than 2" and "more than 2". This previously
+            // only checked for the first two, silently accepting a third (or more) quote as
+            // part of the value -- e.g. "UTF-8'en'a'b" would decode to "a'b" instead of being
+            // rejected as malformed, since a well-formed encoder must percent-encode any
+            // literal apostrophe in the value (isRfc5987AttrChar doesn't allow a raw `'`).
+            if (value.find('\'', secondQuote + 1) != std::string::npos) return false;
 
             std::string encoded = value.substr(secondQuote + 1);
             std::string decoded;

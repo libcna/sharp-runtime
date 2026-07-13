@@ -143,9 +143,9 @@ TEST(ArrayListGapFill, IndexOf_StartIndex_FindsFromOffset) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // type int matches first at index 0; searching from 1 should find index 1
-    EXPECT_EQ(al.IndexOf(std::any(0), 1), 1);
+    al.Add(std::any(1));
+    // value 1 occurs at index 0 and 2; searching from 1 should skip index 0 and find index 2
+    EXPECT_EQ(al.IndexOf(std::any(1), 1), 2);
 }
 
 TEST(ArrayListGapFill, IndexOf_StartIndex_NotFound) {
@@ -159,10 +159,23 @@ TEST(ArrayListGapFill, IndexOf_StartIndex_Count) {
     al.Add(std::any(1));
     al.Add(std::any(2));
     al.Add(std::any(3));
-    // search 1 element starting at index 2 — finds it
-    EXPECT_EQ(al.IndexOf(std::any(0), 2, 1), 2);
-    // search 1 element starting at index 0 — does not reach index 2
-    EXPECT_EQ(al.IndexOf(std::any(0), 0, 1), 0);
+    // search 1 element starting at index 2 — value 3 is there
+    EXPECT_EQ(al.IndexOf(std::any(3), 2, 1), 2);
+    // search 1 element starting at index 0 — value 3 is out of the searched window
+    EXPECT_EQ(al.IndexOf(std::any(3), 0, 1), -1);
+}
+
+TEST(ArrayListGapFill, IndexOf_ComparesByValueNotJustType) {
+    // Regression test: an earlier version compared only std::any::type(), so searching a list
+    // of ints for a value not present would incorrectly "find" the first int of any value.
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    al.Add(std::any(3));
+    EXPECT_EQ(al.IndexOf(std::any(2)), 1);
+    EXPECT_EQ(al.IndexOf(std::any(99)), -1);
+    EXPECT_TRUE(al.Contains(std::any(3)));
+    EXPECT_FALSE(al.Contains(std::any(42)));
 }
 
 // -----------------------------------------------------------------------
@@ -173,18 +186,18 @@ TEST(ArrayListGapFill, LastIndexOf_Basic) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // last int element is at index 2
-    EXPECT_EQ(al.LastIndexOf(std::any(0)), 2);
+    al.Add(std::any(1));
+    // value 1 occurs at index 0 and 2; LastIndexOf finds the last occurrence, index 2
+    EXPECT_EQ(al.LastIndexOf(std::any(1)), 2);
 }
 
 TEST(ArrayListGapFill, LastIndexOf_StartIndex) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // search backwards from index 1 — last int at index 1
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 1), 1);
+    al.Add(std::any(1));
+    // search backwards from index 1 — value 1 not in [0,1] search window except index 0
+    EXPECT_EQ(al.LastIndexOf(std::any(1), 1), 0);
 }
 
 TEST(ArrayListGapFill, LastIndexOf_StartIndex_Count) {
@@ -192,10 +205,10 @@ TEST(ArrayListGapFill, LastIndexOf_StartIndex_Count) {
     al.Add(std::any(1));
     al.Add(std::any(2));
     al.Add(std::any(3));
-    // search 2 elements ending at index 2 (indices 1,2): last int at 2
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 2, 2), 2);
-    // search 1 element ending at index 0: last int at 0
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 0, 1), 0);
+    // search 2 elements ending at index 2 (indices 1,2): value 3 is at index 2
+    EXPECT_EQ(al.LastIndexOf(std::any(3), 2, 2), 2);
+    // search 1 element ending at index 0: value 3 is not there
+    EXPECT_EQ(al.LastIndexOf(std::any(3), 0, 1), -1);
 }
 
 // -----------------------------------------------------------------------
@@ -289,6 +302,129 @@ TEST(ArrayListGapFill, Repeat_CreatesNcopies) {
 TEST(ArrayListGapFill, Repeat_ZeroCount) {
     ArrayList al = ArrayList::Repeat(std::any(1), 0);
     EXPECT_EQ(al.getCountProperty(), 0);
+}
+
+// -----------------------------------------------------------------------
+// ArrayList — bounds validation (ticket 255: these methods previously did zero validation,
+// so an out-of-range index/count reached std::vector iterator arithmetic directly -- undefined
+// behavior, not a clean exception like real ArrayList.cs raises).
+// -----------------------------------------------------------------------
+
+TEST(ArrayListGapFill, Constructor_NegativeCapacity_Throws) {
+    EXPECT_THROW(ArrayList al(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, SetCapacity_BelowCount_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    EXPECT_THROW(al.setCapacityProperty(1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, Insert_NegativeIndex_Throws) {
+    ArrayList al;
+    EXPECT_THROW(al.Insert(-1, std::any(1)), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, Insert_IndexPastEnd_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.Insert(2, std::any(2)), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, Insert_IndexEqualsCount_Legal) {
+    // Inserting exactly at the end (index == count) is legal, matching real .NET.
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_NO_THROW(al.Insert(1, std::any(2)));
+    EXPECT_EQ(al.getCountProperty(), 2);
+}
+
+TEST(ArrayListGapFill, InsertRange_IndexPastEnd_Throws) {
+    ArrayList al;
+    std::vector<std::any> items{std::any(1)};
+    EXPECT_THROW(al.InsertRange(5, items), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, RemoveRange_NegativeIndex_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.RemoveRange(-1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, RemoveRange_PastEnd_ThrowsArgumentException) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.RemoveRange(0, 5), System::ArgumentException);
+}
+
+TEST(ArrayListGapFill, GetRange_NegativeCount_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.GetRange(0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, GetRange_PastEnd_ThrowsArgumentException) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.GetRange(0, 5), System::ArgumentException);
+}
+
+TEST(ArrayListGapFill, Reverse_PastEnd_ThrowsArgumentException) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.Reverse(0, 5), System::ArgumentException);
+}
+
+TEST(ArrayListGapFill, Sort_Range_PastEnd_ThrowsArgumentException) {
+    ArrayList al;
+    al.Add(std::any(1));
+    IntAnyComparer cmp;
+    EXPECT_THROW(al.Sort(0, 5, cmp), System::ArgumentException);
+}
+
+TEST(ArrayListGapFill, BinarySearch_Range_PastEnd_ThrowsArgumentException) {
+    ArrayList al;
+    al.Add(std::any(1));
+    IntAnyComparer cmp;
+    EXPECT_THROW(al.BinarySearch(0, 5, std::any(1), cmp), System::ArgumentException);
+}
+
+TEST(ArrayListGapFill, SetRange_PastEnd_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    std::vector<std::any> items{std::any(1), std::any(2), std::any(3)};
+    EXPECT_THROW(al.SetRange(0, items), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, IndexOf_StartIndexPastEnd_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.IndexOf(std::any(0), 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, IndexOf_StartIndexCount_NegativeCount_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.IndexOf(std::any(0), 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, LastIndexOf_StartIndexPastEnd_Throws) {
+    ArrayList al;
+    al.Add(std::any(1));
+    EXPECT_THROW(al.LastIndexOf(std::any(0), 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(ArrayListGapFill, LastIndexOf_OnEmptyList_ReturnsNegativeOneWithoutThrowing) {
+    // Matches .NET's own special case: LastIndexOf(value) on an empty list delegates to
+    // LastIndexOf(value, -1, 0), which skips the negative-startIndex validation entirely
+    // when Count == 0 and returns -1 directly.
+    ArrayList al;
+    EXPECT_EQ(al.LastIndexOf(std::any(0)), -1);
+}
+
+TEST(ArrayListGapFill, Repeat_NegativeCount_Throws) {
+    EXPECT_THROW(ArrayList::Repeat(std::any(1), -1), System::ArgumentOutOfRangeException);
 }
 
 // -----------------------------------------------------------------------

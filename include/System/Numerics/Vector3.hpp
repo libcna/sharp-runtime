@@ -5,6 +5,7 @@
 #include <cmath>
 #include <sstream>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Numerics/Vector2.hpp"
 
@@ -54,14 +55,14 @@ struct Vector3 {
     }
 
     /** @return The component at @p i (0=X, 1=Y, 2=Z). @throws System::ArgumentOutOfRangeException on invalid index. */
-    float operator[](int i) const {
+    float operator[](SharpRuntime::intcs i) const {
         if (i==0) return X;
         if (i==1) return Y;
         if (i==2) return Z;
         throw System::ArgumentOutOfRangeException("index");
     }
     /** @return A reference to the component at @p i (0=X, 1=Y, 2=Z). @throws System::ArgumentOutOfRangeException on invalid index. */
-    float& operator[](int i) {
+    float& operator[](SharpRuntime::intcs i) {
         if (i==0) return X;
         if (i==1) return Y;
         if (i==2) return Z;

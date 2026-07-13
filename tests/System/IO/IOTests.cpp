@@ -6,7 +6,12 @@
 // Functional I/O (File, FileStream, BinaryReader/Writer, StreamReader/Writer, etc.)
 // is covered in IOStreamTests.cpp.
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
 #include <string>
+#include <thread>
+#include "System/IO/Directory.hpp"
+#include "System/IO/File.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileAccess.hpp"
 #include "System/IO/FileShare.hpp"
@@ -708,6 +713,147 @@ TEST(FileSystemWatcherTests, ChangedHandlerList_CanRegisterHandler) {
     FileSystemWatcher fsw("/tmp");
     fsw.Changed.push_back([](void*, const FileSystemEventArgs&) {});
     EXPECT_EQ(fsw.Changed.size(), 1u);
+}
+
+// --- ticket 1478: real inotify-backed end-to-end coverage (Linux) ---
+
+namespace {
+    // Polls `ready` for up to ~2s; real inotify delivery is fast (single-digit ms) but this
+    // gives ample headroom for a loaded CI box without making a failing test take unreasonably
+    // long to report.
+    bool WaitUntil(const std::atomic<bool>& ready) {
+        for (int i = 0; i < 200; ++i) {
+            if (ready.load()) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return ready.load();
+    }
+}
+
+TEST(FileSystemWatcherTests, EndToEnd_CreateFile_FiresCreatedEvent) {
+    std::string dir = tf("fsw_create_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    FileSystemWatcher fsw(dir);
+    std::atomic<bool> fired{false};
+    std::string observedName;
+    fsw.Created.push_back([&](void*, const FileSystemEventArgs& e) {
+        observedName = e.getNameProperty();
+        fired.store(true);
+    });
+    fsw.setEnableRaisingEventsProperty(true);
+
+    System::IO::File::WriteAllText(dir + "/newfile.txt", "hello");
+
+    EXPECT_TRUE(WaitUntil(fired));
+    EXPECT_EQ(observedName, "newfile.txt");
+
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+
+TEST(FileSystemWatcherTests, EndToEnd_ModifyFile_FiresChangedEvent) {
+    std::string dir = tf("fsw_modify_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    System::IO::File::WriteAllText(dir + "/existing.txt", "v1");
+
+    FileSystemWatcher fsw(dir);
+    std::atomic<bool> fired{false};
+    fsw.Changed.push_back([&](void*, const FileSystemEventArgs& e) {
+        if (e.getNameProperty() == "existing.txt") fired.store(true);
+    });
+    fsw.setEnableRaisingEventsProperty(true);
+
+    System::IO::File::WriteAllText(dir + "/existing.txt", "v2 has more bytes than v1");
+
+    EXPECT_TRUE(WaitUntil(fired));
+
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+
+TEST(FileSystemWatcherTests, EndToEnd_DeleteFile_FiresDeletedEvent) {
+    std::string dir = tf("fsw_delete_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    System::IO::File::WriteAllText(dir + "/doomed.txt", "bye");
+
+    FileSystemWatcher fsw(dir);
+    std::atomic<bool> fired{false};
+    fsw.Deleted.push_back([&](void*, const FileSystemEventArgs& e) {
+        if (e.getNameProperty() == "doomed.txt") fired.store(true);
+    });
+    fsw.setEnableRaisingEventsProperty(true);
+
+    System::IO::File::Delete(dir + "/doomed.txt");
+
+    EXPECT_TRUE(WaitUntil(fired));
+
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+
+TEST(FileSystemWatcherTests, EndToEnd_RenameFileWithinWatchedDirectory_FiresRenamedEvent) {
+    std::string dir = tf("fsw_rename_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    System::IO::File::WriteAllText(dir + "/before.txt", "content");
+
+    FileSystemWatcher fsw(dir);
+    std::atomic<bool> fired{false};
+    std::string newName, oldName;
+    fsw.Renamed.push_back([&](void*, const RenamedEventArgs& e) {
+        newName = e.getNameProperty();
+        oldName = e.getOldNameProperty();
+        fired.store(true);
+    });
+    fsw.setEnableRaisingEventsProperty(true);
+
+    System::IO::File::Move(dir + "/before.txt", dir + "/after.txt");
+
+    EXPECT_TRUE(WaitUntil(fired));
+    EXPECT_EQ(newName, "after.txt");
+    EXPECT_EQ(oldName, "before.txt");
+
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+
+TEST(FileSystemWatcherTests, EndToEnd_FilterExcludesNonMatchingFiles) {
+    std::string dir = tf("fsw_filter_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    FileSystemWatcher fsw(dir, "*.txt");
+    std::atomic<bool> txtFired{false};
+    std::atomic<bool> logFired{false};
+    fsw.Created.push_back([&](void*, const FileSystemEventArgs& e) {
+        if (e.getNameProperty() == "match.txt") txtFired.store(true);
+        if (e.getNameProperty() == "skip.log") logFired.store(true);
+    });
+    fsw.setEnableRaisingEventsProperty(true);
+
+    System::IO::File::WriteAllText(dir + "/skip.log", "should be filtered out");
+    System::IO::File::WriteAllText(dir + "/match.txt", "should fire Created");
+
+    EXPECT_TRUE(WaitUntil(txtFired));
+    // Give the (already-delivered-or-not) skip.log event a moment to have arrived too, then
+    // confirm it never fired -- the filter should have excluded it before dispatch.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(logFired.load());
+
+    fsw.setEnableRaisingEventsProperty(false);
+    System::IO::Directory::Delete(dir, true);
+}
+
+TEST(FileSystemWatcherTests, Destructor_StopsWatchThreadCleanly) {
+    // Regression guard for the dangling-`this` hazard class: destroying a FileSystemWatcher
+    // with EnableRaisingEvents still true must not crash, hang, or leave the watch thread
+    // running past the object's lifetime.
+    std::string dir = tf("fsw_dtor_dir");
+    System::IO::Directory::CreateDirectory(dir);
+    {
+        FileSystemWatcher fsw(dir);
+        fsw.setEnableRaisingEventsProperty(true);
+        // fsw destructs here while still "enabled" -- must join cleanly, not detach.
+    }
+    System::IO::Directory::Delete(dir, true);
+    SUCCEED();
 }
 
 // ===========================================================================
