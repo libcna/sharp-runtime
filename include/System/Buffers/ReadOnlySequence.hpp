@@ -75,8 +75,8 @@ namespace System::Buffers {
          * @brief Returns the number of elements in the sequence.
          * @return Sequence length.
          */
-        [[nodiscard]] long long getLengthProperty() const noexcept {
-            return static_cast<long long>(end_ - start_);
+        [[nodiscard]] longcs getLengthProperty() const noexcept {
+            return static_cast<longcs>(end_ - start_);
         }
 
         /**
