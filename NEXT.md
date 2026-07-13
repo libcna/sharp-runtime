@@ -1,10 +1,35 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `c67ec99`) — 11877 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `9543c24`) — 11881 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11877 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11881 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 354 closed, TryParse could throw + UTC-format bugs
+
+Continuing the same autonomous run (previous checkpoint covered 353). Commit: 9543c24 — pushed
+to `origin/feature/work`.
+
+- **354 (DateTimeOffset.hpp/.cpp)**: four bugs found via a full audit against `DateTimeOffset.cs`
+  and the shared `DateTimeFormat.cs` formatting engine. (1) `TryParse` could throw instead of
+  returning `false` — the unguarded final construction validates the offset (±14h limit) and
+  throws for a syntactically valid but out-of-range offset like `"+15:00"`. Fixed with try/catch.
+  (2) `ToString("R"/"r")` used the original offset-relative clock time and only emitted `"GMT"`
+  when the offset happened to already be zero, otherwise appending the raw offset — an invalid
+  RFC 1123 string with the wrong time. Real .NET converts to UTC before formatting and always
+  emits `"GMT"`. (3) `ToString("u")` had the identical bug — appended a literal `"Z"` without
+  converting to UTC first. (4) `ToString("O")` (round-trip format) omitted the fractional-seconds
+  component entirely, losing sub-second precision and defeating the format's purpose — added
+  `".fff"` (this port's `DateTime::ToString` "f" specifier tops out at millisecond precision, a
+  separate pre-existing limitation, but still strictly better than complete omission). Also
+  investigated and ruled out a suspected bug in `AddDays`/`AddHours`/etc. — traced to a genuine,
+  necessary divergence since this port's `DateTime::AddDays` takes `int` not `double`.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 353 closed, wide-reaching message fix
 
