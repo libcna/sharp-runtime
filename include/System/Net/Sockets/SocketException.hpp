@@ -5,7 +5,11 @@
 #include <string>
 #include "System/ComponentModel/Win32Exception.hpp"
 #include "System/Net/Sockets/SocketError.hpp"
+#include "System/Net/Sockets/detail/ErrnoTranslation.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <cerrno>
+#endif
 
 namespace System::Net::Sockets {
 
@@ -20,6 +24,21 @@ namespace System::Net::Sockets {
         SocketError errorCode_;
 
     public:
+        /**
+         * @brief Creates a new instance using the last socket-related OS error.
+         * C++ counterpart of .NET's parameterless SocketException() constructor, which captures
+         * `Interop.Sys.GetLastErrorInfo()` on Unix (or `Marshal.GetLastPInvokeError()` on
+         * Windows). This port is POSIX-only for System::Net::Sockets (documented in CLAUDE.md),
+         * so this reads `errno` and reuses the same TranslateErrno() helper every other socket
+         * call site in this codebase already uses to turn a native error into a SocketError.
+         */
+        SocketException()
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+            : SocketException(SharpRuntimeDetail::Net::Sockets::TranslateErrno(errno)) {}
+#else
+            : SocketException(SocketError::SocketError) {}
+#endif
+
         /** Creates a new instance with the specified error code (interpreted as a SocketError value). */
         explicit SocketException(intcs errorCode)
             : System::ComponentModel::Win32Exception(errorCode),

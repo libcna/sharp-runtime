@@ -15,6 +15,7 @@
 #include "System/Net/Sockets/TcpClient.hpp"
 #include "System/Net/Sockets/UdpClient.hpp"
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#  include <cerrno>
 #  include <sys/socket.h>
 #  include <sys/un.h>
 #  include <unistd.h>
@@ -63,6 +64,18 @@ TEST(TcpClientTests, Connect_ConnectionRefused_SocketErrorCodeIsConnectionRefuse
     } catch (const System::Net::Sockets::SocketException& ex) {
         EXPECT_EQ(ex.getSocketErrorCodeProperty(), System::Net::Sockets::SocketError::ConnectionRefused);
     }
+}
+
+TEST(SocketExceptionTests, DefaultConstructor_CapturesLastErrno) {
+    // Real .NET's parameterless SocketException() captures the last OS socket error
+    // (Interop.Sys.GetLastErrorInfo() on Unix). This port had no equivalent constructor at all;
+    // added one that reads errno and reuses the same TranslateErrno() helper every other socket
+    // call site uses. Force a known errno (ENOTSOCK, via a bad fstat-style call) then construct.
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    errno = ENOTSOCK;
+    System::Net::Sockets::SocketException ex;
+    EXPECT_EQ(ex.getSocketErrorCodeProperty(), System::Net::Sockets::SocketError::NotSocket);
+#endif
 }
 
 TEST(TcpClientTests, Connect_EndPoint_ConnectionRefused_Throws) {
