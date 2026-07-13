@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#include <atomic>
+#include <thread>
+#include <vector>
 #include <gtest/gtest.h>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
@@ -172,4 +175,38 @@ TEST(ConcurrentStackTest, GetEnumerator_IteratesTopToBottom) {
     EXPECT_EQ(e->Current(), 1);
     EXPECT_FALSE(e->MoveNext());
     delete e;
+}
+
+// The class's own doc-comment promises "All public members are thread-safe and may be used
+// concurrently from multiple threads" -- no prior test actually exercised concurrent access
+// (all 19 original tests were single-threaded). Verifies the mutex-protected implementation
+// doesn't lose pushes/pops or corrupt state under real concurrent load; run under ThreadSanitizer
+// in CI to catch any data race, not just wrong final counts.
+TEST(ConcurrentStackTest, ConcurrentPushPop_NoLostUpdatesOrCorruption) {
+    ConcurrentStack<int> s;
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 2000;
+
+    std::vector<std::thread> pushers;
+    for (int t = 0; t < kThreads; ++t) {
+        pushers.emplace_back([&s, t]() {
+            for (int i = 0; i < kPerThread; ++i) s.Push(t * kPerThread + i);
+        });
+    }
+    for (auto& th : pushers) th.join();
+    EXPECT_EQ(s.getCountProperty(), kThreads * kPerThread);
+
+    std::atomic<int> poppedCount{0};
+    std::vector<std::thread> poppers;
+    for (int t = 0; t < kThreads; ++t) {
+        poppers.emplace_back([&s, &poppedCount]() {
+            int value;
+            while (s.TryPop(value)) poppedCount.fetch_add(1, std::memory_order_relaxed);
+        });
+    }
+    for (auto& th : poppers) th.join();
+
+    EXPECT_EQ(poppedCount.load(), kThreads * kPerThread);
+    EXPECT_TRUE(s.getIsEmptyProperty());
+    EXPECT_EQ(s.getCountProperty(), 0);
 }

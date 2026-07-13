@@ -596,6 +596,40 @@ TEST(HashingTests, XxHash128_Append_NegativeLength_Throws) {
     EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
 }
 
+// XxHash128's one-shot entry points (Hash x3, TryHash, HashToHash128) all funnel through
+// HashToHash128Impl, a SEPARATE function from XxHash3's HashToUInt64Impl -- ticket 355's fix
+// did not cover it, and the streaming-path fix above (Append) does not protect these one-shot
+// callers either, since they never touch Detail::XxHash3Shared::Append at all. Same bug shape,
+// confirmed via a standalone ASan repro (negative length -> unsigned wraparound -> out-of-bounds
+// read), found via a code-audit pass on this file.
+TEST(HashingTests, XxHash128_Hash_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    EXPECT_THROW(XxHash128::Hash(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash128_HashWithSeed_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    EXPECT_THROW(XxHash128::Hash(data.data(), -1, 42), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash128_HashToDestination_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[16];
+    EXPECT_THROW(XxHash128::Hash(data.data(), -1, dest, 16, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash128_TryHash_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    uint8_t dest[16];
+    SharpRuntime::intcs written = 0;
+    EXPECT_THROW(XxHash128::TryHash(data.data(), -1, dest, 16, written, 0), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash128_HashToHash128_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    EXPECT_THROW(XxHash128::HashToHash128(data.data(), -1, 0), System::ArgumentOutOfRangeException);
+}
+
 // XxHash32/XxHash64 have their own independent Append() buffering (not routed through
 // Detail::XxHash3Shared), so ticket 355's fix did not cover them. Same bug, same fix, found via
 // a ported-type-audit pass on these two types: a negative length reaches

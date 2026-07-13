@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash128.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::IO::Hashing {
 
@@ -205,6 +206,15 @@ namespace System::IO::Hashing {
         }
 
         Hash128 HashToHash128Impl(const bytecs* source, intcs length, ulongcs seed) {
+            // Same fix, same rationale as XxHash3's HashToUInt64Impl (ticket 355): a negative
+            // length wraps to a huge value once cast to unsigned, and is then treated as a
+            // request to read that many bytes from source deep inside the length-dispatch logic
+            // below -- a severe out-of-bounds read, confirmed via a standalone ASan repro. This
+            // is the single choke point for all one-shot public entry points (Hash x3, TryHash,
+            // HashToHash128) -- unlike the streaming Append() path, which already validates via
+            // Detail::XxHash3Shared::Append, this one-shot path was not covered by that fix.
+            if (length < 0)
+                throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
             uintcs len = static_cast<uintcs>(length);
             if (len <= 16) return HashLength0To16(source, len, seed);
             if (len <= 128) return HashLength17To128(source, len, seed);
