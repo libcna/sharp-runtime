@@ -212,10 +212,6 @@ update this section (and the whole file) once you understand what changed.
   close correctly (a `WriteWhitespace` primitive doesn't exist in this port's `XmlWriter` at all).
 
 **Needs verification (unknown status)**:
-- `TypedReference`'s `task` table row may be misclassified as `ignore` despite being a legitimate,
-  complete stub implementation — flagged by an earlier audit pass, never corrected. This is a
-  `task`-table (not `ticket`-table) item; see `prompt.md`'s "Initialization" workflow section for
-  how that table is separately maintained.
 - No Windows or Emscripten build has ever been compiled for this repository. Every platform
   `#ifdef` branch for those targets is unverified beyond code review.
 - No performance characteristics (allocation counts, algorithmic complexity, hot-path cost) have
@@ -232,6 +228,14 @@ update this section (and the whole file) once you understand what changed.
 - `getCurrent()` was renamed to `getCurrentProperty()` this session with **no backward-compat
   alias** — any code (including CNA) still calling the old name will fail to compile until
   updated on the consumer's side. This was an explicit user decision, not an oversight.
+- `TypedReference` (`include/System/TypedReference.hpp`) — RE-VERIFIED 2026-07-13: correctly
+  classified `status='ignore'`/`outofscope=1` in the `task` table. An earlier audit pass flagged
+  this as a possible misclassification, but on inspection its entire real functionality depends
+  on C# compiler intrinsics (`__makeref`/`__reftype`/`__refvalue`) and CLR reflection
+  (`FieldInfo`, `RuntimeTypeHandle`) — squarely inside the documented "reflection is permanently
+  out of scope" deviation. The stub-with-`NotSupportedException` shape already matches CLAUDE.md's
+  stated correct end-state for this category. No further action needed; this was a false alarm,
+  not a bug.
 
 ---
 
@@ -346,23 +350,16 @@ a "does this actually work" check available in this repo.
 Ordered by size/risk (smallest and safest first). None of these are currently blocking anything —
 pick based on what's actually wanted next, or ask the user first if unsure which to prioritize.
 
-1. **Re-verify the build/test baseline.**
-   Goal: confirm 12305/12305 still passes cleanly at current HEAD before doing anything else —
-   this document was written without building, so this is the first real action any resumed
-   session should take.
-   Files: none (verification only).
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` — expect 0 errors/0
-   warnings, 12305+ tests passing.
+~~1. Re-verify the build/test baseline.~~ **DONE 2026-07-13**: confirmed 12305/12305 passing,
+   0 errors/0 warnings at HEAD `9be09bc`/`05c9f45`.
 
-2. **Resolve `TypedReference`'s `task`-table classification.**
-   Goal: determine whether `TypedReference`'s `task` row should be `ported` instead of `ignore`
-   (it's reportedly a complete, working stub) and correct it if so.
-   Files: `plan.sqlite3` (`task` table, no code change expected), `include/System/
-   TypedReference.hpp` (read-only, to confirm current state).
-   Verify: `sqlite3 plan.sqlite3 "SELECT * FROM task WHERE name='TypedReference';"` plus a manual
-   read of the header to confirm it's genuinely complete.
+~~2. Resolve `TypedReference`'s `task`-table classification.~~ **DONE 2026-07-13**: re-verified
+   correct as-is (`ignore`/`outofscope=1`) — its entire real functionality depends on reflection
+   and compiler intrinsics, squarely inside the documented permanent-deviation scope. No change
+   made; see §5's "Confirmed, permanent" list for the full reasoning. This was a false alarm from
+   an earlier audit pass, not a genuine misclassification.
 
-3. **Implement `Task::WhenAll`.**
+1. **Implement `Task::WhenAll`.**
    Goal: add a static `Task::WhenAll(std::vector<Task>)`-shaped method that completes once every
    input `Task` has completed, propagating the first exception encountered (matching .NET's
    `Task.WhenAll` semantics as closely as this port's synchronous-launch `Task` model allows).
@@ -370,7 +367,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    Files: `include/System/Threading/Tasks/Task.hpp`.
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Task*WhenAll*"`.
 
-4. **Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
+2. **Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
    overloads.**
    Goal: extend the existing `NumberStyles`-aware parser (added this session, currently supports
    `Integer`/`HexNumber`/`Allow*` whitespace-and-sign flags only) to also handle thousands
@@ -379,7 +376,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    shared parsing helper they route through — check for one before touching all 8 independently).
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Int32*Parse*"`.
 
-5. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
+3. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
    Goal: either implement a real priority-queue-backed channel variant so
    `UnboundedPrioritizedChannelOptions<T>` becomes usable, or — if that's too large for one
    session — remove/correct the dangling doc-comment reference and file a proper follow-up ticket
@@ -387,7 +384,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    Files: `include/System/Threading/Channels/Channel.hpp`, `ChannelOptions.hpp`.
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Channel*"`.
 
-6. **Scope a performance-audit pilot on one hot-path type.**
+4. **Scope a performance-audit pilot on one hot-path type.**
    Goal: rather than a full performance audit (a much larger undertaking), pick ONE
    heavily-used, allocation-sensitive type (e.g. `String`, `List<T>`, or `StringBuilder`) and do
    a focused pass: look for unnecessary copies, repeated reallocation, O(n²) patterns where O(n)
