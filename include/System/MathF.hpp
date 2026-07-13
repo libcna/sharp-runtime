@@ -282,8 +282,8 @@ namespace System {
          * library-specific sentinel value.
          */
         static intcs ILogB(float x) {
-            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<int32_t>::max();
-            if (x == 0.0f) return std::numeric_limits<int32_t>::min();
+            if (std::isnan(x) || std::isinf(x)) return std::numeric_limits<intcs>::max();
+            if (x == 0.0f) return std::numeric_limits<intcs>::min();
             return static_cast<intcs>(std::ilogb(x));
         }
         /** @brief Returns an estimate of the reciprocal of @p x (1/x). */
