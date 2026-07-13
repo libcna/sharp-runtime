@@ -104,6 +104,24 @@ namespace System::Xml::XPath {
         // Root/Element: XPath string-value is the concatenation of all descendant text, which is
         // exactly what XmlNode::getInnerTextProperty() already computes. Text/Comment/PI/
         // Whitespace/SignificantWhitespace: their own value, via the DOM's own getValueProperty().
+        //
+        // KNOWN GAP (audited, not fixed -- see DocumentXPathNavigator.cs's ValueText/
+        // CalibrateText for the real .NET behavior this diverges from): per the XPath 1.0 data
+        // model, adjacent Text/CDATA/Whitespace/SignificantWhitespace DOM sibling nodes (e.g. a
+        // CDATA section immediately followed by plain text, or two Text nodes left un-normalized
+        // after DOM manipulation) collapse into a SINGLE XPath text node -- real .NET's
+        // ValueText concatenates forward through all adjacent text-like siblings, and
+        // CalibrateText() ensures navigation never lands mid-run (always on the first node of a
+        // run). This port has neither: MoveToFirstChild/MoveToNext/MoveToPrevious can land on a
+        // non-first member of an adjacent text-like run (they only skip nodes with no XPath
+        // representation at all, not "continuation" text-like siblings), and this method returns
+        // only the positioned-on node's own value, not the merged run. A correct fix needs
+        // coordinated changes across those three navigation methods (each with different
+        // directional run-boundary logic) plus this method -- out of scope for a single-pass
+        // fix; documented rather than rushed. Reachable only when adjacent text-like DOM
+        // siblings exist without an intervening element/comment/PI (uncommon: most parsers
+        // coalesce adjacent text automatically; requires explicit un-normalized DOM construction
+        // or CDATA directly adjacent to plain text).
         switch (node_->getNodeTypeProperty()) {
             case System::Xml::XmlNodeType::Document:
             case System::Xml::XmlNodeType::Element:
