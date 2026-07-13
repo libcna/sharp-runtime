@@ -291,3 +291,29 @@ TEST(VersionTests, ToString_FieldCountNegative_Throws) {
 TEST(VersionTests, ToString_FieldCount5_Throws) {
     EXPECT_THROW(Version(1, 2, 3, 4).ToString(5), System::ArgumentException);
 }
+
+// ---------------------------------------------------------------------------
+// Parse -- trailing separator (regression: std::getline silently dropped the
+// final empty component real .NET's ParseVersion rejects with FormatException)
+// ---------------------------------------------------------------------------
+
+TEST(VersionTests, Parse_TrailingDotAfterMinor_Throws) {
+    EXPECT_THROW(Version("1.2."), System::FormatException);
+}
+
+TEST(VersionTests, Parse_TrailingDotAfterBuild_Throws) {
+    EXPECT_THROW(Version("1.2.3."), System::FormatException);
+}
+
+TEST(VersionTests, TryParse_TrailingDot_ReturnsFalse) {
+    Version result;
+    EXPECT_FALSE(Version::TryParse("1.2.", result));
+}
+
+TEST(VersionTests, Parse_NoTrailingDot_StillWorks) {
+    Version v("1.2.3.4");
+    EXPECT_EQ(v.Major, 1);
+    EXPECT_EQ(v.Minor, 2);
+    EXPECT_EQ(v.Build, 3);
+    EXPECT_EQ(v.Revision, 4);
+}

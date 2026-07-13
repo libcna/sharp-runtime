@@ -184,6 +184,16 @@ namespace System {
         void parse(const std::string& s) {
             static constexpr const char* kComponentNames[4] = {"major", "minor", "build", "revision"};
 
+            // A trailing '.' (e.g. "1.2.") must produce an empty final component and fail --
+            // real .NET's ParseVersion slices up to the *last* separator it finds and rejects an
+            // empty trailing component with FormatException. std::getline(ss, tok, '.') instead
+            // silently drops that phantom trailing empty token (extraction hits EOF with nothing
+            // left to read, so the loop condition just becomes false one iteration early) --
+            // confirmed via a standalone repro that "1.2." and "1.2.3." both parsed successfully
+            // here even though real .NET throws for both. Reject it explicitly before splitting.
+            if (!s.empty() && s.back() == '.')
+                throw System::FormatException("Input string was not in a correct format.");
+
             std::vector<std::string> toks;
             std::istringstream ss(s);
             std::string tok;
