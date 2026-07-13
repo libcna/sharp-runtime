@@ -42,7 +42,17 @@ namespace System::IO
         // port previously just returned, silently dropping every byte the caller thought it
         // had written.
         if (!writable_) throw System::NotSupportedException("Stream does not support writing.");
-        if (buffer == nullptr || count <= 0) return;
+        // Verified against MemoryStream.cs's Write()/ValidateBufferArguments: real .NET throws
+        // ArgumentNullException for a null buffer and ArgumentOutOfRangeException for a
+        // negative offset/count, matching Read()'s validation above. This previously only
+        // checked `buffer == nullptr || count <= 0` and silently returned for everything else
+        // -- a negative offset reached std::copy(buffer + offset, ...) unchecked, reading
+        // before the caller's array (confirmed real out-of-bounds read via a standalone ASan
+        // repro), not just a silent no-op.
+        if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+        if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+        if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count == 0) return;
         // Position can legally be set arbitrarily far past the end (setPositionProperty only
         // rejects negative values, matching real .NET's own Position setter, which allows
         // seeking past Length -- the resize just happens lazily on the next Write). That means

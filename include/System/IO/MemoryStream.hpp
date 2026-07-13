@@ -37,7 +37,11 @@ namespace System::IO
 
         /** Reads up to count bytes into buffer at offset; returns bytes actually read. */
         intcs Read(bytecs buffer[], intcs offset, intcs count) override;
-        /** Writes count bytes from buffer at offset into the memory buffer. */
+        /**
+         * Writes count bytes from buffer at offset into the memory buffer.
+         * @throws System::ArgumentNullException if buffer is null.
+         * @throws System::ArgumentOutOfRangeException if offset or count is negative.
+         */
         void  Write(const bytecs buffer[], intcs offset, intcs count) override;
         /** Writes a single byte to the memory buffer. */
         void  WriteByte(bytecs value) override;

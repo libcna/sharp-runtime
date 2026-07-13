@@ -72,6 +72,46 @@ TEST(MemoryStreamTests, WriteBufferWithOffset) {
     EXPECT_EQ(ms.ToArray()[2], 101u);
 }
 
+// Post-stabilization audit ticket 1714: Write() previously only checked
+// `buffer == nullptr || count <= 0` and silently returned for everything else -- a negative
+// offset reached std::copy(buffer + offset, ...) unchecked, an out-of-bounds read confirmed via
+// a standalone ASan repro (stack-buffer-underflow), not just a silent no-op.
+TEST(MemoryStreamTests, WriteNullBufferThrowsArgumentNullException) {
+    MemoryStream ms;
+    EXPECT_THROW(ms.Write(nullptr, 0, 10), System::ArgumentNullException);
+}
+
+TEST(MemoryStreamTests, WriteNegativeOffsetThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    EXPECT_THROW(ms.Write(data, -1, 2), System::ArgumentOutOfRangeException);
+    // Stream must be left unmodified -- no partial/corrupted write occurred.
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(MemoryStreamTests, WriteNegativeCountThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    EXPECT_THROW(ms.Write(data, 0, -1), System::ArgumentOutOfRangeException);
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(MemoryStreamTests, WriteZeroCountIsNoOpNotThrow) {
+    MemoryStream ms;
+    uint8_t data[] = {1, 2, 3, 4};
+    EXPECT_NO_THROW(ms.Write(data, 0, 0));
+    EXPECT_EQ(ms.getLengthProperty(), 0);
+}
+
+TEST(MemoryStreamTests, WriteValidArgumentsStillWorksAfterValidationAdded) {
+    MemoryStream ms;
+    uint8_t data[] = {5, 6, 7, 8};
+    ms.Write(data, 1, 2);
+    EXPECT_EQ(ms.getLengthProperty(), 2);
+    EXPECT_EQ(ms.ToArray()[0], 6u);
+    EXPECT_EQ(ms.ToArray()[1], 7u);
+}
+
 TEST(MemoryStreamTests, GetBufferReturnsLiveReference) {
     MemoryStream ms;
     ms.WriteByte(7);
