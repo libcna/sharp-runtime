@@ -596,6 +596,40 @@ TEST(HashingTests, XxHash128_Append_NegativeLength_Throws) {
     EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
 }
 
+// XxHash32/XxHash64 have their own independent Append() buffering (not routed through
+// Detail::XxHash3Shared), so ticket 355's fix did not cover them. Same bug, same fix, found via
+// a ported-type-audit pass on these two types: a negative length reaches
+// `static_cast<size_t>(copy)` in the mid-buffer memcpy once bufLen_ > 0 from a prior partial
+// Append(), turning it into a massive out-of-bounds write. The two-call sequence below (5 bytes
+// to populate bufLen_, then a negative-length call) is the exact reachable crash shape -- a
+// single negative-length call on a fresh instance doesn't reach the vulnerable memcpy, so this
+// regression test intentionally covers the two-call case, not just the single-call case.
+TEST(HashingTests, XxHash32_Append_NegativeLength_Throws) {
+    XxHash32 h;
+    auto data = bytes("abc");
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash32_Append_NegativeLength_AfterPartialBuffer_Throws) {
+    XxHash32 h;
+    auto data = bytes("abcde");
+    h.Append(data.data(), 5); // bufLen_ == 5, primes the vulnerable mid-buffer memcpy path
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash64_Append_NegativeLength_Throws) {
+    XxHash64 h;
+    auto data = bytes("abc");
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash64_Append_NegativeLength_AfterPartialBuffer_Throws) {
+    XxHash64 h;
+    auto data = bytes("abcde");
+    h.Append(data.data(), 5); // bufLen_ == 5, primes the vulnerable mid-buffer memcpy path
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // XxHash128 — official .NET test vectors (github.com/dotnet/runtime XxHash128Tests.cs)
 // ---------------------------------------------------------------------------
