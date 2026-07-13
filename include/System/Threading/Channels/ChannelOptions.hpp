@@ -63,16 +63,12 @@ namespace System::Threading::Channels {
      * @brief Options controlling the behavior of a priority-ordered unbounded channel.
      *
      * C++ counterpart of .NET System.Threading.Channels.UnboundedPrioritizedChannelOptions<T>.
-     *
-     * @note Real .NET pairs this type with a `Channel.CreateUnboundedPrioritized<T>(options)`
-     * factory that backs the channel with a priority queue (items dequeued by @p Comparer order,
-     * not insertion order) instead of the plain FIFO `std::deque` this port's `Channel<T>` uses
-     * internally. That factory -- and the priority-queue-backed reader/writer/state variant it
-     * needs -- is NOT implemented in this port; this options type currently has no way to
-     * actually be used to create a channel. Documented here as a known, disclosed gap rather than
-     * silently pretending the type is functional -- implementing it properly needs a genuinely
-     * different queueing backend, not a small mechanical addition, so it's deferred rather than
-     * attempted in a single audit pass.
+     * Paired with `Channel<T>::CreateUnboundedPrioritized(options)`, which backs the channel with
+     * a `std::multiset<T, Comparer>` (items dequeued in ascending @p Comparer order -- the
+     * smallest item first, not insertion order) instead of the plain FIFO `std::deque` this
+     * port's ordinary `Channel<T>` uses internally. Verified against real .NET's
+     * `UnboundedPrioritizedChannel<T>` (backed by `PriorityQueue<bool, T>`), including its
+     * `TryPeek`/`Count` support and its "unbounded writes always succeed until closed" contract.
      */
     template<typename T>
     class UnboundedPrioritizedChannelOptions : public ChannelOptions {

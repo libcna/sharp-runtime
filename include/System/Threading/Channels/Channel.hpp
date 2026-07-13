@@ -4,8 +4,10 @@
 #pragma once
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <set>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Threading/Channels/ChannelClosedException.hpp"
@@ -273,6 +275,119 @@ namespace System::Threading::Channels {
             }
         };
 
+        // Backing state/reader/writer for Channel<T>::CreateUnboundedPrioritized(), kept
+        // deliberately separate from ChannelState<T>/ChannelReaderImpl<T>/ChannelWriterImpl<T>
+        // above rather than generalizing those over a swappable container: the FIFO types'
+        // bounded-specific fields (capacity, fullMode/drop policies) don't apply to an unbounded
+        // priority queue, and keeping this fully separate means the existing, tested FIFO channel
+        // code path is untouched by this addition. Verified against real .NET's
+        // UnboundedPrioritizedChannel<T> (backed by PriorityQueue<bool, T>) -- see
+        // ChannelOptions.hpp's UnboundedPrioritizedChannelOptions<T> doc-comment.
+        template<typename T>
+        struct PrioritizedChannelState {
+            std::mutex mutex;
+            std::condition_variable notEmpty;
+            // std::multiset dequeues its smallest element first under `comparer` (ascending
+            // order), matching real .NET's default Comparer<T>.Default (min-first) semantics.
+            std::multiset<T, std::function<bool(const T&, const T&)>> items;
+            bool closed = false;
+            std::exception_ptr closeError;
+
+            explicit PrioritizedChannelState(std::function<bool(const T&, const T&)> comparer)
+                : items(std::move(comparer)) {}
+        };
+
+        template<typename T>
+        class PrioritizedChannelReaderImpl : public ChannelReader<T> {
+            std::shared_ptr<PrioritizedChannelState<T>> state_;
+
+        public:
+            explicit PrioritizedChannelReaderImpl(std::shared_ptr<PrioritizedChannelState<T>> state)
+                : state_(std::move(state)) {}
+
+            bool TryRead(T& item) override {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (state_->items.empty()) return false;
+                auto node = state_->items.extract(state_->items.begin());
+                item = std::move(node.value());
+                return true;
+            }
+
+            bool TryPeek(T& item) override {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (state_->items.empty()) return false;
+                item = *state_->items.begin();
+                return true;
+            }
+
+            [[nodiscard]] bool getCanPeekProperty() const override { return true; }
+            [[nodiscard]] bool getCanCountProperty() const override { return true; }
+
+            [[nodiscard]] SharpRuntime::intcs getCountProperty() const override {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                return static_cast<SharpRuntime::intcs>(state_->items.size());
+            }
+
+            System::Threading::Tasks::TaskT<bool> WaitToReadAsync() override {
+                auto state = state_;
+                return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
+                    std::unique_lock<std::mutex> lock(state->mutex);
+                    state->notEmpty.wait(lock, [&] { return !state->items.empty() || state->closed; });
+                    if (!state->items.empty()) return true;
+                    if (state->closeError) std::rethrow_exception(state->closeError);
+                    return false;
+                });
+            }
+
+            [[nodiscard]] System::Threading::Tasks::Task getCompletionProperty() const override {
+                auto state = state_;
+                return System::Threading::Tasks::Task([state]() {
+                    std::unique_lock<std::mutex> lock(state->mutex);
+                    state->notEmpty.wait(lock, [&] { return state->closed && state->items.empty(); });
+                    if (state->closeError) std::rethrow_exception(state->closeError);
+                });
+            }
+        };
+
+        template<typename T>
+        class PrioritizedChannelWriterImpl : public ChannelWriter<T> {
+            std::shared_ptr<PrioritizedChannelState<T>> state_;
+
+        public:
+            explicit PrioritizedChannelWriterImpl(std::shared_ptr<PrioritizedChannelState<T>> state)
+                : state_(std::move(state)) {}
+
+            bool TryWrite(const T& item) override {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (state_->closed) return false;
+                state_->items.insert(item);
+                state_->notEmpty.notify_one();
+                return true;
+            }
+
+            // Unbounded: writing can always proceed unless the channel is closed -- matches real
+            // .NET's own comment on WaitToWriteAsync ("unbounded writing can always be done if
+            // we haven't completed").
+            System::Threading::Tasks::TaskT<bool> WaitToWriteAsync() override {
+                auto state = state_;
+                return System::Threading::Tasks::TaskT<bool>([state]() -> bool {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    if (!state->closed) return true;
+                    if (state->closeError) std::rethrow_exception(state->closeError);
+                    return false;
+                });
+            }
+
+            bool TryComplete(std::exception_ptr error) override {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (state_->closed) return false;
+                state_->closed = true;
+                state_->closeError = error;
+                state_->notEmpty.notify_all();
+                return true;
+            }
+        };
+
     } // namespace detail
 
     /**
@@ -314,6 +429,29 @@ namespace System::Threading::Channels {
             Channel<T> channel;
             channel.Reader = std::make_shared<detail::ChannelReaderImpl<T>>(state);
             channel.Writer = std::make_shared<detail::ChannelWriterImpl<T>>(state);
+            return channel;
+        }
+
+        /**
+         * @brief Creates an unbounded channel that dequeues items in priority order rather than
+         * insertion order.
+         *
+         * C++ counterpart of .NET Channel.CreateUnboundedPrioritized<T>(options). Items dequeue
+         * in ascending order per @p options's Comparer (the smallest item first); if @p options
+         * doesn't supply a Comparer, `operator<` is used, matching
+         * UnboundedPrioritizedChannelOptions<T>::Comparer's own documented default. Writing never
+         * blocks (unbounded) and always succeeds until the channel is completed, exactly like
+         * CreateUnbounded().
+         */
+        [[nodiscard]] static Channel<T> CreateUnboundedPrioritized(
+            const UnboundedPrioritizedChannelOptions<T>& options = UnboundedPrioritizedChannelOptions<T>()) {
+            std::function<bool(const T&, const T&)> comparer = options.Comparer
+                ? options.Comparer
+                : std::function<bool(const T&, const T&)>([](const T& a, const T& b) { return a < b; });
+            auto state = std::make_shared<detail::PrioritizedChannelState<T>>(std::move(comparer));
+            Channel<T> channel;
+            channel.Reader = std::make_shared<detail::PrioritizedChannelReaderImpl<T>>(state);
+            channel.Writer = std::make_shared<detail::PrioritizedChannelWriterImpl<T>>(state);
             return channel;
         }
     };
