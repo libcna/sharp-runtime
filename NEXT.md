@@ -1,10 +1,38 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a4b6a43`) — 11798 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `7236c91`) — 11804 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11798 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11804 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 328 closed, the session's most severe/wide-reaching finding
+
+Continuing the same autonomous run (previous checkpoint covered 325-326; 327 was already `done`
+from earlier work, not a gap). Commit: 7236c91 — pushed to `origin/feature/work`.
+
+- **328 (Convert.cpp/.hpp)**: the widest-reaching bug found this session. Every
+  `Convert::To*` method with both a `bool` overload and a `const std::string&` overload
+  (`ToByte`/`ToInt16`/`ToInt32`/`ToInt64`/`ToDouble`/`ToSingle`/`ToUInt32`/`ToUInt64`/
+  `ToUInt16`/`ToSByte` — 10 methods) silently resolved a **raw string-literal argument** (e.g.
+  `Convert::ToInt32("42")`, arguably the single most natural way to call this API) to the
+  `bool` overload instead of the string one — C++ overload resolution always prefers a
+  standard conversion (pointer-to-bool) over a user-defined one (`const char*` →
+  `std::string`), regardless of which one the caller obviously meant. `Convert::ToInt32("42")`
+  silently returned `1`, not `42`. `ToBoolean` had already been fixed for this exact issue in
+  an earlier commit; the sibling sweep to the other 10 methods was never done. The project's
+  own test suite had a comment documenting the workaround ("Explicit std::string to avoid
+  const char* → bool implicit conversion") without ever fixing the root cause — the bug was
+  *known* and silently tolerated. Also found and fixed two smaller sibling bugs in the same
+  file: `ToInt32(string)`/`ToInt64(string)` reimplemented parsing via `strtoll` instead of
+  delegating to `Int32::Parse`/`Int64::Parse` (rejecting real .NET-tolerated trailing
+  whitespace), and `ToInt32(string, fromBase)` never validated `fromBase ∈ {2,8,10,16}` the way
+  real .NET does.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 325-326 closed, both clean audits
 
