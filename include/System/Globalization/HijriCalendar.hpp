@@ -23,9 +23,9 @@ namespace System::Globalization {
  */
 class HijriCalendar : public Calendar {
 public:
-    static constexpr int HijriEra         = 1;    ///< The only era value for this calendar.
-    static constexpr int MaxCalendarYear  = 9666; ///< Maximum supported Hijri year.
-    static constexpr int MaxCalendarMonth = 4;    ///< Last valid month in MaxCalendarYear.
+    static constexpr intcs HijriEra         = 1;    ///< The only era value for this calendar.
+    static constexpr intcs MaxCalendarYear  = 9666; ///< Maximum supported Hijri year.
+    static constexpr intcs MaxCalendarMonth = 4;    ///< Last valid month in MaxCalendarYear.
 
     /**
      * @brief Returns the era for the given DateTime.
@@ -33,14 +33,14 @@ public:
      * C++ counterpart of .NET HijriCalendar.GetEra(DateTime).
      * @return Always HijriEra (1).
      */
-    [[nodiscard]] int GetEra(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetEra(const System::DateTime& time) const override;
 
     /**
      * @brief Returns the number of eras in this calendar.
      *
      * @return Always 1; the Hijri calendar has a single era.
      */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -58,7 +58,7 @@ public:
      * C++ counterpart of .NET HijriCalendar.Eras.
      * @return A vector containing {HijriEra}.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {HijriEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {HijriEra}; }
 
     /**
      * @brief Returns the Hijri year corresponding to the given DateTime.
@@ -67,7 +67,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The Hijri year.
      */
-    [[nodiscard]] int GetYear(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetYear(const System::DateTime& time) const override;
 
     /**
      * @brief Returns the Hijri month corresponding to the given DateTime.
@@ -76,7 +76,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The Hijri month (1–12).
      */
-    [[nodiscard]] int GetMonth(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetMonth(const System::DateTime& time) const override;
 
     /**
      * @brief Returns the day of the Hijri month corresponding to the given DateTime.
@@ -85,7 +85,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The day of the Hijri month (1–30).
      */
-    [[nodiscard]] int GetDayOfMonth(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetDayOfMonth(const System::DateTime& time) const override;
 
     /**
      * @brief Returns the day of the Hijri year corresponding to the given DateTime.
@@ -94,7 +94,7 @@ public:
      * @param time The Gregorian DateTime to convert.
      * @return The day of the Hijri year (1–355).
      */
-    [[nodiscard]] int GetDayOfYear(const System::DateTime& time) const override;
+    [[nodiscard]] intcs GetDayOfYear(const System::DateTime& time) const override;
 
     /**
      * @brief Determines whether the specified Hijri year is a leap year.
@@ -105,7 +105,7 @@ public:
      * @param era  The era (default CurrentEra; ignored).
      * @return true if @p year is a Hijri leap year; otherwise false.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int era = CurrentEra) const override;
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs era = CurrentEra) const override;
 
     /**
      * @brief Returns the number of days in the specified Hijri month.
@@ -117,7 +117,7 @@ public:
      * @param era   The era (default CurrentEra; ignored).
      * @return The number of days in the specified month (29 or 30).
      */
-    [[nodiscard]] int GetDaysInMonth(int year, int month, int era = CurrentEra) const override;
+    [[nodiscard]] intcs GetDaysInMonth(intcs year, intcs month, intcs era = CurrentEra) const override;
 
     /**
      * @brief Returns the number of days in the specified Hijri year.
@@ -127,7 +127,7 @@ public:
      * @param era  The era (default CurrentEra; ignored).
      * @return 354 for common years, 355 for leap years.
      */
-    [[nodiscard]] int GetDaysInYear(int year, int era = CurrentEra) const override;
+    [[nodiscard]] intcs GetDaysInYear(intcs year, intcs era = CurrentEra) const override;
 
     /**
      * @brief Returns a DateTime offset by the specified number of Hijri months.
@@ -137,7 +137,7 @@ public:
      * @param months The number of Hijri months to add (may be negative).
      * @return A new DateTime offset by @p months Hijri months.
      */
-    [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, int months) const override;
+    [[nodiscard]] System::DateTime AddMonths(const System::DateTime& time, intcs months) const override;
 
     /**
      * @brief Returns a DateTime offset by the specified number of Hijri years.
@@ -147,7 +147,7 @@ public:
      * @param years The number of Hijri years to add (may be negative).
      * @return A new DateTime offset by @p years Hijri years.
      */
-    [[nodiscard]] System::DateTime AddYears(const System::DateTime& time, int years) const override;
+    [[nodiscard]] System::DateTime AddYears(const System::DateTime& time, intcs years) const override;
 
     /**
      * @brief Returns a DateTime from the Hijri date and time components.
@@ -165,8 +165,8 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p day is outside the valid range for
      *         the given Hijri @p year and @p month.
      */
-    [[nodiscard]] System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                              int second, int millisecond, int era = CurrentEra) const override;
+    [[nodiscard]] System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                              intcs second, intcs millisecond, intcs era = CurrentEra) const override;
 
 private:
     // Absolute day 1 = 0001-01-01 Gregorian (= 0001-01-03 Julian proleptic).
