@@ -221,14 +221,30 @@ namespace System {
          * @brief Converts the value of an array of bytes to its equivalent string
          * representation in hexadecimal, separated by hyphens.
          *
-         * C++ counterpart of .NET BitConverter.ToString(byte[], int, int).
+         * C++ counterpart of .NET BitConverter.ToString(byte[], int, int). @p value is a raw
+         * pointer with no length information available to this overload, so only the checks
+         * that don't require knowing the buffer's size are performed here; see the
+         * std::vector<bytecs> overload for full array-length-aware bounds checking.
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p length is negative.
          */
         [[nodiscard]] static std::string ToString(const bytecs* value, intcs startIndex, intcs length);
+
+        /**
+         * @brief Converts bytes from startIndex to startIndex+length in a byte vector to a hex string.
+         *
+         * C++ counterpart of .NET BitConverter.ToString(byte[], int, int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex or @p length is negative,
+         *         or @p startIndex is beyond the end of @p value.
+         * @throws System::ArgumentException if @p startIndex plus @p length exceeds @p value's size.
+         */
+        [[nodiscard]] static std::string ToString(const std::vector<bytecs>& value, intcs startIndex, intcs length);
 
         /**
          * @brief Converts bytes from startIndex to end of vector to a hex string.
          *
          * C++ counterpart of .NET BitConverter.ToString(byte[], int).
+         * @throws System::ArgumentOutOfRangeException if @p startIndex is negative or beyond the
+         *         end of @p value.
          */
         [[nodiscard]] static std::string ToString(const std::vector<bytecs>& value, intcs startIndex);
 

@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include "System/BitConverter.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 using System::BitConverter;
 using System::bytecs;
@@ -289,6 +291,49 @@ TEST(BitConverterTests, ToString_VectorStartIndex_SkipsFirst) {
 TEST(BitConverterTests, ToString_VectorStartIndex_Zero_MatchesFull) {
     std::vector<bytecs> v = {0xAA, 0xBB};
     EXPECT_EQ(BitConverter::ToString(v, 0), BitConverter::ToString(v));
+}
+
+// Regression tests for ticket 352: ToString(vector, startIndex) previously computed
+// `length = value.size() - startIndex` with NO validation of startIndex, so a negative
+// startIndex produced an inflated length and the underlying raw-pointer overload then read
+// value[startIndex + i] -- a genuine, confirmed out-of-bounds read (one element before the
+// buffer's start for startIndex == -1), not merely wrong output. Verified against
+// BitConverter.cs's ToString(byte[], int, int), including its exact (quirky but real) boundary
+// behavior: startIndex == size for a non-empty vector THROWS, it does not return an empty
+// string, even though that combination computes length == 0.
+TEST(BitConverterTests, ToString_VectorNegativeStartIndex_ThrowsInsteadOfReadingOutOfBounds) {
+    std::vector<bytecs> v = {0x01, 0x02, 0x03};
+    EXPECT_THROW(BitConverter::ToString(v, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitConverterTests, ToString_VectorStartIndexEqualsSize_Throws) {
+    std::vector<bytecs> v = {0x01, 0x02, 0x03};
+    EXPECT_THROW(BitConverter::ToString(v, 3), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitConverterTests, ToString_VectorStartIndexBeyondSize_Throws) {
+    std::vector<bytecs> v = {0x01, 0x02, 0x03};
+    EXPECT_THROW(BitConverter::ToString(v, 5), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitConverterTests, ToString_VectorEmptyStartIndexZero_ReturnsEmptyString) {
+    std::vector<bytecs> v;
+    EXPECT_EQ(BitConverter::ToString(v, 0), "");
+}
+
+TEST(BitConverterTests, ToString_VectorThreeArg_LengthExceedsRemaining_ThrowsArgumentException) {
+    std::vector<bytecs> v = {0x01, 0x02, 0x03};
+    EXPECT_THROW(BitConverter::ToString(v, 1, 10), System::ArgumentException);
+}
+
+TEST(BitConverterTests, ToString_RawPointer_NegativeStartIndex_Throws) {
+    bytecs buf[] = {0x01, 0x02};
+    EXPECT_THROW(BitConverter::ToString(buf, -1, 1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BitConverterTests, ToString_RawPointer_NegativeLength_Throws) {
+    bytecs buf[] = {0x01, 0x02};
+    EXPECT_THROW(BitConverter::ToString(buf, 0, -1), System::ArgumentOutOfRangeException);
 }
 
 // Half bit-reinterpretation
