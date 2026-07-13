@@ -260,6 +260,9 @@ namespace System {
          * @param right     The divisor.
          * @param remainder Set to the remainder of the division.
          * @return The quotient of dividing @p left by @p right.
+         * @throws System::DivideByZeroException if @p right is zero (inherited from operator/).
+         * @throws System::OverflowException if @p left is MinValue and @p right is -1
+         *         (inherited from operator/ -- see its doc-comment for the underlying reason).
          */
         static Int128 DivRem(const Int128& left, const Int128& right, Int128& remainder) {
             Int128 quotient = left / right;
