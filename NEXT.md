@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `7d3deca`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `3a8adfa`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,9 +66,9 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`7d3deca`), via `cmake --build build --parallel 4`.
+(`3a8adfa`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12336/12336 passing**, 1222 test suites, via
+**Test status**: last verified **12350/12350 passing**, 1223 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -191,6 +191,19 @@ across repeated runs where concurrency/timing was a factor.
   passed unchanged before the 26 new ones were added). No changes were needed in the 8 type
   headers themselves beyond doc-comments — they all route through this one shared parser. Test
   count grew from 12310 to 12336.
+- Implemented `Channel<T>::CreateUnboundedPrioritized` (`3a8adfa`) — resolves the previously
+  dangling doc-comment reference in `UnboundedPrioritizedChannelOptions<T>`. Backed by
+  `std::multiset<T, Comparer>` (ascending order, smallest-first dequeue, defaulting to
+  `operator<` when no `Comparer` is supplied), kept as an entirely separate
+  `detail::PrioritizedChannelState/Reader/WriterImpl` trio rather than generalizing the existing
+  FIFO `ChannelState<T>`/`std::deque` machinery — the FIFO type's bounded-specific fields
+  (capacity, drop policies) don't apply to an unbounded priority queue, and this keeps the
+  already-tested FIFO code path completely untouched (zero risk of regression there). Verified
+  against real .NET's `UnboundedPrioritizedChannel<T>` (backed by `PriorityQueue<bool, T>`):
+  supports `TryPeek`/`Count` (the plain FIFO channel doesn't), and writes never block since the
+  channel is unbounded (matches `CreateUnbounded()`'s own contract). 14 new regression tests,
+  including a concurrent multi-writer/multi-reader stress test (flake-checked across 10 repeats).
+  Test count grew from 12336 to 12350.
 
 ---
 
@@ -236,8 +249,6 @@ update this section (and the whole file) once you understand what changed.
   hang a `TaskCompletionSource` off of.
 - `Task.WhenAny` is still missing — needs a race-free "first of N" mechanism deserving its own
   design pass (`Task.WhenAll` was implemented 2026-07-13, see §3).
-- `UnboundedPrioritizedChannelOptions<T>` references a `Channel::CreateUnboundedPrioritized()`
-  factory that does not exist anywhere in the codebase, making the options type currently unusable.
 - `System::Xml::Linq::XText`'s `WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
   the way real .NET does when the parent is an `XDocument` — needs a larger `XmlWriter` change to
   close correctly (a `WriteWhitespace` primitive doesn't exist in this port's `XmlWriter` at all).
@@ -400,15 +411,11 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    per-type changes needed beyond doc-comments. 26 new regression tests. See §3 for the full
    list of grammar additions and documented deviations.
 
-1. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
-   Goal: either implement a real priority-queue-backed channel variant so
-   `UnboundedPrioritizedChannelOptions<T>` becomes usable, or — if that's too large for one
-   session — remove/correct the dangling doc-comment reference and file a proper follow-up ticket
-   for the real implementation.
-   Files: `include/System/Threading/Channels/Channel.hpp`, `ChannelOptions.hpp`.
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Channel*"`.
+~~1. Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).~~
+   **DONE 2026-07-13** (`3a8adfa`): implemented via a separate `std::multiset`-backed
+   detail::Prioritized* trio, 14 new regression tests. See §3 for the full design rationale.
 
-2. **Scope a performance-audit pilot on one hot-path type.**
+1. **Scope a performance-audit pilot on one hot-path type.**
    Goal: rather than a full performance audit (a much larger undertaking), pick ONE
    heavily-used, allocation-sensitive type (e.g. `String`, `List<T>`, or `StringBuilder`) and do
    a focused pass: look for unnecessary copies, repeated reallocation, O(n²) patterns where O(n)
@@ -449,7 +456,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 7d3deca (12336/12336 tests
+Read NEXT.md first. It reflects the repository state as of HEAD 3a8adfa (12350/12350 tests
 passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
