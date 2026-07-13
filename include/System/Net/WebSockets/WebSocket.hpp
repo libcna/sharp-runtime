@@ -65,17 +65,34 @@ namespace System::Net::WebSockets {
         /** @brief Releases resources used by this WebSocket. */
         virtual void Dispose() = 0;
 
-        /** @brief Receives data into @p buffer[offset, offset+count). */
+        /**
+         * @brief Receives data into @p buffer[offset, offset+count).
+         *
+         * @warning Lifetime contract: implementations (e.g. `ClientWebSocket`) run this
+         * operation on a real background thread that starts immediately and writes into
+         * @p buffer asynchronously (this runtime's `Task` has no GC to keep a captured
+         * reference's target alive, unlike real .NET's `Memory<byte>`/array-backed overloads).
+         * The caller MUST keep @p buffer alive, unmoved, and untouched by any other code until
+         * the returned `Task` completes — destroying, reallocating (e.g. via `push_back`), or
+         * concurrently writing to @p buffer before completion is a use-after-free / data race.
+         */
         virtual System::Threading::Tasks::TaskT<WebSocketReceiveResult>
         ReceiveAsync(std::vector<bytecs>& buffer, intcs offset, intcs count,
                      System::Threading::CancellationToken cancellationToken = System::Threading::CancellationToken::None()) = 0;
 
-        /** @brief Receives data into the entire buffer. */
+        /** @brief Receives data into the entire buffer. Same lifetime contract as the 4-arg overload. */
         System::Threading::Tasks::TaskT<WebSocketReceiveResult> ReceiveAsync(std::vector<bytecs>& buffer) {
             return ReceiveAsync(buffer, 0, static_cast<intcs>(buffer.size()));
         }
 
-        /** @brief Sends @p buffer[offset, offset+count) as a message of the given type. */
+        /**
+         * @brief Sends @p buffer[offset, offset+count) as a message of the given type.
+         *
+         * @warning Same lifetime contract as `ReceiveAsync`: the operation runs on a real
+         * background thread that starts immediately and reads @p buffer asynchronously by
+         * reference. The caller MUST keep @p buffer alive and unmoved until the returned `Task`
+         * completes.
+         */
         virtual System::Threading::Tasks::Task
         SendAsync(const std::vector<bytecs>& buffer, intcs offset, intcs count, WebSocketMessageType messageType,
                   bool endOfMessage,

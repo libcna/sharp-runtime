@@ -56,6 +56,16 @@ TEST(ValueWebSocketReceiveResultTests, NegativeCount_Throws) {
     EXPECT_THROW((ValueWebSocketReceiveResult(-1, WebSocketMessageType::Text, false)), System::ArgumentOutOfRangeException);
 }
 
+// Real .NET validates messageType against the same range it packs alongside count/endOfMessage:
+// if ((uint)messageType > (uint)WebSocketMessageType.Close). The port previously only validated
+// count, silently accepting an out-of-range messageType value.
+TEST(ValueWebSocketReceiveResultTests, InvalidMessageType_Throws) {
+    EXPECT_THROW((ValueWebSocketReceiveResult(0, static_cast<WebSocketMessageType>(99), false)),
+                 System::ArgumentOutOfRangeException);
+    EXPECT_THROW((ValueWebSocketReceiveResult(0, static_cast<WebSocketMessageType>(-1), false)),
+                 System::ArgumentOutOfRangeException);
+}
+
 TEST(WebSocketReceiveResultTests, BasicAccessors) {
     WebSocketReceiveResult result(5, WebSocketMessageType::Text, true);
     EXPECT_EQ(result.getCountProperty(), 5);

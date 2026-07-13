@@ -24,6 +24,12 @@ namespace System::Net::WebSockets {
         ValueWebSocketReceiveResult(SharpRuntime::intcs count, WebSocketMessageType messageType, bool endOfMessage)
             : count_(count), messageType_(messageType), endOfMessage_(endOfMessage) {
             System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+            // Real .NET validates messageType against the same range it packs into 32 minus 1
+            // bits alongside count/endOfMessage: if ((uint)messageType > (uint)WebSocketMessageType.Close).
+            if (static_cast<SharpRuntime::intcs>(messageType) < 0 ||
+                static_cast<SharpRuntime::intcs>(messageType) > static_cast<SharpRuntime::intcs>(WebSocketMessageType::Close)) {
+                throw System::ArgumentOutOfRangeException("messageType");
+            }
         }
 
         /** @return The number of bytes received. */
