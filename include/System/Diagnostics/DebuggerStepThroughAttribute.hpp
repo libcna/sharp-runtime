@@ -5,5 +5,13 @@
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics {
-    class DebuggerStepThroughAttribute : public System::Attribute {};
+
+/**
+ * @brief Marks a class, struct, method, or constructor that a debugger should step through rather than into.
+ *
+ * C++ counterpart of .NET System.Diagnostics.DebuggerStepThroughAttribute.
+ * A pure marker attribute — carries no state and has no runtime behavior.
+ */
+class DebuggerStepThroughAttribute : public System::Attribute {};
+
 } // namespace System::Diagnostics

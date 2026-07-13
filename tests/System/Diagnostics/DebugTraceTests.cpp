@@ -5,11 +5,14 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/Diagnostics/Debug.hpp"
 #include "System/Diagnostics/DebugProvider.hpp"
+#include "System/Diagnostics/Debugger.hpp"
 #include "System/Diagnostics/Trace.hpp"
+#include "System/Exception.hpp"
 #include <memory>
 
 using System::Diagnostics::Debug;
 using System::Diagnostics::DebugProvider;
+using System::Diagnostics::Debugger;
 using System::Diagnostics::Trace;
 
 // ---------------------------------------------------------------------------
@@ -195,4 +198,37 @@ TEST(DebugTraceTests, Trace_Fail_DoesNotThrow) {
 
 TEST(DebugTraceTests, Trace_Flush_DoesNotThrow) {
     EXPECT_NO_THROW(Trace::Flush());
+}
+
+// ---------------------------------------------------------------------------
+// Debugger tests
+// ---------------------------------------------------------------------------
+
+TEST(DebuggerTests, IsAttached_AlwaysFalse) {
+    EXPECT_FALSE(Debugger::getIsAttachedProperty());
+}
+
+TEST(DebuggerTests, Launch_AlwaysFalse) {
+    EXPECT_FALSE(Debugger::Launch());
+}
+
+TEST(DebuggerTests, IsLogging_AlwaysFalse) {
+    EXPECT_FALSE(Debugger::IsLogging());
+}
+
+TEST(DebuggerTests, Log_DoesNotThrow_WithDefaults) {
+    EXPECT_NO_THROW(Debugger::Log(0));
+}
+
+TEST(DebuggerTests, Log_DoesNotThrow_WithAllArgs) {
+    EXPECT_NO_THROW(Debugger::Log(1, "category", "message"));
+}
+
+TEST(DebuggerTests, DefaultCategory_IsEmpty) {
+    EXPECT_TRUE(Debugger::DefaultCategory.empty());
+}
+
+TEST(DebuggerTests, BreakForUserUnhandledException_DoesNotThrow) {
+    System::Exception ex("test exception");
+    EXPECT_NO_THROW(Debugger::BreakForUserUnhandledException(ex));
 }

@@ -5,5 +5,13 @@
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics {
-    class DebuggerNonUserCodeAttribute : public System::Attribute {};
+
+/**
+ * @brief Marks a class, struct, method, property, or constructor as not user code, so a debugger skips it when stepping.
+ *
+ * C++ counterpart of .NET System.Diagnostics.DebuggerNonUserCodeAttribute.
+ * A pure marker attribute — carries no state and has no runtime behavior.
+ */
+class DebuggerNonUserCodeAttribute : public System::Attribute {};
+
 } // namespace System::Diagnostics
