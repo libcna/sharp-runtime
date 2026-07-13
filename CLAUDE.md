@@ -34,6 +34,10 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 | `System::IO::RandomAccess` | `pread`, `pwrite`, `fsync` | POSIX-only |
 | `System::AppDomain/AppContext` | `/proc/self/exe` | Linux-only |
 | `System::TimeZoneInfo` | `localtime_r`, `/usr/share/zoneinfo` | POSIX-only |
+| `System::Diagnostics::Process` | `fork`, `execve`, `waitpid` | POSIX-only |
+| `System::Runtime::InteropServices::PosixSignal`/`PosixSignalRegistration` | `sigaction` | POSIX-only |
+| `System::Net::NetworkInformation::NetworkInterface` | `getifaddrs` | Linux-only |
+| `System::IO::FileSystemWatcher` | `inotify` | Linux-only |
 
 ### What is MSVC-unsupported (compiler-extension dependency, not a platform bug)
 
