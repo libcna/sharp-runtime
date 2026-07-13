@@ -6,6 +6,27 @@ cmake --build build --parallel 8          # Debug, default config — 0 errors/0
 ./build/SharpRuntimeTests                 # 11815 tests from 1197 test suites, 0 failures
 ```
 
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 334 closed, a race that TSan couldn't confirm despite real effort
+
+Continuing the same autonomous run (previous checkpoint covered 332-333). No new commits.
+
+- **334 (Threading/Thread.hpp)**: `thread_` (plain `std::thread`) is written by `Start()`'s
+  move-assignment and read by `Join()`/`getIsAliveProperty()`/`getThreadStateProperty()` with no
+  synchronization — theoretically a genuine data race per the C++ standard if `Start()` runs on
+  one thread while another concurrently polls status. Wrote two escalating TSan repros
+  (including a 200-iteration version with a head-start specifically timed to maximize the race
+  window) — TSan, built to catch exactly this from even one overlapping execution, never flagged
+  it. Unlike ticket 324's SortedSet UB (structurally guaranteed by the standard regardless of
+  timing), this is genuinely timing-dependent, and a proper fix would need a broader mutex-based
+  refactor across 5 methods. Documented, not fixed — same call as ticket 302's Guid RNG race
+  (also theoretical, also unconfirmed, also needs a bigger design decision than a one-off
+  ticket warrants).
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
+
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 332-333 closed
 
 Continuing the same autonomous run (previous checkpoint covered 330-331). Commit: e6157c7 —
