@@ -1,10 +1,54 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-397, all DB-only tickets). Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-406, all DB-only tickets). Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 398-406 closed, `namespace-audit` category FULLY DRAINED
+
+Continuing the same autonomous run (previous checkpoint covered 378-397). No commits — all 9 are
+database-consistency checks touching no git-tracked files (plan.sqlite3 is gitignored).
+
+- **398 System.Security.Authentication**: 3/3, 0 done/3 todo.
+- **399 System.Collections.Frozen**: 2/2, already fully done (2/2).
+- **400 System.Net.Mime**: 2/2, 0 done/2 todo.
+- **401 System.Numerics.Colors**: 2/2, 0 done/2 todo.
+- **402 System.Runtime.Versioning**: 2/2, 0 done/2 todo.
+- **403 System.Buffers.Binary**: 1/1, 0 done/1 todo.
+- **404 System.Linq**: 1/1, 0 done/1 todo.
+- **405 System.Runtime.ExceptionServices**: 1/1, 0 done/1 todo.
+- **406 System.Security**: 1/1, 0 done/1 todo.
+
+All 9 had perfect task/ticket coverage. This drains the entire `namespace-audit` category:
+`SELECT COUNT(*) FROM ticket WHERE category='namespace-audit' AND status='todo'` now returns 0
+(51 done total across the whole sweep, tickets 362-406). **Summary of the full namespace-audit
+sweep**: 45 namespaces checked, exactly ONE orphan gap found (System.Collections — ArrayList and
+Hashtable, closed at ticket 374 by creating tickets #1489/#1490). Every other namespace had
+perfect 1:1 `task`/`ported-type-audit ticket` coverage. The `ported-type-audit` backlog is
+confirmed to be an accurate, near-complete mirror of the `task` table.
+
+**Category status after this batch** (`SELECT category, status, COUNT(*) FROM ticket GROUP BY
+category, status`): `ported-type-audit` 612 done / **400 todo (by far the largest remaining
+category, and the natural next stop in the priority+ticket_no queue)**; `classification-audit` 0
+done / 60 todo (untouched); `correctness` 49 done / 2 todo; `documentation` 19 done / 6 todo;
+`style` 100 **blocked** (tied to ticket #43's blocked global int→intcs policy — do not reopen).
+
+The natural `ORDER BY priority, ticket_no` queue now transitions into `ported-type-audit` —
+confirmed via `SELECT ticket_no, priority, category, area, title FROM ticket WHERE status='todo'
+ORDER BY priority, ticket_no LIMIT 10` which surfaces ticket 636 (System.Buffers.Binary.
+BinaryPrimitives) next. These are per-.NET-type audits (title "Verify ported type: System.X.Y"),
+narrower and more tractable than the file-level `code-audit` tickets processed earlier this
+session (336-355) — same deep-audit methodology applies: check filesystem reality first, verify
+API surface against `/rv/tmp/runtime/src/libraries/`, verify doc-comments/SPDX headers, add/
+improve focused tests, fix any real bugs found, build clean, run full suite, mark done, commit
+(if source changed), push.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"` — this now surfaces the
+`ported-type-audit` backlog starting at ticket 636. Ticket #43 stays `blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 378-397 closed (namespace-audit batch, 20 tickets), zero further orphans
 
