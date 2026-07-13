@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include "System/Buffer.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 using System::Buffer;
@@ -266,4 +267,67 @@ TEST(BufferTests, MemoryCopy_SizeExceeded_Throws) {
     uint8_t dst[2] = {0, 0};
     EXPECT_THROW(Buffer::MemoryCopy(src, dst, longcs{2}, longcs{4}),
                  System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferTests, MemoryCopy_NegativeSourceBytesToCopy_Throws) {
+    uint8_t src[4] = {1, 2, 3, 4};
+    uint8_t dst[4] = {0, 0, 0, 0};
+    EXPECT_THROW(Buffer::MemoryCopy(src, dst, longcs{4}, longcs{-1}),
+                 System::ArgumentOutOfRangeException);
+}
+
+// ---------------------------------------------------------------------------
+// BlockCopy / GetByte / SetByte — bounds validation (regression: these
+// previously did zero validation and reached memmove/pointer arithmetic
+// directly with attacker/caller-controlled offsets, count, or index --
+// confirmed exploitable via a standalone ASan repro before the fix).
+// ---------------------------------------------------------------------------
+
+TEST(BufferTests, BlockCopy_Vector_CountExceedsSrc_Throws) {
+    std::vector<bytecs> src{1, 2, 3, 4};
+    std::vector<bytecs> dst{0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    EXPECT_THROW(Buffer::BlockCopy(src, 0, dst, 0, 1000), System::ArgumentException);
+}
+
+TEST(BufferTests, BlockCopy_Vector_CountExceedsDst_Throws) {
+    std::vector<bytecs> src{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<bytecs> dst{0, 0};
+    EXPECT_THROW(Buffer::BlockCopy(src, 0, dst, 0, 10), System::ArgumentException);
+}
+
+TEST(BufferTests, BlockCopy_Vector_NegativeSrcOffset_Throws) {
+    std::vector<bytecs> src{1, 2, 3, 4};
+    std::vector<bytecs> dst{0, 0, 0, 0};
+    EXPECT_THROW(Buffer::BlockCopy(src, -1, dst, 0, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferTests, BlockCopy_Vector_NegativeDstOffset_Throws) {
+    std::vector<bytecs> src{1, 2, 3, 4};
+    std::vector<bytecs> dst{0, 0, 0, 0};
+    EXPECT_THROW(Buffer::BlockCopy(src, 0, dst, -1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferTests, BlockCopy_Vector_NegativeCount_Throws) {
+    std::vector<bytecs> src{1, 2, 3, 4};
+    std::vector<bytecs> dst{0, 0, 0, 0};
+    EXPECT_THROW(Buffer::BlockCopy(src, 0, dst, 0, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferTests, BlockCopy_TypedVector_CountExceedsBounds_Throws) {
+    std::vector<int32_t> src{1, 2};
+    std::vector<int32_t> dst{0, 0};
+    // 8 bytes available per vector; ask for 100 bytes.
+    EXPECT_THROW(Buffer::BlockCopy(src, 0, dst, 0, 100), System::ArgumentException);
+}
+
+TEST(BufferTests, GetByte_IndexOutOfRange_Throws) {
+    std::vector<int32_t> v{0x01020304};
+    EXPECT_THROW(Buffer::GetByte(v, 4), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Buffer::GetByte(v, -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BufferTests, SetByte_IndexOutOfRange_Throws) {
+    std::vector<int32_t> v{0x01020304};
+    EXPECT_THROW(Buffer::SetByte(v, 4, 0xFF), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(Buffer::SetByte(v, -1, 0xFF), System::ArgumentOutOfRangeException);
 }
