@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Net/Sockets/NetworkStream.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/Sockets/SocketException.hpp"
@@ -64,11 +65,20 @@ NetworkStream::NetworkStream(int fd) : fd_(fd) {}
 NetworkStream::~NetworkStream() { Close(); }
 
 intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
+    // Unlike this codebase's other Stream implementations (e.g. FileStream::Read), this method
+    // previously had no argument validation at all -- a negative `count` wrapped to a huge
+    // size_t once cast for the recv() call below, letting the kernel write past the end of a
+    // small destination buffer (confirmed via an ASan repro: stack-buffer-overflow). Matches
+    // real .NET's Stream.ValidateBufferArguments behavior.
+    if (offset < 0)
+        throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+    if (count < 0)
+        throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
 #if defined(__EMSCRIPTEN__)
     (void)buffer; (void)offset; (void)count;
     throw System::PlatformNotSupportedException("NetworkStream is not supported on Emscripten.");
 #else
-    if (!validFd(fd_)) return 0;
+    if (count == 0 || !validFd(fd_)) return 0;
     auto n = ::recv(toSk(fd_), reinterpret_cast<char*>(buffer + offset),
                     static_cast<size_t>(count), 0);
     if (n < 0) {
@@ -82,11 +92,15 @@ intcs NetworkStream::Read(bytecs buffer[], intcs offset, intcs count) {
 }
 
 void NetworkStream::Write(const bytecs buffer[], intcs offset, intcs count) {
+    if (offset < 0)
+        throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+    if (count < 0)
+        throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
 #if defined(__EMSCRIPTEN__)
     (void)buffer; (void)offset; (void)count;
     throw System::PlatformNotSupportedException("NetworkStream is not supported on Emscripten.");
 #else
-    if (!validFd(fd_)) return;
+    if (count == 0 || !validFd(fd_)) return;
     auto n = ::send(toSk(fd_), reinterpret_cast<const char*>(buffer + offset),
                     static_cast<size_t>(count), 0);
     if (n < 0) {

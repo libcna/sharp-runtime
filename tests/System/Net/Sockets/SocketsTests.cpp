@@ -5,6 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include <thread>
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/Net/IPAddress.hpp"
@@ -300,6 +301,46 @@ TEST(NetworkStreamTests, CanRead_False_AfterClose) {
     ::close(fds[1]);
     ns.Close();
     EXPECT_FALSE(ns.getCanReadProperty());
+}
+
+// Regression: Read/Write had no argument validation at all, unlike this codebase's other Stream
+// implementations (e.g. FileStream::Read). A negative `count` wrapped to a huge size_t once cast
+// for the recv()/send() call, letting the kernel write past the end of a small destination
+// buffer -- confirmed via an ASan repro (stack-buffer-overflow) before this fix.
+TEST(NetworkStreamTests, Read_NegativeCount_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {};
+    EXPECT_THROW(ns.Read(buffer, 0, -1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Read_NegativeOffset_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {};
+    EXPECT_THROW(ns.Read(buffer, -1, 1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Write_NegativeCount_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ns.Write(buffer, 0, -1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
+}
+
+TEST(NetworkStreamTests, Write_NegativeOffset_Throws) {
+    int fds[2];
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
+    NetworkStream ns(fds[0]);
+    SharpRuntime::bytecs buffer[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ns.Write(buffer, -1, 1), System::ArgumentOutOfRangeException);
+    ::close(fds[1]);
 }
 
 #endif // !_WIN32 && !__EMSCRIPTEN__
