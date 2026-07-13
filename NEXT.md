@@ -1,10 +1,33 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `4b728b7`) — 11848 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `9cfbf30`) — 11850 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11848 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11850 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 347 closed, malformed UTF-8 slipped through validation
+
+Continuing the same autonomous run (previous checkpoint covered 346). Commit: 9cfbf30 — pushed
+to `origin/feature/work`.
+
+- **347 (Globalization/NumberFormatInfo.hpp)**: systematically cross-checked every setter's
+  validation-vs-`VerifyWritable()` ordering (the port has two different, both-correct orderings
+  depending on property — numeric range-bound setters validate first, string/array setters check
+  writability first) and every numeric range bound against `NumberFormatInfo.cs` — all already
+  matched exactly, confirming a very thorough prior audit. One real bug found: `CheckNativeDigits`
+  only compared each entry's byte length against what its leading byte's value range implies,
+  without validating the leading byte is actually a valid UTF-8 lead byte (0x80-0xBF are
+  continuation bytes, never valid leads) or that subsequent bytes are valid continuation bytes.
+  Confirmed via a standalone repro that both a malformed 2-byte sequence with a bad second byte
+  and a bare continuation byte used as a lead byte both passed the old length-only check, despite
+  the method's own doc comment stating the intent of validating "exactly one well-formed
+  codepoint." Fixed with proper lead-byte-range and continuation-byte validation.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 346 closed, a real SIGFPE crash bug
 
