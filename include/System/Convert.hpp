@@ -162,6 +162,8 @@ namespace System {
          * @throws OverflowException if out of range [0, 255].
          */
         [[nodiscard]] static bytecs ToByte(const std::string& value);
+        /** @brief Converts a C-string to byte. Delegates to the std::string overload. */
+        [[nodiscard]] static bytecs ToByte(const char* value) { return ToByte(std::string(value)); }
 
         // ===================================================================
         // ToInt16
@@ -195,6 +197,8 @@ namespace System {
          * @throws OverflowException if outside [-32768, 32767].
          */
         [[nodiscard]] static shortcs ToInt16(const std::string& value);
+        /** @brief Converts a C-string to 16-bit integer. Delegates to the std::string overload. */
+        [[nodiscard]] static shortcs ToInt16(const char* value) { return ToInt16(std::string(value)); }
 
         // ===================================================================
         // ToInt32
@@ -228,6 +232,18 @@ namespace System {
          * @throws FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static intcs ToInt32(const std::string& value);
+        /**
+         * @brief Converts a C-string to 32-bit integer.
+         *
+         * Without this overload, a raw string literal argument (e.g. `Convert::ToInt32("42")`)
+         * would silently resolve to the ToInt32(bool) overload instead of the intended
+         * std::string one -- C++ overload resolution always prefers a standard conversion
+         * (pointer-to-bool) over a user-defined conversion (const char* -> std::string),
+         * regardless of which one the caller obviously meant. Confirmed as a genuine,
+         * silent-wrong-result bug via a standalone repro before this fix. Delegates to the
+         * std::string overload.
+         */
+        [[nodiscard]] static intcs ToInt32(const char* value) { return ToInt32(std::string(value)); }
         /**
          * @brief Converts a string in the given base to a 32-bit integer.
          *
@@ -273,6 +289,8 @@ namespace System {
          * @throws FormatException if the string is not a valid integer.
          */
         [[nodiscard]] static longcs ToInt64(const std::string& value);
+        /** @brief Converts a C-string to 64-bit integer. Delegates to the std::string overload. */
+        [[nodiscard]] static longcs ToInt64(const char* value) { return ToInt64(std::string(value)); }
 
         // ===================================================================
         // ToDouble
@@ -298,6 +316,8 @@ namespace System {
          * @throws FormatException if the string is not a valid number.
          */
         [[nodiscard]] static double ToDouble(const std::string& value);
+        /** @brief Converts a C-string to double. Delegates to the std::string overload. */
+        [[nodiscard]] static double ToDouble(const char* value) { return ToDouble(std::string(value)); }
 
         // ===================================================================
         // ToSingle
@@ -323,6 +343,8 @@ namespace System {
          * @throws FormatException if the string is not a valid number.
          */
         [[nodiscard]] static Single ToSingle(const std::string& value);
+        /** @brief Converts a C-string to float. Delegates to the std::string overload. */
+        [[nodiscard]] static Single ToSingle(const char* value) { return ToSingle(std::string(value)); }
 
         // ===================================================================
         // ToUInt32
@@ -353,6 +375,8 @@ namespace System {
          * @throws FormatException if the string is not a valid unsigned integer.
          */
         [[nodiscard]] static uint32_t ToUInt32(const std::string& value);
+        /** @brief Converts a C-string to unsigned 32-bit integer. Delegates to the std::string overload. */
+        [[nodiscard]] static uint32_t ToUInt32(const char* value) { return ToUInt32(std::string(value)); }
 
         // ===================================================================
         // ToUInt64
@@ -383,6 +407,8 @@ namespace System {
          * @throws FormatException if the string is not a valid unsigned integer.
          */
         [[nodiscard]] static uint64_t ToUInt64(const std::string& value);
+        /** @brief Converts a C-string to unsigned 64-bit integer. Delegates to the std::string overload. */
+        [[nodiscard]] static uint64_t ToUInt64(const char* value) { return ToUInt64(std::string(value)); }
 
         // ===================================================================
         // ToUInt16
@@ -444,6 +470,8 @@ namespace System {
          * @throws OverflowException if outside [0, 65535].
          */
         [[nodiscard]] static ushortcs ToUInt16(const std::string& value);
+        /** @brief Converts a C-string to unsigned 16-bit integer. Delegates to the std::string overload. */
+        [[nodiscard]] static ushortcs ToUInt16(const char* value) { return ToUInt16(std::string(value)); }
 
         // ===================================================================
         // ToSByte
@@ -514,6 +542,8 @@ namespace System {
          * @throws OverflowException if outside [-128, 127].
          */
         [[nodiscard]] static sbytecs ToSByte(const std::string& value);
+        /** @brief Converts a C-string to signed byte. Delegates to the std::string overload. */
+        [[nodiscard]] static sbytecs ToSByte(const char* value) { return ToSByte(std::string(value)); }
 
         // ===================================================================
         // ToString

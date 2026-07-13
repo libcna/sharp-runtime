@@ -198,3 +198,22 @@ TEST(ConvertTests, ToSByte_FromDouble_Valid)    { EXPECT_EQ(Convert::ToSByte(-1.
 TEST(ConvertTests, ToSByte_FromDouble_Overflow) { EXPECT_THROW(Convert::ToSByte(200.0), System::OverflowException); }
 TEST(ConvertTests, ToSByte_FromString_Valid)    { EXPECT_EQ(Convert::ToSByte(std::string("-1")), sbytecs(-1)); }
 TEST(ConvertTests, ToSByte_FromString_Overflow) { EXPECT_THROW(Convert::ToSByte(std::string("200")), System::OverflowException); }
+
+// Regression tests for ticket 328: a raw string-literal argument (no std::string(...) wrapping)
+// previously silently resolved to each method's bool overload instead of its std::string one --
+// C++ overload resolution always prefers a standard conversion (pointer-to-bool) over a
+// user-defined one (const char* -> std::string). Confirmed this affected every Convert::To*
+// method with both a bool and a std::string overload except ToBoolean (already fixed
+// separately). Fixed by adding an explicit ToXxx(const char*) overload to each. These tests use
+// raw literals deliberately -- the point is to exercise the new overload, not the pre-existing
+// std::string one already covered by the Valid/Overflow tests above.
+TEST(ConvertTests, RawStringLiteral_ResolvesToStringOverload_NotBool) {
+    EXPECT_EQ(Convert::ToByte("200"), bytecs(200));
+    EXPECT_EQ(Convert::ToInt16("1000"), shortcs(1000));
+    EXPECT_EQ(Convert::ToDouble("3.5"), 3.5);
+    EXPECT_FLOAT_EQ(Convert::ToSingle("2.5"), 2.5f);
+    EXPECT_EQ(Convert::ToUInt32("42"), 42u);
+    EXPECT_EQ(Convert::ToUInt64("42"), 42ull);
+    EXPECT_EQ(Convert::ToUInt16("1000"), ushortcs(1000));
+    EXPECT_EQ(Convert::ToSByte("-1"), sbytecs(-1));
+}

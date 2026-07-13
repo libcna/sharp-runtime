@@ -2,10 +2,13 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Convert.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/OverflowException.hpp"
 #include "System/Boolean.hpp"
 #include "System/Double.hpp"
+#include "System/Int32.hpp"
+#include "System/Int64.hpp"
 #include "System/UInt32.hpp"
 #include "System/UInt64.hpp"
 
@@ -26,7 +29,15 @@ namespace System {
     using SharpRuntime::sbytecs;
 
     namespace {
+        // Used only by ToInt32(string, fromBase) now -- the plain decimal ToInt32(string)/
+        // ToInt64(string) overloads delegate to Int32::Parse/Int64::Parse below instead (see
+        // their comments). Real .NET's Convert.ToInt32(string, int fromBase) restricts fromBase
+        // to {2, 8, 10, 16} (ParseNumbers.StringToLong throws ArgumentException otherwise) --
+        // this previously accepted any base strtoll itself supports (0, 2-36), silently
+        // producing a result for a base real .NET would reject outright.
         intcs parseIntBase(const std::string& value, int base) {
+            if (base != 2 && base != 8 && base != 10 && base != 16)
+                throw System::ArgumentException("Invalid Base.");
             if (value.empty()) throw FormatException("Input string was not in a correct format.");
             errno = 0;
             char* end = nullptr;
@@ -40,7 +51,16 @@ namespace System {
     }
 
     intcs Convert::ToInt32(const std::string& value) {
-        return parseIntBase(value, 10);
+        // Verified against Convert.cs's ToInt32(string): delegates straight to int.Parse(value),
+        // whose default NumberStyles.Integer tolerates leading AND trailing whitespace (plus a
+        // leading sign). This previously reimplemented parsing inline via strtoll, which skips
+        // leading whitespace but rejects ANY trailing character including whitespace -- so
+        // Convert::ToInt32(" 42 ") (a very natural call, e.g. from ported C# reading user input)
+        // threw FormatException where real .NET succeeds. System::Int32::Parse already
+        // correctly implements this trim behavior (see its own doc comment), matching the
+        // established fix pattern already applied to ToDouble/ToBoolean/ToUInt32/ToUInt64
+        // below/above in this same file.
+        return Int32::Parse(value);
     }
     intcs Convert::ToInt32(double value) {
         if (value > INT_MAX || value < INT_MIN) throw OverflowException();
@@ -58,13 +78,10 @@ namespace System {
     }
 
     longcs Convert::ToInt64(const std::string& value) {
-        if (value.empty()) throw FormatException();
-        errno = 0;
-        char* end = nullptr;
-        long long result = std::strtoll(value.c_str(), &end, 10);
-        if (end == value.c_str() || *end != '\0') throw FormatException();
-        if (errno == ERANGE) throw OverflowException();
-        return static_cast<longcs>(result);
+        // Same fix and rationale as ToInt32(string) above -- delegates to Int64::Parse, which
+        // already correctly tolerates leading/trailing whitespace matching real .NET's
+        // long.Parse default NumberStyles.Integer.
+        return Int64::Parse(value);
     }
     longcs Convert::ToInt64(double value) { return static_cast<longcs>(value); }
 

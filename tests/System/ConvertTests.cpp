@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include "System/ArgumentException.hpp"
 #include "System/Convert.hpp"
 
 using System::Convert;
@@ -22,6 +23,31 @@ TEST(ConvertTests, ToInt32FromStringInvalidThrows) {
     EXPECT_THROW(Convert::ToInt32(std::string("abc")),   std::exception);
     EXPECT_THROW(Convert::ToInt32(std::string("")),      std::exception);
     EXPECT_THROW(Convert::ToInt32(std::string("1.5")),   std::exception);
+}
+
+// Regression tests for ticket 328: a raw string-literal argument (no explicit std::string(...)
+// wrapping -- exactly the form the tests above deliberately avoided) previously silently
+// resolved to the ToInt32(bool) overload instead of ToInt32(const std::string&): C++ overload
+// resolution always prefers a standard conversion (pointer-to-bool) over a user-defined one
+// (const char* -> std::string), regardless of which one the caller obviously meant. Convert::
+// ToInt32("42") returned 1 (true), not 42. Fixed by adding an explicit ToInt32(const char*)
+// overload (an exact-match candidate that wins over both). This bug affected essentially every
+// Convert::To* method with both a bool and a std::string overload (ToBoolean/ToByte/ToInt16/
+// ToInt32/ToInt64/ToDouble/ToSingle/ToUInt32/ToUInt64/ToUInt16/ToSByte) -- ToBoolean had
+// already been fixed; the other 10 had not.
+TEST(ConvertTests, ToInt32FromRawStringLiteral_ResolvesToStringOverload) {
+    EXPECT_EQ(Convert::ToInt32("42"), 42);
+    EXPECT_EQ(Convert::ToInt32("-7"), -7);
+}
+
+// Regression test for ticket 328: real .NET's Convert.ToInt32(string) delegates to
+// int.Parse(value), whose default NumberStyles.Integer tolerates leading AND trailing
+// whitespace. The port previously reimplemented parsing via strtoll directly, which rejects
+// any trailing character including whitespace -- Convert::ToInt32(" 42 ") threw
+// FormatException where real .NET succeeds.
+TEST(ConvertTests, ToInt32FromString_TrailingWhitespace_Tolerated) {
+    EXPECT_EQ(Convert::ToInt32(std::string(" 42 ")), 42);
+    EXPECT_EQ(Convert::ToInt32(std::string("\t-7\n")), -7);
 }
 
 TEST(ConvertTests, ToInt32FromBool) {
@@ -79,6 +105,15 @@ TEST(ConvertTests, ToInt32Base10) {
     EXPECT_EQ(Convert::ToInt32("42", 10), 42);
 }
 
+// Regression test for ticket 328: real .NET's Convert.ToInt32(string, int fromBase) restricts
+// fromBase to {2, 8, 10, 16}, throwing ArgumentException for anything else (ParseNumbers.
+// StringToLong). The port previously accepted any base strtoll itself supports (e.g. base 5),
+// silently producing a result real .NET would reject outright.
+TEST(ConvertTests, ToInt32InvalidBase_ThrowsArgumentException) {
+    EXPECT_THROW(Convert::ToInt32("42", 5), System::ArgumentException);
+    EXPECT_THROW(Convert::ToInt32("42", 3), System::ArgumentException);
+}
+
 // ---------------------------------------------------------------------------
 // ToInt64
 // ---------------------------------------------------------------------------
@@ -86,6 +121,15 @@ TEST(ConvertTests, ToInt32Base10) {
 TEST(ConvertTests, ToInt64FromString) {
     EXPECT_EQ(Convert::ToInt64(std::string("1000000000000")), 1000000000000LL);
     EXPECT_EQ(Convert::ToInt64(std::string("-1")),            -1LL);
+}
+
+// Regression tests for ticket 328 -- see the identical ToInt32 tests above for the full
+// rationale (raw string literal overload resolution, and trailing-whitespace tolerance).
+TEST(ConvertTests, ToInt64FromRawStringLiteral_ResolvesToStringOverload) {
+    EXPECT_EQ(Convert::ToInt64("100"), 100LL);
+}
+TEST(ConvertTests, ToInt64FromString_TrailingWhitespace_Tolerated) {
+    EXPECT_EQ(Convert::ToInt64(std::string("  100  ")), 100LL);
 }
 
 TEST(ConvertTests, ToInt64FromStringInvalidThrows) {
