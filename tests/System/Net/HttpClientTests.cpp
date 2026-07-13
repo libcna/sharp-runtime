@@ -21,6 +21,13 @@
 #include "System/Net/Http/StreamContent.hpp"
 #include "System/Net/Http/MultipartContent.hpp"
 #include "System/Net/Http/MultipartFormDataContent.hpp"
+#include "System/Net/Http/HttpMessageHandler.hpp"
+#include "System/Net/Http/DelegatingHandler.hpp"
+#include "System/Net/Http/HttpClientHandler.hpp"
+#include "System/Net/Cookie.hpp"
+#include "System/Net/CookieContainer.hpp"
+#include "System/Net/CookieException.hpp"
+#include "System/Uri.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/MemoryStream.hpp"
 #include "System/NotSupportedException.hpp"
@@ -29,6 +36,7 @@
 #include "System/ReadOnlyMemory.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using namespace System::Net::Http;
 using System::Net::HttpStatusCode;
@@ -766,4 +774,248 @@ TEST(HttpClientTests, ConnectionClosedBeforeContentLengthBytes_ThrowsHttpRequest
     EXPECT_THROW(client.GetString("http://127.0.0.1:" + std::to_string(port) + "/"), HttpRequestException);
 
     serverThread.join();
+}
+
+// ---------------------------------------------------------------------------
+// HttpMessageHandler / DelegatingHandler (ticket 1496)
+// ---------------------------------------------------------------------------
+
+namespace {
+// A DelegatingHandler spy that records whether it was invoked and injects a header, then
+// forwards to the real inner handler -- the classic auth-injection/logging middleware pattern.
+class SpyHandler : public DelegatingHandler {
+public:
+    explicit SpyHandler(std::shared_ptr<HttpMessageHandler> inner) : DelegatingHandler(std::move(inner)) {}
+
+    bool invoked = false;
+
+    std::shared_ptr<HttpResponseMessage> Send(std::shared_ptr<HttpRequestMessage> request) override {
+        invoked = true;
+        request->setHeader("X-Spy-Injected", "yes");
+        return DelegatingHandler::Send(std::move(request));
+    }
+};
+} // namespace
+
+TEST(HttpMessageHandlerTests, HttpClient_CustomHandlerChain_IsInvokedEndToEnd) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+
+    std::string receivedRequest;
+    std::thread serverThread([&]() {
+        auto server = listener->Accept();
+        std::vector<SharpRuntime::bytecs> reqBuf(4096);
+        SharpRuntime::intcs n = server->Receive(reqBuf);
+        receivedRequest.assign(reqBuf.begin(), reqBuf.begin() + n);
+        server->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        server->Close();
+    });
+
+    auto terminal = std::make_shared<HttpClientHandler>();
+    auto spy = std::make_shared<SpyHandler>(terminal);
+    HttpClient client(spy);
+
+    std::string body = client.GetString("http://127.0.0.1:" + std::to_string(port) + "/");
+    serverThread.join();
+
+    EXPECT_TRUE(spy->invoked);
+    EXPECT_EQ(body, "OK");
+    EXPECT_NE(receivedRequest.find("X-Spy-Injected: yes"), std::string::npos);
+}
+
+TEST(HttpMessageHandlerTests, DelegatingHandler_NoInnerHandler_Throws) {
+    DelegatingHandler handler;
+    auto req = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+    EXPECT_THROW(handler.Send(req), System::InvalidOperationException);
+}
+
+TEST(HttpMessageHandlerTests, DelegatingHandler_InnerHandlerProperty_RoundTrips) {
+    auto inner = std::make_shared<HttpClientHandler>();
+    DelegatingHandler handler(inner);
+    EXPECT_EQ(handler.getInnerHandlerProperty(), inner);
+}
+
+// ---------------------------------------------------------------------------
+// Cookie (ticket 1498)
+// ---------------------------------------------------------------------------
+
+using System::Net::Cookie;
+using System::Net::CookieContainer;
+using System::Net::CookieException;
+
+TEST(CookieTests, NameValue_ToString) {
+    Cookie c("session", "abc123");
+    EXPECT_EQ(c.ToString(), "session=abc123");
+}
+
+TEST(CookieTests, EmptyName_Throws) {
+    EXPECT_THROW(Cookie("", "v"), CookieException);
+}
+
+TEST(CookieTests, NameStartingWithDollar_Throws) {
+    EXPECT_THROW(Cookie("$reserved", "v"), CookieException);
+}
+
+TEST(CookieTests, NameWithEquals_Throws) {
+    EXPECT_THROW(Cookie("na=me", "v"), CookieException);
+}
+
+TEST(CookieTests, DefaultPath_IsRoot) {
+    Cookie c("a", "b");
+    EXPECT_EQ(c.getPathProperty(), "/");
+}
+
+TEST(CookieTests, Expired_SessionCookie_NeverExpires) {
+    Cookie c("a", "b");
+    EXPECT_FALSE(c.getExpiredProperty());
+}
+
+// ---------------------------------------------------------------------------
+// CookieContainer (ticket 1498)
+// ---------------------------------------------------------------------------
+
+TEST(CookieContainerTests, GetCookieHeader_ExactDomainMatch) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    container.Add(uri, Cookie("session", "abc"));
+    EXPECT_EQ(container.GetCookieHeader(uri), "session=abc");
+}
+
+TEST(CookieContainerTests, GetCookieHeader_DifferentDomain_NoLeak) {
+    CookieContainer container;
+    container.Add(System::Uri("http://example.com/"), Cookie("session", "abc"));
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://other.com/")), "");
+}
+
+TEST(CookieContainerTests, GetCookieHeader_LeadingDotDomain_MatchesSubdomain) {
+    CookieContainer container;
+    Cookie c("session", "abc");
+    c.setDomainProperty(".example.com");
+    container.Add(System::Uri("http://example.com/"), c);
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://api.example.com/")), "session=abc");
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://example.com/")), "session=abc");
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://notexample.com/")), "");
+}
+
+TEST(CookieContainerTests, GetCookieHeader_PathScoped_NoLeakOutsidePath) {
+    CookieContainer container;
+    Cookie c("session", "abc", "/api");
+    container.Add(System::Uri("http://example.com/api/"), c);
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://example.com/api/users")), "session=abc");
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://example.com/other")), "");
+}
+
+TEST(CookieContainerTests, GetCookieHeader_SecureCookie_OnlyOverHttps) {
+    CookieContainer container;
+    Cookie c("session", "abc");
+    c.setSecureProperty(true);
+    container.Add(System::Uri("http://example.com/"), c);
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("http://example.com/")), "");
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("https://example.com/")), "session=abc");
+}
+
+TEST(CookieContainerTests, GetCookieHeader_MultipleCookies_JoinedWithSemicolon) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    container.Add(uri, Cookie("a", "1"));
+    container.Add(uri, Cookie("b", "2"));
+    std::string header = container.GetCookieHeader(uri);
+    EXPECT_NE(header.find("a=1"), std::string::npos);
+    EXPECT_NE(header.find("b=2"), std::string::npos);
+    EXPECT_NE(header.find("; "), std::string::npos);
+}
+
+TEST(CookieContainerTests, SetCookies_ParsesNameValue) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    container.SetCookies(uri, "session=abc123");
+    EXPECT_EQ(container.GetCookieHeader(uri), "session=abc123");
+}
+
+TEST(CookieContainerTests, SetCookies_ParsesDomainAndPathAttributes) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    container.SetCookies(uri, "session=abc; Domain=.example.com; Path=/app; Secure; HttpOnly");
+    EXPECT_EQ(container.GetCookieHeader(System::Uri("https://sub.example.com/app/page")), "session=abc");
+}
+
+TEST(CookieContainerTests, SetCookies_MaxAgeZero_ExpiresImmediately) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    container.SetCookies(uri, "session=abc; Max-Age=0");
+    EXPECT_EQ(container.GetCookieHeader(uri), "");
+}
+
+TEST(CookieContainerTests, SetCookies_MissingEquals_Throws) {
+    CookieContainer container;
+    System::Uri uri("http://example.com/");
+    EXPECT_THROW(container.SetCookies(uri, "not-a-valid-cookie"), CookieException);
+}
+
+// ---------------------------------------------------------------------------
+// HttpClientHandler cookie wiring (ticket 1498) -- loopback server integration
+// ---------------------------------------------------------------------------
+
+TEST(HttpClientHandlerCookieTests, SetCookieResponse_CapturedAndSentOnNextRequest) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+    std::string base = "http://127.0.0.1:" + std::to_string(port);
+
+    std::string secondRequestRaw;
+    std::thread serverThread([&]() {
+        // First request: server issues a Set-Cookie.
+        auto s1 = listener->Accept();
+        std::vector<SharpRuntime::bytecs> buf1(4096);
+        s1->Receive(buf1);
+        s1->Send(toBytes(
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=xyz789; Path=/\r\nContent-Length: 2\r\n\r\nOK"));
+        s1->Close();
+
+        // Second request: client should now send the Cookie header back.
+        auto s2 = listener->Accept();
+        std::vector<SharpRuntime::bytecs> buf2(4096);
+        SharpRuntime::intcs n2 = s2->Receive(buf2);
+        secondRequestRaw.assign(buf2.begin(), buf2.begin() + n2);
+        s2->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        s2->Close();
+    });
+
+    HttpClient client;
+    client.GetString(base + "/login");
+    client.GetString(base + "/dashboard");
+    serverThread.join();
+
+    EXPECT_NE(secondRequestRaw.find("Cookie: sid=xyz789"), std::string::npos);
+}
+
+TEST(HttpClientHandlerCookieTests, UseCookies_False_DoesNotSendCapturedCookie) {
+    std::shared_ptr<System::Net::Sockets::Socket> listener;
+    SharpRuntime::intcs port = startMockHttpServer(listener);
+    std::string base = "http://127.0.0.1:" + std::to_string(port);
+
+    std::string secondRequestRaw;
+    std::thread serverThread([&]() {
+        auto s1 = listener->Accept();
+        std::vector<SharpRuntime::bytecs> buf1(4096);
+        s1->Receive(buf1);
+        s1->Send(toBytes(
+            "HTTP/1.1 200 OK\r\nSet-Cookie: sid=xyz789; Path=/\r\nContent-Length: 2\r\n\r\nOK"));
+        s1->Close();
+
+        auto s2 = listener->Accept();
+        std::vector<SharpRuntime::bytecs> buf2(4096);
+        SharpRuntime::intcs n2 = s2->Receive(buf2);
+        secondRequestRaw.assign(buf2.begin(), buf2.begin() + n2);
+        s2->Send(toBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"));
+        s2->Close();
+    });
+
+    auto handler = std::make_shared<HttpClientHandler>();
+    handler->setUseCookiesProperty(false);
+    HttpClient client(handler);
+    client.GetString(base + "/login");
+    client.GetString(base + "/dashboard");
+    serverThread.join();
+
+    EXPECT_EQ(secondRequestRaw.find("Cookie:"), std::string::npos);
 }

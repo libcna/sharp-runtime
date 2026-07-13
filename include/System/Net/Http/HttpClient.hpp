@@ -4,6 +4,7 @@
 #pragma once
 #include "System/Net/Http/HttpMethod.hpp"
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/HttpMessageHandler.hpp"
 #include "System/Net/Http/HttpRequestMessage.hpp"
 #include "System/Net/Http/HttpResponseMessage.hpp"
 #include "System/Threading/Tasks/Task.hpp"
@@ -31,7 +32,17 @@ namespace System::Net::Http {
  */
 class HttpClient {
 public:
+    /** Constructs an HttpClient backed by a default HttpClientHandler (plain-socket HTTP/1.1). */
     HttpClient();
+
+    /**
+     * Constructs an HttpClient that sends every request through @p handler instead of the
+     * default HttpClientHandler. C++ counterpart of .NET HttpClient(HttpMessageHandler).
+     * @p handler is typically a DelegatingHandler chain (auth injection, logging, retry
+     * policies, etc.) terminating in an HttpClientHandler that performs the actual socket I/O.
+     */
+    explicit HttpClient(std::shared_ptr<HttpMessageHandler> handler);
+
     ~HttpClient();
 
     // Non-copyable — sockets are not trivially copyable
@@ -111,6 +122,7 @@ public:
 private:
     std::string                                  baseAddress_;
     std::unordered_map<std::string, std::string> defaultHeaders_;
+    std::shared_ptr<HttpMessageHandler>           handler_;
 };
 
 } // namespace System::Net::Http
