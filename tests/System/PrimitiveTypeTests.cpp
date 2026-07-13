@@ -195,6 +195,11 @@ TEST(Int32Tests, DivRem_MinValueByNegativeOne_ThrowsOverflowException) {
 TEST(Int32Tests, Abs_Positive) { EXPECT_EQ(Int32::Abs(42), 42); }
 TEST(Int32Tests, Abs_Negative) { EXPECT_EQ(Int32::Abs(-42), 42); }
 TEST(Int32Tests, Abs_Zero)     { EXPECT_EQ(Int32::Abs(0), 0); }
+TEST(Int32Tests, Abs_MinValue_Throws) {
+    // Int16/Int64/SByte/Int128 all have this test already; Int32 (the most-used integer type in
+    // game code) was missing it despite Abs() being correctly implemented.
+    EXPECT_THROW(Int32::Abs(Int32::MinValue), System::OverflowException);
+}
 TEST(Int32Tests, CopySign_PositiveValuePositiveSign)  { EXPECT_EQ(Int32::CopySign(5, 3), 5); }
 TEST(Int32Tests, CopySign_PositiveValueNegativeSign)  { EXPECT_EQ(Int32::CopySign(5, -3), -5); }
 TEST(Int32Tests, CopySign_NegativeValuePositiveSign)  { EXPECT_EQ(Int32::CopySign(-5, 3), 5); }
