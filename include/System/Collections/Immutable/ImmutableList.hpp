@@ -21,6 +21,19 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Immutable.ImmutableList<T>.
  * Internally shares the underlying std::vector via shared_ptr; mutations return new instances.
  *
+ * Covers the core mutation/lookup surface (Add/AddRange/Insert/InsertRange/SetItem/Replace/
+ * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Contains/IndexOf/LastIndexOf/BinarySearch).
+ * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
+ * by an AVL tree, not a flat vector): Sort/Reverse (in-place-returning-new-instance variants),
+ * ForEach, the 3 CopyTo overloads, GetRange, ConvertAll<TOutput>, Exists/Find/FindAll/FindIndex/
+ * FindLast/FindLastIndex/TrueForAll, ToBuilder/Builder, RemoveRange(IEnumerable<T>), and every
+ * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
+ * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
+ * real gaps, not incorrect behavior for the surface that does exist -- left undone here rather
+ * than expanded ad hoc in a single audit pass; a full port would need an AVL/red-black backing
+ * structure to match .NET's O(log n) persistent-update complexity (this port's vector-copy
+ * approach is O(n) per mutation).
+ *
  * @tparam T The type of elements stored in the list.
  */
 template<typename T>
