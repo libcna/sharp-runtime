@@ -1,10 +1,68 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `ed58a5a`) — 12211 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `638741a`) — 12267 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12211 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12267 tests from 1218 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 1713 (systemic version-tracking, 11 files) fixed, all 7 P1 post-stabilization-audit tickets now done
+
+Continuing the same "postupně" (gradual, reduced-parallelism) pace. Ticket 1713 — the large
+systemic finding that ALL 11 generic collection types lack version tracking, so enumerators never
+detect concurrent modification — was deliberately deferred to its own dedicated round given its
+scope (per the ticket's own scope note anticipating this). Split into 3 forks of 3-4 files each
+(`--parallel 2` builds, same reduced pace as the first round), each applying the same proven
+fail-fast pattern already used by this codebase's legacy `ArrayList`/`Hashtable` types. Verified
+afterward via `git fetch`+`git log` (no local/origin divergence, all 3 commits landed cleanly), a
+fresh `cmake --build --parallel 2` + full test run (12267/12267), and personally read the most
+technically interesting diff (`Dictionary.hpp`'s deliberate .NET-parity deviation) directly.
+
+- **List/Dictionary/HashSet** (commit `638741a`): `List`'s existing `Enumerator` converted to
+  hold a parent pointer + version check. `Dictionary`/`HashSet` had no formal enumerator at all
+  (raw STL `begin()`/`end()`) — got a new `VersionCheckedIterator` wrapper. **Two deliberate,
+  clearly documented deviations from literal .NET parity, both for C++ memory safety**:
+  `Dictionary`/`HashSet`'s `Remove()`/`Clear()` bump `version_` here, even though real .NET's
+  don't (its array+free-list scheme is immune to this specific hazard) — this port's
+  `std::unordered_map`/`set` iterators are genuinely invalidated by erasing the
+  currently-iterated element, confirmed via an ASan use-after-free repro *during development,
+  before* adding the bump. A textbook case of "don't blindly copy .NET's exact behavior when the
+  underlying C++ container has different invalidation rules" — correctly caught rather than
+  shipping a literal-parity bug.
+- **LinkedList/Queue/Stack/SortedList** (commit `247910d`): `Queue`/`Stack` had ZERO enumeration
+  support at all (`std::queue`/`std::stack` adapters have no iterators) — switched both to
+  `std::deque` directly (their existing default backing container, so no behavioral change) to
+  unlock iteration, then added version-checked `GetEnumerator()` matching .NET's exact order.
+  **Bonus fix found while in the file**: `SortedList`'s non-const `operator[]` had the identical
+  silent-auto-insert bug as ticket 1712 (`Dictionary`/`SortedDictionary`) — a type that ticket
+  didn't cover — fixed with the same `ValueProxy` pattern.
+- **SortedDictionary/SortedSet/OrderedDictionary/PriorityQueue** (commit `7f12223`):
+  `SortedDictionary`/`SortedSet` exposed raw STL iterators (both already had a doc-comment
+  disclosing this as a known limitation) — replaced with a custom version-checked `Iterator`
+  class per type. `OrderedDictionary` used raw `std::vector` iterators (an undocumented
+  dangling-iterator risk on reallocation) — fixed with an index-based `Iterator` immune to
+  reallocation, confirmed via a 200-element forced-reallocation stress test.
+  **`PriorityQueue` confirmed genuinely out of scope** — it has no enumeration surface at all (no
+  `begin()`/`end()`, no `UnorderedItems`-equivalent) — correctly NOT modified rather than having
+  something manufactured to fit the ticket. `SortedSet`'s documented `GetViewBetween` live-view
+  semantics (an earlier session's separate decision) confirmed unaffected.
+
+Total: 74 new regression tests across the three commits, all flake-checked via repeated runs,
+every fix ASan/UBSan-repro-verified before landing.
+
+Final verified state: 12267/12267 tests passing (up from 12211 — 56 net new tests), 0 errors/0
+warnings, all 3 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+**All 7 P1 post-stabilization-audit tickets are now done.** Remaining: 11 P2/P3 tickets
+(1717-1726, 1728) plus ticket 1727 (needs-user-decision, still untouched, correctly not fixed
+without asking).
+
+### To resume
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo' ORDER BY priority, ticket_no;"` — 11
+tickets remain (1717-1726, 1728), all P2/P3, lower severity than the P1 batch just completed.
+Continue with the same reduced-parallelism ("postupně") pace. Ticket 1727 stays untouched
+pending explicit user decision.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — first 6 post-stabilization-audit tickets fixed (all P1), 3 reduced-parallelism forks
 
