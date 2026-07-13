@@ -1,10 +1,30 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1e47b40`) — 11813 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `e6157c7`) — 11815 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11813 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11815 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 332-333 closed
+
+Continuing the same autonomous run (previous checkpoint covered 330-331). Commit: e6157c7 —
+pushed to `origin/feature/work`.
+
+- **332 (Linq.hpp)**: `OrderBy`/`OrderByDescending` used `std::sort`, which the C++ standard does
+  NOT guarantee stable — but real .NET's `Enumerable.OrderBy`/`OrderByDescending` are explicitly
+  documented and guaranteed stable sorts (equal-key elements preserve original relative order),
+  confirmed against the reference source's own internal machinery
+  (`ImplicitlyStableOrderedIterator` exists specifically to preserve this). Switched both to
+  `std::stable_sort`.
+- **333 (Immutable/ImmutableSortedDictionary.hpp)**: clean audit — this file already had
+  extensive recent work (custom-comparer support, Add/AddRange semantics verified against the
+  actual `SetOrAdd` reference source).
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 330-331 closed, both clean audits
 
