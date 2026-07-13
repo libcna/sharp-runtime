@@ -4,10 +4,13 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/TextElementEnumerator.hpp"
 
 namespace System::Globalization {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief Provides iteration over and retrieval of text elements in a string.
@@ -58,8 +61,8 @@ public:
      * Stub — returns the byte length of the string.
      * @return The number of text elements (bytes in this implementation).
      */
-    [[nodiscard]] int getLengthInTextElementsProperty() const {
-        return static_cast<int>(string_.size());
+    [[nodiscard]] intcs getLengthInTextElementsProperty() const {
+        return static_cast<intcs>(string_.size());
     }
 
     /**
@@ -70,9 +73,9 @@ public:
      * @return The substring from @p startingTextElement to the end.
      * @throws System::ArgumentOutOfRangeException if @p startingTextElement is out of range.
      */
-    [[nodiscard]] std::string SubstringByTextElements(int startingTextElement) const {
+    [[nodiscard]] std::string SubstringByTextElements(intcs startingTextElement) const {
         return SubstringByTextElements(startingTextElement,
-                                       static_cast<int>(string_.size()) - startingTextElement);
+                                       static_cast<intcs>(string_.size()) - startingTextElement);
     }
 
     /**
@@ -85,8 +88,8 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p startingTextElement or
      *         @p lengthInTextElements is negative or out of range for the string.
      */
-    [[nodiscard]] std::string SubstringByTextElements(int startingTextElement,
-                                                       int lengthInTextElements) const {
+    [[nodiscard]] std::string SubstringByTextElements(intcs startingTextElement,
+                                                       intcs lengthInTextElements) const {
         size_t length = string_.size();
         if (static_cast<unsigned int>(startingTextElement) >= static_cast<unsigned int>(length)) {
             throw System::ArgumentOutOfRangeException("startingTextElement");
@@ -115,7 +118,7 @@ public:
      *         `(uint)index > (uint)str.Length` check, which relies on unsigned wraparound to
      *         catch negative values too).
      */
-    static std::string GetNextTextElement(const std::string& str, int index = 0) {
+    static std::string GetNextTextElement(const std::string& str, intcs index = 0) {
         if (index < 0 || index > static_cast<int>(str.size()))
             throw System::ArgumentOutOfRangeException("index");
         if (index == static_cast<int>(str.size())) return {};
@@ -135,7 +138,7 @@ public:
      *         str.size(). Previously a negative index fell through to `return 1` instead of
      *         throwing (StringInfo.cs validates the same way as GetNextTextElement).
      */
-    static int GetNextTextElementLength(const std::string& str, int index = 0) {
+    static intcs GetNextTextElementLength(const std::string& str, intcs index = 0) {
         if (index < 0 || index > static_cast<int>(str.size()))
             throw System::ArgumentOutOfRangeException("index");
         if (index == static_cast<int>(str.size())) return 0;
@@ -150,10 +153,10 @@ public:
      * @param str The source string.
      * @return A vector of zero-based byte indices, one per character in @p str.
      */
-    static std::vector<int> ParseCombiningCharacters(const std::string& str) {
-        std::vector<int> result;
+    static std::vector<intcs> ParseCombiningCharacters(const std::string& str) {
+        std::vector<intcs> result;
         result.reserve(str.size());
-        for (int i = 0; i < static_cast<int>(str.size()); ++i)
+        for (intcs i = 0; i < static_cast<intcs>(str.size()); ++i)
             result.push_back(i);
         return result;
     }
@@ -178,7 +181,7 @@ public:
      * @return A TextElementEnumerator positioned before the first element at @p index.
      * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than the string length.
      */
-    static TextElementEnumerator GetTextElementEnumerator(const std::string& str, int index) {
+    static TextElementEnumerator GetTextElementEnumerator(const std::string& str, intcs index) {
         if (index < 0 || index > static_cast<int>(str.size()))
             throw System::ArgumentOutOfRangeException("index");
         return TextElementEnumerator(str.substr(index));
