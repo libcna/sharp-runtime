@@ -1,10 +1,46 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `458199e`) — 11823 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `e14ac46`) — 11837 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11823 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11837 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 339-340 closed
+
+Continuing the same autonomous run (previous checkpoint covered 336-338). Commits: 79bc288,
+e14ac46 — both pushed to `origin/feature/work`.
+
+- **339 (Collections/ObjectModel/Collection.hpp)**: `CopyTo`'s bounds check `index +
+  getCountProperty() > destination.size()` is signed-integer-overflow UB for a large index
+  (confirmed via UBSan) — and worse than UB in the abstract: the wraparound can make the check
+  evaluate false when it should be true, silently skipping the `ArgumentException` throw and
+  letting the copy loop write out of bounds into the destination vector. Rewrote as a
+  subtraction-based check matching `List<T>.CopyTo`'s own `array.Length - arrayIndex < Count`
+  idiom. The identical copy-pasted code in the sibling `ReadOnlyCollection.hpp` (no dedicated
+  ticket) had the same bug and was fixed too. Also documented (not code-fixed — out of scope for
+  a single ticket) a structural gap: `Collection<T>::operator[]` returns a plain `T&`, so direct
+  index assignment bypasses the virtual `SetItem()` hook, a real issue for `KeyedCollection`
+  whose `SetItem` override rebuilds an internal key index — mirrors an already-accepted
+  precedent in this codebase (`KeyedCollection`'s own key-based `operator[]` carries the same
+  kind of caveat about `ChangeItemKey()`).
+- **340 (Uri.cpp)**: four bugs found via a full audit against `Uri.cs`/`UriExt.cs`/
+  `DomainNameHelper.cs`. (1) A malformed port (non-numeric or > 65535) silently corrupted
+  `host_` into the whole `"host:badport"` text instead of throwing `UriFormatException`
+  (matching .NET's `ParsingError.BadPort`) — now validated properly. (2)
+  `getIsLoopbackProperty()`'s `host_ == "::1"` check was unreachable dead code since a parsed
+  IPv6 literal's `host_` always retains its brackets (`"[::1]"`, matching .NET's own bracketed
+  `Host` property) — fixed the comparison and made `"localhost"` case-insensitive. (3) The
+  `Uri(baseUri, relativeUri)` combine constructor only recognized a `"scheme://..."` relativeUri
+  as already-absolute, missing the opaque `"scheme:rest"` form (`mailto:`, `urn:`, `tel:`) —
+  fixed by reusing `findSchemeColon()`, already defined in the same file for this exact
+  detection in `parse()`. (4) The combine constructor's merged-authority reconstruction dropped
+  the base URI's `userInfo_` entirely (RFC 3986 §5.3 requires it to carry over) — fixed.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 336-338 closed
 
