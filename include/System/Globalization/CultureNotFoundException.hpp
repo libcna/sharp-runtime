@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdio>
 #include "System/ArgumentException.hpp"
 
 namespace System::Globalization {
@@ -16,6 +17,25 @@ namespace System::Globalization {
 class CultureNotFoundException : public System::ArgumentException {
     std::string invalidCultureName_;
     int invalidCultureId_ = -1;
+
+    /** @brief Formats an LCID as real .NET's "{0} (0x{0:x4})" -- e.g. 99 -> "99 (0x0063)". */
+    static std::string formatCultureId(int id) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%d (0x%04x)", id, id);
+        return buf;
+    }
+
+    /**
+     * @brief Composes the full exception message, matching real .NET's Message override:
+     * base message (with the "(Parameter 'x')" marker already appended, if @p paramName is
+     * non-empty) followed by a newline and "{value} is an invalid culture identifier.",
+     * where {value} is the invalid culture name or a formatted LCID.
+     */
+    static std::string composeMessage(const std::string& message, const std::string& paramName,
+                                       const std::string& invalidCultureValue) {
+        std::string base = paramName.empty() ? message : AppendParamNameSuffix(message, paramName);
+        return base + "\n" + invalidCultureValue + " is an invalid culture identifier.";
+    }
 
 public:
     /**
@@ -64,7 +84,8 @@ public:
      */
     CultureNotFoundException(const std::string& paramName, const std::string& invalidCultureName,
                              const std::string& message)
-        : ArgumentException(message, paramName),
+        : ArgumentException(composeMessage(message, paramName, invalidCultureName), paramName,
+                             AlreadyComposedTag{}),
           invalidCultureName_(invalidCultureName) {}
 
     /**
@@ -77,7 +98,7 @@ public:
      */
     CultureNotFoundException(const std::string& message, const std::string& invalidCultureName,
                              std::exception_ptr inner)
-        : ArgumentException(message, std::move(inner)),
+        : ArgumentException(composeMessage(message, "", invalidCultureName), std::move(inner)),
           invalidCultureName_(invalidCultureName) {}
 
     /**
@@ -90,7 +111,7 @@ public:
      */
     CultureNotFoundException(const std::string& message, int invalidCultureId,
                              std::exception_ptr inner)
-        : ArgumentException(message, std::move(inner)),
+        : ArgumentException(composeMessage(message, "", formatCultureId(invalidCultureId)), std::move(inner)),
           invalidCultureId_(invalidCultureId) {}
 
     /**
@@ -103,7 +124,8 @@ public:
      */
     CultureNotFoundException(const std::string& paramName, int invalidCultureId,
                              const std::string& message)
-        : ArgumentException(message, paramName),
+        : ArgumentException(composeMessage(message, paramName, formatCultureId(invalidCultureId)),
+                             paramName, AlreadyComposedTag{}),
           invalidCultureId_(invalidCultureId) {}
 
     /**

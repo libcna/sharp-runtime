@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/DateOnly.hpp"
 #include "System/DateTime.hpp"
 #include "System/DayOfWeek.hpp"
+#include "System/TimeOnly.hpp"
 
 namespace System::Globalization {
 
@@ -36,6 +38,16 @@ public:
     }
 
     /**
+     * @brief Returns the ISO 8601 week number for the given date.
+     * C++ counterpart of .NET ISOWeek.GetWeekOfYear(DateOnly).
+     * @param date The date to query.
+     * @return The ISO 8601 week number (1–53).
+     */
+    static int GetWeekOfYear(const System::DateOnly& date) {
+        return GetWeekOfYear(date.ToDateTime(System::TimeOnly()));
+    }
+
+    /**
      * @brief Returns the ISO 8601 week-year for the given date.
      *
      * C++ counterpart of .NET ISOWeek.GetYear(DateTime).
@@ -49,6 +61,16 @@ public:
         if (week < MinWeek) return year - 1;
         if (week > 52 && GetWeeksInYear(year) == 52) return year + 1;
         return year;
+    }
+
+    /**
+     * @brief Returns the ISO 8601 week-year for the given date.
+     * C++ counterpart of .NET ISOWeek.GetYear(DateOnly).
+     * @param date The date to query.
+     * @return The ISO 8601 week-year.
+     */
+    static int GetYear(const System::DateOnly& date) {
+        return GetYear(date.ToDateTime(System::TimeOnly()));
     }
 
     /**
@@ -91,6 +113,20 @@ public:
         int correction = isoWeekday(jan4.getDayOfWeekProperty()) + 3;
         int ordinal = (week * 7) + isoWeekday(dayOfWeek) - correction;
         return jan4.AddDays(ordinal - 4);
+    }
+
+    /**
+     * @brief Maps an ISO week date to the equivalent Gregorian DateOnly.
+     *
+     * C++ counterpart of .NET ISOWeek.ToDateOnly(int, int, DayOfWeek).
+     * @param year      The ISO week-numbering year (1–9999).
+     * @param week      The ISO week number (1–53).
+     * @param dayOfWeek The day of week within the ISO week (Sunday may be given as 0 or 7).
+     * @return The Gregorian DateOnly equivalent to the given ISO week date.
+     * @throws System::ArgumentOutOfRangeException if @p year, @p week, or @p dayOfWeek is out of range.
+     */
+    static System::DateOnly ToDateOnly(int year, int week, System::DayOfWeek dayOfWeek) {
+        return System::DateOnly::FromDateTime(ToDateTime(year, week, dayOfWeek));
     }
 
     /**
