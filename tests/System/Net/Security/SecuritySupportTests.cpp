@@ -76,3 +76,19 @@ TEST(SslApplicationProtocolTests, GetHashCode_MatchesForEqualProtocols) {
     SslApplicationProtocol b("h2");
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
+
+TEST(SslApplicationProtocolTests, ToString_InvalidUtf8_FallsBackToHexDump) {
+    std::vector<SharpRuntime::bytecs> bytes{
+        static_cast<SharpRuntime::bytecs>(0xFF), static_cast<SharpRuntime::bytecs>(0x00),
+        static_cast<SharpRuntime::bytecs>(0xAB)};
+    SslApplicationProtocol proto(bytes);
+    EXPECT_EQ(proto.ToString(), "0xff 0x00 0xab");
+}
+
+TEST(SslApplicationProtocolTests, ToString_ValidUtf8_DecodesAsText) {
+    std::vector<SharpRuntime::bytecs> bytes{
+        static_cast<SharpRuntime::bytecs>('a'), static_cast<SharpRuntime::bytecs>('b'),
+        static_cast<SharpRuntime::bytecs>('c')};
+    SslApplicationProtocol proto(bytes);
+    EXPECT_EQ(proto.ToString(), "abc");
+}
