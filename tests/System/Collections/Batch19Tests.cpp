@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <type_traits>
 
 using System::Collections::ObjectModel::ObservableCollection;
 using System::Collections::ObjectModel::ReadOnlyObservableCollection;
@@ -93,6 +94,17 @@ TEST(ReadOnlyObservableCollectionBatch19Test, ForwardsCollectionChangedFromSourc
     src->Add(42);
     EXPECT_TRUE(fired);
 }
+
+// The constructor registers a forwarding callback with the shared source that captures `this`.
+// Copying or moving the wrapper would leave that callback pointing at the wrong (or, once the
+// original is destroyed, dangling) object while the shared source keeps invoking it -- confirmed
+// via an ASan repro (stack-use-after-scope) before this class was made non-copyable/non-movable.
+// This static_assert is the regression guard: it fails to compile if copy/move is ever
+// re-enabled without an accompanying re-registration fix.
+static_assert(!std::is_copy_constructible_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_copy_assignable_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_move_constructible_v<ReadOnlyObservableCollection<int>>);
+static_assert(!std::is_move_assignable_v<ReadOnlyObservableCollection<int>>);
 
 // ===========================================================================
 // ReadOnlySet
