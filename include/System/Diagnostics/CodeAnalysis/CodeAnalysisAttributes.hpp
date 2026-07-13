@@ -4,6 +4,7 @@
 #pragma once
 #include <any>
 #include <string>
+#include <vector>
 #include "System/Attribute.hpp"
 
 namespace System::Diagnostics::CodeAnalysis {
@@ -75,40 +76,54 @@ namespace System::Diagnostics::CodeAnalysis {
         [[nodiscard]] bool getParameterValueProperty() const { return parameterValue_; }
     };
 
-    /** @brief Specifies that the named member is non-null when the method returns. */
+    /** @brief Specifies that the named member(s) are non-null when the method returns. */
     class MemberNotNullAttribute : public System::Attribute {
-        std::string member_;
+        std::vector<std::string> members_;
     public:
         /**
-         * @brief Constructs the attribute for the specified member name.
-         * @param m Name of the member that is not null after the method returns.
+         * @brief Constructs the attribute for a single member name.
+         * @param member Name of the member that is not null after the method returns.
          */
-        explicit MemberNotNullAttribute(const std::string& m) : member_(m) {}
-        /** @return The name of the member guaranteed to be non-null on return. */
-        [[nodiscard]] const std::string& getMemberProperty() const { return member_; }
+        explicit MemberNotNullAttribute(const std::string& member) : members_{member} {}
+        /**
+         * @brief Constructs the attribute for multiple member names.
+         * @param members Names of the members that are not null after the method returns.
+         */
+        explicit MemberNotNullAttribute(std::vector<std::string> members) : members_(std::move(members)) {}
+        /** @return The names of the members guaranteed to be non-null on return. */
+        [[nodiscard]] const std::vector<std::string>& getMembersProperty() const { return members_; }
     };
 
-    /** @brief Specifies that the named member is non-null when the method returns the specified Boolean value. */
+    /** @brief Specifies that the named member(s) are non-null when the method returns the specified Boolean value. */
     class MemberNotNullWhenAttribute : public System::Attribute {
         bool returnValue_;
-        std::string member_;
+        std::vector<std::string> members_;
     public:
         /**
-         * @brief Constructs the attribute with the triggering return value and member name.
-         * @param rv The Boolean return value that indicates the member is not null.
-         * @param m  Name of the member that is not null when the method returns @p rv.
+         * @brief Constructs the attribute with the triggering return value and a single member name.
+         * @param returnValue The Boolean return value that indicates the member is not null.
+         * @param member      Name of the member that is not null when the method returns @p returnValue.
          */
-        MemberNotNullWhenAttribute(bool rv, const std::string& m) : returnValue_(rv), member_(m) {}
+        MemberNotNullWhenAttribute(bool returnValue, const std::string& member)
+            : returnValue_(returnValue), members_{member} {}
+        /**
+         * @brief Constructs the attribute with the triggering return value and multiple member names.
+         * @param returnValue The Boolean return value that indicates the members are not null.
+         * @param members     Names of the members that are not null when the method returns @p returnValue.
+         */
+        MemberNotNullWhenAttribute(bool returnValue, std::vector<std::string> members)
+            : returnValue_(returnValue), members_(std::move(members)) {}
         /** @return The Boolean return value that triggers the not-null member postcondition. */
-        [[nodiscard]] bool getReturnValueProperty()        const { return returnValue_; }
-        /** @return The name of the member guaranteed to be non-null for the specified return value. */
-        [[nodiscard]] const std::string& getMemberProperty() const { return member_; }
+        [[nodiscard]] bool getReturnValueProperty() const { return returnValue_; }
+        /** @return The names of the members guaranteed to be non-null for the specified return value. */
+        [[nodiscard]] const std::vector<std::string>& getMembersProperty() const { return members_; }
     };
 
     /** @brief Indicates that the annotated member requires unreferenced code and may break when trimmed. */
     class RequiresUnreferencedCodeAttribute : public System::Attribute {
         std::string message_;
         std::string url_;
+        bool excludeStatics_ = false;
     public:
         /**
          * @brief Constructs the attribute with a diagnostic message and optional URL.
@@ -121,12 +136,17 @@ namespace System::Diagnostics::CodeAnalysis {
         [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
         /** @return Optional URL with further documentation; empty if not set. */
         [[nodiscard]] const std::string& getUrlProperty()     const { return url_; }
+        /** @return True if the annotation should not apply to static members. */
+        [[nodiscard]] bool getExcludeStaticsProperty() const { return excludeStatics_; }
+        /** @brief Sets whether the annotation should not apply to static members. */
+        void setExcludeStaticsProperty(bool v) { excludeStatics_ = v; }
     };
 
     /** @brief Indicates that the annotated member requires dynamic code and may break in AOT environments. */
     class RequiresDynamicCodeAttribute : public System::Attribute {
         std::string message_;
         std::string url_;
+        bool excludeStatics_ = false;
     public:
         /**
          * @brief Constructs the attribute with a diagnostic message and optional URL.
@@ -139,6 +159,10 @@ namespace System::Diagnostics::CodeAnalysis {
         [[nodiscard]] const std::string& getMessageProperty() const { return message_; }
         /** @return Optional URL with further documentation; empty if not set. */
         [[nodiscard]] const std::string& getUrlProperty()     const { return url_; }
+        /** @return True if the annotation should not apply to static members. */
+        [[nodiscard]] bool getExcludeStaticsProperty() const { return excludeStatics_; }
+        /** @brief Sets whether the annotation should not apply to static members. */
+        void setExcludeStaticsProperty(bool v) { excludeStatics_ = v; }
     };
 
     /** @brief Excludes the attributed type or member from code coverage analysis. */
@@ -154,6 +178,8 @@ namespace System::Diagnostics::CodeAnalysis {
         explicit ExcludeFromCodeCoverageAttribute(const std::string& j) : justification_(j) {}
         /** @return The justification for excluding from code coverage; empty if not set. */
         [[nodiscard]] const std::string& getJustificationProperty() const { return justification_; }
+        /** @brief Sets the justification for excluding from code coverage. */
+        void setJustificationProperty(const std::string& v) { justification_ = v; }
     };
 
     /** @brief Suppresses a specific static-analysis rule violation for the attributed member. */
@@ -201,11 +227,14 @@ namespace System::Diagnostics::CodeAnalysis {
      */
     class StringSyntaxAttribute : public System::Attribute {
         std::string syntax_;
+        std::vector<std::any> arguments_;
     public:
         static constexpr const char* CompositeFormat = "CompositeFormat"; ///< .NET composite format string.
+        static constexpr const char* CSharp           = "C#";             ///< C# code syntax.
         static constexpr const char* DateOnlyFormat   = "DateOnlyFormat"; ///< Date-only format string.
         static constexpr const char* DateTimeFormat   = "DateTimeFormat"; ///< Date and time format string.
         static constexpr const char* EnumFormat       = "EnumFormat";     ///< Enum format string.
+        static constexpr const char* FSharp           = "F#";             ///< F# code syntax.
         static constexpr const char* GuidFormat       = "GuidFormat";     ///< GUID format string.
         static constexpr const char* Json             = "Json";           ///< JSON syntax.
         static constexpr const char* NumericFormat    = "NumericFormat";  ///< Numeric format string.
@@ -213,6 +242,7 @@ namespace System::Diagnostics::CodeAnalysis {
         static constexpr const char* TimeOnlyFormat   = "TimeOnlyFormat"; ///< Time-only format string.
         static constexpr const char* TimeSpanFormat   = "TimeSpanFormat"; ///< TimeSpan format string.
         static constexpr const char* Uri              = "Uri";            ///< URI syntax.
+        static constexpr const char* VisualBasic      = "Visual Basic";   ///< Visual Basic code syntax.
         static constexpr const char* Xml              = "Xml";            ///< XML syntax.
 
         /**
@@ -220,8 +250,17 @@ namespace System::Diagnostics::CodeAnalysis {
          * @param syntax One of the predefined syntax constants or a custom identifier.
          */
         explicit StringSyntaxAttribute(const std::string& syntax) : syntax_(syntax) {}
+        /**
+         * @brief Constructs the attribute with the specified syntax kind and syntax-specific arguments.
+         * @param syntax    One of the predefined syntax constants or a custom identifier.
+         * @param arguments Optional arguments associated with the specific syntax employed.
+         */
+        StringSyntaxAttribute(const std::string& syntax, std::vector<std::any> arguments)
+            : syntax_(syntax), arguments_(std::move(arguments)) {}
         /** @return The syntax kind identifier for this parameter or return value. */
         [[nodiscard]] const std::string& getSyntaxProperty() const { return syntax_; }
+        /** @return Optional arguments associated with the specific syntax employed; empty if not set. */
+        [[nodiscard]] const std::vector<std::any>& getArgumentsProperty() const { return arguments_; }
     };
 
     /** @brief Indicates that the specified method parameter expects a constant, with optional bounds. */
