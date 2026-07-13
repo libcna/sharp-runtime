@@ -21,6 +21,7 @@ namespace System {
     template<typename T>
     class SpanSplitEnumerator {
     public:
+        /** @brief The separator-matching strategy: a single element, any of a set, or an exact subsequence. */
         enum class Mode { SingleElement, AnyOf, Sequence };
 
     private:

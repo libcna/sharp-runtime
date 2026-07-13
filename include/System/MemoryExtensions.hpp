@@ -171,6 +171,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static bool Contains(Span<T> span, const T& value) {
             return Contains(ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()), value);
         }
@@ -238,6 +239,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static SharpRuntime::intcs IndexOf(Span<T> span, const T& value) {
             return IndexOf(ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()), value);
         }
@@ -284,6 +286,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static SharpRuntime::intcs LastIndexOf(Span<T> span, const T& value) {
             return LastIndexOf(ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()), value);
         }
@@ -331,6 +334,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static bool SequenceEqual(Span<T> a, Span<T> b) {
             return SequenceEqual(
                 ReadOnlySpan<T>(a.getPointer(), a.getLengthProperty()),
@@ -376,6 +380,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static SharpRuntime::intcs Count(Span<T> span, const T& value) {
             return Count(ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()), value);
         }
@@ -423,6 +428,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         static void CopyTo(Span<T> source, Span<T> destination) {
             CopyTo(ReadOnlySpan<T>(source.getPointer(), source.getLengthProperty()), destination);
         }
@@ -475,6 +481,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static SharpRuntime::intcs BinarySearch(Span<T> span, const T& value) {
             return BinarySearch(ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()), value);
         }
@@ -525,6 +532,7 @@ namespace System {
         }
 
         template<typename T>
+        /** @brief Span<T> overload; see the ReadOnlySpan<T> overload above. */
         [[nodiscard]] static bool Overlaps(Span<T> span, Span<T> other) {
             return Overlaps(
                 ReadOnlySpan<T>(span.getPointer(), span.getLengthProperty()),
