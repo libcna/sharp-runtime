@@ -147,6 +147,29 @@ TEST(GZipStreamTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(gz.Close());
 }
 
+TEST(GZipStreamTests, CompressThenDecompress_Roundtrip) {
+    MemoryStream compressed;
+    {
+        GZipStream gz(&compressed, CompressionMode::Compress, /*leaveOpen=*/true);
+        std::string payload = "GZipStream roundtrip payload, long enough to compress well.";
+        gz.Write(reinterpret_cast<const uint8_t*>(payload.data()), 0, static_cast<int>(payload.size()));
+        gz.Close();
+    }
+
+    const auto& buf = compressed.ToArray();
+    // A gzip stream starts with the fixed 2-byte magic number 0x1F 0x8B.
+    ASSERT_GE(buf.size(), 2u);
+    EXPECT_EQ(buf[0], 0x1Fu);
+    EXPECT_EQ(buf[1], 0x8Bu);
+
+    MemoryStream source(buf.data(), static_cast<int>(buf.size()));
+    GZipStream ungz(&source, CompressionMode::Decompress, /*leaveOpen=*/true);
+    uint8_t out[128] = {};
+    int n = ungz.Read(out, 0, 128);
+    std::string result(reinterpret_cast<char*>(out), static_cast<size_t>(n));
+    EXPECT_EQ(result, "GZipStream roundtrip payload, long enough to compress well.");
+}
+
 // ===========================================================================
 // DeflateStream
 // ===========================================================================
@@ -199,6 +222,26 @@ TEST(DeflateStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_NO_THROW(ds.Close());
+}
+
+TEST(DeflateStreamTests, CompressThenDecompress_Roundtrip) {
+    MemoryStream compressed;
+    {
+        DeflateStream ds(&compressed, CompressionMode::Compress, /*leaveOpen=*/true);
+        std::string payload = "DeflateStream roundtrip payload, long enough to compress well.";
+        ds.Write(reinterpret_cast<const uint8_t*>(payload.data()), 0, static_cast<int>(payload.size()));
+        ds.Close();
+    }
+
+    const auto& buf = compressed.ToArray();
+    ASSERT_GT(buf.size(), 0u);
+
+    MemoryStream source(buf.data(), static_cast<int>(buf.size()));
+    DeflateStream unds(&source, CompressionMode::Decompress, /*leaveOpen=*/true);
+    uint8_t out[128] = {};
+    int n = unds.Read(out, 0, 128);
+    std::string result(reinterpret_cast<char*>(out), static_cast<size_t>(n));
+    EXPECT_EQ(result, "DeflateStream roundtrip payload, long enough to compress well.");
 }
 
 // ===========================================================================
@@ -730,6 +773,16 @@ TEST(DeflateEncoderDecoderTests, GetMaxCompressedLength_Positive) {
 
 TEST(DeflateEncoderDecoderTests, GetMaxCompressedLength_NegativeThrows) {
     EXPECT_THROW(DeflateEncoder::GetMaxCompressedLength(-1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test: for inputs above 2^31, GetMaxCompressedLength must not truncate the length
+// through a 32-bit zlib uLong before computing the bound (a real hazard on platforms where
+// `unsigned long` is 32 bits, e.g. Windows) -- it must use the managed zlib-ng formula fallback
+// instead and still return a value strictly larger than the (untruncated) input.
+TEST(DeflateEncoderDecoderTests, GetMaxCompressedLength_AboveTwoGiB_DoesNotTruncate) {
+    const SharpRuntime::longcs above2GiB = (SharpRuntime::longcs(1) << 31) + 12345;
+    SharpRuntime::longcs bound = DeflateEncoder::GetMaxCompressedLength(above2GiB);
+    EXPECT_GT(bound, above2GiB);
 }
 
 // ===========================================================================
