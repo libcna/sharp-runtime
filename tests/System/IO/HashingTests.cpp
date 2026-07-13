@@ -569,6 +569,33 @@ TEST(HashingTests, XxHash3_Hash_DestinationTooShort_Throws) {
     EXPECT_THROW(XxHash3::Hash(data.data(), 3, dest, 7), System::ArgumentException);
 }
 
+// Regression tests for ticket 355: a negative length previously wrapped to a huge value once
+// cast to unsigned (confirmed via a standalone repro), turning the internal memcpy call into an
+// immediate crash / massive out-of-bounds access -- a severe memory-safety bug, not just abstract
+// UB. Fixed at both the one-shot hashing entry points (HashToUInt64Impl) and the shared streaming
+// Append() (used by both XxHash3 and XxHash128).
+TEST(HashingTests, XxHash3_HashToUInt64_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    EXPECT_THROW(XxHash3::HashToUInt64(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash3_Hash_NegativeLength_Throws) {
+    auto data = bytes("abc");
+    EXPECT_THROW(XxHash3::Hash(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash3_Append_NegativeLength_Throws) {
+    XxHash3 h;
+    auto data = bytes("abc");
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
+TEST(HashingTests, XxHash128_Append_NegativeLength_Throws) {
+    XxHash128 h;
+    auto data = bytes("abc");
+    EXPECT_THROW(h.Append(data.data(), -1), System::ArgumentOutOfRangeException);
+}
+
 // ---------------------------------------------------------------------------
 // XxHash128 — official .NET test vectors (github.com/dotnet/runtime XxHash128Tests.cs)
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Hashing/XxHash3Shared.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include <cstring>
 
 namespace System::IO::Hashing::Detail::XxHash3Shared {
@@ -258,6 +259,17 @@ namespace System::IO::Hashing::Detail::XxHash3Shared {
     }
 
     void Append(State& state, const bytecs* source, intcs length) {
+        // Confirmed via a standalone repro that a negative length is a severe, immediate memory-
+        // safety bug here, not just abstract UB: static_cast<size_t>(length) below (in the
+        // small-input memcpy path a few lines down) wraps a negative intcs to a value near
+        // SIZE_MAX (e.g. -1 -> 18446744073709551615 on a 64-bit build), turning the memcpy call
+        // into an immediate crash / massive out-of-bounds read-and-write. Unlike .NET's
+        // ReadOnlySpan<byte>, whose Length can never be negative through any normal
+        // construction path, this port's raw-pointer-plus-intcs-length API has no such inherent
+        // guarantee, so it must be validated explicitly at this shared entry point (used by both
+        // XxHash3::Append and XxHash128::Append).
+        if (length < 0)
+            throw System::ArgumentOutOfRangeException("length", "Non-negative number required.");
         state.TotalLength += static_cast<ulongcs>(length);
 
         bytecs* buffer = state.Buffer;
