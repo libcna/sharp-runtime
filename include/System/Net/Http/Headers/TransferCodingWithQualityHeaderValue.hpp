@@ -20,7 +20,7 @@ namespace System::Net::Http::Headers {
         explicit TransferCodingWithQualityHeaderValue(const std::string& value);
         /**
          * @brief Constructs a value with the given transfer-coding token and quality factor.
-         * @throws std::out_of_range if @p quality is outside [0.0, 1.0].
+         * @throws System::ArgumentOutOfRangeException if @p quality is outside [0.0, 1.0].
          */
         TransferCodingWithQualityHeaderValue(const std::string& value, double quality);
 
@@ -28,7 +28,7 @@ namespace System::Net::Http::Headers {
         [[nodiscard]] std::optional<double> getQualityProperty() const;
         /**
          * Sets (or removes, if empty) the "q" quality factor.
-         * @throws std::out_of_range if @p value is outside [0.0, 1.0].
+         * @throws System::ArgumentOutOfRangeException if @p value is outside [0.0, 1.0].
          */
         void setQualityProperty(std::optional<double> value);
 

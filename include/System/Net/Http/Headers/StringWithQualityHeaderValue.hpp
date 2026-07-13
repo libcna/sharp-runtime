@@ -34,7 +34,7 @@ namespace System::Net::Http::Headers {
          * @brief Constructs a value with the given quality factor.
          * @throws System::ArgumentException if @p value is empty.
          * @throws System::FormatException if @p value is not a valid HTTP token.
-         * @throws std::out_of_range if @p quality is outside [0.0, 1.0].
+         * @throws System::ArgumentOutOfRangeException if @p quality is outside [0.0, 1.0].
          */
         StringWithQualityHeaderValue(const std::string& value, double quality);
 

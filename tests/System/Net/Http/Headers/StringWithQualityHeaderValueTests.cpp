@@ -72,6 +72,31 @@ TEST(StringWithQualityHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_FALSE(StringWithQualityHeaderValue::TryParse("gzip; q=2.0", result));
 }
 
+// Real .NET's HttpRuleParser.GetNumberLength rejects a leading dot, a sign, and scientific
+// notation for the quality number -- std::stod alone accepts all three, which would let
+// TryParse silently accept malformed quality values real .NET rejects.
+TEST(StringWithQualityHeaderValueTests, TryParse_LeadingDotQuality_ReturnsFalse) {
+    StringWithQualityHeaderValue result("x");
+    EXPECT_FALSE(StringWithQualityHeaderValue::TryParse("gzip; q=.5", result));
+}
+
+TEST(StringWithQualityHeaderValueTests, TryParse_SignedQuality_ReturnsFalse) {
+    StringWithQualityHeaderValue result("x");
+    EXPECT_FALSE(StringWithQualityHeaderValue::TryParse("gzip; q=+0.5", result));
+}
+
+TEST(StringWithQualityHeaderValueTests, TryParse_ScientificNotationQuality_ReturnsFalse) {
+    StringWithQualityHeaderValue result("x");
+    EXPECT_FALSE(StringWithQualityHeaderValue::TryParse("gzip; q=1e0", result));
+}
+
+TEST(StringWithQualityHeaderValueTests, TryParse_TrailingDotQuality_Valid) {
+    StringWithQualityHeaderValue result("x");
+    ASSERT_TRUE(StringWithQualityHeaderValue::TryParse("gzip; q=1.", result));
+    ASSERT_TRUE(result.getQualityProperty().has_value());
+    EXPECT_DOUBLE_EQ(*result.getQualityProperty(), 1.0);
+}
+
 TEST(StringWithQualityHeaderValueTests, Parse_Invalid_Throws) {
     EXPECT_THROW(StringWithQualityHeaderValue::Parse("bad value"), System::FormatException);
 }
