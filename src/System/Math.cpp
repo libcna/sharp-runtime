@@ -207,7 +207,18 @@ namespace System
 
     intcs Math::DivRem(intcs a, intcs b, intcs& result)
     {
+        // Verified against Math.cs's DivRem(int,int,out int): the C# source has no explicit
+        // check for either failure mode -- it relies on the CLR's underlying idiv instruction
+        // trapping on both divide-by-zero AND MinValue/-1 overflow, which the runtime then
+        // translates into DivideByZeroException / OverflowException respectively. C++ has no
+        // such automatic trap-to-exception translation: integer division is undefined behavior
+        // on both inputs, and MinValue/-1 specifically raises a real SIGFPE hardware fault on
+        // x86 (confirmed via a standalone repro -- this crashed the process, not merely UB in
+        // the abstract), matching the same bug class already fixed in Int32::DivRem/
+        // Int64::DivRem elsewhere in this codebase but missed here.
         if (b == 0) throw System::DivideByZeroException();
+        if (a == std::numeric_limits<intcs>::min() && b == -1)
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         intcs q = a / b;
         result  = a % b;
         return q;
@@ -215,7 +226,10 @@ namespace System
 
     longcs Math::DivRem(longcs a, longcs b, longcs& result)
     {
+        // See Math::DivRem(intcs,intcs,intcs&) above -- same fix, same rationale.
         if (b == 0) throw System::DivideByZeroException();
+        if (a == std::numeric_limits<longcs>::min() && b == -1)
+            throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
         longcs q = a / b;
         result   = a % b;
         return q;

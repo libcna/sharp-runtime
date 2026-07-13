@@ -400,6 +400,20 @@ TEST(MathTests, DivRem_Pair_ByZero_ThrowsDivideByZeroException) {
     EXPECT_THROW(Math::DivRem(17, 0), System::DivideByZeroException);
 }
 
+// Regression for ticket 346: int.MinValue / -1 is a real hardware trap (SIGFPE on x86, confirmed
+// via a standalone repro) in plain C++ integer division, matching the CLR's idiv instruction
+// which surfaces this exact case as a catchable OverflowException. DivRem previously checked
+// only for the zero-divisor case, missing this second hardware-trap hazard entirely -- same bug
+// class already fixed in Int32::DivRem/Int64::DivRem elsewhere in this codebase but missed here.
+TEST(MathTests, DivRem_MinValueByNegativeOne_ThrowsOverflowException) {
+    int rem = 0;
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<int>::min(), -1, rem), System::OverflowException);
+}
+
+TEST(MathTests, DivRem_Pair_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<int>::min(), -1), System::OverflowException);
+}
+
 // ---------------------------------------------------------------------------
 // BigMul
 // ---------------------------------------------------------------------------
@@ -574,6 +588,20 @@ TEST(MathTests, DivRem_Long_ByZero_ThrowsDivideByZeroException) {
     EXPECT_THROW(Math::DivRem(static_cast<SharpRuntime::longcs>(9LL),
                                static_cast<SharpRuntime::longcs>(0LL), rem),
                  System::DivideByZeroException);
+}
+
+// Regression for ticket 346: same MinValue/-1 hardware-trap fix as the intcs overload above.
+TEST(MathTests, DivRem_Long_MinValueByNegativeOne_ThrowsOverflowException) {
+    SharpRuntime::longcs rem = 0;
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<SharpRuntime::longcs>::min(),
+                               static_cast<SharpRuntime::longcs>(-1LL), rem),
+                 System::OverflowException);
+}
+
+TEST(MathTests, DivRem_Pair_Long_MinValueByNegativeOne_ThrowsOverflowException) {
+    EXPECT_THROW(Math::DivRem(std::numeric_limits<SharpRuntime::longcs>::min(),
+                               static_cast<SharpRuntime::longcs>(-1LL)),
+                 System::OverflowException);
 }
 
 // ---------------------------------------------------------------------------

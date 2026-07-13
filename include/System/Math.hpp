@@ -480,17 +480,25 @@ namespace System
         /**
          * @brief Divides @p a by @p b and returns {quotient, remainder} as a pair.
          * @throws System::DivideByZeroException if @p b is zero (see the out-param DivRem() overload).
+         * @throws System::OverflowException if @p a is intcs's MinValue and @p b is -1 (see the
+         *         out-param DivRem() overload's comment -- same real hardware-trap hazard,
+         *         confirmed via a standalone repro).
          */
         [[nodiscard]] static std::pair<intcs, intcs> DivRem(intcs a, intcs b) {
             if (b == 0) throw System::DivideByZeroException();
+            if (a == std::numeric_limits<intcs>::min() && b == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return { a / b, a % b };
         }
         /**
          * @brief Divides @p a by @p b (64-bit) and returns {quotient, remainder} as a pair.
          * @throws System::DivideByZeroException if @p b is zero.
+         * @throws System::OverflowException if @p a is longcs's MinValue and @p b is -1.
          */
         [[nodiscard]] static std::pair<longcs, longcs> DivRem(longcs a, longcs b) {
             if (b == 0) throw System::DivideByZeroException();
+            if (a == std::numeric_limits<longcs>::min() && b == -1)
+                throw System::OverflowException("Negating the minimum value of a twos complement number is invalid.");
             return { a / b, a % b };
         }
 
