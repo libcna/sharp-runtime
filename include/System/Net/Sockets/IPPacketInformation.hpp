@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <cstdint>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Net/IPAddress.hpp"
 
@@ -34,6 +35,17 @@ namespace System::Net::Sockets {
         }
         bool operator==(const IPPacketInformation& o) const { return Equals(o); }
         bool operator!=(const IPPacketInformation& o) const { return !Equals(o); }
+
+        /**
+         * @brief Returns a hash code combining the interface index and address.
+         * C++ counterpart of .NET IPPacketInformation.GetHashCode() -- matches its exact formula:
+         * unchecked(interface.GetHashCode() * 0xA5555529) + address.GetHashCode().
+         */
+        [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
+            return static_cast<SharpRuntime::intcs>(
+                static_cast<uint32_t>(networkInterface_) * static_cast<uint32_t>(0xA5555529)
+                + static_cast<uint32_t>(address_.GetHashCode()));
+        }
     };
 
 } // namespace System::Net::Sockets

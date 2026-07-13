@@ -78,6 +78,18 @@ TEST(IPPacketInformationTests, BasicAccessors) {
     EXPECT_NE(info, IPPacketInformation(IPAddress::Loopback, 4));
 }
 
+TEST(IPPacketInformationTests, GetHashCode_EqualInstancesMatch) {
+    IPPacketInformation a(IPAddress::Loopback, 3);
+    IPPacketInformation b(IPAddress::Loopback, 3);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(IPPacketInformationTests, GetHashCode_DifferingInterfaceDiffers) {
+    IPPacketInformation a(IPAddress::Loopback, 3);
+    IPPacketInformation b(IPAddress::Loopback, 4);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
 TEST(SocketReceiveFromResultTests, DefaultAndAssign) {
     SocketReceiveFromResult result;
     result.ReceivedBytes = 42;
@@ -102,6 +114,21 @@ TEST(UdpReceiveResultTests, BasicAccessors) {
     EXPECT_EQ(result, UdpReceiveResult(buffer, remote));
 }
 
+TEST(UdpReceiveResultTests, GetHashCode_EqualInstancesMatch) {
+    std::vector<SharpRuntime::bytecs> buffer{1, 2, 3};
+    IPEndPoint remote(IPAddress::Loopback, 1234);
+    UdpReceiveResult a(buffer, remote);
+    UdpReceiveResult b(buffer, remote);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(UdpReceiveResultTests, GetHashCode_DifferingBufferDiffers) {
+    IPEndPoint remote(IPAddress::Loopback, 1234);
+    UdpReceiveResult a(std::vector<SharpRuntime::bytecs>{1, 2, 3}, remote);
+    UdpReceiveResult b(std::vector<SharpRuntime::bytecs>{4, 5, 6}, remote);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
+}
+
 // --- LingerOption / MulticastOption -----------------------------------------------------------
 
 TEST(LingerOptionTests, BasicAccessors) {
@@ -113,6 +140,18 @@ TEST(LingerOptionTests, BasicAccessors) {
     EXPECT_FALSE(option.getEnabledProperty());
     EXPECT_EQ(option.getLingerTimeProperty(), 10);
     EXPECT_EQ(option, LingerOption(false, 10));
+}
+
+TEST(LingerOptionTests, GetHashCode_EqualInstancesMatch) {
+    LingerOption a(true, 30);
+    LingerOption b(true, 30);
+    EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
+}
+
+TEST(LingerOptionTests, GetHashCode_DifferingTimeDiffers) {
+    LingerOption a(true, 30);
+    LingerOption b(true, 45);
+    EXPECT_NE(a.GetHashCode(), b.GetHashCode());
 }
 
 TEST(MulticastOptionTests, GroupOnly) {
