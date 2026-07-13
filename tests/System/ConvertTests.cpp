@@ -56,9 +56,17 @@ TEST(ConvertTests, ToInt32FromBool) {
 }
 
 TEST(ConvertTests, ToInt32FromDouble) {
-    EXPECT_EQ(Convert::ToInt32(3.7),  3);   // truncates
-    EXPECT_EQ(Convert::ToInt32(-2.9), -2);
+    // Real .NET rounds to nearest, ties to even (matching Math.Round's default), not truncation.
+    EXPECT_EQ(Convert::ToInt32(3.7),  4);
+    EXPECT_EQ(Convert::ToInt32(-2.9), -3);
     EXPECT_EQ(Convert::ToInt32(0.0),  0);
+}
+
+TEST(ConvertTests, ToInt32FromDouble_RoundsHalfToEven) {
+    EXPECT_EQ(Convert::ToInt32(2.5), 2);
+    EXPECT_EQ(Convert::ToInt32(3.5), 4);
+    EXPECT_EQ(Convert::ToInt32(-2.5), -2);
+    EXPECT_EQ(Convert::ToInt32(-3.5), -4);
 }
 
 TEST(ConvertTests, ToInt32FromDoubleOverflowThrows) {
@@ -142,7 +150,12 @@ TEST(ConvertTests, ToInt64FromInt) {
 }
 
 TEST(ConvertTests, ToInt64FromDouble) {
-    EXPECT_EQ(Convert::ToInt64(3.7), 3LL);
+    // Real .NET: checked((long)Math.Round(value)) -- rounds to nearest, ties to even.
+    EXPECT_EQ(Convert::ToInt64(3.7), 4LL);
+}
+
+TEST(ConvertTests, ToInt64FromDouble_OverflowThrows) {
+    EXPECT_THROW(Convert::ToInt64(1e20), System::OverflowException);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,10 +182,11 @@ TEST(ConvertTests, ToInt16FromLongOverflowThrows) {
     EXPECT_THROW(Convert::ToInt16(static_cast<SharpRuntime::longcs>(40000LL)), std::exception);
 }
 TEST(ConvertTests, ToInt16FromDouble) {
-    EXPECT_EQ(Convert::ToInt16(3.7), static_cast<SharpRuntime::shortcs>(3));
+    // Rounds to nearest (ties to even), matching real .NET -- not truncation.
+    EXPECT_EQ(Convert::ToInt16(3.7), static_cast<SharpRuntime::shortcs>(4));
 }
 TEST(ConvertTests, ToInt16FromFloat) {
-    EXPECT_EQ(Convert::ToInt16(5.9f), static_cast<SharpRuntime::shortcs>(5));
+    EXPECT_EQ(Convert::ToInt16(5.9f), static_cast<SharpRuntime::shortcs>(6));
 }
 TEST(ConvertTests, ToInt16FromBool_True)  { EXPECT_EQ(Convert::ToInt16(true),  static_cast<SharpRuntime::shortcs>(1)); }
 TEST(ConvertTests, ToInt16FromBool_False) { EXPECT_EQ(Convert::ToInt16(false), static_cast<SharpRuntime::shortcs>(0)); }
@@ -496,7 +510,7 @@ TEST(ConvertTests, ToChar_Zero) {
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToInt64_FromFloat) {
-    EXPECT_EQ(Convert::ToInt64(2.9f), static_cast<SharpRuntime::longcs>(2));
+    EXPECT_EQ(Convert::ToInt64(2.9f), static_cast<SharpRuntime::longcs>(3));
 }
 TEST(ConvertTests, ToInt64_FromBool_True) {
     EXPECT_EQ(Convert::ToInt64(true), 1LL);
@@ -527,7 +541,7 @@ TEST(ConvertTests, ToByte_FromLong) {
 TEST(ConvertTests, ToByte_FromBool_True)  { EXPECT_EQ(Convert::ToByte(true),  SharpRuntime::bytecs(1)); }
 TEST(ConvertTests, ToByte_FromBool_False) { EXPECT_EQ(Convert::ToByte(false), SharpRuntime::bytecs(0)); }
 TEST(ConvertTests, ToByte_FromDouble) {
-    EXPECT_EQ(Convert::ToByte(65.9), SharpRuntime::bytecs(65));
+    EXPECT_EQ(Convert::ToByte(65.9), SharpRuntime::bytecs(66));
 }
 TEST(ConvertTests, ToByte_FromFloat) {
     EXPECT_EQ(Convert::ToByte(10.5f), SharpRuntime::bytecs(10));

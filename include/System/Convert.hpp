@@ -11,6 +11,7 @@
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/FormatException.hpp"
+#include "System/Math.hpp"
 #include "System/OverflowException.hpp"
 
 namespace System {
@@ -151,10 +152,16 @@ namespace System {
         [[nodiscard]] static bytecs ToByte(longcs value)   { return static_cast<bytecs>(value); }
         /** @brief Converts a Boolean to byte (true → 1, false → 0). */
         [[nodiscard]] static bytecs ToByte(bool value)     { return value ? bytecs(1) : bytecs(0); }
-        /** @brief Converts a double to byte (truncates). */
-        [[nodiscard]] static bytecs ToByte(double value)   { return static_cast<bytecs>(value); }
-        /** @brief Converts a float to byte (truncates). */
-        [[nodiscard]] static bytecs ToByte(float value)    { return static_cast<bytecs>(value); }
+        /**
+         * @brief Converts a double to byte (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside [0, 255].
+         */
+        [[nodiscard]] static bytecs ToByte(double value)   { return ToByte(ToInt32(value)); }
+        /**
+         * @brief Converts a float to byte (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside [0, 255].
+         */
+        [[nodiscard]] static bytecs ToByte(float value)    { return ToByte(ToInt32(value)); }
         /**
          * @brief Converts a string to byte.
          *
@@ -183,10 +190,16 @@ namespace System {
          * @throws OverflowException if outside [-32768, 32767].
          */
         [[nodiscard]] static shortcs ToInt16(longcs value);
-        /** @brief Converts a double to 16-bit integer (truncates). */
-        [[nodiscard]] static shortcs ToInt16(double value)   { return static_cast<shortcs>(value); }
-        /** @brief Converts a float to 16-bit integer (truncates). */
-        [[nodiscard]] static shortcs ToInt16(float value)    { return static_cast<shortcs>(value); }
+        /**
+         * @brief Converts a double to 16-bit integer (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside [-32768, 32767].
+         */
+        [[nodiscard]] static shortcs ToInt16(double value)   { return ToInt16(ToInt32(value)); }
+        /**
+         * @brief Converts a float to 16-bit integer (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside [-32768, 32767].
+         */
+        [[nodiscard]] static shortcs ToInt16(float value)    { return ToInt16(ToInt32(value)); }
         /** @brief Converts a Boolean to 16-bit integer (true → 1, false → 0). */
         [[nodiscard]] static shortcs ToInt16(bool value)     { return value ? shortcs(1) : shortcs(0); }
         /** @brief Converts a byte to 16-bit integer. */
@@ -277,10 +290,16 @@ namespace System {
                 throw OverflowException("Value is out of Int64 range.");
             return static_cast<longcs>(value);
         }
-        /** @brief Converts a double to 64-bit integer (truncates). */
+        /**
+         * @brief Converts a double to 64-bit integer (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside long's range.
+         */
         [[nodiscard]] static longcs ToInt64(double value);
-        /** @brief Converts a float to 64-bit integer (truncates). */
-        [[nodiscard]] static longcs ToInt64(float value)      { return static_cast<longcs>(value); }
+        /**
+         * @brief Converts a float to 64-bit integer (rounds to nearest, ties to even).
+         * @throws OverflowException if the rounded value is outside long's range.
+         */
+        [[nodiscard]] static longcs ToInt64(float value)      { return ToInt64(static_cast<double>(value)); }
         /** @brief Converts a Boolean to 64-bit integer (true → 1, false → 0). */
         [[nodiscard]] static longcs ToInt64(bool value)       { return value ? 1LL : 0LL; }
         /**
@@ -359,15 +378,16 @@ namespace System {
         /** @brief Converts a Boolean to unsigned 32-bit integer (true → 1, false → 0). */
         [[nodiscard]] static uint32_t ToUInt32(bool value)    { return value ? 1u : 0u; }
         /**
-         * @brief Converts a double to unsigned 32-bit integer (truncates).
+         * @brief Converts a double to unsigned 32-bit integer (rounds to nearest, ties to even).
          *
-         * @throws OverflowException if out of range.
+         * @throws OverflowException if the rounded value is out of range.
          */
         [[nodiscard]] static uint32_t ToUInt32(double value)
         {
-            if (value < 0.0 || value > static_cast<double>(std::numeric_limits<uint32_t>::max()))
+            double rounded = Math::Round(value);
+            if (rounded < 0.0 || rounded > static_cast<double>(std::numeric_limits<uint32_t>::max()))
                 throw OverflowException("Value is out of UInt32 range.");
-            return static_cast<uint32_t>(value);
+            return static_cast<uint32_t>(rounded);
         }
         /**
          * @brief Converts a string to unsigned 32-bit integer.
@@ -391,15 +411,23 @@ namespace System {
         /** @brief Converts a Boolean to unsigned 64-bit integer (true → 1, false → 0). */
         [[nodiscard]] static uint64_t ToUInt64(bool value)    { return value ? 1ull : 0ull; }
         /**
-         * @brief Converts a double to unsigned 64-bit integer (truncates).
+         * @brief Converts a double to unsigned 64-bit integer (rounds to nearest, ties to even).
          *
-         * @throws OverflowException if out of range.
+         * @throws OverflowException if the rounded value is out of range.
+         *
+         * @note The boundary check compares against 2^64 (18446744073709551616.0), not
+         * UINT64_MAX (18446744073709551615), because UINT64_MAX is not exactly representable
+         * as a double -- the nearest representable double to UINT64_MAX is 2^64 itself. Casting
+         * static_cast<double>(std::numeric_limits<uint64_t>::max()) rounds UP to 2^64, so
+         * comparing against that cast value would incorrectly accept some just-out-of-range
+         * inputs; comparing against the literal 2^64 boundary (exclusive) is precise.
          */
         [[nodiscard]] static uint64_t ToUInt64(double value)
         {
-            if (value < 0.0 || value > static_cast<double>(std::numeric_limits<uint64_t>::max()))
+            double rounded = Math::Round(value);
+            if (rounded < 0.0 || rounded >= 18446744073709551616.0)
                 throw OverflowException("Value is out of UInt64 range.");
-            return static_cast<uint64_t>(value);
+            return static_cast<uint64_t>(rounded);
         }
         /**
          * @brief Converts a string to unsigned 64-bit integer.
@@ -454,16 +482,11 @@ namespace System {
             return static_cast<ushortcs>(value);
         }
         /**
-         * @brief Converts a double to unsigned 16-bit integer (truncates).
+         * @brief Converts a double to unsigned 16-bit integer (rounds to nearest, ties to even).
          *
-         * @throws OverflowException if outside [0, 65535].
+         * @throws OverflowException if the rounded value is outside [0, 65535].
          */
-        [[nodiscard]] static ushortcs ToUInt16(double value)
-        {
-            if (value < 0.0 || value > 65535.0)
-                throw OverflowException("Value is out of UInt16 range.");
-            return static_cast<ushortcs>(value);
-        }
+        [[nodiscard]] static ushortcs ToUInt16(double value) { return ToUInt16(ToInt32(value)); }
         /**
          * @brief Converts a string to unsigned 16-bit integer.
          *
@@ -526,16 +549,11 @@ namespace System {
             return static_cast<sbytecs>(value);
         }
         /**
-         * @brief Converts a double to signed byte (truncates).
+         * @brief Converts a double to signed byte (rounds to nearest, ties to even).
          *
-         * @throws OverflowException if outside [-128, 127].
+         * @throws OverflowException if the rounded value is outside [-128, 127].
          */
-        [[nodiscard]] static sbytecs ToSByte(double value)
-        {
-            if (value < -128.0 || value > 127.0)
-                throw OverflowException("Value is out of SByte range.");
-            return static_cast<sbytecs>(value);
-        }
+        [[nodiscard]] static sbytecs ToSByte(double value) { return ToSByte(ToInt32(value)); }
         /**
          * @brief Converts a string to signed byte.
          *
