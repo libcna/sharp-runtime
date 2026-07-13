@@ -110,6 +110,7 @@ namespace System::Numerics {
         // Arithmetic operators
         // ------------------------------------------------------------------
         BigInteger operator-() const;
+        /** @brief Returns the absolute value of this BigInteger. */
         BigInteger Abs()       const;
 
         BigInteger operator+(const BigInteger& o) const;

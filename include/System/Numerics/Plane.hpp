@@ -22,10 +22,12 @@ struct Plane {
     Plane(Vector3 normal, float d) : Normal(normal), D(d) {}
     Plane(Vector4 v) : Normal(v.X,v.Y,v.Z), D(v.W) {}
 
+    /** @brief Returns true if this plane's Normal and D exactly equal @p o's. */
     bool Equals(const Plane& o) const { return Normal==o.Normal && D==o.D; }
     bool operator==(const Plane& o) const { return Equals(o); }
     bool operator!=(const Plane& o) const { return !Equals(o); }
 
+    /** @brief Returns a string representation of this plane in the form "{Normal:... D:...}". */
     std::string ToString() const {
         std::ostringstream ss;
         ss.imbue(std::locale::classic());

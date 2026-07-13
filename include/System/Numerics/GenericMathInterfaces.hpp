@@ -117,61 +117,61 @@ namespace System::Numerics {
     /** Stub interface for trigonometric functions, mirroring .NET ITrigonometricFunctions<TSelf>. */
     template<typename TSelf>
     struct ITrigonometricFunctions {
-        static TSelf Acos(TSelf x);
-        static TSelf AcosPi(TSelf x);
-        static TSelf Asin(TSelf x);
-        static TSelf AsinPi(TSelf x);
-        static TSelf Atan(TSelf x);
-        static TSelf AtanPi(TSelf x);
-        static TSelf Cos(TSelf x);
-        static TSelf CosPi(TSelf x);
-        static TSelf Sin(TSelf x);
-        static TSelf SinPi(TSelf x);
-        static TSelf Tan(TSelf x);
-        static TSelf TanPi(TSelf x);
+        static TSelf Acos(TSelf x);   ///< Returns the arc cosine of x, in radians.
+        static TSelf AcosPi(TSelf x); ///< Returns the arc cosine of x, divided by pi.
+        static TSelf Asin(TSelf x);   ///< Returns the arc sine of x, in radians.
+        static TSelf AsinPi(TSelf x); ///< Returns the arc sine of x, divided by pi.
+        static TSelf Atan(TSelf x);   ///< Returns the arc tangent of x, in radians.
+        static TSelf AtanPi(TSelf x); ///< Returns the arc tangent of x, divided by pi.
+        static TSelf Cos(TSelf x);    ///< Returns the cosine of x (radians).
+        static TSelf CosPi(TSelf x);  ///< Returns the cosine of x*pi.
+        static TSelf Sin(TSelf x);    ///< Returns the sine of x (radians).
+        static TSelf SinPi(TSelf x);  ///< Returns the sine of x*pi.
+        static TSelf Tan(TSelf x);    ///< Returns the tangent of x (radians).
+        static TSelf TanPi(TSelf x);  ///< Returns the tangent of x*pi.
     };
 
     /** Stub interface for hyperbolic functions, mirroring .NET IHyperbolicFunctions<TSelf>. */
     template<typename TSelf>
     struct IHyperbolicFunctions {
-        static TSelf Acosh(TSelf x);
-        static TSelf Asinh(TSelf x);
-        static TSelf Atanh(TSelf x);
-        static TSelf Cosh(TSelf x);
-        static TSelf Sinh(TSelf x);
-        static TSelf Tanh(TSelf x);
+        static TSelf Acosh(TSelf x); ///< Returns the inverse hyperbolic cosine of x.
+        static TSelf Asinh(TSelf x); ///< Returns the inverse hyperbolic sine of x.
+        static TSelf Atanh(TSelf x); ///< Returns the inverse hyperbolic tangent of x.
+        static TSelf Cosh(TSelf x);  ///< Returns the hyperbolic cosine of x.
+        static TSelf Sinh(TSelf x);  ///< Returns the hyperbolic sine of x.
+        static TSelf Tanh(TSelf x);  ///< Returns the hyperbolic tangent of x.
     };
 
     /** Stub interface for logarithmic functions, mirroring .NET ILogarithmicFunctions<TSelf>. */
     template<typename TSelf>
     struct ILogarithmicFunctions {
-        static TSelf Log(TSelf x);
-        static TSelf Log(TSelf x, TSelf newBase);
-        static TSelf Log2(TSelf x);
-        static TSelf Log10(TSelf x);
+        static TSelf Log(TSelf x);                  ///< Returns the natural (base e) logarithm of x.
+        static TSelf Log(TSelf x, TSelf newBase);    ///< Returns the logarithm of x in the given base.
+        static TSelf Log2(TSelf x);                  ///< Returns the base-2 logarithm of x.
+        static TSelf Log10(TSelf x);                 ///< Returns the base-10 logarithm of x.
     };
 
     /** Stub interface for exponential functions, mirroring .NET IExponentialFunctions<TSelf>. */
     template<typename TSelf>
     struct IExponentialFunctions {
-        static TSelf Exp(TSelf x);
-        static TSelf Exp2(TSelf x);
-        static TSelf Exp10(TSelf x);
+        static TSelf Exp(TSelf x);   ///< Returns e raised to the power x.
+        static TSelf Exp2(TSelf x);  ///< Returns 2 raised to the power x.
+        static TSelf Exp10(TSelf x); ///< Returns 10 raised to the power x.
     };
 
     /** Stub interface for power functions, mirroring .NET IPowerFunctions<TSelf>. */
     template<typename TSelf>
     struct IPowerFunctions {
-        static TSelf Pow(TSelf x, TSelf y);
+        static TSelf Pow(TSelf x, TSelf y); ///< Returns x raised to the power y.
     };
 
     /** Stub interface for root functions, mirroring .NET IRootFunctions<TSelf>. */
     template<typename TSelf>
     struct IRootFunctions {
-        static TSelf Cbrt(TSelf x);
-        static TSelf Hypot(TSelf x, TSelf y);
-        static TSelf RootN(TSelf x, int n);
-        static TSelf Sqrt(TSelf x);
+        static TSelf Cbrt(TSelf x);            ///< Returns the cube root of x.
+        static TSelf Hypot(TSelf x, TSelf y);  ///< Returns sqrt(x*x + y*y), computed without undue overflow/underflow.
+        static TSelf RootN(TSelf x, int n);    ///< Returns the n-th root of x.
+        static TSelf Sqrt(TSelf x);            ///< Returns the square root of x.
     };
 
     /** Stub interface exposing E/Pi/Tau constants, mirroring .NET IFloatingPointConstants<TSelf>. */
