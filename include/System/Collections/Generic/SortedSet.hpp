@@ -6,6 +6,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -17,20 +18,45 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.SortedSet<T>.
  * Backed by std::set<T>; provides O(log n) Add, Remove, and Contains.
  *
- * @note Unlike .NET's SortedSet<T>, iterators do not detect concurrent modification:
- * .NET throws InvalidOperationException if the set is structurally modified while
- * an enumerator is active, but sharp-runtime's iterators follow plain std::set
- * invalidation rules instead (erasing an element only invalidates that element's
- * iterator; other iterators remain valid). Do not mutate the set while iterating
- * it directly.
+ * begin()/end() (used by range-for) detect structural modification during iteration
+ * via a version counter and throw System::InvalidOperationException, matching real
+ * .NET's fail-fast enumerator contract (see ticket 1713).
  *
  * @tparam T The type of elements in the set (must support operator< for ordering).
  */
 template<typename T>
 class SortedSet {
     std::set<T> data_;
+    intcs version_ = 0;
 
 public:
+    /**
+     * @brief A version-checked wrapper over std::set<T>::iterator that throws
+     * System::InvalidOperationException on dereference/increment if the owning
+     * SortedSet was structurally modified since this iterator was obtained --
+     * matching real .NET's fail-fast enumerator contract (ticket 1713).
+     */
+    class Iterator {
+        typename std::set<T>::const_iterator it_;
+        const SortedSet* owner_;
+        intcs version_;
+
+        void checkVersion() const {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+        }
+
+    public:
+        Iterator(typename std::set<T>::const_iterator it, const SortedSet* owner)
+            : it_(it), owner_(owner), version_(owner->version_) {}
+
+        const T& operator*() const { checkVersion(); return *it_; }
+        const T* operator->() const { checkVersion(); return &*it_; }
+        Iterator& operator++() { checkVersion(); ++it_; return *this; }
+        bool operator==(const Iterator& other) const { return it_ == other.it_; }
+        bool operator!=(const Iterator& other) const { return it_ != other.it_; }
+    };
+
     /** @brief Initializes a new empty SortedSet. */
     SortedSet() = default;
 
@@ -77,7 +103,11 @@ public:
      * @param item The element to add.
      * @return true if the element was added; false if it was already present.
      */
-    bool Add(const T& item) { return data_.insert(item).second; }
+    bool Add(const T& item) {
+        bool added = data_.insert(item).second;
+        if (added) ++version_;
+        return added;
+    }
 
     /**
      * @brief Removes the specified element from the set.
@@ -86,7 +116,11 @@ public:
      * @param item The element to remove.
      * @return true if the element was found and removed; otherwise false.
      */
-    bool Remove(const T& item) { return data_.erase(item) > 0; }
+    bool Remove(const T& item) {
+        bool removed = data_.erase(item) > 0;
+        if (removed) ++version_;
+        return removed;
+    }
 
     /**
      * @brief Determines whether the set contains the specified element.
@@ -104,7 +138,7 @@ public:
      *
      * C++ counterpart of .NET SortedSet<T>.Clear().
      */
-    void Clear() { data_.clear(); }
+    void Clear() { data_.clear(); ++version_; }
 
     /**
      * @brief Modifies the set to contain all elements in itself and the specified set.
@@ -114,6 +148,7 @@ public:
      */
     void UnionWith(const SortedSet<T>& other) {
         for (const auto& x : other.data_) data_.insert(x);
+        ++version_;
     }
 
     /**
@@ -126,6 +161,7 @@ public:
         std::set<T> result;
         for (const auto& x : data_) if (other.Contains(x)) result.insert(x);
         data_ = std::move(result);
+        ++version_;
     }
 
     /**
@@ -141,8 +177,9 @@ public:
         // invalidated by that very erase call -- real UB even where it doesn't reliably crash
         // under a given std::set implementation. Real .NET's SortedSet<T>.ExceptWith has the
         // identical `if (other == this) { Clear(); return; }` special case.
-        if (&other == this) { data_.clear(); return; }
+        if (&other == this) { data_.clear(); ++version_; return; }
         for (const auto& x : other.data_) data_.erase(x);
+        ++version_;
     }
 
     /**
@@ -154,12 +191,13 @@ public:
     void SymmetricExceptWith(const SortedSet<T>& other) {
         // Same self-aliasing hazard and fix as ExceptWith above -- real .NET's
         // SortedSet<T>.SymmetricExceptWith also special-cases `other == this`.
-        if (&other == this) { data_.clear(); return; }
+        if (&other == this) { data_.clear(); ++version_; return; }
         for (const auto& x : other.data_) {
             auto it = data_.find(x);
             if (it != data_.end()) data_.erase(it);
             else data_.insert(x);
         }
+        ++version_;
     }
 
     /**
@@ -274,10 +312,14 @@ public:
         return std::vector<T>(data_.begin(), data_.end());
     }
 
-    /** @brief Returns a const iterator to the beginning of the SortedSet (STL interop). */
-    auto begin() const { return data_.begin(); }
-    /** @brief Returns a const iterator past the end of the SortedSet (STL interop). */
-    auto end()   const { return data_.end(); }
+    /**
+     * @brief Returns a version-checked iterator to the beginning of the set (range-for).
+     * @throws System::InvalidOperationException from dereference/increment if the set is
+     *         structurally modified while this iterator is in use.
+     */
+    Iterator begin() const { return Iterator(data_.cbegin(), this); }
+    /** @brief Returns a version-checked iterator past the end of the set (range-for). */
+    Iterator end()   const { return Iterator(data_.cend(), this); }
 };
 
 } // namespace System::Collections::Generic
