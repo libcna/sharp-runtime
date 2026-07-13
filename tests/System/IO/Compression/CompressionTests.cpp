@@ -969,6 +969,33 @@ TEST(ZipFileTests, OpenRead_NonExistentDirectory_Throws) {
         System::IO::DirectoryNotFoundException);
 }
 
+// Regression test for a "Zip Slip" path-traversal bug: ExtractToDirectory previously combined a
+// malicious entry name like "../evil.txt" with the destination directory via Path::Combine with
+// no bounds check, so extraction could write files outside the specified destination directory
+// entirely. Real .NET's ExtractRelativeToDirectoryCheckIfFile guards against exactly this by
+// resolving the full destination path and rejecting it with an IOException unless it stays under
+// the destination directory -- mirrored here.
+TEST(ZipFileTests, ExtractToDirectory_EntryEscapesDestination_Throws) {
+    const std::string archivePath = "/tmp/sharp_rt_zipslip_test.zip";
+    const std::string destDir = "/tmp/sharp_rt_zipslip_dest";
+    const std::string escapedFile = "/tmp/sharp_rt_zipslip_evil.txt";
+    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
+
+    {
+        ZipArchive archive(archivePath, ZipArchiveMode::Create);
+        auto entry = archive.CreateEntry("../sharp_rt_zipslip_evil.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'p', 'w', 'n', 'e', 'd'};
+        s->Write(data, 0, 5);
+    }
+
+    EXPECT_THROW(ZipFile::ExtractToDirectory(archivePath, destDir), System::IO::IOException);
+    // The escaped file must never have been written.
+    EXPECT_FALSE(File::Exists(escapedFile));
+
+    RemoveAll(archivePath); RemoveAll(destDir); RemoveAll(escapedFile);
+}
+
 TEST(ZipFileExtensionsTests, CreateEntryFromFile_ExtractToFile_Roundtrip) {
     const std::string srcFile = "/tmp/sharp_rt_zfe_src.txt";
     const std::string archivePath = "/tmp/sharp_rt_zfe_test.zip";

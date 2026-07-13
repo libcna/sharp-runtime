@@ -6,6 +6,7 @@
 #include "System/IO/File.hpp"
 #include "System/IO/FileMode.hpp"
 #include "System/IO/FileStream.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/IO/Path.hpp"
 
 #include <memory>
@@ -35,6 +36,21 @@ namespace System::IO::Compression {
 
     void ZipFileExtensions::ExtractToDirectory(ZipArchive& archive, const std::string& destinationDirectoryName,
                                                 bool overwriteFiles) {
+        // Real .NET's ExtractRelativeToDirectoryCheckIfFile resolves each entry's destination to a
+        // full path and rejects it (IOException) unless it stays under the destination directory --
+        // this port previously used Path::Combine directly with no such check, so a malicious entry
+        // name like "../../etc/passwd" (a "Zip Slip" path) would write outside destinationDirectoryName
+        // entirely. Mirrored here: resolve the destination directory to a full path once, then for
+        // every entry resolve its full destination path and verify it is still prefixed by the
+        // destination directory (with a trailing separator, so "dest-evil" can't falsely pass a
+        // "dest" prefix check) before writing anything.
+        System::IO::Directory::CreateDirectory(destinationDirectoryName);
+        std::string destinationDirectoryFullPath = System::IO::Path::GetFullPath(destinationDirectoryName);
+        if (destinationDirectoryFullPath.empty() ||
+            destinationDirectoryFullPath.back() != System::IO::Path::DirectorySeparatorChar) {
+            destinationDirectoryFullPath += System::IO::Path::DirectorySeparatorChar;
+        }
+
         for (auto& entry : archive.getEntriesProperty()) {
             const std::string& fullName = entry.getFullNameProperty();
             // Entries whose name ends with a directory separator represent directories; skip them.
@@ -43,12 +59,18 @@ namespace System::IO::Compression {
             }
 
             const std::string destPath = System::IO::Path::Combine(destinationDirectoryName, fullName);
-            const std::string destDir = System::IO::Path::GetDirectoryName(destPath);
+            const std::string destPathFull = System::IO::Path::GetFullPath(destPath);
+            if (destPathFull.compare(0, destinationDirectoryFullPath.size(), destinationDirectoryFullPath) != 0) {
+                throw System::IO::IOException(
+                    "Extracting Zip entry would have resulted in a file outside the specified destination directory.");
+            }
+
+            const std::string destDir = System::IO::Path::GetDirectoryName(destPathFull);
             if (!destDir.empty() && !System::IO::Directory::Exists(destDir)) {
                 System::IO::Directory::CreateDirectory(destDir);
             }
 
-            ExtractToFile(entry, destPath, overwriteFiles);
+            ExtractToFile(entry, destPathFull, overwriteFiles);
         }
     }
 
