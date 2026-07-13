@@ -17,7 +17,12 @@ namespace System::IO {
      *
      * Wraps std::filesystem. Partial C++ counterpart of .NET System.IO.DirectoryInfo.
      *
-     * @note Status: Partial
+     * @note Status: Partial — covers Create/Delete/MoveTo/GetFiles/GetDirectories and the common
+     * FileSystemInfo properties. Not ported: CreateSubdirectory, the Enumerate*
+     * (EnumerateFiles/EnumerateDirectories/EnumerateFileSystemInfos) streaming variants,
+     * GetFileSystemInfos, the Root property, and searchPattern/SearchOption-based overloads of
+     * GetFiles/GetDirectories. GetFileNames() is a port-added convenience method with no real
+     * .NET equivalent (real .NET's GetFiles() already returns FileInfo[], not paths).
      */
     class DirectoryInfo : public FileSystemInfo {
     public:
