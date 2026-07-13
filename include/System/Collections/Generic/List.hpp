@@ -77,10 +77,13 @@ class List : public IList<T> {
             return static_cast<intcs>(items_.size());
         }
 
+        /** @brief Returns false; List&lt;T&gt; is never read-only. */
         [[nodiscard]] bool getIsReadOnlyProperty() const override { return false; }
 
+        /** @brief Appends @p item to the end of the list. */
         void Add(const T& item) override { items_.push_back(item); }
 
+        /** @brief Removes all elements from the list. */
         void Clear() override { items_.clear(); }
 
         [[nodiscard]] bool Contains(const T& item) const override
@@ -143,9 +146,13 @@ class List : public IList<T> {
         /** @brief Returns the underlying std::vector for STL interop (mutable). */
         [[nodiscard]] std::vector<T>& ToVector() { return items_; }
 
+        /** @brief STL-interop mutable begin iterator (not part of the .NET API). */
         auto begin() { return items_.begin(); }
+        /** @brief STL-interop mutable end iterator (not part of the .NET API). */
         auto end()   { return items_.end(); }
+        /** @brief STL-interop const begin iterator (not part of the .NET API). */
         [[nodiscard]] auto begin() const { return items_.cbegin(); }
+        /** @brief STL-interop const end iterator (not part of the .NET API). */
         [[nodiscard]] auto end()   const { return items_.cend(); }
 
         /**
