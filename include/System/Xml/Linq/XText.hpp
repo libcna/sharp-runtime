@@ -11,6 +11,17 @@ namespace System::Xml::Linq {
      * @brief Represents a text node.
      *
      * C++ counterpart of .NET System.Xml.Linq.XText.
+     *
+     * @note Two related, deliberate scope reductions relative to real .NET: (1) real .NET's
+     * XContainer.Add rejects a non-whitespace-only XText added directly under an XDocument with
+     * ArgumentException (only prolog/epilog whitespace is legal there); this port performs no
+     * such validation, since System::Xml::XmlWriter has no WriteWhitespace primitive to give the
+     * distinction real behavioral meaning. (2) real .NET's XText::WriteTo calls
+     * writer.WriteWhitespace(text) when the parent is an XDocument and writer.WriteString(text)
+     * otherwise; this port always calls WriteString for the same reason (no WriteWhitespace
+     * primitive exists on this port's XmlWriter). Adding a distinct WriteWhitespace primitive
+     * with its own validation/formatting semantics is a larger XmlWriter change than a single
+     * type audit should take on.
      */
     class XText : public XNode {
         std::string text_;
