@@ -86,10 +86,14 @@ struct BitVector32 {
          * @brief Returns a string representation of this Section.
          *
          * C++ counterpart of .NET BitVector32.Section.ToString().
-         * @return A string in the form "Section{mask=N, offset=N}".
+         * @return A string in the form "Section{0xMASK, 0xOFFSET}" (lowercase hex, no leading
+         *         zeros), matching real .NET's `$"Section{{0x{Mask:x}, 0x{Offset:x}}}"` exactly.
+         *         An earlier version of this method used decimal "mask=N, offset=N" labels
+         *         instead -- a real format mismatch versus the .NET reference, not just a
+         *         paraphrase, since it changed both the field labels and the number base.
          */
         [[nodiscard]] std::string ToString() const {
-            return "Section{mask=" + std::to_string(mask_) + ", offset=" + std::to_string(offset_) + "}";
+            return "Section{0x" + toLowerHex(mask_) + ", 0x" + toLowerHex(offset_) + "}";
         }
 
         /**
@@ -97,9 +101,24 @@ struct BitVector32 {
          *
          * C++ counterpart of .NET BitVector32.Section.ToString(BitVector32.Section).
          * @param section The Section to convert.
-         * @return A string in the form "Section{mask=N, offset=N}".
+         * @return The same string as @p section.ToString().
          */
         static std::string ToString(const Section& section) { return section.ToString(); }
+
+    private:
+        // Matches .NET's "x" format specifier: lowercase hex digits, no leading zeros, "0" for
+        // zero. mask_/offset_ are always non-negative in practice (CreateSection only ever
+        // builds a Section with a small positive mask and a non-negative offset < 32).
+        static std::string toLowerHex(SharpRuntime::shortcs value) {
+            if (value == 0) return "0";
+            static constexpr char kDigits[] = "0123456789abcdef";
+            std::string s;
+            auto v = static_cast<uint32_t>(value);
+            while (v > 0) { s = kDigits[v & 0xF] + s; v >>= 4; }
+            return s;
+        }
+
+    public:
 
         /**
          * @brief Returns true if two Section values are equal.

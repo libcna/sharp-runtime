@@ -251,6 +251,19 @@ TEST(BitVector32Batch19Test, Section_ToString) {
     EXPECT_EQ(BitVector32::Section::ToString(s), t);
 }
 
+TEST(BitVector32Batch19Test, Section_ToString_MatchesDotNetHexFormat) {
+    // Real .NET: $"Section{{0x{Mask:x}, 0x{Offset:x}}}" -- lowercase hex, no leading zeros, no
+    // field-name labels. An earlier version of this port used decimal "mask=N, offset=N" labels,
+    // a real format mismatch (wrong number base, not just paraphrased text).
+    auto base = BitVector32::CreateSection(15);       // mask=15 (0xf), offset=0
+    auto s = BitVector32::CreateSection(15, base);     // mask=15 (0xf), offset=4
+    EXPECT_EQ(s.ToString(), "Section{0xf, 0x4}");
+    EXPECT_EQ(BitVector32::Section::ToString(s), "Section{0xf, 0x4}");
+
+    auto zero = BitVector32::CreateSection(1);         // mask=1 (0x1), offset=0
+    EXPECT_EQ(zero.ToString(), "Section{0x1, 0x0}");
+}
+
 TEST(BitVector32Batch19Test, CreateMaskSequence) {
     int m1 = BitVector32::CreateMask();
     int m2 = BitVector32::CreateMask(m1);
