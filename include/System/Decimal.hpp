@@ -80,7 +80,7 @@ public:
      *
      * C++ counterpart of .NET Decimal(int).
      */
-    /* implicit */ Decimal(int v);
+    /* implicit */ Decimal(intcs v);
 
     /**
      * @brief Constructs a Decimal from a signed 64-bit integer.
@@ -189,7 +189,7 @@ public:
      * @return A negative integer, zero, or a positive integer as this value is
      *         less than, equal to, or greater than @p other.
      */
-    [[nodiscard]] int CompareTo(const Decimal& other) const
+    [[nodiscard]] intcs CompareTo(const Decimal& other) const
     {
         if (*this == other) return 0;
         return (*this < other) ? -1 : 1;
@@ -211,7 +211,7 @@ public:
      * Equal Decimal values (regardless of scale) produce the same hash code.
      * @return A 32-bit hash code.
      */
-    [[nodiscard]] int GetHashCode() const noexcept
+    [[nodiscard]] intcs GetHashCode() const noexcept
     {
         // Normalise: values that compare equal must have equal hashes, so
         // strip trailing zeros before hashing (same as .NET's behaviour).
@@ -223,7 +223,7 @@ public:
         h ^= std::hash<uint64_t>{}(uint64_t(m >> 64)) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<uint8_t>{}(s)   + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<bool>{}(neg)    + 0x9e3779b9 + (h << 6) + (h >> 2);
-        return static_cast<int>(h & 0x7fffffff);
+        return static_cast<intcs>(h & 0x7fffffff);
     }
 
     // -----------------------------------------------------------------------
@@ -481,7 +481,7 @@ public:
      * @return A negative integer, zero, or a positive integer as @p d1 is
      *         less than, equal to, or greater than @p d2.
      */
-    static int Compare(const Decimal& d1, const Decimal& d2)
+    static intcs Compare(const Decimal& d1, const Decimal& d2)
     {
         return d1.CompareTo(d2);
     }
@@ -534,7 +534,7 @@ public:
      * @param decimals Number of decimal places (0–28).
      * @throws System::ArgumentOutOfRangeException if @p decimals is outside 0–28.
      */
-    static Decimal Round(const Decimal& d, int decimals) { return Round(d, decimals, MidpointRounding::ToEven); }
+    static Decimal Round(const Decimal& d, intcs decimals) { return Round(d, decimals, MidpointRounding::ToEven); }
 
     /**
      * @brief Rounds @p d to the nearest integer, using the specified rounding convention.
@@ -552,7 +552,7 @@ public:
      * @param mode     The rounding convention to use for midpoint values.
      * @throws System::ArgumentOutOfRangeException if @p decimals is outside 0–28.
      */
-    static Decimal Round(const Decimal& d, int decimals, MidpointRounding mode);
+    static Decimal Round(const Decimal& d, intcs decimals, MidpointRounding mode);
 
     /**
      * @brief Returns the larger of two Decimal values.
@@ -621,7 +621,7 @@ public:
      * C++ counterpart of .NET Decimal.Sign / Math.Sign(decimal).
      * @return −1 if negative, 0 if zero, 1 if positive.
      */
-    static int Sign(const Decimal& d)
+    static intcs Sign(const Decimal& d)
     {
         if (d == Zero) return 0;
         return d.negative_ ? -1 : 1;
