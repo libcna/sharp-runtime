@@ -5,10 +5,13 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Text/Encoding.hpp"
 #include "System/Text/EncodingInfo.hpp"
 
 namespace System::Text {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides the base class for encoding providers that supply encodings unavailable in
@@ -25,7 +28,7 @@ namespace System::Text {
     public:
         virtual ~EncodingProvider() = default;
         /** Returns an encoding for the given code-page identifier, or nullptr if unknown. */
-        [[nodiscard]] virtual std::shared_ptr<Encoding> GetEncoding(int codepage) = 0;
+        [[nodiscard]] virtual std::shared_ptr<Encoding> GetEncoding(intcs codepage) = 0;
         /** Returns an encoding for the given encoding name, or nullptr if unknown. */
         [[nodiscard]] virtual std::shared_ptr<Encoding> GetEncoding(const std::string& name) = 0;
         /** Returns the encodings known to this provider (default: none). */
