@@ -1,10 +1,288 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `90b6533`) — 12173 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `d50ec81`) — 12305 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12305 tests from 1220 test suites, 0 failures
 ```
+
+## MILESTONE: ticket 1727 fixed — entire `plan.sqlite3` `ticket` table is now `done`, zero exceptions
+
+The user explicitly authorized unblocking ticket 1727 (`getCurrent()` → `getCurrentProperty()`
+naming rename, previously held pending decision) with an unambiguous instruction: rename
+everywhere, no permanent exception, downstream consumers (CNA) are responsible for updating their
+own call sites if they use the old name.
+
+Given this is a rename that must stay globally consistent (every declaration and every call site
+has to agree, or the project won't compile), this was done as ONE coordinated pass rather than
+split across multiple parallel forks — unlike the independent, file-scoped bug fixes earlier in
+this session, a rename doesn't parallelize safely across forks without risking a transient
+inconsistent state. Renamed all 61 occurrences across 23 files (confirmed via
+`grep -rln "getCurrent(" include/ src/ tests/` both before starting and as a final zero-hit
+sweep after finishing): the two root interfaces (`System::Collections::IEnumerator`,
+`System::Collections::Generic::IEnumerator<T>`), every implementer (`ArrayList`, `Hashtable`,
+`Queue`, `Stack`, `BitArray`, `ListDictionaryInternal` ×2, `Delegate::InvocationListEnumerator`,
+`Buffers::ReadOnlySequence::Enumerator`, `Globalization::TextElementEnumerator`,
+`Threading::SynchronizationContext`'s static `Current`-equivalent), plus every call site across 9
+test files — including a test double in `Interfaces2Tests.cpp` that overrides `IEnumerator` and
+needed the matching rename to keep compiling as a valid override. Doc-comment text mentioning the
+old name was updated alongside the code.
+
+Verified via a full rebuild (`cmake --build build --parallel 2`, 0 errors/0 warnings) and the
+complete test suite: 12305/12305 passing — the SAME count as immediately before the rename,
+confirming this was a pure naming change with zero behavioral impact. Commit `d50ec81`, pushed to
+`origin/feature/work`.
+
+## MILESTONE: `SELECT COUNT(*) FROM ticket WHERE status != 'done'` now returns **0**
+
+Every ticket in the entire `plan.sqlite3` `ticket` table — all 19 post-stabilization-audit
+tickets (1710-1728) plus the full pre-existing backlog from earlier in this session — is now
+`done`. There are no `todo`, `doing`, `blocked`, or `needs_user` rows anywhere in the table. The
+`task` table (separate workflow, tracks individual .NET types) also had zero unclassified rows as
+of the last check this session.
+
+### To resume
+There is no pre-scoped work left in `plan.sqlite3`. A genuinely fresh session should either:
+(1) ask the user for new direction, (2) run another fresh audit sweep (this session's
+`POST_STABILIZATION_AUDIT.md` pattern — 7 parallel find-only forks across named risk categories,
+each finding independently verified before ticketing — proved productive twice now: the original
+41-bug first-pass sweep, and this 20-finding fresh audit; a third pass may have diminishing
+returns but is a reasonable thing to offer), or (3) re-run the `task`-table Step 1 query in case
+any new .NET types have appeared to classify. Ticket #43 (the original int→intcs policy
+decision) and ticket 1727 (this getCurrent() rename) both demonstrate the same pattern: when a
+broad-refactor-shaped question comes up, hold it for explicit user decision rather than guessing
+— both were eventually authorized and executed cleanly once asked.
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — 18/19 post-stabilization-audit tickets done, only 1727 (needs-user-decision) remains
+
+Finished working through the post-stabilization-audit ticket batch "postupně" (gradually, reduced
+parallelism). **18 of 19 tickets are now `done`**; the sole holdout is **1727** (systemic
+`getCurrent()` naming-convention violation, 30 occurrences across 14 files), which stays `todo`
+by design — same precedent as ticket #43's `int`→`intcs` rollout: a naming-convention change wide
+enough to touch many files needs explicit per-action user approval before starting, not an
+auto-fix.
+
+This round closed out the remaining P2/P3 tickets (1717-1726, 1728), landing as several small
+commits — `a765579` (String::LastIndexOf), `3521103` (Math::Round FP-mode hazard), `4b03e33`
+(MemoryStream disposed-state), `13924e2` (StringInfo byte/char inconsistency), `c9e5cce` +
+`141372d` (ConcurrentQueue/ConcurrentDictionary stress tests), `1200d79` (CLAUDE.md getItem/
+setItem doc note), `0d54282` (Channel stress test), `a66028c` (ticket 1717 — NumberStyles-aware
+Parse/TryParse for all 8 integer primitive types), `3404022` (ticket 1718 — List<T>/StringBuilder
+CopyTo).
+
+**Ticket 1717 caught its own bug during verification, fixed same-session**: the first pass's
+`TryParseHexCore` returned a plain `bool`, conflating "not valid hex grammar" with "valid hex but
+more digits than the target type's width" — so `Parse(string, NumberStyles.HexNumber, ...)`
+always threw `FormatException` instead of `OverflowException` for a too-many-hex-digits input
+(e.g. `Int32::Parse("1FFFFFFFF", HexNumber)`), caught by
+`Ticket1717Tests.Int32_HexNumberStyle_TooManyDigitsOverflows`. Fixed by adding a `tooManyDigits`
+out-parameter to `TryParseHexCore` (mirroring the existing `overflowed` out-param pattern on
+`TryParseSignedCore`/`TryParseUnsignedCore`) and updating all 16 call sites (2 per type × 8
+types) to check it directly instead of re-invoking the parser a second time on input that would
+deterministically fail identically. Also fixed the same latent bug in Int64/UInt64, whose hex
+`Parse` path had *no* overflow classification at all (always threw `FormatException`) before this
+fix.
+
+Verified via full rebuild (`cmake --build build --parallel 2`, 0 errors/0 warnings) + full suite
+(`./build/SharpRuntimeTests`, 12305/12305 passing) + `git fetch`/`git log origin/feature/work`
+(no divergence, all commits confirmed landed) after every commit.
+
+### To resume
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo';"` — only 1727 remains, and it needs an
+explicit user decision (not auto-fixable) before any action: is a 30-occurrence/14-file
+`getCurrent()` → correct-naming-convention rename in scope right now, and if so, should it be
+one big commit or split into per-file/per-namespace batches like ticket #43 was? Do not start
+it without asking.
+
+Beyond 1727, the post-stabilization-audit batch is fully closed. Next open work is whatever's
+next in the `plan.sqlite3` `task` table (dotnet/runtime namespace review) — see §10's resume
+prompt below, or re-run a fresh audit sweep if the user wants another one.
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 1713 (systemic version-tracking, 11 files) fixed, all 7 P1 post-stabilization-audit tickets now done
+
+Continuing the same "postupně" (gradual, reduced-parallelism) pace. Ticket 1713 — the large
+systemic finding that ALL 11 generic collection types lack version tracking, so enumerators never
+detect concurrent modification — was deliberately deferred to its own dedicated round given its
+scope (per the ticket's own scope note anticipating this). Split into 3 forks of 3-4 files each
+(`--parallel 2` builds, same reduced pace as the first round), each applying the same proven
+fail-fast pattern already used by this codebase's legacy `ArrayList`/`Hashtable` types. Verified
+afterward via `git fetch`+`git log` (no local/origin divergence, all 3 commits landed cleanly), a
+fresh `cmake --build --parallel 2` + full test run (12267/12267), and personally read the most
+technically interesting diff (`Dictionary.hpp`'s deliberate .NET-parity deviation) directly.
+
+- **List/Dictionary/HashSet** (commit `638741a`): `List`'s existing `Enumerator` converted to
+  hold a parent pointer + version check. `Dictionary`/`HashSet` had no formal enumerator at all
+  (raw STL `begin()`/`end()`) — got a new `VersionCheckedIterator` wrapper. **Two deliberate,
+  clearly documented deviations from literal .NET parity, both for C++ memory safety**:
+  `Dictionary`/`HashSet`'s `Remove()`/`Clear()` bump `version_` here, even though real .NET's
+  don't (its array+free-list scheme is immune to this specific hazard) — this port's
+  `std::unordered_map`/`set` iterators are genuinely invalidated by erasing the
+  currently-iterated element, confirmed via an ASan use-after-free repro *during development,
+  before* adding the bump. A textbook case of "don't blindly copy .NET's exact behavior when the
+  underlying C++ container has different invalidation rules" — correctly caught rather than
+  shipping a literal-parity bug.
+- **LinkedList/Queue/Stack/SortedList** (commit `247910d`): `Queue`/`Stack` had ZERO enumeration
+  support at all (`std::queue`/`std::stack` adapters have no iterators) — switched both to
+  `std::deque` directly (their existing default backing container, so no behavioral change) to
+  unlock iteration, then added version-checked `GetEnumerator()` matching .NET's exact order.
+  **Bonus fix found while in the file**: `SortedList`'s non-const `operator[]` had the identical
+  silent-auto-insert bug as ticket 1712 (`Dictionary`/`SortedDictionary`) — a type that ticket
+  didn't cover — fixed with the same `ValueProxy` pattern.
+- **SortedDictionary/SortedSet/OrderedDictionary/PriorityQueue** (commit `7f12223`):
+  `SortedDictionary`/`SortedSet` exposed raw STL iterators (both already had a doc-comment
+  disclosing this as a known limitation) — replaced with a custom version-checked `Iterator`
+  class per type. `OrderedDictionary` used raw `std::vector` iterators (an undocumented
+  dangling-iterator risk on reallocation) — fixed with an index-based `Iterator` immune to
+  reallocation, confirmed via a 200-element forced-reallocation stress test.
+  **`PriorityQueue` confirmed genuinely out of scope** — it has no enumeration surface at all (no
+  `begin()`/`end()`, no `UnorderedItems`-equivalent) — correctly NOT modified rather than having
+  something manufactured to fit the ticket. `SortedSet`'s documented `GetViewBetween` live-view
+  semantics (an earlier session's separate decision) confirmed unaffected.
+
+Total: 74 new regression tests across the three commits, all flake-checked via repeated runs,
+every fix ASan/UBSan-repro-verified before landing.
+
+Final verified state: 12267/12267 tests passing (up from 12211 — 56 net new tests), 0 errors/0
+warnings, all 3 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+**All 7 P1 post-stabilization-audit tickets are now done.** Remaining: 11 P2/P3 tickets
+(1717-1726, 1728) plus ticket 1727 (needs-user-decision, still untouched, correctly not fixed
+without asking).
+
+### To resume
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo' ORDER BY priority, ticket_no;"` — 11
+tickets remain (1717-1726, 1728), all P2/P3, lower severity than the P1 batch just completed.
+Continue with the same reduced-parallelism ("postupně") pace. Ticket 1727 stays untouched
+pending explicit user decision.
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — first 6 post-stabilization-audit tickets fixed (all P1), 3 reduced-parallelism forks
+
+User asked to fix the post-stabilization-audit tickets "postupně" (gradually/step by step) —
+interpreted as: don't blast all 19 into parallel forks at once, use reduced parallelism (matching
+the earlier CPU-heat-driven precedent: `cmake --build --parallel 2`), and work through them in
+priority order. First round: all 6 P1 tickets (the highest-severity confirmed bugs), dispatched
+as 3 forks of 2 tickets each on disjoint files. Ticket 1713 (the large 11-file systemic
+generic-collections version-tracking gap) was deliberately deferred to its own dedicated round
+given its scope. Verified afterward via `git fetch`+`git log` (no local/origin divergence, all 6
+commits landed cleanly), a fresh `cmake --build --parallel 2` + full test run (12211/12211), and
+personally re-read the two highest-impact diffs (`Convert` rounding, `Dictionary` KeyNotFoundException)
+directly.
+
+- **1710 (`Convert::ToXxx` rounding)**: fixed by delegating `ToByte`/`ToInt16`/`ToUInt16`/
+  `ToSByte(double|float)` to `ToInt32(double)`, matching real .NET's own delegation pattern
+  exactly. `ToInt32`/`ToInt64(double)` now round via `Math::Round` before range-checking.
+  `ToUInt32`/`ToUInt64(double)` gained the same rounding with a nearest-representable-double
+  boundary-check trick (since `INT64_MAX`/`UINT64_MAX` aren't exactly representable as `double`).
+  **Found and fixed a second bug not in the original ticket text while fixing the family**:
+  `ToInt64(float)` was a separate bare truncating cast that didn't even delegate to
+  `ToInt64(double)` — fixed to delegate. `ToInt64(double)`'s missing overflow check also fixed
+  (`ToInt64(1e20)` now throws `OverflowException` instead of silently returning `LLONG_MIN`).
+  Repro-confirmed: `ToInt32(2.9)` now `3`, `ToInt32(3.5)` now `4` (tie-to-even). 8 pre-existing
+  tests that had codified the wrong truncating behavior were fixed alongside. Commit `ed58a5a`.
+- **1711 (`Span<T>` exception type)**: all 3 indexer occurrences now throw
+  `IndexOutOfRangeException` instead of `ArgumentOutOfRangeException`, matching real .NET.
+  `Slice()` correctly left as `ArgumentOutOfRangeException` (a different real-.NET convention).
+  Commit `a9a21c0`.
+- **1712 (`Dictionary`/`SortedDictionary` silent auto-insert)**: applied the exact `ValueProxy`
+  pattern `ConcurrentDictionary` already uses to distinguish get-intent (throws
+  `KeyNotFoundException` on missing key) from set-intent (inserts) — a single C++ `operator[]`
+  can't otherwise express .NET's split get/set indexer semantics. Setter path unchanged (still
+  correctly inserts on missing key). Commit `6948175`.
+- **1716 (`ConcurrentDictionary` reentrancy deadlock)**: `GetOrAdd`/`AddOrUpdate` restructured to
+  check-under-lock → call-factory-outside-lock → re-acquire-and-commit (checking again in case
+  another thread inserted while unlocked), matching real .NET's documented contract that the
+  factory may run without the lock held and may run more than once under contention. Confirmed
+  fixed via 4 reentrant-callback regression tests, repeated 3x with no flakiness. Commit `57ddc49`.
+- **1714/1715 (`MemoryStream`/`DeflateStream`/`GZipStream`/`ZLibStream::Write` missing
+  validation)**: all 4 `Write` methods (`MemoryStream` plus the 3 compression stream wrappers,
+  which shared a byte-identical copy-pasted gap) gained the same buffer/offset/count validation
+  their sibling `Read` methods (or real .NET's base contract) already had. Both fixes
+  ASan-repro-confirmed: the negative-offset out-of-bounds read is eliminated post-fix. Commits
+  `c9c7526`, `e244f25`.
+
+Final verified state: 12211/12211 tests passing (up from 12173 — 38 net new regression tests), 0
+errors/0 warnings, all 6 commits confirmed on `origin/feature/work` via `git fetch` (no
+divergence).
+
+### To resume
+13 tickets remain in `post-stabilization-audit`: the large systemic 1713 (generic-collections
+version tracking, deliberately deferred to its own round), P2 tickets 1717-1719, 1721-1725, and
+P3 tickets 1720, 1726, 1728. Ticket 1727 (`getCurrent()` naming) stays untouched pending explicit
+user decision — do not fix without asking, matching the ticket-#43 precedent. Query:
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo' ORDER BY priority, ticket_no;"`. Continue
+with reduced parallelism (`--parallel 2`, 2-3 concurrent forks) per the user's "postupně"
+pacing request — this is a standing preference for this ticket category, not a one-time ask.
+
+## New: fresh post-stabilization audit — 20 verified findings, 19 new tickets (1710-1728, category `post-stabilization-audit`)
+
+User explicitly asked for a fresh audit that does NOT assume the completed ticket table means
+the runtime is perfect, across 8 named risk categories (API inconsistencies, undocumented .NET
+deviations, `NotImplementedException` residue, stub classes, platform problems, exception type
+mismatches, hidden silent-wrong-behavior, missing tests). Full writeup:
+**`POST_STABILIZATION_AUDIT.md`** (repo root, committed `8618d19`) — read that file for complete
+details; this is a pointer, not a duplicate.
+
+Methodology: 7 parallel FIND-ONLY forks (no fixes, no file changes), each swept the whole
+codebase for one or two categories, verified every candidate against the real .NET reference
+source and/or a standalone repro before reporting, explicitly declining to pad with speculative
+findings. Every finding was re-checked by the orchestrating session before ticketing.
+
+**Result: 20 concrete findings (9 High, 8 Medium, 3 Low)**, all backed by evidence — several
+repro-confirmed via direct execution, not just code-read plausibility. Highlights:
+- `Convert::ToXxx(double/float)` truncates instead of rounding (systemic across 8 methods,
+  repro-confirmed against real .NET's actual banker's-rounding algorithm) — ticket 1710.
+- `Dictionary`/`SortedDictionary`'s non-const indexer silently auto-inserts a default value
+  instead of throwing `KeyNotFoundException` — the exact bug `ConcurrentDictionary` already fixed
+  via a `ValueProxy` wrapper, never propagated to its non-concurrent siblings — ticket 1712.
+- **Systemic**: all 11 generic collections (`List`, `Dictionary`, `HashSet`, etc.) lack version
+  tracking, so enumerators never detect concurrent modification (UB via dangling
+  reference/iterator on reallocation, or silent wrong-result iteration otherwise) — the legacy
+  `System.Collections` types already have this exact fix, never applied to the generic ones —
+  ticket 1713 (large, will fan out per-type when implemented).
+- `MemoryStream::Write` AND `DeflateStream`/`GZipStream`/`ZLibStream::Write` (4 call sites, same
+  copy-pasted bug) silently no-op on invalid arguments; a negative offset causes a confirmed
+  out-of-bounds READ, not just a no-op — tickets 1714/1715.
+- `Span<T>` indexer throws the wrong exception type (`ArgumentOutOfRangeException` instead of
+  .NET's `IndexOutOfRangeException`) — ticket 1711.
+- `ConcurrentDictionary::GetOrAdd`/`AddOrUpdate` holds its lock across the user-supplied callback
+  → reentrancy deadlock on a realistic memoization pattern — ticket 1716.
+
+One finding (`getCurrent()` naming violation, systemic across 30 occurrences/14 files — worse
+than the single known instance found earlier this session) is deliberately filed as
+needs-user-decision, not auto-fixable, since it's the same broad-refactor shape as ticket #43
+(int→intcs) and needs the same kind of explicit authorization before touching.
+
+### To resume
+All 19 new tickets are `todo` in the `post-stabilization-audit` category, prioritized P1
+(6 tickets — real correctness/memory-safety bugs) through P3 (4 tickets — documentation/
+needs-decision/lower-risk test gaps). No fixes have been applied yet — this was a find-and-ticket
+pass only, per the user's explicit instruction. `sqlite3 plan.sqlite3 "SELECT ticket_no,
+priority, title FROM ticket WHERE category='post-stabilization-audit' ORDER BY priority,
+ticket_no;"` to see the queue. Natural next step if the user wants to proceed: work these 19
+tickets the same way as the rest of this session's ticket-workflow (parallel forks by
+disjoint-file-set, verify via `git fetch`+rebuild+full-test-run, checkpoint). Ticket 1727
+(`getCurrent()`) needs an explicit user decision before any code changes — do not fix without
+asking, matching the #43 precedent.
+
+## Re-verified this checkpoint: `plan.sqlite3` has nothing blocked, nothing pending, anywhere
+
+Direct re-check, both tables, full status breakdown (not a sample):
+```
+sqlite3 plan.sqlite3 "SELECT status, COUNT(*) FROM ticket GROUP BY status;"
+  done|1709
+sqlite3 plan.sqlite3 "SELECT status, COUNT(*) FROM task GROUP BY status;"
+  ignore|137
+  ignored|15023
+  ported|1041
+```
+`ticket`: every one of 1709 rows is `done` — no `blocked`/`todo`/`doing`/`needs_user`/`wontfix`
+rows exist at all. `task`: only `ported`/`ignore`/`ignored` appear — no `''`/`todo`/`tobedecided`
+rows exist. (Note: an earlier checkpoint entry below states the ticket total as "1712" — that was
+an arithmetic slip made while summing the category breakdown by hand; 1709 is the correct,
+directly-queried total and is what should be trusted going forward.)
 
 ## MILESTONE: ticket #43 (global int→intcs policy) unblocked and fully rolled out — the `ticket` table is now 100% `done`
 

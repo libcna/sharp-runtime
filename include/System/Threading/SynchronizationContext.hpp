@@ -21,7 +21,7 @@ namespace System::Threading {
      * thread -- this port's Post() previously ran the callback inline, identically to Send(),
      * defeating the entire purpose of the distinction. (2) Current/SetSynchronizationContext
      * read/write a per-thread field (real .NET: Thread.CurrentThread._synchronizationContext);
-     * this port's getCurrent() previously always returned nullptr regardless of what had been
+     * this port's getCurrentProperty() previously always returned nullptr regardless of what had been
      * set via SetSynchronizationContext(), which was itself a complete no-op -- the pair never
      * round-tripped at all.
      */
@@ -41,7 +41,7 @@ namespace System::Threading {
         }
 
         /** Returns the synchronization context set for the current thread via SetSynchronizationContext(), or nullptr if none. */
-        static SynchronizationContext* getCurrent() { return CurrentSlot(); }
+        static SynchronizationContext* getCurrentProperty() { return CurrentSlot(); }
 
         /** Sets the synchronization context for the current thread. */
         static void SetSynchronizationContext(SynchronizationContext* syncContext) { CurrentSlot() = syncContext; }

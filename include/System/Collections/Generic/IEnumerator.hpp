@@ -31,10 +31,10 @@ public:
     /**
      * @brief Returns a void pointer to the current element (non-generic override).
      *
-     * Bridges the non-generic System::Collections::IEnumerator::getCurrent() to the
+     * Bridges the non-generic System::Collections::IEnumerator::getCurrentProperty() to the
      * typed Current() accessor. Allows non-generic code to access the current element.
      */
-    void* getCurrent() const override {
+    void* getCurrentProperty() const override {
         return const_cast<T*>(&Current());
     }
 };

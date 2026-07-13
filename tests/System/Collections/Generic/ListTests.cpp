@@ -7,6 +7,7 @@
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <string>
 #include <vector>
 
@@ -337,6 +338,90 @@ TEST(GenListTests, InsertRangeOutOfRange_Throws) {
     EXPECT_THROW(lst.InsertRange(2, v), System::ArgumentOutOfRangeException);
 }
 
+// ---- GetEnumerator() version-tracking (ticket 1713, post-stabilization-audit finding #4) ----
+TEST(GenListTests, GetEnumerator_NoModification_DoesNotThrow) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    auto* e = lst.GetEnumerator();
+    int count = 0;
+    while (e->MoveNext()) { (void)e->Current(); count++; }
+    EXPECT_EQ(count, 3);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_AddDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Add(3);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_RemoveDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Remove(2);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_ClearDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Clear();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_SortDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(3); lst.Add(1); lst.Add(2);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Sort();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_ReverseDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2); lst.Add(3);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Reverse();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, GetEnumerator_InsertDuringIteration_Throws) {
+    List<int> lst;
+    lst.Add(1); lst.Add(2);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    lst.Insert(0, 99);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenListTests, AddRange_Empty_DoesNotBumpVersion) {
+    // Matches real .NET's List<T>.AddRange: adding an empty collection is a no-op that does
+    // NOT bump _version, so an in-progress enumeration must not be invalidated by it.
+    List<int> lst;
+    lst.Add(1);
+    auto* e = lst.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    std::vector<int> empty;
+    lst.AddRange(empty);
+    EXPECT_NO_THROW(e->MoveNext());
+    delete e;
+}
+
 // ---- LinkedListNode Next/Previous ----
 TEST(GenLinkedListNodeTests, NextProperty) {
     LinkedList<int> ll;
@@ -402,6 +487,49 @@ TEST(GenLinkedListTests, GetEnumerator) {
     int sum = 0;
     while (e->MoveNext()) sum += e->Current();
     EXPECT_EQ(sum, 6);
+    delete e;
+}
+
+// post-stabilization-audit finding #4 / ticket 1713: GetEnumerator()'s Enumerator must detect
+// structural modification during iteration and throw InvalidOperationException, matching real
+// .NET's fail-fast contract.
+TEST(GenLinkedListTests, GetEnumerator_NoModification_DoesNotThrow) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_TRUE(e->MoveNext());
+    EXPECT_FALSE(e->MoveNext());
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_AddLastDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.AddLast(3);
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_RemoveFirstDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2); ll.AddLast(3);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.RemoveFirst();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
+    delete e;
+}
+
+TEST(GenLinkedListTests, GetEnumerator_ClearDuringIteration_Throws) {
+    LinkedList<int> ll;
+    ll.AddLast(1); ll.AddLast(2);
+    auto* e = ll.GetEnumerator();
+    EXPECT_TRUE(e->MoveNext());
+    ll.Clear();
+    EXPECT_THROW(e->MoveNext(), System::InvalidOperationException);
     delete e;
 }
 

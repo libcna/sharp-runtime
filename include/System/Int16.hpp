@@ -16,9 +16,13 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+class IFormatProvider;
 
 /**
  * @brief Provides constants and static methods for working with 16-bit signed integers.
@@ -66,6 +70,66 @@ public:
     static bool TryParse(const std::string& s, SharpRuntime::shortcs& result) {
         try { result = Parse(s); return true; }
         catch (...) { result = 0; return false; }
+    }
+
+    /**
+     * @brief Converts the string representation of a number in the specified style to its
+     * 16-bit signed integer equivalent.
+     *
+     * C++ counterpart of .NET Int16.Parse(string, NumberStyles, IFormatProvider). @p provider
+     * is accepted for API-surface parity but ignored. Supports NumberStyles.Integer and
+     * NumberStyles.HexNumber (hex reinterpreted as a two's-complement bit pattern) -- see
+     * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar and
+     * the deliberate scope decision on AllowThousands/AllowDecimalPoint/etc.
+     * @throws System::FormatException if the string is not in a correct format for @p style.
+     * @throws System::OverflowException if the value exceeds Int16 range.
+     */
+    static SharpRuntime::shortcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                        const IFormatProvider* provider) {
+        (void)provider;
+        SharpRuntime::shortcs result;
+        if (!TryParse(s, style, provider, result)) {
+            using System::Globalization::NumberStyles;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 4, tooManyDigits);
+                if (tooManyDigits)
+                    throw System::OverflowException("Value out of Int16 range.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            SharpRuntime::longcs signedResult; bool overflowed = false;
+            if (System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed) &&
+                (overflowed || signedResult < MinValue || signedResult > MaxValue))
+                throw System::OverflowException("Value out of Int16 range.");
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+        return result;
+    }
+
+    /**
+     * @brief Tries to convert a string to a 16-bit signed integer using the specified style,
+     * without throwing.
+     *
+     * C++ counterpart of .NET Int16.TryParse(string, NumberStyles, IFormatProvider, out short).
+     */
+    static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                          const IFormatProvider* provider, SharpRuntime::shortcs& result) {
+        (void)provider;
+        using System::Globalization::NumberStyles;
+        result = 0;
+        if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+            uint64_t bits; bool tooManyDigits = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 4, tooManyDigits))
+                return false;
+            result = static_cast<SharpRuntime::shortcs>(static_cast<uint16_t>(bits));
+            return true;
+        }
+        SharpRuntime::longcs signedResult; bool overflowed = false;
+        if (!System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed))
+            return false;
+        if (overflowed || signedResult < MinValue || signedResult > MaxValue) return false;
+        result = static_cast<SharpRuntime::shortcs>(signedResult);
+        return true;
     }
 
     /** @brief Converts the 16-bit signed integer @p value to its string representation. */

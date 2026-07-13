@@ -8,6 +8,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/Generic/KeyValuePair.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections::Generic {
@@ -20,12 +21,9 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.SortedDictionary<TKey,TValue>.
  * Backed by std::map<TKey,TValue>; provides O(log n) Add, Remove, and lookup.
  *
- * @note Unlike .NET's SortedDictionary<TKey,TValue>, iterators do not detect
- * concurrent modification: .NET throws InvalidOperationException if the
- * dictionary is structurally modified while an enumerator is active, but
- * sharp-runtime's iterators follow plain std::map invalidation rules instead
- * (erasing an element only invalidates that element's iterator; other iterators
- * remain valid). Do not mutate the dictionary while iterating it directly.
+ * begin()/end() (used by range-for) now detect structural modification during
+ * iteration via a version counter and throw System::InvalidOperationException,
+ * matching real .NET's fail-fast enumerator contract (see ticket 1713).
  *
  * @tparam TKey   The type of the keys (must support operator<).
  * @tparam TValue The type of the values.
@@ -33,8 +31,36 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class SortedDictionary {
     std::map<TKey, TValue> map_;
+    intcs version_ = 0;
 
 public:
+    /**
+     * @brief A version-checked wrapper over std::map<TKey,TValue>::iterator that throws
+     * System::InvalidOperationException on dereference/increment if the owning
+     * SortedDictionary was structurally modified since this iterator was obtained --
+     * matching real .NET's fail-fast enumerator contract (ticket 1713).
+     */
+    class Iterator {
+        typename std::map<TKey, TValue>::const_iterator it_;
+        const SortedDictionary* owner_;
+        intcs version_;
+
+        void checkVersion() const {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+        }
+
+    public:
+        Iterator(typename std::map<TKey, TValue>::const_iterator it, const SortedDictionary* owner)
+            : it_(it), owner_(owner), version_(owner->version_) {}
+
+        const std::pair<const TKey, TValue>& operator*() const { checkVersion(); return *it_; }
+        const std::pair<const TKey, TValue>* operator->() const { checkVersion(); return &*it_; }
+        Iterator& operator++() { checkVersion(); ++it_; return *this; }
+        bool operator==(const Iterator& other) const { return it_ == other.it_; }
+        bool operator!=(const Iterator& other) const { return it_ != other.it_; }
+    };
+
     /** @brief Initializes a new empty SortedDictionary. */
     SortedDictionary() = default;
 
@@ -47,14 +73,49 @@ public:
     [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(map_.size()); }
 
     /**
-     * @brief Gets or sets the value associated with the specified key (mutable).
+     * @brief A proxy for `dict[key]` that throws on read of a missing key while still
+     * supporting `dict[key] = value` to insert-or-update, matching .NET's split get/set
+     * indexer semantics on top of a single C++ `operator[]`.
      *
-     * C++ counterpart of .NET SortedDictionary<TKey,TValue>.Item[TKey] setter.
-     * Inserts a default value if the key is absent.
-     * @param key The key whose value to get or set.
-     * @return A reference to the associated value.
+     * A plain `TValue&` return (the prior implementation) could not distinguish a read
+     * from a write, so it always inserted a default-constructed value on a missing key --
+     * matching std::map::operator[]'s convention, not .NET's. Real .NET's
+     * SortedDictionary<TKey,TValue> indexer getter throws KeyNotFoundException
+     * unconditionally on a missing key; only the setter inserts.
      */
-    TValue& operator[](const TKey& key) { return map_[key]; }
+    class ValueProxy {
+        SortedDictionary* owner_;
+        TKey key_;
+    public:
+        ValueProxy(SortedDictionary* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+        /** Reads the current value; throws KeyNotFoundException if the key is absent. */
+        operator const TValue&() const {
+            auto it = owner_->map_.find(key_);
+            if (it == owner_->map_.end())
+                throw KeyNotFoundException("The given key was not present in the dictionary.");
+            return it->second;
+        }
+
+        /** Inserts or overwrites the value for this key. */
+        ValueProxy& operator=(const TValue& value) {
+            bool isNewKey = owner_->map_.find(key_) == owner_->map_.end();
+            owner_->map_[key_] = value;
+            if (isNewKey) ++owner_->version_;
+            return *this;
+        }
+    };
+
+    /**
+     * @brief Gets or sets the value associated with the specified key.
+     *
+     * C++ counterpart of .NET SortedDictionary<TKey,TValue>.Item[TKey]. The getter throws
+     * System::Collections::Generic::KeyNotFoundException if @p key is absent (it does NOT
+     * insert a default, unlike std::map::operator[]); the setter inserts or overwrites.
+     * See ValueProxy for why this isn't a plain `TValue&`.
+     * @param key The key whose value to get or set.
+     */
+    [[nodiscard]] ValueProxy operator[](const TKey& key) { return ValueProxy(this, key); }
 
     /**
      * @brief Gets the value associated with the specified key (const).
@@ -81,6 +142,7 @@ public:
     void Add(const TKey& key, const TValue& value) {
         if (map_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
+        ++version_;
     }
 
     /**
@@ -93,6 +155,7 @@ public:
     bool TryAdd(const TKey& key, const TValue& value) {
         if (map_.count(key)) return false;
         map_[key] = value;
+        ++version_;
         return true;
     }
 
@@ -103,7 +166,11 @@ public:
      * @param key The key of the element to remove.
      * @return true if the element was found and removed; otherwise false.
      */
-    bool Remove(const TKey& key) { return map_.erase(key) > 0; }
+    bool Remove(const TKey& key) {
+        bool removed = map_.erase(key) > 0;
+        if (removed) ++version_;
+        return removed;
+    }
 
     /**
      * @brief Determines whether the dictionary contains the specified key.
@@ -185,21 +252,21 @@ public:
      *
      * C++ counterpart of .NET SortedDictionary<TKey,TValue>.Clear().
      */
-    void Clear() { map_.clear(); }
+    void Clear() { map_.clear(); ++version_; }
 
     /** @brief Returns all keys in sorted order (alias for getKeysProperty()). */
     [[nodiscard]] std::vector<TKey> Keys() const { return getKeysProperty(); }
     /** @brief Returns all values in key-sorted order (alias for getValuesProperty()). */
     [[nodiscard]] std::vector<TValue> Values() const { return getValuesProperty(); }
 
-    /** @brief Returns an iterator to the beginning of the dictionary (STL interop). */
-    auto begin()       { return map_.begin(); }
-    /** @brief Returns an iterator past the end of the dictionary (STL interop). */
-    auto end()         { return map_.end(); }
-    /** @brief Returns a const iterator to the beginning of the dictionary (STL interop). */
-    auto begin() const { return map_.cbegin(); }
-    /** @brief Returns a const iterator past the end of the dictionary (STL interop). */
-    auto end()   const { return map_.cend(); }
+    /**
+     * @brief Returns a version-checked iterator to the beginning of the dictionary (range-for).
+     * @throws System::InvalidOperationException from dereference/increment if the dictionary
+     *         is structurally modified while this iterator is in use.
+     */
+    Iterator begin() const { return Iterator(map_.cbegin(), this); }
+    /** @brief Returns a version-checked iterator past the end of the dictionary (range-for). */
+    Iterator end()   const { return Iterator(map_.cend(), this); }
 };
 
 } // namespace System::Collections::Generic

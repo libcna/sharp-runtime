@@ -29,9 +29,11 @@ namespace System::IO {
      * feature gaps: recursive subdirectory watching (IncludeSubdirectories is tracked but has
      * no effect -- would require walking the whole tree, adding a watch per subdirectory, and
      * handling directories created/removed while already watching), and any non-Linux backend
-     * (FSEvents on macOS, ReadDirectoryChangesW on Windows) -- on those platforms this remains
-     * the original stub: the flag is tracked faithfully, but no real monitoring occurs. This is
-     * a documented gap, not a silent one.
+     * (FSEvents on macOS, ReadDirectoryChangesW on Windows) -- on those platforms, setting
+     * EnableRaisingEvents = true throws System::PlatformNotSupportedException rather than
+     * silently tracking the flag with no real monitoring, matching CLAUDE.md's
+     * platform-abstraction policy (never silently fail on an unsupported platform). This is a
+     * documented gap, not a silent one.
      */
     class FileSystemWatcher {
         std::string directory_;

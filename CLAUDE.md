@@ -12,7 +12,10 @@
 2. **10711+ tests passing.** `./build/SharpRuntimeTests` must show no failures. (Baseline verified 2026-07-07 — this floor should be raised as new tests are added, never lowered.)
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
-5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`.
+5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
+   (C# `this[key]` equivalents) use `getItem()` / `setItem()`, not
+   `getItemProperty()`/`setItemProperty()` — a deliberate, consistent convention for the
+   parameterized-property case, applied across every indexer in the codebase.
 6. **Namespace syntax:** `namespace System::Collections::Generic {` (C++17 nested form).
 7. **Use `SharpRuntime::intcs`, not `int`** in public APIs that mirror .NET `int` parameters.
 8. **No LINQ.** Use `std::ranges` in ported code instead.
@@ -34,6 +37,10 @@ These subsystems currently work only on Linux/macOS and are **documented bugs**,
 | `System::IO::RandomAccess` | `pread`, `pwrite`, `fsync` | POSIX-only |
 | `System::AppDomain/AppContext` | `/proc/self/exe` | Linux-only |
 | `System::TimeZoneInfo` | `localtime_r`, `/usr/share/zoneinfo` | POSIX-only |
+| `System::Diagnostics::Process` | `fork`, `execve`, `waitpid` | POSIX-only |
+| `System::Runtime::InteropServices::PosixSignal`/`PosixSignalRegistration` | `sigaction` | POSIX-only |
+| `System::Net::NetworkInformation::NetworkInterface` | `getifaddrs` | Linux-only |
+| `System::IO::FileSystemWatcher` | `inotify` | Linux-only |
 
 ### What is MSVC-unsupported (compiler-extension dependency, not a platform bug)
 

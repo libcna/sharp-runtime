@@ -2,7 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <atomic>
+#include <mutex>
 #include <thread>
+#include <vector>
 #include "System/Threading/Channels/Channel.hpp"
 #include "System/Threading/Channels/ChannelClosedException.hpp"
 
@@ -252,4 +255,56 @@ TEST(ChannelTests, CanCountAndCount) {
 TEST(ChannelTests, ChannelClosedException_DefaultMessage) {
     ChannelClosedException ex;
     EXPECT_STREQ(ex.what(), "The channel has been closed.");
+}
+
+// Ticket 1726 (post-stabilization-audit): all prior std::thread-using tests above are
+// single-writer/single-reader coordination checks. Channel<T> is exactly the kind of primitive
+// real .NET code uses for fan-in/fan-out, so this exercises genuine multi-producer/
+// multi-consumer contention: N writer threads each TryWrite a distinct block of values (using an
+// unbounded channel, so TryWrite always succeeds immediately -- no need to also race
+// WaitToWriteAsync backpressure here, that's covered by the existing bounded-channel tests
+// above), M reader threads race TryRead against each other and against getIsCompletedProperty()
+// once the writers finish and TryComplete() is called, verifying the total items read matches
+// total written with no duplicates or losses.
+TEST(ChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicatedItems) {
+    auto channel = Channel<int>::CreateUnbounded();
+    constexpr int kWriters = 4;
+    constexpr int kReaders = 4;
+    constexpr int kPerWriter = 2000;
+    constexpr int kTotal = kWriters * kPerWriter;
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&channel, w]() {
+            for (int i = 0; i < kPerWriter; ++i) {
+                EXPECT_TRUE(channel.Writer->TryWrite(w * kPerWriter + i));
+            }
+        });
+    }
+    for (auto& th : writers) th.join();
+    channel.Writer->TryComplete();
+
+    std::atomic<int> readCount{0};
+    std::vector<int> seenPerValue(kTotal, 0);
+    std::mutex seenMutex;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&]() {
+            int value;
+            while (channel.Reader->TryRead(value)) {
+                readCount.fetch_add(1, std::memory_order_relaxed);
+                std::lock_guard<std::mutex> lock(seenMutex);
+                ASSERT_GE(value, 0);
+                ASSERT_LT(value, kTotal);
+                seenPerValue[static_cast<size_t>(value)]++;
+            }
+        });
+    }
+    for (auto& th : readers) th.join();
+
+    EXPECT_EQ(readCount.load(), kTotal);
+    for (int v = 0; v < kTotal; ++v) {
+        EXPECT_EQ(seenPerValue[static_cast<size_t>(v)], 1) << "value " << v << " seen "
+            << seenPerValue[static_cast<size_t>(v)] << " times (expected exactly once)";
+    }
 }

@@ -319,6 +319,44 @@ TEST(StringInfoTests, GetNextTextElementLength_PastEnd_Throws) {
     EXPECT_THROW(StringInfo::GetNextTextElementLength("hi", 10), System::ArgumentOutOfRangeException);
 }
 
+// Non-ASCII UTF-8 consistency: "e with acute accent" is the 2-byte UTF-8 sequence 0xC3 0xA9.
+// GetNextTextElement/GetNextTextElementLength/ParseCombiningCharacters/LengthInTextElements must
+// all keep the 2-byte sequence together (matching GetTextElementEnumerator, which already did),
+// not split it into two 1-byte fragments.
+TEST(StringInfoTests, GetNextTextElement_MultiByteUtf8_KeepsFullCharacter) {
+    std::string eAcute = "\xC3\xA9"; // U+00E9
+    EXPECT_EQ(StringInfo::GetNextTextElement(eAcute, 0), eAcute);
+}
+
+TEST(StringInfoTests, GetNextTextElement_MultiByteUtf8_ConsistentWithEnumerator) {
+    std::string s = "a\xC3\xA9z"; // 'a', e-acute (2 bytes), 'z'
+    auto direct = StringInfo::GetNextTextElement(s, 1);
+    auto en = StringInfo::GetTextElementEnumerator(s);
+    ASSERT_TRUE(en.MoveNext()); // 'a'
+    ASSERT_TRUE(en.MoveNext()); // e-acute
+    EXPECT_EQ(direct, en.GetTextElement());
+    EXPECT_EQ(direct, "\xC3\xA9");
+}
+
+TEST(StringInfoTests, GetNextTextElementLength_MultiByteUtf8_IsTwo) {
+    std::string eAcute = "\xC3\xA9";
+    EXPECT_EQ(StringInfo::GetNextTextElementLength(eAcute, 0), 2);
+}
+
+TEST(StringInfoTests, ParseCombiningCharacters_MultiByteUtf8_OneEntryPerCharacter) {
+    std::string s = "a\xC3\xA9z"; // 'a'(1 byte) + e-acute(2 bytes) + 'z'(1 byte) = 3 elements
+    auto v = StringInfo::ParseCombiningCharacters(s);
+    ASSERT_EQ(v.size(), 3u);
+    EXPECT_EQ(v[0], 0); // 'a' starts at byte 0
+    EXPECT_EQ(v[1], 1); // e-acute starts at byte 1 (not split into two entries)
+    EXPECT_EQ(v[2], 3); // 'z' starts at byte 3
+}
+
+TEST(StringInfoTests, LengthInTextElements_MultiByteUtf8_CountsCharactersNotBytes) {
+    StringInfo si("a\xC3\xA9z"); // 4 bytes, 3 text elements
+    EXPECT_EQ(si.getLengthInTextElementsProperty(), 3);
+}
+
 TEST(StringInfoTests, ParseCombiningCharacters_SplitsEachByte) {
     auto v = StringInfo::ParseCombiningCharacters("abc");
     ASSERT_EQ(v.size(), 3u);

@@ -4,7 +4,10 @@
 #include <gtest/gtest.h>
 #include "System/Collections/Concurrent/ConcurrentDictionary.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include <atomic>
 #include <string>
+#include <thread>
+#include <vector>
 
 using System::Collections::Concurrent::ConcurrentDictionary;
 
@@ -135,4 +138,101 @@ TEST(ConcurrentDictionaryTest, Indexer_Set_ExistingKey_Overwrites) {
     d["a"] = 2;
     EXPECT_EQ(d.getCountProperty(), 1);
     EXPECT_EQ(static_cast<int>(d["a"]), 2);
+}
+
+// Regression tests for POST_STABILIZATION_AUDIT.md finding #7 / ticket 1716: GetOrAdd and
+// AddOrUpdate previously held the internal mutex across the entire user-supplied factory
+// callback, so a factory that reentrantly called back into the same ConcurrentDictionary
+// instance (a realistic memoization pattern) deadlocked the thread against itself
+// (std::mutex is non-recursive). Real .NET's documented contract explicitly permits and
+// expects the factory to run without the lock held. Each test below intentionally has the
+// callback call another ConcurrentDictionary method reentrantly; a hang here (rather than a
+// clean pass) indicates the deadlock has regressed.
+
+TEST(ConcurrentDictionaryTest, GetOrAdd_ReentrantFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("related", 10);
+    int result = d.GetOrAdd("key", [&](const std::string&) {
+        // Reentrant call into the same instance while "key" is still being computed.
+        int related = d.GetOrAdd("related", 999);
+        return related + 1;
+    });
+    EXPECT_EQ(result, 11);
+    EXPECT_EQ(d.getCountProperty(), 2);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ReentrantUpdateFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("a", 1);
+    d.TryAdd("b", 5);
+    int result = d.AddOrUpdate("a", 0, [&](const std::string&, int old) {
+        int b = d.GetOrAdd("b", -1);
+        return old + b;
+    });
+    EXPECT_EQ(result, 6);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ReentrantAddFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    int result = d.AddOrUpdate(
+        "a",
+        [&](const std::string&) { return d.GetOrAdd("b", 3); },
+        [](const std::string&, int old) { return old + 1; });
+    EXPECT_EQ(result, 3);
+    EXPECT_TRUE(d.ContainsKey("a"));
+    EXPECT_TRUE(d.ContainsKey("b"));
+}
+
+TEST(ConcurrentDictionaryTest, GetOrAdd_ConcurrentContention_RaceDiscardsLosingFactory) {
+    ConcurrentDictionary<std::string, int> d;
+    int result1 = d.GetOrAdd("shared", [](const std::string&) { return 100; });
+    int result2 = d.GetOrAdd("shared", [](const std::string&) { return 200; });
+    // Second call's factory result must be discarded since the key already existed.
+    EXPECT_EQ(result1, 100);
+    EXPECT_EQ(result2, 100);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+// Ticket 1725 (post-stabilization-audit): the reentrancy tests above (GetOrAdd/AddOrUpdate
+// deadlock scenarios, fixed by ticket 1716) exercise the lock-release-around-callback logic
+// specifically, but none exercised ORDINARY concurrent access from real OS threads. Matches the
+// stress test pattern already established for sibling ConcurrentStack/ConcurrentQueue: N threads
+// each TryAdd distinct keys (no key contention between threads, so no losing-factory-discard
+// noise), verifying no lost updates; then N threads each TryRemove their own keys concurrently,
+// verifying every key is removed and the dictionary ends up empty.
+TEST(ConcurrentDictionaryTest, ConcurrentAddRemove_DistinctKeys_NoLostUpdatesOrCorruption) {
+    ConcurrentDictionary<std::string, int> d;
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 500;
+
+    std::vector<std::thread> adders;
+    for (int t = 0; t < kThreads; ++t) {
+        adders.emplace_back([&d, t]() {
+            for (int i = 0; i < kPerThread; ++i) {
+                std::string key = "t" + std::to_string(t) + "_" + std::to_string(i);
+                EXPECT_TRUE(d.TryAdd(key, t * kPerThread + i));
+            }
+        });
+    }
+    for (auto& th : adders) th.join();
+    EXPECT_EQ(d.getCountProperty(), kThreads * kPerThread);
+
+    std::atomic<int> removedCount{0};
+    std::vector<std::thread> removers;
+    for (int t = 0; t < kThreads; ++t) {
+        removers.emplace_back([&d, &removedCount, t]() {
+            for (int i = 0; i < kPerThread; ++i) {
+                std::string key = "t" + std::to_string(t) + "_" + std::to_string(i);
+                int value;
+                if (d.TryRemove(key, value)) {
+                    EXPECT_EQ(value, t * kPerThread + i);
+                    removedCount.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    for (auto& th : removers) th.join();
+
+    EXPECT_EQ(removedCount.load(), kThreads * kPerThread);
+    EXPECT_EQ(d.getCountProperty(), 0);
 }

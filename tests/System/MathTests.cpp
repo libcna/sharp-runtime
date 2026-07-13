@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <cfenv>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -632,6 +633,34 @@ TEST(MathTests, SinCos_PiOver2) {
 TEST(MathTests, Round_MidpointRounding_ToEven) {
     EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::ToEven), 2.0);
     EXPECT_DOUBLE_EQ(Math::Round(3.5, System::MidpointRounding::ToEven), 4.0);
+}
+
+namespace {
+// RAII guard restoring the default (nearest) FP rounding mode even if an assertion inside the
+// scope fails and unwinds early -- ticket 1723 regression test needs this since it deliberately
+// mutates ambient process-wide FP state via fesetround().
+struct RoundingModeGuard {
+    int saved = std::fegetround();
+    ~RoundingModeGuard() { std::fesetround(saved); }
+};
+}
+
+// Ticket 1723 (post-stabilization-audit): Math::Round(..., ToEven) previously used
+// std::nearbyint, which follows the CURRENT fesetround() mode rather than always implementing
+// ties-to-even -- under FE_UPWARD, nearbyint(2.5) silently returned 3.0 instead of 2.0. Verifies
+// the fix (a manual floor/fmod-based implementation, immune to the rounding-mode register) still
+// produces correct banker's-rounding results under a non-default ambient rounding mode.
+TEST(MathTests, Round_ToEven_IndependentOfAmbientRoundingMode) {
+    RoundingModeGuard guard;
+    std::fesetround(FE_UPWARD);
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::ToEven), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(3.5, System::MidpointRounding::ToEven), 4.0);
+    EXPECT_DOUBLE_EQ(Math::Round(-2.5, System::MidpointRounding::ToEven), -2.0);
+    std::fesetround(FE_DOWNWARD);
+    EXPECT_DOUBLE_EQ(Math::Round(2.5, System::MidpointRounding::ToEven), 2.0);
+    EXPECT_DOUBLE_EQ(Math::Round(3.5, System::MidpointRounding::ToEven), 4.0);
+    // No-mode-argument Round(double) delegates to ToEven -- verify it's also immune.
+    EXPECT_DOUBLE_EQ(Math::Round(2.5), 2.0);
 }
 
 TEST(MathTests, Round_MidpointRounding_AwayFromZero) {

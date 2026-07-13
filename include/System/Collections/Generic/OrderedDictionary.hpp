@@ -11,6 +11,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include "System/Collections/Generic/KeyValuePair.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -24,6 +25,12 @@ using SharpRuntime::intcs;
  * Backed by a std::vector (preserves order) and an std::unordered_map (O(1) key lookup).
  * Remove and RemoveAt are O(n) due to index rebuilding.
  *
+ * begin()/end() (used by range-for) detect structural modification during iteration
+ * via a version counter and throw System::InvalidOperationException, matching real
+ * .NET's fail-fast enumerator contract (see ticket 1713) -- important here since
+ * `entries_` is a std::vector, so a mutation mid-iteration can reallocate and leave a
+ * raw iterator genuinely dangling, not just semantically stale.
+ *
  * @tparam TKey   The type of keys in the dictionary.
  * @tparam TValue The type of values in the dictionary.
  */
@@ -31,6 +38,7 @@ template<typename TKey, typename TValue>
 class OrderedDictionary {
     std::vector<std::pair<TKey, TValue>>       entries_;
     std::unordered_map<TKey, std::size_t>      keyIndex_;
+    intcs version_ = 0;
 
     void rebuildIndex() {
         keyIndex_.clear();
@@ -39,6 +47,42 @@ class OrderedDictionary {
     }
 
 public:
+    /**
+     * @brief A version-checked wrapper over the backing vector's iterator that throws
+     * System::InvalidOperationException on dereference/increment if the owning
+     * OrderedDictionary was structurally modified since this iterator was obtained --
+     * matching real .NET's fail-fast enumerator contract (ticket 1713). Also guards
+     * against genuine iterator invalidation from vector reallocation, which the raw
+     * STL iterator this replaces could not.
+     */
+    class Iterator {
+        typename std::vector<std::pair<TKey, TValue>>::const_iterator it_;
+        const OrderedDictionary* owner_;
+        intcs version_;
+        std::size_t index_;
+
+        void checkVersion() const {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+        }
+
+    public:
+        Iterator(std::size_t index, const OrderedDictionary* owner)
+            : it_(), owner_(owner), version_(owner->version_), index_(index) {}
+
+        const std::pair<TKey, TValue>& operator*() const {
+            checkVersion();
+            return owner_->entries_[index_];
+        }
+        const std::pair<TKey, TValue>* operator->() const {
+            checkVersion();
+            return &owner_->entries_[index_];
+        }
+        Iterator& operator++() { checkVersion(); ++index_; return *this; }
+        bool operator==(const Iterator& other) const { return index_ == other.index_; }
+        bool operator!=(const Iterator& other) const { return index_ != other.index_; }
+    };
+
     /** @brief Initializes a new empty OrderedDictionary. */
     OrderedDictionary() = default;
 
@@ -102,6 +146,7 @@ public:
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, TValue{});
         keyIndex_[key] = newIndex;
+        ++version_;
         return entries_.back().second;
     }
 
@@ -135,6 +180,7 @@ public:
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
         keyIndex_[key] = newIndex;
+        ++version_;
     }
 
     /**
@@ -151,6 +197,7 @@ public:
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
         keyIndex_[key] = newIndex;
+        ++version_;
         return true;
     }
 
@@ -222,6 +269,7 @@ public:
         if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         entries_.insert(entries_.begin() + index, {key, value});
         rebuildIndex();
+        ++version_;
     }
 
     /**
@@ -236,6 +284,7 @@ public:
         if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
             throw System::ArgumentOutOfRangeException("index");
         entries_[static_cast<std::size_t>(index)].second = value;
+        ++version_;
     }
 
     /**
@@ -250,6 +299,7 @@ public:
         if (it == keyIndex_.end()) return false;
         entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(it->second));
         rebuildIndex();
+        ++version_;
         return true;
     }
 
@@ -265,6 +315,7 @@ public:
             throw System::ArgumentOutOfRangeException("index");
         entries_.erase(entries_.begin() + index);
         rebuildIndex();
+        ++version_;
     }
 
     /**
@@ -275,6 +326,7 @@ public:
     void Clear() {
         entries_.clear();
         keyIndex_.clear();
+        ++version_;
     }
 
     /**
@@ -300,14 +352,14 @@ public:
      */
     void TrimExcess() { entries_.shrink_to_fit(); }
 
-    /** @brief Returns an iterator to the first entry (STL interop). */
-    auto begin()       { return entries_.begin(); }
-    /** @brief Returns an iterator past the last entry (STL interop). */
-    auto end()         { return entries_.end(); }
-    /** @brief Returns a const iterator to the first entry (STL interop). */
-    auto begin() const { return entries_.cbegin(); }
-    /** @brief Returns a const iterator past the last entry (STL interop). */
-    auto end()   const { return entries_.cend(); }
+    /**
+     * @brief Returns a version-checked iterator to the first entry (range-for).
+     * @throws System::InvalidOperationException from dereference/increment if the
+     *         dictionary is structurally modified while this iterator is in use.
+     */
+    Iterator begin() const { return Iterator(0, this); }
+    /** @brief Returns a version-checked iterator past the last entry (range-for). */
+    Iterator end()   const { return Iterator(entries_.size(), this); }
 };
 
 } // namespace System::Collections::Generic

@@ -14,9 +14,13 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+    class IFormatProvider;
 
     using SharpRuntime::intcs;
 
@@ -70,6 +74,63 @@ namespace System {
         static bool TryParse(const std::string& s, SharpRuntime::ulongcs& result) {
             try { result = Parse(s); return true; }
             catch (...) { result = 0; return false; }
+        }
+
+        /**
+         * @brief Converts the string representation of a number in the specified style to its
+         * UInt64 equivalent.
+         *
+         * C++ counterpart of .NET UInt64.Parse(string, NumberStyles, IFormatProvider). @p
+         * provider is accepted for API-surface parity but ignored. Supports
+         * NumberStyles.Integer and NumberStyles.HexNumber -- see
+         * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
+         * @throws System::FormatException if the string is not in a correct format for @p style.
+         * @throws System::OverflowException if the value exceeds UInt64 range.
+         */
+        static SharpRuntime::ulongcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                            const IFormatProvider* provider) {
+            (void)provider;
+            SharpRuntime::ulongcs result;
+            if (!TryParse(s, style, provider, result)) {
+                using System::Globalization::NumberStyles;
+                if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 16, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for a UInt64.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                bool overflowed = false;
+                if (System::detail::IntegerNumberStylesParser::TryParseUnsignedCore(s, style, result, overflowed) && overflowed)
+                    throw System::OverflowException("Value was either too large or too small for a UInt64.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            return result;
+        }
+
+        /**
+         * @brief Tries to convert a string to a UInt64 using the specified style, without
+         * throwing.
+         *
+         * C++ counterpart of .NET UInt64.TryParse(string, NumberStyles, IFormatProvider, out ulong).
+         */
+        static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                              const IFormatProvider* provider, SharpRuntime::ulongcs& result) {
+            (void)provider;
+            using System::Globalization::NumberStyles;
+            result = 0;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 16, tooManyDigits))
+                    return false;
+                result = static_cast<SharpRuntime::ulongcs>(bits);
+                return true;
+            }
+            bool overflowed = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseUnsignedCore(s, style, result, overflowed))
+                return false;
+            if (overflowed) return false;
+            return true;
         }
 
         /** @brief Converts the value to its decimal string representation. */

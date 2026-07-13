@@ -75,6 +75,8 @@ namespace System::IO::Compression {
          * @param buffer Source array.
          * @param offset Starting index in @p buffer.
          * @param count  Number of bytes to compress.
+         * @throws System::ArgumentNullException if buffer is null.
+         * @throws System::ArgumentOutOfRangeException if offset or count is negative.
          */
         void Write(const SharpRuntime::bytecs* buffer,
                    SharpRuntime::intcs          offset,

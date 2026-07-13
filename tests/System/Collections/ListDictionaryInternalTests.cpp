@@ -120,7 +120,7 @@ TEST(ListDictionaryInternalTest, Keys_ReflectsCountAndContents) {
     IEnumerator* e = keys->GetEnumerator();
     int count = 0;
     while (e->MoveNext()) {
-        void* k = e->getCurrent();
+        void* k = e->getCurrentProperty();
         EXPECT_TRUE(k == &k1 || k == &k2);
         ++count;
     }
@@ -139,7 +139,7 @@ TEST(ListDictionaryInternalTest, Values_ReflectsContents) {
 
     IEnumerator* e = values->GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &v);
+    EXPECT_EQ(e->getCurrentProperty(), &v);
     delete e;
     delete values;
 }

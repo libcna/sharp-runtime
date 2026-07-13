@@ -3,8 +3,10 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/StringBuilder.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <sstream>
@@ -125,6 +127,26 @@ namespace System::Text
     bool StringBuilder::Empty() const
     {
         return buffer.empty();
+    }
+
+    void StringBuilder::CopyTo(intcs sourceIndex, char* destination, intcs destinationLength,
+                                intcs destinationIndex, intcs count) const
+    {
+        if (destination == nullptr)
+            throw System::ArgumentNullException("destination");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (destinationIndex < 0)
+            throw System::ArgumentOutOfRangeException("destinationIndex", "Non-negative number required.");
+        intcs length = static_cast<intcs>(buffer.size());
+        if (sourceIndex < 0 || sourceIndex > length)
+            throw System::ArgumentOutOfRangeException("sourceIndex", "Index was out of range. Must be non-negative and less than or equal to the length of the StringBuilder.");
+        if (sourceIndex > length - count)
+            throw System::ArgumentException("sourceIndex was greater than the length of the source StringBuilder minus count.");
+        if (destinationIndex > destinationLength - count)
+            throw System::ArgumentException("Offset and length were out of bounds for the destination array, or count is greater than the number of elements from destinationIndex to the end of the destination array.");
+        std::copy(buffer.begin() + sourceIndex, buffer.begin() + sourceIndex + count,
+                  destination + destinationIndex);
     }
 
     StringBuilder& StringBuilder::Append(SharpRuntime::longcs value)

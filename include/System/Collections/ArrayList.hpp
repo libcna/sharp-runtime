@@ -64,7 +64,7 @@ inline bool arrayListValueEquals(const std::any& a, const std::any& b) {
 class ArrayList : public IList {
     // Verified against ArrayList.cs: every structural mutation (Add/Insert/Remove/Clear/
     // Reverse/Sort/SetRange/the indexer setter) bumps _version, and GetEnumerator()'s
-    // enumerator throws InvalidOperationException on the next MoveNext()/Reset()/getCurrent()
+    // enumerator throws InvalidOperationException on the next MoveNext()/Reset()/getCurrentProperty()
     // call if the list was mutated since the enumerator was created -- .NET's fail-fast
     // enumeration contract. Not bumped by non-mutating operations (BinarySearch, IndexOf,
     // Contains, ToArray, Clone, etc.) or by TrimToSize() (capacity-only, matching .NET).
@@ -92,13 +92,13 @@ public:
      * @brief Constructs an ArrayList by copying all elements from @p c via GetEnumerator().
      *
      * C++ counterpart of .NET ArrayList(ICollection).
-     * Each element is stored as void* (the raw pointer returned by IEnumerator::getCurrent()).
+     * Each element is stored as void* (the raw pointer returned by IEnumerator::getCurrentProperty()).
      */
     explicit ArrayList(ICollection& c) {
         IEnumerator* e = c.GetEnumerator();
         if (e) {
             while (e->MoveNext())
-                _items.emplace_back(e->getCurrent());
+                _items.emplace_back(e->getCurrentProperty());
             delete e;
         }
     }
@@ -656,7 +656,7 @@ public:
      * @brief Returns an enumerator that iterates through the full list.
      *
      * C++ counterpart of .NET ArrayList.GetEnumerator(). The enumerator throws
-     * InvalidOperationException on MoveNext()/Reset()/getCurrent() if the list is
+     * InvalidOperationException on MoveNext()/Reset()/getCurrentProperty() if the list is
      * structurally modified while enumeration is in progress, matching .NET's fail-fast
      * contract (see the Enumerator class doc-comment for the one known gap: mutation via
      * the non-const operator[] reference isn't detected).
@@ -733,7 +733,7 @@ private:
             started_ = false;
         }
 
-        [[nodiscard]] void* getCurrent() const override {
+        [[nodiscard]] void* getCurrentProperty() const override {
             if (!started_ || index_ < start_ || index_ >= end_)
                 throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
             return const_cast<std::any*>(&list_->_items[static_cast<size_t>(index_)]);

@@ -83,6 +83,33 @@ TEST(SortedDictionaryTests, OperatorBracket_ReadWrite) {
     sd["a"] = 100;
     EXPECT_EQ(sd["a"], 100);
 }
+
+// Regression test for POST_STABILIZATION_AUDIT.md finding #3 / ticket 1712: the non-const
+// operator[] getter previously silently inserted a default-constructed value on a missing key
+// (std::map::operator[]'s convention) instead of throwing, unlike real .NET's
+// SortedDictionary<TKey,TValue> indexer, which throws KeyNotFoundException on the getter
+// regardless of const/non-const.
+TEST(SortedDictionaryTests, OperatorBracket_NonConst_ThrowsIfMissing) {
+    SortedDictionary<std::string, int> sd;
+    EXPECT_THROW((void)static_cast<int>(sd["missing"]), System::Collections::Generic::KeyNotFoundException);
+    EXPECT_FALSE(sd.ContainsKey("missing"));
+    EXPECT_EQ(sd.getCountProperty(), 0);
+}
+
+TEST(SortedDictionaryTests, OperatorBracket_NonConst_SetMissingStillInserts) {
+    SortedDictionary<std::string, int> sd;
+    sd["newkey"] = 42;
+    EXPECT_TRUE(sd.ContainsKey("newkey"));
+    EXPECT_EQ(static_cast<int>(sd["newkey"]), 42);
+}
+
+TEST(SortedDictionaryTests, OperatorBracket_NonConst_SetExistingUpdates) {
+    SortedDictionary<std::string, int> sd;
+    sd.Add("k", 1);
+    sd["k"] = 2;
+    EXPECT_EQ(static_cast<int>(sd["k"]), 2);
+    EXPECT_EQ(sd.getCountProperty(), 1);
+}
 TEST(SortedDictionaryTests, TryGetValue_Found) {
     SortedDictionary<std::string, int> sd;
     sd.Add("z", 99);

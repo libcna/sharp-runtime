@@ -110,7 +110,7 @@ TEST(GenericIEnumeratorTest, GetCurrentVoidPtr) {
     std::vector<int> data{42};
     VecEnumerator e(data);
     e.MoveNext();
-    void* p = e.getCurrent();
+    void* p = e.getCurrentProperty();
     EXPECT_EQ(*static_cast<int*>(p), 42);
 }
 

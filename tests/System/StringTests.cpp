@@ -251,6 +251,29 @@ TEST(StringTests, LastIndexOf_Char_NotFound) {
     EXPECT_EQ(String::LastIndexOf("hello", 'z'), -1);
 }
 
+// Real .NET's CompareInfo.LastIndexOf special-cases startIndex == source.Length as valid (an
+// off-by-one compat fixup, treated as startIndex == length - 1) rather than throwing -- a natural
+// "search the whole string backward" idiom using str.Length as the start index must not throw.
+TEST(StringTests, LastIndexOf_String_StartIndexEqualsLength_DoesNotThrow) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", "bc", 6), 4);
+}
+TEST(StringTests, LastIndexOf_Char_StartIndexEqualsLength_DoesNotThrow) {
+    EXPECT_EQ(String::LastIndexOf("hello", 'l', 5), 3);
+}
+TEST(StringTests, LastIndexOf_String_StartIndexGreaterThanLength_StillThrows) {
+    EXPECT_THROW(String::LastIndexOf("hello", "l", 6), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, LastIndexOf_Char_StartIndexGreaterThanLength_StillThrows) {
+    EXPECT_THROW(String::LastIndexOf("hello", 'l', 6), System::ArgumentOutOfRangeException);
+}
+TEST(StringTests, LastIndexOf_CharWithCount_StartIndexEqualsLength_DoesNotThrow) {
+    // startIndex==5 (length) fixes up to startIndex=4, count=3-1=2 -> examines indices 3,4 ("lo").
+    EXPECT_EQ(String::LastIndexOf("hello", 'l', 5, 3), 3);
+}
+TEST(StringTests, LastIndexOf_StringWithCount_StartIndexEqualsLength_DoesNotThrow) {
+    EXPECT_EQ(String::LastIndexOf("abcabc", "bc", 6, 4), 4);
+}
+
 // --- PadLeft ---
 
 TEST(StringTests, PadLeft_WithSpaces) {

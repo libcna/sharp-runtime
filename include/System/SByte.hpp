@@ -16,9 +16,13 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+    class IFormatProvider;
 
     using SharpRuntime::sbytecs;
 
@@ -77,6 +81,66 @@ namespace System {
         static bool TryParse(const std::string& s, sbytecs& result) noexcept {
             try { result = Parse(s); return true; }
             catch (...) { result = 0; return false; }
+        }
+
+        /**
+         * @brief Converts the string representation of a number in the specified style to its
+         * SByte equivalent.
+         *
+         * C++ counterpart of .NET SByte.Parse(string, NumberStyles, IFormatProvider). @p
+         * provider is accepted for API-surface parity but ignored. Supports
+         * NumberStyles.Integer and NumberStyles.HexNumber (hex reinterpreted as a
+         * two's-complement bit pattern) -- see
+         * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
+         * @throws System::FormatException if the string is not in a correct format for @p style.
+         * @throws System::OverflowException if the value exceeds SByte range.
+         */
+        [[nodiscard]] static sbytecs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                            const IFormatProvider* provider) {
+            (void)provider;
+            sbytecs result;
+            if (!TryParse(s, style, provider, result)) {
+                using System::Globalization::NumberStyles;
+                if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 2, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for a signed byte.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                SharpRuntime::longcs signedResult; bool overflowed = false;
+                if (System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed) &&
+                    (overflowed || signedResult < MinValue || signedResult > MaxValue))
+                    throw System::OverflowException("Value was either too large or too small for a signed byte.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            return result;
+        }
+
+        /**
+         * @brief Tries to convert a string to an SByte using the specified style, without
+         * throwing.
+         *
+         * C++ counterpart of .NET SByte.TryParse(string, NumberStyles, IFormatProvider, out sbyte).
+         */
+        static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                              const IFormatProvider* provider, sbytecs& result) noexcept {
+            (void)provider;
+            using System::Globalization::NumberStyles;
+            result = 0;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 2, tooManyDigits))
+                    return false;
+                result = static_cast<sbytecs>(static_cast<uint8_t>(bits));
+                return true;
+            }
+            SharpRuntime::longcs signedResult; bool overflowed = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed))
+                return false;
+            if (overflowed || signedResult < MinValue || signedResult > MaxValue) return false;
+            result = static_cast<sbytecs>(signedResult);
+            return true;
         }
 
         /** @brief Converts @p value to its decimal string representation. C++ counterpart of .NET SByte.ToString(). */

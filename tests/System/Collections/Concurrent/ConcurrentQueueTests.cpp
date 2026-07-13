@@ -2,6 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <atomic>
+#include <thread>
+#include <vector>
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Concurrent/ConcurrentQueue.hpp"
@@ -116,4 +119,37 @@ TEST(ConcurrentQueueTest, GetEnumerator_IteratesFrontToBack) {
     EXPECT_EQ(e->Current(), 2);
     EXPECT_FALSE(e->MoveNext());
     delete e;
+}
+
+// Ticket 1725 (post-stabilization-audit): the class exists specifically to be safely mutated
+// from multiple threads (std::mutex-guarded internally), but all prior tests were
+// single-threaded API-shape verification -- matching the stress test already added to sibling
+// ConcurrentStack. Verifies concurrent Enqueue from N threads loses nothing, then concurrent
+// TryDequeue from N threads drains exactly that many items with no duplicates.
+TEST(ConcurrentQueueTest, ConcurrentEnqueueDequeue_NoLostUpdatesOrCorruption) {
+    ConcurrentQueue<int> q;
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 2000;
+
+    std::vector<std::thread> enqueuers;
+    for (int t = 0; t < kThreads; ++t) {
+        enqueuers.emplace_back([&q, t]() {
+            for (int i = 0; i < kPerThread; ++i) q.Enqueue(t * kPerThread + i);
+        });
+    }
+    for (auto& th : enqueuers) th.join();
+    EXPECT_EQ(q.getCountProperty(), kThreads * kPerThread);
+
+    std::atomic<int> dequeuedCount{0};
+    std::vector<std::thread> dequeuers;
+    for (int t = 0; t < kThreads; ++t) {
+        dequeuers.emplace_back([&q, &dequeuedCount]() {
+            int value;
+            while (q.TryDequeue(value)) dequeuedCount.fetch_add(1, std::memory_order_relaxed);
+        });
+    }
+    for (auto& th : dequeuers) th.join();
+
+    EXPECT_EQ(dequeuedCount.load(), kThreads * kPerThread);
+    EXPECT_TRUE(q.getIsEmptyProperty());
 }

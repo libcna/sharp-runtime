@@ -4,6 +4,7 @@
 #include "System/Convert.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Math.hpp"
 #include "System/OverflowException.hpp"
 #include "System/Boolean.hpp"
 #include "System/Double.hpp"
@@ -63,8 +64,12 @@ namespace System {
         return Int32::Parse(value);
     }
     intcs Convert::ToInt32(double value) {
-        if (value > INT_MAX || value < INT_MIN) throw OverflowException();
-        return static_cast<intcs>(value);
+        // Real .NET's Convert.ToInt32(double) rounds to the nearest integer, ties to even,
+        // matching Math.Round's default -- it previously truncated toward zero instead (e.g.
+        // ToInt32(2.9) returned 2, not 3), a confirmed post-stabilization-audit finding.
+        double rounded = Math::Round(value);
+        if (rounded > INT_MAX || rounded < INT_MIN) throw OverflowException();
+        return static_cast<intcs>(rounded);
     }
     intcs Convert::ToInt32(float value) {
         return ToInt32(static_cast<double>(value));
@@ -83,7 +88,21 @@ namespace System {
         // long.Parse default NumberStyles.Integer.
         return Int64::Parse(value);
     }
-    longcs Convert::ToInt64(double value) { return static_cast<longcs>(value); }
+    longcs Convert::ToInt64(double value) {
+        // Real .NET: checked((long)Math.Round(value)) -- rounds to nearest (ties to even), then
+        // throws OverflowException outside long's range. Previously this was a bare
+        // static_cast<longcs>(value) with NO rounding and NO overflow check at all --
+        // ToInt64(1e20) returned LLONG_MIN (a silent wraparound) instead of throwing, a confirmed
+        // post-stabilization-audit finding. The boundary compares against 2^63
+        // (9223372036854775808.0), not LLONG_MAX, because LLONG_MAX (2^63-1) is not exactly
+        // representable as a double -- the nearest representable double to LLONG_MAX is 2^63
+        // itself, so comparing against a cast LLONG_MAX would incorrectly accept some
+        // just-out-of-range inputs.
+        double rounded = Math::Round(value);
+        if (rounded < -9223372036854775808.0 || rounded >= 9223372036854775808.0)
+            throw OverflowException();
+        return static_cast<longcs>(rounded);
+    }
 
     shortcs Convert::ToInt16(const std::string& value) {
         intcs v = ToInt32(value);

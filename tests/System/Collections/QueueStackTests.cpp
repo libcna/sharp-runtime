@@ -90,11 +90,11 @@ TEST(QueueTest, GetEnumerator_IteratesInFIFOOrder) {
 
     IEnumerator* e = q.GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &a);
+    EXPECT_EQ(e->getCurrentProperty(), &a);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &b);
+    EXPECT_EQ(e->getCurrentProperty(), &b);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &c);
+    EXPECT_EQ(e->getCurrentProperty(), &c);
     EXPECT_FALSE(e->MoveNext());
     delete e;
 }
@@ -104,7 +104,7 @@ TEST(QueueTest, GetEnumerator_CurrentBeforeMoveNext_Throws) {
     int a = 1;
     q.Enqueue(&a);
     IEnumerator* e = q.GetEnumerator();
-    EXPECT_THROW(e->getCurrent(), InvalidOperationException);
+    EXPECT_THROW(e->getCurrentProperty(), InvalidOperationException);
     delete e;
 }
 
@@ -203,11 +203,11 @@ TEST(StackTest, GetEnumerator_IteratesTopToBottom) {
 
     IEnumerator* e = s.GetEnumerator();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &c);
+    EXPECT_EQ(e->getCurrentProperty(), &c);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &b);
+    EXPECT_EQ(e->getCurrentProperty(), &b);
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(e->getCurrent(), &a);
+    EXPECT_EQ(e->getCurrentProperty(), &a);
     EXPECT_FALSE(e->MoveNext());
     delete e;
 }

@@ -109,12 +109,13 @@ public:
  * C++ counterpart of .NET System.Collections.Generic.LinkedList<T>.
  * Backed by std::list<T>; provides O(1) insertion and removal at known nodes.
  *
- * @note Unlike .NET's LinkedList<T>, iterators/enumerators do not detect
- * concurrent modification: .NET throws InvalidOperationException if the list is
- * structurally modified while an enumerator is active, but sharp-runtime's
- * iterators follow plain std::list invalidation rules instead (erasing a node
- * only invalidates that node's iterator; other iterators remain valid). Do not
- * mutate the list while iterating it directly.
+ * @note GetEnumerator()'s Enumerator detects structural modification (AddFirst/AddLast/
+ * AddBefore/AddAfter/Remove/RemoveFirst/RemoveLast/Clear) during iteration via a version
+ * counter, matching .NET's InvalidOperationException fail-fast contract (see List<T>/ArrayList's
+ * Enumerator in this codebase for the same established pattern). Directly using begin()/end()
+ * STL iterators still follows plain std::list invalidation rules, not .NET's version-checked
+ * contract (erasing a node only invalidates that node's own iterator under std::list semantics;
+ * other iterators remain valid) -- only the GetEnumerator()-returned Enumerator is fail-fast.
  *
  * @note Missing surface, and why: real .NET's LinkedListNode<T> is an independently
  * allocatable object that can exist *detached* from any list (`new LinkedListNode<T>(value)`),
@@ -132,18 +133,27 @@ public:
 template<typename T>
 class LinkedList {
     std::list<T> list_;
+    intcs version_ = 0;
 
     class Enumerator : public IEnumerator<T> {
+        const LinkedList<T>* list_;
+        intcs version_;
         typename std::list<T>::iterator cur_, end_;
         bool started_ = false;
     public:
-        Enumerator(typename std::list<T>::iterator b, typename std::list<T>::iterator e)
-            : cur_(b), end_(e) {}
+        Enumerator(const LinkedList<T>* list, typename std::list<T>::iterator b, typename std::list<T>::iterator e)
+            : list_(list), version_(list->version_), cur_(b), end_(e) {}
         bool MoveNext() override {
+            if (version_ != list_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
             if (!started_) { started_ = true; } else { ++cur_; }
             return cur_ != end_;
         }
-        void Reset() override { started_ = false; }
+        void Reset() override {
+            if (version_ != list_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            started_ = false;
+        }
         const T& Current() const override { return *cur_; }
     };
 
@@ -220,6 +230,7 @@ public:
      */
     LinkedListNode<T> AddFirst(const T& value) {
         list_.push_front(value);
+        ++version_;
         return LinkedListNode<T>(&list_, list_.begin());
     }
 
@@ -232,6 +243,7 @@ public:
      */
     LinkedListNode<T> AddLast(const T& value) {
         list_.push_back(value);
+        ++version_;
         auto it = list_.end(); --it;
         return LinkedListNode<T>(&list_, it);
     }
@@ -249,6 +261,7 @@ public:
     LinkedListNode<T> AddBefore(LinkedListNode<T> node, const T& value) {
         validateNode(node);
         auto it = list_.insert(node.iter_, value);
+        ++version_;
         return LinkedListNode<T>(&list_, it);
     }
 
@@ -267,6 +280,7 @@ public:
         auto it = node.iter_;
         ++it;
         it = list_.insert(it, value);
+        ++version_;
         return LinkedListNode<T>(&list_, it);
     }
 
@@ -279,6 +293,7 @@ public:
     void RemoveFirst() {
         if (list_.empty()) throw System::InvalidOperationException("The LinkedList is empty.");
         list_.pop_front();
+        ++version_;
     }
 
     /**
@@ -290,6 +305,7 @@ public:
     void RemoveLast() {
         if (list_.empty()) throw System::InvalidOperationException("The LinkedList is empty.");
         list_.pop_back();
+        ++version_;
     }
 
     /**
@@ -303,6 +319,7 @@ public:
         auto it = std::find(list_.begin(), list_.end(), value);
         if (it == list_.end()) return false;
         list_.erase(it);
+        ++version_;
         return true;
     }
 
@@ -317,6 +334,7 @@ public:
     void Remove(LinkedListNode<T> node) {
         validateNode(node);
         list_.erase(node.iter_);
+        ++version_;
     }
 
     /**
@@ -324,7 +342,7 @@ public:
      *
      * C++ counterpart of .NET LinkedList<T>.Clear().
      */
-    void Clear() { list_.clear(); }
+    void Clear() { list_.clear(); ++version_; }
 
     /**
      * @brief Determines whether @p value is in the list.
@@ -400,7 +418,7 @@ public:
      * @return A heap-allocated IEnumerator<T>; caller takes ownership.
      */
     [[nodiscard]] IEnumerator<T>* GetEnumerator() {
-        return new Enumerator(list_.begin(), list_.end());
+        return new Enumerator(this, list_.begin(), list_.end());
     }
 
     /** @brief Returns an iterator to the first node (STL interop). */

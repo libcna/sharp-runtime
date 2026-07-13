@@ -65,7 +65,7 @@ class ListDictionaryInternal : public IDictionary {
             it_ = d_->list_.begin();
         }
 
-        [[nodiscard]] void* getCurrent() const override {
+        [[nodiscard]] void* getCurrentProperty() const override {
             return const_cast<void*>(getKeyProperty());
         }
 
@@ -104,7 +104,7 @@ class ListDictionaryInternal : public IDictionary {
             ~Enumerator() override { delete inner_; }
             bool MoveNext() override { return inner_->MoveNext(); }
             void Reset() override { inner_->Reset(); }
-            [[nodiscard]] void* getCurrent() const override {
+            [[nodiscard]] void* getCurrentProperty() const override {
                 return const_cast<void*>(keys_ ? inner_->getKeyProperty() : inner_->getValueProperty());
             }
         };

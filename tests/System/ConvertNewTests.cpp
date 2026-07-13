@@ -100,7 +100,7 @@ TEST(ConvertTests, ToSingle_Identity)           { EXPECT_FLOAT_EQ(Convert::ToSin
 TEST(ConvertTests, ToUInt32_FromBool_True)      { EXPECT_EQ(Convert::ToUInt32(true), 1u); }
 TEST(ConvertTests, ToUInt32_FromBool_False)     { EXPECT_EQ(Convert::ToUInt32(false), 0u); }
 TEST(ConvertTests, ToUInt32_FromByte)           { EXPECT_EQ(Convert::ToUInt32(bytecs(200)), 200u); }
-TEST(ConvertTests, ToUInt32_FromDouble_Valid)   { EXPECT_EQ(Convert::ToUInt32(255.9), 255u); }
+TEST(ConvertTests, ToUInt32_FromDouble_Valid)   { EXPECT_EQ(Convert::ToUInt32(255.9), 256u); }
 TEST(ConvertTests, ToUInt32_FromDouble_Negative) {
     EXPECT_THROW(Convert::ToUInt32(-1.0), System::OverflowException);
 }
@@ -175,7 +175,7 @@ TEST(ConvertTests, ToUInt16_FromShort_Valid)    { EXPECT_EQ(Convert::ToUInt16(sh
 TEST(ConvertTests, ToUInt16_FromShort_Negative) { EXPECT_THROW(Convert::ToUInt16(shortcs(-1)), System::OverflowException); }
 TEST(ConvertTests, ToUInt16_FromLong_Valid)     { EXPECT_EQ(Convert::ToUInt16(longcs(0)), 0u); }
 TEST(ConvertTests, ToUInt16_FromLong_Overflow)  { EXPECT_THROW(Convert::ToUInt16(longcs(70000)), System::OverflowException); }
-TEST(ConvertTests, ToUInt16_FromDouble_Valid)   { EXPECT_EQ(Convert::ToUInt16(1.9), ushortcs(1)); }
+TEST(ConvertTests, ToUInt16_FromDouble_Valid)   { EXPECT_EQ(Convert::ToUInt16(1.9), ushortcs(2)); }
 TEST(ConvertTests, ToUInt16_FromDouble_Overflow){ EXPECT_THROW(Convert::ToUInt16(-1.0), System::OverflowException); }
 TEST(ConvertTests, ToUInt16_FromString_Valid)   { EXPECT_EQ(Convert::ToUInt16(std::string("1000")), 1000u); }
 TEST(ConvertTests, ToUInt16_FromString_Overflow){ EXPECT_THROW(Convert::ToUInt16(std::string("65536")), System::OverflowException); }
@@ -216,4 +216,67 @@ TEST(ConvertTests, RawStringLiteral_ResolvesToStringOverload_NotBool) {
     EXPECT_EQ(Convert::ToUInt64("42"), 42ull);
     EXPECT_EQ(Convert::ToUInt16("1000"), ushortcs(1000));
     EXPECT_EQ(Convert::ToSByte("-1"), sbytecs(-1));
+}
+
+// ---------------------------------------------------------------------------
+// Post-stabilization audit ticket 1710: ToXxx(double)/ToXxx(float) family rounded to nearest
+// (ties to even, matching Math.Round's default) instead of truncating toward zero, and
+// ToInt64(double) had no overflow check at all. Verified against the exact real .NET reference
+// algorithm (Convert.cs) for each type -- see POST_STABILIZATION_AUDIT.md finding #1.
+// ---------------------------------------------------------------------------
+
+TEST(ConvertTests, ToByte_FromDouble_RoundsHalfToEven) {
+    EXPECT_EQ(Convert::ToByte(2.5), bytecs(2));   // 2 is even
+    EXPECT_EQ(Convert::ToByte(3.5), bytecs(4));   // 4 is even
+}
+TEST(ConvertTests, ToByte_FromDouble_OverflowThrows) {
+    EXPECT_THROW(Convert::ToByte(255.5), System::OverflowException);  // rounds to 256, out of range
+    EXPECT_THROW(Convert::ToByte(-0.6), System::OverflowException);   // rounds to -1, out of range
+}
+
+TEST(ConvertTests, ToSByte_FromDouble_RoundsAndOverflows) {
+    EXPECT_EQ(Convert::ToSByte(2.5), sbytecs(2));
+    EXPECT_EQ(Convert::ToSByte(-2.5), sbytecs(-2));
+    EXPECT_THROW(Convert::ToSByte(127.5), System::OverflowException);  // rounds to 128
+}
+
+TEST(ConvertTests, ToInt16_FromDouble_RoundsHalfToEven) {
+    EXPECT_EQ(Convert::ToInt16(2.5), shortcs(2));
+    EXPECT_EQ(Convert::ToInt16(3.5), shortcs(4));
+}
+
+TEST(ConvertTests, ToUInt16_FromDouble_RoundsAndOverflows) {
+    EXPECT_EQ(Convert::ToUInt16(2.5), ushortcs(2));
+    EXPECT_EQ(Convert::ToUInt16(3.5), ushortcs(4));
+    EXPECT_THROW(Convert::ToUInt16(65535.5), System::OverflowException);  // rounds to 65536
+}
+
+TEST(ConvertTests, ToUInt32_FromDouble_RoundsHalfToEven) {
+    EXPECT_EQ(Convert::ToUInt32(2.5), 2u);
+    EXPECT_EQ(Convert::ToUInt32(3.5), 4u);
+}
+
+TEST(ConvertTests, ToUInt64_FromDouble_RoundsAndOverflows) {
+    EXPECT_EQ(Convert::ToUInt64(2.5), 2ull);
+    EXPECT_EQ(Convert::ToUInt64(3.5), 4ull);
+    EXPECT_THROW(Convert::ToUInt64(-1.0), System::OverflowException);
+    EXPECT_THROW(Convert::ToUInt64(1.8446744073709552e19), System::OverflowException);  // >= 2^64
+}
+
+TEST(ConvertTests, ToInt64_FromDouble_RoundsHalfToEven) {
+    EXPECT_EQ(Convert::ToInt64(2.5), 2LL);
+    EXPECT_EQ(Convert::ToInt64(3.5), 4LL);
+    EXPECT_EQ(Convert::ToInt64(-2.5), -2LL);
+}
+TEST(ConvertTests, ToInt64_FromDouble_OverflowThrows_ReproFromAudit) {
+    // Confirmed audit repro: previously returned LLONG_MIN (silent wraparound) instead of
+    // throwing OverflowException.
+    EXPECT_THROW(Convert::ToInt64(1e20), System::OverflowException);
+    EXPECT_THROW(Convert::ToInt64(-1e20), System::OverflowException);
+}
+
+TEST(ConvertTests, ToInt32_FromDouble_ExactAuditReproValues) {
+    // Confirmed audit repro values.
+    EXPECT_EQ(Convert::ToInt32(2.9), 3);
+    EXPECT_EQ(Convert::ToInt32(3.5), 4);
 }

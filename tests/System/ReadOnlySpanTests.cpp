@@ -56,8 +56,22 @@ TEST(ReadOnlySpanTests, Indexer_ReturnsCorrectElement) {
 TEST(ReadOnlySpanTests, Indexer_OutOfRange_Throws) {
     int arr[] = {1};
     ReadOnlySpan<int> s(arr, 1);
-    EXPECT_THROW((void)s[1], System::ArgumentOutOfRangeException);
-    EXPECT_THROW((void)s[-1], System::ArgumentOutOfRangeException);
+    EXPECT_THROW((void)s[1], System::IndexOutOfRangeException);
+    EXPECT_THROW((void)s[-1], System::IndexOutOfRangeException);
+}
+
+// Real .NET's Span<T>/ReadOnlySpan<T> indexer throws IndexOutOfRangeException, distinct from
+// List<T>'s ArgumentOutOfRangeException convention -- verifies the writable Span<T> overload
+// (both const and non-const operator[]) matches, not just ReadOnlySpan<T>.
+TEST(SpanTests, Indexer_OutOfRange_ThrowsIndexOutOfRangeException) {
+    int arr[] = {1};
+    Span<int> s(arr, 1);
+    EXPECT_THROW((void)s[1], System::IndexOutOfRangeException);
+    EXPECT_THROW((void)s[-1], System::IndexOutOfRangeException);
+
+    const Span<int> cs(arr, 1);
+    EXPECT_THROW((void)cs[1], System::IndexOutOfRangeException);
+    EXPECT_THROW((void)cs[-1], System::IndexOutOfRangeException);
 }
 
 TEST(ReadOnlySpanTests, GetPointer_ReturnsFirstElement) {

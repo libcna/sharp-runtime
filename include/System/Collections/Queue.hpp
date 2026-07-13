@@ -37,12 +37,12 @@ public:
      * @brief Constructs a Queue populated with all elements from @p col.
      *
      * C++ counterpart of .NET Queue(ICollection col).
-     * Each element is the raw void* returned by IEnumerator::getCurrent().
+     * Each element is the raw void* returned by IEnumerator::getCurrentProperty().
      * @param col Source collection.
      */
     explicit Queue(ICollection& col) {
         IEnumerator* e = col.GetEnumerator();
-        if (e) { while (e->MoveNext()) q_.push_back(e->getCurrent()); delete e; }
+        if (e) { while (e->MoveNext()) q_.push_back(e->getCurrentProperty()); delete e; }
     }
 
     // -----------------------------------------------------------------------
@@ -205,7 +205,7 @@ private:
             started_ = false;
         }
 
-        [[nodiscard]] void* getCurrent() const override {
+        [[nodiscard]] void* getCurrentProperty() const override {
             if (!started_ || index_ < 0)
                 throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
             return q_->q_[static_cast<size_t>(index_)];
