@@ -1,10 +1,49 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by ticket 362, a DB-only ticket). Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-377, all DB-only tickets). Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 368-377 closed (namespace-audit batch), first orphan gap found and closed
+
+Continuing the same autonomous run (previous checkpoint covered 363-367). No commits — all ten
+are database-consistency checks touching no git-tracked files (plan.sqlite3 is gitignored).
+
+- **368 (System.Net.Sockets)**: 24/24, zero orphans, 0/24 done.
+- **369 (System.Diagnostics.CodeAnalysis)**: 23/23, zero orphans, 0/23 done.
+- **370 (System.Xml.Linq)**: 23/23, zero orphans, 0/23 done.
+- **371 (System.Net)**: done (perfect consistency, see prior pass).
+- **372 (System.IO.Compression)**: 20/20, zero orphans, 2/20 done.
+- **373 (System.Buffers)**: 18/18, zero orphans, **all 18 already done**.
+- **374 (System.Collections)**: **19 task rows marked ported but only 17 matching
+  ported-type-audit tickets — the first genuine orphan gap found in the namespace-audit sweep
+  (7 namespaces checked before this one, all perfect).** `orphan_tasks` query identified the two
+  missing types: `ArrayList` and `Hashtable` (both `type='class'`, task ids 3261/3282).
+  `orphan_tickets` (stale tickets pointing to nonexistent tasks) was empty — one-directional gap
+  only. Closed it by creating tickets **#1489** (`Verify ported type:
+  System.Collections.ArrayList`) and **#1490** (`...Hashtable`), matching the exact template
+  shape from ticket 780 (`category='ported-type-audit'`, `area`/`namespace='System.Collections'`,
+  `type_kind='class'`, `priority='P2'`, `estimated_size='M'`, `status='todo'`). Next free
+  ticket_no was 1489 (`MAX(ticket_no)` was 1488 at time of insert). Status breakdown: 3/19 done
+  (16 todo including the two new tickets).
+- **375 (System.Net.Http)**: 17/17, zero orphans, 0/17 done.
+- **376 (System.Text.Json)**: done (perfect consistency, see prior pass).
+- **377 (System.Threading.Tasks)**: 16/16, zero orphans, 0/16 done.
+
+8 of 10 namespaces this batch had perfect 1:1 task/ticket coverage; System.Collections was the
+first exception found across 9 namespaces audited so far this session (362-377 minus already-done
+371/376). The `ported-type-audit` backlog is overwhelmingly an accurate mirror of the `task`
+table — orphans are rare but do happen, so the SQL-comparison step in this methodology remains
+worth doing every time rather than skipping ahead once a pattern seems to hold.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"` — this will surface either
+another `namespace-audit` ticket or (once those are drained) the large `ported-type-audit`
+backlog (612+ done / 398+ todo, now +2 todo from tickets 1489/1490 just created). Ticket #43
+stays `blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 362 closed (namespace-audit), important process discovery
 
