@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `890b569`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `0713156`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,9 +66,9 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`890b569`), via `cmake --build build --parallel 4`.
+(`0713156`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12356/12356 passing**, 1223 test suites, via
+**Test status**: last verified **12371/12371 passing**, 1223 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -223,21 +223,70 @@ across repeated runs where concurrency/timing was a factor.
   matches the standalone measurement when built with `-DCMAKE_BUILD_TYPE=Release`. 6 new
   regression tests. Test count grew from 12350 to 12356.
 
+**Post-pilot audit round** (once §8's original 4 tasks were done, per the user's standing
+autonomous-session authorization to keep finding high-value work): 4 parallel find-only agents
+covering categories the original `POST_STABILIZATION_AUDIT.md` pass didn't specifically target —
+TODO/FIXME/stub markers, weak/happy-path-only test coverage, resource-management/RAII issues, and
+`plan.sqlite3`-vs-source drift. Markers and drift audits came back clean (genuinely nothing new —
+see the audits' own reports for methodology). Resource-management and weak-tests audits found real
+issues, all now fixed and pushed:
+- **`fix: resource-management audit findings`** (`0c6427f`) — 4 verified fd-leak/double-close
+  bugs: `Process::Start` leaked the stdout pipe if stderr pipe creation failed after; `File-
+  SystemWatcher::startWatchingIfPossible` orphaned 3 fds permanently if `std::thread`'s
+  constructor threw; `DeflateStream`/`GZipStream`/`ZLibStream::Close()` leaked zlib state (and
+  risked `std::terminate`) if the inner stream's `Write()` threw mid-flush — fixed by mirroring
+  `BufferedStream::Close()`'s already-correct pattern; `TcpClient`/`TcpListener`/`UdpClient`/
+  `NetworkStream` were missing `= delete` on copy construction/assignment despite owning a raw fd
+  closed by the destructor (their sibling `Socket` already had this) — a double-close bug if ever
+  copied. 6 new regression tests + 8 `static_assert(!is_copy_constructible)` compile-time checks.
+- **`fix: String::Format` validation** (`1ed11cd`) — `String::Format` never validated its format
+  string at all: an out-of-range argument index (`"{5}"` with only `arg0`) was silently left
+  unreplaced instead of throwing `FormatException`, unlike real .NET (verified against
+  `String.Manipulation.cs`'s `FormatHelper`). Fixed via a new `FinalizeFormat()` helper wrapping
+  all 18 leaf `Format()` overloads. While implementing this, also found and fixed a second bug in
+  the shared `replaceArg()` helper: naive substring `find()` treated `"{1"` as a prefix match
+  inside `"{10}"`, silently corrupting output instead of leaving it for the new validation to
+  reject. 6 new regression tests.
+- **`fix: Task::Delay` + `Stream::Seek`** (`97a639a`) — two more bugs surfaced while verifying
+  "weak test coverage" audit findings: `Task::Delay` had zero validation of negative input (real
+  .NET throws `ArgumentOutOfRangeException` for `< -1`); `Stream::Seek` routed entirely through
+  `setPositionProperty()` for validation, so a resulting negative position threw
+  `ArgumentOutOfRangeException` instead of real .NET's `IOException` (verified against
+  `MemoryStream.cs`'s `SeekCore` — a genuinely different validation rule from the Position
+  setter's own, still-correct, `ArgumentOutOfRangeException`). Fixed in the shared base
+  `Stream::Seek()`, used by every Stream subtype in this port (none override it). 5 new tests.
+- **`test:` coverage additions** (`0713156`) — of the weak-test audit's 11 findings, 9 turned out
+  to be **false positives** on verification: the audit agent only checked one test file per type
+  and missed that this codebase spreads a type's tests across multiple files (e.g. `List<T>`
+  tests exist in `ListTests.cpp`, `CollectionsTests.cpp`, AND `Ticket1717And1718Tests.cpp` —
+  `CopyTo`/`AsReadOnly`/`FindLastIndex`/`FindLast`/`LastIndexOf`/`IndexOf(startIndex)`/
+  `InsertRange`'s success path, and `Dictionary::Remove` on a missing key, were all already
+  covered). The 2 genuine gaps got regression tests: `Int32::Abs(Int32::MinValue)` throwing
+  `OverflowException` (sibling types already had this test; `Int32` didn't), and
+  `NumberFormatInfo`'s `CheckRange`-before-`VerifyWritable` check ordering on a read-only
+  instance with an out-of-range value (verified this port's ordering already matches real .NET's
+  `NumberFormatInfo.cs` exactly — a pure coverage gap, not a bug).
+
+Test count grew from 12356 to 12371 across this whole audit round. **Lesson for future audit
+rounds in this codebase**: always grep for `TEST(<TypeName>Tests,` across the WHOLE `tests/`
+tree, not just the one file whose name matches the type — this codebase's test suite grew
+incrementally across many `BatchNN`/`TicketNNNN`/feature-named files, not one file per type.
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12356 tests passed
-at the last verification (HEAD `890b569`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
+**There is no active build/test blocker right now.** Build was clean and all 12371 tests passed
+at the last verification (HEAD `0713156`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
 `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
 
 This session is running autonomously (per explicit user authorization). All four of NEXT.md's
-original §8 tasks are now done (`Task::WhenAll`, `NumberStyles.Currency`/`AllowThousands`,
-`Channel::CreateUnboundedPrioritized`, the `String` performance-audit pilot) — §8 currently holds
-only the pilot's own natural follow-on (extending the performance pass to other hot-path types,
-not yet started). Two pre-session decisions from the user remain in effect: (1) no new
-benchmarking dependency — `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2)
-push after each verified task, same cadence as before.
+original §8 tasks are done, plus a full post-pilot audit round (4 parallel find-only agents → 4
+fix commits, see §3) — §8 currently holds only natural follow-ons that haven't been started yet
+(extending the performance pass to other hot-path types; a possible further audit round). Two
+pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
+`std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
+task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next. Two candidates were proposed and are awaiting a decision (see §8 for
@@ -256,9 +305,12 @@ update this section (and the whole file) once you understand what changed.
 ## 5. Known bugs and limitations
 
 **Confirmed, deliberately deferred (not bugs — documented scope decisions)**:
-- `NumberStyles`-aware `Parse`/`TryParse` (all 8 integer types) supports `Integer`, `HexNumber`,
-  and the `Allow*` whitespace/sign flags, but **not** `Currency`/`AllowThousands`/
-  `AllowDecimalPoint` — deferred per ticket 1717's own acceptance criteria, documented in-code.
+- `NumberStyles`-aware `Parse`/`TryParse` (all 8 integer types) now supports `Integer`,
+  `HexNumber`, `Number`, and `Currency` in full (`AllowThousands`/`AllowDecimalPoint`/
+  `AllowCurrencySymbol`/`AllowParentheses`/`AllowTrailingSign` were added 2026-07-13, see §3) —
+  the one remaining gap is `AllowExponent`, which real .NET's `Number`/`Currency` styles don't
+  include either (only `Float`/`HexFloat` do, and those don't apply to integer types), so this is
+  a non-gap, not a scope reduction.
 - `Span<char>`/UTF-8 `ReadOnlySpan<byte>`-based `Parse`/`TryParse` overloads for the same 8 types
   — not implemented at all, explicitly out of scope for the ticket that added the NumberStyles
   overloads.
@@ -412,41 +464,34 @@ a "does this actually work" check available in this repo.
 
 ## 8. Next smallest tasks
 
-Ordered by size/risk (smallest and safest first). None of these are currently blocking anything —
-pick based on what's actually wanted next, or ask the user first if unsure which to prioritize.
+**Completed this session** (2026-07-13, full detail in §3 / git history — compacted here to keep
+this section actionable): build/test baseline re-verify; `TypedReference` classification
+(false-alarm, no change needed); `Task::WhenAll`; `NumberStyles.Currency`/`AllowThousands` for
+all 8 integer types; `Channel::CreateUnboundedPrioritized`; a `String` performance-audit pilot;
+a full post-pilot audit round (resource-management fixes, `String::Format` validation,
+`Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions).
 
-~~1. Re-verify the build/test baseline.~~ **DONE 2026-07-13**: confirmed 12305/12305 passing,
-   0 errors/0 warnings at HEAD `9be09bc`/`05c9f45`.
+None of the tasks below are currently blocking anything — pick based on what's actually wanted
+next, or ask the user first if unsure which to prioritize.
 
-~~2. Resolve `TypedReference`'s `task`-table classification.~~ **DONE 2026-07-13**: re-verified
-   correct as-is (`ignore`/`outofscope=1`) — its entire real functionality depends on reflection
-   and compiler intrinsics, squarely inside the documented permanent-deviation scope. No change
-   made; see §5's "Confirmed, permanent" list for the full reasoning. This was a false alarm from
-   an earlier audit pass, not a genuine misclassification.
+1. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
+   two real, measurement-justified wins; `List<T>`, `StringBuilder`, and `Dictionary` haven't been
+   profiled at all yet. Use `bench/StringBenchmark.cpp` as the template (add a new `bench/*.cpp`
+   file, measure before changing anything, only commit changes with a real measured delta).
+   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` (no regressions).
 
-~~3. Implement `Task::WhenAll`.~~ **DONE 2026-07-13** (`9d4e77e`): static
-   `Task::WhenAll(std::vector<Task>)`, 5 new regression tests. See §3 for the exact semantics
-   implemented (no short-circuit, direct-rethrow-first-fault, empty-input fast path).
+2. **Another audit round, different categories.** This session's post-pilot round covered
+   TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
+   note), resource-management/RAII (4 real bugs, fixed), and `plan.sqlite3` drift (clean). Categories
+   NOT yet covered: compiler-warning audit under a stricter flag set (e.g. `-Wshadow`,
+   `-Wconversion`), duplicated-implementation search, missing edge-case handling in recently-added
+   code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized` work from this session is itself
+   a good target for a fresh pair of eyes), or a real sanitizer run (ASan/TSan) across the full
+   test suite (never done in this project's history per §5's "Needs verification" list).
 
-~~1. Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
-   overloads.~~ **DONE 2026-07-13** (`7d3deca`): extended the single shared parser
-   (`include/System/detail/IntegerNumberStylesParser.hpp`) that all 8 types route through — no
-   per-type changes needed beyond doc-comments. 26 new regression tests. See §3 for the full
-   list of grammar additions and documented deviations.
-
-~~1. Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).~~
-   **DONE 2026-07-13** (`3a8adfa`): implemented via a separate `std::multiset`-backed
-   detail::Prioritized* trio, 14 new regression tests. See §3 for the full design rationale.
-
-~~1. Scope a performance-audit pilot on one hot-path type.~~ **DONE 2026-07-13** (`890b569`):
-   picked `System::String`. Measured first (standalone `std::chrono` script, no speculative
-   changes), then fixed `Split(char)` (stringstream → manual scan, ~2.6x, plus a verified-against-
-   .NET correctness bug fix as a side effect) and `Concat`/`Join` (upfront `reserve()`, ~1.4x).
-   Added `bench/StringBenchmark.cpp` (gated behind `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF)
-   as the minimal harness this task called for. See §3 for full detail. The pilot confirms a full
-   performance audit would likely find more low-risk wins in other hot-path types (`List<T>`,
-   `StringBuilder`, `Dictionary`) — **not yet started**, a natural next candidate if this
-   direction continues.
+3. **`Task.WhenAny`.** Still deferred (§5) — needs a race-free "first of N" completion-signaling
+   mechanism, a genuinely harder design than `WhenAll` was. Worth scoping as its own careful pass
+   given this class's history of real ThreadSanitizer-caught races.
 
 ---
 
@@ -478,7 +523,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 890b569 (12356/12356 tests
+Read NEXT.md first. It reflects the repository state as of HEAD 0713156 (12371/12371 tests
 passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
