@@ -23,7 +23,7 @@ namespace System::Globalization {
  */
 class JulianCalendar : public Calendar {
 public:
-    static constexpr int JulianEra = 1; ///< The only era value for this calendar.
+    static constexpr intcs JulianEra = 1; ///< The only era value for this calendar.
 
     /**
      * @brief Gets the algorithm type for this calendar.
@@ -61,7 +61,7 @@ public:
      * C++ counterpart of .NET JulianCalendar.TwoDigitYearMax.
      * @return The maximum two-digit year (default 2049).
      */
-    [[nodiscard]] int getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
+    [[nodiscard]] intcs getTwoDigitYearMaxProperty() const override { return twoDigitYearMax_; }
 
     /**
      * @brief Sets the last two-digit year that maps into the range of this calendar.
@@ -70,7 +70,7 @@ public:
      * @param value The new maximum two-digit year.
      * @throws System::InvalidOperationException if this instance is read-only.
      */
-    void setTwoDigitYearMaxProperty(int value) override {
+    void setTwoDigitYearMaxProperty(intcs value) override {
         VerifyWritable();
         twoDigitYearMax_ = value;
     }
@@ -81,14 +81,14 @@ public:
      * C++ counterpart of .NET JulianCalendar.GetEra(DateTime).
      * @return Always JulianEra (1).
      */
-    [[nodiscard]] int GetEra(const System::DateTime& /*time*/) const override { return JulianEra; }
+    [[nodiscard]] intcs GetEra(const System::DateTime& /*time*/) const override { return JulianEra; }
 
     /**
      * @brief Returns the number of eras in this calendar.
      *
      * @return Always 1; the Julian calendar has a single era.
      */
-    [[nodiscard]] int GetErasCount() const override { return 1; }
+    [[nodiscard]] intcs GetErasCount() const override { return 1; }
 
     /**
      * @brief Gets the list of era identifiers supported by this calendar.
@@ -96,7 +96,7 @@ public:
      * C++ counterpart of .NET JulianCalendar.Eras.
      * @return A vector containing {JulianEra}.
      */
-    [[nodiscard]] std::vector<int> getErasProperty() const override { return {JulianEra}; }
+    [[nodiscard]] std::vector<intcs> getErasProperty() const override { return {JulianEra}; }
 
     /**
      * @brief Determines whether the specified year is a Julian leap year.
@@ -107,7 +107,7 @@ public:
      * @param era  The era (ignored; always Julian).
      * @return true if @p year is divisible by 4; otherwise false.
      */
-    [[nodiscard]] bool IsLeapYear(int year, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] bool IsLeapYear(intcs year, intcs /*era*/ = CurrentEra) const override {
         return year % 4 == 0;
     }
 
@@ -121,7 +121,7 @@ public:
      * @param era   The era (ignored).
      * @return The number of days in the specified month.
      */
-    [[nodiscard]] int GetDaysInMonth(int year, int month, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInMonth(intcs year, intcs month, intcs /*era*/ = CurrentEra) const override {
         static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         if (month == 2 && IsLeapYear(year)) return 29;
         return days[month];
@@ -135,7 +135,7 @@ public:
      * @param era  The era (ignored).
      * @return 366 for a leap year; otherwise 365.
      */
-    [[nodiscard]] int GetDaysInYear(int year, int /*era*/ = CurrentEra) const override {
+    [[nodiscard]] intcs GetDaysInYear(intcs year, intcs /*era*/ = CurrentEra) const override {
         return IsLeapYear(year) ? 366 : 365;
     }
 
@@ -143,7 +143,7 @@ public:
      * @brief Returns the Julian calendar year for the given DateTime.
      * C++ counterpart of .NET JulianCalendar.GetYear(DateTime).
      */
-    [[nodiscard]] int GetYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetYear(const System::DateTime& time) const override {
         return GetDatePart(time.getTicksProperty(), DatePartYear);
     }
 
@@ -151,7 +151,7 @@ public:
      * @brief Returns the Julian calendar month for the given DateTime.
      * C++ counterpart of .NET JulianCalendar.GetMonth(DateTime).
      */
-    [[nodiscard]] int GetMonth(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetMonth(const System::DateTime& time) const override {
         return GetDatePart(time.getTicksProperty(), DatePartMonth);
     }
 
@@ -159,7 +159,7 @@ public:
      * @brief Returns the Julian calendar day-of-month for the given DateTime.
      * C++ counterpart of .NET JulianCalendar.GetDayOfMonth(DateTime).
      */
-    [[nodiscard]] int GetDayOfMonth(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetDayOfMonth(const System::DateTime& time) const override {
         return GetDatePart(time.getTicksProperty(), DatePartDay);
     }
 
@@ -167,7 +167,7 @@ public:
      * @brief Returns the Julian calendar day-of-year for the given DateTime.
      * C++ counterpart of .NET JulianCalendar.GetDayOfYear(DateTime).
      */
-    [[nodiscard]] int GetDayOfYear(const System::DateTime& time) const override {
+    [[nodiscard]] intcs GetDayOfYear(const System::DateTime& time) const override {
         return GetDatePart(time.getTicksProperty(), DatePartDayOfYear);
     }
 
@@ -185,8 +185,8 @@ public:
      * @param era         The era (ignored).
      * @return The Gregorian-DateTime equivalent of the given Julian date components.
      */
-    System::DateTime ToDateTime(int year, int month, int day, int hour, int minute,
-                                int second, int millisecond, int /*era*/ = CurrentEra) const override {
+    System::DateTime ToDateTime(intcs year, intcs month, intcs day, intcs hour, intcs minute,
+                                intcs second, intcs millisecond, intcs /*era*/ = CurrentEra) const override {
         SharpRuntime::longcs ticks = DateToTicks(year, month, day)
             + hour * System::DateTime::TicksPerHour
             + minute * System::DateTime::TicksPerMinute
@@ -208,7 +208,7 @@ public:
      * this port's other calendar-specific AddMonths overrides use.
      * @throws System::ArgumentOutOfRangeException if @p months is outside [-120000, 120000].
      */
-    System::DateTime AddMonths(const System::DateTime& time, int months) const override {
+    System::DateTime AddMonths(const System::DateTime& time, intcs months) const override {
         if (months < -120000 || months > 120000)
             throw System::ArgumentOutOfRangeException("months", std::to_string(months),
                 "Valid values are between -120000 and 120000, inclusive.");
@@ -241,7 +241,7 @@ public:
      * bound AddMonths (above) already enforces (120000 / 12 = 10000) before the multiply.
      * @throws System::ArgumentOutOfRangeException if @p years is outside [-10000, 10000].
      */
-    System::DateTime AddYears(const System::DateTime& time, int years) const override {
+    System::DateTime AddYears(const System::DateTime& time, intcs years) const override {
         if (years < -10000 || years > 10000)
             throw System::ArgumentOutOfRangeException("years", std::to_string(years),
                 "Valid values are between -10000 and 10000, inclusive.");
