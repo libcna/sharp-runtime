@@ -1,10 +1,140 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `224c9e7`) — 12100 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `8d4f662`) — 12100 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12100 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ENTIRE TICKET BACKLOG DRAINED (`SELECT COUNT(*) FROM ticket WHERE status='todo'` = 0)
+
+Continuing the same autonomous run (previous checkpoint covered the 8 classification-audit
+follow-up tickets). Final batch: the 6 `documentation` (doxygen-gap-filling) tickets 1479-1484,
+dispatched as a single fork (System root, Collections.Generic, Threading, IO, Text, Numerics —
+explicitly excluding subdirectories already doc-comment-audited earlier this session:
+Threading/Tasks, Threading/Channels, IO/Compression, IO/Hashing, IO/IsolatedStorage, Text/Json,
+Text/RegularExpressions, Text/Unicode, Numerics/Colors). Verified afterward via `git fetch`+
+`git log` (no local/origin divergence, all 5 commits landed cleanly — Threading needed zero
+changes so produced no commit, correctly) and a fresh `cmake --build` + full test run: 12100/12100
+UNCHANGED from before this batch, confirming every commit was genuinely comment-only as required
+(no logic/behavior changes for a documentation-only ticket category).
+
+**Notable process finding**: the underlying heuristic Doxygen-gap-detection script (from ticket
+45, referenced by these tickets) heavily over-counts — most flagged items across all 6 areas were
+false positives from four distinct blind spots: multi-line `template<...>` declarations,
+`public:`/`private:` labels or explanatory `//` comments intervening between a doc-comment and
+its declaration, local RAII lock-guard variables misparsed as method declarations (a
+`std::lock_guard<std::mutex> lock(mutex_);` inside a method body syntactically resembles a method
+declaration to a regex heuristic), and forward-declarations correctly needing no doc. The fork
+correctly did NOT blindly trust the script's flagged list — it manually inspected every flagged
+item before deciding real-gap vs. false-positive, exactly matching the script's own documented
+caveat that it's "regex-based, not a real C++ parser, and can overcount."
+
+**Genuine gaps found and fixed** (all via commits `0433bfd`/`e780f63`/`afcd888`/`f05b1ad`/
+`8d4f662`):
+- **System (root)** — the largest real find: `DateTimeOffset.hpp` had 27 real gaps, its ENTIRE
+  property/arithmetic/parsing/comparison surface undocumented despite being behaviorally
+  audited+fixed earlier this session (ticket 354) — a reminder that a behavioral-correctness
+  audit and a doc-comment audit are genuinely separate concerns, passing one doesn't imply the
+  other. Plus 8 `MemoryExtensions` `Span<T>` forwarding overloads, `TimeZoneNotFoundException`,
+  `TryWriteInterpolatedStringHandler`, `SpanSplitEnumerator::Mode`.
+- **Collections.Generic**: `List.hpp` — 6 methods (`getIsReadOnlyProperty`, `Add`, `Clear`,
+  `begin`/`end`).
+- **Threading**: zero real gaps — already fully documented from this session's own two prior deep
+  behavioral-audit passes (Task/Parallel/ValueTask, ReaderWriterLockSlim, etc.) — confirms
+  doc-comment coverage naturally follows when a type gets genuine deep-audit attention.
+- **IO**: `BinaryReader` + 3 exception types' trivial constructor overloads.
+- **Text**: Rune-enumerator/`ChunkEnumerator` range-for support methods,
+  `DecoderFallbackException`/`EncoderFallbackException` constructors and fallback-buffer methods.
+- **Numerics**: `BigInteger::Abs`, `Plane::Equals`/`ToString`, and 30
+  `GenericMathInterfaces` trig/hyperbolic/log/exp/power/root function stubs (extended an existing
+  trailing-`///<` style already used elsewhere in the same file, for consistency).
+
+Final verified state: 12100/12100 tests passing (unchanged — this was a pure comment-only batch
+by design), 0 errors/0 warnings, all 5 commits confirmed on `origin/feature/work` via `git fetch`
+(no divergence).
+
+## MILESTONE: entire `ticket` table backlog fully drained
+
+`SELECT category, status, COUNT(*) FROM ticket GROUP BY category, status`:
+```
+build              done     7
+classification-audit done  60
+code-audit         done   122
+correctness        done    51
+database           done     9
+documentation      done    25
+legal              done     1
+namespace-audit    done    51
+platform           done     7
+ported-type-audit  done  1020
+status-audit       done    37
+style           blocked   100   <- the only non-done rows in the whole table
+style              done     3
+test               done     1
+tooling             done     3
+workflow            done     1
+```
+`SELECT COUNT(*) FROM ticket WHERE status='todo'` returns **0**. The only remaining non-`done`
+tickets are the 100 `style` tickets, permanently `blocked` on ticket #43 (the global int→intcs
+naming-convention policy) per this project's explicit, repeated standing instruction across many
+sessions — **do not reopen ticket #43 or the `style` category without being explicitly asked
+again**.
+
+### Session-wide summary (this autonomous run, from the "ticket-workflow pivot" through this
+checkpoint)
+- **code-audit** (336-355, 20 tickets): deep file-level audits, ~10 real bugs fixed including a
+  Delegate Equals/GetHashCode bug, a Math.DivRem SIGFPE, a BitConverter OOB read, an XxHash3
+  negative-length memcpy crash.
+- **namespace-audit** (362-406, 51 tickets): pure `task`/`ticket` consistency checks across 45
+  namespaces; exactly ONE orphan gap found (System.Collections — ArrayList/Hashtable).
+- **ported-type-audit** (636-1416 + 8 follow-ups, 1020 tickets total): 41 real bugs/gaps fixed via
+  9 rounds of 3-5 parallel forks each, including 2 security vulnerabilities (Zip Slip, HTTP CRLF
+  header injection) and 4 memory-safety bugs (XxHash32/64, NetworkStream, UdpClient — all
+  ASan-confirmed).
+- **classification-audit** (1417-1476, 60 tickets): sampled ~1400+ `task` rows marked `ignored`
+  across 60 namespaces via 5 parallel forks; found 8 genuine misclassifications, each spawning a
+  narrow, correctly-scoped follow-up ticket rather than an inline port.
+- **8 classification-audit follow-ups** (1491-1498): real new-feature implementation work —
+  `Process` (POSIX fork/exec/waitpid core), SHA3 family + HKDF (NIST/RFC-vector-verified),
+  `Cookie`/`CookieContainer` + `HttpMessageHandler`/`DelegatingHandler` pipeline, real
+  `BufferedStream` buffering, real inotify-backed `FileSystemWatcher`, `NativeMemory`, and
+  async-signal-safe `PosixSignal`/`PosixSignalRegistration` (which caught and correctly worked
+  around a genuine `<signal.h>` macro-collision hazard).
+- **documentation** (1479-1484, 6 tickets): doxygen-gap-filling, comment-only, 12100/12100
+  unchanged throughout.
+- **Zero regressions** across the entire run — every batch independently verified via
+  `git fetch`+`git log`+fresh rebuild+full test run before being trusted, with extra scrutiny
+  (personal diff review, repeated test runs for flakiness) for anything security/memory-safety/
+  concurrency-relevant.
+- Test count grew from ~10711 (this project's documented floor at session start) to **12100**,
+  net +1389 tests, with zero failures at any checkpoint.
+
+### To resume (if the user wants further work)
+The `ticket`-table-driven stabilization workflow (prompt.md's second half) has no more actionable
+`todo` items. Options for a follow-on session, in rough order of likely value:
+1. **Re-run the `task`-table workflow's Step 1** (prompt.md's "Initialization" section) —
+   `SELECT id,namespace,name,type FROM task WHERE (status='' OR status='todo') ORDER BY (CASE
+   WHEN namespace LIKE 'System%' THEN 0 ELSE 1 END), namespace, name LIMIT 20;` — this is a
+   DIFFERENT, separate workflow from the ticket table (see prompt.md), tracks individual .NET
+   TYPES rather than stabilization work, and this session found (via the classification-audit
+   pass) that a handful of `task` rows have gone stale relative to reality (`Comparison`,
+   `SequencePosition`, `StringNormalizationExtensions`, `PropertyChangedEventHandler` — noted in
+   ticket 1424/1427's notes, never corrected since that's a different workflow's job). A
+   reconciliation pass here could find more drift like that, plus there may be genuinely new
+   `''`/`todo` task rows never classified at all.
+2. **Ask the user directly** whether ticket #43 (global int→intcs policy) should finally be
+   unblocked — it's been sitting blocked for a long time and is the single largest remaining
+   category (100 tickets) in the whole ticket table. This requires EXPLICIT user authorization per
+   this project's standing instruction — do not infer consent from anything in this session.
+3. **Spot-check / re-audit already-`ported`-marked types for regressions** — this session found
+   real bugs even in types marked "done" from prior sessions (e.g. `JapaneseCalendar`/
+   `NumberFormatInfo` re-audited fresh under `code-audit` tickets 348/347 despite already being
+   `ported-type-audit`-done, and each still had a real bug). A second full sweep of
+   `ported-type-audit` (this time reviewing already-`done` tickets rather than the now-empty
+   `todo` queue) could surface more.
+4. Sit idle / await explicit new direction — there is no more autonomously-safe, pre-scoped work
+   left in `plan.sqlite3` as of this checkpoint.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — all 8 classification-audit follow-up tickets implemented (5 parallel forks), real feature work
 
