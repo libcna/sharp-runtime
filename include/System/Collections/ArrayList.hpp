@@ -18,6 +18,42 @@ namespace System::Collections {
 using SharpRuntime::bytecs;
 using SharpRuntime::intcs;
 
+namespace detail {
+
+/**
+ * @brief Best-effort std::any value equality for ArrayList's typed Contains/IndexOf/
+ * LastIndexOf overloads.
+ *
+ * Real .NET compares elements via Object.Equals, which works for any boxed value because
+ * every .NET type carries a virtual Equals; std::any has no equivalent built-in equality
+ * operator. Common primitive/string types are compared by actual value here. Types outside
+ * that known set report as never-equal rather than matching purely on type() -- an earlier
+ * version of this code compared only item.type() == value.type(), which caused false-positive
+ * matches (e.g. searching a list of ints [1,2,3] for the value 0 would "find" index 0, since
+ * only the type was compared).
+ */
+inline bool arrayListValueEquals(const std::any& a, const std::any& b) {
+    if (a.type() != b.type()) return false;
+    if (const auto* p = std::any_cast<std::string>(&a))            return *p == *std::any_cast<std::string>(&b);
+    if (const auto* p = std::any_cast<const char*>(&a))            return std::string(*p) == std::string(*std::any_cast<const char*>(&b));
+    if (const auto* p = std::any_cast<bool>(&a))                   return *p == *std::any_cast<bool>(&b);
+    if (const auto* p = std::any_cast<int>(&a))                    return *p == *std::any_cast<int>(&b);
+    if (const auto* p = std::any_cast<long>(&a))                   return *p == *std::any_cast<long>(&b);
+    if (const auto* p = std::any_cast<long long>(&a))              return *p == *std::any_cast<long long>(&b);
+    if (const auto* p = std::any_cast<unsigned int>(&a))           return *p == *std::any_cast<unsigned int>(&b);
+    if (const auto* p = std::any_cast<unsigned long>(&a))          return *p == *std::any_cast<unsigned long>(&b);
+    if (const auto* p = std::any_cast<unsigned long long>(&a))     return *p == *std::any_cast<unsigned long long>(&b);
+    if (const auto* p = std::any_cast<double>(&a))                 return *p == *std::any_cast<double>(&b);
+    if (const auto* p = std::any_cast<float>(&a))                  return *p == *std::any_cast<float>(&b);
+    if (const auto* p = std::any_cast<char>(&a))                   return *p == *std::any_cast<char>(&b);
+    if (const auto* p = std::any_cast<void*>(&a))                  return *p == *std::any_cast<void*>(&b);
+    // Unknown type with no recognized equality operator: never match, rather than a
+    // false-positive type-only match.
+    return false;
+}
+
+} // namespace detail
+
 /**
  * @brief Implements the IList interface using an array whose size is dynamically increased.
  *
@@ -289,7 +325,7 @@ public:
      */
     bool Contains(const std::any& value) const {
         for (const auto& item : _items)
-            if (item.type() == value.type()) return true;
+            if (detail::arrayListValueEquals(item, value)) return true;
         return false;
     }
 
@@ -311,7 +347,7 @@ public:
      */
     int IndexOf(const std::any& value) const {
         for (int i = 0; i < static_cast<int>(_items.size()); ++i)
-            if (_items[i].type() == value.type()) return i;
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -326,7 +362,7 @@ public:
         if (startIndex > size)
             throw System::ArgumentOutOfRangeException("startIndex", "Index was out of range. Must be non-negative and less than the size of the collection.");
         for (int i = startIndex; i < size; ++i)
-            if (_items[i].type() == value.type()) return i;
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -345,7 +381,7 @@ public:
             throw System::ArgumentOutOfRangeException("count", "Count must be positive and count must refer to a location within the string/array/collection.");
         int end = startIndex + count;
         for (int i = startIndex; i < end && i < size; ++i)
-            if (_items[i].type() == value.type()) return i;
+            if (detail::arrayListValueEquals(_items[i], value)) return i;
         return -1;
     }
 
@@ -391,7 +427,7 @@ public:
                 "Index was out of range. Must be non-negative and less than the size of the collection.");
         int lo = startIndex - count + 1;
         for (int i = startIndex; i >= lo; --i)
-            if (_items[static_cast<size_t>(i)].type() == value.type()) return i;
+            if (detail::arrayListValueEquals(_items[static_cast<size_t>(i)], value)) return i;
         return -1;
     }
 

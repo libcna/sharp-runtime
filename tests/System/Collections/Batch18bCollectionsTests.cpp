@@ -143,9 +143,9 @@ TEST(ArrayListGapFill, IndexOf_StartIndex_FindsFromOffset) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // type int matches first at index 0; searching from 1 should find index 1
-    EXPECT_EQ(al.IndexOf(std::any(0), 1), 1);
+    al.Add(std::any(1));
+    // value 1 occurs at index 0 and 2; searching from 1 should skip index 0 and find index 2
+    EXPECT_EQ(al.IndexOf(std::any(1), 1), 2);
 }
 
 TEST(ArrayListGapFill, IndexOf_StartIndex_NotFound) {
@@ -159,10 +159,23 @@ TEST(ArrayListGapFill, IndexOf_StartIndex_Count) {
     al.Add(std::any(1));
     al.Add(std::any(2));
     al.Add(std::any(3));
-    // search 1 element starting at index 2 — finds it
-    EXPECT_EQ(al.IndexOf(std::any(0), 2, 1), 2);
-    // search 1 element starting at index 0 — does not reach index 2
-    EXPECT_EQ(al.IndexOf(std::any(0), 0, 1), 0);
+    // search 1 element starting at index 2 — value 3 is there
+    EXPECT_EQ(al.IndexOf(std::any(3), 2, 1), 2);
+    // search 1 element starting at index 0 — value 3 is out of the searched window
+    EXPECT_EQ(al.IndexOf(std::any(3), 0, 1), -1);
+}
+
+TEST(ArrayListGapFill, IndexOf_ComparesByValueNotJustType) {
+    // Regression test: an earlier version compared only std::any::type(), so searching a list
+    // of ints for a value not present would incorrectly "find" the first int of any value.
+    ArrayList al;
+    al.Add(std::any(1));
+    al.Add(std::any(2));
+    al.Add(std::any(3));
+    EXPECT_EQ(al.IndexOf(std::any(2)), 1);
+    EXPECT_EQ(al.IndexOf(std::any(99)), -1);
+    EXPECT_TRUE(al.Contains(std::any(3)));
+    EXPECT_FALSE(al.Contains(std::any(42)));
 }
 
 // -----------------------------------------------------------------------
@@ -173,18 +186,18 @@ TEST(ArrayListGapFill, LastIndexOf_Basic) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // last int element is at index 2
-    EXPECT_EQ(al.LastIndexOf(std::any(0)), 2);
+    al.Add(std::any(1));
+    // value 1 occurs at index 0 and 2; LastIndexOf finds the last occurrence, index 2
+    EXPECT_EQ(al.LastIndexOf(std::any(1)), 2);
 }
 
 TEST(ArrayListGapFill, LastIndexOf_StartIndex) {
     ArrayList al;
     al.Add(std::any(1));
     al.Add(std::any(2));
-    al.Add(std::any(3));
-    // search backwards from index 1 — last int at index 1
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 1), 1);
+    al.Add(std::any(1));
+    // search backwards from index 1 — value 1 not in [0,1] search window except index 0
+    EXPECT_EQ(al.LastIndexOf(std::any(1), 1), 0);
 }
 
 TEST(ArrayListGapFill, LastIndexOf_StartIndex_Count) {
@@ -192,10 +205,10 @@ TEST(ArrayListGapFill, LastIndexOf_StartIndex_Count) {
     al.Add(std::any(1));
     al.Add(std::any(2));
     al.Add(std::any(3));
-    // search 2 elements ending at index 2 (indices 1,2): last int at 2
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 2, 2), 2);
-    // search 1 element ending at index 0: last int at 0
-    EXPECT_EQ(al.LastIndexOf(std::any(0), 0, 1), 0);
+    // search 2 elements ending at index 2 (indices 1,2): value 3 is at index 2
+    EXPECT_EQ(al.LastIndexOf(std::any(3), 2, 2), 2);
+    // search 1 element ending at index 0: value 3 is not there
+    EXPECT_EQ(al.LastIndexOf(std::any(3), 0, 1), -1);
 }
 
 // -----------------------------------------------------------------------
