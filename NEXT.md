@@ -1,10 +1,36 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `d176e5f`) — 11860 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6f215cd`) — 11863 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11860 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11863 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 350 closed, whitespace-padded numbers rejected
+
+Continuing the same autonomous run (previous checkpoint covered 349). Commit: 6f215cd — pushed
+to `origin/feature/work`.
+
+- **350 (Xml/XmlConvert.cpp)**: `ToSingle`/`ToDouble` computed a trimmed copy of the input for
+  the INF/-INF token check but called `Parse()` with the ORIGINAL untrimmed string for the
+  general numeric path. `Single::Parse`/`Double::Parse` delegate to `std::from_chars`, which —
+  unlike .NET's `float.Parse`/`double.Parse` — does not skip leading or trailing whitespace at
+  all (confirmed via a standalone repro). Since XML text content commonly has surrounding
+  whitespace from document formatting, this threw `FormatException` for extremely common, valid
+  XML Schema numeric content. Verified against `XmlConvert.cs`, which explicitly passes
+  `NumberStyles.AllowLeadingWhite | AllowTrailingWhite`. Same bug found in `ToDecimal` via a
+  sibling-family check (`Decimal::TryParse` tolerates no whitespace whatsoever). Fixed all
+  three using the already-defined `TrimXmlWhitespace()` helper — confirmed the integer `ToXxx`
+  methods don't share this bug since their `Parse()` uses `std::stoXXX`, which already tolerates
+  whitespace. Also documented (not fixed — architectural-scale) a separate gap:
+  `ToString(TimeSpan)`/`ToTimeSpan` use .NET's native colon-separated `TimeSpan` format instead
+  of the XML Schema `duration` lexical form (`PnYnMnDTnHnMnS`) real `XmlConvert` uses — an
+  entirely different grammar needing a full parser/formatter pair to fix correctly.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 349 closed, reader-position corruption + file-path misdetection
 
