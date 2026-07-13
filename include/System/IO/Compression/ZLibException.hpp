@@ -4,9 +4,12 @@
 #pragma once
 #include <string>
 #include <utility>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/IO/IOException.hpp"
 
 namespace System::IO::Compression {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief The exception that is thrown when ZLib returns an error code indicating an
@@ -17,7 +20,7 @@ namespace System::IO::Compression {
     class ZLibException : public System::IO::IOException {
     private:
         std::string zlibErrorContext_;
-        int         zlibErrorCode_ = 0;
+        intcs       zlibErrorCode_ = 0;
         std::string zlibErrorMessage_;
 
     public:
@@ -39,7 +42,7 @@ namespace System::IO::Compression {
          * @param zlibErrorMessage The string provided by ZLib as error information (unlocalized).
          */
         ZLibException(const std::string& message, const std::string& zlibErrorContext,
-                       int zlibErrorCode, const std::string& zlibErrorMessage)
+                       intcs zlibErrorCode, const std::string& zlibErrorMessage)
             : System::IO::IOException(message),
               zlibErrorContext_(zlibErrorContext),
               zlibErrorCode_(zlibErrorCode),
@@ -48,7 +51,7 @@ namespace System::IO::Compression {
         /** Returns a description of the context within zlib where the error occurred. */
         [[nodiscard]] const std::string& getZlibErrorContextProperty() const { return zlibErrorContext_; }
         /** Returns the error code returned by the ZLib function that caused this exception. */
-        [[nodiscard]] int getZlibErrorCodeProperty() const { return zlibErrorCode_; }
+        [[nodiscard]] intcs getZlibErrorCodeProperty() const { return zlibErrorCode_; }
         /** Returns the string provided by ZLib as error information (unlocalized). */
         [[nodiscard]] const std::string& getZlibErrorMessageProperty() const { return zlibErrorMessage_; }
     };
