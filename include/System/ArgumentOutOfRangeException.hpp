@@ -65,6 +65,8 @@ public:
      * @brief Initializes a new instance with a parameter name, actual value, and message.
      *
      * C++ counterpart of .NET ArgumentOutOfRangeException(string, object, string).
+     * Matches .NET's Message property override, which appends "Actual value was X."
+     * after the "(Parameter 'x')" marker whenever an actual value is supplied.
      * @param paramName   The name of the parameter that caused the exception.
      * @param actualValue The value of the argument that caused the exception (as string).
      * @param message     The error message.
@@ -85,6 +87,18 @@ public:
     // -----------------------------------------------------------------------
     // Static guard helpers  (C++ counterparts of .NET ThrowIf* methods)
     // -----------------------------------------------------------------------
+    //
+    // KNOWN MINOR GAP (audited, not fixed): real .NET's ThrowIfXxx helpers embed the actual
+    // value directly in the PRIMARY message text too (e.g. ThrowIfZero's exact resource string
+    // is "{paramName} ('{value}') must be a non-zero value."), and ThrowIfNegativeOrZero/
+    // ThrowIfEqual/ThrowIfNotEqual use noticeably different prose than the messages below (e.g.
+    // "must be a non-negative and non-zero value." vs this port's "must be a positive value.").
+    // The information itself is NOT missing here -- paramName is present via
+    // getParamNameProperty(), the value via getActualValueProperty() and (after this ticket's
+    // fix) the "Actual value was X." message suffix -- this is a pure wording/paraphrase
+    // difference in the primary sentence, not a structural gap, so left as-is matching this
+    // project's established practice of not chasing verbatim message-text parity for its own
+    // sake (see CLAUDE.md's parity philosophy).
 
     /**
      * @brief Throws ArgumentOutOfRangeException if @p value is zero.

@@ -98,6 +98,32 @@ namespace System {
          */
         static void ThrowIfNullOrWhiteSpace(const std::string& argument,
                                             const std::string& paramName = "");
+
+    protected:
+        /** @brief Tag type selecting the "message is already fully composed" constructor below. */
+        struct AlreadyComposedTag {};
+
+        /**
+         * @brief Constructs from a message a derived class has already fully composed (e.g.
+         * with additional suffix text appended after the parameter-name marker), storing
+         * @p paramName directly without appending " (Parameter 'x')" to @p composedMessage a
+         * second time.
+         *
+         * For use by derived classes (e.g. ArgumentOutOfRangeException) whose real .NET
+         * counterpart appends its own suffix (e.g. "Actual value was X.") AFTER the
+         * "(Parameter 'x')" marker that the two-argument (message, paramName) constructor
+         * would otherwise append last.
+         */
+        ArgumentException(const std::string& composedMessage, const std::string& paramName,
+                          AlreadyComposedTag);
+
+        /**
+         * @brief Appends " (Parameter 'paramName')" to @p message, matching the exact format
+         * the (message, paramName) constructors use, for use by derived classes composing a
+         * fuller final message before calling the AlreadyComposedTag constructor above.
+         */
+        static std::string AppendParamNameSuffix(const std::string& message,
+                                                  const std::string& paramName);
     };
 
 } // namespace System

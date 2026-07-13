@@ -81,6 +81,32 @@ TEST(ArgumentOutOfRangeExceptionTests, ThreeArgCtor_StoresMessage) {
     EXPECT_NE(std::string(ex.what()).find("Index was out of range."), std::string::npos);
 }
 
+// Regression tests for ticket 353: real .NET's ArgumentOutOfRangeException.Message override
+// always appends "Actual value was {actualValue}." AFTER the "(Parameter 'x')" marker whenever
+// an actual value is supplied via the 3-arg constructor -- this is a defining, always-present
+// feature of this exception type, not an optional extra. The previous implementation stored
+// actualValue_ (so getActualValueProperty() worked) but never wove it into the message text
+// itself, so what()/the message was missing this suffix entirely for every 3-arg constructor
+// call and every ThrowIfXxx static helper (which all route through the 3-arg constructor
+// internally).
+TEST(ArgumentOutOfRangeExceptionTests, ThreeArgCtor_MessageIncludesActualValueSuffix) {
+    ArgumentOutOfRangeException ex("index", "42", "Index was out of range.");
+    std::string msg(ex.what());
+    EXPECT_NE(msg.find("Actual value was 42."), std::string::npos);
+    // Real .NET orders the parameter-name marker before the actual-value suffix.
+    EXPECT_LT(msg.find("index"), msg.find("Actual value was 42."));
+}
+
+TEST(ArgumentOutOfRangeExceptionTests, ThrowIfNegative_MessageIncludesActualValueSuffix) {
+    try {
+        ArgumentOutOfRangeException::ThrowIfNegative(-5, "count");
+        FAIL() << "expected ArgumentOutOfRangeException";
+    } catch (const ArgumentOutOfRangeException& ex) {
+        std::string msg(ex.what());
+        EXPECT_NE(msg.find("Actual value was -5."), std::string::npos);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Inheritance
 // ---------------------------------------------------------------------------
