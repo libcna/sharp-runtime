@@ -135,3 +135,45 @@ TEST(UriBuilderTest, GetHashCode_Consistent) {
     UriBuilder b("https", "example.com", -1, "/x");
     EXPECT_EQ(a.GetHashCode(), b.GetHashCode());
 }
+
+// ---------------------------------------------------------------------------
+// Query/Fragment setter normalization (regression: real .NET's UriBuilder.Query/
+// Fragment setters prepend '?'/'#' when missing, so the getter always returns the
+// prefixed form -- this port previously stored the raw value verbatim.
+// ---------------------------------------------------------------------------
+
+TEST(UriBuilderTest, SetQuery_WithoutLeadingQuestionMark_Normalizes) {
+    UriBuilder b;
+    b.setQueryProperty("foo=bar");
+    EXPECT_EQ(b.getQueryProperty(), "?foo=bar");
+}
+
+TEST(UriBuilderTest, SetQuery_WithLeadingQuestionMark_Unchanged) {
+    UriBuilder b;
+    b.setQueryProperty("?foo=bar");
+    EXPECT_EQ(b.getQueryProperty(), "?foo=bar");
+}
+
+TEST(UriBuilderTest, SetQuery_Empty_StaysEmpty) {
+    UriBuilder b;
+    b.setQueryProperty("");
+    EXPECT_TRUE(b.getQueryProperty().empty());
+}
+
+TEST(UriBuilderTest, SetFragment_WithoutLeadingHash_Normalizes) {
+    UriBuilder b;
+    b.setFragmentProperty("section1");
+    EXPECT_EQ(b.getFragmentProperty(), "#section1");
+}
+
+TEST(UriBuilderTest, SetFragment_WithLeadingHash_Unchanged) {
+    UriBuilder b;
+    b.setFragmentProperty("#section1");
+    EXPECT_EQ(b.getFragmentProperty(), "#section1");
+}
+
+TEST(UriBuilderTest, SetFragment_Empty_StaysEmpty) {
+    UriBuilder b;
+    b.setFragmentProperty("");
+    EXPECT_TRUE(b.getFragmentProperty().empty());
+}
