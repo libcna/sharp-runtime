@@ -1,10 +1,53 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `e6157c7`) — 11815 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `458199e`) — 11823 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11815 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11823 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 336-338 closed
+
+Continuing the same autonomous run (previous checkpoint covered 334). Commits: e71ee62, 758e357,
+458199e — all pushed to `origin/feature/work`.
+
+- **336 (Net/Sockets/TcpClient.cpp)**: `GetStream()` built a brand-new `NetworkStream` on every
+  call (a fresh `dup()`'d fd on POSIX; an outright fd-ownership transfer on Windows that left the
+  client disconnected after the first call, so a *second* call threw `InvalidOperationException`
+  there). Real .NET's `TCPClient.cs` caches: `return _dataStream ??= new NetworkStream(Client,
+  true);` — same instance every call. Added a `mutable std::shared_ptr<NetworkStream> stream_;`
+  cache member; `Close()` also resets it so a post-reconnect `GetStream()` (this port allows
+  reconnecting after `Close()`, unlike .NET's terminal `Dispose()`) builds a fresh stream. Added
+  two POSIX-only regression tests using a real `TcpListener`+`TcpClient` loopback connection.
+- **337 (Int64.hpp)**: two bugs. (1) `CopySign(MinValue, negativeSign)` computed `-absValue`
+  without special-casing `MinValue` — real signed-integer-overflow UB in C++ (confirmed via a
+  UBSan repro), where real .NET relies on C#'s well-defined unchecked-arithmetic wraparound for
+  this exact input. Fixed with the same explicit-`MinValue`-special-case shape already applied to
+  `Int32::CopySign` by an earlier ticket — this `Int64` copy just hadn't received it. (2)
+  `ToString(value, format)` was missing the `"B"`/`"b"` binary format specifier (.NET 8+,
+  `Number.Formatting.cs`'s `FormatInt64`), which `Int32::ToString` already implements correctly.
+  Added the matching branch. Checked whether the `CopySign` UB pattern extends to `SByte`/`Int16`
+  — it doesn't, since `sbytecs`/`int16_t` arithmetic promotes to `int` before negating, so the
+  narrowing cast back is well-defined modular reduction under C++20, not UB; `Int32`/`Int64` were
+  the only two vulnerable types and both are now fixed.
+- **338 (Collections/Immutable/ImmutableHashSet.hpp)**: `SymmetricExcept` toggled directly over
+  `other`'s raw elements (iterated under `other`'s own comparer) instead of rehashing them under
+  *this* set's comparer first, unlike `ImmutableHashSet_1.cs`'s private `SymmetricExcept`. When
+  two of `other`'s elements are distinct under `other`'s comparer but collapse to the same
+  logical element under *this* set's comparer, the toggle ran twice for that element and
+  cancelled out, silently *dropping* it from the result. Same bug class as the `SetEquals` fix
+  already committed for this file (`b9ad0e6`). Confirmed via a standalone repro (case-insensitive
+  empty set XOR case-sensitive `{"A","a"}` produced an empty result instead of the correct
+  `{"A"}`). A targeted sibling-family grep found the identical bug in
+  `ImmutableSortedSet.hpp` (no dedicated ticket exists for that file) and fixed it there too with
+  the same rehash-first pattern. Confirmed the mutable (non-Immutable) `HashSet<T>`/`SortedSet<T>`
+  port is immune — those types don't support runtime custom comparers at all, so the
+  "two sets with different comparers" scenario can't arise there.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 334 closed, a race that TSan couldn't confirm despite real effort
 
