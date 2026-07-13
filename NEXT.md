@@ -1,10 +1,72 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `28de291`) — 11967 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `b986dbd`) — 11976 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11967 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11976 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — seventh `ported-type-audit` batch (68 tickets, 3 parallel forks), 4 more real bugs found
+
+Continuing the same autonomous run (previous checkpoint covered the 50-ticket networking batch).
+Same disjoint-file-set parallel-fork pattern, 3 forks: System.Security.Authentication +
+System.Security.Principal (7 tickets), System.Text encoding/fallback machinery (25 tickets),
+System.Text.Json.Nodes + System.Text.Json.Serialization (36 tickets). Verified afterward via
+`git fetch`+`git log` (no local/origin divergence, all 4 commits landed cleanly) and a fresh
+`cmake --build` + full test run (11976/11976, matching the last fork's self-reported count).
+
+- **1093-1129 (Security.Authentication/Principal, 7 tickets)**: all clean, no bugs. SslProtocols'
+  7 flag values verified byte-exact; TLS/crypto correctly left out of scope.
+- **1132-1158 (System.Text encoding machinery, 25 tickets)**: 23 clean (confirmed `UTF8Encoding`
+  actually wires the fallback machinery into `GetBytes`/`GetString` rather than leaving it
+  disconnected — a thing worth checking, not just assuming). 2 fixes:
+  - **CompositeFormat::Parse** (1133) silently accepted malformed format strings (unterminated
+    `{`, stray `}`, empty/non-numeric index) instead of throwing `FormatException` like real
+    .NET's documented contract. Rewrote as a proper scanning parser that throws on the same
+    invalid inputs, while correctly handling escaped `{{`/`}}` and alignment/format-spec
+    placeholders like `{0,-5:F2}`. Also confirmed the reduced public surface (no `Format(args)`
+    on the type itself) is NOT a scope gap — real .NET implements that as extension methods on
+    `string`/`StringBuilder` too. 8 regression tests. Commit `cb8785c`.
+  - **EncodingInfo::GetEncoding()** (1151) always returns UTF-8 regardless of the stored code
+    page — confirmed via grep that no `EncodingInfo` instances are actually constructed anywhere
+    in this codebase, so this is a dead-code-path scope reduction, not a reachable bug. Improved
+    the doc-comment rather than fixing a path nothing calls. Commit `498bbc9`.
+- **1179-1214 (Text.Json.Nodes + Serialization, 36 tickets)**: Nodes types (JsonNode/JsonObject/
+  JsonValue/JsonNodeOptions) all clean, including the parent-cycle/dangling-parent guards and
+  case-insensitive property lookup. **JsonArray** (1179) was missing
+  `IList<JsonNode?>.Remove(item)` (value-based removal by reference identity) — only
+  `RemoveAt(index)` existed; added it delegating to existing `IndexOf`+`RemoveAt`. Commit
+  `af52ddb`. Serialization: as expected, most of the 31 tickets are inert attribute/interface
+  stubs correctly reflecting this port's documented no-reflection scope — verified each one's
+  constructor/property surface against the .NET reference anyway rather than rubber-stamping. 6
+  plain enums verified byte-exact. `JsonConverter<T>`/`JsonConverterFactory`/
+  `JsonStringEnumConverter<TEnum>`/`ReferenceHandler`/`ReferenceResolver` confirmed to be REAL,
+  working implementations (not stubs) with documented no-reflection adaptations.
+  **JsonPolymorphicAttribute::UnknownDerivedTypeHandling** (1203) was typed `bool` instead of the
+  actual `JsonUnknownDerivedTypeHandling` 3-value enum real .NET uses — the bool version could
+  never represent `FallBackToNearestAncestor` and collapsed the other two values into true/false.
+  Fixed the field type/default. Commit `b986dbd`.
+
+Final verified state: 11976/11976 tests passing (up from 11967 — 9 net new tests), 0 errors/0
+warnings, all 4 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+Running tally across all seven `ported-type-audit` fork batches this session: 319 tickets closed,
+31 real bugs/gaps found and fixed including two security vulnerabilities (Zip Slip, HTTP CRLF
+header injection) and three memory-safety bugs (XxHash32/64, NetworkStream, UdpClient), 0
+regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 3-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary — for anything security/memory-safety-relevant,
+personally read the diff rather than trusting the fork's summary alone. Checkpoint NEXT.md,
+repeat. Ticket #43 stays `blocked`. The `ported-type-audit` backlog is now ~868 done / ~120 todo
+— getting close to fully drained; after that the queue naturally transitions to
+`classification-audit` (0 done/60 todo, untouched all session — a different, lighter-weight
+methodology: sample ignored/ignore task rows per namespace, verify truly out of scope, create
+narrow follow-up tickets only for misclassifications).
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — sixth `ported-type-audit` batch (50 tickets, 3 parallel forks), 2 more memory-safety bugs found
 
