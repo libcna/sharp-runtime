@@ -25,10 +25,14 @@ namespace System::Text {
         SharpRuntime::intcs index_ = 0;
 
     public:
+        /** @brief Initializes a new EncoderFallbackException with a default message. */
         EncoderFallbackException() : System::ArgumentException("Value does not fall within the expected range.") {}
+        /** @brief Initializes a new EncoderFallbackException with the specified message. */
         explicit EncoderFallbackException(const std::string& message) : System::ArgumentException(message) {}
+        /** @brief Initializes a new EncoderFallbackException with a message and an inner exception. */
         EncoderFallbackException(const std::string& message, std::exception_ptr innerException)
             : System::ArgumentException(message, innerException) {}
+        /** @brief Initializes a new EncoderFallbackException with the offending character and its index. */
         EncoderFallbackException(const std::string& message, char charUnknown, SharpRuntime::intcs index)
             : System::ArgumentException(message), charUnknown_(charUnknown), index_(index) {}
 
@@ -128,9 +132,11 @@ namespace System::Text {
     /** @brief Fallback buffer that substitutes EncoderReplacementFallback's replacement string. */
     class EncoderReplacementFallbackBuffer : public EncoderFallbackBuffer {
     public:
+        /** @brief Initializes the buffer with @p fallback's replacement string. */
         explicit EncoderReplacementFallbackBuffer(const EncoderReplacementFallback& fallback) {
             fallbackString_ = fallback.getDefaultStringProperty();
         }
+        /** @brief Prepares the replacement string to be read back; returns true if it is non-empty. */
         bool Fallback(char, SharpRuntime::intcs) override {
             position_ = 0;
             return !fallbackString_.empty();
@@ -154,9 +160,13 @@ namespace System::Text {
     /** @brief Fallback buffer that always throws EncoderFallbackException. */
     class EncoderExceptionFallbackBuffer : public EncoderFallbackBuffer {
     public:
+        /** @brief Always throws EncoderFallbackException describing the unencodable character. */
         bool Fallback(char charUnknown, SharpRuntime::intcs index) override;
+        /** @brief Never reached (Fallback always throws); returns '\0'. */
         char GetNextChar() override { return '\0'; }
+        /** @brief Never reached (Fallback always throws); returns false. */
         bool MovePrevious() override { return false; }
+        /** @return 0; no bytes are ever queued since Fallback always throws. */
         [[nodiscard]] SharpRuntime::intcs getRemainingProperty() const override { return 0; }
     };
 

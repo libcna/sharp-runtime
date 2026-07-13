@@ -52,6 +52,7 @@ namespace System::Text {
         bool operator==(const RunePosition& o) const { return Equals(o); }
         bool operator!=(const RunePosition& o) const { return !Equals(o); }
 
+        /** @brief Returns a hash code combining the rune value, start index, length, and replaced flag. */
         [[nodiscard]] SharpRuntime::intcs GetHashCode() const {
             return System::HashCode::Combine(rune_.getValueProperty(), startIndex_, length_, wasReplaced_);
         }
@@ -84,8 +85,10 @@ namespace System::Text {
         struct Sentinel {};
 
     public:
+        /** @brief Initializes an enumerator over a copy of @p data. */
         explicit Enumerator(const std::string& data) : data_(data) {}
 
+        /** @return The current RunePosition. */
         [[nodiscard]] RunePosition getCurrentProperty() const {
             return RunePosition(currentRune_, currentStart_, currentLength_, currentWasReplaced_);
         }
@@ -113,6 +116,7 @@ namespace System::Text {
             return true;
         }
 
+        /** @brief Resets the enumerator to its initial position, before the first RunePosition. */
         void Reset() {
             nextIndex_ = 0;
             currentRune_ = Rune();
@@ -121,10 +125,12 @@ namespace System::Text {
             hasCurrent_ = false;
         }
 
+        /** @brief Range-based-for support: advances to the first RunePosition and returns *this. */
         [[nodiscard]] Enumerator& begin() {
             hasCurrent_ = MoveNext();
             return *this;
         }
+        /** @brief Range-based-for support: returns the end sentinel. */
         [[nodiscard]] Sentinel end() const { return Sentinel{}; }
         bool operator!=(Sentinel) const { return hasCurrent_; }
         [[nodiscard]] RunePosition operator*() const { return getCurrentProperty(); }

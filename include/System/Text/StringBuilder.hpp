@@ -262,8 +262,10 @@ namespace System::Text
             bool hasCurrent_ = false;
 
         public:
+            /** @brief Initializes an enumerator that will yield @p chunk as its single chunk. */
             explicit ChunkEnumerator(const std::string& chunk) : chunk_(&chunk) {}
 
+            /** @return The current chunk. */
             [[nodiscard]] const std::string& getCurrentProperty() const { return *chunk_; }
 
             /** @brief Advances to the next chunk. @return false after the single chunk has been yielded once. */
@@ -273,10 +275,12 @@ namespace System::Text
                 return true;
             }
 
+            /** @brief Range-based-for support: advances to the first (only) chunk and returns *this. */
             [[nodiscard]] ChunkEnumerator& begin() {
                 hasCurrent_ = MoveNext();
                 return *this;
             }
+            /** @brief Range-based-for support: returns the end sentinel. */
             [[nodiscard]] Sentinel end() const { return Sentinel{}; }
             bool operator!=(Sentinel) const { return hasCurrent_; }
             [[nodiscard]] const std::string& operator*() const { return *chunk_; }
