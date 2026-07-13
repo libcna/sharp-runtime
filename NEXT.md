@@ -1,10 +1,32 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `7236c91`) — 11804 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1e47b40`) — 11813 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11804 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11813 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 329 closed, a fifth "raw std:: exception escapes" instance in one file
+
+Continuing the same autonomous run (previous checkpoint covered 328). Commit: 1e47b40 — pushed
+to `origin/feature/work`.
+
+- **329 (Text/StringBuilder.hpp/.cpp)**: `setLengthProperty`, `Remove`, `Insert`,
+  `Append(char, repeatCount)`, and `EnsureCapacity` — five separate methods — all passed a
+  caller-controlled value directly into the underlying `std::string` operation with zero
+  validation, letting a negative value wrap to a huge `size_t` and trigger a **raw**
+  `std::out_of_range`/`std::length_error`/`std::bad_alloc` instead of the
+  `System::ArgumentOutOfRangeException` these APIs are documented to throw (this project's
+  ongoing "raw std:: exception escapes instead of System::" audit class — see memory). `Remove`
+  had a second, subtler issue: an over-large `count` was silently *clamped* by
+  `std::string::erase` rather than throwing at all, where real .NET rejects it outright.
+  Confirmed all five/six failure modes via a standalone repro before fixing each against
+  `StringBuilder.cs`'s exact validation formula.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 328 closed, the session's most severe/wide-reaching finding
 
