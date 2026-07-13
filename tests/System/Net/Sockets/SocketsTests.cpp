@@ -240,6 +240,25 @@ TEST(UdpClientTests, Send_ThrowsWithoutConnect) {
     EXPECT_THROW((void)client.Send(data, 3), System::InvalidOperationException);
 }
 
+// Regression: Send() previously cast `bytes` straight to size_t with no bounds check at all,
+// letting an oversized (or negative, wrapping to huge) count read past the end of the datagram
+// buffer -- confirmed via a standalone ASan repro (heap-buffer-overflow) before this fix.
+TEST(UdpClientTests, Send_BytesExceedsBufferSize_Throws) {
+    UdpClient client;
+    IPEndPoint ep(IPAddress::Loopback, 12345);
+    client.Connect(ep);
+    std::vector<SharpRuntime::bytecs> data = {0x01, 0x02, 0x03};
+    EXPECT_THROW((void)client.Send(data, 1000), System::ArgumentOutOfRangeException);
+}
+
+TEST(UdpClientTests, Send_NegativeBytes_Throws) {
+    UdpClient client;
+    IPEndPoint ep(IPAddress::Loopback, 12345);
+    client.Connect(ep);
+    std::vector<SharpRuntime::bytecs> data = {0x01, 0x02, 0x03};
+    EXPECT_THROW((void)client.Send(data, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(UdpClientTests, Close_NoThrow) {
     UdpClient client;
     EXPECT_NO_THROW(client.Close());
