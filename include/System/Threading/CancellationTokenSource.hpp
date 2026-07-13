@@ -21,7 +21,13 @@ namespace System::Threading {
      *
      * Partial C++ counterpart of .NET System.Threading.CancellationTokenSource.
      *
-     * @note Status: Partial — no timer-based (delayed) cancellation, no linked token sources.
+     * @note Status: Partial — implements the default constructor, Token, IsCancellationRequested,
+     * Cancel() (with the documented LIFO callback-ordering and AggregateException-on-callback-
+     * throw semantics verified against real .NET), and Dispose(). Missing relative to real .NET:
+     * the TimeSpan/int-delay constructors and CancelAfter (timer-based delayed cancellation),
+     * CreateLinkedTokenSource (linked token sources), the Cancel(bool throwOnFirstException)
+     * overload, CancelAsync(), and TryReset(). Covers the common
+     * "create a source, hand out its token, cancel it later" pattern.
      */
     class CancellationTokenSource {
         std::shared_ptr<Detail::CancellationState> state_ = std::make_shared<Detail::CancellationState>();
