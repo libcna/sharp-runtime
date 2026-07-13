@@ -1,10 +1,99 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `b986dbd`) — 11976 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `faf053c`) — 11999 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11976 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11999 tests from 1198 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — eighth `ported-type-audit` batch (60 tickets, 4 parallel forks), core TPL bugs found (Task/Parallel/ValueTask)
+
+Continuing the same autonomous run (previous checkpoint covered the 68-ticket batch). Same
+disjoint-file-set parallel-fork pattern, 4 forks: System.Text.RegularExpressions +
+System.Text.Unicode + System.Timers (16 tickets), System.Threading.Channels (9 tickets),
+System.Threading.Tasks (16 tickets), System.Xml.Linq (19 tickets). Verified afterward via
+`git fetch`+`git log` (no local/origin divergence, all 8 commits landed cleanly), a fresh
+`cmake --build` + full test run (11999/11999, matching the last fork's self-reported count), AND
+— given Threading.Tasks' concurrency blast radius — 3 repeated runs of the concurrency-relevant
+test filter (`*Parallel*:*ValueTask*:*TaskFactory*:*TaskT*`) to rule out flakiness in the new
+atomic-based fix. Personally re-verified the `ParallelLoopResult.LowestBreakIteration` fix's
+diff directly (a lock-free CAS-loop minimum-tracker) given the concurrency stakes.
+
+**System.Threading.Tasks (16 tickets) — the highest-stakes batch this round, given Task/ValueTask
+are the most heavily-used async types in the codebase:**
+- **ParallelLoopResult.LowestBreakIteration** (1300-1303) was NEVER populated —
+  `ParallelLoopState::Break()` only ever set the shared stop flag, never recorded which iteration
+  index called it, so the property always returned `nullopt` even when `Break()` genuinely ran (a
+  dead property with zero test coverage beyond its own default). Verified against
+  `ParallelLoopState.cs`'s internal `Break<TInt>(iteration, pflags)`, which tracks the minimum
+  `Break()`-calling index via compare-exchange. Fixed with a shared atomic minimum-tracker; 5
+  regression tests including one confirming `Stop()` deliberately does NOT populate this (only
+  `Break()` does, matching .NET). Commit `5eb68d9`.
+- **ValueTask<TResult>** (1314) had TWO real bugs: the default constructor was permanently
+  "incomplete" with no way to ever complete (should set `completed_=true`, matching real .NET's
+  `obj==null → IsCompleted==true` semantics), and it had NO `Task<TResult>`-wrapping constructor
+  at all — unlike the sibling non-generic `ValueTask` — meaning it could never represent a
+  still-running operation. Both fixed, mirroring `ValueTask`'s already-established pattern.
+  Commit `faf053c`.
+- **Task<TResult>** (1304): had no `CancellationToken` constructor at all — an asymmetry with the
+  non-generic `Task`. Added it plus matching accessors, mirroring `Task`'s already-hardened
+  cancellation pattern. Documented (not implemented) `Task.WhenAll`/`WhenAny`'s absence —
+  `WhenAll` would be low-risk, `WhenAny` needs a race-free "first of N" mechanism deserving its
+  own pass. Commit `841f66e`.
+- **TaskFactory** (1309): `StartNew<TResult>(function)` never observed the factory's default
+  `CancellationToken`, inconsistent with the non-generic overload — fixed, plus added a
+  `StartNew<TResult>(function, token)` overload. Documented two genuine architectural gaps rather
+  than attempting fixes beyond a single pass's scope: `TaskCanceledException`'s `Task*`
+  constructor has a real lifetime hazard (raw non-owning pointer, unlike .NET's GC-backed
+  reference); `TaskCompletionSource<TResult>` is missing its `.Task` property entirely (arguably
+  its primary purpose) — this port's `Task` always launches immediately on construction, with no
+  "pending" mode to bridge into, a design constraint bigger than one ticket. Commit `5b1650a`.
+
+**Other results:**
+- **System.Text.RegularExpressions/Unicode/Timers (16 tickets)**: 15 clean (UnicodeRanges' 162
+  ranges spot-checked and count-verified exact). **Timer** (1317): documented (not redesigned,
+  matching the Socket/ClientWebSocket precedent from earlier batches) a real `this`-capture
+  lifetime hazard — `Dispose()` detaches its background thread rather than joining, so a `Timer`
+  destroyed while its `Elapsed` callback is mid-flight leaves that callback dereferencing a
+  dangling `this`. Commit `8f238a6`.
+- **System.Threading.Channels (9 tickets)**: 8 clean (confirmed the `DropNewest`/`DropOldest`
+  drop-policy logic is correctly matched, not swapped, against `BoundedChannel.cs`).
+  **UnboundedPrioritizedChannelOptions<T>**'s doc-comment claimed a pairing
+  `Channel::CreateUnboundedPrioritized()` factory that doesn't exist anywhere in this codebase,
+  leaving the options type unusable as documented — corrected the doc-comment to disclose this;
+  implementing it needs a genuinely different priority-queue-backed channel variant, deferred per
+  the "document, don't rush" precedent. Commit `914f0b3`.
+- **System.Xml.Linq (19 tickets)**: 15 clean, including reverifying several prior-session fixes
+  still intact (XContainer's self/ancestor-insertion guard, XDocument's WriteEndDocument/
+  whitespace-validation fixes) and confirming XName/XNamespace's documented
+  value-equality-instead-of-interning deviation is sound. **Extensions** (1381): doc-comment
+  explicitly listed `AncestorsAndSelf` as in-scope, but it — plus filtered `Attributes(source,
+  name)` and `Ancestors(source, name)` overloads — were entirely missing; added all four. Commit
+  `5ebf2e6`. **XDeclaration** (1389, hosted in `XDocument.hpp`): `ToString()` defaulted `version`
+  to `"1.0"` when unset, inconsistent with how `encoding`/`standalone` correctly omit their
+  attribute when unset right next to it — real .NET omits `version` too. Commit `64d9326`.
+
+Final verified state: 11999/11999 tests passing (up from 11976 — 23 net new tests), 0 errors/0
+warnings, all 8 commits confirmed on `origin/feature/work` via `git fetch` (no divergence), no
+flakiness across repeated concurrency-relevant test runs.
+
+Running tally across all eight `ported-type-audit` fork batches this session: 379 tickets closed,
+40 real bugs/gaps found and fixed including two security vulnerabilities (Zip Slip, HTTP CRLF
+header injection) and three memory-safety bugs (XxHash32/64, NetworkStream, UdpClient), 0
+regressions, all commits pushed and verified.
+
+### To resume
+Query the next batch: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, area, title FROM ticket
+WHERE status='todo' ORDER BY priority, ticket_no LIMIT 20;"`, group by disjoint `area`/directory,
+dispatch 3-4 parallel forks per round using the established prompt template (see recent `Agent`
+calls in this session for the exact shape), verify via `git fetch`+`git log`+rebuild+full test
+run before trusting each round's summary — for anything security/memory-safety/concurrency-
+relevant, personally read the diff and consider repeated test runs to rule out flakiness rather
+than trusting the fork's summary alone. Checkpoint NEXT.md, repeat. Ticket #43 stays `blocked`.
+The `ported-type-audit` backlog is now ~928 done / ~60 todo — very close to fully drained; after
+that the queue transitions to `classification-audit` (0 done/60 todo, untouched all session — a
+different, lighter-weight methodology: sample ignored/ignore task rows per namespace, verify
+truly out of scope, create narrow follow-up tickets only for misclassifications).
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — seventh `ported-type-audit` batch (68 tickets, 3 parallel forks), 4 more real bugs found
 
