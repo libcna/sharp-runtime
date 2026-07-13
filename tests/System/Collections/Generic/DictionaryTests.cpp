@@ -78,6 +78,41 @@ TEST(DictionaryTest, OperatorBracketConstThrowsIfMissing) {
     EXPECT_THROW(d["missing"], KeyNotFoundException);
 }
 
+// Regression test for POST_STABILIZATION_AUDIT.md finding #3 / ticket 1712: the non-const
+// operator[] getter previously silently inserted a default-constructed value on a missing key
+// (std::unordered_map::operator[]'s convention) instead of throwing, unlike real .NET's
+// Dictionary<TKey,TValue> indexer, which throws KeyNotFoundException on the getter regardless
+// of const/non-const.
+TEST(DictionaryTest, OperatorBracketNonConstThrowsIfMissing) {
+    Dictionary<std::string, int> d;
+    EXPECT_THROW((void)static_cast<int>(d["missing"]), KeyNotFoundException);
+    // Confirm reading the missing key did NOT silently insert it.
+    EXPECT_FALSE(d.ContainsKey("missing"));
+    EXPECT_EQ(d.getCountProperty(), 0);
+}
+
+TEST(DictionaryTest, OperatorBracketNonConstGetExistingReturnsValue) {
+    Dictionary<std::string, int> d;
+    d.Add("present", 7);
+    int v = d["present"];
+    EXPECT_EQ(v, 7);
+}
+
+TEST(DictionaryTest, OperatorBracketNonConstSetMissingStillInserts) {
+    Dictionary<std::string, int> d;
+    d["newkey"] = 42;
+    EXPECT_TRUE(d.ContainsKey("newkey"));
+    EXPECT_EQ(static_cast<int>(d["newkey"]), 42);
+}
+
+TEST(DictionaryTest, OperatorBracketNonConstSetExistingUpdates) {
+    Dictionary<std::string, int> d;
+    d.Add("k", 1);
+    d["k"] = 2;
+    EXPECT_EQ(static_cast<int>(d["k"]), 2);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
 TEST(DictionaryTest, TryAdd) {
     Dictionary<std::string, int> d;
     EXPECT_TRUE(d.TryAdd("k", 1));

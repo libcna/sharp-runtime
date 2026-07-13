@@ -222,12 +222,47 @@ public:
     }
 
     /**
-     * @brief Gets or sets the value associated with the specified key (mutable).
+     * @brief A proxy for `dict[key]` that throws on read of a missing key while still
+     * supporting `dict[key] = value` to insert-or-update, matching .NET's split get/set
+     * indexer semantics on top of a single C++ `operator[]`.
      *
-     * C++ counterpart of .NET Dictionary<TKey,TValue> indexer setter.
-     * Inserts a default value if the key is absent.
+     * A plain `TValue&` return (the prior implementation) could not distinguish a read
+     * from a write, so it always inserted a default-constructed value on a missing key --
+     * matching std::unordered_map::operator[]'s convention, not .NET's. Real .NET's
+     * Dictionary<TKey,TValue> indexer getter throws KeyNotFoundException unconditionally
+     * on a missing key; only the setter inserts. This mirrors the same fix already applied
+     * to ConcurrentDictionary::ValueProxy (see that class for the precedent).
      */
-    TValue& operator[](const TKey& key) { return map_[key]; }
+    class ValueProxy {
+        Dictionary* owner_;
+        TKey key_;
+    public:
+        ValueProxy(Dictionary* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+        /** Reads the current value; throws KeyNotFoundException if the key is absent. */
+        operator const TValue&() const {
+            auto it = owner_->map_.find(key_);
+            if (it == owner_->map_.end())
+                throw KeyNotFoundException("The given key was not present in the dictionary.");
+            return it->second;
+        }
+
+        /** Inserts or overwrites the value for this key. */
+        ValueProxy& operator=(const TValue& value) {
+            owner_->map_[key_] = value;
+            return *this;
+        }
+    };
+
+    /**
+     * @brief Gets or sets the value associated with the specified key.
+     *
+     * C++ counterpart of .NET Dictionary<TKey,TValue> indexer. The getter throws
+     * System::Collections::Generic::KeyNotFoundException if @p key is absent (it does NOT
+     * insert a default, unlike std::unordered_map::operator[]); the setter inserts or
+     * overwrites. See ValueProxy for why this isn't a plain `TValue&`.
+     */
+    [[nodiscard]] ValueProxy operator[](const TKey& key) { return ValueProxy(this, key); }
 
     /**
      * @brief Gets the value associated with the specified key (const).
