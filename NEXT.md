@@ -1,10 +1,57 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `503a2fb`) — 12305 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `d50ec81`) — 12305 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 12305 tests from 1220 test suites, 0 failures
 ```
+
+## MILESTONE: ticket 1727 fixed — entire `plan.sqlite3` `ticket` table is now `done`, zero exceptions
+
+The user explicitly authorized unblocking ticket 1727 (`getCurrent()` → `getCurrentProperty()`
+naming rename, previously held pending decision) with an unambiguous instruction: rename
+everywhere, no permanent exception, downstream consumers (CNA) are responsible for updating their
+own call sites if they use the old name.
+
+Given this is a rename that must stay globally consistent (every declaration and every call site
+has to agree, or the project won't compile), this was done as ONE coordinated pass rather than
+split across multiple parallel forks — unlike the independent, file-scoped bug fixes earlier in
+this session, a rename doesn't parallelize safely across forks without risking a transient
+inconsistent state. Renamed all 61 occurrences across 23 files (confirmed via
+`grep -rln "getCurrent(" include/ src/ tests/` both before starting and as a final zero-hit
+sweep after finishing): the two root interfaces (`System::Collections::IEnumerator`,
+`System::Collections::Generic::IEnumerator<T>`), every implementer (`ArrayList`, `Hashtable`,
+`Queue`, `Stack`, `BitArray`, `ListDictionaryInternal` ×2, `Delegate::InvocationListEnumerator`,
+`Buffers::ReadOnlySequence::Enumerator`, `Globalization::TextElementEnumerator`,
+`Threading::SynchronizationContext`'s static `Current`-equivalent), plus every call site across 9
+test files — including a test double in `Interfaces2Tests.cpp` that overrides `IEnumerator` and
+needed the matching rename to keep compiling as a valid override. Doc-comment text mentioning the
+old name was updated alongside the code.
+
+Verified via a full rebuild (`cmake --build build --parallel 2`, 0 errors/0 warnings) and the
+complete test suite: 12305/12305 passing — the SAME count as immediately before the rename,
+confirming this was a pure naming change with zero behavioral impact. Commit `d50ec81`, pushed to
+`origin/feature/work`.
+
+## MILESTONE: `SELECT COUNT(*) FROM ticket WHERE status != 'done'` now returns **0**
+
+Every ticket in the entire `plan.sqlite3` `ticket` table — all 19 post-stabilization-audit
+tickets (1710-1728) plus the full pre-existing backlog from earlier in this session — is now
+`done`. There are no `todo`, `doing`, `blocked`, or `needs_user` rows anywhere in the table. The
+`task` table (separate workflow, tracks individual .NET types) also had zero unclassified rows as
+of the last check this session.
+
+### To resume
+There is no pre-scoped work left in `plan.sqlite3`. A genuinely fresh session should either:
+(1) ask the user for new direction, (2) run another fresh audit sweep (this session's
+`POST_STABILIZATION_AUDIT.md` pattern — 7 parallel find-only forks across named risk categories,
+each finding independently verified before ticketing — proved productive twice now: the original
+41-bug first-pass sweep, and this 20-finding fresh audit; a third pass may have diminishing
+returns but is a reasonable thing to offer), or (3) re-run the `task`-table Step 1 query in case
+any new .NET types have appeared to classify. Ticket #43 (the original int→intcs policy
+decision) and ticket 1727 (this getCurrent() rename) both demonstrate the same pattern: when a
+broad-refactor-shaped question comes up, hold it for explicit user decision rather than guessing
+— both were eventually authorized and executed cleanly once asked.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — 18/19 post-stabilization-audit tickets done, only 1727 (needs-user-decision) remains
 
