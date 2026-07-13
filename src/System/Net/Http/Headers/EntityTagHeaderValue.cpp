@@ -59,6 +59,12 @@ namespace System::Net::Http::Headers {
         if (tag.size() >= 2 && (tag[0] == 'W' || tag[0] == 'w') && tag[1] == '/') {
             isWeak = true;
             tag = tag.substr(2);
+            // Real .NET's GetEntityTagLength skips whitespace between the "W/" prefix and the
+            // quoted-string tag (HttpRuleParser.GetWhitespaceLength after the '/'); a naive
+            // substr(2) with no whitespace skip would reject an otherwise-valid weak tag like
+            // "W/ \"abc\"".
+            size_t tagStart = tag.find_first_not_of(" \t");
+            tag = (tagStart == std::string::npos) ? "" : tag.substr(tagStart);
         }
 
         if (!isValidQuotedString(tag)) return false;

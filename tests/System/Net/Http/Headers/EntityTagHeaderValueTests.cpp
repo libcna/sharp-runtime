@@ -70,6 +70,15 @@ TEST(EntityTagHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_FALSE(EntityTagHeaderValue::TryParse("not-quoted", result));
 }
 
+// Real .NET's GetEntityTagLength skips whitespace between the "W/" prefix and the quoted-string
+// tag (HttpRuleParser.GetWhitespaceLength after the '/').
+TEST(EntityTagHeaderValueTests, TryParse_WeakTagWithSpaceAfterSlash_Succeeds) {
+    EntityTagHeaderValue result("\"x\"");
+    ASSERT_TRUE(EntityTagHeaderValue::TryParse("W/ \"abc\"", result));
+    EXPECT_TRUE(result.getIsWeakProperty());
+    EXPECT_EQ(result.getTagProperty(), "\"abc\"");
+}
+
 TEST(EntityTagHeaderValueTests, Parse_Invalid_Throws) {
     EXPECT_THROW(EntityTagHeaderValue::Parse("not-quoted"), System::FormatException);
 }
