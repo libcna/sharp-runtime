@@ -1,10 +1,32 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6e0facd`) — 11794 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a4b6a43`) — 11798 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11794 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11798 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 324 closed, self-aliasing UB in Except/SymmetricExceptWith
+
+Continuing the same autonomous run (previous checkpoint covered 322-323). Commit: a4b6a43 —
+pushed to `origin/feature/work`.
+
+- **324 (Generic/HashSet.hpp)**: `ExceptWith`/`SymmetricExceptWith` both iterate `other`'s
+  backing container while erasing from `this`'s — with no guard against `other` aliasing `this`
+  (e.g. `s.ExceptWith(s)`, a realistic call pattern, not contrived). Confirmed via ASan as a
+  genuine heap-use-after-free. Real .NET's `HashSet<T>` explicitly special-cases
+  `other == this` in exactly these two methods ("a set minus/symmetric-differenced with itself
+  is the empty set"). Grepped the sibling `SortedSet<T>` (own dedicated ticket 344, still
+  `todo`) for the same pattern and found it there too, confirmed against real .NET's
+  `SortedSet.cs` — fixed both immediately rather than deferring, consistent with this session's
+  practice for confirmed sibling-family bugs.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`. When ticket 344 (`SortedSet.hpp`'s own dedicated audit) comes up, its
+`ExceptWith`/`SymmetricExceptWith` self-aliasing fix is already done (see above) — focus that
+ticket's audit on the rest of the file.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 322-323 closed; a process note on delegated-agent scope creep
 
