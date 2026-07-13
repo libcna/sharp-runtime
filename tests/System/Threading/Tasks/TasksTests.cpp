@@ -151,6 +151,63 @@ TEST(TaskTTests, Run_StringResult) {
     EXPECT_EQ(t.Wait(), "hello");
 }
 
+TEST(TaskTTests, GetStatusProperty_MatchesTaskLifecycle) {
+    TaskT<int> t = TaskT<int>::FromResult(1);
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::RanToCompletion);
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskTTests, Faulted_IsNotCompletedSuccessfully) {
+    TaskT<int> t = TaskT<int>::Run([]() -> int { throw std::runtime_error("fail"); });
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::Faulted);
+    EXPECT_FALSE(t.getIsCompletedSuccessfullyProperty());
+}
+
+// ===========================================================================
+// TaskT<TResult> cooperative cancellation (mirrors the Task cancellation tests below --
+// TaskT previously had no CancellationToken constructor at all, an asymmetry with Task)
+// ===========================================================================
+
+TEST(TaskTCancellationTests, PreCanceledToken_TaskIsImmediatelyCanceled) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    std::atomic<bool> ran{false};
+    TaskT<int> t([&ran]() { ran = true; return 1; }, cts.getTokenProperty());
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskTCancellationTests, FuncThrowsOperationCanceled_MatchingToken_ReportsCanceled) {
+    CancellationTokenSource cts;
+    CancellationToken token = cts.getTokenProperty();
+    TaskT<int> t([&cts, token]() -> int {
+        cts.Cancel();
+        token.ThrowIfCancellationRequested();
+        return 1;
+    }, token);
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(t.getIsFaultedProperty());
+    EXPECT_EQ(t.getStatusProperty(), System::Threading::Tasks::TaskStatus::Canceled);
+}
+
+TEST(TaskTCancellationTests, FuncThrowsOtherException_ReportsFaultedNotCanceled) {
+    CancellationTokenSource cts;
+    TaskT<int> t([]() -> int { throw std::runtime_error("boom"); }, cts.getTokenProperty());
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
+TEST(TaskTCancellationTests, RunWithToken_GetCancellationTokenProperty_ReturnsSameToken) {
+    CancellationTokenSource cts;
+    TaskT<int> t = TaskT<int>::Run([]() { return 42; }, cts.getTokenProperty());
+    EXPECT_EQ(t.Wait(), 42);
+    EXPECT_FALSE(t.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
 // ===========================================================================
 // TaskCompletionSource<TResult>
 // ===========================================================================

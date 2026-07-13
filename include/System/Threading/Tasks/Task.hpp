@@ -24,6 +24,18 @@ namespace System::Threading::Tasks {
 
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
+    //
+    // Known gap (documented, not implemented in this pass): Task.WhenAll(IEnumerable<Task>) and
+    // Task.WhenAny(IEnumerable<Task>) do not exist anywhere in this port, despite being two of
+    // the most commonly used static Task methods in real .NET code. WhenAll would be a small,
+    // low-risk addition following the same "wait each, rethrow first exception directly" pattern
+    // already established by Wait()'s documented AggregateException-wrapping simplification.
+    // WhenAny is materially harder: std::future has no native "wait for first of N" primitive,
+    // so a correct, race-free implementation needs a shared completion-signaling mechanism (e.g.
+    // a condition variable each task's completion callback notifies) -- given this Task/TaskT
+    // pair's history of real ThreadSanitizer-caught races around shared_future (see future_'s
+    // comment above), that is substantial new work deserving its own careful pass rather than a
+    // rushed addition during a single audit ticket.
     class Task {
         struct State {
             std::atomic<bool> isCompleted{false};
@@ -230,6 +242,7 @@ namespace System::Threading::Tasks {
     class TaskT {
         struct State {
             std::atomic<bool> isCompleted{false};
+            std::atomic<bool> isCanceled{false};
             std::atomic<bool> isFaulted{false};
             std::exception_ptr exception;
             TResult result{};
@@ -239,6 +252,7 @@ namespace System::Threading::Tasks {
         // concurrent Wait()/getResultProperty() calls from multiple threads on the same TaskT).
         std::shared_ptr<std::shared_future<TResult>> future_;
         std::shared_ptr<State>                state_;
+        System::Threading::CancellationToken cancellationToken_ = System::Threading::CancellationToken::None();
 
         // Pre-completed constructor — used by FromResult; never launches async.
         TaskT(const TResult& value, bool /*completed*/) : state_(std::make_shared<State>()) {
@@ -277,12 +291,81 @@ namespace System::Threading::Tasks {
 #endif
         }
 
+        /**
+         * Constructs and immediately starts a TaskT that executes @p func, cooperatively observing
+         * @p token. Mirrors Task's own cancellation-token constructor (see its doc-comment for the
+         * full cooperative-cancellation contract) -- this overload was previously missing entirely,
+         * an asymmetry with the non-generic Task that made cancellation unavailable for any TaskT
+         * caller. On Emscripten, throws PlatformNotSupportedException.
+         */
+        TaskT(std::function<TResult()> func, System::Threading::CancellationToken token)
+            : cancellationToken_(token)
+        {
+#if defined(__EMSCRIPTEN__)
+            (void)func;
+            throw System::PlatformNotSupportedException("TaskT: std::async requires pthreads (not available in Emscripten single-threaded build)");
+#else
+            state_ = std::make_shared<State>();
+            if (token.getIsCancellationRequestedProperty()) {
+                state_->isCanceled  = true;
+                state_->isCompleted = true;
+                return;
+            }
+            auto s = state_;
+            future_ = std::make_shared<std::shared_future<TResult>>(
+                std::async(std::launch::async, [func, s, token]() -> TResult {
+                    try {
+                        TResult r  = func();
+                        s->result  = r;
+                        s->isCompleted = true;
+                        return r;
+                    } catch (const System::OperationCanceledException&) {
+                        if (token.getIsCancellationRequestedProperty()) {
+                            s->isCanceled = true;
+                        } else {
+                            s->exception = std::current_exception();
+                            s->isFaulted = true;
+                        }
+                        s->isCompleted = true;
+                        return TResult{};
+                    } catch (...) {
+                        s->exception   = std::current_exception();
+                        s->isFaulted   = true;
+                        s->isCompleted = true;
+                        return TResult{};
+                    }
+                }).share()
+            );
+#endif
+        }
+
         /** Returns true when the task has finished. */
         [[nodiscard]] bool getIsCompletedProperty() const { return state_->isCompleted; }
+        /** Returns true when the task was canceled via a CancellationToken. */
+        [[nodiscard]] bool getIsCanceledProperty()  const { return state_->isCanceled; }
         /** Returns true when the task threw an unhandled exception. */
         [[nodiscard]] bool getIsFaultedProperty()   const { return state_->isFaulted; }
+        /** Returns true when the task completed without faulting or being canceled. */
+        [[nodiscard]] bool getIsCompletedSuccessfullyProperty() const {
+            return state_->isCompleted && !state_->isFaulted && !state_->isCanceled;
+        }
+        /** Returns the CancellationToken associated with this task (CancellationToken::None() if none was supplied). */
+        [[nodiscard]] const System::Threading::CancellationToken& getCancellationTokenProperty() const {
+            return cancellationToken_;
+        }
+        /** Returns the current lifecycle stage of this task. */
+        [[nodiscard]] TaskStatus getStatusProperty() const {
+            if (!state_->isCompleted) return TaskStatus::Running;
+            if (state_->isCanceled)   return TaskStatus::Canceled;
+            if (state_->isFaulted)    return TaskStatus::Faulted;
+            return TaskStatus::RanToCompletion;
+        }
 
-        /** Blocks until the task finishes and returns the result; re-throws any stored exception. */
+        /**
+         * Blocks until the task finishes and returns the result; re-throws any stored exception,
+         * or throws TaskCanceledException if the task was canceled (matching Task::Wait()'s own
+         * documented convention of rethrowing directly rather than wrapping in AggregateException).
+         */
         TResult getResultProperty() {
             // Read into a local instead of writing back through state_->result: with future_
             // now a shared_future, multiple threads may call getResultProperty() concurrently
@@ -292,6 +375,7 @@ namespace System::Threading::Tasks {
             // repeatedly/concurrently and already returns the completed value.
             TResult r = (future_ && future_->valid()) ? future_->get() : state_->result;
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
+            if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
             return r;
         }
 
@@ -313,6 +397,11 @@ namespace System::Threading::Tasks {
          */
         static TaskT<TResult> Run(std::function<TResult()> func) {
             return TaskT<TResult>(std::move(func));
+        }
+
+        /** Creates and starts a new TaskT that executes @p func asynchronously, observing @p token. */
+        static TaskT<TResult> Run(std::function<TResult()> func, System::Threading::CancellationToken token) {
+            return TaskT<TResult>(std::move(func), std::move(token));
         }
     };
 
