@@ -52,7 +52,7 @@ namespace System::IO::Hashing::Detail::XxHash3Shared {
         }
     }
 
-    ulongcs XorShift(ulongcs value, int shift) {
+    ulongcs XorShift(ulongcs value, intcs shift) {
         return value ^ (value >> shift);
     }
 

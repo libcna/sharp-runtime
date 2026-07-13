@@ -110,7 +110,7 @@ namespace System::IO::Hashing::Detail {
         ulongcs Rrmxmx(ulongcs hash, uintcs length);
         ulongcs Multiply64To128(ulongcs left, ulongcs right, ulongcs& lower);
         ulongcs Multiply64To128ThenFold(ulongcs left, ulongcs right);
-        ulongcs XorShift(ulongcs value, int shift);
+        ulongcs XorShift(ulongcs value, intcs shift);
         uintcs ReadUInt32LE(const bytecs* data);
         ulongcs ReadUInt64LE(const bytecs* data);
 
