@@ -16,10 +16,14 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/Int128.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+    class IFormatProvider;
 
     using SharpRuntime::longcs;
 
@@ -70,6 +74,64 @@ namespace System {
         static bool TryParse(const std::string& s, longcs& result) noexcept {
             try { result = Parse(s); return true; }
             catch (...) { result = 0; return false; }
+        }
+
+        /**
+         * @brief Converts the string representation of a number in the specified style to its
+         * 64-bit signed integer equivalent.
+         *
+         * C++ counterpart of .NET Int64.Parse(string, NumberStyles, IFormatProvider). @p
+         * provider is accepted for API-surface parity but ignored. Supports
+         * NumberStyles.Integer and NumberStyles.HexNumber (hex reinterpreted as a
+         * two's-complement bit pattern) -- see
+         * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
+         * @throws System::FormatException if the string is not in a correct format for @p style.
+         * @throws System::OverflowException if the value exceeds Int64 range.
+         */
+        [[nodiscard]] static longcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                           const IFormatProvider* provider) {
+            (void)provider;
+            longcs result;
+            if (!TryParse(s, style, provider, result)) {
+                using System::Globalization::NumberStyles;
+                if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 16, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for an Int64.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                bool overflowed = false;
+                if (System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, result, overflowed) && overflowed)
+                    throw System::OverflowException("Value was either too large or too small for an Int64.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            return result;
+        }
+
+        /**
+         * @brief Tries to convert a string to a 64-bit signed integer using the specified
+         * style, without throwing.
+         *
+         * C++ counterpart of .NET Int64.TryParse(string, NumberStyles, IFormatProvider, out long).
+         */
+        static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                              const IFormatProvider* provider, longcs& result) noexcept {
+            (void)provider;
+            using System::Globalization::NumberStyles;
+            result = 0;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 16, tooManyDigits))
+                    return false;
+                result = static_cast<longcs>(bits);
+                return true;
+            }
+            bool overflowed = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, result, overflowed))
+                return false;
+            if (overflowed) return false;
+            return true;
         }
 
         /** @brief Converts @p value to its decimal string representation. C++ counterpart of .NET Int64.ToString(). */

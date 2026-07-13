@@ -14,9 +14,13 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+    class IFormatProvider;
 
     using SharpRuntime::intcs;
 
@@ -79,6 +83,65 @@ namespace System {
         static bool TryParse(const std::string& s, SharpRuntime::ushortcs& result) {
             try { result = Parse(s); return true; }
             catch (...) { result = 0; return false; }
+        }
+
+        /**
+         * @brief Converts the string representation of a number in the specified style to its
+         * UInt16 equivalent.
+         *
+         * C++ counterpart of .NET UInt16.Parse(string, NumberStyles, IFormatProvider). @p
+         * provider is accepted for API-surface parity but ignored. Supports
+         * NumberStyles.Integer and NumberStyles.HexNumber -- see
+         * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
+         * @throws System::FormatException if the string is not in a correct format for @p style.
+         * @throws System::OverflowException if the value exceeds UInt16 range.
+         */
+        static SharpRuntime::ushortcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                             const IFormatProvider* provider) {
+            (void)provider;
+            SharpRuntime::ushortcs result;
+            if (!TryParse(s, style, provider, result)) {
+                using System::Globalization::NumberStyles;
+                if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 4, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for a UInt16.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                SharpRuntime::ulongcs unsignedResult; bool overflowed = false;
+                if (System::detail::IntegerNumberStylesParser::TryParseUnsignedCore(s, style, unsignedResult, overflowed) &&
+                    (overflowed || unsignedResult > MaxValue))
+                    throw System::OverflowException("Value was either too large or too small for a UInt16.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            return result;
+        }
+
+        /**
+         * @brief Tries to convert a string to a UInt16 using the specified style, without
+         * throwing.
+         *
+         * C++ counterpart of .NET UInt16.TryParse(string, NumberStyles, IFormatProvider, out ushort).
+         */
+        static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                              const IFormatProvider* provider, SharpRuntime::ushortcs& result) {
+            (void)provider;
+            using System::Globalization::NumberStyles;
+            result = 0;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 4, tooManyDigits))
+                    return false;
+                result = static_cast<SharpRuntime::ushortcs>(bits);
+                return true;
+            }
+            SharpRuntime::ulongcs unsignedResult; bool overflowed = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseUnsignedCore(s, style, unsignedResult, overflowed))
+                return false;
+            if (overflowed || unsignedResult > MaxValue) return false;
+            result = static_cast<SharpRuntime::ushortcs>(unsignedResult);
+            return true;
         }
 
         /** @brief Converts the value to its decimal string representation. */

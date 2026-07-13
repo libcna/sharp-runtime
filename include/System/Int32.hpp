@@ -17,9 +17,13 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/Globalization/NumberStyles.hpp"
 #include "System/OverflowException.hpp"
+#include "System/detail/IntegerNumberStylesParser.hpp"
 
 namespace System {
+
+    class IFormatProvider;
 
 /**
  * @brief Static helper methods that mirror System.Int32 in .NET.
@@ -82,6 +86,73 @@ public:
     static bool TryParse(const std::string& s, SharpRuntime::intcs& result) {
         try { result = Parse(s); return true; }
         catch (...) { result = 0; return false; }
+    }
+
+    /**
+     * @brief Converts the string representation of a number in the specified style to its
+     * 32-bit signed integer equivalent.
+     *
+     * C++ counterpart of .NET Int32.Parse(string, NumberStyles, IFormatProvider). @p provider
+     * is accepted for API-surface parity but ignored (this port has no culture-aware number
+     * formatting). Supports NumberStyles.Integer (leading/trailing whitespace, leading sign)
+     * and NumberStyles.HexNumber (leading/trailing whitespace, hex digits, no sign -- a hex
+     * string is reinterpreted as a two's-complement bit pattern, matching real .NET's actual
+     * semantics: Parse("FFFFFFFF", NumberStyles.HexNumber) yields -1, not an overflow).
+     * AllowThousands/AllowDecimalPoint/AllowCurrencySymbol/AllowParentheses/AllowExponent are
+     * not implemented -- see include/System/detail/IntegerNumberStylesParser.hpp's own
+     * doc-comment for the deliberate scope decision.
+     * @throws System::FormatException if the string is not in a correct format for @p style.
+     * @throws System::OverflowException if the value exceeds Int32 range.
+     */
+    static SharpRuntime::intcs Parse(const std::string& s, System::Globalization::NumberStyles style,
+                                      const IFormatProvider* provider) {
+        (void)provider;
+        SharpRuntime::intcs result;
+        if (!TryParse(s, style, provider, result)) {
+            // Re-derive which failure occurred for an accurate exception type.
+            using System::Globalization::NumberStyles;
+            if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 8, tooManyDigits);
+                if (tooManyDigits)
+                    throw System::OverflowException("Value was either too large or too small for an Int32.");
+                throw System::FormatException("Input string was not in a correct format.");
+            }
+            SharpRuntime::longcs signedResult; bool overflowed = false;
+            if (System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed) &&
+                (overflowed || signedResult < MinValue || signedResult > MaxValue))
+                throw System::OverflowException("Value was either too large or too small for an Int32.");
+            throw System::FormatException("Input string was not in a correct format.");
+        }
+        return result;
+    }
+
+    /**
+     * @brief Tries to convert a string to a 32-bit signed integer using the specified style,
+     * without throwing.
+     *
+     * C++ counterpart of .NET Int32.TryParse(string, NumberStyles, IFormatProvider, out int).
+     * @p provider is accepted for API-surface parity but ignored. See Parse(string,
+     * NumberStyles, IFormatProvider) for the supported grammar subset.
+     */
+    static bool TryParse(const std::string& s, System::Globalization::NumberStyles style,
+                          const IFormatProvider* provider, SharpRuntime::intcs& result) {
+        (void)provider;
+        using System::Globalization::NumberStyles;
+        result = 0;
+        if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
+            uint64_t bits; bool tooManyDigits = false;
+            if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 8, tooManyDigits))
+                return false;
+            result = static_cast<SharpRuntime::intcs>(static_cast<uint32_t>(bits));
+            return true;
+        }
+        SharpRuntime::longcs signedResult; bool overflowed = false;
+        if (!System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed))
+            return false;
+        if (overflowed || signedResult < MinValue || signedResult > MaxValue) return false;
+        result = static_cast<SharpRuntime::intcs>(signedResult);
+        return true;
     }
 
     // -----------------------------------------------------------------------
