@@ -1,10 +1,34 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `978dc76`) — 11841 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `62d550d`) — 11841 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11841 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 343 closed, a documented navigation gap
+
+Continuing the same autonomous run (previous checkpoint covered 341). Commit: 62d550d — pushed
+to `origin/feature/work`.
+
+- **343 (Xml/XPath/XmlDocumentNavigator.cpp)**: first dedicated audit pass for this file (only
+  one prior commit, the initial port). Extensive review against `DocumentXPathNavigator.cs`
+  confirmed the navigation logic, attribute/namespace axis filtering, and position comparison
+  all correctly match real .NET's behavior — including subtle interactions like `xmlns=""`
+  cancelling an inherited default namespace, and namespace-node identity being independent of
+  the scope used to navigate there. One genuine, confirmed gap found and documented (not fixed):
+  per the XPath 1.0 data model, adjacent Text/CDATA/Whitespace/SignificantWhitespace DOM
+  siblings collapse into a single XPath text node — real .NET implements this via `ValueText`'s
+  forward concatenation and `CalibrateText()`'s run-start normalization; this port has neither.
+  A correct fix needs coordinated, directionally-different changes across
+  `MoveToFirstChild`/`MoveToNext`/`MoveToPrevious` (each has different run-boundary logic) plus
+  `getValueProperty()` — judged too large/risky for a single-pass fix (same call as tickets
+  302/334 for similarly structural gaps this session), documented in detail instead.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 341 closed
 
