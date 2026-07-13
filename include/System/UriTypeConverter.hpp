@@ -55,11 +55,18 @@ namespace System {
          * @brief Converts a Uri to its string representation.
          *
          * C++ counterpart of .NET UriTypeConverter.ConvertTo(ITypeDescriptorContext, CultureInfo, object, Type).
+         * Real .NET's implementation returns uri.OriginalString, not uri.AbsoluteUri --
+         * verified against UriTypeConverter.cs, which explicitly uses OriginalString so the
+         * round-trip works for relative Uris too (AbsoluteUri throws for those). This
+         * previously called getAbsoluteUriProperty() instead -- fixed to match, though in this
+         * port's current implementation the two properties hold the same underlying value (see
+         * Uri::getOriginalStringProperty()'s doc-comment), so this is a forward-looking
+         * correctness fix rather than one with an observable behavior difference today.
          * @param uri The Uri to convert.
-         * @return The absolute URI string.
+         * @return The original URI string.
          */
         [[nodiscard]] virtual std::string ConvertTo(const Uri& uri) const {
-            return uri.getAbsoluteUriProperty();
+            return uri.getOriginalStringProperty();
         }
     };
 

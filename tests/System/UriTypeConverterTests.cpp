@@ -43,3 +43,15 @@ TEST(UriTypeConverterTest, RoundTrip) {
     Uri restored = c.ConvertFrom(s);
     EXPECT_EQ(restored.getHostProperty(), "test.org");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: real .NET's UriTypeConverter.ConvertTo returns uri.OriginalString,
+// not uri.AbsoluteUri (verified against UriTypeConverter.cs) -- this matters
+// because AbsoluteUri throws for a relative Uri while OriginalString never does.
+// ---------------------------------------------------------------------------
+
+TEST(UriTypeConverterTest, ConvertTo_UsesOriginalString) {
+    UriTypeConverter c;
+    Uri uri("http://example.com/path");
+    EXPECT_EQ(c.ConvertTo(uri), uri.getOriginalStringProperty());
+}

@@ -384,3 +384,20 @@ TEST(UriTests, Combine_PreservesBaseUserInfo) {
     EXPECT_EQ(combined.getUserInfoProperty(), "user:pass");
     EXPECT_EQ(combined.getAbsoluteUriProperty(), "http://user:pass@example.com/a/b/c");
 }
+
+// ---------------------------------------------------------------------------
+// OriginalString -- was entirely missing from this port (C++ counterpart of
+// .NET Uri.OriginalString), unlike getAbsoluteUriProperty() which existed but
+// is documented (per real .NET semantics) to sometimes differ.
+// ---------------------------------------------------------------------------
+
+TEST(UriTests, OriginalString_MatchesConstructorInput) {
+    Uri u("http://example.com/path?q=1#frag");
+    EXPECT_EQ(u.getOriginalStringProperty(), "http://example.com/path?q=1#frag");
+}
+
+TEST(UriTests, OriginalString_WorksForRelativeUri) {
+    // Real .NET's AbsoluteUri throws for a relative Uri; OriginalString never does.
+    Uri u("relative/path", UriKind::Relative);
+    EXPECT_EQ(u.getOriginalStringProperty(), "relative/path");
+}
