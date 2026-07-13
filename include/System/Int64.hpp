@@ -137,7 +137,7 @@ namespace System {
          * @brief Compares @p a to @p b and returns a signed integer.
          * C++ counterpart of .NET Int64.CompareTo(long).
          */
-        [[nodiscard]] static int CompareTo(longcs a, longcs b) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs CompareTo(longcs a, longcs b) noexcept {
             return (a < b) ? -1 : (a > b) ? 1 : 0;
         }
 
@@ -145,8 +145,8 @@ namespace System {
         [[nodiscard]] static bool Equals(longcs a, longcs b) noexcept { return a == b; }
 
         /** @brief Returns a hash code for @p value. C++ counterpart of .NET Int64.GetHashCode(). */
-        [[nodiscard]] static int GetHashCode(longcs value) noexcept {
-            return static_cast<int>(value ^ (static_cast<uint64_t>(value) >> 32));
+        [[nodiscard]] static SharpRuntime::intcs GetHashCode(longcs value) noexcept {
+            return static_cast<SharpRuntime::intcs>(value ^ (static_cast<uint64_t>(value) >> 32));
         }
 
         /**
@@ -170,7 +170,7 @@ namespace System {
         [[nodiscard]] static longcs Min(longcs x, longcs y) noexcept { return x < y ? x : y; }
 
         /** @brief Returns -1 if negative, 0 if zero, 1 if positive. C++ counterpart of .NET Math.Sign(long). */
-        [[nodiscard]] static int Sign(longcs value) noexcept {
+        [[nodiscard]] static SharpRuntime::intcs Sign(longcs value) noexcept {
             return (value > 0) - (value < 0);
         }
 
@@ -207,30 +207,44 @@ namespace System {
             return value > 0 && (value & (value - 1)) == 0;
         }
 
-        /** @brief Returns the number of leading zero bits. C++ counterpart of .NET Int64.LeadingZeroCount(long). */
-        [[nodiscard]] static int LeadingZeroCount(longcs value) noexcept {
-            return std::countl_zero(static_cast<uint64_t>(value));
+        /**
+         * @brief Returns the number of leading zero bits.
+         * C++ counterpart of .NET Int64.LeadingZeroCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.LeadingZeroCount returns @c long (not
+         * @c int) -- matched here via @c longcs rather than @c intcs.
+         */
+        [[nodiscard]] static longcs LeadingZeroCount(longcs value) noexcept {
+            return static_cast<longcs>(std::countl_zero(static_cast<uint64_t>(value)));
         }
 
-        /** @brief Returns the number of set bits. C++ counterpart of .NET Int64.PopCount(long). */
-        [[nodiscard]] static int PopCount(longcs value) noexcept {
-            return std::popcount(static_cast<uint64_t>(value));
+        /**
+         * @brief Returns the number of set bits.
+         * C++ counterpart of .NET Int64.PopCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.PopCount returns @c long (not @c int).
+         */
+        [[nodiscard]] static longcs PopCount(longcs value) noexcept {
+            return static_cast<longcs>(std::popcount(static_cast<uint64_t>(value)));
         }
 
-        /** @brief Returns the number of trailing zero bits. C++ counterpart of .NET Int64.TrailingZeroCount(long). */
-        [[nodiscard]] static int TrailingZeroCount(longcs value) noexcept {
+        /**
+         * @brief Returns the number of trailing zero bits.
+         * C++ counterpart of .NET Int64.TrailingZeroCount(long).
+         * @note Real .NET's IBinaryInteger&lt;long&gt;.TrailingZeroCount returns @c long (not
+         * @c int).
+         */
+        [[nodiscard]] static longcs TrailingZeroCount(longcs value) noexcept {
             if (value == 0) return 64;
-            return std::countr_zero(static_cast<uint64_t>(value));
+            return static_cast<longcs>(std::countr_zero(static_cast<uint64_t>(value)));
         }
 
         /** @brief Rotates @p value left by @p rotateAmount bits. C++ counterpart of .NET Int64.RotateLeft(long,int). */
-        [[nodiscard]] static longcs RotateLeft(longcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static longcs RotateLeft(longcs value, SharpRuntime::intcs rotateAmount) noexcept {
             return static_cast<longcs>(
                 std::rotl(static_cast<uint64_t>(value), rotateAmount));
         }
 
         /** @brief Rotates @p value right by @p rotateAmount bits. C++ counterpart of .NET Int64.RotateRight(long,int). */
-        [[nodiscard]] static longcs RotateRight(longcs value, int rotateAmount) noexcept {
+        [[nodiscard]] static longcs RotateRight(longcs value, SharpRuntime::intcs rotateAmount) noexcept {
             return static_cast<longcs>(
                 std::rotr(static_cast<uint64_t>(value), rotateAmount));
         }
@@ -239,12 +253,13 @@ namespace System {
          * @brief Returns the floor of the base-2 logarithm of @p value.
          * C++ counterpart of .NET Int64.Log2(long). Matches .NET: Log2(0) is 0, not an error
          * (BitOperations.Log2(0) is documented to return 0).
+         * @note Real .NET's IBinaryNumber&lt;long&gt;.Log2 returns @c long (not @c int).
          * @throws System::ArgumentOutOfRangeException if @p value is negative.
          */
-        [[nodiscard]] static int Log2(longcs value) {
+        [[nodiscard]] static longcs Log2(longcs value) {
             if (value < 0) throw System::ArgumentOutOfRangeException("value", "value must be non-negative");
             if (value == 0) return 0;
-            return std::bit_width(static_cast<uint64_t>(value)) - 1;
+            return static_cast<longcs>(std::bit_width(static_cast<uint64_t>(value)) - 1);
         }
 
         /**
