@@ -306,6 +306,26 @@ TEST(NumberFormatInfoBatch31Test, NativeDigits_ValidReplacement_Succeeds) {
     EXPECT_EQ(nfi.getNativeDigitsProperty()[0], "٠");
 }
 
+// Regression for ticket 347: CheckNativeDigits previously only compared the total byte length
+// of each entry against what its leading byte's value range implies, without validating that
+// the leading byte is actually a valid UTF-8 lead byte or that the following bytes are valid
+// continuation bytes (0x80-0xBF) -- letting malformed UTF-8 slip through despite the method's
+// own stated intent of validating "exactly one well-formed codepoint" per entry.
+TEST(NumberFormatInfoBatch31Test, NativeDigits_MalformedContinuationByte_Throws) {
+    NumberFormatInfo nfi;
+    // Leading byte 0xC2 correctly implies a 2-byte sequence, but the second byte (0x20, a plain
+    // space) is not a valid UTF-8 continuation byte.
+    std::vector<std::string> bad = {"0","1","2","3","4","5","6","7","8","\xC2\x20"};
+    EXPECT_THROW(nfi.setNativeDigitsProperty(bad), System::ArgumentException);
+}
+
+TEST(NumberFormatInfoBatch31Test, NativeDigits_ContinuationByteAsLeadByte_Throws) {
+    NumberFormatInfo nfi;
+    // 0x80 is a continuation byte and can never validly start a UTF-8 sequence.
+    std::vector<std::string> bad = {"0","1","2","3","4","5","6","7","8","\x80\x80"};
+    EXPECT_THROW(nfi.setNativeDigitsProperty(bad), System::ArgumentException);
+}
+
 TEST(NumberFormatInfoBatch31Test, DigitSubstitution_InvalidValue_Throws) {
     NumberFormatInfo nfi;
     EXPECT_THROW(nfi.setDigitSubstitutionProperty(static_cast<DigitShapes>(99)), System::ArgumentException);

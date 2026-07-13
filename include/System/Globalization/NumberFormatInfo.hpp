@@ -103,15 +103,35 @@ class NumberFormatInfo {
      * to exactly one well-formed codepoint.
      */
     static void CheckNativeDigits(const std::vector<std::string>& nativeDigits) {
+        static constexpr const char* kMsg =
+            "Each member of the NativeDigits array must be a single text element (one or more "
+            "UTF16 code points) and a supplementary character is only allowed if the "
+            "corresponding digit in the Latin script, that is a digit in the range 0 through 9, "
+            "is also a supplementary character.";
         if (nativeDigits.size() != 10)
             throw System::ArgumentException("The NativeDigits array must contain exactly ten members.", "value");
         for (const auto& digit : nativeDigits) {
             if (digit.empty())
-                throw System::ArgumentException("Each member of the NativeDigits array must be a single text element (one or more UTF16 code points) and a supplementary character is only allowed if the corresponding digit in the Latin script, that is a digit in the range 0 through 9, is also a supplementary character.", "value");
+                throw System::ArgumentException(kMsg, "value");
             unsigned char c0 = static_cast<unsigned char>(digit[0]);
-            size_t expectedLen = c0 < 0x80 ? 1 : c0 < 0xE0 ? 2 : c0 < 0xF0 ? 3 : 4;
-            if (digit.size() != expectedLen)
-                throw System::ArgumentException("Each member of the NativeDigits array must be a single text element (one or more UTF16 code points) and a supplementary character is only allowed if the corresponding digit in the Latin script, that is a digit in the range 0 through 9, is also a supplementary character.", "value");
+            // Verified this is a real gap against the method's own stated intent ("must decode
+            // to exactly one well-formed codepoint"): the previous check only compared the
+            // total byte length against what the leading byte's value range implies, without
+            // checking (a) that the leading byte is actually a valid UTF-8 lead byte -- 0x80-
+            // 0xBF are continuation bytes and can never start a sequence -- or (b) that the
+            // subsequent bytes are valid continuation bytes (0x80-0xBF each). Confirmed via a
+            // standalone repro that both a malformed 2-byte sequence with a bad second byte
+            // (e.g. {0xC2, 0x20}) and a bare continuation byte used as if it were a lead byte
+            // (e.g. {0x80, 0x80}) both passed the old length-only check.
+            size_t expectedLen = c0 < 0x80 ? 1 : c0 < 0xC0 ? 0 /* invalid lead byte */
+                                : c0 < 0xE0 ? 2 : c0 < 0xF0 ? 3 : c0 < 0xF8 ? 4 : 0 /* invalid lead byte */;
+            if (expectedLen == 0 || digit.size() != expectedLen)
+                throw System::ArgumentException(kMsg, "value");
+            for (size_t i = 1; i < digit.size(); ++i) {
+                unsigned char ci = static_cast<unsigned char>(digit[i]);
+                if (ci < 0x80 || ci > 0xBF)
+                    throw System::ArgumentException(kMsg, "value");
+            }
         }
     }
 
