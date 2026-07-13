@@ -4,10 +4,10 @@
 
 /**
  * @brief Experimental property wrapper.
- * @note Status: Stub
- * @note This type is experimental and is not used by the current SharpRuntime design.
- * Prop.hpp is preferred because it expands to ordinary members and methods
- * without per-instance std::function-based indirection.
+ * @note Status: Complete, but deliberately unused. The getter/setter delegation below is fully
+ * implemented (not a stub) -- this type is deprioritized in favor of SharpRuntime::Prop.hpp,
+ * which expands to ordinary members and methods without this type's per-instance
+ * std::function-based indirection. Kept for reference/experimentation only.
  */
 #include <functional>
 #include <iostream>
