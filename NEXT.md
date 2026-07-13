@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `9d4e77e`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `7d3deca`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -65,10 +65,10 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 
 ## 2. Current status
 
-**Build status**: last verified clean — 0 errors, 0 warnings — at HEAD (`9d4e77e`), via
-`cmake --build build --parallel 4`.
+**Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
+(`7d3deca`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12310/12310 passing**, 1221 test suites, via
+**Test status**: last verified **12336/12336 passing**, 1222 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -174,14 +174,36 @@ across repeated runs where concurrency/timing was a factor.
   empty input without spawning a thread. 5 new regression tests in
   `tests/System/Threading/Tasks/TasksTests.cpp` (`TaskWhenAllTests` suite). Test count grew from
   12305 to 12310.
+- Extended `include/System/detail/IntegerNumberStylesParser.hpp` (`7d3deca`) — the shared
+  NumberStyles-aware parsing core behind all 8 integer types' `Parse`/`TryParse(string,
+  NumberStyles, IFormatProvider*)` overloads — to support `AllowThousands`, `AllowDecimalPoint`,
+  `AllowCurrencySymbol`, `AllowParentheses`, and `AllowTrailingSign`, so `NumberStyles.Number` and
+  `NumberStyles.Currency` are now fully supported (previously only `.Integer`/`.HexNumber`).
+  Verified against real .NET's `TryParseNumber`/`TryNumberBufferToBinaryInteger`
+  (`Number.Parsing.Common.cs`/`Number.Parsing.cs`), including its quirk that a nonzero fractional
+  digit (e.g. `"123.5"`) throws `OverflowException`, not `FormatException`. Separators/currency
+  symbol use `NumberFormatInfo.InvariantInfo`'s fixed defaults (`.`/`,`/U+00A4 "¤"), since this
+  port ignores `IFormatProvider`. Unsigned types deliberately reject any negative-indicating token
+  (`-` or closed parens) as a format failure rather than importing .NET's
+  negative-unsigned-throws-`OverflowException` quirk, keeping unsigned parsing uniform across all
+  styles — a documented deviation, not an oversight. The refactor is verified
+  behavior-preserving for the pre-existing `.Integer`/`.HexNumber` scope (all 12310 prior tests
+  passed unchanged before the 26 new ones were added). No changes were needed in the 8 type
+  headers themselves beyond doc-comments — they all route through this one shared parser. Test
+  count grew from 12310 to 12336.
 
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12310 tests passed
-at the last verification (HEAD `9d4e77e`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
+**There is no active build/test blocker right now.** Build was clean and all 12336 tests passed
+at the last verification (HEAD `7d3deca`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
 `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
+
+This session is running autonomously (per explicit user authorization) through NEXT.md §8's task
+list and beyond. Two pre-session decisions were confirmed with the user: (1) no new dependency
+for the eventual performance-audit pilot — use `std::chrono`-based timing, not a vendored
+benchmarking library; (2) push after each verified task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next. Two candidates were proposed and are awaiting a decision (see §8 for
@@ -372,16 +394,13 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    `Task::WhenAll(std::vector<Task>)`, 5 new regression tests. See §3 for the exact semantics
    implemented (no short-circuit, direct-rethrow-first-fault, empty-input fast path).
 
-1. **Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
-   overloads.**
-   Goal: extend the existing `NumberStyles`-aware parser (added this session, currently supports
-   `Integer`/`HexNumber`/`Allow*` whitespace-and-sign flags only) to also handle thousands
-   separators and currency symbols, matching real .NET's grammar.
-   Files: `include/System/{Int16,Int32,Int64,UInt16,UInt32,UInt64,SByte,Byte}.hpp` (whichever
-   shared parsing helper they route through — check for one before touching all 8 independently).
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Int32*Parse*"`.
+~~1. Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
+   overloads.~~ **DONE 2026-07-13** (`7d3deca`): extended the single shared parser
+   (`include/System/detail/IntegerNumberStylesParser.hpp`) that all 8 types route through — no
+   per-type changes needed beyond doc-comments. 26 new regression tests. See §3 for the full
+   list of grammar additions and documented deviations.
 
-2. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
+1. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
    Goal: either implement a real priority-queue-backed channel variant so
    `UnboundedPrioritizedChannelOptions<T>` becomes usable, or — if that's too large for one
    session — remove/correct the dangling doc-comment reference and file a proper follow-up ticket
@@ -389,7 +408,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    Files: `include/System/Threading/Channels/Channel.hpp`, `ChannelOptions.hpp`.
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Channel*"`.
 
-3. **Scope a performance-audit pilot on one hot-path type.**
+2. **Scope a performance-audit pilot on one hot-path type.**
    Goal: rather than a full performance audit (a much larger undertaking), pick ONE
    heavily-used, allocation-sensitive type (e.g. `String`, `List<T>`, or `StringBuilder`) and do
    a focused pass: look for unnecessary copies, repeated reallocation, O(n²) patterns where O(n)
@@ -430,7 +449,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 9d4e77e (12310/12310 tests
+Read NEXT.md first. It reflects the repository state as of HEAD 7d3deca (12336/12336 tests
 passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
