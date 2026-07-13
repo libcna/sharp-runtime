@@ -1,10 +1,48 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-377, all DB-only tickets). Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-397, all DB-only tickets). Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 378-397 closed (namespace-audit batch, 20 tickets), zero further orphans
+
+Continuing the same autonomous run (previous checkpoint covered 368-377). No commits — all 20 are
+database-consistency checks touching no git-tracked files (plan.sqlite3 is gitignored).
+
+Same methodology as prior batches. All 20 namespaces had PERFECT 1:1 task/ticket coverage — zero
+orphans found in either direction for any of them (System.Collections at ticket 374 remains the
+only orphan gap found across the whole namespace-audit sweep so far):
+
+- **378 System.Net.NetworkInformation**: 15/15, 0 done/15 todo.
+- **379 System.Collections.Immutable**: 13/13, 5 done/8 todo.
+- **380 System.Xml.XPath**: 13/13, 0 done/13 todo.
+- **381 System.Net.WebSockets**: 12/12, 0 done/12 todo.
+- **382 System.Text.RegularExpressions**: 12/12, 4 done/8 todo.
+- **383 System.Collections.Specialized**: 11/11, 6 done/5 todo.
+- **384 System.IO.Hashing**: 10/10, 0 done/10 todo.
+- **385 System.Threading.Channels**: 9/9, 0 done/9 todo.
+- **386 System.Collections.ObjectModel**: 7/7, 1 done/6 todo.
+- **387 System.Collections.Concurrent**: 5/5, 3 done/2 todo.
+- **388 System.IO.IsolatedStorage**: 5/5, 0 done/5 todo.
+- **389 System.Net.Security**: 5/5, 0 done/5 todo.
+- **390 System.Runtime.CompilerServices**: 5/5, 0 done/5 todo.
+- **391 System.Security.Principal**: 5/5, 1 done/4 todo.
+- **392 System.Text.Json.Nodes**: 5/5, 0 done/5 todo.
+- **393 System.Buffers.Text**: 4/4, 0 done/4 todo.
+- **394 System.Text.Unicode**: 4/4, 0 done/4 todo.
+- **395 System.Timers**: 4/4, 0 done/4 todo.
+- **396 System.Net.Http.Json**: 3/3, 0 done/3 todo.
+- **397 System.Runtime.InteropServices**: 3/3, 0 done/3 todo.
+
+Namespace sizes are shrinking fast as the queue works through `ORDER BY priority, ticket_no` —
+remaining namespace-audit tickets are mostly small (3-9 items each) from here on.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 368-377 closed (namespace-audit batch), first orphan gap found and closed
 
