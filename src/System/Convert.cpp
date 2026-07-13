@@ -73,7 +73,7 @@ namespace System {
         if (value > INT_MAX || value < INT_MIN) throw OverflowException();
         return static_cast<intcs>(value);
     }
-    intcs Convert::ToInt32(const std::string& value, int fromBase) {
+    intcs Convert::ToInt32(const std::string& value, intcs fromBase) {
         return parseIntBase(value, fromBase);
     }
 
@@ -148,7 +148,7 @@ namespace System {
     std::string Convert::ToString(char value)    { return std::string(1, value); }
     std::string Convert::ToString(bytecs value)  { return std::to_string(static_cast<int>(value)); }
 
-    std::string Convert::ToString(intcs value, int toBase) {
+    std::string Convert::ToString(intcs value, intcs toBase) {
         if (toBase == 10) return std::to_string(value);
         if (toBase == 16) {
             std::ostringstream oss;

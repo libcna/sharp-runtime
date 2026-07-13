@@ -250,7 +250,7 @@ namespace System {
          * C++ counterpart of .NET Convert.ToInt32(string, int).
          * @param fromBase The base of the number (2, 8, 10, or 16).
          */
-        [[nodiscard]] static intcs ToInt32(const std::string& value, int fromBase);
+        [[nodiscard]] static intcs ToInt32(const std::string& value, intcs fromBase);
 
         // ===================================================================
         // ToInt64
@@ -582,7 +582,7 @@ namespace System {
          * @param toBase The base (2, 8, 10, or 16).
          * @throws FormatException for an unsupported base.
          */
-        [[nodiscard]] static std::string ToString(intcs value, int toBase);
+        [[nodiscard]] static std::string ToString(intcs value, intcs toBase);
 
         // ===================================================================
         // ToChar (additional)
