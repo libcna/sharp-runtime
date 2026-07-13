@@ -21,7 +21,7 @@ namespace System {
          * C++ counterpart of .NET ArrayTypeMismatchException().
          */
         ArrayTypeMismatchException()
-            : SystemException("Attempted to store an element of the wrong type within an array.") {}
+            : SystemException("Attempted to access an element as a type incompatible with the array.") {}
 
         /**
          * @brief Initializes a new instance with the specified error message.

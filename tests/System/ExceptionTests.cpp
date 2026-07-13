@@ -434,10 +434,13 @@ TEST(ExceptionTests, CatchByBaseInsteadOfDerived) {
 // ArrayTypeMismatchException
 // ---------------------------------------------------------------------------
 
-TEST(ArrayTypeMismatchExceptionTests, DefaultCtor_MessageContainsWrongType) {
+// Regression: the default message previously used the class doc-comment's summary text
+// ("...wrong type...") instead of real .NET's actual SR.Arg_ArrayTypeMismatchException
+// resource string ("...incompatible with the array.").
+TEST(ArrayTypeMismatchExceptionTests, DefaultCtor_MessageMatchesDotNetResourceString) {
     System::ArrayTypeMismatchException ex;
     std::string msg(ex.what());
-    EXPECT_NE(msg.find("wrong type"), std::string::npos);
+    EXPECT_NE(msg.find("incompatible with the array"), std::string::npos);
 }
 
 TEST(ArrayTypeMismatchExceptionTests, IsA_SystemException) {

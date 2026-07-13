@@ -12,6 +12,15 @@ TEST(ArrayTypeMismatchExceptionTests2, DefaultCtor_WhatNotEmpty) {
     EXPECT_FALSE(std::string(ex.what()).empty());
 }
 
+// Regression: the default message previously used the class doc-comment's summary text
+// ("Attempted to store an element...") instead of real .NET's actual SR.Arg_ArrayTypeMismatchException
+// resource string.
+TEST(ArrayTypeMismatchExceptionTests2, DefaultCtor_MatchesDotNetResourceString) {
+    ArrayTypeMismatchException ex;
+    EXPECT_EQ(std::string(ex.what()),
+              "Attempted to access an element as a type incompatible with the array.");
+}
+
 TEST(ArrayTypeMismatchExceptionTests2, IsA_SystemException) {
     EXPECT_THROW(throw ArrayTypeMismatchException(), System::SystemException);
 }
