@@ -1,10 +1,56 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `638741a`) — 12267 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `3404022`) — 12305 tests passing. Verified via:*
 ```
 cmake --build build --parallel 2          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12267 tests from 1218 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12305 tests from 1220 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — 18/19 post-stabilization-audit tickets done, only 1727 (needs-user-decision) remains
+
+Finished working through the post-stabilization-audit ticket batch "postupně" (gradually, reduced
+parallelism). **18 of 19 tickets are now `done`**; the sole holdout is **1727** (systemic
+`getCurrent()` naming-convention violation, 30 occurrences across 14 files), which stays `todo`
+by design — same precedent as ticket #43's `int`→`intcs` rollout: a naming-convention change wide
+enough to touch many files needs explicit per-action user approval before starting, not an
+auto-fix.
+
+This round closed out the remaining P2/P3 tickets (1717-1726, 1728), landing as several small
+commits — `a765579` (String::LastIndexOf), `3521103` (Math::Round FP-mode hazard), `4b03e33`
+(MemoryStream disposed-state), `13924e2` (StringInfo byte/char inconsistency), `c9e5cce` +
+`141372d` (ConcurrentQueue/ConcurrentDictionary stress tests), `1200d79` (CLAUDE.md getItem/
+setItem doc note), `0d54282` (Channel stress test), `a66028c` (ticket 1717 — NumberStyles-aware
+Parse/TryParse for all 8 integer primitive types), `3404022` (ticket 1718 — List<T>/StringBuilder
+CopyTo).
+
+**Ticket 1717 caught its own bug during verification, fixed same-session**: the first pass's
+`TryParseHexCore` returned a plain `bool`, conflating "not valid hex grammar" with "valid hex but
+more digits than the target type's width" — so `Parse(string, NumberStyles.HexNumber, ...)`
+always threw `FormatException` instead of `OverflowException` for a too-many-hex-digits input
+(e.g. `Int32::Parse("1FFFFFFFF", HexNumber)`), caught by
+`Ticket1717Tests.Int32_HexNumberStyle_TooManyDigitsOverflows`. Fixed by adding a `tooManyDigits`
+out-parameter to `TryParseHexCore` (mirroring the existing `overflowed` out-param pattern on
+`TryParseSignedCore`/`TryParseUnsignedCore`) and updating all 16 call sites (2 per type × 8
+types) to check it directly instead of re-invoking the parser a second time on input that would
+deterministically fail identically. Also fixed the same latent bug in Int64/UInt64, whose hex
+`Parse` path had *no* overflow classification at all (always threw `FormatException`) before this
+fix.
+
+Verified via full rebuild (`cmake --build build --parallel 2`, 0 errors/0 warnings) + full suite
+(`./build/SharpRuntimeTests`, 12305/12305 passing) + `git fetch`/`git log origin/feature/work`
+(no divergence, all commits confirmed landed) after every commit.
+
+### To resume
+`sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE
+category='post-stabilization-audit' AND status='todo';"` — only 1727 remains, and it needs an
+explicit user decision (not auto-fixable) before any action: is a 30-occurrence/14-file
+`getCurrent()` → correct-naming-convention rename in scope right now, and if so, should it be
+one big commit or split into per-file/per-namespace batches like ticket #43 was? Do not start
+it without asking.
+
+Beyond 1727, the post-stabilization-audit batch is fully closed. Next open work is whatever's
+next in the `plan.sqlite3` `task` table (dotnet/runtime namespace review) — see §10's resume
+prompt below, or re-run a fresh audit sweep if the user wants another one.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 1713 (systemic version-tracking, 11 files) fixed, all 7 P1 post-stabilization-audit tickets now done
 
