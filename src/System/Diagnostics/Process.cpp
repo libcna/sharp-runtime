@@ -201,6 +201,7 @@ bool Process::Start() {
 void Process::Kill() { Kill(false); }
 
 void Process::Kill(bool entireProcessTree) {
+    (void)entireProcessTree; // unused on non-POSIX platforms, where this throws below
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     if (!impl_->started || impl_->isCurrentProcess) return;
     reapIfNeeded(*impl_);
@@ -233,6 +234,7 @@ void Process::WaitForExit() {
 }
 
 bool Process::WaitForExit(intcs milliseconds) {
+    (void)milliseconds; // unused on non-POSIX platforms, where this throws below
 #if defined(SHARP_RUNTIME_PROCESS_POSIX)
     if (!impl_->started) throw System::InvalidOperationException("No process is associated with this object.");
     if (impl_->isCurrentProcess) return false;

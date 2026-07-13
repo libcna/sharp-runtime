@@ -5,8 +5,12 @@
 
 #if defined(_WIN32)
 #  include <io.h>
-#  define WIN32_LEAN_AND_MEAN
-#  define NOMINMAX
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <windows.h>
 #elif defined(__EMSCRIPTEN__)
 // No terminal to redirect-detect; stdin/stdout/stderr are never real TTYs.
