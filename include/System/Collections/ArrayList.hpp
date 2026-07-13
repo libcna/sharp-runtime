@@ -335,7 +335,7 @@ public:
      * C++ counterpart of .NET ArrayList.IndexOf(object).
      */
     SharpRuntime::intcs IndexOf(void* value) const override {
-        for (int i = 0; i < static_cast<int>(_items.size()); ++i)
+        for (intcs i = 0; i < static_cast<intcs>(_items.size()); ++i)
             if (std::any_cast<void*>(&_items[i]) && std::any_cast<void*>(_items[i]) == value) return i;
         return -1;
     }
