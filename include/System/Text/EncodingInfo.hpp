@@ -26,7 +26,17 @@ namespace System::Text {
         /** Gets the human-readable name of this encoding. */
         [[nodiscard]] const std::string& getDisplayNameProperty() const { return displayName_; }
 
-        /** Returns an Encoding object for this EncodingInfo (stub — always returns UTF-8). */
+        /**
+         * @brief Returns an Encoding object for this EncodingInfo.
+         *
+         * Reduced scope: always returns UTF-8 regardless of getCodePageProperty(). Real .NET
+         * resolves this via a global code-page table (Encoding.GetEncoding(int)) populated by
+         * every registered EncodingProvider; this runtime has no such registry (see
+         * EncodingProvider's own class doc-comment) and no EncodingInfo instances are actually
+         * constructed anywhere in this codebase today, so there is no live caller depending on
+         * per-code-page resolution here. Wiring this up properly would need the same code-page
+         * table EncodingProvider already defers.
+         */
         [[nodiscard]] std::shared_ptr<Encoding> GetEncoding() const {
             return Encoding::UTF8();
         }
