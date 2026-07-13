@@ -5,8 +5,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Diagnostics {
+
+    using SharpRuntime::intcs;
 
 /**
  * @brief Provides the default implementation for the Write and Fail methods of Debug.
@@ -61,7 +64,7 @@ public:
      * C++ counterpart of .NET DebugProvider.OnIndentLevelChanged(int).
      * @param indentLevel The new indent level.
      */
-    virtual void OnIndentLevelChanged(int indentLevel) { (void)indentLevel; }
+    virtual void OnIndentLevelChanged(intcs indentLevel) { (void)indentLevel; }
 
     /**
      * @brief Invoked when Debug::IndentSize changes; override to react to indent-size changes.
@@ -69,7 +72,7 @@ public:
      * C++ counterpart of .NET DebugProvider.OnIndentSizeChanged(int).
      * @param indentSize The new indent size.
      */
-    virtual void OnIndentSizeChanged(int indentSize) { (void)indentSize; }
+    virtual void OnIndentSizeChanged(intcs indentSize) { (void)indentSize; }
 };
 
 } // namespace System::Diagnostics
