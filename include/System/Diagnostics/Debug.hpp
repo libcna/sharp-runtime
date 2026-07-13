@@ -7,10 +7,13 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/Diagnostics/DebugProvider.hpp"
 
 namespace System::Diagnostics {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides a set of methods and properties that help debug code.
@@ -30,13 +33,13 @@ namespace System::Diagnostics {
             return provider;
         }
 
-        static int& indentSizeStorage() {
-            static int size = 4;
+        static intcs& indentSizeStorage() {
+            static intcs size = 4;
             return size;
         }
 
-        static int& indentLevelStorage() {
-            static thread_local int level = 0;
+        static intcs& indentLevelStorage() {
+            static thread_local intcs level = 0;
             return level;
         }
 
@@ -74,7 +77,7 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.IndentSize.
          * @return The current indent size, in characters.
          */
-        static int getIndentSizeProperty() { return indentSizeStorage(); }
+        static intcs getIndentSizeProperty() { return indentSizeStorage(); }
 
         /**
          * @brief Sets the amount by which the indent is increased for each IndentLevel step.
@@ -82,7 +85,7 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.IndentSize.
          * @param value The new indent size; negative values are clamped to 0.
          */
-        static void setIndentSizeProperty(int value) {
+        static void setIndentSizeProperty(intcs value) {
             indentSizeStorage() = value < 0 ? 0 : value;
             providerStorage()->OnIndentSizeChanged(indentSizeStorage());
         }
@@ -93,7 +96,7 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.IndentLevel.
          * @return The current indent level.
          */
-        static int getIndentLevelProperty() { return indentLevelStorage(); }
+        static intcs getIndentLevelProperty() { return indentLevelStorage(); }
 
         /**
          * @brief Sets the current indent level (per-thread).
@@ -101,7 +104,7 @@ namespace System::Diagnostics {
          * C++ counterpart of .NET Debug.IndentLevel.
          * @param value The new indent level; negative values are clamped to 0.
          */
-        static void setIndentLevelProperty(int value) {
+        static void setIndentLevelProperty(intcs value) {
             indentLevelStorage() = value < 0 ? 0 : value;
             providerStorage()->OnIndentLevelChanged(indentLevelStorage());
         }
