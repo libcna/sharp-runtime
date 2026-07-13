@@ -1,10 +1,32 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `6f215cd`) — 11863 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `cb57a4e`) — 11868 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11863 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11868 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 351 closed, missing index-accessor API surface
+
+Continuing the same autonomous run (previous checkpoint covered 350). Commit: cb57a4e — pushed
+to `origin/feature/work`.
+
+- **351 (Collections/Generic/SortedList.hpp)**: no correctness bugs found in existing methods —
+  no dual-structure exception-safety risk (single `std::map`, matching Dictionary/SortedSet's
+  earlier-audited pattern), `IndexOfKey`'s linear scan is a performance characteristic
+  difference from .NET's binary search, not a correctness issue. One real API-completeness gap
+  found and fixed: `GetKeyAtIndex(int)`/`GetValueAtIndex(int)`/`SetValueAtIndex(int, TValue)`
+  didn't exist at all, despite being core public API in real .NET's `SortedList<TKey,TValue>` —
+  a type whose entire documented purpose is "sorted by key and accessible by key or index" (this
+  port's own class doc-comment already says so). Added all three matching .NET's exact
+  bounds-checked semantics. Deliberately skipped `Capacity`/`EnsureCapacity`/`TrimExcess` — those
+  relate to .NET's internal-array pre-allocation, with no meaningful analog for this
+  `std::map`-backed type.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 350 closed, whitespace-padded numbers rejected
 
