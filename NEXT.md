@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `9be09bc`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `9d4e77e`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -65,12 +65,10 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 
 ## 2. Current status
 
-**Build status**: last verified clean — 0 errors, 0 warnings — at HEAD (`9be09bc`), via
-`cmake --build build --parallel 2`. This document was written without performing a build (per
-explicit instruction for this handoff-doc task); if picking this up in a new session, re-verify
-first (see §7).
+**Build status**: last verified clean — 0 errors, 0 warnings — at HEAD (`9d4e77e`), via
+`cmake --build build --parallel 4`.
 
-**Test status**: last verified **12305/12305 passing**, 1220 test suites, via
+**Test status**: last verified **12310/12310 passing**, 1221 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -166,12 +164,23 @@ misclassification; `SortedList`'s indexer had the same auto-insert bug as `Dicti
 **Tests added**: ~180 new regression tests across the fixes above, each verified flake-free
 across repeated runs where concurrency/timing was a factor.
 
+**Since the rewrite above** (post-audit, self-directed continuation via "co dale?"/"what next?"):
+- Re-verified the build/test baseline (`d403015`) and resolved `TypedReference`'s classification
+  as a correct, permanent `ignore` (false alarm, not a bug).
+- Implemented `Task::WhenAll(std::vector<Task>)` (`9d4e77e`) — waits on every input task without
+  short-circuiting on the first fault, rethrows the first fault directly on `Wait()` (matching this
+  class's existing no-`AggregateException`-wrapping convention), throws `TaskCanceledException` if
+  no task faulted but at least one was canceled, and returns `CompletedTask()` immediately for an
+  empty input without spawning a thread. 5 new regression tests in
+  `tests/System/Threading/Tasks/TasksTests.cpp` (`TaskWhenAllTests` suite). Test count grew from
+  12305 to 12310.
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12305 tests passed
-at the last verification (HEAD `9be09bc`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
+**There is no active build/test blocker right now.** Build was clean and all 12310 tests passed
+at the last verification (HEAD `9d4e77e`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
 `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
@@ -203,8 +212,8 @@ update this section (and the whole file) once you understand what changed.
 - `TaskCompletionSource<TResult>.Task` property is missing entirely — an architectural gap, since
   this port's `Task` always launches immediately on construction with no "pending" bridge mode to
   hang a `TaskCompletionSource` off of.
-- `Task.WhenAll`/`Task.WhenAny` are missing. `WhenAll` was assessed as low-risk to add;
-  `WhenAny` needs a race-free "first of N" mechanism deserving its own design pass.
+- `Task.WhenAny` is still missing — needs a race-free "first of N" mechanism deserving its own
+  design pass (`Task.WhenAll` was implemented 2026-07-13, see §3).
 - `UnboundedPrioritizedChannelOptions<T>` references a `Channel::CreateUnboundedPrioritized()`
   factory that does not exist anywhere in the codebase, making the options type currently unusable.
 - `System::Xml::Linq::XText`'s `WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
@@ -359,15 +368,11 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    made; see §5's "Confirmed, permanent" list for the full reasoning. This was a false alarm from
    an earlier audit pass, not a genuine misclassification.
 
-1. **Implement `Task::WhenAll`.**
-   Goal: add a static `Task::WhenAll(std::vector<Task>)`-shaped method that completes once every
-   input `Task` has completed, propagating the first exception encountered (matching .NET's
-   `Task.WhenAll` semantics as closely as this port's synchronous-launch `Task` model allows).
-   Already assessed by an earlier audit pass as low-risk to add.
-   Files: `include/System/Threading/Tasks/Task.hpp`.
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Task*WhenAll*"`.
+~~3. Implement `Task::WhenAll`.~~ **DONE 2026-07-13** (`9d4e77e`): static
+   `Task::WhenAll(std::vector<Task>)`, 5 new regression tests. See §3 for the exact semantics
+   implemented (no short-circuit, direct-rethrow-first-fault, empty-input fast path).
 
-2. **Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
+1. **Add `NumberStyles.Currency`/`AllowThousands` support to the 8 integer `Parse`/`TryParse`
    overloads.**
    Goal: extend the existing `NumberStyles`-aware parser (added this session, currently supports
    `Integer`/`HexNumber`/`Allow*` whitespace-and-sign flags only) to also handle thousands
@@ -376,7 +381,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    shared parsing helper they route through — check for one before touching all 8 independently).
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Int32*Parse*"`.
 
-3. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
+2. **Implement `Channel::CreateUnboundedPrioritized` (or correct the dangling reference to it).**
    Goal: either implement a real priority-queue-backed channel variant so
    `UnboundedPrioritizedChannelOptions<T>` becomes usable, or — if that's too large for one
    session — remove/correct the dangling doc-comment reference and file a proper follow-up ticket
@@ -384,7 +389,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    Files: `include/System/Threading/Channels/Channel.hpp`, `ChannelOptions.hpp`.
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests --gtest_filter="*Channel*"`.
 
-4. **Scope a performance-audit pilot on one hot-path type.**
+3. **Scope a performance-audit pilot on one hot-path type.**
    Goal: rather than a full performance audit (a much larger undertaking), pick ONE
    heavily-used, allocation-sensitive type (e.g. `String`, `List<T>`, or `StringBuilder`) and do
    a focused pass: look for unnecessary copies, repeated reallocation, O(n²) patterns where O(n)
@@ -425,10 +430,9 @@ pick based on what's actually wanted next, or ask the user first if unsure which
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 9be09bc (12305/12305 tests
-passing, 0 errors/0 warnings, all verified at that commit — but this document was written
-without performing a build, so re-verify first: cmake --build build --parallel 4 &&
-./build/SharpRuntimeTests).
+Read NEXT.md first. It reflects the repository state as of HEAD 9d4e77e (12310/12310 tests
+passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
+cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
 open question is which of §8's candidate next tasks (or something else entirely) to work on.
