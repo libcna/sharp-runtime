@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Text/StringBuilder.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 
 #include <array>
 #include <charconv>
@@ -49,6 +50,12 @@ namespace System::Text
 
     StringBuilder& StringBuilder::Append(char value, intcs repeatCount)
     {
+        // Matches StringBuilder.cs's Append(char, int): ArgumentOutOfRangeException.
+        // ThrowIfNegative(repeatCount). Without this, a negative repeatCount wraps to a huge
+        // size_t via the unsigned cast below, and std::string::append throws a raw
+        // std::length_error instead of the System:: exception this API is documented to throw.
+        if (repeatCount < 0)
+            throw System::ArgumentOutOfRangeException("repeatCount", "Non-negative number required.");
         buffer.append(static_cast<size_t>(repeatCount), value);
         return *this;
     }
@@ -106,6 +113,12 @@ namespace System::Text
 
     void StringBuilder::setLengthProperty(intcs value)
     {
+        // Matches StringBuilder.cs's Length setter: ArgumentOutOfRangeException.
+        // ThrowIfNegative(value). Without this, a negative value wraps to a huge size_t and
+        // std::string::resize throws a raw std::length_error/std::bad_alloc instead of the
+        // System:: exception this API is documented to throw.
+        if (value < 0)
+            throw System::ArgumentOutOfRangeException("value", "Non-negative number required.");
         buffer.resize(static_cast<size_t>(value), '\0');
     }
 
@@ -122,12 +135,31 @@ namespace System::Text
 
     StringBuilder& StringBuilder::Insert(intcs index, const std::string& value)
     {
+        // Matches StringBuilder.cs's Insert(int, string): index must be in [0, Length]
+        // (checked via the unsigned-comparison idiom `(uint)index > (uint)Length`, which also
+        // catches a negative index). Without this, an out-of-range index wraps/overflows into
+        // std::string::insert, which throws a raw std::out_of_range instead of the System::
+        // exception this API is documented to throw.
+        if (static_cast<SharpRuntime::uintcs>(index) > static_cast<SharpRuntime::uintcs>(buffer.size()))
+            throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the StringBuilder.");
         buffer.insert(static_cast<size_t>(index), value);
         return *this;
     }
 
     StringBuilder& StringBuilder::Remove(intcs startIndex, intcs count)
     {
+        // Matches StringBuilder.cs's Remove(int, int): both must be non-negative, and
+        // count must not exceed Length - startIndex. Without these, a negative startIndex/count
+        // wraps into std::string::erase (raw std::out_of_range instead of System::
+        // ArgumentOutOfRangeException), and an over-large (but non-wrapping) count was
+        // previously silently clamped by std::string::erase instead of throwing -- real .NET
+        // rejects it outright rather than removing fewer characters than requested.
+        if (startIndex < 0)
+            throw System::ArgumentOutOfRangeException("startIndex", "Non-negative number required.");
+        if (count < 0)
+            throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+        if (count > static_cast<intcs>(buffer.size()) - startIndex)
+            throw System::ArgumentOutOfRangeException("count", "Index and count must refer to a location within the string.");
         buffer.erase(static_cast<size_t>(startIndex), static_cast<size_t>(count));
         return *this;
     }

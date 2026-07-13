@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Text/StringBuilder.hpp"
 
 using System::Text::StringBuilder;
@@ -262,6 +263,24 @@ TEST(StringBuilderTests, Insert_EmptyString_NoChange) {
     EXPECT_EQ(sb.ToString(), "abc");
 }
 
+// Regression tests for ticket 329: Insert never validated `index` against [0, Length], letting
+// an out-of-range index reach std::string::insert directly, which throws a raw
+// std::out_of_range instead of the System::ArgumentOutOfRangeException StringBuilder.cs's
+// Insert(int, string) throws for the identical condition.
+TEST(StringBuilderTests, Insert_NegativeIndex_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Insert(-1, "x"), System::ArgumentOutOfRangeException);
+}
+TEST(StringBuilderTests, Insert_IndexPastEnd_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Insert(4, "x"), System::ArgumentOutOfRangeException);
+}
+TEST(StringBuilderTests, Insert_IndexAtLength_Succeeds) {
+    StringBuilder sb("abc");
+    sb.Insert(3, "x");
+    EXPECT_EQ(sb.ToString(), "abcx");
+}
+
 // ---------------------------------------------------------------------------
 // Remove
 // ---------------------------------------------------------------------------
@@ -288,6 +307,25 @@ TEST(StringBuilderTests, Remove_ZeroCount_NoChange) {
     StringBuilder sb("abc");
     sb.Remove(1, 0);
     EXPECT_EQ(sb.ToString(), "abc");
+}
+
+// Regression tests for ticket 329: Remove never validated startIndex/count, letting a negative
+// value reach std::string::erase directly (raw std::out_of_range instead of System::
+// ArgumentOutOfRangeException), and -- more subtly -- an over-large but non-negative count was
+// previously silently CLAMPED by std::string::erase instead of throwing, so
+// Remove(0, 100) on a 3-char buffer removed only 3 characters with no error at all where real
+// .NET's StringBuilder.Remove(int, int) throws ArgumentOutOfRangeException outright.
+TEST(StringBuilderTests, Remove_NegativeStartIndex_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Remove(-1, 1), System::ArgumentOutOfRangeException);
+}
+TEST(StringBuilderTests, Remove_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Remove(0, -1), System::ArgumentOutOfRangeException);
+}
+TEST(StringBuilderTests, Remove_CountExceedsRemainingLength_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.Remove(0, 100), System::ArgumentOutOfRangeException);
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +475,22 @@ TEST(StringBuilderTests, SetLength_Extend_PadsNulls) {
     sb.setLengthProperty(4);
     EXPECT_EQ(sb.getLengthProperty(), 4);
 }
+// Regression test for ticket 329: a negative length previously reached std::string::resize
+// directly (wrapping to a huge size_t, throwing a raw std::length_error/std::bad_alloc) instead
+// of the System::ArgumentOutOfRangeException StringBuilder.cs's Length setter throws for the
+// identical condition.
+TEST(StringBuilderTests, SetLength_Negative_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb("abc");
+    EXPECT_THROW(sb.setLengthProperty(-1), System::ArgumentOutOfRangeException);
+}
+
+// Regression test for ticket 329: Append(char, int repeatCount) never validated repeatCount,
+// letting a negative value reach std::string::append directly (raw std::length_error) instead
+// of the System::ArgumentOutOfRangeException StringBuilder.cs's Append(char, int) throws.
+TEST(StringBuilderTests, AppendCharRepeated_Negative_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb;
+    EXPECT_THROW(sb.Append('x', -1), System::ArgumentOutOfRangeException);
+}
 
 // --- Append(float) ---
 TEST(StringBuilderTests, Append_Float_Basic) {
@@ -503,6 +557,13 @@ TEST(StringBuilderTests, EnsureCapacity_ReservesSpace) {
     StringBuilder sb;
     sb.EnsureCapacity(500);
     EXPECT_GE(sb.getCapacityProperty(), 500);
+}
+// Regression test for ticket 329: EnsureCapacity never validated capacity, letting a negative
+// value reach std::string::reserve directly (raw std::length_error) instead of the System::
+// ArgumentOutOfRangeException StringBuilder.cs's EnsureCapacity(int) throws.
+TEST(StringBuilderTests, EnsureCapacity_Negative_ThrowsArgumentOutOfRangeException) {
+    StringBuilder sb;
+    EXPECT_THROW(sb.EnsureCapacity(-1), System::ArgumentOutOfRangeException);
 }
 TEST(StringBuilderTests, EnsureCapacity_DoesNotTruncate) {
     StringBuilder sb("hello");

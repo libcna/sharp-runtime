@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IndexOutOfRangeException.hpp"
 #include "System/String.hpp"
 
@@ -208,8 +209,18 @@ namespace System::Text
         /** @brief Returns the current capacity of the internal buffer. */
         [[nodiscard]] intcs getCapacityProperty() const { return static_cast<intcs>(buffer.capacity()); }
 
-        /** @brief Ensures the internal buffer has at least @p capacity characters reserved. */
-        void EnsureCapacity(intcs capacity) { buffer.reserve(static_cast<std::size_t>(capacity)); }
+        /**
+         * @brief Ensures the internal buffer has at least @p capacity characters reserved.
+         * @throws System::ArgumentOutOfRangeException if @p capacity is negative, matching
+         *         StringBuilder.cs's EnsureCapacity(int) (ArgumentOutOfRangeException.
+         *         ThrowIfNegative). Without this check, a negative capacity wraps to a huge
+         *         size_t and std::string::reserve throws a raw std::length_error instead.
+         */
+        void EnsureCapacity(intcs capacity) {
+            if (capacity < 0)
+                throw System::ArgumentOutOfRangeException("capacity", "Non-negative number required.");
+            buffer.reserve(static_cast<std::size_t>(capacity));
+        }
 
         /**
          * @brief Returns the character at @p index (.NET's indexer).
