@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include "System/NotImplementedException.hpp"
 #include "System/ObjectDisposedException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Buffers/OperationStatus.hpp"
 #include "System/IO/Compression/CompressionMode.hpp"
@@ -135,6 +136,30 @@ TEST(GZipStreamTests, Write_DoesNotThrow) {
     EXPECT_NO_THROW(gz.Write(buf, 0, 4));
 }
 
+// Post-stabilization audit ticket 1715: Write() previously only checked `count <= 0` -- no
+// null-buffer or negative-offset check -- so a negative offset reached deflate()'s
+// next_in = buffer + offset unchecked, an out-of-bounds read confirmed via a standalone ASan
+// repro, not just a silent no-op.
+TEST(GZipStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(gz.Write(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(GZipStreamTests, Write_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(gz.Write(buf, -1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(GZipStreamTests, Write_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(gz.Write(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(GZipStreamTests, Flush_DoesNotThrow) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -212,6 +237,27 @@ TEST(DeflateStreamTests, Write_DoesNotThrow) {
     EXPECT_NO_THROW(ds.Write(buf, 0, 4));
 }
 
+// Post-stabilization audit ticket 1715: same missing-validation bug as GZipStream::Write.
+TEST(DeflateStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(ds.Write(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(DeflateStreamTests, Write_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ds.Write(buf, -1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(DeflateStreamTests, Write_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(ds.Write(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(DeflateStreamTests, Flush_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -284,6 +330,27 @@ TEST(ZLibStreamTests, Write_DoesNotThrow) {
     ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
     EXPECT_NO_THROW(zl.Write(buf, 0, 4));
+}
+
+// Post-stabilization audit ticket 1715: same missing-validation bug as GZipStream::Write.
+TEST(ZLibStreamTests, Write_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(zl.Write(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(ZLibStreamTests, Write_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(zl.Write(buf, -1, 2), System::ArgumentOutOfRangeException);
+}
+
+TEST(ZLibStreamTests, Write_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {1, 2, 3, 4};
+    EXPECT_THROW(zl.Write(buf, 0, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ZLibStreamTests, Flush_DoesNotThrow) {

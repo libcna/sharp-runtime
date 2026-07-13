@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Compression/DeflateStream.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/IO/IOException.hpp"
 #include "System/IO/InvalidDataException.hpp"
 #include "System/NotSupportedException.hpp"
@@ -93,7 +95,15 @@ void DeflateStream::Write(const SharpRuntime::bytecs* buffer,
                           SharpRuntime::intcs          offset,
                           SharpRuntime::intcs          count)
 {
-    if (!state_ || !state_->initialized || count <= 0) return;
+    // Verified against real .NET's Stream.ValidateBufferArguments (throws
+    // ArgumentNullException/ArgumentOutOfRangeException before touching the buffer). This
+    // previously only checked `count <= 0` -- no null-buffer or negative-offset check at all,
+    // so a negative offset reached deflate()'s next_in = buffer + offset unchecked, a confirmed
+    // out-of-bounds read via a standalone ASan repro (not just a silent no-op).
+    if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+    if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+    if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+    if (!state_ || !state_->initialized || count == 0) return;
 
     auto& s = *state_;
     s.zs.next_in  = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(buffer + offset));
