@@ -206,17 +206,28 @@ namespace System::Net::Sockets {
         /** @return An integer-valued socket option. */
         [[nodiscard]] intcs GetSocketOption(SocketOptionLevel level, SocketOptionName name) const;
 
-        /** @brief Asynchronous counterpart of Connect(remoteEP). */
+        /**
+         * @brief Asynchronous counterpart of Connect(remoteEP).
+         * @warning The returned task's action runs on a real background thread
+         * (`std::async(std::launch::async, ...)`, dispatched immediately, not deferred) and
+         * captures `this` by raw pointer. The caller must keep this Socket alive until the task
+         * completes -- destroying or moving the Socket while the task is still running is a
+         * dangling-pointer use-after-free. There is no shared-ownership self-capture here (that
+         * would need Socket to be enable_shared_from_this, a larger API-surface change deferred
+         * to a future pass); this is the same lifetime-contract shape as
+         * System::Net::Http::Json::HttpClientJsonExtensions's HttpClient& capture.
+         */
         [[nodiscard]] System::Threading::Tasks::TaskT<bool> ConnectAsync(const System::Net::EndPoint& remoteEP);
-        /** @brief Asynchronous counterpart of Accept(). */
+        /** @brief Asynchronous counterpart of Accept(). @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment. */
         [[nodiscard]] System::Threading::Tasks::TaskT<std::shared_ptr<Socket>> AcceptAsync();
-        /** @brief Asynchronous counterpart of Send(buffer, flags). */
+        /** @brief Asynchronous counterpart of Send(buffer, flags). @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment. */
         [[nodiscard]] System::Threading::Tasks::TaskT<intcs> SendAsync(std::vector<bytecs> buffer,
                                                                         SocketFlags flags = SocketFlags::None);
         /**
          * @brief Asynchronous counterpart of Receive(*buffer, flags). @p buffer is shared so the
          * caller can observe the bytes written once the task completes (there is no Memory<T>
          * idiom here to express an in-place async fill more directly).
+         * @warning Same `this`-capture lifetime contract as ConnectAsync -- see its doc-comment.
          */
         [[nodiscard]] System::Threading::Tasks::TaskT<intcs>
         ReceiveAsync(std::shared_ptr<std::vector<bytecs>> buffer, SocketFlags flags = SocketFlags::None);
