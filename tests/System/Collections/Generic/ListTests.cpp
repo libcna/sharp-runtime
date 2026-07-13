@@ -258,6 +258,14 @@ TEST(GenListTests, EnsureCapacityAndTrimExcess) {
     EXPECT_EQ(lst.getCapacityProperty(), 1);
 }
 
+// Regression: EnsureCapacity previously returned void, but real .NET's
+// List<T>.EnsureCapacity(int) returns the resulting capacity -- added to match that signature.
+TEST(GenListTests, EnsureCapacity_ReturnsResultingCapacity) {
+    List<int> lst;
+    SharpRuntime::intcs cap = lst.EnsureCapacity(100);
+    EXPECT_GE(cap, 100);
+}
+
 TEST(GenListTests, ConvertAll) {
     List<int> lst;
     lst.Add(1); lst.Add(2); lst.Add(3);

@@ -459,15 +459,19 @@ class List : public IList<T> {
         /**
          * @brief Ensures that the list can hold at least @p capacity elements.
          *
-         * C++ counterpart of .NET List<T>.EnsureCapacity(int).
+         * C++ counterpart of .NET List<T>.EnsureCapacity(int), which returns the resulting
+         * capacity (`_items.Length` after the call) rather than void -- added to match that
+         * signature; ported code may capture the return value.
          * @param capacity The minimum capacity to ensure.
+         * @return The resulting capacity.
          * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
          */
-        void EnsureCapacity(intcs capacity) {
+        intcs EnsureCapacity(intcs capacity) {
             if (capacity < 0)
                 throw System::ArgumentOutOfRangeException("capacity");
             if (capacity > static_cast<intcs>(items_.capacity()))
                 items_.reserve(static_cast<std::size_t>(capacity));
+            return static_cast<intcs>(items_.capacity());
         }
 
         /**

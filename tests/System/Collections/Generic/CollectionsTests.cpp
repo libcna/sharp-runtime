@@ -792,6 +792,15 @@ TEST(HashSetTests, TrimExcess_DoesNotLoseEntries) {
     EXPECT_TRUE(s.Contains(3));
 }
 
+// Regression: EnsureCapacity previously returned void, but real .NET's
+// HashSet<T>.EnsureCapacity(int) returns the resulting capacity -- added to match that
+// signature.
+TEST(HashSetTests, EnsureCapacity_ReturnsResultingCapacity) {
+    HashSet<int> s;
+    SharpRuntime::intcs cap = s.EnsureCapacity(200);
+    EXPECT_GE(cap, 200);
+}
+
 // ===========================================================================
 // SortedDictionary
 // ===========================================================================
