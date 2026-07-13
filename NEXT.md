@@ -1,10 +1,34 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `47cfd51`) — 11856 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `d176e5f`) — 11860 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11856 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11860 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 349 closed, reader-position corruption + file-path misdetection
+
+Continuing the same autonomous run (previous checkpoint covered 348). Commit: d176e5f — pushed
+to `origin/feature/work`.
+
+- **349 (Xml/XmlReader.cpp)**: two real, severe bugs. (1) `ReadElementContentAsString()` didn't
+  track element nesting depth, so a nested child element's own `EndElement` event was
+  indistinguishable from the enclosing element's end — for `"<a><b>x</b>y</a>"`, the loop hit
+  `<b>`'s `EndElement` first, mistook it for `</a>`, returned `"x"` (silently dropping `"y"`),
+  and left the reader positioned mid-content instead of past `</a>` — corrupting every
+  subsequent `Read()` call, not just the returned string. Fixed with a depth counter that only
+  treats a depth-0 `EndElement` as its own. (2) `Create(inputUri)`'s file-vs-content heuristic
+  (a documented, deliberate dual-purpose design) misclassified extremely common XML content as a
+  file path: self-closing tags like `<br/>` contain `/`, and namespace URIs are almost always
+  `http://...`. Such content was sent to `LoadFile()`, which fails and throws a misleading
+  "parse error" for perfectly valid XML text. Fixed by checking whether the trimmed input starts
+  with `<` first — an unambiguous "this is content" signal a file path essentially never
+  matches — before falling through to the original path-like heuristic.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 348 closed, unvalidated era-relative years
 
