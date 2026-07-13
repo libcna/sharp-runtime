@@ -7,8 +7,11 @@
 #include "System/Net/IPAddress.hpp"
 #include "System/Net/IPEndPoint.hpp"
 #include "System/Net/Sockets/NetworkStream.hpp"
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Net::Sockets {
+
+    using SharpRuntime::intcs;
 
     /**
      * @brief Provides client connections for TCP network services.
@@ -41,7 +44,7 @@ namespace System::Net::Sockets {
         ~TcpClient();
 
         /** @brief Connects to a remote host by name and port. */
-        void Connect(const std::string& hostname, int port);
+        void Connect(const std::string& hostname, intcs port);
 
         /** @brief Connects to the specified remote endpoint. */
         void Connect(const IPEndPoint& remoteEP);
@@ -53,7 +56,7 @@ namespace System::Net::Sockets {
         [[nodiscard]] bool getConnectedProperty() const { return connected_; }
 
         /** @brief Returns the number of bytes available to read without blocking. */
-        [[nodiscard]] int Available() const;
+        [[nodiscard]] intcs Available() const;
 
         /** @brief Returns a NetworkStream for reading and writing (dup-ed fd). */
         [[nodiscard]] std::shared_ptr<NetworkStream> GetStream() const;
@@ -74,7 +77,7 @@ namespace System::Net::Sockets {
 
     public:
         explicit TcpListener(const IPEndPoint& localEP);
-        TcpListener(const IPAddress& addr, int port);
+        TcpListener(const IPAddress& addr, intcs port);
         ~TcpListener();
 
         /** @brief Starts listening for incoming connections (bind + listen). */
