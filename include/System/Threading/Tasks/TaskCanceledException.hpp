@@ -35,14 +35,23 @@ namespace System::Threading::Tasks {
 
         /**
          * @brief Initializes a new instance referencing the Task that was canceled.
+         *
          * @param task The task that has been canceled; may be nullptr.
+         * @note Lifetime hazard: unlike real .NET's TaskCanceledException.Task (a GC-tracked
+         * reference to a heap-allocated Task object, always safe to dereference for as long as
+         * the exception itself is reachable), this stores a raw, non-owning pointer. If @p task
+         * is destroyed (e.g. a local Task going out of scope) before this exception is caught and
+         * getTaskProperty() is called, the pointer dangles. Callers must ensure the referenced
+         * Task outlives this exception, or avoid getTaskProperty() and rely on the exception's own
+         * message/CancellationToken instead.
          */
         explicit TaskCanceledException(const Task* task);
 
         /**
          * @brief Gets the task associated with this exception, or nullptr if none.
          *
-         * C++ counterpart of .NET TaskCanceledException.Task.
+         * C++ counterpart of .NET TaskCanceledException.Task. See this type's pointer
+         * constructor for the lifetime contract this raw pointer carries.
          */
         [[nodiscard]] const Task* getTaskProperty() const { return canceledTask_; }
     };

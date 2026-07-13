@@ -702,6 +702,27 @@ TEST(TaskFactoryTests, StartNewWithResult_ReturnsValue) {
     EXPECT_EQ(t.Wait(), 42);
 }
 
+TEST(TaskFactoryTests, StartNewWithResultAndToken_ObservesCancellation) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    TaskFactory factory;
+    std::atomic<bool> ran{false};
+    TaskT<int> t = factory.StartNew<int>([&ran]() -> int { ran = true; return 1; },
+                                          cts.getTokenProperty());
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+}
+
+TEST(TaskFactoryTests, StartNewWithResult_UsesFactoryDefaultToken) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    TaskFactory factory(cts.getTokenProperty());
+    std::atomic<bool> ran{false};
+    TaskT<int> t = factory.StartNew<int>([&ran]() -> int { ran = true; return 1; });
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(ran.load());
+}
+
 TEST(TaskFactoryTests, TaskDotFactory_StartNew_ExecutesAction) {
     std::atomic<bool> ran{false};
     Task t = Task::Factory().StartNew([&ran]() { ran = true; });
