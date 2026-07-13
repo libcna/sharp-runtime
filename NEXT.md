@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `3a8adfa`.*
+*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `890b569`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,9 +66,9 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`3a8adfa`), via `cmake --build build --parallel 4`.
+(`890b569`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12350/12350 passing**, 1223 test suites, via
+**Test status**: last verified **12356/12356 passing**, 1223 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Zero known failing tests.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -91,11 +91,13 @@ executable verification surface in this repo.
 - No Windows or Emscripten build has ever actually been compiled for this repo — `#ifdef`
   branches for those platforms exist and are code-reviewed, but are unverified by compilation
   (this sandbox is Linux-only). See §5.
-- No performance/benchmark suite exists anywhere in this project's history — allocation patterns,
-  algorithmic complexity, and hot-path efficiency have never been measured.
-- Several documented API gaps remain (NumberStyles.Currency parsing, `Task.WhenAll`/`WhenAny`,
-  `Channel::CreateUnboundedPrioritized`, `ImmutableList`'s missing LINQ-family methods — full list
-  in §5).
+- Performance work is now started but far from comprehensive: only `System::String`'s
+  `Split(char)`/`Concat`/`Join` have been measured and optimized (see §3), via a minimal
+  dependency-free `bench/StringBenchmark.cpp` harness (gated behind
+  `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF). No other hot-path type (`List<T>`,
+  `StringBuilder`, `Dictionary`, etc.) has been profiled.
+- Remaining documented API gaps: `Task.WhenAny`, `ImmutableList`'s missing LINQ-family methods —
+  full list in §5.
 
 ---
 
@@ -204,19 +206,38 @@ across repeated runs where concurrency/timing was a factor.
   channel is unbounded (matches `CreateUnbounded()`'s own contract). 14 new regression tests,
   including a concurrent multi-writer/multi-reader stress test (flake-checked across 10 repeats).
   Test count grew from 12336 to 12350.
+- Performance-audit pilot on `System::String` (`890b569`) — per user decision, measured with a
+  standalone `std::chrono` timing script before touching anything (no speculative optimization),
+  then applied two measurement-justified fixes: (1) `Split(value, char)` rewritten from
+  `std::stringstream`+`getline` to a direct `find`/`substr` scan — measured ~2.6x faster (302ns →
+  116ns/call for a typical 10-field line), and matches the approach the string-delimiter overload
+  already used. As a verified-against-.NET side effect, this also fixed a pre-existing correctness
+  bug: `Split("", ',')` previously returned an empty vector instead of real .NET's single-element
+  `{""}` result (`String.Manipulation.cs`'s `CreateSplitArrayOfThisAsSoleValue`). (2)
+  `Concat(vector<string>)`/`Join(separator, vector<string>)` now `reserve()` the exact total size
+  upfront instead of relying on `std::string`'s amortized-growth `+=` — measured ~1.4x faster for
+  a realistic 50-item join. Added `bench/StringBenchmark.cpp`, a minimal dependency-free
+  `std::chrono` timing harness (per explicit user decision: no vendored benchmarking library),
+  gated behind a new `SHARP_RUNTIME_BUILD_BENCHMARKS` CMake option (default OFF, doesn't affect
+  the default build/test loop) — confirmed the Split fix's real-world speedup (127.6 ns/call)
+  matches the standalone measurement when built with `-DCMAKE_BUILD_TYPE=Release`. 6 new
+  regression tests. Test count grew from 12350 to 12356.
 
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12336 tests passed
-at the last verification (HEAD `7d3deca`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
+**There is no active build/test blocker right now.** Build was clean and all 12356 tests passed
+at the last verification (HEAD `890b569`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
 `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
 
-This session is running autonomously (per explicit user authorization) through NEXT.md §8's task
-list and beyond. Two pre-session decisions were confirmed with the user: (1) no new dependency
-for the eventual performance-audit pilot — use `std::chrono`-based timing, not a vendored
-benchmarking library; (2) push after each verified task, same cadence as before.
+This session is running autonomously (per explicit user authorization). All four of NEXT.md's
+original §8 tasks are now done (`Task::WhenAll`, `NumberStyles.Currency`/`AllowThousands`,
+`Channel::CreateUnboundedPrioritized`, the `String` performance-audit pilot) — §8 currently holds
+only the pilot's own natural follow-on (extending the performance pass to other hot-path types,
+not yet started). Two pre-session decisions from the user remain in effect: (1) no new
+benchmarking dependency — `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2)
+push after each verified task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next. Two candidates were proposed and are awaiting a decision (see §8 for
@@ -256,8 +277,10 @@ update this section (and the whole file) once you understand what changed.
 **Needs verification (unknown status)**:
 - No Windows or Emscripten build has ever been compiled for this repository. Every platform
   `#ifdef` branch for those targets is unverified beyond code review.
-- No performance characteristics (allocation counts, algorithmic complexity, hot-path cost) have
-  ever been measured for any type in this codebase.
+- Performance characteristics (allocation counts, algorithmic complexity, hot-path cost) have
+  only been measured for `System::String`'s `Split(char)`/`Concat`/`Join` so far (2026-07-13, see
+  §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
+  still unmeasured.
 
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
@@ -415,16 +438,15 @@ pick based on what's actually wanted next, or ask the user first if unsure which
    **DONE 2026-07-13** (`3a8adfa`): implemented via a separate `std::multiset`-backed
    detail::Prioritized* trio, 14 new regression tests. See §3 for the full design rationale.
 
-1. **Scope a performance-audit pilot on one hot-path type.**
-   Goal: rather than a full performance audit (a much larger undertaking), pick ONE
-   heavily-used, allocation-sensitive type (e.g. `String`, `List<T>`, or `StringBuilder`) and do
-   a focused pass: look for unnecessary copies, repeated reallocation, O(n²) patterns where O(n)
-   is achievable. Treat this as a pilot to gauge whether a full performance audit is worthwhile
-   before committing to one.
-   Files: TBD based on which type is picked.
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` (no regressions) — no
-   benchmark harness currently exists, so this task should also produce a minimal one if it finds
-   something worth measuring.
+~~1. Scope a performance-audit pilot on one hot-path type.~~ **DONE 2026-07-13** (`890b569`):
+   picked `System::String`. Measured first (standalone `std::chrono` script, no speculative
+   changes), then fixed `Split(char)` (stringstream → manual scan, ~2.6x, plus a verified-against-
+   .NET correctness bug fix as a side effect) and `Concat`/`Join` (upfront `reserve()`, ~1.4x).
+   Added `bench/StringBenchmark.cpp` (gated behind `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF)
+   as the minimal harness this task called for. See §3 for full detail. The pilot confirms a full
+   performance audit would likely find more low-risk wins in other hot-path types (`List<T>`,
+   `StringBuilder`, `Dictionary`) — **not yet started**, a natural next candidate if this
+   direction continues.
 
 ---
 
@@ -440,9 +462,9 @@ pick based on what's actually wanted next, or ask the user first if unsure which
   documented deviation.
 - **No reflection, GC-internals, serialization-infrastructure, or P/Invoke implementation
   attempts** — permanent, documented deviations.
-- **No speculative performance optimization without measurement first** — if a performance pass
-  happens, it should be driven by an actual benchmark/profile, not guesswork (see task 6 in §8,
-  which is scoped as a measurement-first pilot for exactly this reason).
+- **No speculative performance optimization without measurement first** — the `String` pilot
+  (§3/§8) measured with a standalone script before changing anything; any further performance
+  work should follow the same discipline, using `bench/StringBenchmark.cpp` as the template.
 - **No further broad, many-file refactors or renames** without the same explicit, per-action user
   authorization the `intcs` and `getCurrentProperty()` changes required.
 - **No mass rewrite or reformatting in a single commit** — keep changes small, reviewable, and
@@ -456,7 +478,7 @@ pick based on what's actually wanted next, or ask the user first if unsure which
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 3a8adfa (12350/12350 tests
+Read NEXT.md first. It reflects the repository state as of HEAD 890b569 (12356/12356 tests
 passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
