@@ -287,6 +287,44 @@ TEST(JapaneseCalendarBatch30Test, GetYear_Heisei1) {
     EXPECT_EQ(jc.GetYear(System::DateTime(1989, 6, 1)), 1);
 }
 
+// Regression for ticket 348: eraYearToGregorian previously performed no validation at all,
+// silently computing a nonsensical Gregorian year for an era-relative year outside that era's
+// actual span. Verified against GregorianCalendarHelper.cs's GetYearOffset(throwOnError: true) --
+// Heisei only spans era-relative years [1,31] (1989-2019); year 100 is invalid for that era.
+TEST(JapaneseCalendarBatch30Test, IsLeapYear_YearExceedsEraSpan_Throws) {
+    JapaneseCalendar jc;
+    EXPECT_THROW(jc.IsLeapYear(100, JapaneseCalendar::HeiseiEra), System::ArgumentOutOfRangeException);
+}
+
+TEST(JapaneseCalendarBatch30Test, IsLeapYear_YearAtEraSpanBoundary_Succeeds) {
+    JapaneseCalendar jc;
+    // Heisei's maxEraYear is 31 (2019-1988); this must not throw.
+    EXPECT_NO_THROW(jc.IsLeapYear(31, JapaneseCalendar::HeiseiEra));
+}
+
+TEST(JapaneseCalendarBatch30Test, ToDateTime_YearExceedsEraSpan_Throws) {
+    JapaneseCalendar jc;
+    EXPECT_THROW(jc.ToDateTime(100, 1, 1, 0, 0, 0, 0, JapaneseCalendar::HeiseiEra),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(JapaneseCalendarBatch30Test, ToDateTime_ZeroYear_Throws) {
+    JapaneseCalendar jc;
+    EXPECT_THROW(jc.ToDateTime(0, 1, 1, 0, 0, 0, 0, JapaneseCalendar::ReiwaEra),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(JapaneseCalendarBatch30Test, ToDateTime_NegativeYear_Throws) {
+    JapaneseCalendar jc;
+    EXPECT_THROW(jc.ToDateTime(-1, 1, 1, 0, 0, 0, 0, JapaneseCalendar::ReiwaEra),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(JapaneseCalendarBatch30Test, ToDateTime_InvalidEra_Throws) {
+    JapaneseCalendar jc;
+    EXPECT_THROW(jc.ToDateTime(1, 1, 1, 0, 0, 0, 0, 99), System::ArgumentOutOfRangeException);
+}
+
 // Real .NET's s_calendarMinValue is 1868-10-23 (JapaneseCalendar.cs); this port previously
 // used 1868-09-08, off by 45 days.
 TEST(JapaneseCalendarBatch30Test, MinSupportedDateTime_MatchesRealDotNet) {

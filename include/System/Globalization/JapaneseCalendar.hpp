@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <stdexcept>
+#include <string>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Globalization/Calendar.hpp"
 
@@ -229,15 +230,41 @@ private:
      * @param year Era-relative year (1-based within era).
      * @param era  Era identifier (1–5).
      * @return The Gregorian year.
+     * @throws System::ArgumentOutOfRangeException if @p year is negative, outside the valid
+     *         [1, maxEraYear] range for @p era, or @p era is not one of the 5 known eras.
      */
     static int eraYearToGregorian(int year, int era) {
+        // Verified against GregorianCalendarHelper.cs's GetYearOffset(throwOnError: true) --
+        // the shared validation path real .NET's JapaneseCalendar.GetGregorianYear/IsLeapYear/
+        // GetDaysInMonth/GetDaysInYear/ToDateTime all route through: year must be non-negative
+        // AND within [1, maxEraYear] for the resolved era (maxEraYear taken directly from
+        // JapaneseCalendar.cs's built-in EraInfo table: Reiwa 9999-2018, Heisei 2019-1988,
+        // Showa 1989-1925, Taisho 1926-1911, Meiji 1912-1867), and era must be one of the 5
+        // known values. This port previously performed none of that validation, silently
+        // computing (and using) a nonsensical Gregorian year for any out-of-range era-relative
+        // year or era value instead of throwing -- e.g. IsLeapYear(100, HeiseiEra) computed
+        // Gregorian year 2088 instead of rejecting 100 as outside Heisei's actual [1,31] range.
+        if (year < 0)
+            throw System::ArgumentOutOfRangeException("year", "Non-negative number required.");
+        int maxYear;
+        switch (era) {
+            case ReiwaEra:  maxYear = 9999 - 2018; break;
+            case HeiseiEra: maxYear = 2019 - 1988; break;
+            case ShowaEra:  maxYear = 1989 - 1925; break;
+            case TaishoEra: maxYear = 1926 - 1911; break;
+            case MeijiEra:  maxYear = 1912 - 1867; break;
+            default:
+                throw System::ArgumentOutOfRangeException("era", "Era value was not valid.");
+        }
+        if (year < 1 || year > maxYear)
+            throw System::ArgumentOutOfRangeException("year",
+                "Valid values are between 1 and " + std::to_string(maxYear) + ", inclusive.");
         switch (era) {
             case ReiwaEra:  return 2018 + year;
             case HeiseiEra: return 1988 + year;
             case ShowaEra:  return 1925 + year;
             case TaishoEra: return 1911 + year;
-            case MeijiEra:  return 1867 + year;
-            default:        return year;
+            default:        return 1867 + year; // MeijiEra
         }
     }
 };
