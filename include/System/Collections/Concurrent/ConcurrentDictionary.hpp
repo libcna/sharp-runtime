@@ -130,38 +130,94 @@ namespace System::Collections::Concurrent {
             return it->second;
         }
 
-        /** Thread-safely returns the value for key if present, otherwise inserts the value produced by factory. */
+        /**
+         * @brief Thread-safely returns the value for key if present, otherwise inserts the
+         * value produced by factory.
+         *
+         * @note factory is invoked WITHOUT the dictionary's internal lock held, matching real
+         * .NET's documented ConcurrentDictionary.GetOrAdd contract exactly: the delegate may run
+         * outside the lock and, under contention, may be invoked more than once (its result is
+         * discarded if another thread inserts the same key first) -- callers must not assume the
+         * factory call and the insertion are atomic, and the factory must not have side effects
+         * that depend on that assumption. This also avoids a self-deadlock if factory reentrantly
+         * calls back into this same ConcurrentDictionary instance (unavoidable with a
+         * non-recursive std::mutex if the lock were held across the callback).
+         */
         TValue GetOrAdd(const TKey& key, std::function<TValue(const TKey&)> factory) {
-            std::lock_guard<std::mutex> lk(mutex_);
-            auto it = map_.find(key);
-            if (it != map_.end()) return it->second;
+            {
+                std::lock_guard<std::mutex> lk(mutex_);
+                auto it = map_.find(key);
+                if (it != map_.end()) return it->second;
+            }
             TValue v = factory(key);
-            map_[key] = v;
-            return v;
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto [it, inserted] = map_.emplace(key, std::move(v));
+            return it->second;
         }
 
-        /** Thread-safely adds addValue if key is absent, or replaces the existing value using updateFactory. */
+        /**
+         * @brief Thread-safely adds addValue if key is absent, or replaces the existing value
+         * using updateFactory.
+         *
+         * @note updateFactory is invoked WITHOUT the dictionary's internal lock held (see
+         * GetOrAdd's doc-comment for the full rationale -- same contract, same deadlock-avoidance
+         * reason). If another thread mutates the entry between the existence check and the write
+         * back, this last write wins (a simplification of real .NET's compare-and-retry loop,
+         * which requires TValue equality-comparability this port's ConcurrentDictionary doesn't
+         * assume) -- acceptable since the primary correctness requirement (no lock held across
+         * arbitrary user code) is preserved.
+         */
         TValue AddOrUpdate(const TKey& key, const TValue& addValue,
                            std::function<TValue(const TKey&, const TValue&)> updateFactory) {
+            bool exists;
+            TValue current{};
+            {
+                std::lock_guard<std::mutex> lk(mutex_);
+                auto it = map_.find(key);
+                exists = (it != map_.end());
+                if (exists) current = it->second;
+            }
+            if (!exists) {
+                std::lock_guard<std::mutex> lk(mutex_);
+                auto it = map_.find(key);
+                if (it == map_.end()) { map_[key] = addValue; return addValue; }
+                current = it->second; // another thread added it first; fall through to update
+            }
+            TValue updated = updateFactory(key, current);
             std::lock_guard<std::mutex> lk(mutex_);
-            auto it = map_.find(key);
-            if (it == map_.end()) { map_[key] = addValue; return addValue; }
-            it->second = updateFactory(key, it->second);
-            return it->second;
+            map_[key] = updated;
+            return updated;
         }
 
         /**
          * @brief Thread-safely adds a value produced by addFactory if key is absent, or replaces
          * the existing value using updateFactory.
          * C++ counterpart of .NET ConcurrentDictionary.AddOrUpdate(TKey, Func&lt;TKey,TValue&gt;, Func&lt;TKey,TValue,TValue&gt;).
+         *
+         * @note Neither addFactory nor updateFactory is invoked with the dictionary's internal
+         * lock held -- see GetOrAdd's doc-comment for the full rationale.
          */
         TValue AddOrUpdate(const TKey& key, std::function<TValue(const TKey&)> addFactory,
                            std::function<TValue(const TKey&, const TValue&)> updateFactory) {
+            bool exists;
+            TValue current{};
+            {
+                std::lock_guard<std::mutex> lk(mutex_);
+                auto it = map_.find(key);
+                exists = (it != map_.end());
+                if (exists) current = it->second;
+            }
+            if (!exists) {
+                TValue v = addFactory(key);
+                std::lock_guard<std::mutex> lk(mutex_);
+                auto it = map_.find(key);
+                if (it == map_.end()) { map_[key] = v; return v; }
+                current = it->second; // another thread added it first; fall through to update
+            }
+            TValue updated = updateFactory(key, current);
             std::lock_guard<std::mutex> lk(mutex_);
-            auto it = map_.find(key);
-            if (it == map_.end()) { TValue v = addFactory(key); map_[key] = v; return v; }
-            it->second = updateFactory(key, it->second);
-            return it->second;
+            map_[key] = updated;
+            return updated;
         }
 
         /** Returns true if the dictionary contains the specified key (thread-safe). */

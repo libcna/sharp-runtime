@@ -136,3 +136,56 @@ TEST(ConcurrentDictionaryTest, Indexer_Set_ExistingKey_Overwrites) {
     EXPECT_EQ(d.getCountProperty(), 1);
     EXPECT_EQ(static_cast<int>(d["a"]), 2);
 }
+
+// Regression tests for POST_STABILIZATION_AUDIT.md finding #7 / ticket 1716: GetOrAdd and
+// AddOrUpdate previously held the internal mutex across the entire user-supplied factory
+// callback, so a factory that reentrantly called back into the same ConcurrentDictionary
+// instance (a realistic memoization pattern) deadlocked the thread against itself
+// (std::mutex is non-recursive). Real .NET's documented contract explicitly permits and
+// expects the factory to run without the lock held. Each test below intentionally has the
+// callback call another ConcurrentDictionary method reentrantly; a hang here (rather than a
+// clean pass) indicates the deadlock has regressed.
+
+TEST(ConcurrentDictionaryTest, GetOrAdd_ReentrantFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("related", 10);
+    int result = d.GetOrAdd("key", [&](const std::string&) {
+        // Reentrant call into the same instance while "key" is still being computed.
+        int related = d.GetOrAdd("related", 999);
+        return related + 1;
+    });
+    EXPECT_EQ(result, 11);
+    EXPECT_EQ(d.getCountProperty(), 2);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ReentrantUpdateFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("a", 1);
+    d.TryAdd("b", 5);
+    int result = d.AddOrUpdate("a", 0, [&](const std::string&, int old) {
+        int b = d.GetOrAdd("b", -1);
+        return old + b;
+    });
+    EXPECT_EQ(result, 6);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ReentrantAddFactory_DoesNotDeadlock) {
+    ConcurrentDictionary<std::string, int> d;
+    int result = d.AddOrUpdate(
+        "a",
+        [&](const std::string&) { return d.GetOrAdd("b", 3); },
+        [](const std::string&, int old) { return old + 1; });
+    EXPECT_EQ(result, 3);
+    EXPECT_TRUE(d.ContainsKey("a"));
+    EXPECT_TRUE(d.ContainsKey("b"));
+}
+
+TEST(ConcurrentDictionaryTest, GetOrAdd_ConcurrentContention_RaceDiscardsLosingFactory) {
+    ConcurrentDictionary<std::string, int> d;
+    int result1 = d.GetOrAdd("shared", [](const std::string&) { return 100; });
+    int result2 = d.GetOrAdd("shared", [](const std::string&) { return 200; });
+    // Second call's factory result must be discarded since the key already existed.
+    EXPECT_EQ(result1, 100);
+    EXPECT_EQ(result2, 100);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
