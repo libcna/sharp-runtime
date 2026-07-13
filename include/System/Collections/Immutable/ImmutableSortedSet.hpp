@@ -270,12 +270,23 @@ public:
      * @brief Returns a new set containing only elements present in exactly one of the two sets.
      *
      * C++ counterpart of .NET ImmutableSortedSet<T>.SymmetricExcept(IEnumerable<T>).
+     * Verified against ImmutableSortedSet_1.cs's SymmetricExcept: @p other is first rehashed
+     * into a set under *this* set's comparer before the difference is computed -- same pattern
+     * as SetEquals/IsSubsetOf above. This port previously toggled directly over @p other's raw
+     * elements (ordered under @p other's own comparer): if two of @p other's elements are
+     * distinct under @p other's comparer but equivalent under *this* set's comparer, the toggle
+     * runs twice for that element and cancels out, silently dropping it from the result. Same
+     * bug class as the SetEquals fix, just for the toggle-based operation; see
+     * ImmutableHashSet::SymmetricExcept's comment for the confirmed repro (case-insensitive vs.
+     * case-sensitive {"A","a"}) demonstrating the failure mode.
      * @param other The other set.
      * @return A new ImmutableSortedSet with the symmetric difference.
      */
     [[nodiscard]] ImmutableSortedSet<T> SymmetricExcept(const ImmutableSortedSet<T>& other) const {
+        auto otherRehashed = makeEmpty(data_->key_comp());
+        otherRehashed->insert(other.data_->begin(), other.data_->end());
         auto s = std::make_shared<SetT>(*data_);
-        for (const auto& x : *other.data_) {
+        for (const auto& x : *otherRehashed) {
             if (s->count(x)) s->erase(x);
             else s->insert(x);
         }

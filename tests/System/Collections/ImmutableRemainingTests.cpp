@@ -562,6 +562,33 @@ TEST(ImmutableSortedSetTests, SetEquals_DifferentElements_ReturnsFalse) {
     EXPECT_FALSE(a.SetEquals(b));
 }
 
+// Regression test for ticket 338: SymmetricExcept previously toggled directly over `other`'s raw
+// elements (iterated under `other`'s own comparer) instead of rehashing them under `this` set's
+// comparer first. When two of `other`'s elements are distinct under `other`'s comparer but
+// collapse to the same logical element under `this` set's comparer, the toggle ran twice for
+// that element and cancelled itself out, silently dropping it from the result -- same bug class
+// as the SetEquals fix above, just for the toggle-based set operation. Confirmed via a standalone
+// UBSan/ASan repro before the fix (case-insensitive empty set XOR case-sensitive {"A","a"}
+// produced an empty result instead of the correct single-element {"A"}).
+TEST(ImmutableHashSetTests, SymmetricExcept_OtherHasComparerCollapsingDuplicates) {
+    auto empty = ImmutableHashSet<std::string>::Create(caseInsensitiveHash, caseInsensitiveEqual, {});
+    auto other = ImmutableHashSet<std::string>::Create({"A", "a"}); // distinct under default comparer
+    auto result = empty.SymmetricExcept(other);
+    EXPECT_EQ(result.getCountProperty(), 1);
+}
+TEST(ImmutableSortedSetTests, SymmetricExcept_OtherHasComparerCollapsingDuplicates) {
+    auto caseInsensitiveLess = [](const std::string& a, const std::string& b) {
+        std::string la = a, lb = b;
+        for (char& c : la) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (char& c : lb) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return la < lb;
+    };
+    auto empty = ImmutableSortedSet<std::string>::Create(caseInsensitiveLess);
+    auto other = ImmutableSortedSet<std::string>::Create({"A", "a"}); // distinct under default operator<
+    auto result = empty.SymmetricExcept(other);
+    EXPECT_EQ(result.getCountProperty(), 1);
+}
+
 TEST(ImmutableHashSetTests, IsSubsetOf_UsesThisSetsComparer) {
     // Verified against ImmutableHashSet_1.cs's private IsSubsetOf: `other` is rehashed
     // under *this* set's comparer before the subset check, so "Hello" (in `sub`, case-
