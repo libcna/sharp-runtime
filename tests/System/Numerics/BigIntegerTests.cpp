@@ -397,6 +397,23 @@ TEST(BigIntegerTests, Divide_LargeByLarge) {
     EXPECT_EQ(q * b + (a % b), a);
 }
 
+TEST(BigIntegerTests, DivMod_MultiLimbKnuthD_RemainderInRangeAndReconstructs) {
+    // Exercises the multi-limb (n>=2) Knuth Algorithm D path with a divisor whose top limb is
+    // small relative to BASE (10^9), forcing real normalization (d>1 in divmodMag) -- unlike
+    // Divide_LargeByLarge's divisor, whose top limb is close to BASE-1, giving d==1 (no
+    // normalization). A wrong qhat estimate here would show up either as reconstruction failure
+    // or as a remainder outside [0, |b|), which self-consistency alone (q*b+rem==a) cannot rule
+    // out on its own since any (q,rem) pair differing from the true one by a multiple of b would
+    // also satisfy the identity.
+    BigInteger a = BigInteger::Parse("123456789012345678901234567890123456789");
+    BigInteger b = BigInteger::Parse("987654321098765432109");
+    BigInteger q = a / b;
+    BigInteger r = a % b;
+    EXPECT_EQ(q * b + r, a);
+    EXPECT_TRUE(r.Sign() >= 0);
+    EXPECT_TRUE(r.Abs() < b.Abs());
+}
+
 // ---------------------------------------------------------------------------
 // Modulo (new)
 // ---------------------------------------------------------------------------
