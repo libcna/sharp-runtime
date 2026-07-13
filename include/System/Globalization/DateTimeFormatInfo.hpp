@@ -24,6 +24,18 @@ using SharpRuntime::intcs;
  *
  * C++ counterpart of .NET System.Globalization.DateTimeFormatInfo.
  * The default constructor initializes an invariant-culture instance.
+ *
+ * @note This port omits the real .NET `Calendar` get/set property (the calendar system used
+ * to interpret/format date components, e.g. Gregorian vs. Hijri vs. Hebrew). This codebase's
+ * `System::DateTime` is always internally Gregorian (matching real .NET's own internal tick
+ * representation, which is likewise always Gregorian regardless of `Calendar`), so the gap is
+ * in formatting/parsing pluggability, not internal storage. Wiring a settable `Calendar`
+ * through the actual `DateTime::ToString`/`Parse` pipeline (so era names, month names, and
+ * date-component interpretation route through the selected calendar rather than always being
+ * Gregorian/invariant) would be a genuinely large redesign, not a mechanical add — deferred
+ * rather than attempted in a single audit pass. Nothing elsewhere in this codebase currently
+ * references a `DateTimeFormatInfo::getCalendarProperty()`, so this is a documented gap, not a
+ * silently-broken call site.
  */
 class DateTimeFormatInfo {
 public:
@@ -375,13 +387,19 @@ public:
     /**
      * @brief Returns all date and time format patterns for this instance.
      *
-     * C++ counterpart of .NET DateTimeFormatInfo.GetAllDateTimePatterns().
-     * Stub — returns the most common patterns.
+     * C++ counterpart of .NET DateTimeFormatInfo.GetAllDateTimePatterns(). Real .NET iterates
+     * `DateTimeFormat.AllStandardFormats` ("dDfFgGmMoOrRstTuUyY") and concatenates the results
+     * of GetAllDateTimePatterns(char) for each -- an earlier version of this method instead
+     * returned 7 hardcoded raw pattern fields directly, silently omitting the RFC1123/
+     * sortable/universal-sortable/round-trip patterns entirely.
      * @return A vector of format pattern strings.
      */
     [[nodiscard]] std::vector<std::string> GetAllDateTimePatterns() const {
-        return {fullDateTimePattern_, longDatePattern_, shortDatePattern_,
-                longTimePattern_, shortTimePattern_, monthDayPattern_, yearMonthPattern_};
+        std::vector<std::string> results;
+        for (char c : std::string("dDfFgGmMoOrRstTuUyY")) {
+            for (auto& p : GetAllDateTimePatterns(c)) results.push_back(p);
+        }
+        return results;
     }
 
     /**
@@ -401,10 +419,14 @@ public:
             case 'd': return {shortDatePattern_};
             case 'D': return {longDatePattern_};
             case 'f': return {longDatePattern_ + " " + shortTimePattern_};
-            case 'F': return {fullDateTimePattern_};
+            case 'F': case 'U': return {fullDateTimePattern_};
             case 'g': return {shortDatePattern_ + " " + shortTimePattern_};
             case 'G': return {shortDatePattern_ + " " + longTimePattern_};
             case 'm': case 'M': return {monthDayPattern_};
+            // Real .NET's RoundtripFormat constant (DateTimeFormat.cs) -- was entirely missing
+            // here, so GetAllDateTimePatterns('o'/'O') previously fell through to the
+            // ArgumentException default case instead of returning a valid pattern.
+            case 'o': case 'O': return {"yyyy'-'MM'-'dd'T'HH':'mm':'ss.fffffffK"};
             case 'r': case 'R': return {getRFC1123PatternProperty()};
             case 's': return {getSortableDateTimePatternProperty()};
             case 't': return {shortTimePattern_};

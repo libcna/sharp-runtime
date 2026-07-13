@@ -8,6 +8,7 @@
 //   DateTimeStyles:      enum values, operator|, operator&
 //   DaylightTime:        constructor, getStartProperty/getEndProperty/getDeltaProperty
 //   DigitShapes:         enum values
+#include <algorithm>
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -276,6 +277,31 @@ TEST(DateTimeFormatInfoBatch28Test, GetAllDateTimePatterns_UnrecognizedFormat_Th
     // format character rather than returning an empty collection.
     DateTimeFormatInfo dtfi;
     EXPECT_THROW(dtfi.GetAllDateTimePatterns('?'), System::ArgumentException);
+}
+
+TEST(DateTimeFormatInfoBatch28Test, GetAllDateTimePatterns_RoundtripAndUniversal_DoNotThrow) {
+    // Regression: 'o'/'O'/'U' previously fell through to the default ArgumentException case,
+    // but real .NET's format switch handles all of "dDfFgGmMoOrRstTuUyY".
+    DateTimeFormatInfo dtfi;
+    EXPECT_FALSE(dtfi.GetAllDateTimePatterns('o').empty());
+    EXPECT_FALSE(dtfi.GetAllDateTimePatterns('O').empty());
+    EXPECT_FALSE(dtfi.GetAllDateTimePatterns('U').empty());
+    EXPECT_EQ(dtfi.GetAllDateTimePatterns('F'), dtfi.GetAllDateTimePatterns('U'));
+}
+
+TEST(DateTimeFormatInfoBatch28Test, GetAllDateTimePatterns_NoArg_CoversAllStandardFormats) {
+    // Regression: the no-arg overload previously returned only 7 hardcoded raw pattern
+    // fields, silently omitting RFC1123/sortable/universal-sortable/round-trip patterns.
+    // Real .NET's version loops over every standard format character and concatenates.
+    DateTimeFormatInfo dtfi;
+    auto all = dtfi.GetAllDateTimePatterns();
+    auto contains = [&](const std::string& s) {
+        return std::find(all.begin(), all.end(), s) != all.end();
+    };
+    EXPECT_TRUE(contains(dtfi.getRFC1123PatternProperty()));
+    EXPECT_TRUE(contains(dtfi.getSortableDateTimePatternProperty()));
+    EXPECT_TRUE(contains(dtfi.getUniversalSortableDateTimePatternProperty()));
+    EXPECT_TRUE(contains("yyyy'-'MM'-'dd'T'HH':'mm':'ss.fffffffK"));
 }
 
 TEST(DateTimeFormatInfoBatch28Test, NativeCalendarName) {
