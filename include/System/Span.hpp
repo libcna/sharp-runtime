@@ -10,6 +10,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/IndexOutOfRangeException.hpp"
 
 namespace System {
 
@@ -91,20 +92,20 @@ namespace System {
         /**
          * @brief Returns a reference to the element at the specified index.
          * @param i The zero-based index.
-         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
+         * @throws System::IndexOutOfRangeException if @p i is out of bounds.
          */
         T& operator[](intcs i) {
-            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
+            if (i < 0 || i >= length_) throw System::IndexOutOfRangeException();
             return ptr_[i];
         }
 
         /**
          * @brief Returns a const reference to the element at the specified index.
          * @param i The zero-based index.
-         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
+         * @throws System::IndexOutOfRangeException if @p i is out of bounds.
          */
         const T& operator[](intcs i) const {
-            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
+            if (i < 0 || i >= length_) throw System::IndexOutOfRangeException();
             return ptr_[i];
         }
 
@@ -347,10 +348,10 @@ namespace System {
         /**
          * @brief Returns a const reference to the element at the specified index.
          * @param i The zero-based index of the element.
-         * @throws System::ArgumentOutOfRangeException if @p i is out of bounds.
+         * @throws System::IndexOutOfRangeException if @p i is out of bounds.
          */
         const T& operator[](intcs i) const {
-            if (i < 0 || i >= length_) throw System::ArgumentOutOfRangeException("index");
+            if (i < 0 || i >= length_) throw System::IndexOutOfRangeException();
             return ptr_[i];
         }
 
