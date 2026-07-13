@@ -97,7 +97,7 @@ public:
     struct ParsedUrl {
         std::string scheme;
         std::string host;
-        int         port = 80;
+        SharpRuntime::intcs port = 80;
         std::string path;
     };
 
@@ -109,7 +109,7 @@ public:
     static ParsedUrl parseUrl(const std::string& url);
 
     struct ParsedStatusLine {
-        int         statusCode = 0;
+        SharpRuntime::intcs statusCode = 0;
         std::string reason;
     };
 
