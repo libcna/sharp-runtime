@@ -307,7 +307,18 @@ namespace System {
 
         DateTime dt;
         if (!DateTime::TryParse(dtStr, dt)) return false;
-        result = DateTimeOffset(dt, offset);
+        // The DateTimeOffset(DateTime, TimeSpan) constructor validates the offset (must be a
+        // whole number of minutes, within +-14 hours, and produce a UTC instant within
+        // DateTime's representable range) and throws ArgumentException/
+        // ArgumentOutOfRangeException on violation -- e.g. TryParse("...+15:00", result) parses
+        // a syntactically well-formed but out-of-range (>14h) offset successfully up to this
+        // point, then this construction throws. TryParse's entire contract is to never throw,
+        // only report failure via its bool return, so that exception must not escape here.
+        try {
+            result = DateTimeOffset(dt, offset);
+        } catch (...) {
+            return false;
+        }
         return true;
     }
 
@@ -338,16 +349,34 @@ namespace System {
 
     std::string DateTimeOffset::ToString(const std::string& format) const {
         if (format == "O" || format == "o") {
-            // ISO 8601 round-trip: yyyy-MM-ddTHH:mm:ss.fffffffzzz
-            return dateTime_.ToString("yyyy-MM-ddTHH:mm:ss") + formatOffset(offset_);
+            // ISO 8601 round-trip: yyyy-MM-ddTHH:mm:ss.fffffffzzz. The offset is preserved
+            // (not converted to UTC) since round-tripping must reconstruct the exact original
+            // DateTimeOffset, including its specific offset -- matches real .NET.
+            // Note: DateTime::ToString's own "f" specifier tops out at millisecond (3-digit)
+            // precision in this port, not .NET's full 7-digit (100ns tick) precision -- a
+            // pre-existing limitation of DateTime's formatting engine, not introduced here.
+            // ".fff" is still added (previously the fractional-seconds component was omitted
+            // entirely), since that's a real, confirmed loss of round-trip fidelity for any
+            // sub-second component -- millisecond precision is strictly better than none.
+            return dateTime_.ToString("yyyy-MM-ddTHH:mm:ss.fff") + formatOffset(offset_);
         }
         if (format == "R" || format == "r") {
-            // RFC 1123 (simplified — no day-of-week)
-            return dateTime_.ToString("ddd, dd MMM yyyy HH:mm:ss") + " " +
-                   (offset_ == TimeSpan::Zero ? "GMT" : formatOffset(offset_));
+            // Verified against DateTimeFormat.cs's TryFormatR: real .NET converts to UTC
+            // (subtracting the offset) BEFORE formatting, and ALWAYS appends the literal "GMT"
+            // -- RFC 1123 has no offset notation, "GMT" is the only valid trailing token
+            // regardless of the original offset. The previous code used the ORIGINAL
+            // (offset-relative) clock time directly and only emitted "GMT" when the offset
+            // happened to already be zero, appending the raw "+HH:MM"/"-HH:MM" offset
+            // otherwise -- producing both the wrong TIME and an invalid RFC1123 string for any
+            // non-zero offset.
+            return getUtcDateTimeProperty().ToString("ddd, dd MMM yyyy HH:mm:ss") + " GMT";
         }
         if (format == "u") {
-            return dateTime_.ToString("yyyy-MM-dd HH:mm:ssZ");
+            // Verified against DateTimeFormat.cs's TryFormatu: real .NET ALSO converts to UTC
+            // first. The previous code appended a literal "Z" (implying UTC) to the ORIGINAL,
+            // still-offset-relative clock time without actually converting it -- misleading
+            // output for any non-zero offset (a "Z"-suffixed timestamp that wasn't actually UTC).
+            return getUtcDateTimeProperty().ToString("yyyy-MM-dd HH:mm:ssZ");
         }
         // General format: delegate to DateTime and append offset
         return dateTime_.ToString(format) + formatOffset(offset_);

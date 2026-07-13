@@ -820,6 +820,40 @@ TEST(DateTimeOffsetTests, ToString_WithFormat_r_ProducesRfc1123) {
     EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 07:28:00 GMT");
 }
 
+// Regression tests for ticket 354: real .NET's TryFormatR/TryFormatu (DateTimeFormat.cs) convert
+// to UTC (subtracting the offset) BEFORE formatting, and "R"/"r" always emits the literal "GMT"
+// (RFC 1123 has no offset notation). The previous code used the ORIGINAL offset-relative clock
+// time directly for BOTH "R" and "u", producing the wrong time and (for "R") an invalid trailing
+// token (the raw offset instead of "GMT") for any non-zero offset.
+TEST(DateTimeOffsetTests, ToString_WithFormat_r_NonZeroOffset_ConvertsToUtcAndAlwaysUsesGmt) {
+    // 07:28 +02:00 == 05:28 UTC.
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("r"), "Wed, 21 Oct 2015 05:28:00 GMT");
+}
+
+TEST(DateTimeOffsetTests, ToString_WithFormat_u_NonZeroOffset_ConvertsToUtc) {
+    DateTimeOffset dto(2015, 10, 21, 7, 28, 0, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("u"), "2015-10-21 05:28:00Z");
+}
+
+// Regression for ticket 354: the "O" round-trip format previously omitted the fractional-second
+// component entirely, losing millisecond precision on round-trip.
+TEST(DateTimeOffsetTests, ToString_WithFormat_O_IncludesMilliseconds) {
+    DateTime dt(2024, 6, 15, 10, 30, 0, 123);
+    DateTimeOffset dto(dt, TimeSpan::FromHours(2));
+    EXPECT_EQ(dto.ToString("O"), "2024-06-15T10:30:00.123+02:00");
+}
+
+// Regression for ticket 354: TryParse's contract is to never throw, only report failure via its
+// bool return -- but the DateTimeOffset(DateTime, TimeSpan) constructor it calls internally
+// validates the offset (must be within +-14 hours) and throws ArgumentOutOfRangeException on
+// violation. A syntactically well-formed offset that exceeds 14 hours previously let that
+// exception escape TryParse uncaught.
+TEST(DateTimeOffsetTests, TryParse_SyntacticallyValidButOutOfRangeOffset_ReturnsFalse) {
+    DateTimeOffset dto;
+    EXPECT_FALSE(DateTimeOffset::TryParse("2024-01-15T10:30:00+15:00", dto));
+}
+
 // ===========================================================================
 // TimeOnly
 // ===========================================================================
