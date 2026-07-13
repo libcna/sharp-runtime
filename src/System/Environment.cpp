@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Environment.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -340,10 +341,20 @@ bool Environment::getIsPrivilegedProcessProperty() {
 }
 
 void Environment::SetCurrentDirectory(const std::string& path) {
+    // Real .NET's Environment.CurrentDirectory setter first calls
+    // ArgumentException.ThrowIfNullOrEmpty(value) before touching the OS (Environment.cs), then
+    // throws when the underlying OS call fails (Environment.Windows.cs:
+    // `if (!Interop.Kernel32.SetCurrentDirectory(value))` throws a Win32-error-derived exception,
+    // typically DirectoryNotFoundException for a missing path) -- this previously did neither,
+    // silently accepting an empty path and ignoring chdir()'s return value entirely instead of
+    // surfacing either failure.
+    ArgumentException::ThrowIfNullOrEmpty(path, "value");
 #if defined(_WIN32)
-    SetCurrentDirectoryA(path.c_str());
+    if (!SetCurrentDirectoryA(path.c_str()))
+        throw System::IO::DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
 #else
-    chdir(path.c_str());
+    if (chdir(path.c_str()) != 0)
+        throw System::IO::DirectoryNotFoundException("Could not find a part of the path '" + path + "'.");
 #endif
 }
 
@@ -437,6 +448,14 @@ std::vector<std::string> Environment::GetCommandLineArgs() {
 }
 
 std::string Environment::getCommandLineProperty() {
+    // Real .NET's Environment.CommandLine (PasteArguments.Paste) re-quotes each argument using
+    // the same backslash-doubling rules as Windows' CommandLineToArgvW, so an argument containing
+    // whitespace/quotes round-trips unambiguously. This simplified version just space-joins the
+    // raw argv entries verbatim -- correct for the common case (no whitespace/quote characters in
+    // any argument), but an argument containing a space would be indistinguishable from two
+    // separate arguments if this string were re-parsed. Not fixed: full CommandLineToArgvW-style
+    // quoting is a Windows-specific escaping scheme with limited practical value for this
+    // POSIX-focused runtime's primarily-diagnostic use of this property.
     std::string result;
     for (std::size_t i = 0; i < s_commandLineArgs.size(); ++i) {
         if (i > 0) result += ' ';

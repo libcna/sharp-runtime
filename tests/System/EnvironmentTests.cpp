@@ -3,7 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <algorithm>
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/Environment.hpp"
+#include "System/IO/DirectoryNotFoundException.hpp"
 #include "System/Version.hpp"
 #ifndef _WIN32
 #include <unistd.h>
@@ -251,6 +253,19 @@ TEST(EnvironmentTests, SetCurrentDirectory_ThenGetReflectsChange) {
     EXPECT_EQ(Environment::GetCurrentDirectory(), "/tmp");
     // Restore
     Environment::SetCurrentDirectory(original);
+}
+
+TEST(EnvironmentTests, SetCurrentDirectory_NonexistentPath_Throws) {
+    // Regression: chdir()'s return value was previously ignored entirely, silently leaving
+    // the working directory unchanged instead of surfacing the failure like real .NET does.
+    EXPECT_THROW(Environment::SetCurrentDirectory("/this/path/does/not/exist/hopefully"),
+                 System::IO::DirectoryNotFoundException);
+}
+
+TEST(EnvironmentTests, SetCurrentDirectory_EmptyPath_Throws) {
+    // Regression: real .NET's setter calls ArgumentException.ThrowIfNullOrEmpty(value) before
+    // touching the OS; this port previously had no such check.
+    EXPECT_THROW(Environment::SetCurrentDirectory(""), System::ArgumentException);
 }
 
 // ---------------------------------------------------------------------------
