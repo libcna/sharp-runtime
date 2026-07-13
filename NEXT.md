@@ -1,10 +1,83 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a560451`) — 12168 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `116ae68`) — 12173 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12168 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12173 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — `status-audit` category: 37 tickets from 2026-07-09, in-code status markers verified/corrected (3 parallel forks)
+
+Continuing the same autonomous run (previous checkpoint covered the 100-ticket `code-audit`
+re-verification). Found a THIRD pre-session pool worth a second pass: `status-audit` (37 done
+tickets, all dated 2026-07-09 — 3-4 days before this session, entirely unexplored by this
+session until now). Each ticket audits an in-code status marker (`@status STUB`/`Partial`/`DONE`)
+against implementation reality — genuinely valuable given this session made extensive changes to
+many of these exact files (most notably `BufferedStream.hpp` and `FileSystemWatcher.hpp`, both
+of which went from stub to real implementation earlier this session). Dispatched 3 parallel
+forks (12-15 tickets each). Verified afterward via `git fetch`+`git log` (no local/origin
+divergence, all 6 commits landed cleanly) and a fresh `cmake --build` + full test run
+(12173/12173).
+
+**Result: 8 of 37 markers were stale/misleading/vague, corrected — plus one real code fix found
+along the way:**
+
+- **`FileSystemWatcher.hpp`** (98): already correctly updated by the same-session fork that did
+  the real inotify implementation — confirms the "update the doc-comment in the same commit as
+  the fix" discipline held throughout this session.
+- **`Property.hpp`/`ReadonlyProperty.hpp`/`Enum.hpp`** (79, 80, 87): all said "Stub" but were
+  actually fully working — corrected to clarify working non-reflection helpers vs. the
+  permanently-out-of-scope reflection pieces they're adjacent to. Commits `27ec588`/`b4bcba7`.
+- **`DescriptionAttribute.hpp`** (82) — real code fix, not just a doc correction: the "Stub"
+  marker's justification ("no reflection integration") didn't actually explain a real gap behind
+  it — missing `Default`/`Equals`/`GetHashCode`/`IsDefaultAttribute` surface. Added all four with
+  5 new tests. Commit `27ec588`.
+- **`Directory.hpp`/`DirectoryInfo.hpp`** (92, 93): bare "Status: Partial" with zero detail —
+  technically accurate but unhelpful; expanded both with concrete missing-surface lists. Commits
+  `58fc8fb`/`116ae68`.
+- **`CancellationToken.hpp`/`CancellationTokenSource.hpp`** (110, 111): markers were vague/
+  incomplete — documented the exact missing surface (`CanBeCanceled`, `WaitHandle`, state-object
+  `Register` overloads, `UnsafeRegister`, `Cancel(bool)`, `CancelAsync()`, `TryReset()`, etc.).
+  Commit `cb8d3e9`.
+- **`Threading/Timer.hpp`** (113) — note: the *other* `Timer`, distinct from `System.Timers.Timer`
+  which already has a documented lifetime hazard from an earlier round. This one's marker said
+  "no thread-pool" but omitted the actual missing overload surface (TimeSpan/uint/long
+  ctor+Change overloads, `ActiveCount`, `Dispose(WaitHandle)`, `DisposeAsync()`, `Change()`'s
+  `bool` return). Also confirmed this type's `shared_ptr`-based design has NO dangling-`this`
+  hazard, unlike its unrelated `System.Timers.Timer` sibling. Commit `6e18cbf`.
+
+**Everything else (29 of 37) was already accurate** — including `DateTime.hpp`, `DateTimeOffset.hpp`,
+`Debug.hpp`, `Trace.hpp`, `Guid.hpp`, `Half.hpp`, `ZipFile.hpp`, `ArgIterator.hpp`, most of the
+`System.IO` file/directory/stream types, `Dns.hpp`, `Decoder.hpp`/`Encoder.hpp` (consistent with
+this session's own earlier findings), `Regex.hpp` (accurate and detailed — confirmed
+`std::regex`-backed with named-group support, disclosed `RegexOptions`/timeout gaps), `Mutex.hpp`,
+`TypedReference.hpp` (a possible separate `task.status` drift noted, not acted on — belongs to
+the `task`-table workflow, not this ticket), `Uri.hpp` (still accurate after this session's
+recent `OriginalString` addition).
+
+Final verified state: 12173/12173 tests passing (up from 12168 — 5 net new tests), 0 errors/0
+warnings, all 6 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+**Running tally, autonomous continuation after the "entire backlog drained" milestone**:
+`regression-audit` (211 tickets, 10 bugs) + `code-audit` re-verification (100 tickets, 9 bugs) +
+`status-audit` (37 tickets, 8 corrections + 1 code fix) = 348 additional tickets processed across
+three second-pass categories, 20 more real bugs/gaps found on top of the original 41.
+
+### To resume
+All three second-pass categories (`regression-audit`, the 100-ticket `code-audit` slice,
+`status-audit`) are now fully drained. `SELECT category, status, COUNT(*) FROM ticket GROUP BY
+category, status` at this point shows every category `done` except `style` (100, permanently
+`blocked` on ticket #43). Remaining options: (1) re-run the `task`-table workflow for drift
+(a couple of small leads surfaced this round: `TypedReference` possibly misclassified `ignore`
+despite being a legitimate complete stub — worth checking), (2) ask the user about unblocking
+ticket #43, (3) this session has now done two full "re-audit the pre-session pool" passes across
+every ticket category that had one (`ported-type-audit`→`regression-audit`, `code-audit`,
+`status-audit`) — a plausible next escalation is a THIRD pass specifically re-auditing tickets
+closed by earlier rounds WITHIN this very session (the 41+20=61 already-fixed findings, to check
+none of today's own fixes introduced a fresh regression) — though this has materially diminishing
+justification since those fixes are hours old, not days, and were already build+test verified at
+close time, (4) await further explicit direction. Ticket #43 stays `blocked` — never touch
+without being asked again.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — 100 pre-session `code-audit` "large file" tickets re-verified (6 parallel forks), 9 more real bugs found including a stack-overflow DoS and a third XxHash memory-safety bug
 
