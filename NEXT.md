@@ -1,10 +1,101 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `8d4f662`) — 12100 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `1c25c57`) — 12144 tests passing. Verified via:*
 ```
 cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 12100 tests from 1215 test suites, 0 failures
+./build/SharpRuntimeTests                 # 12144 tests from 1215 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — new `regression-audit` category: 211 tickets, second pass on pre-session-done `System` root types, 10 more real bugs found
+
+After the full ticket backlog drained (previous checkpoint), user explicitly authorized
+continuing ("ano pokračuj stejným tempem dál" — "yes, continue at the same pace"). Since the
+ticket table had no more `todo` items and the `task` table also had zero unclassified rows,
+identified a genuinely valuable, safe next phase from this session's own evidence: 229
+`ported-type-audit` tickets (211 in area='System', 18 in System.Buffers — the latter already
+confirmed clean via an earlier namespace-audit) were closed in a PRIOR session, before this
+session's own fresh fork-batch audit rigor existed — and this session repeatedly proved that
+"already done" doesn't mean bug-free (41 fixes in supposedly-done code already this session).
+Created a NEW ticket category `regression-audit` (211 new tickets, 1499-1709) — one per `System`
+root-namespace type, each explicitly referencing its original `ported-type-audit` ticket number
+for traceability, with acceptance criteria requiring genuine re-verification rather than a
+rubber-stamp. Also fixed 4 known `task.status` drift items first (`Comparison`,
+`SequencePosition`, `StringNormalizationExtensions`, `PropertyChangedEventHandler` — all verified
+to genuinely exist and work, just never flagged `ported`).
+
+Dispatched 5 parallel forks (~40-43 tickets each, alphabetically split since these are
+independent single-file types with no directory-overlap risk). Verified afterward via
+`git fetch`+`git log` (no local/origin divergence, all 10 commits landed cleanly), a fresh
+`cmake --build` + full test run (12144/12144), and personally re-read the highest-stakes fix
+(`Buffer::BlockCopy`/`GetByte`/`SetByte`/`MemoryCopy`) diff directly given its memory-safety
+relevance.
+
+**Result: this second pass was genuinely productive — 10 more real bugs/gaps found**, confirming
+the "re-audit already-done work" hypothesis:
+
+- **Memory safety: `Buffer::BlockCopy`/`GetByte`/`SetByte`/`MemoryCopy`** (ticket 1529) had ZERO
+  bounds validation on the `std::vector`-backed overloads — reached `memmove`/pointer arithmetic
+  directly with caller-controlled offset/count/index. Confirmed exploitable via a standalone ASan
+  repro (`BlockCopy` with `count=1000` on 4-byte vectors → immediate heap-buffer-overflow) before
+  fixing. Fixed with the same unsigned-arithmetic bounds-check pattern real .NET uses
+  (`ArgumentOutOfRangeException`/`ArgumentException`). The raw-pointer `BlockCopy` overload is
+  documented, not fixed, matching this codebase's established "raw pointer can't validate"
+  precedent (`Array::Copy`, `ArrayList::CopyTo`). Also hardened `MemoryCopy`'s `long` overload to
+  reject a negative `sourceBytesToCopy` explicitly. Commit `b8b3dc1`.
+- **MSVC compatibility: `Math::BigMul(long,long,long&)`** (ticket 1620) used `__int128` with no
+  MSVC guard, unlike every other `__int128` use in this codebase (`Int128.hpp` hard-`#error`s,
+  `BinaryPrimitives.hpp` `#ifdef`-excludes) — would have failed MSVC compilation with a raw
+  "unknown type" error rather than the intended clean, documented MSVC-unsupported status. Fixed
+  by wrapping in `#if !defined(_MSC_VER)`. Commit `4c32320`.
+- **`ArrayTypeMismatchException`** (1517): default message used the class doc-comment's summary
+  text instead of .NET's actual `SR.Arg_ArrayTypeMismatchException` resource string — a real,
+  wrong-text bug (a test had even codified the wrong message, now fixed alongside it). Commit
+  `2fffd53`.
+- **`Version::parse()`** (1707): silently accepted a trailing dot (`"1.2."`) instead of throwing
+  `FormatException` — `std::getline` drops the phantom trailing empty component. Commit `ca097b3`.
+- **`UInt128`** (1684): entirely missing `Parse`/`TryParse`/`ToString(format)`, inconsistent with
+  its signed sibling `Int128` (which has all three) and real .NET's `UInt128`. Added all three
+  with proper `FormatException`-vs-`OverflowException` distinction. Commit `8e5409a`.
+- **`UriBuilder`** (1694): `setQueryProperty`/`setFragmentProperty` stored the raw value verbatim
+  instead of normalizing a missing `?`/`#` prefix like real .NET's setters do. Commit `482c2a5`.
+- **`UriParser`** (1702): `IsKnownScheme`'s table had a phantom `"wais"` scheme (not actually
+  registered in real .NET) and was missing `"ws"`/`"wss"`/`"uuid"`/`"vsmacros"` — fixed to match
+  `UriSyntax.cs` exactly. Commit `4fc284f`.
+- **`Uri`/`UriTypeConverter`** (1693, 1704): `Uri.OriginalString` was entirely missing; added it,
+  then fixed `UriTypeConverter::ConvertTo` (which had been using `AbsoluteUri` instead of
+  `OriginalString`, unlike real .NET's actual implementation). Commit `1c25c57`.
+
+**Everything else across all 211 tickets was clean on deep audit** — including thorough
+re-verification that several PRIOR fixes from this same session are still intact
+(`ArgumentException` family/ticket 353, `Delegate`/ticket 345, `Convert`/tickets 19dfd66+7236c91,
+`DateTimeOffset`/ticket 354, `Uri.cpp`/ticket 340), several already-hardened areas from even
+earlier sessions (`Single`'s NaN total-ordering, `TimeSpan`'s overflow-safe arithmetic, `Random`'s
+documented Mono-cross-verification, `Tuple`'s 8-arity hash-combining formula traced byte-exact),
+and `GC`/`GC*` types correctly confirmed as documented no-ops per CLAUDE.md's permanent deviation.
+
+Final verified state: 12144/12144 tests passing (up from 12100 — 44 net new tests), 0 errors/0
+warnings, all 10 commits confirmed on `origin/feature/work` via `git fetch` (no divergence).
+
+**Takeaway for future sessions**: a "regression audit" second pass on old `done` tickets is a
+genuinely productive activity, not busywork — this round's hit rate (10 real findings across 211
+re-audited types, including one exploitable heap overflow) is comparable to the FIRST-pass
+`ported-type-audit` sweep's hit rate (41 findings across 1020 types) despite auditing
+already-"done" code. The `System.Buffers` 18-ticket pool (already confirmed clean via an earlier
+namespace-audit this session) was excluded from this round; other namespaces' pre-session-done
+tickets (if any exist outside `area='System'`) were not checked — this round only covered the 211
+area='System' tickets specifically, since that's where the pre-session-done pool concentrated.
+
+### To resume
+The `regression-audit` category (this session's new addition) is fully drained: `SELECT COUNT(*)
+FROM ticket WHERE category='regression-audit' AND status='todo'` = 0. Options for continuing
+(same menu as the prior "entire backlog drained" checkpoint, still applicable): (1) re-run the
+`task`-table workflow's Step 1 for any newly-surfaced drift, (2) ask the user about unblocking
+ticket #43, (3) extend this regression-audit pattern to other namespaces if a similar
+pre-session-done pool is found elsewhere (check `SELECT area, COUNT(*) FROM ticket WHERE
+category='ported-type-audit' AND status='done' AND ticket_no NOT BETWEEN 636 AND 1498 GROUP BY
+area` — as of this checkpoint that only showed `System`/`System.Buffers`, both now covered), or
+(4) await further explicit direction. Ticket #43 stays `blocked` — never touch without being
+asked again.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ENTIRE TICKET BACKLOG DRAINED (`SELECT COUNT(*) FROM ticket WHERE status='todo'` = 0)
 
