@@ -29,6 +29,44 @@ TEST(UriParserTest, IsKnownSchemeUnknown) {
     EXPECT_FALSE(UriParser::IsKnownScheme("custom-scheme"));
 }
 
+// ---------------------------------------------------------------------------
+// Regression: the known-scheme table previously listed "wais" (not one of
+// .NET's actual registered UriParser schemes) and was missing "ws"/"wss"
+// (WebSocket), "uuid", and "vsmacros" -- fixed to match UriSyntax.cs exactly.
+// ---------------------------------------------------------------------------
+
+TEST(UriParserTest, IsKnownSchemeWs) {
+    EXPECT_TRUE(UriParser::IsKnownScheme("ws"));
+}
+
+TEST(UriParserTest, IsKnownSchemeWss) {
+    EXPECT_TRUE(UriParser::IsKnownScheme("wss"));
+}
+
+TEST(UriParserTest, IsKnownSchemeUuid) {
+    EXPECT_TRUE(UriParser::IsKnownScheme("uuid"));
+}
+
+TEST(UriParserTest, IsKnownSchemeVsmacros) {
+    EXPECT_TRUE(UriParser::IsKnownScheme("vsmacros"));
+}
+
+TEST(UriParserTest, IsKnownSchemeWaisIsNotActuallyRegistered) {
+    // "wais" is a historical RFC 1738 scheme, NOT one of .NET's registered UriParser schemes.
+    EXPECT_FALSE(UriParser::IsKnownScheme("wais"));
+}
+
+TEST(UriParserTest, IsKnownSchemeMailtoGopherNewsNntpTelnetLdapNetTcpNetPipe) {
+    EXPECT_TRUE(UriParser::IsKnownScheme("mailto"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("gopher"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("news"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("nntp"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("telnet"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("ldap"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("net.tcp"));
+    EXPECT_TRUE(UriParser::IsKnownScheme("net.pipe"));
+}
+
 TEST(UriParserTest, IsKnownSchemeIsCaseInsensitive) {
     // URI schemes are case-insensitive per RFC 3986; matches this class's own doc comment.
     EXPECT_TRUE(UriParser::IsKnownScheme("HTTP"));
