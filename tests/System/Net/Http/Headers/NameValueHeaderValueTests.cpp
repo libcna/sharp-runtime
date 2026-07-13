@@ -90,6 +90,38 @@ TEST(NameValueHeaderValueTests, TryParse_Invalid_ReturnsFalse) {
     EXPECT_FALSE(NameValueHeaderValue::TryParse("", result));
 }
 
+// Real .NET's GetValueLength requires a non-empty token or quoted-string after '=' -- "name="
+// with nothing (or only whitespace) after the delimiter is an invalid value, not a name-only value.
+TEST(NameValueHeaderValueTests, TryParse_TrailingEqualsNoValue_ReturnsFalse) {
+    NameValueHeaderValue result("x");
+    EXPECT_FALSE(NameValueHeaderValue::TryParse("foo=", result));
+}
+
+TEST(NameValueHeaderValueTests, TryParse_TrailingEqualsWhitespaceOnly_ReturnsFalse) {
+    NameValueHeaderValue result("x");
+    EXPECT_FALSE(NameValueHeaderValue::TryParse("foo=  ", result));
+}
+
+// Real .NET's TryParse only accepts an unquoted value that is entirely token characters (or a
+// well-formed quoted-string) -- an unquoted value containing '=' or other non-token characters
+// must be rejected, unlike the looser check used by the public constructor/setValueProperty.
+TEST(NameValueHeaderValueTests, TryParse_UnquotedValueContainingEquals_ReturnsFalse) {
+    NameValueHeaderValue result("x");
+    EXPECT_FALSE(NameValueHeaderValue::TryParse("a=b=c", result));
+}
+
+TEST(NameValueHeaderValueTests, TryParse_UnquotedValueWithEmbeddedSpace_ReturnsFalse) {
+    NameValueHeaderValue result("x");
+    EXPECT_FALSE(NameValueHeaderValue::TryParse("a=b c", result));
+}
+
+TEST(NameValueHeaderValueTests, TryParse_QuotedValueContainingEquals_Succeeds) {
+    NameValueHeaderValue result("x");
+    ASSERT_TRUE(NameValueHeaderValue::TryParse("a=\"b=c\"", result));
+    EXPECT_EQ(result.getNameProperty(), "a");
+    EXPECT_EQ(result.getValueProperty(), "\"b=c\"");
+}
+
 TEST(NameValueHeaderValueTests, Parse_Invalid_Throws) {
     EXPECT_THROW(NameValueHeaderValue::Parse(""), System::FormatException);
 }

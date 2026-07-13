@@ -122,22 +122,34 @@ namespace System::Net::Http::Headers {
 
         size_t eq = trimmed.find('=');
         std::string name = (eq == std::string::npos) ? trimmed : trimmed.substr(0, eq);
-        std::string value = (eq == std::string::npos) ? "" : trimmed.substr(eq + 1);
 
         size_t nameEnd = name.find_last_not_of(" \t");
         if (nameEnd == std::string::npos) return false;
         name = name.substr(0, nameEnd + 1);
-
-        if (eq != std::string::npos) {
-            size_t valueStart = value.find_first_not_of(" \t");
-            value = (valueStart == std::string::npos) ? "" : value.substr(valueStart);
-        }
-
         if (!isToken(name)) return false;
-        if (!value.empty()) {
-            try {
-                checkValueFormat(value);
-            } catch (...) {
+
+        std::string value;
+        if (eq != std::string::npos) {
+            value = trimmed.substr(eq + 1);
+            size_t valueStart = value.find_first_not_of(" \t");
+            // Real .NET's GetValueLength requires a non-empty token or quoted-string after '=';
+            // "name=" (nothing, or only whitespace, after the delimiter) is an invalid value and
+            // must be rejected, not silently treated as a name-only value.
+            if (valueStart == std::string::npos) return false;
+            value = value.substr(valueStart);
+            // trimmed has no trailing whitespace (see initial trim above), so value doesn't either.
+
+            // Real .NET's TryParse (GetValueLength -> GetTokenLength or GetQuotedStringLength,
+            // with the caller requiring the whole input to be consumed) only accepts an unquoted
+            // value that is ENTIRELY token characters, or a well-formed quoted-string -- unlike
+            // the looser checkValueFormat() used by the public constructor/setValueProperty
+            // (which only rejects leading/trailing whitespace and embedded CR/LF/NUL, matching
+            // real .NET's own looser CheckValueFormat for that path). A naive find('=')-based
+            // split previously let an unquoted value containing '=' (e.g. "a=b=c") or other
+            // non-token characters through TryParse, which real .NET's stricter grammar rejects.
+            if (value.front() == '"') {
+                if (!isValidQuotedString(value)) return false;
+            } else if (!isToken(value)) {
                 return false;
             }
         }
