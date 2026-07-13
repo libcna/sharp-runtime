@@ -12,12 +12,17 @@ namespace System {
      * @brief Provides the base class for enumerations and static utility methods
      * for working with C++ enum types.
      *
-     * C++ counterpart of .NET System.Enum (stub).
+     * C++ counterpart of .NET System.Enum.
      * Full .NET Enum reflection (GetNames, GetValues, Parse, IsDefined, etc.)
-     * requires runtime type information that is not available in C++.
-     * This class provides lightweight template helpers as a practical substitute.
+     * requires runtime type information that is not available in C++, and is
+     * permanently out of scope per this project's reflection deviation policy.
+     * This class provides working, non-reflection template helpers (ToString,
+     * ToUnderlying, ToInt32, ToObject, HasFlag) as a practical substitute --
+     * these ARE fully implemented, not stubs.
      *
-     * @note Status: Stub — reflection-dependent members are not implemented.
+     * @note Status: Partial — reflection-dependent members (GetNames/GetValues/Parse/
+     * IsDefined/etc.) are permanently out of scope; the non-reflection helpers above
+     * are complete.
      */
     class Enum {
     public:
