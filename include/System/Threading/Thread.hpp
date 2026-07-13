@@ -139,7 +139,7 @@ namespace System::Threading {
          * @throws System::ArgumentOutOfRangeException if @p millisecondsTimeout is less than -1.
          * @throws System::Threading::ThreadStateException if this thread has not been started.
          */
-        bool Join(int millisecondsTimeout) {
+        bool Join(intcs millisecondsTimeout) {
             if (millisecondsTimeout < -1)
                 throw System::ArgumentOutOfRangeException("millisecondsTimeout",
                     "Number must be either non-negative and less than or equal to Int32.MaxValue or -1.");
@@ -257,8 +257,8 @@ namespace System::Threading {
          * @brief Spins for @p iterations tight-loop iterations.
          * @param iterations Number of spin iterations.
          */
-        static void SpinWait(int iterations) {
-            for (int i = 0; i < iterations; ++i)
+        static void SpinWait(intcs iterations) {
+            for (intcs i = 0; i < iterations; ++i)
                 std::atomic_signal_fence(std::memory_order_seq_cst);
         }
 
@@ -280,7 +280,7 @@ namespace System::Threading {
          * @brief Returns the ID of the processor on which the current thread is running.
          * @return Processor ID (best-effort; may be stale immediately).
          */
-        [[nodiscard]] static int GetCurrentProcessorId();
+        [[nodiscard]] static intcs GetCurrentProcessorId();
 
         // -----------------------------------------------------------------------
         // CurrentThread proxy
