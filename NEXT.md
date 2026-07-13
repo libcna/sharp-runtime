@@ -1,10 +1,36 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a8af25d`) — 11841 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `16ad73c`) — 11844 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11841 tests from 1197 test suites, 0 failures
+./build/SharpRuntimeTests                 # 11844 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 345 closed, real Equals/GetHashCode bugs
+
+Continuing the same autonomous run (previous checkpoint covered 344). Commit: 16ad73c — pushed
+to `origin/feature/work`.
+
+- **345 (Delegate.hpp/.cpp)**: two real bugs in the single-target delegate path. (1) `Equals()`
+  only ever returned `true` for the literal same object, but real .NET's documented
+  `Delegate.Equals` contract compares single-cast delegates by (Method, Target) value-equality —
+  two distinct instances wrapping the same free function ARE `Equals()` in .NET. A
+  `std::function` can't be compared this way for arbitrary lambdas/closures (no `operator==`, a
+  fundamental C++ limitation), but the one mechanically comparable case — both wrapping the
+  identical plain function pointer — is now handled. (2) While implementing that fix, discovered
+  `GetHashCode()`'s "hash the function target pointer" special case was itself broken: it hashed
+  `std::function::target<>()`'s RETURN VALUE directly — the address of the internal storage slot
+  holding the callable, not the callable's own value, which differs per `std::function` instance
+  even for the same wrapped function (confirmed via a standalone repro) — so it never actually
+  produced a consistent hash, and after fix (1) would have been a real hash-contract violation.
+  Fixed by dereferencing to get the actual function pointer value before hashing. Rest of the
+  file (Invoke, Combine, Remove/RemoveAll, InvocationListEnumerator, DynamicInvoke/getTarget's
+  documented deviations) reviewed and confirmed correct.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 344 closed, a documented live-view gap
 
