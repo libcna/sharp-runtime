@@ -5,10 +5,13 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Specialized {
+
+using SharpRuntime::intcs;
 
 /**
  * @brief A strongly-typed collection of strings.
@@ -29,7 +32,7 @@ public:
      * C++ counterpart of .NET StringCollection.Count.
      * @return The number of elements.
      */
-    [[nodiscard]] int getCountProperty() const { return static_cast<int>(data_.size()); }
+    [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_.size()); }
 
     /**
      * @brief Gets a value indicating whether the collection is read-only.
@@ -63,8 +66,8 @@ public:
      * @return A const reference to the string.
      * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    [[nodiscard]] const std::string& operator[](int index) const {
-        if (index < 0 || index >= static_cast<int>(data_.size()))
+    [[nodiscard]] const std::string& operator[](intcs index) const {
+        if (index < 0 || index >= static_cast<intcs>(data_.size()))
             throw System::ArgumentOutOfRangeException("index");
         return data_[static_cast<size_t>(index)];
     }
@@ -77,8 +80,8 @@ public:
      * @return A reference to the string.
      * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    std::string& operator[](int index) {
-        if (index < 0 || index >= static_cast<int>(data_.size()))
+    std::string& operator[](intcs index) {
+        if (index < 0 || index >= static_cast<intcs>(data_.size()))
             throw System::ArgumentOutOfRangeException("index");
         return data_[static_cast<size_t>(index)];
     }
@@ -90,9 +93,9 @@ public:
      * @param value The string to add.
      * @return The zero-based index at which @p value was added.
      */
-    int Add(const std::string& value) {
+    intcs Add(const std::string& value) {
         data_.push_back(value);
-        return static_cast<int>(data_.size()) - 1;
+        return static_cast<intcs>(data_.size()) - 1;
     }
 
     /**
@@ -113,8 +116,8 @@ public:
      * @param value The string to insert.
      * @throws System::ArgumentOutOfRangeException if @p index is negative or greater than Count.
      */
-    void Insert(int index, const std::string& value) {
-        if (index < 0 || index > static_cast<int>(data_.size()))
+    void Insert(intcs index, const std::string& value) {
+        if (index < 0 || index > static_cast<intcs>(data_.size()))
             throw System::ArgumentOutOfRangeException("index");
         data_.insert(data_.begin() + index, value);
     }
@@ -137,8 +140,8 @@ public:
      * @param index The zero-based index of the element to remove.
      * @throws System::ArgumentOutOfRangeException if @p index is out of range.
      */
-    void RemoveAt(int index) {
-        if (index < 0 || index >= static_cast<int>(data_.size()))
+    void RemoveAt(intcs index) {
+        if (index < 0 || index >= static_cast<intcs>(data_.size()))
             throw System::ArgumentOutOfRangeException("index");
         data_.erase(data_.begin() + index);
     }
@@ -168,9 +171,9 @@ public:
      * @param value The string to locate.
      * @return The zero-based index, or -1 if not found.
      */
-    [[nodiscard]] int IndexOf(const std::string& value) const {
+    [[nodiscard]] intcs IndexOf(const std::string& value) const {
         auto it = std::find(data_.begin(), data_.end(), value);
-        return it == data_.end() ? -1 : static_cast<int>(it - data_.begin());
+        return it == data_.end() ? -1 : static_cast<intcs>(it - data_.begin());
     }
 
     /**
@@ -182,10 +185,10 @@ public:
      * @throws System::ArgumentOutOfRangeException if @p index is negative.
      * @throws System::ArgumentException if @p dest does not have enough room starting at @p index.
      */
-    void CopyTo(std::vector<std::string>& dest, int index) const {
+    void CopyTo(std::vector<std::string>& dest, intcs index) const {
         if (index < 0)
             throw System::ArgumentOutOfRangeException("index");
-        if (static_cast<int>(dest.size()) - index < static_cast<int>(data_.size()))
+        if (static_cast<intcs>(dest.size()) - index < static_cast<intcs>(data_.size()))
             throw System::ArgumentException("Destination array was not long enough.", "dest");
         for (size_t i = 0; i < data_.size(); ++i)
             dest[static_cast<size_t>(index) + i] = data_[i];
