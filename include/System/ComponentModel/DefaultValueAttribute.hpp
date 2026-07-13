@@ -4,9 +4,13 @@
 #pragma once
 #include <any>
 #include <string>
+#include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/Attribute.hpp"
 
 namespace System::ComponentModel {
+
+    using SharpRuntime::intcs;
+    using SharpRuntime::longcs;
 
     /** Specifies the default value for a property. */
     class DefaultValueAttribute : public System::Attribute {
@@ -15,9 +19,9 @@ namespace System::ComponentModel {
         /** @param v Default value as bool. */
         explicit DefaultValueAttribute(bool v)        : value_(v) {}
         /** @param v Default value as int. */
-        explicit DefaultValueAttribute(int v)         : value_(v) {}
+        explicit DefaultValueAttribute(intcs v)       : value_(v) {}
         /** @param v Default value as long. */
-        explicit DefaultValueAttribute(long v)        : value_(v) {}
+        explicit DefaultValueAttribute(longcs v)      : value_(v) {}
         /** @param v Default value as double. */
         explicit DefaultValueAttribute(double v)      : value_(v) {}
         /** @param v Default value as float. */
