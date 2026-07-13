@@ -48,7 +48,7 @@ TEST(BitArrayGapFill, GetEnumerator_IteratesAllBits) {
     ASSERT_NE(e, nullptr);
     std::vector<bool> got;
     while (e->MoveNext()) {
-        bool v = *static_cast<bool*>(e->getCurrent());
+        bool v = *static_cast<bool*>(e->getCurrentProperty());
         got.push_back(v);
     }
     delete e;
@@ -457,7 +457,7 @@ TEST(ArrayListGapFill, GetEnumerator_IteratesAllElementsInOrder) {
     ASSERT_NE(e, nullptr);
     std::vector<int> seen;
     while (e->MoveNext())
-        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())));
+        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())));
     EXPECT_EQ(seen, (std::vector<int>{10, 20, 30}));
     EXPECT_FALSE(e->MoveNext());
 }
@@ -473,7 +473,7 @@ TEST(ArrayListGapFill, GetEnumerator_GetCurrent_BeforeMoveNext_Throws) {
     ArrayList al;
     al.Add(std::any(1));
     std::unique_ptr<IEnumerator> e(al.GetEnumerator());
-    EXPECT_THROW(e->getCurrent(), System::InvalidOperationException);
+    EXPECT_THROW(e->getCurrentProperty(), System::InvalidOperationException);
 }
 
 TEST(ArrayListGapFill, GetEnumerator_GetCurrent_AfterExhaustion_Throws) {
@@ -482,7 +482,7 @@ TEST(ArrayListGapFill, GetEnumerator_GetCurrent_AfterExhaustion_Throws) {
     std::unique_ptr<IEnumerator> e(al.GetEnumerator());
     e->MoveNext();
     EXPECT_FALSE(e->MoveNext());
-    EXPECT_THROW(e->getCurrent(), System::InvalidOperationException);
+    EXPECT_THROW(e->getCurrentProperty(), System::InvalidOperationException);
 }
 
 TEST(ArrayListGapFill, GetEnumerator_Reset_AllowsReiteration) {
@@ -494,12 +494,12 @@ TEST(ArrayListGapFill, GetEnumerator_Reset_AllowsReiteration) {
     e->MoveNext();
     e->Reset();
     ASSERT_TRUE(e->MoveNext());
-    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())), 1);
+    EXPECT_EQ(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())), 1);
 }
 
 // Regression test: real .NET's ArrayList enumerator is fail-fast -- a structural
 // modification (Add/Insert/Remove/Clear/...) after the enumerator is created invalidates it,
-// throwing InvalidOperationException on the next MoveNext()/Reset()/getCurrent() call.
+// throwing InvalidOperationException on the next MoveNext()/Reset()/getCurrentProperty() call.
 TEST(ArrayListGapFill, GetEnumerator_ModifiedDuringEnumeration_Throws) {
     ArrayList al;
     al.Add(std::any(1));
@@ -521,7 +521,7 @@ TEST(ArrayListGapFill, GetEnumerator_TwoArgOverload_IteratesOnlyTheRequestedRang
     ASSERT_NE(e, nullptr);
     std::vector<int> seen;
     while (e->MoveNext())
-        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrent())));
+        seen.push_back(std::any_cast<int>(*static_cast<std::any*>(e->getCurrentProperty())));
     EXPECT_EQ(seen, (std::vector<int>{2, 3}));
 }
 

@@ -19,14 +19,14 @@ TEST(ReadOnlySequenceEnumeratorTest, CurrentHasCorrectLength) {
     ReadOnlySequence<int> seq(data.data(), static_cast<int>(data.size()));
     auto e = seq.GetEnumerator();
     e.MoveNext();
-    EXPECT_EQ(e.getCurrent().getLengthProperty(), 3);
+    EXPECT_EQ(e.getCurrentProperty().getLengthProperty(), 3);
 }
 
 TEST(ReadOnlySequenceEnumeratorTest, EmptySequenceNoMoveNext) {
     ReadOnlySequence<int> seq;
     auto e = seq.GetEnumerator();
     e.MoveNext();
-    auto mem = e.getCurrent();
+    auto mem = e.getCurrentProperty();
     EXPECT_EQ(mem.getLengthProperty(), 0);
 }
 

@@ -284,7 +284,7 @@ namespace System::Buffers {
              *
              * C++ counterpart of .NET ReadOnlySequence&lt;T&gt;.Enumerator.Current.
              */
-            [[nodiscard]] System::ReadOnlyMemory<T> getCurrent() const {
+            [[nodiscard]] System::ReadOnlyMemory<T> getCurrentProperty() const {
                 return seq_->First();
             }
 

@@ -189,7 +189,7 @@ TEST(TextElementEnumeratorBatch33Test, UTF8TwoByteSequence) {
 TEST(TextElementEnumeratorBatch33Test, GetCurrent_SameAsGetTextElement) {
     TextElementEnumerator e("z");
     e.MoveNext();
-    EXPECT_EQ(e.getCurrent(), e.GetTextElement());
+    EXPECT_EQ(e.getCurrentProperty(), e.GetTextElement());
 }
 
 // ===========================================================================

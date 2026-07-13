@@ -25,7 +25,7 @@ public:
     explicit IntVectorEnumerator(const std::vector<int>& d) : data_(d) {}
     bool MoveNext() override { return ++index_ < static_cast<int>(data_.size()); }
     void Reset()    override { index_ = -1; }
-    void* getCurrent() const override {
+    void* getCurrentProperty() const override {
         return const_cast<int*>(&data_[static_cast<size_t>(index_)]);
     }
 };
@@ -67,11 +67,11 @@ TEST(IEnumeratorTest, MoveNextAndCurrent) {
     std::vector<int> data = {10, 20, 30};
     IntVectorEnumerator e(data);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrent()), 10);
+    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 10);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrent()), 20);
+    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 20);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrent()), 30);
+    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 30);
     EXPECT_FALSE(e.MoveNext());
 }
 
@@ -81,7 +81,7 @@ TEST(IEnumeratorTest, Reset) {
     e.MoveNext();
     e.Reset();
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(*static_cast<int*>(e.getCurrent()), 1);
+    EXPECT_EQ(*static_cast<int*>(e.getCurrentProperty()), 1);
 }
 
 TEST(IEnumeratorTest, EmptyCollection) {

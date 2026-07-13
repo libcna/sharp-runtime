@@ -72,7 +72,7 @@ public:
      * C++ counterpart of .NET TextElementEnumerator.Current.
      * @return The current text element string.
      */
-    [[nodiscard]] std::string getCurrent() const { return GetTextElement(); }
+    [[nodiscard]] std::string getCurrentProperty() const { return GetTextElement(); }
 
     /**
      * @brief Gets the index of the current text element in the original string.

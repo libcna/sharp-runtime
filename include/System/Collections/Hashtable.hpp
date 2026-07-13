@@ -241,7 +241,7 @@ public:
      * @brief Returns a heap-allocated enumerator over the Hashtable's entries; caller takes ownership.
      *
      * C++ counterpart of .NET Hashtable.GetEnumerator(). The enumerator throws
-     * InvalidOperationException on MoveNext()/Reset()/getCurrent() (or Key/Value/Entry access)
+     * InvalidOperationException on MoveNext()/Reset()/getCurrentProperty() (or Key/Value/Entry access)
      * if the Hashtable is structurally modified while enumeration is in progress, matching
      * .NET's fail-fast contract. Iteration order is unspecified (std::unordered_map bucket
      * order), matching .NET's own documented "no particular order" guarantee for Hashtable.
@@ -287,7 +287,7 @@ private:
             valid_ = false;
         }
 
-        [[nodiscard]] void* getCurrent() const override {
+        [[nodiscard]] void* getCurrentProperty() const override {
             ensureCurrent();
             return &current_;
         }

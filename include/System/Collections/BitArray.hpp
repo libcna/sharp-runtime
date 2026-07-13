@@ -330,7 +330,7 @@ public:
     /**
      * @brief Enumerates over each bool value in the BitArray.
      *
-     * getCurrent() returns a void* pointing to an internal bool; cast to bool* to read.
+     * getCurrentProperty() returns a void* pointing to an internal bool; cast to bool* to read.
      */
     class Enumerator : public IEnumerator {
         const BitArray* arr_;
@@ -349,7 +349,7 @@ public:
         }
         void Reset() override { index_ = -1; current_ = false; }
         /** @brief Returns pointer to an internal bool holding the current bit value. */
-        void* getCurrent() const override { return &current_; }
+        void* getCurrentProperty() const override { return &current_; }
     };
 
     /**

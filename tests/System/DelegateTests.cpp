@@ -204,7 +204,7 @@ TEST(DelegateTests, InvocationListEnumerator_SingleTarget_OneIteration) {
     auto d = std::make_shared<Delegate>([]{});
     auto e = Delegate::EnumerateInvocationList<Delegate>(d);
     EXPECT_TRUE(e.MoveNext());
-    EXPECT_EQ(e.getCurrent().get(), d.get());
+    EXPECT_EQ(e.getCurrentProperty().get(), d.get());
     EXPECT_FALSE(e.MoveNext());
 }
 

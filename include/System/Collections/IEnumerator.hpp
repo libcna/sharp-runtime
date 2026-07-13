@@ -36,6 +36,6 @@ namespace System::Collections
      * C++ counterpart of .NET IEnumerator.Current.
      * @return Pointer to the current element; cast to the appropriate type.
      */
-    [[nodiscard]] virtual void* getCurrent() const = 0;
+    [[nodiscard]] virtual void* getCurrentProperty() const = 0;
     };
 }

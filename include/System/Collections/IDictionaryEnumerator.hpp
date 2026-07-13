@@ -11,7 +11,7 @@ namespace System::Collections {
  * @brief Enumerates the elements of a non-generic dictionary.
  *
  * C++ counterpart of .NET System.Collections.IDictionaryEnumerator.
- * Extends IEnumerator; getCurrent() returns a DictionaryEntry as void*.
+ * Extends IEnumerator; getCurrentProperty() returns a DictionaryEntry as void*.
  */
 class IDictionaryEnumerator : public IEnumerator {
 public:

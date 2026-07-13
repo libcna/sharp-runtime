@@ -41,7 +41,7 @@ using System::Threading::SynchronizationContext;
 using System::Threading::SendOrPostCallback;
 
 TEST(SynchronizationContextTests, GetCurrent_ReturnsNullptr) {
-    EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
+    EXPECT_EQ(SynchronizationContext::getCurrentProperty(), nullptr);
 }
 
 TEST(SynchronizationContextTests, Post_InvokesCallbackAsynchronously) {
@@ -79,13 +79,13 @@ TEST(SynchronizationContextTests, SetSynchronizationContext_NoThrow) {
 }
 
 TEST(SynchronizationContextTests, SetSynchronizationContext_RoundTrips) {
-    // Regression: SetSynchronizationContext()/getCurrent() previously didn't round-trip at
-    // all -- getCurrent() always returned nullptr regardless of what had been set.
+    // Regression: SetSynchronizationContext()/getCurrentProperty() previously didn't round-trip at
+    // all -- getCurrentProperty() always returned nullptr regardless of what had been set.
     SynchronizationContext ctx;
     SynchronizationContext::SetSynchronizationContext(&ctx);
-    EXPECT_EQ(SynchronizationContext::getCurrent(), &ctx);
+    EXPECT_EQ(SynchronizationContext::getCurrentProperty(), &ctx);
     SynchronizationContext::SetSynchronizationContext(nullptr); // reset for other tests on this thread
-    EXPECT_EQ(SynchronizationContext::getCurrent(), nullptr);
+    EXPECT_EQ(SynchronizationContext::getCurrentProperty(), nullptr);
 }
 
 // ===========================================================================

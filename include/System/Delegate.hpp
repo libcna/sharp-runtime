@@ -169,7 +169,7 @@ public:
      * @brief Provides a zero-allocation enumerator over a delegate's invocation list.
      *
      * C++ counterpart of .NET System.Delegate.InvocationListEnumerator<TDelegate>.
-     * Supports both explicit MoveNext() / getCurrent() and C++ range-based for loops.
+     * Supports both explicit MoveNext() / getCurrentProperty() and C++ range-based for loops.
      *
      * @tparam TDelegate Delegate or a subclass of Delegate.
      */
@@ -189,7 +189,7 @@ public:
         }
 
         /** @brief Gets the element at the current enumerator position. */
-        [[nodiscard]] std::shared_ptr<TDelegate> getCurrent() const { return current_; }
+        [[nodiscard]] std::shared_ptr<TDelegate> getCurrentProperty() const { return current_; }
 
         /**
          * @brief Advances the enumerator to the next element.
@@ -216,7 +216,7 @@ public:
             bool                      valid;
             bool operator!=(const Iterator& o) const { return valid != o.valid; }
             Iterator& operator++() { valid = e->MoveNext(); return *this; }
-            std::shared_ptr<TDelegate> operator*() const { return e->getCurrent(); }
+            std::shared_ptr<TDelegate> operator*() const { return e->getCurrentProperty(); }
         };
 
         /** @brief Returns a begin iterator for range-based for. */
@@ -230,7 +230,7 @@ public:
      *
      * C++ counterpart of .NET Delegate.EnumerateInvocationList<TDelegate>(TDelegate? d).
      * A null delegate yields an empty enumerator. The returned enumerator can be used
-     * in a C++ range-based for loop or via explicit MoveNext() / getCurrent() calls.
+     * in a C++ range-based for loop or via explicit MoveNext() / getCurrentProperty() calls.
      *
      * @tparam TDelegate Must be Delegate or a subclass of Delegate.
      * @param d The delegate to enumerate.

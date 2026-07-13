@@ -76,7 +76,7 @@ namespace System {
         }
 
         /** @brief Returns the current Range (indices into the source span). */
-        [[nodiscard]] Range getCurrent() const {
+        [[nodiscard]] Range getCurrentProperty() const {
             return Range(Index(startCurrent_), Index(endCurrent_));
         }
 
