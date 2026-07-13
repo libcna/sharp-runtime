@@ -385,9 +385,51 @@ TEST(ValueTaskTTests, FromException_GetResult_Throws) {
     EXPECT_THROW(vt.getResultProperty(), std::runtime_error);
 }
 
-TEST(ValueTaskTTests, DefaultCtor_NotCompleted) {
+// Regression test for a wave-7 audit finding: the default constructor previously set
+// completed_ = false, permanently "incomplete" with no way to ever complete it (no wrapped
+// task, no setter). Verified against ValueTask<TResult>.IsCompleted (`if (obj == null) return
+// true;`): real .NET's "no backing Task/IValueTaskSource" state is always completed, holding
+// default(TResult) -- not permanently pending.
+TEST(ValueTaskTTests, DefaultCtor_IsCompletedWithDefaultResult) {
     ValueTaskT<int> vt;
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
+    EXPECT_FALSE(vt.getIsFaultedProperty());
+    EXPECT_EQ(vt.getResultProperty(), 0);
+}
+
+// Regression tests for a wave-7 audit finding: ValueTaskT had no TaskT<TResult>-wrapping
+// constructor at all, unlike the sibling ValueTask's Task-wrapping constructor -- meaning it
+// could only ever represent an already-known synchronous result/exception, never a still-running
+// async operation. These mirror the existing ValueTask FromTask_* tests above.
+
+TEST(ValueTaskTTests, FromTaskT_CompletedTask_IsCompleted) {
+    ValueTaskT<int> vt(TaskT<int>::FromResult(7));
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
+    EXPECT_EQ(vt.getResultProperty(), 7);
+}
+
+TEST(ValueTaskTTests, FromTaskT_AlreadyFaultedTask_GetResult_Rethrows) {
+    auto ex = std::make_exception_ptr(std::runtime_error("taskT faulted"));
+    ValueTaskT<int> vt(TaskT<int>::Run([ex]() -> int { std::rethrow_exception(ex); }));
+    EXPECT_THROW(vt.getResultProperty(), std::runtime_error);
+    EXPECT_TRUE(vt.getIsFaultedProperty());
+}
+
+TEST(ValueTaskTTests, FromTaskT_StillRunning_LaterObservesCompletion) {
+    std::promise<void> release;
+    std::shared_future<void> releaseFuture = release.get_future().share();
+    TaskT<int> t([releaseFuture]() -> int {
+        releaseFuture.wait();
+        return 99;
+    });
+    ValueTaskT<int> vt(std::move(t));
     EXPECT_FALSE(vt.getIsCompletedProperty());
+    release.set_value();
+    EXPECT_EQ(vt.getResultProperty(), 99);
+    EXPECT_TRUE(vt.getIsCompletedProperty());
+    EXPECT_TRUE(vt.getIsCompletedSuccessfullyProperty());
 }
 
 // ===========================================================================
