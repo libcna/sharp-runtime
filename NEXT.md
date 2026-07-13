@@ -1,10 +1,71 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `702c587`) — 11885 tests passing (unchanged by tickets 362-406, all DB-only tickets). Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `c9623bf`) — 11891 tests passing. Verified via:*
 ```
-cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
-./build/SharpRuntimeTests                 # 11885 tests from 1197 test suites, 0 failures
+cmake --build build --parallel 4          # Debug, default config — 0 errors/0 warnings
+./build/SharpRuntimeTests                 # 11891 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — first `ported-type-audit` batch (18 tickets), real bugs found via parallel forks
+
+Continuing the same autonomous run (previous checkpoint covered 398-406, the end of
+`namespace-audit`). This batch is the first dip into the large `ported-type-audit` backlog
+(612 done / 398 todo at the start of this batch). **Process change**: dispatched two parallel
+background forks (via the `Agent` tool, `subagent_type: fork`) to do the deep-audit work, to keep
+the large per-type investigation detail out of the main session's context — each fork owns its
+own ticket lifecycle (mark doing → audit → fix/test → build/test clean → commit+push →
+mark done with notes) and reports back a concise summary. Both forks' actual commits were
+verified afterward via `git log -p` and a fresh `cmake --build` + full test run before trusting
+the summaries (per this project's "no blind trust in delegated agent reports" rule).
+
+- **639-640 (System.Buffers.Text: Utf8Formatter, Utf8Parser)**: both clean — no bugs found. Both
+  types had already been deeply audited and fixed earlier in this same session (Utf8Formatter via
+  commit 6e0facd, three ASan-verified stack-buffer-overflow fixes in D/X/N format sizing;
+  Utf8Parser via commit 0d74a07, overflow-hardened integer parsing verified against 200k
+  randomized inputs). This pass re-verified bool/integer G/D/N/X formatting and hex
+  sign-reinterpretation/overflow guards against the real .NET reference — exact match, no new
+  findings, no commits (nothing to fix).
+- **643-657, 1489-1490 (System.Collections: 16 tickets)**: 14 clean (DictionaryEntry, ICollection,
+  IComparer, IDictionary, IDictionaryEnumerator, IEnumerable, IEnumerator, IEqualityComparer,
+  IList, IStructuralComparable, IStructuralEquatable, Queue, Stack, StructuralComparisons — all
+  verified faithful ports, no changes). One naming-convention gap noted but NOT fixed
+  (`IEnumerator::getCurrent()` missing the `Property` suffix used everywhere else) — consistent
+  across 21 files, correctly identified as out of scope per CLAUDE.md's no-broad-refactor rule
+  rather than fixed ad hoc.
+  - **1489 (ArrayList) — real bug fixed**: `Contains`/`IndexOf`/`LastIndexOf(const std::any&)`
+    compared elements via `item.type() == value.type()` only — never compared the actual value.
+    Searching `[1, 2, 3]` for `99` would false-positive match index 0. Fixed with a new
+    `detail::arrayListValueEquals()` helper (compares common primitive/string types by value,
+    falls back to never-equal — not a type-only match — for unrecognized types). Rewrote 6
+    existing tests that had codified the buggy behavior in their assertions, added 1 regression
+    test. Commit `f442080`.
+  - **1490 (Hashtable) — 3 real bugs fixed**: (1) `GetEnumerator()` unconditionally returned
+    `nullptr`, violating `IDictionary`'s contract — any caller iterating a `Hashtable` would
+    crash. Implemented a proper fail-fast `Enumerator` (version-checked, matching the
+    Queue/Stack/ArrayList pattern already established in this codebase) exposing
+    Key/Value/Entry via `DictionaryEntry`. (2) `CopyTo(void*, int)` was a complete no-op stub —
+    now copies `DictionaryEntry` elements, matching real .NET's default `Hashtable.CopyTo`
+    behavior. (3) `ContainsValue` had the identical type-only comparison bug as ArrayList's
+    `IndexOf` family — fixed with the same `hashtableValueEquals()` pattern. Also added
+    version-bumping to all mutators (`Add`/`Clear`/`Remove`/`setItem`) to support the new
+    fail-fast enumerator. Documented (not fixed) that `Keys`/`Values` properties still return
+    `nullptr` — a live `ICollection` view needs its own subclass design with a defined
+    lifetime/ownership story, correctly deferred as out of scope for a single pass;
+    `getKeys()`/`getValues()` snapshot accessors already cover the common case. Added 5
+    regression tests. Commit `c9623bf`.
+
+Final verified state: 11891/11891 tests passing (up from 11885 — 6 net new/rewritten tests), 0
+errors/0 warnings, both commits confirmed pushed to `origin/feature/work`.
+
+**Process note for future sessions**: parallel forks worked well here because the two batches
+touched disjoint files (Buffers.Text vs Collections) — no build/git contention. If dispatching
+concurrent forks again, keep them on disjoint file sets for the same reason; forks touching
+overlapping files should be sequenced instead to avoid build-directory/git races.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 10;"`. Ticket #43 stays
+`blocked`. The `ported-type-audit` backlog is now 630 done / ~380 todo.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — tickets 398-406 closed, `namespace-audit` category FULLY DRAINED
 
