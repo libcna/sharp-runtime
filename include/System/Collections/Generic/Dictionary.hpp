@@ -10,6 +10,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 
 namespace System::Collections::Generic {
@@ -22,12 +23,25 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.Dictionary<TKey,TValue>.
  * Backed by std::unordered_map; provides O(1) average-case lookup, insertion, and removal.
  *
- * @note Unlike .NET's Dictionary<TKey,TValue>, iterators do not detect concurrent
- * modification: .NET throws InvalidOperationException if the dictionary is
- * structurally modified while an enumerator is active, but sharp-runtime's
- * iterators follow plain std::unordered_map invalidation rules instead (insertion
- * may invalidate all iterators; erasure only invalidates the erased element's
- * iterator). Do not mutate the dictionary while iterating it directly.
+ * @note begin()/end() return a version-checked iterator that throws
+ * System::InvalidOperationException("Collection was modified; enumeration operation may not "
+ * "execute.") if the dictionary is structurally modified while iteration is in progress,
+ * matching .NET's Dictionary<TKey,TValue> enumerator fail-fast contract in spirit. The
+ * version-bump rule matches real .NET's actual _version semantics (verified against
+ * Dictionary.cs) for Add() and the indexer setter: both bump on inserting a NEW key, but
+ * overwriting an EXISTING key's value does NOT (not a structural change). TWO deliberate
+ * deviations from .NET's exact _version rules, both for C++ memory safety rather than pure
+ * .NET parity: (1) Remove() DOES bump version_ here, unlike real .NET's Dictionary.Remove
+ * (which doesn't, since its array-backed entries use a free-list so index-based enumeration is
+ * unaffected by a removal) -- this port's iterator wraps a real std::unordered_map iterator,
+ * and erasing the element the iterator currently points at invalidates that specific iterator
+ * even though other iterators remain valid (confirmed via an ASan use-after-free repro before
+ * this fix); not bumping would silently let an in-progress enumeration crash instead of
+ * throwing cleanly. (2) Clear() also bumps version_ here, unlike real .NET's Dictionary.Clear()
+ * (which also skips the bump), because std::unordered_map::clear() invalidates every iterator
+ * into the map, unlike .NET's array-based entries which are simply zeroed in place. Both
+ * deviations trade being slightly stricter than real .NET (an extra InvalidOperationException
+ * real .NET wouldn't throw in these two specific scenarios) for guaranteed memory safety.
  *
  * @tparam TKey   The type of the keys.
  * @tparam TValue The type of the values.
@@ -35,6 +49,32 @@ using SharpRuntime::intcs;
 template<typename TKey, typename TValue>
 class Dictionary {
     std::unordered_map<TKey, TValue> map_;
+    intcs version_ = 0;
+
+    template<typename InnerIt>
+    class VersionCheckedIterator {
+        const Dictionary* owner_;
+        intcs version_;
+        InnerIt it_;
+    public:
+        VersionCheckedIterator(const Dictionary* owner, InnerIt it)
+            : owner_(owner), version_(owner->version_), it_(it) {}
+
+        VersionCheckedIterator& operator++() {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            ++it_;
+            return *this;
+        }
+        decltype(auto) operator*() const {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            return *it_;
+        }
+        auto operator->() const { return it_.operator->(); }
+        bool operator!=(const VersionCheckedIterator& other) const { return it_ != other.it_; }
+        bool operator==(const VersionCheckedIterator& other) const { return it_ == other.it_; }
+    };
 
 public:
     /**
@@ -65,23 +105,37 @@ public:
         if (map_.count(key))
             throw System::ArgumentException("An item with the same key has already been added.");
         map_[key] = value;
+        ++version_;
     }
 
     /**
      * @brief Removes the element with the specified key from the dictionary.
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Remove(TKey).
+     *
+     * @note DEVIATION from real .NET: Dictionary.cs's Remove does NOT bump `_version` (its
+     * array-backed entries use a free-list, so index-based enumeration is unaffected by a
+     * removal). This port's version-checked iterator wraps a real std::unordered_map iterator,
+     * where erasing the element the iterator is CURRENTLY positioned on invalidates that
+     * specific iterator (confirmed via an ASan use-after-free repro) even though other
+     * iterators remain valid per the standard -- not bumping version_ here would silently let
+     * an in-progress enumeration crash instead of throwing cleanly. Bumping unconditionally on
+     * a successful removal trades exact `_version` parity for guaranteed memory safety.
      * @param key The key of the element to remove.
      * @return true if the element was found and removed; otherwise false.
      */
     bool Remove(const TKey& key) {
-        return map_.erase(key) > 0;
+        bool removed = map_.erase(key) > 0;
+        if (removed) ++version_;
+        return removed;
     }
 
     /**
      * @brief Removes the element with the specified key and copies its value to the output parameter.
      *
-     * C++ counterpart of .NET Dictionary<TKey,TValue>.Remove(TKey, out TValue).
+     * C++ counterpart of .NET Dictionary<TKey,TValue>.Remove(TKey, out TValue). See the other
+     * Remove(TKey) overload's doc-comment for why this port bumps version_ on removal, unlike
+     * real .NET's Dictionary.Remove.
      * @param key   The key of the element to remove.
      * @param value Receives the removed value if found.
      * @return true if the element was found and removed; otherwise false.
@@ -91,6 +145,7 @@ public:
         if (it == map_.end()) return false;
         value = std::move(it->second);
         map_.erase(it);
+        ++version_;
         return true;
     }
 
@@ -145,6 +200,7 @@ public:
     bool TryAdd(const TKey& key, const TValue& value) {
         if (map_.count(key)) return false;
         map_[key] = value;
+        ++version_;
         return true;
     }
 
@@ -166,7 +222,7 @@ public:
      *
      * C++ counterpart of .NET Dictionary<TKey,TValue>.Clear().
      */
-    void Clear() { map_.clear(); }
+    void Clear() { map_.clear(); ++version_; }
 
     /**
      * @brief Gets a vector containing the keys of the dictionary.
@@ -208,6 +264,7 @@ public:
         if (capacity < 0)
             throw System::ArgumentOutOfRangeException("capacity");
         map_.reserve(static_cast<std::size_t>(capacity));
+        ++version_;
         return static_cast<intcs>(map_.bucket_count());
     }
 
@@ -219,6 +276,7 @@ public:
     void TrimExcess() {
         map_.rehash(static_cast<std::size_t>(
             std::ceil(static_cast<double>(map_.size()) / map_.max_load_factor())));
+        ++version_;
     }
 
     /**
@@ -247,9 +305,17 @@ public:
             return it->second;
         }
 
-        /** Inserts or overwrites the value for this key. */
+        /**
+         * Inserts or overwrites the value for this key. Matches real .NET's Dictionary
+         * indexer setter exactly: bumps the version counter only when a NEW key is inserted,
+         * not when an existing key's value is merely overwritten (verified against
+         * Dictionary.cs's TryInsert -- the OverwriteExisting branch returns before its
+         * _version++).
+         */
         ValueProxy& operator=(const TValue& value) {
+            bool isNewKey = owner_->map_.find(key_) == owner_->map_.end();
             owner_->map_[key_] = value;
+            if (isNewKey) ++owner_->version_;
             return *this;
         }
     };
@@ -277,14 +343,21 @@ public:
         return it->second;
     }
 
-    /** @brief Returns an iterator to the first element (for range-based for). */
-    auto begin()        { return map_.begin(); }
-    /** @brief Returns an iterator past the last element (for range-based for). */
-    auto end()          { return map_.end(); }
-    /** @brief Returns a const iterator to the first element (for range-based for). */
-    [[nodiscard]] auto begin() const { return map_.cbegin(); }
-    /** @brief Returns a const iterator past the last element (for range-based for). */
-    [[nodiscard]] auto end()   const { return map_.cend(); }
+    using iterator = VersionCheckedIterator<typename std::unordered_map<TKey, TValue>::iterator>;
+    using const_iterator = VersionCheckedIterator<typename std::unordered_map<TKey, TValue>::const_iterator>;
+
+    /**
+     * @brief Returns a version-checked iterator to the first element (for range-based for).
+     * Throws System::InvalidOperationException from operator++/operator* if the dictionary is
+     * structurally modified during iteration -- see the class doc-comment for the exact rules.
+     */
+    iterator begin()        { return iterator(this, map_.begin()); }
+    /** @brief Returns a version-checked iterator past the last element (for range-based for). */
+    iterator end()          { return iterator(this, map_.end()); }
+    /** @brief Returns a const version-checked iterator to the first element (for range-based for). */
+    [[nodiscard]] const_iterator begin() const { return const_iterator(this, map_.cbegin()); }
+    /** @brief Returns a const version-checked iterator past the last element (for range-based for). */
+    [[nodiscard]] const_iterator end()   const { return const_iterator(this, map_.cend()); }
 
     /**
      * @brief Returns a const reference to the underlying std::unordered_map.

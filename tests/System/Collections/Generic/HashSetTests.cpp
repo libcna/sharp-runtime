@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 #include "System/Collections/Generic/HashSet.hpp"
+#include "System/InvalidOperationException.hpp"
 
 using System::Collections::Generic::HashSet;
 using SharpRuntime::intcs;
@@ -185,4 +186,40 @@ TEST(HashSetTest, Overlaps_False) {
     a.Add(1); a.Add(2);
     b.Add(3); b.Add(4);
     EXPECT_FALSE(a.Overlaps(b));
+}
+
+// ---- begin()/end() version-tracking (ticket 1713, post-stabilization-audit finding #4) ----
+TEST(HashSetTest, Iteration_NoModification_DoesNotThrow) {
+    HashSet<int> s;
+    s.Add(1); s.Add(2); s.Add(3);
+    int count = 0;
+    EXPECT_NO_THROW({ for (auto& x : s) { (void)x; count++; } });
+    EXPECT_EQ(count, 3);
+}
+
+TEST(HashSetTest, Iteration_AddDuringIteration_Throws) {
+    HashSet<int> s;
+    s.Add(1); s.Add(2);
+    EXPECT_THROW({
+        for (auto& x : s) { (void)x; s.Add(99); }
+    }, System::InvalidOperationException);
+}
+
+TEST(HashSetTest, Iteration_RemoveDuringIteration_Throws) {
+    // Deliberate deviation from real .NET's HashSet.Remove (does not bump _version) for memory
+    // safety: erasing the element a std::unordered_set iterator currently points at invalidates
+    // that iterator, matching the same fix applied to Dictionary<TKey,TValue> for ticket 1713.
+    HashSet<int> s;
+    s.Add(1); s.Add(2); s.Add(3);
+    EXPECT_THROW({
+        for (auto& x : s) { (void)x; s.Remove(3); }
+    }, System::InvalidOperationException);
+}
+
+TEST(HashSetTest, Iteration_ClearDuringIteration_Throws) {
+    HashSet<int> s;
+    s.Add(1); s.Add(2);
+    EXPECT_THROW({
+        for (auto& x : s) { (void)x; s.Clear(); }
+    }, System::InvalidOperationException);
 }

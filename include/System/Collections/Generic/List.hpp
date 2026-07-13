@@ -11,6 +11,7 @@
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include "System/Collections/Generic/IList.hpp"
 #include "System/Collections/ObjectModel/ReadOnlyCollection.hpp"
 
@@ -25,12 +26,18 @@ using SharpRuntime::intcs;
  * Backed by std::vector<T>; provides O(1) amortized Add, O(1) indexed access,
  * and full IList<T> compliance.
  *
- * @note Unlike .NET's List<T>, iterators returned by begin()/end() do not detect
- * concurrent modification: .NET throws InvalidOperationException if the list is
- * structurally modified (Add/Remove/Clear/etc.) while an enumerator is active,
- * but sharp-runtime's iterators follow plain std::vector<T> invalidation rules
- * instead (e.g. Add() may reallocate and invalidate all existing iterators
- * without warning). Do not mutate the list while iterating it directly.
+ * @note GetEnumerator()'s Enumerator detects structural modification (Add/Remove/Clear/Insert/
+ * etc.) during iteration via a version counter, matching .NET's InvalidOperationException
+ * fail-fast contract (see ArrayList's Enumerator in this codebase for the same established
+ * pattern). One narrow, documented gap remains: real .NET's index-assignment setter
+ * (`list[i] = value`) also bumps `_version`, but this port's `operator[]` returns a plain `T&`
+ * for C++ ergonomics -- there is no hook point to intercept a subsequent `list[i] = value;`
+ * assignment through that reference, so value-only index writes do NOT trigger fail-fast
+ * detection here. Widening `operator[]` into a proxy-object return (as done for Dictionary's
+ * indexer to fix a different bug, ticket 1712) would be a much larger, riskier change to the
+ * single most call-site-heavy method in this codebase; deferred rather than rushed. Directly
+ * using begin()/end() STL iterators still follows plain std::vector<T> invalidation rules, not
+ * .NET's version-checked contract -- only the GetEnumerator()-returned Enumerator is fail-fast.
  *
  * @tparam T The type of elements in the list.
  */
@@ -38,16 +45,26 @@ template<typename T>
 class List : public IList<T> {
     private:
         std::vector<T> items_;
+        intcs version_ = 0;
 
         class Enumerator : public IEnumerator<T>
         {
-            const std::vector<T>& items_;
+            const List<T>* list_;
+            intcs version_;
             intcs index_ = -1;
         public:
-            explicit Enumerator(const std::vector<T>& items) : items_(items) {}
-            bool MoveNext() override { return ++index_ < static_cast<intcs>(items_.size()); }
-            void Reset() override { index_ = -1; }
-            [[nodiscard]] const T& Current() const override { return items_[static_cast<size_t>(index_)]; }
+            explicit Enumerator(const List<T>* list) : list_(list), version_(list->version_) {}
+            bool MoveNext() override {
+                if (version_ != list_->version_)
+                    throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+                return ++index_ < static_cast<intcs>(list_->items_.size());
+            }
+            void Reset() override {
+                if (version_ != list_->version_)
+                    throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+                index_ = -1;
+            }
+            [[nodiscard]] const T& Current() const override { return list_->items_[static_cast<size_t>(index_)]; }
         };
 
         void requireIndexInRange(intcs index) const {
@@ -81,10 +98,10 @@ class List : public IList<T> {
         [[nodiscard]] bool getIsReadOnlyProperty() const override { return false; }
 
         /** @brief Appends @p item to the end of the list. */
-        void Add(const T& item) override { items_.push_back(item); }
+        void Add(const T& item) override { items_.push_back(item); ++version_; }
 
         /** @brief Removes all elements from the list. */
-        void Clear() override { items_.clear(); }
+        void Clear() override { items_.clear(); ++version_; }
 
         [[nodiscard]] bool Contains(const T& item) const override
         {
@@ -96,6 +113,7 @@ class List : public IList<T> {
             auto it = std::find(items_.begin(), items_.end(), item);
             if (it == items_.end()) return false;
             items_.erase(it);
+            ++version_;
             return true;
         }
 
@@ -123,17 +141,19 @@ class List : public IList<T> {
             if (index < 0 || index > static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
             items_.insert(items_.begin() + index, item);
+            ++version_;
         }
 
         void RemoveAt(intcs index) override
         {
             requireIndexInRange(index);
             items_.erase(items_.begin() + index);
+            ++version_;
         }
 
         IEnumerator<T>* GetEnumerator() override
         {
-            return new Enumerator(items_);
+            return new Enumerator(this);
         }
 
         /**
@@ -162,7 +182,10 @@ class List : public IList<T> {
          * @param collection The elements to add.
          */
         void AddRange(const std::vector<T>& collection) {
-            items_.insert(items_.end(), collection.begin(), collection.end());
+            if (!collection.empty()) {
+                items_.insert(items_.end(), collection.begin(), collection.end());
+                ++version_;
+            }
         }
 
         /**
@@ -181,7 +204,10 @@ class List : public IList<T> {
         void InsertRange(intcs index, const std::vector<T>& collection) {
             if (index < 0 || index > static_cast<intcs>(items_.size()))
                 throw System::ArgumentOutOfRangeException("index", "Index must be within the bounds of the List.");
-            items_.insert(items_.begin() + index, collection.begin(), collection.end());
+            if (!collection.empty()) {
+                items_.insert(items_.begin() + index, collection.begin(), collection.end());
+                ++version_;
+            }
         }
 
         /**
@@ -212,6 +238,7 @@ class List : public IList<T> {
          */
         void Sort() {
             std::sort(items_.begin(), items_.end());
+            ++version_;
         }
 
         /**
@@ -223,6 +250,7 @@ class List : public IList<T> {
         void Sort(std::function<intcs(const T&, const T&)> comparison) {
             std::sort(items_.begin(), items_.end(),
                       [&](const T& a, const T& b) { return comparison(a, b) < 0; });
+            ++version_;
         }
 
         /**
@@ -232,6 +260,7 @@ class List : public IList<T> {
          */
         void Reverse() {
             std::reverse(items_.begin(), items_.end());
+            ++version_;
         }
 
         /**
@@ -300,6 +329,7 @@ class List : public IList<T> {
             auto it = std::remove_if(items_.begin(), items_.end(), predicate);
             intcs count = static_cast<intcs>(items_.end() - it);
             items_.erase(it, items_.end());
+            if (count > 0) ++version_;
             return count;
         }
 
@@ -545,7 +575,10 @@ class List : public IList<T> {
          */
         void RemoveRange(intcs index, intcs count) {
             requireValidRange(index, count);
-            items_.erase(items_.begin() + index, items_.begin() + index + count);
+            if (count > 0) {
+                items_.erase(items_.begin() + index, items_.begin() + index + count);
+                ++version_;
+            }
         }
 
         /**
@@ -558,6 +591,7 @@ class List : public IList<T> {
         void Reverse(intcs index, intcs count) {
             requireValidRange(index, count);
             std::reverse(items_.begin() + index, items_.begin() + index + count);
+            ++version_;
         }
 };
 

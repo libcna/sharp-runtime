@@ -6,6 +6,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
+#include "System/InvalidOperationException.hpp"
 #include <string>
 
 using System::Collections::Generic::Dictionary;
@@ -171,4 +172,52 @@ TEST(DictionaryTest, EnsureCapacity_ReturnsResultingCapacity) {
 TEST(DictionaryTest, EnsureCapacity_NegativeThrows) {
     Dictionary<std::string, int> d;
     EXPECT_THROW(d.EnsureCapacity(-1), System::ArgumentOutOfRangeException);
+}
+
+// ---- begin()/end() version-tracking (ticket 1713, post-stabilization-audit finding #4) ----
+TEST(DictionaryTest, Iteration_NoModification_DoesNotThrow) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2); d.Add("c", 3);
+    int count = 0;
+    EXPECT_NO_THROW({ for (auto& kv : d) { (void)kv; count++; } });
+    EXPECT_EQ(count, 3);
+}
+
+TEST(DictionaryTest, Iteration_AddNewKeyDuringIteration_Throws) {
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2);
+    EXPECT_THROW({
+        for (auto& kv : d) { (void)kv; d.Add("new", 99); }
+    }, System::InvalidOperationException);
+}
+
+TEST(DictionaryTest, Iteration_RemoveDuringIteration_Throws) {
+    // This port DELIBERATELY deviates from real .NET's Dictionary.Remove (which does not bump
+    // _version) for memory safety: erasing the element a std::unordered_map iterator currently
+    // points at invalidates that iterator, unlike .NET's array-backed free-list entries.
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2); d.Add("c", 3);
+    EXPECT_THROW({
+        for (auto& kv : d) { (void)kv; d.Remove("c"); }
+    }, System::InvalidOperationException);
+}
+
+TEST(DictionaryTest, Iteration_OverwriteExistingKeyDuringIteration_DoesNotThrow) {
+    // Overwriting an existing key's value is not a structural change in real .NET either.
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2);
+    EXPECT_NO_THROW({
+        for (auto& kv : d) { (void)kv; d["a"] = 100; }
+    });
+    EXPECT_EQ((int)d["a"], 100);
+}
+
+TEST(DictionaryTest, Iteration_ClearDuringIteration_Throws) {
+    // Deliberate deviation from real .NET's Dictionary.Clear (also doesn't bump _version) for
+    // the same std::unordered_map iterator-invalidation reason as Remove above.
+    Dictionary<std::string, int> d;
+    d.Add("a", 1); d.Add("b", 2);
+    EXPECT_THROW({
+        for (auto& kv : d) { (void)kv; d.Clear(); }
+    }, System::InvalidOperationException);
 }

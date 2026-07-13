@@ -7,6 +7,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/InvalidOperationException.hpp"
 
 namespace System::Collections::Generic {
 
@@ -18,17 +19,52 @@ using SharpRuntime::intcs;
  * C++ counterpart of .NET System.Collections.Generic.HashSet<T>.
  * Backed by std::unordered_set; provides O(1) average-case Add, Remove, and Contains.
  *
- * @note Unlike .NET's HashSet<T>, iterators do not detect concurrent modification:
- * .NET throws InvalidOperationException if the set is structurally modified while
- * an enumerator is active, but sharp-runtime's iterators follow plain
- * std::unordered_set invalidation rules instead. Do not mutate the set while
- * iterating it directly.
+ * @note begin()/end() return a version-checked iterator that throws
+ * System::InvalidOperationException("Collection was modified; enumeration operation may not "
+ * "execute.") if the set is structurally modified while iteration is in progress, matching
+ * .NET's HashSet<T> enumerator fail-fast contract. Every mutating method here bumps the version
+ * counter on an actual change, including Remove() and Clear() -- a deliberate, safety-motivated
+ * deviation from real .NET's Dictionary<TKey,TValue>/HashSet<T> `_version` semantics (which
+ * don't bump on Remove, since their array-backed entries use a free-list so index-based
+ * enumeration is unaffected by a removal). This port's iterator wraps a real
+ * std::unordered_set iterator, where erasing the element the iterator currently points at
+ * invalidates that specific iterator (confirmed via an ASan use-after-free repro during this
+ * fix's development for the analogous Dictionary<TKey,TValue> case) even though other iterators
+ * remain valid per the standard -- bumping unconditionally on every successful mutation trades
+ * exact `_version` parity (an extra InvalidOperationException real .NET wouldn't throw for a
+ * same-position Remove during enumeration) for guaranteed memory safety.
  *
  * @tparam T The type of elements in the set.
  */
 template<typename T>
 class HashSet {
     std::unordered_set<T> set_;
+    intcs version_ = 0;
+
+    template<typename InnerIt>
+    class VersionCheckedIterator {
+        const HashSet* owner_;
+        intcs version_;
+        InnerIt it_;
+    public:
+        VersionCheckedIterator(const HashSet* owner, InnerIt it)
+            : owner_(owner), version_(owner->version_), it_(it) {}
+
+        VersionCheckedIterator& operator++() {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            ++it_;
+            return *this;
+        }
+        decltype(auto) operator*() const {
+            if (version_ != owner_->version_)
+                throw System::InvalidOperationException("Collection was modified; enumeration operation may not execute.");
+            return *it_;
+        }
+        auto operator->() const { return it_.operator->(); }
+        bool operator!=(const VersionCheckedIterator& other) const { return it_ != other.it_; }
+        bool operator==(const VersionCheckedIterator& other) const { return it_ == other.it_; }
+    };
 
 public:
     /**
@@ -45,7 +81,11 @@ public:
      * @param item The element to add.
      * @return true if the element was added; false if it was already present.
      */
-    bool Add(const T& item) { return set_.insert(item).second; }
+    bool Add(const T& item) {
+        bool added = set_.insert(item).second;
+        if (added) ++version_;
+        return added;
+    }
 
     /**
      * @brief Adds the specified element to the set (move overload).
@@ -54,7 +94,11 @@ public:
      * @param item The element to add (moved).
      * @return true if the element was added; false if it was already present.
      */
-    bool Add(T&& item) { return set_.insert(std::move(item)).second; }
+    bool Add(T&& item) {
+        bool added = set_.insert(std::move(item)).second;
+        if (added) ++version_;
+        return added;
+    }
 
     /**
      * @brief Removes the specified element from the set.
@@ -63,7 +107,11 @@ public:
      * @param item The element to remove.
      * @return true if the element was found and removed; otherwise false.
      */
-    bool Remove(const T& item) { return set_.erase(item) > 0; }
+    bool Remove(const T& item) {
+        bool removed = set_.erase(item) > 0;
+        if (removed) ++version_;
+        return removed;
+    }
 
     /**
      * @brief Determines whether the set contains the specified element.
@@ -103,6 +151,7 @@ public:
             if (match(*it)) { it = set_.erase(it); ++removed; }
             else ++it;
         }
+        if (removed > 0) ++version_;
         return removed;
     }
 
@@ -131,7 +180,7 @@ public:
      *
      * C++ counterpart of .NET HashSet<T>.Clear().
      */
-    void Clear() { set_.clear(); }
+    void Clear() { set_.clear(); ++version_; }
 
     /**
      * @brief Modifies the set to contain all elements present in itself or the specified collection.
@@ -141,6 +190,7 @@ public:
      */
     void UnionWith(const HashSet<T>& other) {
         for (const auto& item : other.set_) set_.insert(item);
+        ++version_;
     }
 
     /**
@@ -153,6 +203,7 @@ public:
         for (auto it = set_.begin(); it != set_.end(); ) {
             it = other.Contains(*it) ? ++it : set_.erase(it);
         }
+        ++version_;
     }
 
     /**
@@ -168,8 +219,9 @@ public:
         // whenever the caller passes the set itself (e.g. `s.ExceptWith(s)`), which is a real,
         // confirmed heap-use-after-free (ASan) since erase() invalidates the very iterator the
         // range-for loop is using to walk other.set_.
-        if (&other == this) { set_.clear(); return; }
+        if (&other == this) { set_.clear(); ++version_; return; }
         for (const auto& item : other.set_) set_.erase(item);
+        ++version_;
     }
 
     /**
@@ -184,13 +236,14 @@ public:
         // before the general loop, which here would otherwise erase from set_ while iterating
         // that exact same container via other.set_ -- confirmed as a genuine ASan
         // heap-use-after-free before this fix.
-        if (&other == this) { set_.clear(); return; }
+        if (&other == this) { set_.clear(); ++version_; return; }
         std::vector<T> toAdd;
         for (const auto& item : other.set_) {
             if (!Contains(item)) toAdd.push_back(item);
             else set_.erase(item);
         }
         for (const auto& item : toAdd) set_.insert(item);
+        ++version_;
     }
 
     /**
@@ -279,6 +332,7 @@ public:
         if (capacity < 0)
             throw System::ArgumentOutOfRangeException("capacity");
         set_.reserve(static_cast<std::size_t>(capacity));
+        ++version_;
         return static_cast<intcs>(set_.bucket_count());
     }
 
@@ -287,16 +341,23 @@ public:
      *
      * C++ counterpart of .NET HashSet<T>.TrimExcess().
      */
-    void TrimExcess() { set_.rehash(set_.size()); }
+    void TrimExcess() { set_.rehash(set_.size()); ++version_; }
 
-    /** @brief Returns an iterator to the first element (for range-based for). */
-    auto begin()       { return set_.begin(); }
-    /** @brief Returns an iterator past the last element (for range-based for). */
-    auto end()         { return set_.end(); }
-    /** @brief Returns a const iterator to the first element (for range-based for). */
-    [[nodiscard]] auto begin() const { return set_.begin(); }
-    /** @brief Returns a const iterator past the last element (for range-based for). */
-    [[nodiscard]] auto end()   const { return set_.end(); }
+    using iterator = VersionCheckedIterator<typename std::unordered_set<T>::iterator>;
+    using const_iterator = VersionCheckedIterator<typename std::unordered_set<T>::const_iterator>;
+
+    /**
+     * @brief Returns a version-checked iterator to the first element (for range-based for).
+     * Throws System::InvalidOperationException from operator++/operator* if the set is
+     * structurally modified during iteration -- see the class doc-comment for the exact rules.
+     */
+    iterator begin()       { return iterator(this, set_.begin()); }
+    /** @brief Returns a version-checked iterator past the last element (for range-based for). */
+    iterator end()         { return iterator(this, set_.end()); }
+    /** @brief Returns a const version-checked iterator to the first element (for range-based for). */
+    [[nodiscard]] const_iterator begin() const { return const_iterator(this, set_.begin()); }
+    /** @brief Returns a const version-checked iterator past the last element (for range-based for). */
+    [[nodiscard]] const_iterator end()   const { return const_iterator(this, set_.end()); }
 };
 
 } // namespace System::Collections::Generic
