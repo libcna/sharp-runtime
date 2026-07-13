@@ -428,6 +428,12 @@ namespace System
     {
         if (value.empty()) return substr.empty() ? 0 : -1;
         auto len = static_cast<SharpRuntime::intcs>(value.size());
+        // Real .NET's CompareInfo.LastIndexOf explicitly special-cases startIndex == source.Length
+        // as valid (a documented back-compat off-by-one fixup: "The caller likely had an off-by-one
+        // error when invoking the API") by silently treating it as startIndex == length - 1, rather
+        // than throwing -- a natural "search the whole string backward" idiom deserves to work, not
+        // throw ArgumentOutOfRangeException.
+        if (startIndex == len) startIndex = len - 1;
         if (startIndex < 0 || startIndex >= len)
             throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.rfind(substr, static_cast<size_t>(startIndex));
@@ -438,6 +444,9 @@ namespace System
     {
         if (value.empty()) return -1;
         auto len = static_cast<SharpRuntime::intcs>(value.size());
+        // See the (string, string, int) overload above for why startIndex == length is special-cased
+        // rather than rejected, matching real .NET's CompareInfo.LastIndexOf fixup.
+        if (startIndex == len) startIndex = len - 1;
         if (startIndex < 0 || startIndex >= len)
             throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         auto pos = value.rfind(ch, static_cast<size_t>(startIndex));
@@ -713,6 +722,10 @@ namespace System
     {
         if (value.empty()) return -1;
         auto len = static_cast<SharpRuntime::intcs>(value.size());
+        // Real .NET's CompareInfo.LastIndexOf off-by-one fixup: startIndex == length is treated as
+        // startIndex == length - 1 with count reduced by one to match (not just startIndex alone) --
+        // see the 3-arg overload above for the non-count-adjusted rationale.
+        if (startIndex == len) { startIndex = len - 1; if (count > 0) count -= 1; }
         if (startIndex < 0 || startIndex >= len)
             throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         if (count < 0 || count > startIndex + 1)
@@ -727,6 +740,8 @@ namespace System
     {
         if (value.empty()) return substr.empty() ? 0 : -1;
         auto len = static_cast<SharpRuntime::intcs>(value.size());
+        // See the (string, char, int, int) overload above for the off-by-one fixup rationale.
+        if (startIndex == len) { startIndex = len - 1; if (count > 0) count -= 1; }
         if (startIndex < 0 || startIndex >= len)
             throw System::ArgumentOutOfRangeException("startIndex", "String::LastIndexOf: startIndex must be within the bounds of the string.");
         if (count < 0 || count > startIndex + 1)
