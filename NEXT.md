@@ -1,10 +1,34 @@
 # NEXT.md — sharp-runtime handoff document
 
-*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `62d550d`) — 11841 tests passing. Verified via:*
+*Last updated: 2026-07-13 (branch: `feature/work`, HEAD `a8af25d`) — 11841 tests passing. Verified via:*
 ```
 cmake --build build --parallel 8          # Debug, default config — 0 errors/0 warnings
 ./build/SharpRuntimeTests                 # 11841 tests from 1197 test suites, 0 failures
 ```
+
+## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 344 closed, a documented live-view gap
+
+Continuing the same autonomous run (previous checkpoint covered 343). Commit: a8af25d — pushed
+to `origin/feature/work`.
+
+- **344 (Collections/Generic/SortedSet.hpp)**: full audit against `SortedSet.cs`. Confirmed
+  `UnionWith`/`IntersectWith` are self-alias-safe (`std::set` insertion never invalidates
+  iterators, duplicate insert is a no-op) — unlike `ExceptWith`/`SymmetricExceptWith`'s
+  erase-based self-aliasing UB already fixed in ticket 324. Confirmed `SetEquals` is correct
+  here since this mutable `SortedSet<T>` — unlike `ImmutableHashSet`/`ImmutableSortedSet` —
+  has no custom-comparer support, so the comparer-mismatch bug class from tickets 315/338 can't
+  occur (only one comparer per `T`). One significant divergence found and documented (not
+  fixed): `GetViewBetween` returns an independent copy, but real .NET's `GetViewBetween` returns
+  a genuine bidirectional live view (`new TreeSubSet(this, ...)`) where writes propagate both
+  ways within the bounds — confirmed via `SortedSet.TreeSubSet.cs`'s existence and the actual
+  construction call. A faithful live view isn't achievable on top of `std::set` without
+  replacing this type's entire internal representation with a hand-rolled tree matching .NET's
+  own — architectural-scale, so documented with a detailed `@warning` rather than attempted.
+
+### To resume
+Query the next ticket: `sqlite3 plan.sqlite3 "SELECT ticket_no, priority, category, area, title
+FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"`. Ticket #43 stays
+`blocked`.
 
 ## Session checkpoint (2026-07-13, autonomous run continuing) — ticket 343 closed, a documented navigation gap
 
