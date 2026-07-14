@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `200591b`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `8b2cfaf`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -471,6 +471,31 @@ warning suppressions, `-Wno-error=tsan`) specifically to re-check the new `FromE
 full-suite runs (12388 tests each) — **0 ThreadSanitizer warnings across all of it**. The
 `build-tsan/` directory was removed afterward (gitignored via `build*`, not meant to persist).
 
+**`Dictionary<K,V>` performance pass — honest no-change result** (§8 item 1, per explicit user
+direction "jdi na dictionary"/"go to dictionary"). Read `Dictionary.hpp` in full for the same
+anti-pattern classes the `String`/`List<T>`/`StringBuilder` passes checked (`stringstream`,
+missing `reserve()`, O(n²) patterns) — found none; `getKeysProperty()`/`getValuesProperty()`
+already `reserve()`, `ContainsValue()`'s O(n) scan matches real .NET's own `ContainsValue`
+exactly (no reverse value index in either implementation), `EnsureCapacity`/`TrimExcess` are
+one-time ops.
+
+One real candidate found: `Add()`, `TryAdd()`, and `ValueProxy::operator=()` (the indexer
+setter) each do a redundant lookup-then-insert — `map_.count(key)`/`map_.find(key)` followed by a
+*separate* `map_[key] = value`, two hash-table probes where `std::unordered_map::try_emplace()`/
+`insert_or_assign()` can do the same job in one. Measured with a standalone `-O2` benchmark (same
+`std::chrono` methodology as the `String` pilot) across both a realistic workload (string keys)
+and a hashing-is-nearly-free control (int keys), covering both `Add`'s all-new-insert pattern and
+the indexer setter's 50%-overwrite/50%-new-insert pattern:
+- String keys (the common `Dictionary<string,T>` case): `Add` — 1.00x (no measurable difference);
+  indexer setter — **0.92x, i.e. the "optimized" `insert_or_assign` version was slower**.
+- Int keys (hashing cost minimized): `Add` — 1.06x; indexer setter — 1.07x — both within typical
+  microbenchmark noise, and inconsistent with the string-key result's direction.
+Conclusion: the "fewer API calls" reasoning doesn't hold up once actually measured — real cost is
+dominated by string hashing and unordered_map's per-insert node allocation, not by which of two
+near-identical single-hash-probe paths gets used. Per CLAUDE.md's "no speculative optimization"
+rule (and matching this session's own `List<T>`/`StringBuilder` precedent — see above), **no code
+changed**. This is the third honest negative performance finding this session, not a gap.
+
 ---
 
 ## 4. Current blocker / main problem
@@ -687,19 +712,15 @@ warning audit (clean — see §3); a performance-audit extension to `List<T>`/`S
 (honest no-significant-finding result — see §3, no code changed); `TaskCompletionSource<TResult>.
 Task` property (the last remaining documented `Task`-family gap — see §3 for the two real bugs,
 including a genuine deadlock, found and fixed while implementing it) plus a dedicated
-ThreadSanitizer re-verification of that new code (0 warnings — see §3).
+ThreadSanitizer re-verification of that new code (0 warnings — see §3); a `Dictionary<K,V>`
+performance pass (the last hot-path collection type from the original shortlist — honest
+no-change result, see §3: the one real candidate found, `Add`/`TryAdd`/indexer-setter's
+double-lookup pattern, measured flat-to-negative once actually benchmarked).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **`Dictionary<K,V>` performance pass**, if the performance-audit direction continues — the
-   one hot-path collection type from the original `String`/`List<T>`/`StringBuilder` shortlist
-   (§3) not yet looked at. Same "measure first" discipline: read for `stringstream`/missing-
-   `reserve()`/O(n²) patterns, measure any real candidate found, only change with a genuine
-   measured delta. Given `List<T>`/`StringBuilder` both came back clean, treat this as a
-   lower-confidence lead, not an assumed win.
-
-2. **Another audit round, different categories.** This session's post-pilot round covered
+1. **Another audit round, different categories.** This session's post-pilot round covered
    TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
    note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), memory
    safety / undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs total, fixed), and
@@ -741,9 +762,10 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 200591b (12388/12388 tests
-passing, 0 errors/0 warnings). ThreadSanitizer has been re-verified clean specifically against
-the 10 newest TaskCompletionSource.Task tests (0 warnings, see §3); AddressSanitizer/
+Read NEXT.md first. It reflects the repository state as of HEAD (this commit) — still
+12388/12388 tests, 0 errors/0 warnings; the Dictionary<K,V> performance pass added no code
+change (honest negative finding, see §3). ThreadSanitizer has been re-verified clean specifically
+against the 10 newest TaskCompletionSource.Task tests (0 warnings, see §3); AddressSanitizer/
 UndefinedBehaviorSanitizer were verified clean at the prior commit 1cdc80a/12378 tests but not
 yet re-run against the newest 10 (low-priority formality, see §5) — re-verify the normal build
 first anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
