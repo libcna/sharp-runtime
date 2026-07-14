@@ -2,6 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -30,6 +32,40 @@ namespace System::Runtime::InteropServices {
         static size_t roundUpToAlignment(size_t byteCount, size_t alignment) {
             return (byteCount != 0) ? ((byteCount + (alignment - 1)) & ~(alignment - 1)) : alignment;
         }
+
+#if !defined(_WIN32)
+        // POSIX has no portable aligned-realloc, and plain malloc() neither guarantees large
+        // alignments nor exposes a block's usable size -- so the POSIX AlignedAlloc/AlignedFree/
+        // AlignedRealloc below hand-roll alignment via over-allocation, storing the real malloc'd
+        // pointer and the requested byte count in a small header placed immediately before the
+        // address handed back to the caller. AlignedRealloc needs both: the raw pointer to free
+        // the old block, and the byte count to bound its copy to what the OLD block actually
+        // holds -- previously it blindly copied the caller's NEW byteCount from the OLD pointer,
+        // a confirmed heap-buffer-overflow (AddressSanitizer, 2026-07-14: growing a 32-byte block
+        // to 128 bytes read 128 bytes from the 32-byte source).
+        struct AlignedHeader {
+            void* raw;
+            size_t byteCount;
+        };
+
+        static void* alignedAllocPosix(size_t adjustedByteCount, size_t adjustedAlignment) {
+            size_t headerSize = sizeof(AlignedHeader);
+            size_t totalSize = adjustedByteCount + adjustedAlignment + headerSize;
+            if (totalSize < adjustedByteCount) throw System::OutOfMemoryException();
+            void* raw = std::malloc(totalSize);
+            if (raw == nullptr) throw System::OutOfMemoryException();
+
+            auto rawAddr = reinterpret_cast<uintptr_t>(raw);
+            uintptr_t minUserAddr = rawAddr + headerSize;
+            uintptr_t userAddr = (minUserAddr + adjustedAlignment - 1) & ~(static_cast<uintptr_t>(adjustedAlignment) - 1);
+            void* result = reinterpret_cast<void*>(userAddr);
+
+            auto* header = reinterpret_cast<AlignedHeader*>(result) - 1;
+            header->raw = raw;
+            header->byteCount = adjustedByteCount;
+            return result;
+        }
+#endif
 
     public:
         NativeMemory() = delete;
@@ -113,11 +149,11 @@ namespace System::Runtime::InteropServices {
 
 #if defined(_WIN32)
             void* result = _aligned_malloc(adjustedByteCount, adjustedAlignment);
-#else
-            void* result = std::aligned_alloc(adjustedAlignment, adjustedByteCount);
-#endif
             if (result == nullptr) throw System::OutOfMemoryException();
             return result;
+#else
+            return alignedAllocPosix(adjustedByteCount, adjustedAlignment);
+#endif
         }
 
         /**
@@ -129,7 +165,8 @@ namespace System::Runtime::InteropServices {
 #if defined(_WIN32)
             _aligned_free(ptr);
 #else
-            std::free(ptr);
+            auto* header = reinterpret_cast<AlignedHeader*>(ptr) - 1;
+            std::free(header->raw);
 #endif
         }
 
@@ -140,11 +177,10 @@ namespace System::Runtime::InteropServices {
          * AlignedAlloc() if @p ptr is null. This port has no portable POSIX aligned-realloc
          * primitive to delegate to (glibc/BSD offer no `aligned_realloc`, unlike Windows'
          * `_aligned_realloc`), so it allocates fresh via AlignedAlloc(), copies the lesser of the
-         * old/new sizes, and frees the original -- functionally equivalent, at the cost of always
-         * moving even when an in-place growth would have been possible. Since the true prior
-         * allocation size isn't tracked, @p byteCount is used as the copy bound when growing (the
-         * caller-supplied new size), which is always safe as an upper bound for what could have
-         * been written to the smaller old block.
+         * old/new sizes (the old size comes from the hand-rolled header alignedAllocPosix()
+         * stores -- see its own comment for why guessing at the old size is unsafe), and frees the
+         * original -- functionally equivalent, at the cost of always moving even when an in-place
+         * growth would have been possible.
          * @throws System::ArgumentException if @p alignment is not a power of two.
          * @throws System::OutOfMemoryException if reallocation fails.
          */
@@ -159,9 +195,13 @@ namespace System::Runtime::InteropServices {
             if (result == nullptr) throw System::OutOfMemoryException();
             return result;
 #else
+            auto* oldHeader = reinterpret_cast<AlignedHeader*>(ptr) - 1;
+            void* oldRaw = oldHeader->raw;
+            size_t oldByteCount = oldHeader->byteCount;
+
             void* result = AlignedAlloc(byteCount, alignment);
-            std::memcpy(result, ptr, byteCount);
-            std::free(ptr);
+            std::memcpy(result, ptr, std::min(byteCount, oldByteCount));
+            std::free(oldRaw);
             return result;
 #endif
         }
