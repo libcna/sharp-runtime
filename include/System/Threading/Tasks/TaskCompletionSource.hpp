@@ -33,28 +33,50 @@ namespace System::Threading::Tasks {
      * promise_.set_value()/set_exception(), and the loser would throw an uncaught
      * std::future_error instead of TrySet* returning false as .NET guarantees.
      *
-     * @note Known gap (documented, not implemented in this pass): real .NET's
-     * TaskCompletionSource<TResult> exposes a `Task<TResult> Task { get; }` property -- arguably
-     * the entire point of the type, since it's what lets producer code hand a not-yet-completed
-     * Task to consumer code written against the Task API, then complete it later out-of-band.
-     * This port has no equivalent: GetResult()/Wait() block the calling thread directly instead
-     * of returning a TaskT<TResult>/Task handle. Adding one is not a small addition: real .NET's
-     * Task supports a private "pending, no delegate, externally completed later" construction
-     * mode that TaskCompletionSource's internal Task is built with; this port's Task/TaskT
-     * always launches an async lambda immediately on construction (see Task.hpp) with no such
-     * pending mode, so bridging the two would need a genuine new construction path threaded
-     * through both types -- a real architectural change, not something to retrofit during a
-     * single audit ticket.
+     * @note Exposes a `getTaskProperty()` bridging this source's completion onto the ordinary
+     * TaskT<TResult> API (2026-07-14) -- real .NET's `Task<TResult> Task { get; }` property.
+     * This port's Task/TaskT always launches an async lambda immediately on construction (see
+     * Task.hpp) with no "pending, externally completed later" mode of its own, unlike real
+     * .NET's Task; TaskT<TResult>::FromExternalFuture() bridges the two by wrapping this
+     * source's own future and spawning one watcher thread that mirrors its eventual outcome
+     * into the returned TaskT's state -- see that method's own doc-comment for the full
+     * rationale. The bridging TaskT is created once in the constructor (matching real .NET's
+     * own stable-identity Task property) and returned by value on every getTaskProperty() call
+     * (cheap: TaskT is just two shared_ptrs + a CancellationToken).
+     *
+     * @note Declares an explicit destructor that force-completes an unfulfilled promise_ before
+     * any member's implicit destructor runs (2026-07-14) -- required to avoid a genuine deadlock,
+     * confirmed via a standalone repro on this toolchain: destroying the LAST shared_future
+     * reference to an std::async-launched task blocks until that task's callable returns (this
+     * holds for shared_future here, not just plain future -- an implementation behavior, not
+     * something the standard requires, but real on GCC/libstdc++). task_'s implicit member
+     * destructor runs before promise_'s (reverse declaration order), so without this, task_'s
+     * internal watcher thread (blocked on this source's own future) would still be waiting for
+     * promise_ to resolve while the destructor destroying task_ is itself blocked waiting for
+     * that same watcher thread -- a cycle with no way out. Resolving promise_ first breaks it.
      */
     template<typename TResult>
     class TaskCompletionSource {
         std::promise<TResult> promise_;
         std::shared_future<TResult> future_;
         std::atomic<bool> completed_{false}; ///< True once the source has been completed.
+        TaskT<TResult> task_;
 
     public:
         /** Default constructor — creates an unresolved source. */
-        TaskCompletionSource() : future_(promise_.get_future().share()) {}
+        TaskCompletionSource()
+            : future_(promise_.get_future().share()),
+              task_(TaskT<TResult>::FromExternalFuture(std::make_shared<std::shared_future<TResult>>(future_))) {}
+
+        /** See the class-level @note on why this can't be the implicitly-generated destructor. */
+        ~TaskCompletionSource() {
+            if (!completed_.exchange(true)) {
+                promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
+            }
+        }
+
+        /** The TaskT<TResult> this source controls; completes when this source does. */
+        [[nodiscard]] TaskT<TResult> getTaskProperty() const { return task_; }
 
         /**
          * Transitions the task to a successful result.
@@ -111,16 +133,34 @@ namespace System::Threading::Tasks {
         TResult GetResult() { return future_.get(); }
     };
 
-    /** Specialisation of TaskCompletionSource for void tasks (no result value). */
+    /**
+     * Specialisation of TaskCompletionSource for void tasks (no result value).
+     *
+     * @note Declares an explicit destructor for the same reason as the primary template -- see
+     * its class-level @note for the full deadlock rationale.
+     */
     template<>
     class TaskCompletionSource<void> {
         std::promise<void> promise_;
         std::shared_future<void> future_;
         std::atomic<bool> completed_{false}; ///< True once the source has been completed.
+        Task task_;
 
     public:
         /** Default constructor — creates an unresolved source. */
-        TaskCompletionSource() : future_(promise_.get_future().share()) {}
+        TaskCompletionSource()
+            : future_(promise_.get_future().share()),
+              task_(Task::FromExternalFuture(std::make_shared<std::shared_future<void>>(future_))) {}
+
+        /** See the class-level @note on why this can't be the implicitly-generated destructor. */
+        ~TaskCompletionSource() {
+            if (!completed_.exchange(true)) {
+                promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
+            }
+        }
+
+        /** The Task this source controls; completes when this source does. */
+        [[nodiscard]] Task getTaskProperty() const { return task_; }
 
         /**
          * Transitions the task to the completed state.

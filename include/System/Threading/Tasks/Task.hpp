@@ -53,6 +53,12 @@ namespace System::Threading::Tasks {
         std::shared_ptr<State>             state_;
         System::Threading::CancellationToken cancellationToken_ = System::Threading::CancellationToken::None();
 
+        // Tag-dispatched private constructor for FromExternalFuture() below: a fresh, NOT-yet-
+        // completed State with no future_ and no launched action -- distinct from the public
+        // default constructor above, which is intentionally already-completed.
+        struct PendingTag {};
+        explicit Task(PendingTag) : state_(std::make_shared<State>()) {}
+
     public:
         /** Constructs an already-completed Task (equivalent to Task.CompletedTask). */
         Task() : state_(std::make_shared<State>()) { state_->isCompleted = true; }
@@ -218,6 +224,47 @@ namespace System::Threading::Tasks {
         }
 
         /**
+         * Internal: constructs a Task bound to an externally-completed future, with no action of
+         * its own to run. Used by TaskCompletionSource<void>::getTaskProperty() to bridge that
+         * type's producer-driven completion model onto the ordinary Task consumer-facing API.
+         * Not part of the public .NET-mirroring surface (real .NET has no equivalent public
+         * factory -- this exists purely because this port's Task/TaskT always launches an action
+         * immediately on construction, unlike real .NET's Task, which supports an internal
+         * "pending" construction mode TaskCompletionSource's own Task property is built on).
+         *
+         * @note Wraps @p sharedFuture in a NEW std::async task (rather than storing it directly
+         * as future_ and mirroring its outcome from a separately-detached watcher thread, an
+         * earlier version of this method) so that state mutation happens INSIDE the same async
+         * lambda whose completion future_->get() blocks on -- exactly the invariant every other
+         * Task constructor above already relies on (see e.g. the std::function<void()>
+         * constructor). The earlier detached-thread version raced Wait()'s own future_->get()
+         * against the watcher thread's separate sharedFuture->get(), with no ordering guarantee
+         * that state_->isCompleted was set before Wait() returned -- caught by a real, flaky
+         * test failure (TaskCompletionSourceTests.GetTaskProperty_AfterSetResult_*) before this
+         * fix, not merely a theoretical concern.
+         */
+        static Task FromExternalFuture(std::shared_ptr<std::shared_future<void>> sharedFuture) {
+            Task t(PendingTag{});
+            auto s = t.state_;
+            t.future_ = std::make_shared<std::shared_future<void>>(
+                std::async(std::launch::async, [sharedFuture, s]() {
+                    try {
+                        sharedFuture->get();
+                        s->isCompleted = true;
+                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
+                        s->isCanceled  = true;
+                        s->isCompleted = true;
+                    } catch (...) {
+                        s->exception   = std::current_exception();
+                        s->isFaulted   = true;
+                        s->isCompleted = true;
+                    }
+                }).share()
+            );
+            return t;
+        }
+
+        /**
          * Creates a Task that completes when all of the provided tasks have completed.
          *
          * C++ counterpart of .NET Task.WhenAll(IEnumerable&lt;Task&gt;). All input tasks are
@@ -328,6 +375,12 @@ namespace System::Threading::Tasks {
             state_->result = value;
             state_->isCompleted = true;
         }
+
+        // Tag-dispatched private constructor for FromExternalFuture() below: a fresh, NOT-yet-
+        // completed State with no future_ and no launched action -- see Task::PendingTag's
+        // identical comment for the full rationale.
+        struct PendingTag {};
+        explicit TaskT(PendingTag) : state_(std::make_shared<State>()) {}
 
     public:
         /**
@@ -457,6 +510,40 @@ namespace System::Threading::Tasks {
          */
         static TaskT<TResult> FromResult(const TResult& value) {
             return TaskT<TResult>(value, true);
+        }
+
+        /**
+         * Internal: constructs a TaskT bound to an externally-completed future, with no action
+         * of its own to run. Used by TaskCompletionSource<TResult>::getTaskProperty() to bridge
+         * that type's producer-driven completion model onto the ordinary TaskT consumer-facing
+         * API. Not part of the public .NET-mirroring surface -- see Task::FromExternalFuture's
+         * identical doc-comment for the full rationale, including why this wraps @p sharedFuture
+         * in a new std::async task (state mutation inside the same future-producing lambda that
+         * getResultProperty()/Wait() blocks on) rather than a separately-detached watcher thread.
+         */
+        static TaskT<TResult> FromExternalFuture(std::shared_ptr<std::shared_future<TResult>> sharedFuture) {
+            TaskT<TResult> t(PendingTag{});
+            auto s = t.state_;
+            t.future_ = std::make_shared<std::shared_future<TResult>>(
+                std::async(std::launch::async, [sharedFuture, s]() -> TResult {
+                    try {
+                        TResult r = sharedFuture->get();
+                        s->result      = r;
+                        s->isCompleted = true;
+                        return r;
+                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
+                        s->isCanceled  = true;
+                        s->isCompleted = true;
+                        return TResult{};
+                    } catch (...) {
+                        s->exception   = std::current_exception();
+                        s->isFaulted   = true;
+                        s->isCompleted = true;
+                        return TResult{};
+                    }
+                }).share()
+            );
+            return t;
         }
 
         /**

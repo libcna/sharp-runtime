@@ -428,6 +428,46 @@ TEST(TaskCompletionSourceTests, TrySetCanceled_AfterResult_False) {
     EXPECT_FALSE(tcs.TrySetCanceled());
 }
 
+TEST(TaskCompletionSourceTests, GetTaskProperty_BeforeSetResult_IsNotCompleted) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    EXPECT_FALSE(t.getIsCompletedProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetResult_CompletesWithResult) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetResult(99);
+    EXPECT_EQ(t.getResultProperty(), 99);
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetException_Faults) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(std::runtime_error("tcs task error")));
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetCanceled_Cancels) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetCanceled();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_CalledTwice_ReturnsSameUnderlyingTask) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t1 = tcs.getTaskProperty();
+    TaskT<int> t2 = tcs.getTaskProperty();
+    tcs.SetResult(7);
+    EXPECT_EQ(t1.getResultProperty(), 7);
+    EXPECT_EQ(t2.getResultProperty(), 7);
+}
+
 // ===========================================================================
 // TaskCompletionSource<void>
 // ===========================================================================
@@ -459,6 +499,46 @@ TEST(TaskCompletionSourceVoidTests, SetCanceled_Wait_Throws) {
     TaskCompletionSource<void> tcs;
     tcs.SetCanceled();
     EXPECT_THROW(tcs.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_BeforeSetResult_IsNotCompleted) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    EXPECT_FALSE(t.getIsCompletedProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetResult_Completes) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetResult();
+    EXPECT_NO_THROW(t.Wait());
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetException_Faults) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(std::runtime_error("void task error")));
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetCanceled_Cancels) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetCanceled();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_CalledTwice_ReturnsSameUnderlyingTask) {
+    TaskCompletionSource<void> tcs;
+    Task t1 = tcs.getTaskProperty();
+    Task t2 = tcs.getTaskProperty();
+    tcs.SetResult();
+    EXPECT_NO_THROW(t1.Wait());
+    EXPECT_NO_THROW(t2.Wait());
 }
 
 // ===========================================================================
