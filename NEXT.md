@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `557d0ea`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `e014d4c`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,7 +66,8 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`557d0ea`), via `cmake --build build --parallel 4`.
+(`e014d4c`, re-verified after the `557d0ea` `Task::ContinueWith`/`WhenAny` work — no code changed
+since, this commit is docs-only), via `cmake --build build --parallel 4`.
 
 **Test status**: last verified **12449/12449 passing**, via `./build/SharpRuntimeTests`, at the
 same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
@@ -730,7 +731,8 @@ only ever operate on non-generic `Task`, so it wasn't needed to achieve this tic
 ## 4. Current blocker / main problem
 
 **There is no active build/test blocker right now.** Build was clean and all 12449 tests passed
-at the last verification (HEAD `557d0ea`). The full sanitizer trio (TSan/ASan/UBSan) was verified
+at the last verification (HEAD `e014d4c`, re-verified — no code changed since `557d0ea`, this
+commit is docs-only). The full sanitizer trio (TSan/ASan/UBSan) was verified
 clean at `1cdc80a` (12378 tests); ThreadSanitizer has since been re-verified specifically against
 the `TaskCompletionSource.Task` addition (`200591b`), the fresh-eyes-audit fixes
 (`eb8489a`/`41c0476`), and — most recently and most thoroughly, given the concurrency-sensitivity
@@ -1033,8 +1035,9 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 557d0ea — 12449/12449 tests,
-0 errors/0 warnings. ThreadSanitizer AND AddressSanitizer have both been re-verified clean
+Read NEXT.md first. It reflects the repository state as of HEAD e014d4c (docs-only checkpoint;
+the code itself is at 557d0ea, re-verified unchanged) — 12449/12449 tests, 0 errors/0 warnings.
+ThreadSanitizer AND AddressSanitizer have both been re-verified clean
 specifically against the most concurrency/memory-lifetime-sensitive change landed this session --
 the Task::ContinueWith/WhenAny rewrite (557d0ea) -- 0 warnings/errors/leaks across dedicated
 isolated sanitizer builds each (see §2/§3). Earlier changes this session (TaskCompletionSource.Task,
