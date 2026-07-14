@@ -6,7 +6,9 @@
 #include <bit>
 #include <cctype>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -168,6 +170,39 @@ namespace System {
          * C++ counterpart of .NET UInt32.ToString().
          */
         [[nodiscard]] static std::string ToString(uintcs value) { return std::to_string(value); }
+
+        /**
+         * @brief Converts @p value to a string using the specified format specifier
+         * ("X"/"x" hexadecimal, "D"/"d" zero-padded decimal, "G"/"g" general).
+         *
+         * C++ counterpart of .NET UInt32.ToString(string format) -- added 2026-07-14
+         * (duplicated-implementation audit finding: UInt32 was the only one of the 8 integer
+         * types missing this overload, mirrored here from the identical implementation on its
+         * unsigned siblings UInt16/UInt64).
+         */
+        [[nodiscard]] static std::string ToString(uintcs value, const std::string& format) {
+            if (format.empty()) return ToString(value);
+            char type = format[0];
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
+            std::ostringstream oss;
+            oss.imbue(std::locale::classic());
+            if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << value; return oss.str(); }
+            if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << value; return oss.str(); }
+            if (type == 'D' || type == 'd') {
+                std::string s = std::to_string(value);
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            if (type == 'G' || type == 'g') return ToString(value);
+            return ToString(value);
+        }
 
         /**
          * @brief Compares @p a to @p b and returns a signed integer.
