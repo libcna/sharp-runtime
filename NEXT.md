@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-13. Branch: `feature/work`. HEAD: `2be9c3c`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `8e490a8`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,11 +66,14 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`2be9c3c`), via `cmake --build build --parallel 4`.
+(`8e490a8`), via `cmake --build build --parallel 4`.
 
 **Test status**: last verified **12378/12378 passing**, 1224 test suites, via
-`./build/SharpRuntimeTests`, at the same HEAD (also verified flake-free across 3 additional full
-runs plus 20 repeats of the `Task::WhenAny` suite specifically). Zero known failing tests.
+`./build/SharpRuntimeTests`, at the same HEAD. Additionally verified under **ThreadSanitizer**
+(first time in this project's history — see §3): full suite run 4 times with
+`-fsanitize=thread`, 0 warnings and 12378/12378 passing every time, ~4 seconds per run. Also
+verified flake-free across 3 additional normal-build full runs plus 20 repeats of the
+`Task::WhenAny` suite specifically. Zero known failing tests, zero known races.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
@@ -292,6 +295,47 @@ safe to keep running in the background after `WhenAny` returns — matching real
 behavior of not canceling non-winning tasks. 7 new regression tests; verified flake-free across
 20 repeats of the suite plus 3 full-test-suite runs. Test count grew from 12371 to 12378.
 
+**First-ever ThreadSanitizer run in this project's history** (`57bf75f`, `8e490a8`) — set up a
+separate TSan-instrumented build (`-fsanitize=thread -g -O1`, plus `-Wno-array-bounds
+-Wno-stringop-overread -Wno-stringop-overflow -Wno-error=tsan` to work around GCC `-O1`-specific
+false-positive warnings and one genuine `atomic_thread_fence`-under-TSan incompatibility
+unrelated to this codebase). **Process note, important for next time**: the first attempt hung
+for real (not sanitizer overhead — once fixed, the full 12k+ test suite runs under TSan in ~4
+seconds) because of a genuine deadlock in the code below, and it was launched without a bounded
+`timeout` and without active monitoring, so it sat unnoticed for hours before the user had to
+flag it directly. Every TSan invocation after that used `timeout <N>`; see the
+`feedback_bounded_timeouts_for_risky_commands` memory for the full incident writeup — the
+practical rule now: any new/unverified long-running command gets a hard timeout from the start,
+not just after something has already gone wrong once.
+
+Found and fixed 3 real, verified issues, none cosmetic:
+- **`Channel<T>::CreateUnboundedPrioritized`'s `TryRead()` was missing a `notEmpty.notify_all()`
+  call** its sibling FIFO `ChannelReaderImpl::TryRead()` already has — a genuine lost-wakeup bug.
+  Draining the last item while the channel is already closed is exactly the transition
+  `getCompletionProperty()`'s waiter blocks on; without the notify, that wait can hang forever.
+  This is what caused the real (non-sanitizer-overhead) hang described above, reproduced
+  deterministically as a deadlock in `PrioritizedChannelTests.Completion_CompletesOnceClosed-
+  AndDrained` under TSan's instrumented scheduling — it happened to pass under normal execution
+  purely because of a timing coincidence (the Completion task's background thread usually didn't
+  check its predicate until after `TryRead` had already run), not a correctness guarantee. Fixed
+  by adding the identical `notify_all()` call the FIFO implementation already has.
+- **Two test-only races from `sleep_for`-as-synchronization** (`AsyncLocalTests`/`ThreadLocalTests`
+  `InstanceDestroyedOnDifferentThread...` tests): a worker thread constructed an object and a
+  main thread destroyed/reconstructed it at the same stack address after a fixed
+  `sleep_for(20ms)` "should be enough" delay — no actual happens-before relationship. Fixed with
+  a second `promise`/`future` pair so the worker explicitly signals construction-complete.
+- **A subtler synchronization-scope bug** in `PosixSignalTests.MultipleHandlers_FireInReverse-
+  RegistrationOrder`: each handler's `fired++` (the atomic the main thread polled) was NOT
+  actually the last action on the watcher thread — the enclosing `std::lock_guard`'s destructor
+  (unlocking a stack-local mutex) ran afterward, since it was declared before (and so destructs
+  after) the increment. Fixed by scoping the lock so it unlocks strictly before `fired++`.
+- **A plain (non-atomic) pointer race** in `TimerTests.Change_DuringCallback_NotClobberedByPeriod`
+  — a background timer thread could read a test-local `Timer*` before the main thread's write to
+  it became visible. Fixed with `std::atomic<Timer*>`.
+
+Re-verified clean (0 warnings) across 4 full-suite TSan runs after all four fixes landed. Normal
+build re-verified: 0 errors/0 warnings, 12378/12378 passing.
+
 ---
 
 ## 4. Current blocker / main problem
@@ -351,6 +395,12 @@ update this section (and the whole file) once you understand what changed.
   only been measured for `System::String`'s `Split(char)`/`Concat`/`Join` so far (2026-07-13, see
   §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
   still unmeasured.
+- **AddressSanitizer has never been run against this codebase** (ThreadSanitizer now has, see
+  §3, and is clean — but ASan checks a different class of bugs: heap/stack corruption, use-after-
+  free, leaks). The `bench/` / diagnostic-build pattern from the TSan investigation (a separate
+  build dir, `-fsanitize=address -g -O1`, watch for the same GCC `-O1` false-positive warnings
+  that needed `-Wno-array-bounds`/`-Wno-stringop-overread`/`-Wno-stringop-overflow`) would carry
+  over directly.
 
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
@@ -482,33 +532,40 @@ a "does this actually work" check available in this repo.
 
 ## 8. Next smallest tasks
 
-**Completed this session** (2026-07-13, full detail in §3 / git history — compacted here to keep
-this section actionable): build/test baseline re-verify; `TypedReference` classification
+**Completed this session** (2026-07-13/14, full detail in §3 / git history — compacted here to
+keep this section actionable): build/test baseline re-verify; `TypedReference` classification
 (false-alarm, no change needed); `Task::WhenAll`; `NumberStyles.Currency`/`AllowThousands` for
 all 8 integer types; `Channel::CreateUnboundedPrioritized`; a `String` performance-audit pilot;
 a full post-pilot audit round (resource-management fixes, `String::Format` validation,
 `Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions); `Task::WhenAny` (the
-last remaining documented `Task` gap).
+last remaining documented `Task` gap); the project's first-ever full-suite ThreadSanitizer run
+(found and fixed 1 real production deadlock + 3 real test-only races, now clean).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
+1. **AddressSanitizer run.** Never done in this project's history (§5). Same pattern as the TSan
+   investigation this session (see §3): separate build dir, `-fsanitize=address -g -O1`, expect
+   the same GCC `-O1` false-positive warnings needing `-Wno-array-bounds`/`-Wno-stringop-overread`/
+   `-Wno-stringop-overflow`. **Use a bounded `timeout` on every run from the start** — the TSan
+   run's first attempt hung for 6 real hours undetected because it wasn't bounded (see the
+   `feedback_bounded_timeouts_for_risky_commands` memory).
+   Verify: `ASAN_OPTIONS=... timeout <N> ./SharpRuntimeTests` clean (0 leaks/errors).
+
+2. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
    two real, measurement-justified wins; `List<T>`, `StringBuilder`, and `Dictionary` haven't been
    profiled at all yet. Use `bench/StringBenchmark.cpp` as the template (add a new `bench/*.cpp`
    file, measure before changing anything, only commit changes with a real measured delta).
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` (no regressions).
 
-2. **Another audit round, different categories.** This session's post-pilot round covered
+3. **Another audit round, different categories.** This session's post-pilot round covered
    TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
-   note), resource-management/RAII (4 real bugs, fixed), and `plan.sqlite3` drift (clean). Categories
-   NOT yet covered: compiler-warning audit under a stricter flag set (e.g. `-Wshadow`,
-   `-Wconversion`), duplicated-implementation search, missing edge-case handling in recently-added
-   code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this
-   session is itself a good target for a fresh pair of eyes), or a real sanitizer run (ASan/TSan)
-   across the full test suite (never done in this project's history per §5's "Needs verification"
-   list — `Task::WhenAny`'s detach()'d background watcher threads in particular would benefit from
-   a TSan pass, given this class's history of real ThreadSanitizer-caught races).
+   note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), and
+   concurrency (TSan — 4 real races/deadlock, fixed). Categories NOT yet covered: compiler-warning
+   audit under a stricter flag set (e.g. `-Wshadow`, `-Wconversion`), duplicated-implementation
+   search, or missing edge-case handling in recently-added code (the `NumberStyles`/
+   `Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this session is itself a good
+   target for a fresh pair of eyes).
 
 3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
    since this port's `Task` always launches immediately on construction with no "pending" bridge
@@ -545,9 +602,9 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 2be9c3c (12378/12378 tests
-passing, 0 errors/0 warnings, all verified at that commit) — re-verify first anyway:
-cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
+Read NEXT.md first. It reflects the repository state as of HEAD 8e490a8 (12378/12378 tests
+passing, 0 errors/0 warnings, also clean under ThreadSanitizer, all verified at that commit) —
+re-verify first anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
 open question is which of §8's candidate next tasks (or something else entirely) to work on.
