@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `8e490a8`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `35817d9`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,14 +66,16 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`8e490a8`), via `cmake --build build --parallel 4`.
+(`35817d9`), via `cmake --build build --parallel 4`.
 
 **Test status**: last verified **12378/12378 passing**, 1224 test suites, via
 `./build/SharpRuntimeTests`, at the same HEAD. Additionally verified under **ThreadSanitizer**
 (first time in this project's history — see §3): full suite run 4 times with
 `-fsanitize=thread`, 0 warnings and 12378/12378 passing every time, ~4 seconds per run. Also
-verified flake-free across 3 additional normal-build full runs plus 20 repeats of the
-`Task::WhenAny` suite specifically. Zero known failing tests, zero known races.
+verified under **AddressSanitizer** (also a first — see §3): full suite run 3 times with
+`-fsanitize=address`, 0 errors/leaks and 12378/12378 passing every time. Also verified
+flake-free across 3 additional normal-build full runs plus 20 repeats of the `Task::WhenAny`
+suite specifically. Zero known failing tests, zero known races, zero known memory-safety issues.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
@@ -336,6 +338,37 @@ Found and fixed 3 real, verified issues, none cosmetic:
 Re-verified clean (0 warnings) across 4 full-suite TSan runs after all four fixes landed. Normal
 build re-verified: 0 errors/0 warnings, 12378/12378 passing.
 
+**First-ever AddressSanitizer run** (`1f2e4b5`, `35817d9`) — same diagnostic-build pattern as
+TSan (separate build dir, `-fsanitize=address -g -O1`, same GCC `-O1` false-positive warning
+suppressions). Found and fixed two categories of real issues:
+- **A confirmed heap-buffer-overflow** in `NativeMemory::AlignedRealloc`'s POSIX path: it
+  unconditionally `memcpy`'d the caller's NEW size from the OLD (smaller) allocation when
+  growing a block — ASan caught it reading 128 bytes from a 32-byte source. This is the SAME bug
+  GCC's `-Warray-bounds`/`-Wstringop-overread` had already flagged during the TSan build setup
+  (see §3's TSan entry) — at the time those warnings were dismissed as `-O1` false positives
+  without further investigation, which was a mistake; they were GCC correctly seeing this exact
+  bug. Root cause: POSIX has no portable aligned-realloc, so this port had no way to know the
+  old allocation's actual size. Fixed with a standard hand-rolled aligned-allocator technique —
+  `AlignedAlloc` now over-allocates and manually aligns the returned pointer, storing the raw
+  `malloc`'d pointer and requested size in a header immediately before the address handed to the
+  caller, so `AlignedRealloc` can correctly bound its copy to `min(newSize, oldSize)`. Windows'
+  `_aligned_malloc`/`_aligned_realloc` (which already track sizes internally) are untouched.
+- **576 bytes leaked across 9 allocations in the XML subsystem**, from 5 sources, triaged into
+  two categories: (1) a genuine production bug — `XmlDocument::CreateAttribute`/
+  `CreateEntityReference` returned a bare `new`'d object with no owner, the only two `Create*`
+  factory methods that didn't participate in the document's existing `nodeCache_` RAII pool
+  (they have no native tinyxml2 node to key that cache by) — fixed with a parallel
+  `unattachedNodes_` ownership pool plus a `ReleaseUnattachedNode()` transfer point
+  `XmlElement::SetAttributeNode` now calls once an attribute is actually attached; (2)
+  caller-owns-the-return-value contracts matching real .NET's own semantics for `XPathNavigator.
+  Clone()`/`SelectSingleNode()`, `XmlNode.SelectNodes()`, `XmlDocument.GetElementsByTagName()`
+  (the latter two already had an explicit, previously-reviewed "caller's responsibility" comment
+  at their call site) — these were test-only cleanup gaps, fixed in the 4 affected tests rather
+  than changing any production API.
+
+Re-verified clean (0 errors/leaks) across 3 full-suite ASan runs after both fixes landed. Normal
+build re-verified: 0 errors/0 warnings, 12378/12378 passing.
+
 ---
 
 ## 4. Current blocker / main problem
@@ -395,12 +428,12 @@ update this section (and the whole file) once you understand what changed.
   only been measured for `System::String`'s `Split(char)`/`Concat`/`Join` so far (2026-07-13, see
   §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
   still unmeasured.
-- **AddressSanitizer has never been run against this codebase** (ThreadSanitizer now has, see
-  §3, and is clean — but ASan checks a different class of bugs: heap/stack corruption, use-after-
-  free, leaks). The `bench/` / diagnostic-build pattern from the TSan investigation (a separate
-  build dir, `-fsanitize=address -g -O1`, watch for the same GCC `-O1` false-positive warnings
-  that needed `-Wno-array-bounds`/`-Wno-stringop-overread`/`-Wno-stringop-overflow`) would carry
-  over directly.
+- **UndefinedBehaviorSanitizer (UBSan) has never been run against this codebase.** TSan and ASan
+  both have now (see §3, both clean) — UBSan checks a third, different class of bugs (signed
+  overflow, misaligned access, invalid enum values, etc.). Same diagnostic-build pattern as the
+  other two would carry over directly (`-fsanitize=undefined -g -O1`, watch for the same GCC
+  `-O1` false-positive warnings that needed `-Wno-array-bounds`/`-Wno-stringop-overread`/
+  `-Wno-stringop-overflow`).
 
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
@@ -539,18 +572,22 @@ all 8 integer types; `Channel::CreateUnboundedPrioritized`; a `String` performan
 a full post-pilot audit round (resource-management fixes, `String::Format` validation,
 `Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions); `Task::WhenAny` (the
 last remaining documented `Task` gap); the project's first-ever full-suite ThreadSanitizer run
-(found and fixed 1 real production deadlock + 3 real test-only races, now clean).
+(1 real production deadlock + 3 real test-only races, fixed, now clean); the project's
+first-ever full-suite AddressSanitizer run (1 real heap-buffer-overflow + 5 real memory leaks
+across 2 categories, fixed, now clean).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **AddressSanitizer run.** Never done in this project's history (§5). Same pattern as the TSan
-   investigation this session (see §3): separate build dir, `-fsanitize=address -g -O1`, expect
-   the same GCC `-O1` false-positive warnings needing `-Wno-array-bounds`/`-Wno-stringop-overread`/
-   `-Wno-stringop-overflow`. **Use a bounded `timeout` on every run from the start** — the TSan
-   run's first attempt hung for 6 real hours undetected because it wasn't bounded (see the
-   `feedback_bounded_timeouts_for_risky_commands` memory).
-   Verify: `ASAN_OPTIONS=... timeout <N> ./SharpRuntimeTests` clean (0 leaks/errors).
+1. **UndefinedBehaviorSanitizer run.** Never done in this project's history (§5). Same
+   diagnostic-build pattern as TSan/ASan this session (see §3): separate build dir,
+   `-fsanitize=undefined -g -O1`, expect the same GCC `-O1` false-positive warnings needing
+   `-Wno-array-bounds`/`-Wno-stringop-overread`/`-Wno-stringop-overflow`. **Use a bounded
+   `timeout` on every run from the start** — the TSan run's first attempt hung for 6 real hours
+   undetected because it wasn't bounded (see the `feedback_bounded_timeouts_for_risky_commands`
+   memory). Given TSan/ASan both surfaced real, previously-unknown bugs, UBSan finding something
+   real is a reasonable prior, not just a formality.
+   Verify: `UBSAN_OPTIONS=... timeout <N> ./SharpRuntimeTests` clean (0 diagnostics).
 
 2. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
    two real, measurement-justified wins; `List<T>`, `StringBuilder`, and `Dictionary` haven't been
@@ -561,13 +598,13 @@ next, or ask the user first if unsure which to prioritize.
 3. **Another audit round, different categories.** This session's post-pilot round covered
    TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
    note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), and
-   concurrency (TSan — 4 real races/deadlock, fixed). Categories NOT yet covered: compiler-warning
-   audit under a stricter flag set (e.g. `-Wshadow`, `-Wconversion`), duplicated-implementation
-   search, or missing edge-case handling in recently-added code (the `NumberStyles`/
-   `Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this session is itself a good
-   target for a fresh pair of eyes).
+   memory safety (TSan + ASan — 6 real bugs total, fixed). Categories NOT yet covered:
+   compiler-warning audit under a stricter flag set (e.g. `-Wshadow`, `-Wconversion`),
+   duplicated-implementation search, or missing edge-case handling in recently-added code (the
+   `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this session is
+   itself a good target for a fresh pair of eyes).
 
-3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
+4. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
    since this port's `Task` always launches immediately on construction with no "pending" bridge
    mode. Would need design thought about how to represent a Task that doesn't yet have a
    `std::async` backing it.
@@ -602,9 +639,10 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 8e490a8 (12378/12378 tests
-passing, 0 errors/0 warnings, also clean under ThreadSanitizer, all verified at that commit) —
-re-verify first anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
+Read NEXT.md first. It reflects the repository state as of HEAD 35817d9 (12378/12378 tests
+passing, 0 errors/0 warnings, also clean under both ThreadSanitizer and AddressSanitizer, all
+verified at that commit) — re-verify first anyway: cmake --build build --parallel 4 &&
+./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
 open question is which of §8's candidate next tasks (or something else entirely) to work on.
