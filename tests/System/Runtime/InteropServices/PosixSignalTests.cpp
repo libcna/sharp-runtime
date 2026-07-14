@@ -51,14 +51,25 @@ TEST(PosixSignalTests, MultipleHandlers_FireInReverseRegistrationOrder) {
     std::vector<int> order;
     std::mutex orderMutex;
 
+    // fired++ must be the LAST action in each handler with nothing implicit executing after it
+    // (e.g. a lock_guard destructor) -- otherwise the main thread's waitFor(fired, ...) below
+    // observes "handler done" while the watcher thread is still finishing trailing cleanup (the
+    // mutex unlock), a genuine ThreadSanitizer-flagged data race (2026-07-14) on this test's
+    // stack-local orderMutex/order once a later test reuses that stack memory. Scoping the
+    // lock_guard so it unlocks BEFORE fired++ makes fired's atomic increment correctly
+    // happens-after everything the handler does.
     auto reg1 = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [&](PosixSignalContext&) {
-        std::lock_guard<std::mutex> l(orderMutex);
-        order.push_back(1);
+        {
+            std::lock_guard<std::mutex> l(orderMutex);
+            order.push_back(1);
+        }
         fired++;
     });
     auto reg2 = PosixSignalRegistration::Create(PosixSignal::Sigwinch, [&](PosixSignalContext&) {
-        std::lock_guard<std::mutex> l(orderMutex);
-        order.push_back(2);
+        {
+            std::lock_guard<std::mutex> l(orderMutex);
+            order.push_back(2);
+        }
         fired++;
     });
 

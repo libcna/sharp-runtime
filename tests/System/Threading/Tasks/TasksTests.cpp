@@ -14,6 +14,8 @@
 #include <thread>
 #include <vector>
 #include "System/AggregateException.hpp"
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
@@ -123,6 +125,384 @@ TEST(TaskTests, Run_ThrowingAction_IsFaulted) {
 TEST(TaskTests, Delay_CompletesAfterWait) {
     Task t = Task::Delay(1);
     EXPECT_NO_THROW(t.Wait());
+}
+
+TEST(TaskTests, Delay_NegativeOne_DoesNotThrow) {
+    // -1 is a valid sentinel in real .NET's Task.Delay (API-surface parity only -- see
+    // Delay()'s own doc-comment for why this port doesn't give it true infinite-wait semantics).
+    EXPECT_NO_THROW(Task::Delay(-1).Wait());
+}
+
+TEST(TaskTests, Delay_LessThanNegativeOne_ThrowsArgumentOutOfRangeException) {
+    EXPECT_THROW(Task::Delay(-2), System::ArgumentOutOfRangeException);
+}
+
+// ===========================================================================
+// Task::WhenAll
+// ===========================================================================
+
+TEST(TaskWhenAllTests, EmptyVector_ReturnsCompletedTask) {
+    Task t = Task::WhenAll({});
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+// Regression test (added 2026-07-14, duplicated-implementation audit follow-up): a moved-from
+// Task -- this port's closest equivalent to real .NET's "null Task" input -- in the tasks vector
+// previously caused undefined behavior instead of a clean ArgumentException, matching real
+// .NET's own Task_MultiTaskContinuation_NullTask check.
+TEST(TaskWhenAllTests, NullTask_InVector_ThrowsArgumentException) {
+    Task valid = Task::Run([]() {});
+    Task movedFrom = Task::Run([]() {});
+    Task other = std::move(movedFrom); // movedFrom.state_ is now null
+    (void)other;
+    std::vector<Task> tasks{valid, movedFrom};
+    EXPECT_THROW(Task::WhenAll(std::move(tasks)), System::ArgumentException);
+}
+
+TEST(TaskWhenAllTests, AllSucceed_CompletesSuccessfully) {
+    std::atomic<int> counter{0};
+    std::vector<Task> tasks;
+    for (int i = 0; i < 5; ++i) {
+        tasks.push_back(Task::Run([&counter]() { ++counter; }));
+    }
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_NO_THROW(all.Wait());
+    EXPECT_TRUE(all.getIsCompletedSuccessfullyProperty());
+    EXPECT_EQ(counter.load(), 5);
+}
+
+TEST(TaskWhenAllTests, EveryTaskRuns_EvenIfEarlierOneFaults) {
+    // WhenAll must not short-circuit: every input task should still run to completion even
+    // though an earlier one in the vector faults, matching real .NET's "wait for all" contract.
+    std::atomic<int> ranCount{0};
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() { throw std::runtime_error("first task fails"); }));
+    for (int i = 0; i < 4; ++i) {
+        tasks.push_back(Task::Run([&ranCount]() { ++ranCount; }));
+    }
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), std::runtime_error);
+    EXPECT_EQ(ranCount.load(), 4);
+}
+
+TEST(TaskWhenAllTests, OneFaults_WaitRethrowsFirstFault) {
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() { throw std::runtime_error("boom"); }));
+    tasks.push_back(Task::Run([]() {}));
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), std::runtime_error);
+    EXPECT_TRUE(all.getIsFaultedProperty());
+}
+
+TEST(TaskWhenAllTests, OneCanceled_NoFault_WaitThrowsTaskCanceledException) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() {}, cts.getTokenProperty()));
+    Task all = Task::WhenAll(std::move(tasks));
+    EXPECT_THROW(all.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+// Regression test (fixed 2026-07-14): a task that FAULTS with a directly-thrown
+// TaskCanceledException (no CancellationToken involved -- not genuine cooperative cancellation)
+// used to be misclassified as canceled by WhenAll's old `catch (const TaskCanceledException&)`.
+// Wait() rethrows a faulted task's stored exception directly (see its own doc-comment), so the
+// caught exception's TYPE alone can't distinguish "faulted with this exact type" from
+// "genuinely canceled" -- the same shape as the TaskCompletionSource::SetException bug fixed the
+// same day. Fixed by checking each task's own getIsCanceledProperty() after Wait() instead.
+TEST(TaskWhenAllTests, TaskFaultsWithTaskCanceledException_TreatedAsFaultNotCancel) {
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() {
+        throw System::Threading::Tasks::TaskCanceledException("custom fault reason, not real cancellation");
+    }));
+    Task all = Task::WhenAll(std::move(tasks));
+    try {
+        all.Wait();
+        FAIL() << "expected the original TaskCanceledException to be rethrown as a FAULT";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom fault reason, not real cancellation");
+    }
+    EXPECT_TRUE(all.getIsFaultedProperty());
+    EXPECT_FALSE(all.getIsCanceledProperty());
+}
+
+// ===========================================================================
+// Task::WhenAny
+// ===========================================================================
+
+TEST(TaskWhenAnyTests, EmptyVector_Throws) {
+    EXPECT_THROW(Task::WhenAny({}), System::ArgumentException);
+}
+
+// See TaskWhenAllTests.NullTask_InVector_ThrowsArgumentException for the full rationale (added
+// 2026-07-14, duplicated-implementation audit follow-up).
+TEST(TaskWhenAnyTests, NullTask_InVector_ThrowsArgumentException) {
+    Task valid = Task::Run([]() {});
+    Task movedFrom = Task::Run([]() {});
+    Task other = std::move(movedFrom); // movedFrom.state_ is now null
+    (void)other;
+    std::vector<Task> tasks{valid, movedFrom};
+    EXPECT_THROW(Task::WhenAny(std::move(tasks)), System::ArgumentException);
+}
+
+TEST(TaskWhenAnyTests, SingleTask_ReturnsThatTask) {
+    Task t = Task::Run([]() {});
+    TaskT<Task> any = Task::WhenAny({t});
+    Task winner = any.Wait();
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+// Regression test for the fast path added 2026-07-14 (fresh-eyes audit finding): when an input
+// task is already complete before WhenAny() is even called, it should return synchronously
+// (TaskT<Task>::FromResult(t), already completed -- no watcher threads, no wrapping async task)
+// rather than always paying for 1 + N OS thread spawns. Real .NET's own TaskFactory.CommonCWAny-
+// Logic short-circuits the same way. Verified via getIsCompletedProperty() being true
+// IMMEDIATELY after WhenAny() returns, with no .Wait()/blocking call in between -- the async
+// path could never satisfy this (its wrapping TaskT necessarily starts incomplete).
+TEST(TaskWhenAnyTests, AlreadyCompletedTask_ReturnsSynchronously) {
+    Task t = Task::Run([]() {});
+    t.Wait(); // ensure it's actually complete before WhenAny() ever sees it
+    TaskT<Task> any = Task::WhenAny({t});
+    EXPECT_TRUE(any.getIsCompletedProperty());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.getResultProperty();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+TEST(TaskWhenAnyTests, FastTaskWinsOverSlowTask) {
+    Task fast = Task::Run([]() {});
+    Task slow = Task::Run([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    });
+    auto start = std::chrono::steady_clock::now();
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{fast, slow});
+    Task winner = any.Wait();
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    // WhenAny must return once the FAST task completes, not wait for the slow one -- checked via
+    // elapsed wall-clock time (generous margin for scheduling jitter under load) rather than a
+    // side-effect flag racing the slow task's own thread, which is inherently flaky.
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+    EXPECT_LT(elapsedMs, 400);
+}
+
+TEST(TaskWhenAnyTests, WrapperCompletesSuccessfully_EvenWhenWinnerFaulted) {
+    // Matches real .NET's own documented contract: the returned wrapper task always itself
+    // completes RanToCompletion, even if the first-completed inner task faulted.
+    Task faulting = Task::Run([]() { throw std::runtime_error("boom"); });
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{faulting});
+    EXPECT_NO_THROW(any.Wait());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsFaultedProperty());
+    EXPECT_THROW(winner.Wait(), std::runtime_error);
+}
+
+TEST(TaskWhenAnyTests, WrapperCompletesSuccessfully_EvenWhenWinnerCanceled) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task canceled = Task::Run([]() {}, cts.getTokenProperty());
+    TaskT<Task> any = Task::WhenAny(std::vector<Task>{canceled});
+    EXPECT_NO_THROW(any.Wait());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCanceledProperty());
+}
+
+TEST(TaskWhenAnyTests, ManyTasks_ExactlyOneWinnerObserved) {
+    constexpr int kCount = 20;
+    std::vector<Task> tasks;
+    std::vector<std::shared_ptr<std::atomic<bool>>> ran;
+    for (int i = 0; i < kCount; ++i) {
+        auto flag = std::make_shared<std::atomic<bool>>(false);
+        ran.push_back(flag);
+        tasks.push_back(Task::Run([flag]() { *flag = true; }));
+    }
+    TaskT<Task> any = Task::WhenAny(std::move(tasks));
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+// Regression test for the 2026-07-14 WhenAny rewrite (zero-extra-thread ContinueWith-based
+// implementation, replacing one detached watcher thread per input task): 200 tasks would
+// previously mean 200 EXTRA OS threads (on top of the 200 the input tasks themselves already
+// use) just to observe them, purely for this one WhenAny call -- all still individually alive
+// for as long as their respective (losing) input task took to finish. This test's main value is
+// that it no longer represents a meaningfully larger resource cost than a handful of tasks would.
+TEST(TaskWhenAnyTests, LargeTaskCount_NoExtraThreadCostRegression) {
+    constexpr int kCount = 200;
+    std::vector<Task> tasks;
+    for (int i = 0; i < kCount; ++i) {
+        tasks.push_back(Task::Run([]() { std::this_thread::sleep_for(std::chrono::milliseconds(5)); }));
+    }
+    TaskT<Task> any = Task::WhenAny(std::move(tasks));
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
+TEST(TaskWhenAnyTests, RepeatedCalls_NoFlakiness) {
+    // Stress the watcher-thread synchronization (atomic CAS + condition_variable) across many
+    // repetitions with varying task counts, matching this project's convention of repeat-testing
+    // concurrency-sensitive code (see CLAUDE.md's --gtest_repeat guidance).
+    for (int iter = 0; iter < 50; ++iter) {
+        std::vector<Task> tasks;
+        for (int i = 0; i < 5; ++i) {
+            tasks.push_back(Task::Run([]() {}));
+        }
+        TaskT<Task> any = Task::WhenAny(std::move(tasks));
+        Task winner = any.Wait();
+        EXPECT_TRUE(winner.getIsCompletedProperty());
+    }
+}
+
+// ===========================================================================
+// Task::ContinueWith (added 2026-07-14, built to let WhenAny stop spawning a watcher thread
+// per input task -- see WhenAny's own updated doc-comment for the full rationale)
+// ===========================================================================
+
+TEST(TaskContinueWithTests, RunsAfterAntecedentCompletes_ReceivesAntecedent) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<bool> ran{false};
+    std::atomic<bool> sawCompleted{false};
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        ran = true;
+        sawCompleted = t.getIsCompletedSuccessfullyProperty();
+    });
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+    EXPECT_TRUE(sawCompleted.load());
+    EXPECT_TRUE(continuation.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskContinueWithTests, RunsImmediately_WhenAntecedentAlreadyComplete) {
+    Task antecedent = Task::Run([]() {});
+    antecedent.Wait(); // force completion before ContinueWith is even called
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; });
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+}
+
+TEST(TaskContinueWithTests, ContinuationSeesFaultedAntecedent_WithoutAutoRethrow) {
+    Task antecedent = Task::Run([]() { throw std::runtime_error("boom"); });
+    bool sawFaulted = false;
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        // ContinueWith's action does NOT automatically rethrow the antecedent's exception --
+        // matching real .NET, unlike Wait(). Must inspect explicitly.
+        sawFaulted = t.getIsFaultedProperty();
+    });
+    EXPECT_NO_THROW(continuation.Wait());
+    EXPECT_TRUE(sawFaulted);
+    EXPECT_TRUE(continuation.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskContinueWithTests, ContinuationSeesCanceledAntecedent) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task antecedent = Task::Run([]() {}, cts.getTokenProperty());
+    bool sawCanceled = false;
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        sawCanceled = t.getIsCanceledProperty();
+    });
+    continuation.Wait();
+    EXPECT_TRUE(sawCanceled);
+}
+
+TEST(TaskContinueWithTests, ContinuationThrows_ContinuationTaskFaults) {
+    Task antecedent = Task::Run([]() {});
+    Task continuation = antecedent.ContinueWith([](Task) { throw std::runtime_error("continuation boom"); });
+    EXPECT_THROW(continuation.Wait(), std::runtime_error);
+    EXPECT_TRUE(continuation.getIsFaultedProperty());
+}
+
+TEST(TaskContinueWithTests, OnlyOnRanToCompletion_RunsOnSuccess) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; },
+                                                 TaskContinuationOptions::OnlyOnRanToCompletion);
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+}
+
+TEST(TaskContinueWithTests, OnlyOnRanToCompletion_SkipsOnFault_ContinuationCanceled) {
+    Task antecedent = Task::Run([]() { throw std::runtime_error("boom"); });
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; },
+                                                 TaskContinuationOptions::OnlyOnRanToCompletion);
+    EXPECT_THROW(continuation.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ran.load());
+    EXPECT_TRUE(continuation.getIsCanceledProperty());
+}
+
+TEST(TaskContinueWithTests, OnlyOnFaulted_RunsOnFault_SkipsOnSuccess) {
+    Task faulted = Task::Run([]() { throw std::runtime_error("boom"); });
+    std::atomic<bool> ranOnFault{false};
+    Task c1 = faulted.ContinueWith([&](Task) { ranOnFault = true; }, TaskContinuationOptions::OnlyOnFaulted);
+    c1.Wait();
+    EXPECT_TRUE(ranOnFault.load());
+
+    Task succeeded = Task::Run([]() {});
+    std::atomic<bool> ranOnSuccess{false};
+    Task c2 = succeeded.ContinueWith([&](Task) { ranOnSuccess = true; }, TaskContinuationOptions::OnlyOnFaulted);
+    EXPECT_THROW(c2.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ranOnSuccess.load());
+}
+
+TEST(TaskContinueWithTests, OnlyOnCanceled_RunsOnCancel_SkipsOnSuccess) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task canceled = Task::Run([]() {}, cts.getTokenProperty());
+    std::atomic<bool> ranOnCancel{false};
+    Task c1 = canceled.ContinueWith([&](Task) { ranOnCancel = true; }, TaskContinuationOptions::OnlyOnCanceled);
+    c1.Wait();
+    EXPECT_TRUE(ranOnCancel.load());
+
+    Task succeeded = Task::Run([]() {});
+    std::atomic<bool> ranOnSuccess{false};
+    Task c2 = succeeded.ContinueWith([&](Task) { ranOnSuccess = true; }, TaskContinuationOptions::OnlyOnCanceled);
+    EXPECT_THROW(c2.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ranOnSuccess.load());
+}
+
+TEST(TaskContinueWithTests, MultipleContinuations_OnSameAntecedent_AllRun) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<int> count{0};
+    Task c1 = antecedent.ContinueWith([&](Task) { ++count; });
+    Task c2 = antecedent.ContinueWith([&](Task) { ++count; });
+    Task c3 = antecedent.ContinueWith([&](Task) { ++count; });
+    c1.Wait(); c2.Wait(); c3.Wait();
+    EXPECT_EQ(count.load(), 3);
+}
+
+TEST(TaskContinueWithTests, ChainedContinuations_RunInOrder) {
+    std::vector<int> order;
+    std::mutex orderMutex;
+    Task antecedent = Task::Run([]() {});
+    Task c1 = antecedent.ContinueWith([&](Task) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(1);
+    });
+    Task c2 = c1.ContinueWith([&](Task) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(2);
+    });
+    c2.Wait();
+    EXPECT_EQ(order, (std::vector<int>{1, 2}));
+}
+
+TEST(TaskContinueWithTests, RepeatedCalls_NoFlakiness) {
+    for (int iter = 0; iter < 50; ++iter) {
+        Task antecedent = Task::Run([]() {});
+        std::atomic<bool> ran{false};
+        Task continuation = antecedent.ContinueWith([&](Task) { ran = true; });
+        continuation.Wait();
+        EXPECT_TRUE(ran.load());
+    }
 }
 
 // ===========================================================================
@@ -275,6 +655,127 @@ TEST(TaskCompletionSourceTests, TrySetCanceled_AfterResult_False) {
     EXPECT_FALSE(tcs.TrySetCanceled());
 }
 
+// Regression test for audit finding A-04 (2026-07-14): TrySetResult used to claim completed_
+// before calling promise_.set_value(result), so a throwing copy constructor left the promise's
+// shared state permanently un-set (completed_ already true, so no later TrySet* could re-claim
+// it). GetResult()/getTaskProperty()'s Wait() would then block forever. Both are exercised here
+// as bounded operations (they now return/throw promptly instead of hanging) to prove the fix.
+namespace {
+struct ThrowOnCopyResult {
+    ThrowOnCopyResult() = default;
+    ThrowOnCopyResult(const ThrowOnCopyResult&) { throw std::runtime_error("ThrowOnCopyResult: copy failed"); }
+    ThrowOnCopyResult(ThrowOnCopyResult&&) = default;
+    ThrowOnCopyResult& operator=(const ThrowOnCopyResult&) = default;
+};
+} // namespace
+
+TEST(TaskCompletionSourceTests, TrySetResult_ThrowingCopy_PropagatesAndDoesNotStrandTask) {
+    TaskCompletionSource<ThrowOnCopyResult> tcs;
+    ThrowOnCopyResult value;
+    // The copy failure still propagates to this immediate call, unchanged from before the fix.
+    EXPECT_THROW(tcs.TrySetResult(value), std::runtime_error);
+    // completed_ was already claimed by the failed attempt, so a later completion attempt
+    // correctly reports "already completed" -- this was already true before the fix and is not
+    // itself the bug.
+    EXPECT_FALSE(tcs.TrySetCanceled());
+    // The actual regression: GetResult() must not hang forever -- the promise is now settled
+    // with the copy failure instead of being left permanently un-set.
+    EXPECT_THROW(tcs.GetResult(), std::runtime_error);
+}
+
+TEST(TaskCompletionSourceTests, TrySetResult_ThrowingCopy_BridgingTaskFaultsInsteadOfHanging) {
+    TaskCompletionSource<ThrowOnCopyResult> tcs;
+    TaskT<ThrowOnCopyResult> t = tcs.getTaskProperty();
+    ThrowOnCopyResult value;
+    EXPECT_THROW(tcs.TrySetResult(value), std::runtime_error);
+    // A bounded wait: before the fix, this would block indefinitely instead of ever returning.
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_BeforeSetResult_IsNotCompleted) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    EXPECT_FALSE(t.getIsCompletedProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetResult_CompletesWithResult) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetResult(99);
+    EXPECT_EQ(t.getResultProperty(), 99);
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetException_Faults) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(std::runtime_error("tcs task error")));
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+// Regression test (fixed 2026-07-14): SetException() called with a TaskCanceledException used
+// to be silently reinterpreted as SetCanceled(), because the bridging watcher distinguished
+// cancellation from a fault purely by catching `const TaskCanceledException&` -- the same
+// exception type TrySetCanceled() uses internally as its own completion sentinel, so the two
+// were indistinguishable by type alone. A caller-supplied TaskCanceledException must still
+// fault (matching real .NET's SetException, which never special-cases exception type), and its
+// exact type/message must survive, not get replaced by a fresh default-constructed one.
+TEST(TaskCompletionSourceTests, SetException_WithTaskCanceledException_FaultsNotCancels) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(
+        System::Threading::Tasks::TaskCanceledException("custom cancellation reason XYZ")));
+    try {
+        t.Wait();
+        FAIL() << "expected TaskCanceledException to be rethrown";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom cancellation reason XYZ");
+    }
+    // Wait() above blocks until the watcher thread has finished processing the exception, so
+    // these reads are guaranteed to observe the final state (see FromExternalFuture's own
+    // doc-comment on why future_->get() and state mutation are ordered together).
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetCanceled_Cancels) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetCanceled();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceTests, GetTaskProperty_CalledTwice_ReturnsSameUnderlyingTask) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t1 = tcs.getTaskProperty();
+    TaskT<int> t2 = tcs.getTaskProperty();
+    tcs.SetResult(7);
+    EXPECT_EQ(t1.getResultProperty(), 7);
+    EXPECT_EQ(t2.getResultProperty(), 7);
+}
+
+// Demonstrates the SAFE cross-thread completion idiom this class's own doc-comment now warns
+// is required (2026-07-14): unlike real .NET's GC-tracked TaskCompletionSource, this port has
+// ordinary RAII lifetime, so the source must be kept alive (e.g. via std::shared_ptr, captured
+// BY VALUE in the worker closure) for as long as any thread might still complete it -- capturing
+// a stack-local TaskCompletionSource by reference in a detached/joined-later thread and letting
+// it go out of scope before that thread finishes is undefined behavior. This is the pattern
+// callers should copy; repeated to build statistical confidence this exact pattern is race-free.
+TEST(TaskCompletionSourceTests, SharedPtrOwnedSource_CompletedFromWorkerThread_IsSafe) {
+    for (int iter = 0; iter < 50; ++iter) {
+        auto tcs = std::make_shared<TaskCompletionSource<int>>();
+        TaskT<int> task = tcs->getTaskProperty();
+        std::thread worker([tcs]() { tcs->SetResult(42); }); // shared_ptr captured by value
+        tcs.reset(); // drop this scope's reference; the worker's copy keeps the source alive
+        EXPECT_EQ(task.getResultProperty(), 42);
+        worker.join();
+    }
+}
+
 // ===========================================================================
 // TaskCompletionSource<void>
 // ===========================================================================
@@ -306,6 +807,63 @@ TEST(TaskCompletionSourceVoidTests, SetCanceled_Wait_Throws) {
     TaskCompletionSource<void> tcs;
     tcs.SetCanceled();
     EXPECT_THROW(tcs.Wait(), System::Threading::Tasks::TaskCanceledException);
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_BeforeSetResult_IsNotCompleted) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    EXPECT_FALSE(t.getIsCompletedProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetResult_Completes) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetResult();
+    EXPECT_NO_THROW(t.Wait());
+    EXPECT_TRUE(t.getIsCompletedProperty());
+    EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetException_Faults) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(std::runtime_error("void task error")));
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+// See TaskCompletionSourceTests.SetException_WithTaskCanceledException_FaultsNotCancels for the
+// full rationale (fixed 2026-07-14).
+TEST(TaskCompletionSourceVoidTests, SetException_WithTaskCanceledException_FaultsNotCancels) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(
+        System::Threading::Tasks::TaskCanceledException("custom void cancellation reason")));
+    try {
+        t.Wait();
+        FAIL() << "expected TaskCanceledException to be rethrown";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom void cancellation reason");
+    }
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetCanceled_Cancels) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetCanceled();
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+}
+
+TEST(TaskCompletionSourceVoidTests, GetTaskProperty_CalledTwice_ReturnsSameUnderlyingTask) {
+    TaskCompletionSource<void> tcs;
+    Task t1 = tcs.getTaskProperty();
+    Task t2 = tcs.getTaskProperty();
+    tcs.SetResult();
+    EXPECT_NO_THROW(t1.Wait());
+    EXPECT_NO_THROW(t2.Wait());
 }
 
 // ===========================================================================

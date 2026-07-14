@@ -45,7 +45,14 @@ DeflateStream::DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpe
     state_->initialized = true;
 }
 
-DeflateStream::~DeflateStream() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14): Close() can propagate the inner
+// stream's I/O failure (e.g. a broken pipe or full disk during the final deflate flush) -- the
+// correct behavior for an EXPLICIT Close() call, but destructors are implicitly noexcept in
+// C++, so letting that exception escape here calls std::terminate instead of allowing the
+// surrounding scope to unwind normally, confirmed via a standalone repro (a Write()-throwing
+// inner stream terminated the process instead of propagating a catchable exception). Swallowed
+// here; callers who need to observe a close failure must call Close() explicitly.
+DeflateStream::~DeflateStream() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Property accessors
@@ -66,7 +73,15 @@ SharpRuntime::intcs DeflateStream::Read(SharpRuntime::bytecs* buffer,
                                         SharpRuntime::intcs   offset,
                                         SharpRuntime::intcs   count)
 {
-    if (!state_ || !state_->initialized || state_->finished || count <= 0) return 0;
+    // Verified against real .NET's Stream.ValidateBufferArguments, matching Write()'s validation
+    // above and MemoryStream::Read (audit finding A-03, 2026-07-14). This previously validated
+    // nothing: a null buffer reached inflate() unchecked (confirmed reaching zlib and throwing
+    // InvalidDataException instead of ArgumentNullException), and a negative count/offset just
+    // silently returned 0 via `count <= 0` instead of throwing.
+    if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+    if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+    if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+    if (!state_ || !state_->initialized || state_->finished || count == 0) return 0;
 
     auto& s = *state_;
     s.zs.next_out  = reinterpret_cast<Bytef*>(buffer + offset);
@@ -154,24 +169,36 @@ void DeflateStream::Close() {
         return;
     }
     auto& s = *state_;
+    // Mark not-initialized before the flush loop below, which can throw via inner_->Write (e.g.
+    // the inner stream hits a broken pipe or a full disk) -- matches BufferedStream::Close()'s
+    // "set closed state before the throwing operation" pattern. Without this, a second Close()
+    // call (the destructor calls Close() unconditionally, with no try/catch) would re-enter the
+    // same failing flush loop, permanently leaking zlib's deflate/inflate state and risking
+    // std::terminate if it fires during this exception's own unwind.
+    s.initialized = false;
     if (mode_ == CompressionMode::Compress) {
         s.zs.next_in  = nullptr;
         s.zs.avail_in = 0;
-        int ret;
-        do {
-            s.zs.next_out  = s.outbuf;
-            s.zs.avail_out = ZlibDeflateState::BUFSIZE;
-            ret = deflate(&s.zs, Z_FINISH);
-            SharpRuntime::intcs produced =
-                ZlibDeflateState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
-            if (produced > 0 && inner_)
-                inner_->Write(s.outbuf, 0, produced);
-        } while (ret == Z_OK);
+        try {
+            int ret;
+            do {
+                s.zs.next_out  = s.outbuf;
+                s.zs.avail_out = ZlibDeflateState::BUFSIZE;
+                ret = deflate(&s.zs, Z_FINISH);
+                SharpRuntime::intcs produced =
+                    ZlibDeflateState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
+                if (produced > 0 && inner_)
+                    inner_->Write(s.outbuf, 0, produced);
+            } while (ret == Z_OK);
+        } catch (...) {
+            deflateEnd(&s.zs);
+            if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
+            throw;
+        }
         deflateEnd(&s.zs);
     } else {
         inflateEnd(&s.zs);
     }
-    s.initialized = false;
     if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
 }
 

@@ -106,6 +106,16 @@ namespace System::Xml {
                (native && native->Parent() == static_cast<const tinyxml2::XMLNode*>(detachedHolder_));
     }
 
+    void XmlDocument::ReleaseUnattachedNode(XmlNode* node) {
+        for (auto it = unattachedNodes_.begin(); it != unattachedNodes_.end(); ++it) {
+            if (it->get() == node) {
+                it->release();
+                unattachedNodes_.erase(it);
+                return;
+            }
+        }
+    }
+
     XmlNode* XmlDocument::WrapNode(tinyxml2::XMLNode* native) {
         if (!native) return nullptr;
         if (native == static_cast<tinyxml2::XMLNode*>(&doc_)) return this;
@@ -161,7 +171,13 @@ namespace System::Xml {
         // malformed XML name (e.g. empty, or starting with a digit) instead of silently
         // accepting it and producing unparseable markup on write-out.
         (void)XmlConvert::VerifyName(name);
-        return new XmlAttribute(this, name); // unattached; owned by whichever element it's later attached to via SetAttributeNode
+        // Owned by this document (unattachedNodes_) until XmlElement::SetAttributeNode claims it
+        // via ReleaseUnattachedNode -- see unattachedNodes_'s own comment for why (XmlAttribute
+        // has no native tinyxml2 node to key nodeCache_ by, unlike every other Create* method).
+        auto attr = std::make_unique<XmlAttribute>(this, name);
+        auto* raw = attr.get();
+        unattachedNodes_.push_back(std::move(attr));
+        return raw;
     }
 
     XmlElement* XmlDocument::CreateElement(const std::string& name) {
@@ -237,7 +253,16 @@ namespace System::Xml {
         // reference (e.g. "&#65;").
         if (!name.empty() && name[0] == '#')
             throw System::ArgumentException("An entity reference must not start with '#'.", "name");
-        return new XmlEntityReference(this, name);
+        // Owned by this document (unattachedNodes_) for the same reason as CreateAttribute above.
+        // Unlike XmlAttribute, nothing in this port currently attaches an XmlEntityReference to a
+        // tree (it has no native tinyxml2 backing and AppendChild/InsertBefore/etc. all require
+        // one), so in practice this entry is never released via ReleaseUnattachedNode and simply
+        // lives until the document itself is destroyed -- still correct, just always the
+        // "never claimed" branch of the same ownership mechanism.
+        auto ref = std::make_unique<XmlEntityReference>(this, name);
+        auto* raw = ref.get();
+        unattachedNodes_.push_back(std::move(ref));
+        return raw;
     }
 
     XmlWhitespace* XmlDocument::CreateWhitespace(const std::string& text) {

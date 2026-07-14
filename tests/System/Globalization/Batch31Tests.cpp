@@ -260,6 +260,17 @@ TEST(NumberFormatInfoBatch31Test, DecimalDigits_OutOfRange_Throws) {
     EXPECT_NO_THROW(nfi.setNumberDecimalDigitsProperty(99));
 }
 
+TEST(NumberFormatInfoBatch31Test, DecimalDigits_OutOfRangeOnReadOnlyInstance_ThrowsArgumentOutOfRange) {
+    // Regression guard for a specific check-ordering rule verified against real .NET's
+    // NumberDecimalDigits setter (NumberFormatInfo.cs): the out-of-range check runs BEFORE
+    // VerifyWritable(), so an out-of-range value on a read-only instance throws
+    // ArgumentOutOfRangeException, not InvalidOperationException -- unlike an in-range value on
+    // a read-only instance (covered by NumberFormatInfoTests.SetOnReadOnlyInstance_Throws),
+    // which does throw InvalidOperationException.
+    NumberFormatInfo ro = NumberFormatInfo::ReadOnly(NumberFormatInfo());
+    EXPECT_THROW(ro.setNumberDecimalDigitsProperty(100), System::ArgumentOutOfRangeException);
+}
+
 TEST(NumberFormatInfoBatch31Test, NegativePositivePatterns_OutOfRange_Throws) {
     NumberFormatInfo nfi;
     EXPECT_THROW(nfi.setNumberNegativePatternProperty(5), System::ArgumentOutOfRangeException);

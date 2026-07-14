@@ -77,6 +77,14 @@ struct ZipArchiveState {
     std::vector<PendingEntry>         pending;     // entries queued for write
     std::unordered_set<std::string>   deletedEntries; // full names marked via ZipArchiveEntry::Delete()
     bool                    disposed     = false;
+    // Non-owning: set only when constructed via ZipArchive(Stream*, mode) in Create/Update mode.
+    // The finalized memBuf is written back to *stream on Dispose() -- see that method. The
+    // caller retains ownership and must keep the stream alive for the ZipArchive's lifetime,
+    // matching the documented "Source or destination stream" parameter contract. Previously
+    // this pointer was never even stored: Create/Update against a stream silently produced an
+    // archive only in memBuf, which was then discarded on destruction -- the caller-supplied
+    // stream was never touched at all, a confirmed real bug (audit finding A-01, 2026-07-14).
+    System::IO::Stream*     stream       = nullptr;
 };
 
 struct ZipArchiveEntryState {
@@ -184,6 +192,19 @@ namespace {
 // pre-existing, non-deleted entry -- previously it wrote only st.pending, silently discarding
 // every pre-existing entry whenever the archive was disposed with at least one CreateEntry()
 // call (real, silent, irreversible data loss on a standard "update a zip" workflow).
+// Passing a null buffer pointer for a zero-length entry (e.g. an empty vector's .data(), which
+// libstdc++ returns as nullptr) eventually reaches miniz's own mz_zip_file_write_func, which
+// calls fwrite(pBuf, 1, 0, file) -- fwrite's first parameter is declared nonnull, so this is
+// technically undefined behavior by the letter of the standard even though it's universally
+// harmless in practice (0 bytes are never actually read through a null pointer). Confirmed via
+// UndefinedBehaviorSanitizer (2026-07-14). vendor/miniz is third-party, unmodified-from-upstream
+// source (see CLAUDE.md) -- not the place to fix this; passing a non-null, never-dereferenced
+// pointer for an empty buffer here avoids the UB entirely at the call site instead.
+static const SharpRuntime::bytecs* safeDataPtr(const SharpRuntime::bytecs* data, size_t size) {
+    static const SharpRuntime::bytecs dummy = 0;
+    return size == 0 ? &dummy : data;
+}
+
 static void flushWriter(ZipArchiveState& st) {
     const bool hasChanges = !st.pending.empty() || !st.deletedEntries.empty();
     if (st.mode == ZipArchiveMode::Update && !hasChanges) return;
@@ -229,14 +250,14 @@ static void flushWriter(ZipArchiveState& st) {
         // mz_zip_writer_end must still run on the throw path to release miniz's internal state.
         try {
             for (auto& e : existing) {
-                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
                                            static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
             for (auto& e : st.pending) {
                 if (st.deletedEntries.count(e.name)) continue;
                 if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                           e.data->data(), e.data->size(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
                                            static_cast<mz_uint>(e.miniLevel)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
@@ -255,14 +276,14 @@ static void flushWriter(ZipArchiveState& st) {
         void* buf = nullptr; size_t sz = 0;
         try {
             for (auto& e : existing) {
-                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
                                            static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
             for (auto& e : st.pending) {
                 if (st.deletedEntries.count(e.name)) continue;
                 if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                           e.data->data(), e.data->size(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
                                            static_cast<mz_uint>(e.miniLevel)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
@@ -295,10 +316,22 @@ ZipArchive::ZipArchive(System::IO::Stream* stream, ZipArchiveMode mode)
         SharpRuntime::intcs n;
         while ((n = stream->Read(tmp, 0, 65536)) > 0)
             state_->memBuf.insert(state_->memBuf.end(), tmp, tmp + n);
-        if (mode == ZipArchiveMode::Read)
+        // Found alongside the A-01 fix (2026-07-14): openReader() was only called for Read
+        // mode here, unlike the file-path constructor below, which correctly opens it for
+        // BOTH Read and Update. Without it, readerOpen stayed false for a stream-backed
+        // Update-mode archive, so flushWriter()'s "carry forward every pre-existing entry"
+        // step (gated on readerOpen) never ran -- every existing entry was silently dropped
+        // on Dispose() whenever Update mode was used via a Stream*, confirmed via a
+        // standalone regression test that round-tripped a stream through Create then Update.
+        if (mode == ZipArchiveMode::Read || mode == ZipArchiveMode::Update)
             openReader(*state_);
     }
-    // Create mode with stream: we'll write to memBuf on Dispose
+    // Create/Update mode: retain the stream so Dispose() can write the finalized archive back
+    // to it -- see ZipArchiveState::stream's own doc-comment (audit finding A-01, 2026-07-14).
+    // Not retained for Read mode: read-only, nothing is ever written back.
+    if (mode == ZipArchiveMode::Create || mode == ZipArchiveMode::Update) {
+        state_->stream = stream;
+    }
 }
 
 ZipArchive::ZipArchive(const std::string& archivePath, ZipArchiveMode mode)
@@ -310,7 +343,11 @@ ZipArchive::ZipArchive(const std::string& archivePath, ZipArchiveMode mode)
         openReader(*state_);
 }
 
-ZipArchive::~ZipArchive() { Dispose(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro. Dispose() can
+// throw both from the pre-existing flushWriter() miniz-failure path and from this port's own A-01
+// stream-write-back code (stream->Write()/SetLength() on a failing stream).
+ZipArchive::~ZipArchive() { try { Dispose(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // ZipArchive operations
@@ -383,6 +420,31 @@ void ZipArchive::Dispose() {
     if (state_->readerOpen) {
         mz_zip_reader_end(&state_->zip);
         state_->readerOpen = false;
+    }
+
+    // Write the finalized archive back to the caller-supplied stream (audit finding A-01,
+    // 2026-07-14): flushWriter() above only ever populates memBuf for a stream-backed archive
+    // (filePath is empty in that case); this port has no live streaming writer the way real
+    // .NET's ZipArchive does, so the simplest correct fix matching this port's existing
+    // buffer-then-flush design is to push the finalized buffer to the stream here, once,
+    // unconditionally -- memBuf always holds the current, complete archive content at this
+    // point, whether flushWriter just rebuilt it or (Update mode, no changes made) it's still
+    // the original content read at construction. Requires seek support to correctly overwrite
+    // from the start and truncate to the new size (matching real .NET's own Seek(0)+
+    // SetLength+write sequence); a non-seekable stream skips the reposition/truncate and just
+    // appends, which is the best this port's simpler buffered design can do without adopting
+    // real .NET's full live-streaming architecture.
+    if (state_->stream != nullptr &&
+        (state_->mode == ZipArchiveMode::Create || state_->mode == ZipArchiveMode::Update)) {
+        System::IO::Stream* stream = state_->stream;
+        if (stream->getCanSeekProperty()) {
+            stream->setPositionProperty(0);
+            stream->SetLength(static_cast<SharpRuntime::intcs>(state_->memBuf.size()));
+        }
+        if (!state_->memBuf.empty()) {
+            stream->Write(state_->memBuf.data(), 0, static_cast<SharpRuntime::intcs>(state_->memBuf.size()));
+        }
+        stream->Flush();
     }
 }
 

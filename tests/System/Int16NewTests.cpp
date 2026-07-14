@@ -30,6 +30,35 @@ TEST(Int16NewTests, Abs_MinValue_Throws) {
     EXPECT_THROW(Int16::Abs(Int16::MinValue), System::OverflowException);
 }
 
+// Regression tests (added 2026-07-14, duplicated-implementation audit finding): Int16 was the
+// sole signed integer type missing CopySign/IsNegative/IsPositive/MaxMagnitude/MinMagnitude --
+// mirrors SByteTests.cpp's identical coverage for its sibling SByte.
+
+TEST(Int16NewTests, CopySign_PositiveSign) { EXPECT_EQ(Int16::CopySign(-3, 1), 3); }
+TEST(Int16NewTests, CopySign_NegativeSign) { EXPECT_EQ(Int16::CopySign(3, -1), -3); }
+TEST(Int16NewTests, CopySign_MinValue_NonNegativeSign_Throws) {
+    EXPECT_THROW(Int16::CopySign(Int16::MinValue, 1), System::OverflowException);
+}
+TEST(Int16NewTests, CopySign_MinValue_NegativeSign_ReturnsMinValue) {
+    EXPECT_EQ(Int16::CopySign(Int16::MinValue, -1), Int16::MinValue);
+}
+
+TEST(Int16NewTests, IsNegative_True)  { EXPECT_TRUE(Int16::IsNegative(-1)); }
+TEST(Int16NewTests, IsNegative_False) { EXPECT_FALSE(Int16::IsNegative(0)); }
+TEST(Int16NewTests, IsPositive_True)  { EXPECT_TRUE(Int16::IsPositive(1)); }
+TEST(Int16NewTests, IsPositive_False) { EXPECT_FALSE(Int16::IsPositive(0)); }
+
+TEST(Int16NewTests, MaxMagnitude_Larger)  { EXPECT_EQ(Int16::MaxMagnitude(-10, 5), -10); }
+TEST(Int16NewTests, MinMagnitude_Smaller) { EXPECT_EQ(Int16::MinMagnitude(-10, 5), 5); }
+TEST(Int16NewTests, MaxMagnitude_MinValueAlwaysWins) {
+    EXPECT_EQ(Int16::MaxMagnitude(Int16::MinValue, 5), Int16::MinValue);
+    EXPECT_EQ(Int16::MaxMagnitude(5, Int16::MinValue), Int16::MinValue);
+}
+TEST(Int16NewTests, MinMagnitude_MinValueAlwaysLoses) {
+    EXPECT_EQ(Int16::MinMagnitude(Int16::MinValue, 5), 5);
+    EXPECT_EQ(Int16::MinMagnitude(5, Int16::MinValue), 5);
+}
+
 TEST(Int16NewTests, Parse_TrailingGarbage_ThrowsFormatException) {
     EXPECT_THROW(Int16::Parse("123abc"), System::FormatException);
 }

@@ -17,6 +17,7 @@
 #include <regex>
 #include <sys/eventfd.h>
 #include <sys/inotify.h>
+#include <system_error>
 #include <unistd.h>
 #include <unordered_map>
 #endif
@@ -141,7 +142,29 @@ namespace System::IO {
             return;
         }
 
-        watchThread_ = std::thread(&FileSystemWatcher::watchLoop, this);
+        try {
+            watchThread_ = std::thread(&FileSystemWatcher::watchLoop, this);
+        } catch (const std::system_error&) {
+            // std::thread's constructor can throw (e.g. thread/process resource exhaustion).
+            // stopWatchingIfRunning()'s cleanup is gated on watchThread_.joinable(), which never
+            // becomes true on this path -- without this catch, inotifyFd_/watchDescriptor_/
+            // stopEventFd_ would all leak for the lifetime of this object. Mirrors the
+            // eventfd-failure cleanup just above, plus firing Error for consistency with the
+            // inotify_init1/inotify_add_watch failure paths above that.
+            ::close(stopEventFd_);
+            inotify_rm_watch(inotifyFd_, watchDescriptor_);
+            ::close(inotifyFd_);
+            inotifyFd_ = -1;
+            watchDescriptor_ = -1;
+            stopEventFd_ = -1;
+            enabled_ = false;
+            if (!Error.empty()) {
+                auto ex = std::make_exception_ptr(
+                    System::IO::IOException("Unable to start the file system watcher thread."));
+                System::IO::ErrorEventArgs args(ex);
+                for (auto& handler : Error) handler(this, args);
+            }
+        }
     }
 
     void FileSystemWatcher::stopWatchingIfRunning() {

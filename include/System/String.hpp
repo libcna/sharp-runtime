@@ -300,7 +300,10 @@ namespace System
         /**
          * @brief Splits @p value on a single character delimiter.
          *
-         * C++ counterpart of .NET String.Split(char).
+         * C++ counterpart of .NET String.Split(char). An empty @p value returns a single-element
+         * result containing that empty string (`{""}`), matching real .NET's
+         * CreateSplitArrayOfThisAsSoleValue short-circuit for a zero-length input -- verified
+         * against String.Manipulation.cs.
          */
         static std::vector<std::string> Split(const std::string& value, char delimiter);
 
@@ -615,6 +618,14 @@ namespace System
 
         // -----------------------------------------------------------------------
         // Formatting
+        //
+        // Every Format() overload below throws System::FormatException if @p format references
+        // an argument index at or beyond the number of arguments this overload accepts (e.g.
+        // "{5}" when only arg0 was supplied), or contains a malformed placeholder (an unclosed
+        // '{', or a '{' not followed by a digit) -- matching real .NET's String.Format, which
+        // throws rather than silently leaving an unresolved placeholder in the output. Verified
+        // against String.Manipulation.cs's FormatHelper, which validates every placeholder's
+        // index against the supplied argument count before formatting anything.
         // -----------------------------------------------------------------------
 
         /** @brief Formats a string replacing `{0}` with @p arg0 (supports `{0:X}`, `{0:D3}` specifiers). */

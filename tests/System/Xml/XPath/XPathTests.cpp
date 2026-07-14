@@ -336,7 +336,11 @@ TEST(XPathSelectTests, EqualityPredicate_OnAttribute) {
     std::unique_ptr<XPathNodeIterator> it(nav->Select("catalog/book[@id='bk102']"));
     ASSERT_EQ(it->getCountProperty(), 1);
     it->MoveNext();
-    EXPECT_EQ(it->getCurrentProperty()->SelectSingleNode("title")->getValueProperty(), "Midnight Rain");
+    // SelectSingleNode returns a caller-owned XPathNavigator (an internal Clone()) -- wrap it
+    // instead of using it inline, confirmed as a real AddressSanitizer-caught leak otherwise
+    // (2026-07-14).
+    std::unique_ptr<XPathNavigator> title(it->getCurrentProperty()->SelectSingleNode("title"));
+    EXPECT_EQ(title->getValueProperty(), "Midnight Rain");
 }
 
 TEST(XPathSelectTests, EqualityPredicate_OnChildElementValue) {
@@ -667,7 +671,9 @@ TEST(XPathExpressionTests, AddSort_NumericDataType_OrdersNumerically) {
     std::unique_ptr<XPathNavigator> nav(doc->CreateNavigator());
     std::unique_ptr<XPathNodeIterator> it(nav->Select(expr));
     ASSERT_TRUE(it->MoveNext());
-    EXPECT_DOUBLE_EQ(System::Xml::XmlConvert::ToDouble(it->getCurrentProperty()->SelectSingleNode("price")->getValueProperty()), 5.95);
+    // See EqualityPredicate_OnAttribute above for why SelectSingleNode's result is wrapped.
+    std::unique_ptr<XPathNavigator> price(it->getCurrentProperty()->SelectSingleNode("price"));
+    EXPECT_DOUBLE_EQ(System::Xml::XmlConvert::ToDouble(price->getValueProperty()), 5.95);
 }
 
 // ===========================================================================
@@ -713,9 +719,12 @@ TEST(XmlNodeXPathTests, SelectSingleNode_ReturnsXmlNode) {
 
 TEST(XmlNodeXPathTests, SelectNodes_ReturnsAllMatchesAsXmlNodeList) {
     auto doc = LoadCatalog();
+    // SelectNodes returns a caller-owned XmlNodeList -- delete it explicitly, confirmed as a
+    // real AddressSanitizer-caught leak otherwise (2026-07-14).
     XmlNodeList* list = doc->getDocumentElementProperty()->SelectNodes("book");
     ASSERT_NE(list, nullptr);
     EXPECT_EQ(list->getCountProperty(), 3);
+    delete list;
 }
 
 // ===========================================================================

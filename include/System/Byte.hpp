@@ -307,7 +307,7 @@ namespace System {
          *
          * C++ counterpart of .NET Byte.Parse(string, NumberStyles, IFormatProvider). @p
          * provider is accepted for API-surface parity but ignored. Supports
-         * NumberStyles.Integer and NumberStyles.HexNumber -- see
+         * NumberStyles.Integer, .Number, .Currency, and .HexNumber -- see
          * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
          * @throws System::FormatException if the string is not in a correct format for @p style.
          * @throws System::OverflowException if the value is outside [0, 255].
@@ -321,6 +321,13 @@ namespace System {
                 if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                     uint64_t bits; bool tooManyDigits = false;
                     System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 2, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 8, tooManyDigits);
                     if (tooManyDigits)
                         throw System::OverflowException("Value was either too large or too small for an unsigned byte.");
                     throw System::FormatException("Input string was not in a correct format.");
@@ -348,6 +355,13 @@ namespace System {
             if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                 uint64_t bits; bool tooManyDigits = false;
                 if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 2, tooManyDigits))
+                    return false;
+                result = static_cast<bytecs>(bits);
+                return true;
+            }
+            if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 8, tooManyDigits))
                     return false;
                 result = static_cast<bytecs>(bits);
                 return true;

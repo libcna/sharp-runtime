@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
 #include "System/NotImplementedException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/ArgumentNullException.hpp"
@@ -62,6 +63,21 @@ using System::IO::Compression::GZipDecoder;
 using System::IO::Compression::GZipEncoder;
 using System::IO::Compression::ZLibDecoder;
 using System::IO::Compression::ZLibEncoder;
+
+namespace {
+// Test double for the 2026-07-13 resource-management fix: verifies DeflateStream/GZipStream/
+// ZLibStream::Close() cleans up zlib state (and doesn't hang/crash on a second Close() call, as
+// the destructor performs) when the inner stream's Write() throws mid-flush.
+class ThrowingWriteStream final : public System::IO::Stream {
+public:
+    System::IO::intcs Read(System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override { return 0; }
+    void Write(const System::IO::bytecs*, System::IO::intcs, System::IO::intcs) override {
+        throw System::IO::IOException("ThrowingWriteStream: simulated write failure.");
+    }
+    void Close() override {}
+    [[nodiscard]] System::IO::intcs getLengthProperty() const override { return 0; }
+};
+} // namespace
 using System::IO::Stream;
 using System::IO::MemoryStream;
 using System::IO::intcs;
@@ -129,6 +145,30 @@ TEST(GZipStreamTests, Read_EmptyStream_ReturnsZero) {
     EXPECT_EQ(gz.Read(buf, 0, 4), 0);
 }
 
+// Regression tests for audit finding A-03 (2026-07-14): Read() previously performed no argument
+// validation at all, so a null buffer reached zlib's inflate() unchecked and a negative offset/
+// count was silently swallowed by `count <= 0` instead of throwing, matching MemoryStream::Read
+// and this class's own Write() validation.
+TEST(GZipStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(gz.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(GZipStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(gz.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(GZipStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(gz.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(GZipStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -170,6 +210,27 @@ TEST(GZipStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_NO_THROW(gz.Close());
+}
+
+TEST(GZipStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    GZipStream gz(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    // Even with no prior explicit Write(), deflate(Z_FINISH) still emits gzip header/trailer
+    // bytes, so Close()'s flush loop calls inner Write() at least once.
+    EXPECT_THROW(gz.Close(), System::IO::IOException);
+    // A second Close() (mirroring what the destructor does unconditionally) must not re-enter
+    // the failing flush loop, hang, or throw again -- state_->initialized was already cleared.
+    EXPECT_NO_THROW(gz.Close());
+}
+
+// Regression test for audit finding A-02 (2026-07-14): GZipStream::~GZipStream() used to call
+// Close() directly with no exception handling, so letting the object go out of scope with a
+// throwing inner stream called std::terminate. Reaching SUCCEED() below -- rather than the test
+// process being killed -- is the actual assertion.
+TEST(GZipStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { GZipStream gz(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
 }
 
 TEST(GZipStreamTests, CompressThenDecompress_Roundtrip) {
@@ -230,6 +291,28 @@ TEST(DeflateStreamTests, Read_EmptyStream_ReturnsZero) {
     EXPECT_EQ(ds.Read(buf, 0, 4), 0);
 }
 
+// Regression tests for audit finding A-03 (2026-07-14) -- see GZipStreamTests's identical tests
+// for the full rationale.
+TEST(DeflateStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(ds.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(DeflateStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(ds.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(DeflateStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(ds.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(DeflateStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -268,6 +351,21 @@ TEST(DeflateStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_NO_THROW(ds.Close());
+}
+
+TEST(DeflateStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    DeflateStream ds(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(ds.Close(), System::IO::IOException);
+    EXPECT_NO_THROW(ds.Close());
+}
+
+// Regression test for audit finding A-02 (2026-07-14) -- see GZipStreamTests's identical test for
+// the full rationale.
+TEST(DeflateStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { DeflateStream ds(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
 }
 
 TEST(DeflateStreamTests, CompressThenDecompress_Roundtrip) {
@@ -325,6 +423,28 @@ TEST(ZLibStreamTests, Read_EmptyStream_ReturnsZero) {
     EXPECT_EQ(zl.Read(buf, 0, 4), 0);
 }
 
+// Regression tests for audit finding A-03 (2026-07-14) -- see GZipStreamTests's identical tests
+// for the full rationale.
+TEST(ZLibStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(zl.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(ZLibStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(zl.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(ZLibStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(zl.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(ZLibStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -363,6 +483,21 @@ TEST(ZLibStreamTests, Close_DoesNotThrow) {
     MemoryStream ms;
     ZLibStream zl(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_NO_THROW(zl.Close());
+}
+
+TEST(ZLibStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
+    ThrowingWriteStream inner;
+    ZLibStream zl(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
+    EXPECT_THROW(zl.Close(), System::IO::IOException);
+    EXPECT_NO_THROW(zl.Close());
+}
+
+// Regression test for audit finding A-02 (2026-07-14) -- see GZipStreamTests's identical test for
+// the full rationale.
+TEST(ZLibStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { ZLibStream zl(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
 }
 
 TEST(ZLibStreamTests, CompressThenDecompress_Roundtrip) {
@@ -682,6 +817,116 @@ TEST(ZipArchiveTests, UpdateMode_DeletePendingEntry_NeverWritten) {
     auto entries = z2.getEntriesProperty();
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_EQ(entries[0].getFullNameProperty(), "existing.txt");
+}
+
+// Regression tests for audit finding A-01 (2026-07-14): ZipArchive(Stream*, Create/Update) never
+// stored the stream at all, so Dispose() finalized the archive only into an internal buffer and
+// silently discarded it -- the caller-supplied stream was never written to, even though the
+// public doc-comment promised "Create/Update output is written on Dispose()". Confirmed nothing
+// in the existing suite caught this: OpenFromStream_DoesNotThrow only exercises Read mode, and
+// CreateAndReadBack_RoundTrip uses the file-path constructor, not the stream one.
+
+TEST(ZipArchiveTests, CreateFromStream_WritesArchiveBackToStream) {
+    MemoryStream ms; // empty, growable, writable
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto entry = z.CreateEntry("greeting.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'H', 'i', '!'};
+        s->Write(data, 0, 3);
+        // z disposed at end of scope -> must write the finalized archive back into ms.
+    }
+    EXPECT_GT(ms.getLengthProperty(), 0) << "stream must not be empty after Create-mode Dispose()";
+}
+
+TEST(ZipArchiveTests, CreateFromStream_ReadBackThroughSameStream) {
+    MemoryStream ms;
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto entry = z.CreateEntry("greeting.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'H', 'i', '!'};
+        s->Write(data, 0, 3);
+    }
+
+    auto bytes = ms.ToArray();
+    MemoryStream readBack(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z2(&readBack, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "greeting.txt");
+
+    std::unique_ptr<System::IO::Stream> s(entries[0].Open());
+    uint8_t out[8]{};
+    int n = s->Read(out, 0, 8);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(out[0], 'H');
+    EXPECT_EQ(out[1], 'i');
+    EXPECT_EQ(out[2], '!');
+}
+
+TEST(ZipArchiveTests, UpdateFromStream_WritesChangesBackToSameStream) {
+    // Seed a writable, seekable MemoryStream with one entry, then open it in Update mode, add
+    // another entry, and verify the SAME stream object reflects both entries afterward --
+    // exercising the seek+truncate+rewrite path. Uses the default (always-writable) MemoryStream
+    // constructor + an explicit Write() to seed content, rather than the byte-array constructor
+    // (MemoryStream(buffer, size) defaults to read-only in this port, unlike real .NET's
+    // single-array-arg overload -- a separate, unrelated bug, not fixed here).
+    MemoryStream ms;
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("existing.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+    }
+    ASSERT_GT(ms.getLengthProperty(), 0);
+    ms.setPositionProperty(0); // ZipArchive's stream constructor reads from the current position
+
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Update);
+        auto e = z.CreateEntry("added.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("y"), 0, 1);
+        // z disposed here -- must rewrite ms in place with both entries.
+    }
+
+    auto finalBytes = ms.ToArray();
+    MemoryStream readBack(finalBytes.data(), static_cast<int>(finalBytes.size()));
+    ZipArchive z2(&readBack, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 2u);
+    std::vector<std::string> names;
+    for (auto& e : entries) names.push_back(e.getFullNameProperty());
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"added.txt", "existing.txt"}));
+}
+
+// Regression tests for audit finding A-02 (2026-07-14): ZipArchive::~ZipArchive() used to call
+// Dispose() directly with no exception handling. Dispose() can throw from the A-01 stream
+// write-back code added above (stream->Write() on a failing stream) as well as from the
+// pre-existing flushWriter() miniz-failure path. A throwing Dispose() escaping the destructor
+// used to call std::terminate.
+TEST(ZipArchiveTests, Dispose_StreamWriteThrows_Propagates) {
+    ThrowingWriteStream inner;
+    ZipArchive z(&inner, ZipArchiveMode::Create);
+    auto e = z.CreateEntry("f.txt");
+    std::unique_ptr<System::IO::Stream> s(e.Open());
+    s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+    // Entry content is buffered internally; the throw happens on Dispose()'s write-back of the
+    // finalized archive to the caller-supplied (throwing) stream.
+    EXPECT_THROW(z.Dispose(), System::IO::IOException);
+}
+
+TEST(ZipArchiveTests, Destructor_StreamWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    {
+        ZipArchive z(&inner, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("f.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+        // z destructed here -- Dispose() throws internally but must not escape.
+    }
+    SUCCEED();
 }
 
 // ===========================================================================

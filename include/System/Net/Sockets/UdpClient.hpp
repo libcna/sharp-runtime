@@ -38,6 +38,13 @@ namespace System::Net::Sockets {
 
         ~UdpClient();
 
+        // Not copyable: fd_ is a raw owned socket handle closed by the destructor -- an implicit
+        // shallow copy (previously allowed) lets two instances' destructors both close the same
+        // fd, either failing silently or, if the fd was reused in between, closing a handle this
+        // instance doesn't own. Matches Socket's own established copy-deletion.
+        UdpClient(const UdpClient&) = delete;
+        UdpClient& operator=(const UdpClient&) = delete;
+
         /** @brief Sets the default remote host/port for subsequent Send calls. */
         void Connect(const std::string& hostname, intcs port);
 

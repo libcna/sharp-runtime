@@ -6,7 +6,9 @@
 #include <bit>
 #include <cctype>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <utility>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -96,7 +98,7 @@ namespace System {
          *
          * C++ counterpart of .NET UInt32.Parse(string, NumberStyles, IFormatProvider). @p
          * provider is accepted for API-surface parity but ignored. Supports
-         * NumberStyles.Integer and NumberStyles.HexNumber -- see
+         * NumberStyles.Integer, .Number, .Currency, and .HexNumber -- see
          * include/System/detail/IntegerNumberStylesParser.hpp for the exact supported grammar.
          * @throws System::FormatException if the string is not in a correct format for @p style.
          * @throws System::OverflowException if the value exceeds UInt32 range.
@@ -110,6 +112,13 @@ namespace System {
                 if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                     uint64_t bits; bool tooManyDigits = false;
                     System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 8, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for a UInt32.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
+                if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 32, tooManyDigits);
                     if (tooManyDigits)
                         throw System::OverflowException("Value was either too large or too small for a UInt32.");
                     throw System::FormatException("Input string was not in a correct format.");
@@ -141,6 +150,13 @@ namespace System {
                 result = static_cast<uintcs>(bits);
                 return true;
             }
+            if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 32, tooManyDigits))
+                    return false;
+                result = static_cast<uintcs>(bits);
+                return true;
+            }
             SharpRuntime::ulongcs unsignedResult; bool overflowed = false;
             if (!System::detail::IntegerNumberStylesParser::TryParseUnsignedCore(s, style, unsignedResult, overflowed))
                 return false;
@@ -154,6 +170,39 @@ namespace System {
          * C++ counterpart of .NET UInt32.ToString().
          */
         [[nodiscard]] static std::string ToString(uintcs value) { return std::to_string(value); }
+
+        /**
+         * @brief Converts @p value to a string using the specified format specifier
+         * ("X"/"x" hexadecimal, "D"/"d" zero-padded decimal, "G"/"g" general).
+         *
+         * C++ counterpart of .NET UInt32.ToString(string format) -- added 2026-07-14
+         * (duplicated-implementation audit finding: UInt32 was the only one of the 8 integer
+         * types missing this overload, mirrored here from the identical implementation on its
+         * unsigned siblings UInt16/UInt64).
+         */
+        [[nodiscard]] static std::string ToString(uintcs value, const std::string& format) {
+            if (format.empty()) return ToString(value);
+            char type = format[0];
+            int width = 0;
+            if (format.size() > 1) {
+                try {
+                    width = std::stoi(format.substr(1));
+                } catch (const std::exception&) {
+                    throw System::FormatException("Format specifier was invalid.");
+                }
+            }
+            std::ostringstream oss;
+            oss.imbue(std::locale::classic());
+            if (type == 'X') { oss << std::uppercase << std::hex << std::setfill('0') << std::setw(width) << value; return oss.str(); }
+            if (type == 'x') { oss << std::hex << std::setfill('0') << std::setw(width) << value; return oss.str(); }
+            if (type == 'D' || type == 'd') {
+                std::string s = std::to_string(value);
+                while (static_cast<int>(s.size()) < width) s = "0" + s;
+                return s;
+            }
+            if (type == 'G' || type == 'g') return ToString(value);
+            return ToString(value);
+        }
 
         /**
          * @brief Compares @p a to @p b and returns a signed integer.

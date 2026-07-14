@@ -44,7 +44,9 @@ ZLibStream::ZLibStream(Stream* stream, CompressionMode mode, bool leaveOpen)
     state_->initialized = true;
 }
 
-ZLibStream::~ZLibStream() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro.
+ZLibStream::~ZLibStream() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Property accessors
@@ -65,7 +67,14 @@ SharpRuntime::intcs ZLibStream::Read(SharpRuntime::bytecs* buffer,
                                      SharpRuntime::intcs   offset,
                                      SharpRuntime::intcs   count)
 {
-    if (!state_ || !state_->initialized || state_->finished || count <= 0) return 0;
+    // Verified against real .NET's Stream.ValidateBufferArguments, matching Write()'s validation
+    // above and MemoryStream::Read (audit finding A-03, 2026-07-14). This previously validated
+    // nothing: a null buffer reached inflate() unchecked, and a negative count/offset just
+    // silently returned 0 via `count <= 0` instead of throwing.
+    if (buffer == nullptr) throw System::ArgumentNullException("buffer");
+    if (offset < 0) throw System::ArgumentOutOfRangeException("offset", "Non-negative number required.");
+    if (count < 0) throw System::ArgumentOutOfRangeException("count", "Non-negative number required.");
+    if (!state_ || !state_->initialized || state_->finished || count == 0) return 0;
 
     auto& s = *state_;
     s.zs.next_out  = reinterpret_cast<Bytef*>(buffer + offset);
@@ -153,24 +162,36 @@ void ZLibStream::Close() {
         return;
     }
     auto& s = *state_;
+    // Mark not-initialized before the flush loop below, which can throw via inner_->Write (e.g.
+    // the inner stream hits a broken pipe or a full disk) -- matches BufferedStream::Close()'s
+    // "set closed state before the throwing operation" pattern. Without this, a second Close()
+    // call (the destructor calls Close() unconditionally, with no try/catch) would re-enter the
+    // same failing flush loop, permanently leaking zlib's deflate/inflate state and risking
+    // std::terminate if it fires during this exception's own unwind.
+    s.initialized = false;
     if (mode_ == CompressionMode::Compress) {
         s.zs.next_in  = nullptr;
         s.zs.avail_in = 0;
-        int ret;
-        do {
-            s.zs.next_out  = s.outbuf;
-            s.zs.avail_out = ZlibZLibState::BUFSIZE;
-            ret = deflate(&s.zs, Z_FINISH);
-            SharpRuntime::intcs produced =
-                ZlibZLibState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
-            if (produced > 0 && inner_)
-                inner_->Write(s.outbuf, 0, produced);
-        } while (ret == Z_OK);
+        try {
+            int ret;
+            do {
+                s.zs.next_out  = s.outbuf;
+                s.zs.avail_out = ZlibZLibState::BUFSIZE;
+                ret = deflate(&s.zs, Z_FINISH);
+                SharpRuntime::intcs produced =
+                    ZlibZLibState::BUFSIZE - static_cast<SharpRuntime::intcs>(s.zs.avail_out);
+                if (produced > 0 && inner_)
+                    inner_->Write(s.outbuf, 0, produced);
+            } while (ret == Z_OK);
+        } catch (...) {
+            deflateEnd(&s.zs);
+            if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
+            throw;
+        }
         deflateEnd(&s.zs);
     } else {
         inflateEnd(&s.zs);
     }
-    s.initialized = false;
     if (!leaveOpen_ && inner_) { inner_->Close(); inner_ = nullptr; }
 }
 

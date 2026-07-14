@@ -9,6 +9,27 @@ using SharpRuntime::uintcs;
 
 // Additional UInt32 tests (Parse/TryParse/ToString already in PrimitiveTypeTests.cpp)
 
+// Regression tests (added 2026-07-14, duplicated-implementation audit finding): UInt32 was the
+// only one of the 8 integer types missing the 2-arg ToString(value, format) overload -- ported
+// code calling UInt32::ToString(value, "X8"), which compiles for every sibling integer type,
+// failed to compile for UInt32 alone. Mirrors UInt16Tests/UInt64Test's identical coverage.
+TEST(UInt32NewTests, ToStringHex) {
+    EXPECT_EQ(UInt32::ToString(255u, "X"), "FF");
+    EXPECT_EQ(UInt32::ToString(255u, "x"), "ff");
+}
+
+TEST(UInt32NewTests, ToStringPadded) {
+    EXPECT_EQ(UInt32::ToString(10u, "D4"), "0010");
+}
+
+TEST(UInt32NewTests, ToString_EmptyFormat_SameAsOneArg) {
+    EXPECT_EQ(UInt32::ToString(1000u, ""), UInt32::ToString(1000u));
+}
+
+TEST(UInt32NewTests, ToString_MalformedWidth_ThrowsFormatException) {
+    EXPECT_THROW(UInt32::ToString(5u, "Xz"), System::FormatException);
+}
+
 TEST(UInt32NewTests, MaxValue_Correct) { EXPECT_EQ(UInt32::MaxValue, 4294967295u); }
 TEST(UInt32NewTests, MinValue_IsZero)  { EXPECT_EQ(UInt32::MinValue, 0u); }
 

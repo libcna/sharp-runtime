@@ -40,10 +40,22 @@ class OrderedDictionary {
     std::unordered_map<TKey, std::size_t>      keyIndex_;
     intcs version_ = 0;
 
+    // Builds the replacement index in a local temporary and swaps it in only after every
+    // insertion succeeds (audit finding A-05, 2026-07-14) -- previously cleared keyIndex_
+    // FIRST and repopulated it in place, so a throw partway through (e.g. a user-supplied
+    // std::hash<TKey>, a throwing key copy, or an allocation failure) left keyIndex_
+    // partially populated and inconsistent with entries_, confirmed via a standalone repro.
+    // unordered_map::swap is noexcept for the default (always-equal) allocator this class
+    // uses, so this call is strongly exception-safe: either keyIndex_ becomes the fully
+    // rebuilt index, or (if the loop above throws) keyIndex_ is left completely unchanged.
+    // Callers that mutate entries_ before calling this must roll that mutation back on a
+    // caught exception -- see Insert/Remove/RemoveAt.
     void rebuildIndex() {
-        keyIndex_.clear();
+        std::unordered_map<TKey, std::size_t> newIndex;
+        newIndex.reserve(entries_.size());
         for (std::size_t i = 0; i < entries_.size(); ++i)
-            keyIndex_[entries_[i].first] = i;
+            newIndex[entries_[i].first] = i;
+        keyIndex_.swap(newIndex);
     }
 
 public:
@@ -125,30 +137,80 @@ public:
     }
 
     /**
+     * @brief A proxy for `dict[key]` that throws on read of a missing key while still
+     * supporting `dict[key] = value` to insert-or-update, matching .NET's split get/set
+     * indexer semantics on top of a single C++ `operator[]`.
+     *
+     * Fixed 2026-07-14 (duplicated-implementation audit finding): the previous non-const
+     * `operator[]` returned a plain `TValue&`, which cannot distinguish a read from a
+     * write -- so `orderedDict[missingKey]` used purely as a READ silently inserted a
+     * default-constructed value instead of throwing `KeyNotFoundException`, unlike every
+     * sibling dictionary type in this codebase (`Dictionary`/`SortedDictionary`/
+     * `SortedList`/`ConcurrentDictionary` all already have this exact fix -- see
+     * `Dictionary::ValueProxy` for the precedent this mirrors). Real .NET's
+     * `OrderedDictionary<TKey,TValue>` indexer getter and setter are genuinely separate
+     * accessor methods (`get_Item`/`set_Item`), so only the setter upserts.
+     */
+    class ValueProxy {
+        OrderedDictionary* owner_;
+        TKey key_;
+    public:
+        ValueProxy(OrderedDictionary* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+        /** Reads the current value; throws KeyNotFoundException if the key is absent. */
+        operator const TValue&() const {
+            auto it = owner_->keyIndex_.find(key_);
+            if (it == owner_->keyIndex_.end())
+                throw KeyNotFoundException("The given key was not present in the dictionary.");
+            return owner_->entries_[it->second].second;
+        }
+
+        /**
+         * Inserts or overwrites the value for this key, adding at the end if new. Bumps
+         * the version counter only when a NEW key is inserted, matching
+         * `Dictionary::ValueProxy::operator=`'s identical convention.
+         */
+        ValueProxy& operator=(const TValue& value) {
+            auto it = owner_->keyIndex_.find(key_);
+            if (it != owner_->keyIndex_.end()) {
+                owner_->entries_[it->second].second = value;
+                return *this;
+            }
+            // Mutate entries_ (the operation more likely to throw -- the pair's move/copy
+            // into the vector) BEFORE keyIndex_ -- see the class's own prior exception-
+            // safety note (a genuine ASan heap-buffer-overflow was confirmed here via a
+            // standalone repro using a TValue whose copy constructor throws, before that
+            // fix). This order is exception-neutral: if emplace_back throws, keyIndex_ is
+            // untouched and the dictionary is unchanged.
+            std::size_t newIndex = owner_->entries_.size();
+            owner_->entries_.emplace_back(key_, value);
+            try {
+                owner_->keyIndex_[key_] = newIndex;
+            } catch (...) {
+                // Roll back the vector append so entries_ and keyIndex_ stay consistent
+                // (audit finding A-05, 2026-07-14) -- e.g. a throwing std::hash<TKey> during
+                // map insertion used to leave entries_ with the new item but keyIndex_
+                // without it, so Count reported one more element than ContainsKey(key)
+                // could ever find. pop_back() is noexcept, so this rollback cannot itself
+                // throw a second exception.
+                owner_->entries_.pop_back();
+                throw;
+            }
+            ++owner_->version_;
+            return *this;
+        }
+    };
+
+    /**
      * @brief Gets or sets the value associated with the specified key.
      *
-     * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.this[TKey] setter.
-     * If the key does not exist, it is added at the end.
+     * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.this[TKey]. The getter
+     * throws System::Collections::Generic::KeyNotFoundException if @p key is absent (it
+     * does NOT insert a default); the setter inserts (at the end) or overwrites. See
+     * ValueProxy for why this isn't a plain `TValue&`.
      * @param key The key whose value to get or set.
-     * @return A reference to the associated value.
      */
-    TValue& operator[](const TKey& key) {
-        auto it = keyIndex_.find(key);
-        if (it != keyIndex_.end()) return entries_[it->second].second;
-        // Mutate entries_ (the operation more likely to throw -- TValue{}'s construction
-        // and the pair's move/copy into the vector) BEFORE keyIndex_. The previous order
-        // (keyIndex_ first) left keyIndex_ pointing one-past-the-end of entries_ if
-        // emplace_back threw, so any subsequent unchecked lookup (this operator[]'s own
-        // `entries_[it->second]` above, or the const overload) read out of bounds --
-        // confirmed as a genuine ASan heap-buffer-overflow via a standalone repro using a
-        // TValue whose copy constructor throws. This order is exception-neutral: if
-        // emplace_back throws, keyIndex_ is untouched and the dictionary is unchanged.
-        std::size_t newIndex = entries_.size();
-        entries_.emplace_back(key, TValue{});
-        keyIndex_[key] = newIndex;
-        ++version_;
-        return entries_.back().second;
-    }
+    [[nodiscard]] ValueProxy operator[](const TKey& key) { return ValueProxy(this, key); }
 
     /**
      * @brief Gets the key/value pair at the specified index.
@@ -179,7 +241,14 @@ public:
         // so a throwing TKey/TValue copy leaves keyIndex_ untouched instead of desynced.
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
-        keyIndex_[key] = newIndex;
+        try {
+            keyIndex_[key] = newIndex;
+        } catch (...) {
+            // Roll back the append (audit finding A-05, 2026-07-14) -- see ValueProxy::
+            // operator='s identical rollback for the full rationale.
+            entries_.pop_back();
+            throw;
+        }
         ++version_;
     }
 
@@ -196,7 +265,14 @@ public:
         // See operator[]'s comment: entries_ must be mutated before keyIndex_ is updated.
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
-        keyIndex_[key] = newIndex;
+        try {
+            keyIndex_[key] = newIndex;
+        } catch (...) {
+            // Roll back the append (audit finding A-05, 2026-07-14) -- see ValueProxy::
+            // operator='s identical rollback for the full rationale.
+            entries_.pop_back();
+            throw;
+        }
         ++version_;
         return true;
     }
@@ -268,7 +344,16 @@ public:
             throw System::ArgumentOutOfRangeException("index");
         if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         entries_.insert(entries_.begin() + index, {key, value});
-        rebuildIndex();
+        try {
+            rebuildIndex();
+        } catch (...) {
+            // Roll back the vector insertion so entries_ and keyIndex_ stay consistent
+            // (audit finding A-05, 2026-07-14) -- see rebuildIndex()'s own doc-comment:
+            // keyIndex_ is left completely unchanged by the failed call, so it still
+            // matches the original (pre-insert) entries_ once this erase restores it.
+            entries_.erase(entries_.begin() + index);
+            throw;
+        }
         ++version_;
     }
 
@@ -297,8 +382,22 @@ public:
     bool Remove(const TKey& key) {
         auto it = keyIndex_.find(key);
         if (it == keyIndex_.end()) return false;
-        entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(it->second));
-        rebuildIndex();
+        auto pos = static_cast<std::ptrdiff_t>(it->second);
+        // Copy the entry before erasing (audit finding A-05, 2026-07-14) so it can be
+        // restored if rebuildIndex() below throws; if this copy itself throws, nothing has
+        // been mutated yet and the dictionary is left unchanged.
+        auto erased = entries_[static_cast<std::size_t>(pos)];
+        entries_.erase(entries_.begin() + pos);
+        try {
+            rebuildIndex();
+        } catch (...) {
+            // Roll back the erase so entries_ and keyIndex_ stay consistent -- see
+            // rebuildIndex()'s own doc-comment: keyIndex_ is left completely unchanged by
+            // the failed call, so it still matches the original (pre-erase) entries_ once
+            // this re-insertion restores it.
+            entries_.insert(entries_.begin() + pos, erased);
+            throw;
+        }
         ++version_;
         return true;
     }
@@ -313,8 +412,16 @@ public:
     void RemoveAt(intcs index) {
         if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
             throw System::ArgumentOutOfRangeException("index");
+        // See Remove()'s identical comment on why the entry is copied before erasing (audit
+        // finding A-05, 2026-07-14).
+        auto erased = entries_[static_cast<std::size_t>(index)];
         entries_.erase(entries_.begin() + index);
-        rebuildIndex();
+        try {
+            rebuildIndex();
+        } catch (...) {
+            entries_.insert(entries_.begin() + index, erased);
+            throw;
+        }
         ++version_;
     }
 
@@ -336,12 +443,22 @@ public:
      * @param capacity The minimum capacity to ensure.
      * @return The new capacity.
      * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
+     *
+     * @note Bumps version_ only when capacity actually grows -- matching real .NET's own
+     * `if (Capacity < capacity) { ...; _version++; }` exactly (verified against
+     * OrderedDictionary.cs), fixed 2026-07-14 (duplicated-implementation audit finding: this
+     * method previously never bumped version_ at all, unlike its sibling
+     * `Dictionary::EnsureCapacity`, which always bumps -- a fail-fast contract gap versus both
+     * real .NET and this codebase's own established pattern).
      */
     intcs EnsureCapacity(intcs capacity) {
         if (capacity < 0)
             throw System::ArgumentOutOfRangeException("capacity");
         auto cap = static_cast<std::size_t>(capacity);
-        if (entries_.capacity() < cap) entries_.reserve(cap);
+        if (entries_.capacity() < cap) {
+            entries_.reserve(cap);
+            ++version_;
+        }
         return static_cast<intcs>(entries_.capacity());
     }
 

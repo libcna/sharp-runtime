@@ -176,16 +176,20 @@ TEST(TimerTests, Change_DuringLongWait_TakesEffectImmediately) {
 // that fire's callback had just set -- only `period` survived past the first fire.
 TEST(TimerTests, Change_DuringCallback_NotClobberedByPeriod) {
     std::atomic<int> count{0};
-    System::Threading::Timer* timerPtr = nullptr;
+    // atomic, not a plain pointer: the callback runs on the Timer's own background thread and
+    // may fire (dueTime=30ms) before the main thread's `timerPtr = &t;` store below becomes
+    // visible to it -- a genuine ThreadSanitizer-flagged data race (2026-07-14) on a plain
+    // pointer with no synchronization between the writer and reader threads.
+    std::atomic<System::Threading::Timer*> timerPtr{nullptr};
     auto callback = [&](void* s) {
         int n = (*static_cast<std::atomic<int>*>(s)).fetch_add(1) + 1;
         if (n == 1) {
             // Reschedule to fire again soon, overriding the original period (500ms).
-            timerPtr->Change(15, -1);
+            timerPtr.load()->Change(15, -1);
         }
     };
     System::Threading::Timer t(callback, &count, 30, 500); // first fire ~30ms, then every 500ms
-    timerPtr = &t;
+    timerPtr.store(&t);
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
     // If the mid-callback Change(15, ...) was respected, a 2nd fire happens well within 150ms.
     // If it was clobbered by the original period=500, count would still be 1 at this point.

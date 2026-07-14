@@ -182,3 +182,29 @@ TEST(OrderedDictionaryVersionTrackingTests, Enumeration_ManyAdds_ReallocationSaf
     }, System::InvalidOperationException);
     EXPECT_EQ(d.getCountProperty(), 200);
 }
+
+// Regression test (fixed 2026-07-14, duplicated-implementation audit finding): EnsureCapacity
+// previously never bumped version_ at all, unlike its sibling Dictionary::EnsureCapacity and
+// real .NET's own OrderedDictionary.EnsureCapacity (verified against OrderedDictionary.cs: bumps
+// _version only when capacity actually grows, inside the `if (Capacity < capacity)` branch).
+TEST(OrderedDictionaryVersionTrackingTests, Enumeration_EnsureCapacityGrows_DuringIteration_Throws) {
+    OrderedDictionary<int, int> d;
+    d.Add(1, 10); d.Add(2, 20);
+    EXPECT_THROW({
+        for (const auto& kv : d) { (void)kv; d.EnsureCapacity(1000); }
+    }, System::InvalidOperationException);
+}
+
+TEST(OrderedDictionaryVersionTrackingTests, EnsureCapacity_NoActualGrowth_DoesNotBumpVersion) {
+    // Matching real .NET exactly: EnsureCapacity(capacity) that doesn't actually need to grow
+    // must NOT invalidate a live enumerator -- only genuine growth is a structural mutation.
+    OrderedDictionary<int, int> d;
+    d.Add(1, 10); d.Add(2, 20);
+    d.EnsureCapacity(1000); // grows once, establishing a large capacity
+    int sum = 0;
+    for (const auto& kv : d) {
+        sum += kv.second;
+        d.EnsureCapacity(1); // already satisfied -- must be a no-op, no throw expected
+    }
+    EXPECT_EQ(sum, 30);
+}

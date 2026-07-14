@@ -5,6 +5,7 @@
 // Tests for System::String static helpers.
 #include <gtest/gtest.h>
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/String.hpp"
 
 using System::String;
@@ -43,6 +44,58 @@ TEST(StringTests, Split_StringDelimiter_NoMatch) {
     auto r = String::Split("hello", "||");
     ASSERT_EQ(r.size(), 1u);
     EXPECT_EQ(r[0], "hello");
+}
+
+// --- Split (single-char delimiter) ---
+// Regression coverage for the 2026-07-13 performance pass (stringstream -> manual find/substr
+// scan), which also fixed a pre-existing correctness bug -- see String::Split(value, char)'s
+// doc-comment and String.cpp's own comment for the .NET-reference verification.
+
+TEST(StringTests, Split_Char_EmptyValue_ReturnsSingleEmptyString) {
+    // Matches real .NET's "".Split(',') == {""} (String.Manipulation.cs's
+    // CreateSplitArrayOfThisAsSoleValue short-circuit for a zero-length input) -- the pre-fix
+    // stringstream-based implementation incorrectly returned an empty vector here.
+    auto r = String::Split("", ',');
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "");
+}
+
+TEST(StringTests, Split_Char_NoDelimiterFound) {
+    auto r = String::Split("hello", ',');
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0], "hello");
+}
+
+TEST(StringTests, Split_Char_MultipleDelimiters) {
+    auto r = String::Split("a,b,c", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "b");
+    EXPECT_EQ(r[2], "c");
+}
+
+TEST(StringTests, Split_Char_TrailingDelimiter_YieldsTrailingEmptyString) {
+    auto r = String::Split("a,b,", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "b");
+    EXPECT_EQ(r[2], "");
+}
+
+TEST(StringTests, Split_Char_LeadingDelimiter_YieldsLeadingEmptyString) {
+    auto r = String::Split(",a,b", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "");
+    EXPECT_EQ(r[1], "a");
+    EXPECT_EQ(r[2], "b");
+}
+
+TEST(StringTests, Split_Char_ConsecutiveDelimiters_YieldEmptyStringsBetween) {
+    auto r = String::Split("a,,b", ',');
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0], "a");
+    EXPECT_EQ(r[1], "");
+    EXPECT_EQ(r[2], "b");
 }
 
 // --- IsNullOrWhiteSpace ---
@@ -375,6 +428,36 @@ TEST(StringTests, Format_Char) {
 }
 TEST(StringTests, Format_CharInSentence) {
     EXPECT_EQ(String::Format("key={0}", 'Z'), "key=Z");
+}
+
+// --- Format validation (2026-07-13 fix: previously silently left unresolved placeholders in
+// the output instead of throwing, matching real .NET's actual FormatException behavior) ---
+
+TEST(StringTests, Format_OutOfRangeIndex_Throws) {
+    EXPECT_THROW(String::Format("{5}", 42), System::FormatException);
+}
+
+TEST(StringTests, Format_OutOfRangeIndex_TwoArgOverload_Throws) {
+    EXPECT_THROW(String::Format("{0} {2}", 1, 2), System::FormatException);
+}
+
+TEST(StringTests, Format_UnclosedBrace_Throws) {
+    EXPECT_THROW(String::Format("value={0", 42), System::FormatException);
+}
+
+TEST(StringTests, Format_MalformedBrace_NoDigit_Throws) {
+    EXPECT_THROW(String::Format("{abc}", 42), System::FormatException);
+}
+
+TEST(StringTests, Format_TwoDigitIndexDoesNotAliasSingleDigitIndex) {
+    // Regression for a prefix-matching bug in replaceArg: naively find()-ing "{1" would also
+    // match inside "{10}" (a different, out-of-range index for a 2-arg call), silently
+    // corrupting the output instead of leaving "{10}" for FinalizeFormat to reject.
+    EXPECT_THROW(String::Format("{1} and {10}", std::string("a"), std::string("b")), System::FormatException);
+}
+
+TEST(StringTests, Format_ValidPlaceholders_DoNotThrow) {
+    EXPECT_NO_THROW(String::Format("{0} and {1}", std::string("a"), std::string("b")));
 }
 
 // --- IndexOfAny ---

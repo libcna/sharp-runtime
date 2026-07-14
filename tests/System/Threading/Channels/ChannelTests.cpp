@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -278,6 +280,269 @@ TEST(ChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicatedItems) {
         writers.emplace_back([&channel, w]() {
             for (int i = 0; i < kPerWriter; ++i) {
                 EXPECT_TRUE(channel.Writer->TryWrite(w * kPerWriter + i));
+            }
+        });
+    }
+    for (auto& th : writers) th.join();
+    channel.Writer->TryComplete();
+
+    std::atomic<int> readCount{0};
+    std::vector<int> seenPerValue(kTotal, 0);
+    std::mutex seenMutex;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&]() {
+            int value;
+            while (channel.Reader->TryRead(value)) {
+                readCount.fetch_add(1, std::memory_order_relaxed);
+                std::lock_guard<std::mutex> lock(seenMutex);
+                ASSERT_GE(value, 0);
+                ASSERT_LT(value, kTotal);
+                seenPerValue[static_cast<size_t>(value)]++;
+            }
+        });
+    }
+    for (auto& th : readers) th.join();
+
+    EXPECT_EQ(readCount.load(), kTotal);
+    for (int v = 0; v < kTotal; ++v) {
+        EXPECT_EQ(seenPerValue[static_cast<size_t>(v)], 1) << "value " << v << " seen "
+            << seenPerValue[static_cast<size_t>(v)] << " times (expected exactly once)";
+    }
+}
+
+TEST(ChannelTests, MultipleBlockedReaders_AllUnblockWithinBoundedTime) {
+    // Regression test for a lost-wakeup bug (fixed 2026-07-14, confirmed via a standalone
+    // repro): TryWrite used to call notify_one(), which wakes at most one blocked
+    // WaitToReadAsync/ReadAsync waiter. With multiple readers concurrently blocked, that could
+    // permanently starve any reader notify_one() doesn't happen to pick, even though real
+    // .NET's WaitToReadAsync contract notifies every currently-pending registration on a write,
+    // not just one. Uses a bounded poll-with-timeout (not a plain join()) so a regression fails
+    // this test instead of hanging the suite -- any reader thread still running at the deadline
+    // is detached, not joined, to avoid std::terminate on a joinable thread's destructor. See
+    // PrioritizedChannelTests.MultipleBlockedReaders_AllUnblockWithinBoundedTime for the
+    // equivalent coverage of PrioritizedChannelWriterImpl::TryWrite's identical fix.
+    auto channel = Channel<int>::CreateUnbounded();
+    constexpr int kReaders = 6;
+
+    std::vector<std::atomic<bool>> done(kReaders);
+    for (auto& d : done) d = false;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&channel, &done, r]() {
+            channel.Reader->ReadAsync().getResultProperty();
+            done[static_cast<size_t>(r)] = true;
+        });
+    }
+
+    // Give every reader time to actually block inside WaitToReadAsync's condition_variable::wait().
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    for (int i = 0; i < kReaders; ++i) {
+        EXPECT_TRUE(channel.Writer->TryWrite(i));
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto allDone = [&] {
+        return std::all_of(done.begin(), done.end(), [](const std::atomic<bool>& d) { return d.load(); });
+    };
+    while (!allDone() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    for (int r = 0; r < kReaders; ++r) {
+        EXPECT_TRUE(done[static_cast<size_t>(r)].load()) << "reader " << r << " never unblocked";
+    }
+    for (int r = 0; r < kReaders; ++r) {
+        if (done[static_cast<size_t>(r)]) readers[static_cast<size_t>(r)].join();
+        else readers[static_cast<size_t>(r)].detach();
+    }
+}
+
+// -----------------------------------------------------------------------
+// Channel<T>::CreateUnboundedPrioritized
+// -----------------------------------------------------------------------
+
+TEST(PrioritizedChannelTests, DefaultComparer_DequeuesSmallestFirst) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryWrite(5);
+    channel.Writer->TryWrite(1);
+    channel.Writer->TryWrite(3);
+    int a, b, c;
+    ASSERT_TRUE(channel.Reader->TryRead(a));
+    ASSERT_TRUE(channel.Reader->TryRead(b));
+    ASSERT_TRUE(channel.Reader->TryRead(c));
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 3);
+    EXPECT_EQ(c, 5);
+}
+
+TEST(PrioritizedChannelTests, WriteOrderDoesNotAffectReadOrder) {
+    // Priority order, not insertion order -- distinguishes this from the plain FIFO channel.
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    for (int v : {10, 2, 8, 4, 6}) channel.Writer->TryWrite(v);
+    std::vector<int> got;
+    int value;
+    while (channel.Reader->TryRead(value)) got.push_back(value);
+    EXPECT_EQ(got, (std::vector<int>{2, 4, 6, 8, 10}));
+}
+
+TEST(PrioritizedChannelTests, CustomComparer_DescendingOrder) {
+    UnboundedPrioritizedChannelOptions<int> options;
+    options.Comparer = [](const int& a, const int& b) { return a > b; }; // largest first
+    auto channel = Channel<int>::CreateUnboundedPrioritized(options);
+    channel.Writer->TryWrite(1);
+    channel.Writer->TryWrite(5);
+    channel.Writer->TryWrite(3);
+    int a, b, c;
+    ASSERT_TRUE(channel.Reader->TryRead(a));
+    ASSERT_TRUE(channel.Reader->TryRead(b));
+    ASSERT_TRUE(channel.Reader->TryRead(c));
+    EXPECT_EQ(a, 5);
+    EXPECT_EQ(b, 3);
+    EXPECT_EQ(c, 1);
+}
+
+TEST(PrioritizedChannelTests, TryRead_EmptyChannel_ReturnsFalse) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    int value;
+    EXPECT_FALSE(channel.Reader->TryRead(value));
+}
+
+TEST(PrioritizedChannelTests, TryPeek_DoesNotRemoveItem) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryWrite(7);
+    channel.Writer->TryWrite(2);
+    int peeked = 0;
+    EXPECT_TRUE(channel.Reader->TryPeek(peeked));
+    EXPECT_EQ(peeked, 2);
+    EXPECT_EQ(channel.Reader->getCountProperty(), 2); // peek didn't remove it
+    int read = 0;
+    EXPECT_TRUE(channel.Reader->TryRead(read));
+    EXPECT_EQ(read, 2);
+}
+
+TEST(PrioritizedChannelTests, CanPeekAndCanCountAreTrue) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    EXPECT_TRUE(channel.Reader->getCanPeekProperty());
+    EXPECT_TRUE(channel.Reader->getCanCountProperty());
+}
+
+TEST(PrioritizedChannelTests, TryComplete_ThenTryWrite_Fails) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    EXPECT_TRUE(channel.Writer->TryComplete());
+    EXPECT_FALSE(channel.Writer->TryWrite(1));
+    EXPECT_FALSE(channel.Writer->TryComplete()); // already completed
+}
+
+TEST(PrioritizedChannelTests, WaitToWriteAsync_AlwaysTrueUntilClosed) {
+    // Unbounded: writing never blocks on capacity, matching CreateUnbounded()'s own contract.
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    EXPECT_TRUE(channel.Writer->WaitToWriteAsync().getResultProperty());
+    channel.Writer->TryComplete();
+    EXPECT_FALSE(channel.Writer->WaitToWriteAsync().getResultProperty());
+}
+
+TEST(PrioritizedChannelTests, WaitToReadAsync_UnblocksWhenItemWritten) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    std::thread writer([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        channel.Writer->TryWrite(9);
+    });
+    EXPECT_TRUE(channel.Reader->WaitToReadAsync().getResultProperty());
+    writer.join();
+    int value = 0;
+    EXPECT_TRUE(channel.Reader->TryRead(value));
+    EXPECT_EQ(value, 9);
+}
+
+TEST(PrioritizedChannelTests, WaitToReadAsync_ReturnsFalse_WhenClosedEmpty) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryComplete();
+    EXPECT_FALSE(channel.Reader->WaitToReadAsync().getResultProperty());
+}
+
+TEST(PrioritizedChannelTests, WaitToReadAsync_ThrowsCompletionError_WhenClosedWithException) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryComplete(std::make_exception_ptr(std::runtime_error("boom")));
+    EXPECT_THROW(channel.Reader->WaitToReadAsync().getResultProperty(), std::runtime_error);
+}
+
+TEST(PrioritizedChannelTests, Completion_CompletesOnceClosedAndDrained) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryWrite(1);
+    channel.Writer->TryComplete();
+    auto completion = channel.Reader->getCompletionProperty();
+    EXPECT_FALSE(completion.getIsCompletedProperty());
+    int value;
+    channel.Reader->TryRead(value);
+    completion.Wait();
+    EXPECT_TRUE(completion.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(PrioritizedChannelTests, ReadAsync_ReturnsHighestPriorityItem) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    channel.Writer->TryWrite(9);
+    channel.Writer->TryWrite(1);
+    EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 1);
+}
+
+TEST(PrioritizedChannelTests, MultipleBlockedReaders_AllUnblockWithinBoundedTime) {
+    // Regression test for a lost-wakeup bug (fixed 2026-07-14, confirmed via a standalone
+    // repro): TryWrite used to call notify_one(), which wakes at most one blocked
+    // WaitToReadAsync/ReadAsync waiter. With multiple readers concurrently blocked, that could
+    // permanently starve any reader notify_one() doesn't happen to pick, even though real
+    // .NET's WaitToReadAsync contract notifies every currently-pending registration on a write,
+    // not just one. Uses a bounded poll-with-timeout (not a plain join()) so a regression fails
+    // this test instead of hanging the suite -- any reader thread still running at the deadline
+    // is detached, not joined, to avoid std::terminate on a joinable thread's destructor.
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    constexpr int kReaders = 6;
+
+    std::vector<std::atomic<bool>> done(kReaders);
+    for (auto& d : done) d = false;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&channel, &done, r]() {
+            channel.Reader->ReadAsync().getResultProperty();
+            done[static_cast<size_t>(r)] = true;
+        });
+    }
+
+    // Give every reader time to actually block inside WaitToReadAsync's condition_variable::wait().
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    for (int i = 0; i < kReaders; ++i) {
+        EXPECT_TRUE(channel.Writer->TryWrite(i));
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto allDone = [&] {
+        return std::all_of(done.begin(), done.end(), [](const std::atomic<bool>& d) { return d.load(); });
+    };
+    while (!allDone() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    for (int r = 0; r < kReaders; ++r) {
+        EXPECT_TRUE(done[static_cast<size_t>(r)].load()) << "reader " << r << " never unblocked";
+    }
+    for (int r = 0; r < kReaders; ++r) {
+        if (done[static_cast<size_t>(r)]) readers[static_cast<size_t>(r)].join();
+        else readers[static_cast<size_t>(r)].detach();
+    }
+}
+
+TEST(PrioritizedChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicatedItems) {
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    constexpr int kWriters = 4;
+    constexpr int kPerWriter = 250;
+    constexpr int kTotal = kWriters * kPerWriter;
+    constexpr int kReaders = 4;
+
+    std::vector<std::thread> writers;
+    for (int w = 0; w < kWriters; ++w) {
+        writers.emplace_back([&, w]() {
+            for (int i = 0; i < kPerWriter; ++i) {
+                channel.Writer->TryWrite(w * kPerWriter + i);
             }
         });
     }

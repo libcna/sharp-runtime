@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/IO/Stream.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/IO/IOException.hpp"
 #include "System/NotSupportedException.hpp"
 
 namespace System::IO {
@@ -37,6 +38,18 @@ namespace System::IO {
                 break;
             default:
                 throw System::ArgumentException("Invalid seek origin.", "origin");
+        }
+        // A resulting position before the start of the stream throws IOException here, NOT
+        // setPositionProperty()'s own ArgumentOutOfRangeException -- these are two genuinely
+        // different validation rules in real .NET (verified against MemoryStream.cs's SeekCore,
+        // which throws IOException("An attempt was made to move the position before the
+        // beginning of the stream.") for this case, versus the separate Position setter, which
+        // does throw ArgumentOutOfRangeException for a directly-assigned negative value). This
+        // shared base Seek() is used by every Stream subtype in this port that doesn't override
+        // Seek itself (currently all of them), matching the same IOException convention real
+        // .NET's own MemoryStream/UnmanagedMemoryStream share.
+        if (newPosition < 0) {
+            throw System::IO::IOException("An attempt was made to move the position before the beginning of the stream.");
         }
         setPositionProperty(newPosition);
         return newPosition;

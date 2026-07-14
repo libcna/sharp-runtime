@@ -151,18 +151,26 @@ TEST(AsyncLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAd
     // at the identical address. The old this-pointer-keyed implementation would have the worker
     // thread's map lookup for B's address collide with A's still-present stale entry.
     alignas(AsyncLocal<int>) unsigned char buffer[sizeof(AsyncLocal<int>)];
+    std::promise<void> constructed;
+    std::shared_future<void> constructedFuture = constructed.get_future().share();
     std::promise<void> replaced;
     std::shared_future<void> replacedFuture = replaced.get_future().share();
 
     std::thread worker([&] {
         auto* a = new (buffer) AsyncLocal<int>();
         a->setValueProperty(111); // populates this worker thread's thread_local map
+        constructed.set_value();  // real synchronization: main thread must not touch buffer yet
         replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
         auto* b = reinterpret_cast<AsyncLocal<int>*>(buffer);
         EXPECT_EQ(b->getValueProperty(), 0); // must not see A's leftover 111
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // A fixed sleep_for() here (the original approach) gives no actual happens-before guarantee
+    // between the worker's buffer writes above and the main thread's destroy/reconstruct below --
+    // confirmed as a genuine ThreadSanitizer-flagged data race (2026-07-14), even though it
+    // virtually always "worked" in practice since 20ms is far longer than the worker needs.
+    // std::promise::set_value()/std::future::wait() is a real synchronizes-with relationship.
+    constructedFuture.wait();
     reinterpret_cast<AsyncLocal<int>*>(buffer)->~AsyncLocal<int>(); // destroyed on the MAIN thread
     new (buffer) AsyncLocal<int>();                                 // instance B at the identical address
     replaced.set_value();
@@ -871,19 +879,24 @@ TEST(ThreadLocalTests, AfterDispose_SetValue_ThrowsObjectDisposedException) {
 }
 TEST(ThreadLocalTests, InstanceDestroyedOnDifferentThread_ThenNewInstanceAtSameAddress_DoesNotLeakStaleValue) {
     alignas(ThreadLocal<int>) unsigned char buffer[sizeof(ThreadLocal<int>)];
+    std::promise<void> constructed;
+    std::shared_future<void> constructedFuture = constructed.get_future().share();
     std::promise<void> replaced;
     std::shared_future<void> replacedFuture = replaced.get_future().share();
 
     std::thread worker([&] {
         auto* a = new (buffer) ThreadLocal<int>();
         a->setValueProperty(222); // populates this worker thread's thread_local map
+        constructed.set_value();  // real synchronization: main thread must not touch buffer yet
         replacedFuture.wait();    // block until the main thread has destroyed A and placement-new'd B
         auto* b = reinterpret_cast<ThreadLocal<int>*>(buffer);
         EXPECT_FALSE(b->getIsValueCreatedProperty()); // must not see A's leftover entry at all
         EXPECT_EQ(b->getValueProperty(), 0);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // See the identical AsyncLocalTests case above for why sleep_for() was replaced with a real
+    // synchronizes-with relationship (ThreadSanitizer-flagged data race, 2026-07-14).
+    constructedFuture.wait();
     reinterpret_cast<ThreadLocal<int>*>(buffer)->~ThreadLocal<int>(); // destroyed on the MAIN thread
     new (buffer) ThreadLocal<int>();                                  // instance B at the identical address
     replaced.set_value();

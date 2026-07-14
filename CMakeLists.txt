@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SHARP_RUNTIME_BUILD_TESTS "Build sharp-runtime tests" ON)
+option(SHARP_RUNTIME_BUILD_BENCHMARKS "Build sharp-runtime standalone micro-benchmarks" OFF)
 
 file(GLOB_RECURSE SHARP_RUNTIME_SOURCES CONFIGURE_DEPENDS
         "src/*.cpp"
@@ -86,4 +87,18 @@ if(SHARP_RUNTIME_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(SharpRuntimeTests)
+endif()
+
+if(SHARP_RUNTIME_BUILD_BENCHMARKS)
+    add_executable(SharpRuntimeBench
+            bench/StringBenchmark.cpp
+    )
+
+    target_link_libraries(SharpRuntimeBench PRIVATE SHARP_RUNTIME)
+
+    if(NOT MSVC)
+        target_compile_options(SharpRuntimeBench PRIVATE -Wall -Wextra -Werror -O2)
+    else()
+        target_compile_options(SharpRuntimeBench PRIVATE /O2)
+    endif()
 endif()
