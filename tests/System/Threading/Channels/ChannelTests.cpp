@@ -2,7 +2,9 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -309,6 +311,53 @@ TEST(ChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicatedItems) {
     }
 }
 
+TEST(ChannelTests, MultipleBlockedReaders_AllUnblockWithinBoundedTime) {
+    // Regression test for a lost-wakeup bug (fixed 2026-07-14, confirmed via a standalone
+    // repro): TryWrite used to call notify_one(), which wakes at most one blocked
+    // WaitToReadAsync/ReadAsync waiter. With multiple readers concurrently blocked, that could
+    // permanently starve any reader notify_one() doesn't happen to pick, even though real
+    // .NET's WaitToReadAsync contract notifies every currently-pending registration on a write,
+    // not just one. Uses a bounded poll-with-timeout (not a plain join()) so a regression fails
+    // this test instead of hanging the suite -- any reader thread still running at the deadline
+    // is detached, not joined, to avoid std::terminate on a joinable thread's destructor. See
+    // PrioritizedChannelTests.MultipleBlockedReaders_AllUnblockWithinBoundedTime for the
+    // equivalent coverage of PrioritizedChannelWriterImpl::TryWrite's identical fix.
+    auto channel = Channel<int>::CreateUnbounded();
+    constexpr int kReaders = 6;
+
+    std::vector<std::atomic<bool>> done(kReaders);
+    for (auto& d : done) d = false;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&channel, &done, r]() {
+            channel.Reader->ReadAsync().getResultProperty();
+            done[static_cast<size_t>(r)] = true;
+        });
+    }
+
+    // Give every reader time to actually block inside WaitToReadAsync's condition_variable::wait().
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    for (int i = 0; i < kReaders; ++i) {
+        EXPECT_TRUE(channel.Writer->TryWrite(i));
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto allDone = [&] {
+        return std::all_of(done.begin(), done.end(), [](const std::atomic<bool>& d) { return d.load(); });
+    };
+    while (!allDone() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    for (int r = 0; r < kReaders; ++r) {
+        EXPECT_TRUE(done[static_cast<size_t>(r)].load()) << "reader " << r << " never unblocked";
+    }
+    for (int r = 0; r < kReaders; ++r) {
+        if (done[static_cast<size_t>(r)]) readers[static_cast<size_t>(r)].join();
+        else readers[static_cast<size_t>(r)].detach();
+    }
+}
+
 // -----------------------------------------------------------------------
 // Channel<T>::CreateUnboundedPrioritized
 // -----------------------------------------------------------------------
@@ -435,6 +484,51 @@ TEST(PrioritizedChannelTests, ReadAsync_ReturnsHighestPriorityItem) {
     channel.Writer->TryWrite(9);
     channel.Writer->TryWrite(1);
     EXPECT_EQ(channel.Reader->ReadAsync().getResultProperty(), 1);
+}
+
+TEST(PrioritizedChannelTests, MultipleBlockedReaders_AllUnblockWithinBoundedTime) {
+    // Regression test for a lost-wakeup bug (fixed 2026-07-14, confirmed via a standalone
+    // repro): TryWrite used to call notify_one(), which wakes at most one blocked
+    // WaitToReadAsync/ReadAsync waiter. With multiple readers concurrently blocked, that could
+    // permanently starve any reader notify_one() doesn't happen to pick, even though real
+    // .NET's WaitToReadAsync contract notifies every currently-pending registration on a write,
+    // not just one. Uses a bounded poll-with-timeout (not a plain join()) so a regression fails
+    // this test instead of hanging the suite -- any reader thread still running at the deadline
+    // is detached, not joined, to avoid std::terminate on a joinable thread's destructor.
+    auto channel = Channel<int>::CreateUnboundedPrioritized();
+    constexpr int kReaders = 6;
+
+    std::vector<std::atomic<bool>> done(kReaders);
+    for (auto& d : done) d = false;
+    std::vector<std::thread> readers;
+    for (int r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&channel, &done, r]() {
+            channel.Reader->ReadAsync().getResultProperty();
+            done[static_cast<size_t>(r)] = true;
+        });
+    }
+
+    // Give every reader time to actually block inside WaitToReadAsync's condition_variable::wait().
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    for (int i = 0; i < kReaders; ++i) {
+        EXPECT_TRUE(channel.Writer->TryWrite(i));
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto allDone = [&] {
+        return std::all_of(done.begin(), done.end(), [](const std::atomic<bool>& d) { return d.load(); });
+    };
+    while (!allDone() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    for (int r = 0; r < kReaders; ++r) {
+        EXPECT_TRUE(done[static_cast<size_t>(r)].load()) << "reader " << r << " never unblocked";
+    }
+    for (int r = 0; r < kReaders; ++r) {
+        if (done[static_cast<size_t>(r)]) readers[static_cast<size_t>(r)].join();
+        else readers[static_cast<size_t>(r)].detach();
+    }
 }
 
 TEST(PrioritizedChannelTests, ConcurrentMultiWriterMultiReader_NoLostOrDuplicatedItems) {

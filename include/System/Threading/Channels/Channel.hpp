@@ -173,7 +173,17 @@ namespace System::Threading::Channels {
                 if (state_->queue.empty()) return false;
                 item = std::move(state_->queue.front());
                 state_->queue.pop_front();
-                state_->notFull.notify_one();
+                // notify_all(), not notify_one(): multiple writers can be concurrently blocked
+                // in WaitToWriteAsync on a full bounded channel, and freeing one slot doesn't
+                // mean only one of them should get a chance to re-check -- notify_one() would
+                // wake at most one specific waiter (implementation-defined which), permanently
+                // starving the others if no further read/complete ever happens to notify them
+                // again. Matches the identical notEmpty fix below (TryWrite) and real .NET's
+                // WaitToWriteAsync contract of notifying every currently-pending registration on
+                // any relevant state change, not just one. Waking extra threads that re-check
+                // their predicate and safely go back to sleep is always correct, just a few
+                // futile wakeups -- never a correctness risk.
+                state_->notFull.notify_all();
                 // Also wake any Completion waiter: it's blocked on notEmpty until closed &&
                 // queue.empty(), and draining the last item is exactly the transition it's
                 // waiting for.
@@ -242,7 +252,16 @@ namespace System::Threading::Channels {
                 }
 
                 state_->queue.push_back(item);
-                state_->notEmpty.notify_one();
+                // notify_all(), not notify_one(): multiple readers can be concurrently blocked
+                // in WaitToReadAsync/ReadAsync on an empty channel (confirmed via a standalone
+                // repro, 2026-07-14: two readers blocked, one TryWrite, one reader hangs forever
+                // since notify_one() only ever wakes one of them and no further write/complete
+                // ever comes along to notify the other). Real .NET's WaitToReadAsync contract
+                // ("completes with true when data is available to read") notifies every
+                // currently-pending registration on a write, not just one -- readers that lose
+                // the race for the single new item simply re-check TryRead, see it's gone, and
+                // go back to waiting, which is always safe.
+                state_->notEmpty.notify_all();
                 return true;
             }
 
@@ -372,7 +391,12 @@ namespace System::Threading::Channels {
                 std::lock_guard<std::mutex> lock(state_->mutex);
                 if (state_->closed) return false;
                 state_->items.insert(item);
-                state_->notEmpty.notify_one();
+                // notify_all(), not notify_one() -- same lost-wakeup class as the FIFO
+                // ChannelWriterImpl::TryWrite fix above (confirmed via the same kind of
+                // standalone repro: 2026-07-14), and for the identical reason: multiple readers
+                // can be concurrently blocked in WaitToReadAsync/ReadAsync, and notify_one()
+                // would only ever wake one of them.
+                state_->notEmpty.notify_all();
                 return true;
             }
 
