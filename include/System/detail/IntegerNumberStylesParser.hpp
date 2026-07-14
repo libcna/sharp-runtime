@@ -21,16 +21,27 @@ using System::Globalization::NumberStyles;
 //
 // SCOPE: implements NumberStyles.Integer (AllowLeadingWhite | AllowTrailingWhite |
 // AllowLeadingSign), NumberStyles.HexNumber (AllowLeadingWhite | AllowTrailingWhite |
-// AllowHexSpecifier), and -- as of the extension below -- AllowTrailingSign, AllowParentheses,
-// AllowDecimalPoint, AllowThousands, and AllowCurrencySymbol (so NumberStyles.Number and
-// NumberStyles.Currency are now both fully supported). Verified against real .NET's
-// TryParseNumber/TryStringToNumber (Number.Parsing.Common.cs) and TryNumberBufferToBinaryInteger
-// (Number.Parsing.cs). Since this port has no culture-aware NumberFormatInfo (@p provider is
-// always ignored -- see every Parse/TryParse overload's own doc-comment), the separators used
-// are NumberFormatInfo.InvariantInfo's fixed defaults: '.' for both NumberDecimalSeparator and
-// CurrencyDecimalSeparator, ',' for both NumberGroupSeparator and CurrencyGroupSeparator, and
-// U+00A4 ("¤", the international currency sign) for CurrencySymbol -- verified against
-// NumberFormatInfo.cs's field initializers, not guessed.
+// AllowHexSpecifier), NumberStyles.BinaryNumber (AllowLeadingWhite | AllowTrailingWhite |
+// AllowBinarySpecifier -- added 2026-07-14, see TryParseBinaryCore below; previously defined in
+// NumberStyles.hpp but silently ignored by every caller, so BinaryNumber input fell through to
+// decimal parsing instead of throwing or parsing as binary), and -- as of an earlier extension --
+// AllowTrailingSign, AllowParentheses, AllowDecimalPoint, AllowThousands, and
+// AllowCurrencySymbol (so NumberStyles.Number and NumberStyles.Currency are now both fully
+// supported). Verified against real .NET's TryParseNumber/TryStringToNumber
+// (Number.Parsing.Common.cs) and TryNumberBufferToBinaryInteger/
+// TryParseBinaryIntegerHexOrBinaryNumberStyle (Number.Parsing.cs). Since this port has no
+// culture-aware NumberFormatInfo (@p provider is always ignored -- see every Parse/TryParse
+// overload's own doc-comment), the separators used are NumberFormatInfo.InvariantInfo's fixed
+// defaults: '.' for both NumberDecimalSeparator and CurrencyDecimalSeparator, ',' for both
+// NumberGroupSeparator and CurrencyGroupSeparator, and U+00A4 ("¤", the international currency
+// sign) for CurrencySymbol -- verified against NumberFormatInfo.cs's field initializers, not
+// guessed.
+//
+// Leading/trailing whitespace tolerance (AllowLeadingWhite/AllowTrailingWhite) is interleaved
+// with token matching (sign/parentheses/currency symbol), not just skipped once before/after all
+// tokens -- fixed 2026-07-14 after confirming a real discrepancy against .NET/Mono: e.g.
+// int.Parse("123-  ", NumberStyles.Number) == -123 requires whitespace to be tolerated AFTER a
+// trailing sign, not just immediately after the digits.
 //
 // AllowExponent is still NOT implemented (out of scope: NumberStyles.Number/.Currency don't
 // include it either in real .NET -- only .Float/.HexFloat do, which don't apply to integer
@@ -83,15 +94,22 @@ struct IntegerNumberStylesParser {
         const bool allowThousands     = (style & NumberStyles::AllowThousands)     != NumberStyles::None;
         const bool allowDecimalPoint  = (style & NumberStyles::AllowDecimalPoint)  != NumberStyles::None;
 
-        if (allowLeadingWhite)
-            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-
-        // Leading tokens: a sign, an opening '(', and/or a currency symbol, in any order, each
-        // matched at most once (mirrors real .NET's TryParseNumber prefix loop).
+        // Leading tokens: whitespace (if allowed), a sign, an opening '(', and/or a currency
+        // symbol, interleaved in any order, each token matched at most once (mirrors real
+        // .NET's TryParseNumber prefix loop, which re-checks for skippable whitespace after
+        // every token match rather than only once before any token -- verified against
+        // Number.Parsing.Common.cs and empirically cross-checked, 2026-07-14: e.g.
+        // int.Parse("123-  ", NumberStyles.Number) == -123, which requires whitespace to be
+        // tolerated AFTER the trailing sign, not just before it; the mirrored bug existed here
+        // on the leading side too, e.g. a leading currency symbol followed by whitespace before
+        // the digits, such as "¤  123").
         bool negative = false, haveSign = false, haveParen = false, haveCurrency = false;
         for (bool matched = true; matched; ) {
             matched = false;
-            if (allowLeadingSign && !haveSign && i < n && (s[i] == '+' || s[i] == '-')) {
+            if (allowLeadingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
+                while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+                matched = true;
+            } else if (allowLeadingSign && !haveSign && i < n && (s[i] == '+' || s[i] == '-')) {
                 negative = (s[i] == '-'); haveSign = true; ++i; matched = true;
             } else if (allowParens && !haveSign && i < n && s[i] == '(') {
                 haveParen = true; haveSign = true; negative = true; ++i; matched = true;
@@ -125,7 +143,11 @@ struct IntegerNumberStylesParser {
         if (allowTrailingWhite)
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
 
-        // Trailing tokens: same three kinds as the leading loop, plus a closing ')'.
+        // Trailing tokens: same three kinds as the leading loop, plus a closing ')', with
+        // whitespace (if allowed) interleaved after any of them too -- real .NET's trailing
+        // whitespace has no gating condition tying it only to the position right after the
+        // digits (verified 2026-07-14, see the leading-loop comment above for the full
+        // rationale and empirical cross-check).
         for (bool matched = true; matched; ) {
             matched = false;
             if (allowTrailingSign && !haveSign && i < n && (s[i] == '+' || s[i] == '-')) {
@@ -135,6 +157,9 @@ struct IntegerNumberStylesParser {
             } else if (allowCurrency && !haveCurrency &&
                        s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
+            } else if (allowTrailingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
+                while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+                matched = true;
             }
         }
 
@@ -181,20 +206,25 @@ struct IntegerNumberStylesParser {
         const bool allowThousands     = (style & NumberStyles::AllowThousands)     != NumberStyles::None;
         const bool allowDecimalPoint  = (style & NumberStyles::AllowDecimalPoint)  != NumberStyles::None;
 
-        if (allowLeadingWhite)
-            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-
-        if (i < n && (s[i] == '-' || (allowParens && s[i] == '('))) return false;
-
+        // Leading tokens: whitespace (if allowed), a literal '+', and/or a currency symbol,
+        // interleaved in any order -- see TryParseSignedCore's identical leading-loop comment
+        // for the full whitespace-interleaving rationale (2026-07-14). The negative-token
+        // rejection is checked AFTER this loop settles (not just once at the very start) so it
+        // still correctly rejects a '-'/'(' appearing after whitespace or a currency symbol has
+        // already been consumed, e.g. "¤-123".
         bool haveCurrency = false;
         for (bool matched = true; matched; ) {
             matched = false;
-            if (allowLeadingSign && i < n && s[i] == '+') { ++i; matched = true; }
+            if (allowLeadingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
+                while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+                matched = true;
+            } else if (allowLeadingSign && i < n && s[i] == '+') { ++i; matched = true; }
             else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
             }
         }
+        if (i < n && (s[i] == '-' || (allowParens && s[i] == '('))) return false;
 
         uint64_t magnitude = 0;
         bool any = false, sawDecimal = false, fracNonZero = false;
@@ -220,16 +250,22 @@ struct IntegerNumberStylesParser {
         if (allowTrailingWhite)
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
 
-        if (i < n && s[i] == '-') return false; // trailing minus: same rejection as leading
-
+        // Trailing tokens: same interleaved-whitespace treatment as the leading loop above (and
+        // TryParseSignedCore's trailing loop) -- see those comments for the full rationale. The
+        // trailing-minus rejection is checked after the loop settles, so it still correctly
+        // rejects a '-' appearing after a trailing '+'/currency/whitespace has been consumed.
         for (bool matched = true; matched; ) {
             matched = false;
             if (allowTrailingSign && i < n && s[i] == '+') { ++i; matched = true; }
             else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
+            } else if (allowTrailingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
+                while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+                matched = true;
             }
         }
+        if (i < n && s[i] == '-') return false; // trailing minus: same rejection as leading
 
         if (i != n) return false;
         if (fracNonZero) { overflowed = true; return true; }
@@ -262,6 +298,13 @@ struct IntegerNumberStylesParser {
         if (i >= n || !std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
 
         bits = 0;
+        // Skip leading zeros BEFORE counting toward maxDigits, matching real .NET's
+        // TryParseBinaryIntegerHexOrBinaryNumberStyle (Number.Parsing.cs) -- confirmed via a
+        // real discrepancy, 2026-07-14: this port previously counted every hex character
+        // including leading zeros, so a harmlessly zero-padded value like
+        // "00000000FFFFFFFF" (16 chars: 8 leading zeros + 8 significant digits) incorrectly
+        // overflowed for UInt32 (maxDigits=8) even though its SIGNIFICANT digit count fits.
+        while (i < n && s[i] == '0') ++i;
         intcs digitCount = 0;
         while (i < n && std::isxdigit(static_cast<unsigned char>(s[i]))) {
             char c = s[i];
@@ -273,6 +316,45 @@ struct IntegerNumberStylesParser {
             ++i;
         }
         if (digitCount > maxDigits) { tooManyDigits = true; return false; } // matches real .NET's ThrowOverflowException
+
+        if (allowTrailingWhite)
+            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+
+        return i == n;
+    }
+
+    // Parses the BinaryNumber-style subset (pure '0'/'1' digits, no sign, optional surrounding
+    // whitespace) into a raw 64-bit bit pattern -- the binary counterpart of TryParseHexCore
+    // above, added 2026-07-14 to close a silently-wrong-value gap: NumberStyles.AllowBinary-
+    // Specifier/BinaryNumber were defined in NumberStyles.hpp but never checked anywhere, so a
+    // caller passing NumberStyles.BinaryNumber got a DECIMAL reinterpretation instead of a
+    // FormatException/correct binary parse (e.g. Int32::TryParse("101", NumberStyles::
+    // BinaryNumber, ...) silently returned 101, not 5) -- violating this project's own "never
+    // silently return a wrong value" rule (CLAUDE.md). Mirrors real .NET's
+    // TryParseBinaryIntegerHexOrBinaryNumberStyle (Number.Parsing.cs), including skipping
+    // leading zeros before counting toward @p maxDigits (here: max BIT count, e.g. 32 for
+    // Int32 -- NOT divided by 4 the way hex's maxDigits is, since each binary digit is one bit).
+    static bool TryParseBinaryCore(const std::string& s, NumberStyles style,
+                                    uint64_t& bits, intcs maxDigits, bool& tooManyDigits) {
+        tooManyDigits = false;
+        std::size_t i = 0, n = s.size();
+        const bool allowLeadingWhite  = (style & NumberStyles::AllowLeadingWhite)  != NumberStyles::None;
+        const bool allowTrailingWhite = (style & NumberStyles::AllowTrailingWhite) != NumberStyles::None;
+
+        if (allowLeadingWhite)
+            while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+
+        if (i >= n || (s[i] != '0' && s[i] != '1')) return false;
+
+        bits = 0;
+        while (i < n && s[i] == '0') ++i; // skip leading zeros before counting -- see TryParseHexCore
+        intcs digitCount = 0;
+        while (i < n && (s[i] == '0' || s[i] == '1')) {
+            bits = (bits << 1) | static_cast<unsigned>(s[i] - '0');
+            ++digitCount;
+            ++i;
+        }
+        if (digitCount > maxDigits) { tooManyDigits = true; return false; }
 
         if (allowTrailingWhite)
             while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;

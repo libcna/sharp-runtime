@@ -188,3 +188,103 @@ TEST(NumberStylesExtendedTests, UInt64_Currency) {
 TEST(NumberStylesExtendedTests, Byte_ThousandsSeparatorRejectedWhenTooLarge) {
     EXPECT_THROW(Byte::Parse("1,234", NumberStyles::Number, nullptr), System::OverflowException);
 }
+
+// -----------------------------------------------------------------------
+// Whitespace interleaved with leading/trailing tokens (fixed 2026-07-14): AllowLeadingWhite/
+// AllowTrailingWhite previously only skipped whitespace once, strictly before/after the
+// sign/parentheses/currency-symbol matching loops -- real .NET tolerates whitespace BETWEEN a
+// matched token and the digits (or end of string) too. Confirmed via source trace against
+// Number.Parsing.Common.cs and empirical cross-check against real .NET/Mono.
+// -----------------------------------------------------------------------
+
+TEST(NumberStylesExtendedTests, TrailingWhitespace_AfterTrailingSign) {
+    EXPECT_EQ(Int32::Parse("123-  ", NumberStyles::Number, nullptr), -123);
+    EXPECT_EQ(Int32::Parse("123+  ", NumberStyles::Number, nullptr), 123);
+}
+
+TEST(NumberStylesExtendedTests, TrailingWhitespace_AfterClosingParenthesis) {
+    EXPECT_EQ(Int32::Parse(" (123)  ", NumberStyles::Currency, nullptr), -123);
+}
+
+TEST(NumberStylesExtendedTests, TrailingWhitespace_AfterTrailingCurrencySymbol) {
+    std::string input = "123" + std::string(kCurrency) + "  ";
+    EXPECT_EQ(Int32::Parse(input, NumberStyles::Currency, nullptr), 123);
+}
+
+TEST(NumberStylesExtendedTests, LeadingWhitespace_BetweenCurrencySymbolAndDigits) {
+    std::string input = std::string(kCurrency) + "  123";
+    EXPECT_EQ(UInt32::Parse(input, NumberStyles::Currency, nullptr), 123u);
+    EXPECT_EQ(Int32::Parse(input, NumberStyles::Currency, nullptr), 123);
+}
+
+TEST(NumberStylesExtendedTests, TrailingWhitespace_StillRejectedWhenNotAllowed) {
+    // AllowLeadingSign | AllowTrailingSign WITHOUT AllowTrailingWhite (NumberStyles::Integer
+    // would already bundle AllowTrailingWhite in, so it can't be used here to test this): the
+    // fix must not make whitespace tolerance unconditional -- it stays gated by the flag.
+    SharpRuntime::intcs out;
+    EXPECT_FALSE(Int32::TryParse("123-  ", NumberStyles::AllowLeadingSign | NumberStyles::AllowTrailingSign, nullptr, out));
+    EXPECT_TRUE(Int32::TryParse("123-", NumberStyles::AllowLeadingSign | NumberStyles::AllowTrailingSign, nullptr, out));
+    EXPECT_EQ(out, -123);
+}
+
+// -----------------------------------------------------------------------
+// HexNumber leading zeros (fixed 2026-07-14): digitCount previously included leading zeros when
+// checking against maxDigits, so a harmlessly zero-padded hex string longer than the type's
+// native width incorrectly overflowed even though its significant digit count fit. Confirmed
+// against real .NET's TryParseBinaryIntegerHexOrBinaryNumberStyle, which skips leading zeros
+// before counting.
+// -----------------------------------------------------------------------
+
+TEST(NumberStylesExtendedTests, HexNumber_LeadingZeros_DoNotCountTowardOverflow) {
+    EXPECT_EQ(UInt32::Parse("000000001", NumberStyles::HexNumber, nullptr), 1u);
+    EXPECT_EQ(UInt32::Parse("00000000FFFFFFFF", NumberStyles::HexNumber, nullptr), 4294967295u);
+    EXPECT_EQ(Int32::Parse("00000000FFFFFFFF", NumberStyles::HexNumber, nullptr), -1);
+}
+
+TEST(NumberStylesExtendedTests, HexNumber_GenuineOverflow_StillThrows) {
+    // Sanity check: 9 significant (non-zero-leading) digits still correctly overflows a 32-bit type.
+    EXPECT_THROW(UInt32::Parse("100000000", NumberStyles::HexNumber, nullptr), System::OverflowException);
+}
+
+TEST(NumberStylesExtendedTests, HexNumber_AllZeros_ParsesAsZero) {
+    EXPECT_EQ(UInt32::Parse("00000000", NumberStyles::HexNumber, nullptr), 0u);
+    EXPECT_EQ(UInt32::Parse("0", NumberStyles::HexNumber, nullptr), 0u);
+}
+
+// -----------------------------------------------------------------------
+// NumberStyles.BinaryNumber / AllowBinarySpecifier (added 2026-07-14): previously defined in
+// NumberStyles.hpp but never checked by any Parse/TryParse overload, so it silently fell through
+// to decimal parsing instead of throwing FormatException or parsing as binary -- e.g.
+// Int32::TryParse("101", NumberStyles::BinaryNumber, ...) used to return true with result 101
+// (a decimal reinterpretation), not 5. Mirrors the existing, already-correct HexNumber support.
+// -----------------------------------------------------------------------
+
+TEST(NumberStylesExtendedTests, BinaryNumber_Int32_RoundTrips) {
+    EXPECT_EQ(Int32::Parse("101", NumberStyles::BinaryNumber, nullptr), 5);
+    EXPECT_EQ(Int32::Parse("0", NumberStyles::BinaryNumber, nullptr), 0);
+    EXPECT_EQ(Int32::Parse(std::string(32, '1'), NumberStyles::BinaryNumber, nullptr), -1);
+    EXPECT_EQ(Int32::Parse(" 101 ", NumberStyles::BinaryNumber, nullptr), 5);
+}
+
+TEST(NumberStylesExtendedTests, BinaryNumber_LeadingZeros_DoNotCountTowardOverflow) {
+    EXPECT_EQ(UInt32::Parse(std::string(20, '0') + "101", NumberStyles::BinaryNumber, nullptr), 5u);
+}
+
+TEST(NumberStylesExtendedTests, BinaryNumber_TooManyDigits_ThrowsOverflow) {
+    EXPECT_THROW(UInt32::Parse(std::string(33, '1'), NumberStyles::BinaryNumber, nullptr), System::OverflowException);
+    SharpRuntime::uintcs out;
+    EXPECT_FALSE(UInt32::TryParse(std::string(33, '1'), NumberStyles::BinaryNumber, nullptr, out));
+}
+
+TEST(NumberStylesExtendedTests, BinaryNumber_InvalidDigit_ThrowsFormat) {
+    EXPECT_THROW(Int32::Parse("102", NumberStyles::BinaryNumber, nullptr), System::FormatException);
+}
+
+TEST(NumberStylesExtendedTests, BinaryNumber_CoverageAcrossOtherTypes) {
+    EXPECT_EQ(Int16::Parse("101", NumberStyles::BinaryNumber, nullptr), 5);
+    EXPECT_EQ(Int64::Parse("101", NumberStyles::BinaryNumber, nullptr), 5);
+    EXPECT_EQ(SByte::Parse("101", NumberStyles::BinaryNumber, nullptr), 5);
+    EXPECT_EQ(UInt16::Parse("101", NumberStyles::BinaryNumber, nullptr), 5u);
+    EXPECT_EQ(UInt64::Parse("101", NumberStyles::BinaryNumber, nullptr), 5u);
+    EXPECT_EQ(Byte::Parse("101", NumberStyles::BinaryNumber, nullptr), 5u);
+}

@@ -108,6 +108,13 @@ namespace System {
                         throw System::OverflowException("Value was either too large or too small for a signed byte.");
                     throw System::FormatException("Input string was not in a correct format.");
                 }
+                if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                    uint64_t bits; bool tooManyDigits = false;
+                    System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 8, tooManyDigits);
+                    if (tooManyDigits)
+                        throw System::OverflowException("Value was either too large or too small for a signed byte.");
+                    throw System::FormatException("Input string was not in a correct format.");
+                }
                 SharpRuntime::longcs signedResult; bool overflowed = false;
                 if (System::detail::IntegerNumberStylesParser::TryParseSignedCore(s, style, signedResult, overflowed) &&
                     (overflowed || signedResult < MinValue || signedResult > MaxValue))
@@ -131,6 +138,13 @@ namespace System {
             if ((style & NumberStyles::AllowHexSpecifier) != NumberStyles::None) {
                 uint64_t bits; bool tooManyDigits = false;
                 if (!System::detail::IntegerNumberStylesParser::TryParseHexCore(s, style, bits, 2, tooManyDigits))
+                    return false;
+                result = static_cast<sbytecs>(static_cast<uint8_t>(bits));
+                return true;
+            }
+            if ((style & NumberStyles::AllowBinarySpecifier) != NumberStyles::None) {
+                uint64_t bits; bool tooManyDigits = false;
+                if (!System::detail::IntegerNumberStylesParser::TryParseBinaryCore(s, style, bits, 8, tooManyDigits))
                     return false;
                 result = static_cast<sbytecs>(static_cast<uint8_t>(bits));
                 return true;
