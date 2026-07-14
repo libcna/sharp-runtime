@@ -375,12 +375,22 @@ public:
      * @param capacity The minimum capacity to ensure.
      * @return The new capacity.
      * @throws System::ArgumentOutOfRangeException if @p capacity is negative.
+     *
+     * @note Bumps version_ only when capacity actually grows -- matching real .NET's own
+     * `if (Capacity < capacity) { ...; _version++; }` exactly (verified against
+     * OrderedDictionary.cs), fixed 2026-07-14 (duplicated-implementation audit finding: this
+     * method previously never bumped version_ at all, unlike its sibling
+     * `Dictionary::EnsureCapacity`, which always bumps -- a fail-fast contract gap versus both
+     * real .NET and this codebase's own established pattern).
      */
     intcs EnsureCapacity(intcs capacity) {
         if (capacity < 0)
             throw System::ArgumentOutOfRangeException("capacity");
         auto cap = static_cast<std::size_t>(capacity);
-        if (entries_.capacity() < cap) entries_.reserve(cap);
+        if (entries_.capacity() < cap) {
+            entries_.reserve(cap);
+            ++version_;
+        }
         return static_cast<intcs>(entries_.capacity());
     }
 
