@@ -70,14 +70,17 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 
 **Test status**: last verified **12388/12388 passing**, via `./build/SharpRuntimeTests`, at the
 same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
-project's history — see §3): ThreadSanitizer (4 full runs, 0 warnings), AddressSanitizer (3 full
-runs, 0 errors/leaks), UndefinedBehaviorSanitizer (3 full runs, 0 diagnostics) — passing every
-single run at the sanitizer-verified commit (`1cdc80a`; the 10 newest tests, added at `200591b`
-for `TaskCompletionSource.Task`, have not yet been re-run under the sanitizer trio — see §5).
-Also verified flake-free: the new `TaskCompletionSource.Task` tests specifically ran clean across
-20 in-process repeats (500 executions) after a real deadlock in the first implementation attempt
-was found and fixed (see §3). Zero known failing tests, zero known races, zero known
-memory-safety or undefined-behavior issues.
+project's history — see §3): ThreadSanitizer (7 full runs total, 0 warnings — 4 at `1cdc80a`, 3
+more at `200591b` after the `TaskCompletionSource.Task` addition, plus 5 repeats of the
+Task-family filtered suite specifically, 0 warnings throughout), AddressSanitizer (3 full runs, 0
+errors/leaks), UndefinedBehaviorSanitizer (3 full runs, 0 diagnostics) — 12388/12388 (12378 at
+the ASan/UBSan-verified commit) passing every single run, each completing in a few seconds. Also
+verified flake-free: the new `TaskCompletionSource.Task` tests specifically ran clean across 20
+in-process repeats (500 executions) plus 5 TSan repeats (450 executions) after a real deadlock in
+the first implementation attempt was found and fixed (see §3). ASan/UBSan have not yet had a
+dedicated re-run against the 10 newest tests specifically (lower risk: TSan — the sanitizer most
+relevant to this feature's concurrency — is now fully clean against it). Zero known failing
+tests, zero known races, zero known memory-safety or undefined-behavior issues.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
@@ -459,28 +462,39 @@ both `TaskCompletionSource<TResult>` and the `TaskCompletionSource<void>` specia
 flake-free across 20 in-process repeats (500 test executions) plus a full-suite run. Test count
 grew from 12378 to 12388.
 
+**Follow-up: dedicated ThreadSanitizer verification of the above** (same commit's tests, no code
+change) — set up a fresh isolated TSan build (same pattern as §3's earlier sanitizer-trio entries:
+separate `build-tsan/` dir, `-fsanitize=thread -g -O1` plus the same `-O1`-specific false-positive
+warning suppressions, `-Wno-error=tsan`) specifically to re-check the new `FromExternalFuture`/
+`TaskCompletionSource` destructor code, since the rest of the `Task` family was TSan-verified
+*before* this addition landed. Ran the Task-family test filter 5x-repeated (450 executions) and 3
+full-suite runs (12388 tests each) — **0 ThreadSanitizer warnings across all of it**. The
+`build-tsan/` directory was removed afterward (gitignored via `build*`, not meant to persist).
+
 ---
 
 ## 4. Current blocker / main problem
 
 **There is no active build/test blocker right now.** Build was clean and all 12388 tests passed
 at the last verification (HEAD `200591b`). The full sanitizer trio (TSan/ASan/UBSan) was verified
-clean at the prior commit (`1cdc80a`, 12378 tests) — the 10 newest tests (`TaskCompletionSource.
-Task`) have not yet had a dedicated sanitizer re-run, though that feature's own implementation
-work involved fixing a real deadlock found via a standalone repro (see §3), so it has already had
-non-trivial concurrency scrutiny even without a formal TSan pass. `plan.sqlite3`'s `ticket` table
-has zero `blocked`, `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`)
-rows.
+clean at the prior commit (`1cdc80a`, 12378 tests); ThreadSanitizer has since been re-verified
+specifically against the 10 newest tests (`TaskCompletionSource.Task`) via a dedicated isolated
+TSan build — 0 warnings across 3 full-suite runs plus 5 repeats of the Task-family filter (see
+§3). ASan/UBSan have not had that same dedicated re-run yet, but this feature introduces no new
+dynamic-memory or UB-prone patterns, so that's a formality rather than a live risk (see §5).
+`plan.sqlite3`'s `ticket` table has zero `blocked`, `todo`, or `doing` rows; the `task` table has
+zero unclassified (`''`/`todo`) rows.
 
 This session is running autonomously (per explicit user authorization). All four of NEXT.md's
 original §8 tasks are done, plus a full post-pilot audit round (4 parallel find-only agents → 4
 fix commits), a full sanitizer-trio investigation (TSan/ASan/UBSan, 6+ real bugs found and
 fixed — see §3), and the `TaskCompletionSource<TResult>.Task` property (closing the last
-documented `Task`-family architectural gap) — §8 currently holds only natural follow-ons that
-haven't been started yet (extending the performance pass to other hot-path types; a possible
-further audit round). Two pre-session decisions from the user remain in effect: (1) no new
-benchmarking dependency — `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2)
-push after each verified task, same cadence as before.
+documented `Task`-family architectural gap, plus a follow-up dedicated TSan re-verification of
+that new code) — §8 currently holds only natural follow-ons that haven't been started yet
+(extending the performance pass to other hot-path types; a possible further audit round). Two
+pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
+`std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
+task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next. Two candidates were proposed and are awaiting a decision (see §8 for
@@ -523,11 +537,12 @@ update this section (and the whole file) once you understand what changed.
   §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
   still unmeasured.
 - The new `TaskCompletionSource<TResult>.Task`/`Task::FromExternalFuture`/`TaskT::
-  FromExternalFuture` code (`200591b`, see §3) has not yet had a dedicated ThreadSanitizer re-run
-  — the rest of the `Task`/`TaskT`/`TaskCompletionSource` surface was TSan-verified at `1cdc80a`,
-  before this addition. Low risk (the fix already required finding and resolving a real deadlock
-  via a standalone repro, and the new tests ran clean across 500 in-process repeats), but not yet
-  formally confirmed under TSan specifically.
+  FromExternalFuture` code (`200591b`, see §3) has been dedicated-TSan-verified (0 warnings, see
+  §3's follow-up entry) but not yet re-run under AddressSanitizer/UndefinedBehaviorSanitizer
+  specifically — those two were only verified against the pre-`200591b` test count (12378). Lower
+  priority than the TSan pass was: no dynamic memory management or UB-prone patterns were
+  introduced by this feature (it's `shared_ptr`/`std::async`/`std::promise` only), so this is a
+  formality, not a live concern.
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
   delegate types' `DynamicInvoke`, serialization infrastructure, P/Invoke/interop, and
@@ -671,7 +686,8 @@ harmless, UB call) — all fixed, all three now run clean project-wide; a `-Wsha
 warning audit (clean — see §3); a performance-audit extension to `List<T>`/`StringBuilder`
 (honest no-significant-finding result — see §3, no code changed); `TaskCompletionSource<TResult>.
 Task` property (the last remaining documented `Task`-family gap — see §3 for the two real bugs,
-including a genuine deadlock, found and fixed while implementing it).
+including a genuine deadlock, found and fixed while implementing it) plus a dedicated
+ThreadSanitizer re-verification of that new code (0 warnings — see §3).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
@@ -694,13 +710,6 @@ next, or ask the user first if unsure which to prioritize.
    recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny`/
    `TaskCompletionSource.Task` work from this session is itself a good target for a fresh pair of
    eyes).
-
-3. **A dedicated TSan re-run covering the new `TaskCompletionSource.Task`/`FromExternalFuture`
-   code** (§5) — the rest of the `Task` family was TSan-verified at `1cdc80a`, before this
-   addition landed at `200591b`. Lower urgency than it sounds: implementing this feature already
-   surfaced and fixed one genuine deadlock via a standalone repro (see §3), and the new tests ran
-   clean across 500 in-process repeats — but a formal TSan pass would close the loop the same way
-   it did for the rest of this class.
 
 ---
 
@@ -733,10 +742,11 @@ next, or ask the user first if unsure which to prioritize.
 
 ```
 Read NEXT.md first. It reflects the repository state as of HEAD 200591b (12388/12388 tests
-passing, 0 errors/0 warnings; the full ThreadSanitizer/AddressSanitizer/UndefinedBehaviorSanitizer
-trio was verified clean at the prior commit 1cdc80a/12378 tests, but not yet re-run against the
-10 newest TaskCompletionSource.Task tests — see §5) — re-verify first anyway:
-cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
+passing, 0 errors/0 warnings). ThreadSanitizer has been re-verified clean specifically against
+the 10 newest TaskCompletionSource.Task tests (0 warnings, see §3); AddressSanitizer/
+UndefinedBehaviorSanitizer were verified clean at the prior commit 1cdc80a/12378 tests but not
+yet re-run against the newest 10 (low-priority formality, see §5) — re-verify the normal build
+first anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
 open question is which of §8's candidate next tasks (or something else entirely) to work on.
