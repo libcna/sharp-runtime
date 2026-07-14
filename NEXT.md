@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `1cdc80a`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `200591b`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,15 +66,17 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`1cdc80a`), via `cmake --build build --parallel 4`.
+(`200591b`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12378/12378 passing**, 1224 test suites, via
-`./build/SharpRuntimeTests`, at the same HEAD. Additionally verified under **the full
-sanitizer trio** (all three firsts in this project's history — see §3): ThreadSanitizer (4 full
-runs, 0 warnings), AddressSanitizer (3 full runs, 0 errors/leaks), UndefinedBehaviorSanitizer (3
-full runs, 0 diagnostics) — 12378/12378 passing every single run, each completing in a few
-seconds. Also verified flake-free across 3 additional normal-build full runs plus 20 repeats of
-the `Task::WhenAny` suite specifically. Zero known failing tests, zero known races, zero known
+**Test status**: last verified **12388/12388 passing**, via `./build/SharpRuntimeTests`, at the
+same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
+project's history — see §3): ThreadSanitizer (4 full runs, 0 warnings), AddressSanitizer (3 full
+runs, 0 errors/leaks), UndefinedBehaviorSanitizer (3 full runs, 0 diagnostics) — passing every
+single run at the sanitizer-verified commit (`1cdc80a`; the 10 newest tests, added at `200591b`
+for `TaskCompletionSource.Task`, have not yet been re-run under the sanitizer trio — see §5).
+Also verified flake-free: the new `TaskCompletionSource.Task` tests specifically ran clean across
+20 in-process repeats (500 executions) after a real deadlock in the first implementation attempt
+was found and fixed (see §3). Zero known failing tests, zero known races, zero known
 memory-safety or undefined-behavior issues.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -418,23 +420,67 @@ This is a legitimate audit outcome, not a gap — not every investigation has to
 fix, and manufacturing a marginal "optimization" just to show activity would be the wrong call
 here.
 
+**`TaskCompletionSource<TResult>.Task` property** (`200591b`) — the last remaining documented
+`Task` gap (§5's own former entry called this "an architectural change, not something to retrofit
+during a single audit ticket"). Added `Task::FromExternalFuture()`/`TaskT<TResult>::
+FromExternalFuture()` factories that bridge an externally-owned `std::shared_future` onto the
+ordinary `Task`/`TaskT` consumer API; `TaskCompletionSource`'s constructor now eagerly builds a
+`task_`/`getTaskProperty()` from its own promise's future, matching real .NET's stable-identity
+`Task` property.
+
+Two real bugs surfaced during implementation, both confirmed via standalone minimal repros before
+being fixed (not just theorized):
+1. **Lost-ordering race between `Wait()` and the bridging watcher.** The first design stored the
+   external future directly as `future_` and used a *detached `std::thread`* to separately mirror
+   its outcome into `state_`. `Wait()`/`getResultProperty()` call `future_->get()` directly, so
+   both the caller and the detached watcher raced on the same future with no guarantee the
+   watcher's `state_->isCompleted = true` happened before `Wait()` returned — caught by real
+   (not flaky-looking) test failures immediately after first landing. Fixed by wrapping the
+   external future inside a *new* `std::async` task instead, so state mutation happens inside the
+   same future-producing lambda `Wait()` blocks on — the same invariant every other `Task`/`TaskT`
+   constructor in this file already relies on.
+2. **A genuine deadlock in `~TaskCompletionSource()`, confirmed via a standalone `std::promise`/
+   `std::async` repro on this toolchain.** Destroying the *last* `shared_future` reference to an
+   `std::async`-launched task blocks until that task's callable returns — true for `shared_future`
+   here, not just plain `future` (a real GCC/libstdc++ behavior, not something the standard
+   mandates, and the opposite of the commonly-cited "only future blocks, share() opts out"
+   folklore). Since `TaskCompletionSource`'s implicit member destruction runs in reverse
+   declaration order, `task_` (whose internal watcher blocks on this source's own `promise_`) was
+   destroyed *before* `promise_` — so an unfulfilled `TaskCompletionSource` going out of scope
+   deadlocked every time: `task_`'s destructor blocked waiting for the watcher, which was blocked
+   waiting for `promise_`, which hadn't been touched yet. Fixed with an explicit
+   `~TaskCompletionSource()` that force-completes `promise_` (with `TaskCanceledException`, if not
+   already completed) *before* any member's implicit destructor runs, breaking the cycle.
+
+10 new regression tests in `TasksTests.cpp` (`TaskCompletionSourceTests`/
+`TaskCompletionSourceVoidTests`), covering: incomplete-before-`Set*`, completes/faults/cancels
+correctly on `Set*`, and same-instance identity across repeated `getTaskProperty()` calls, for
+both `TaskCompletionSource<TResult>` and the `TaskCompletionSource<void>` specialization. Verified
+flake-free across 20 in-process repeats (500 test executions) plus a full-suite run. Test count
+grew from 12378 to 12388.
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12378 tests passed
-at the last verification (HEAD `1cdc80a`), including clean full-suite runs under all three
-sanitizers (TSan/ASan/UBSan). `plan.sqlite3`'s `ticket` table has zero `blocked`, `todo`, or
-`doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
+**There is no active build/test blocker right now.** Build was clean and all 12388 tests passed
+at the last verification (HEAD `200591b`). The full sanitizer trio (TSan/ASan/UBSan) was verified
+clean at the prior commit (`1cdc80a`, 12378 tests) — the 10 newest tests (`TaskCompletionSource.
+Task`) have not yet had a dedicated sanitizer re-run, though that feature's own implementation
+work involved fixing a real deadlock found via a standalone repro (see §3), so it has already had
+non-trivial concurrency scrutiny even without a formal TSan pass. `plan.sqlite3`'s `ticket` table
+has zero `blocked`, `todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`)
+rows.
 
 This session is running autonomously (per explicit user authorization). All four of NEXT.md's
 original §8 tasks are done, plus a full post-pilot audit round (4 parallel find-only agents → 4
-fix commits) and a full sanitizer-trio investigation (TSan/ASan/UBSan, 6+ real bugs found and
-fixed — see §3) — §8 currently holds only natural follow-ons that haven't been started yet
-(extending the performance pass to other hot-path types; a possible further audit round). Two
-pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
-`std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
-task, same cadence as before.
+fix commits), a full sanitizer-trio investigation (TSan/ASan/UBSan, 6+ real bugs found and
+fixed — see §3), and the `TaskCompletionSource<TResult>.Task` property (closing the last
+documented `Task`-family architectural gap) — §8 currently holds only natural follow-ons that
+haven't been started yet (extending the performance pass to other hot-path types; a possible
+further audit round). Two pre-session decisions from the user remain in effect: (1) no new
+benchmarking dependency — `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2)
+push after each verified task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next. Two candidates were proposed and are awaiting a decision (see §8 for
@@ -465,9 +511,6 @@ update this section (and the whole file) once you understand what changed.
 - `ImmutableList<T>` is missing `Sort`/`Reverse`/`ForEach`/`CopyTo`/`GetRange`/`ConvertAll`/the
   `Find` family/`ToBuilder`/comparer overloads — cataloged in a class-level doc-comment, not
   implemented.
-- `TaskCompletionSource<TResult>.Task` property is missing entirely — an architectural gap, since
-  this port's `Task` always launches immediately on construction with no "pending" bridge mode to
-  hang a `TaskCompletionSource` off of.
 - `System::Xml::Linq::XText`'s `WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
   the way real .NET does when the parent is an `XDocument` — needs a larger `XmlWriter` change to
   close correctly (a `WriteWhitespace` primitive doesn't exist in this port's `XmlWriter` at all).
@@ -479,6 +522,12 @@ update this section (and the whole file) once you understand what changed.
   only been measured for `System::String`'s `Split(char)`/`Concat`/`Join` so far (2026-07-13, see
   §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
   still unmeasured.
+- The new `TaskCompletionSource<TResult>.Task`/`Task::FromExternalFuture`/`TaskT::
+  FromExternalFuture` code (`200591b`, see §3) has not yet had a dedicated ThreadSanitizer re-run
+  — the rest of the `Task`/`TaskT`/`TaskCompletionSource` surface was TSan-verified at `1cdc80a`,
+  before this addition. Low risk (the fix already required finding and resolving a real deadlock
+  via a standalone repro, and the new tests ran clean across 500 in-process repeats), but not yet
+  formally confirmed under TSan specifically.
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
   delegate types' `DynamicInvoke`, serialization infrastructure, P/Invoke/interop, and
@@ -620,7 +669,9 @@ ThreadSanitizer (1 real production deadlock + 3 real test-only races), AddressSa
 heap-buffer-overflow + 5 real memory leaks), UndefinedBehaviorSanitizer (1 real, if practically
 harmless, UB call) — all fixed, all three now run clean project-wide; a `-Wshadow` compiler-
 warning audit (clean — see §3); a performance-audit extension to `List<T>`/`StringBuilder`
-(honest no-significant-finding result — see §3, no code changed).
+(honest no-significant-finding result — see §3, no code changed); `TaskCompletionSource<TResult>.
+Task` property (the last remaining documented `Task`-family gap — see §3 for the two real bugs,
+including a genuine deadlock, found and fixed while implementing it).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
@@ -640,13 +691,16 @@ next, or ask the user first if unsure which to prioritize.
    `-Wsign-conversion` (skipped so far as likely too noisy given this codebase's pervasive
    intentional `intcs`/`size_t` conversions — would need a smarter triage approach, not a blind
    full-codebase run), duplicated-implementation search, or missing edge-case handling in
-   recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny`
-   work from this session is itself a good target for a fresh pair of eyes).
+   recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny`/
+   `TaskCompletionSource.Task` work from this session is itself a good target for a fresh pair of
+   eyes).
 
-3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
-   since this port's `Task` always launches immediately on construction with no "pending" bridge
-   mode. Would need design thought about how to represent a Task that doesn't yet have a
-   `std::async` backing it.
+3. **A dedicated TSan re-run covering the new `TaskCompletionSource.Task`/`FromExternalFuture`
+   code** (§5) — the rest of the `Task` family was TSan-verified at `1cdc80a`, before this
+   addition landed at `200591b`. Lower urgency than it sounds: implementing this feature already
+   surfaced and fixed one genuine deadlock via a standalone repro (see §3), and the new tests ran
+   clean across 500 in-process repeats — but a formal TSan pass would close the loop the same way
+   it did for the rest of this class.
 
 ---
 
@@ -678,9 +732,10 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 1cdc80a (12378/12378 tests
-passing, 0 errors/0 warnings, also clean under the full ThreadSanitizer/AddressSanitizer/
-UndefinedBehaviorSanitizer trio, all verified at that commit) — re-verify first anyway:
+Read NEXT.md first. It reflects the repository state as of HEAD 200591b (12388/12388 tests
+passing, 0 errors/0 warnings; the full ThreadSanitizer/AddressSanitizer/UndefinedBehaviorSanitizer
+trio was verified clean at the prior commit 1cdc80a/12378 tests, but not yet re-run against the
+10 newest TaskCompletionSource.Task tests — see §5) — re-verify first anyway:
 cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
