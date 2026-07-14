@@ -310,6 +310,17 @@ namespace System::Threading::Channels {
                 if (state_->items.empty()) return false;
                 auto node = state_->items.extract(state_->items.begin());
                 item = std::move(node.value());
+                // Wake any Completion waiter: it's blocked on notEmpty until closed &&
+                // items.empty(), and draining the last item is exactly that transition. Missing
+                // this call is a genuine lost-wakeup bug -- confirmed via a real hang under
+                // ThreadSanitizer (2026-07-14): PrioritizedChannelTests.
+                // Completion_CompletesOnceClosedAndDrained deadlocked reliably under TSan's
+                // instrumented scheduling, though it happened to pass under normal execution
+                // because the Completion task's background thread usually didn't start checking
+                // its predicate until after TryRead had already run -- a timing coincidence, not
+                // a correctness guarantee. Matches the identical, already-correct pattern in the
+                // sibling FIFO ChannelReaderImpl::TryRead just above in this file.
+                state_->notEmpty.notify_all();
                 return true;
             }
 
