@@ -212,13 +212,21 @@ struct IntegerNumberStylesParser {
         // rejection is checked AFTER this loop settles (not just once at the very start) so it
         // still correctly rejects a '-'/'(' appearing after whitespace or a currency symbol has
         // already been consumed, e.g. "¤-123".
-        bool haveCurrency = false;
+        //
+        // `haveSign` is shared across BOTH the leading and trailing token loops below (mirroring
+        // TryParseSignedCore's single shared `haveSign`), so at most one '+' total is ever
+        // consumed -- fixed 2026-07-14 (duplicated-implementation audit finding): without this
+        // guard, the leading loop alone would re-match '+' on every iteration with no "already
+        // consumed a sign" check, so e.g. UInt32::TryParse("++5", NumberStyles::Integer, ...)
+        // incorrectly returned true with result 5, and "5++" (multiple trailing signs) was
+        // likewise wrongly accepted -- confirmed via a standalone repro before this fix.
+        bool haveSign = false, haveCurrency = false;
         for (bool matched = true; matched; ) {
             matched = false;
             if (allowLeadingWhite && i < n && std::isspace(static_cast<unsigned char>(s[i]))) {
                 while (i < n && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
                 matched = true;
-            } else if (allowLeadingSign && i < n && s[i] == '+') { ++i; matched = true; }
+            } else if (allowLeadingSign && !haveSign && i < n && s[i] == '+') { haveSign = true; ++i; matched = true; }
             else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;
@@ -254,9 +262,11 @@ struct IntegerNumberStylesParser {
         // TryParseSignedCore's trailing loop) -- see those comments for the full rationale. The
         // trailing-minus rejection is checked after the loop settles, so it still correctly
         // rejects a '-' appearing after a trailing '+'/currency/whitespace has been consumed.
+        // `haveSign` is the SAME flag the leading loop above uses, so a sign already consumed on
+        // either side blocks a second one on the other -- see that loop's comment for why.
         for (bool matched = true; matched; ) {
             matched = false;
-            if (allowTrailingSign && i < n && s[i] == '+') { ++i; matched = true; }
+            if (allowTrailingSign && !haveSign && i < n && s[i] == '+') { haveSign = true; ++i; matched = true; }
             else if (allowCurrency && !haveCurrency &&
                      s.compare(i, kCurrencySymbol.size(), kCurrencySymbol) == 0) {
                 haveCurrency = true; i += kCurrencySymbol.size(); matched = true;

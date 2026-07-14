@@ -288,3 +288,35 @@ TEST(NumberStylesExtendedTests, BinaryNumber_CoverageAcrossOtherTypes) {
     EXPECT_EQ(UInt64::Parse("101", NumberStyles::BinaryNumber, nullptr), 5u);
     EXPECT_EQ(Byte::Parse("101", NumberStyles::BinaryNumber, nullptr), 5u);
 }
+
+// -----------------------------------------------------------------------
+// Unsigned-parser repeated-sign rejection (fixed 2026-07-14, duplicated-implementation audit
+// finding): TryParseUnsignedCore's leading/trailing '+' matching had no "already consumed a
+// sign" guard, unlike TryParseSignedCore's shared `haveSign` flag -- so multiple '+' tokens
+// (leading, trailing, or both) were silently accepted instead of rejected as a format error.
+// -----------------------------------------------------------------------
+
+TEST(NumberStylesExtendedTests, UnsignedParse_RepeatedLeadingSign_Rejected) {
+    SharpRuntime::uintcs out;
+    EXPECT_FALSE(UInt32::TryParse("++5", NumberStyles::Integer, nullptr, out));
+    EXPECT_FALSE(UInt32::TryParse("+++5", NumberStyles::Integer, nullptr, out));
+}
+
+TEST(NumberStylesExtendedTests, UnsignedParse_RepeatedTrailingSign_Rejected) {
+    SharpRuntime::uintcs out;
+    NumberStyles style = NumberStyles::Integer | NumberStyles::AllowTrailingSign;
+    EXPECT_FALSE(UInt32::TryParse("5++", style, nullptr, out));
+}
+
+TEST(NumberStylesExtendedTests, UnsignedParse_LeadingAndTrailingSignTogether_Rejected) {
+    SharpRuntime::uintcs out;
+    NumberStyles style = NumberStyles::Integer | NumberStyles::AllowTrailingSign;
+    EXPECT_FALSE(UInt32::TryParse("+5+", style, nullptr, out));
+}
+
+TEST(NumberStylesExtendedTests, UnsignedParse_SingleSign_StillAccepted) {
+    // Sanity check: the fix must not reject a single, legitimate '+'.
+    EXPECT_EQ(UInt32::Parse("+5", NumberStyles::Integer, nullptr), 5u);
+    EXPECT_EQ(UInt32::Parse("5+", NumberStyles::Integer | NumberStyles::AllowTrailingSign, nullptr), 5u);
+    EXPECT_EQ(Byte::Parse("+5", NumberStyles::Integer, nullptr), 5u);
+}
