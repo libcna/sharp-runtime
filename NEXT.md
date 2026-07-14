@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `35817d9`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `1cdc80a`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,16 +66,16 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`35817d9`), via `cmake --build build --parallel 4`.
+(`1cdc80a`), via `cmake --build build --parallel 4`.
 
 **Test status**: last verified **12378/12378 passing**, 1224 test suites, via
-`./build/SharpRuntimeTests`, at the same HEAD. Additionally verified under **ThreadSanitizer**
-(first time in this project's history — see §3): full suite run 4 times with
-`-fsanitize=thread`, 0 warnings and 12378/12378 passing every time, ~4 seconds per run. Also
-verified under **AddressSanitizer** (also a first — see §3): full suite run 3 times with
-`-fsanitize=address`, 0 errors/leaks and 12378/12378 passing every time. Also verified
-flake-free across 3 additional normal-build full runs plus 20 repeats of the `Task::WhenAny`
-suite specifically. Zero known failing tests, zero known races, zero known memory-safety issues.
+`./build/SharpRuntimeTests`, at the same HEAD. Additionally verified under **the full
+sanitizer trio** (all three firsts in this project's history — see §3): ThreadSanitizer (4 full
+runs, 0 warnings), AddressSanitizer (3 full runs, 0 errors/leaks), UndefinedBehaviorSanitizer (3
+full runs, 0 diagnostics) — 12378/12378 passing every single run, each completing in a few
+seconds. Also verified flake-free across 3 additional normal-build full runs plus 20 repeats of
+the `Task::WhenAny` suite specifically. Zero known failing tests, zero known races, zero known
+memory-safety or undefined-behavior issues.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
@@ -369,17 +369,41 @@ suppressions). Found and fixed two categories of real issues:
 Re-verified clean (0 errors/leaks) across 3 full-suite ASan runs after both fixes landed. Normal
 build re-verified: 0 errors/0 warnings, 12378/12378 passing.
 
+**First-ever UndefinedBehaviorSanitizer run** (`1cdc80a`) — completes the sanitizer trio for this
+session (same diagnostic-build pattern: separate build dir, `-fsanitize=undefined -g -O1`, same
+GCC `-O1` false-positive warning suppressions). Found exactly **one** diagnostic across the
+entire 12378-test suite: writing a zero-length zip entry passed an empty vector's `.data()`
+(`nullptr`, per libstdc++) all the way down through `mz_zip_writer_add_mem` into vendored
+miniz's own `mz_zip_file_write_func`, which calls `fwrite(pBuf, 1, 0, file)` — `fwrite`'s first
+parameter is declared `nonnull`, so this is UB by the letter of the standard even though 0 bytes
+are never actually read through the null pointer (universally harmless in every real libc).
+`vendor/miniz` is third-party, unmodified-from-upstream source (CLAUDE.md) — not the place to
+fix this. Added a small `safeDataPtr()` helper in `ZipArchive.cpp` that substitutes a non-null,
+never-dereferenced dummy pointer for empty entries, applied at all 4 `mz_zip_writer_add_mem`
+call sites (file-based/memory-based writers × existing/pending-entry loops), avoiding the UB at
+this project's own call site rather than touching vendored code.
+
+Re-verified clean (0 diagnostics) across 3 full-suite UBSan runs after the fix landed. Normal
+build re-verified: 0 errors/0 warnings, 12378/12378 passing.
+
+**Sanitizer-trio summary for this session**: TSan found 1 real production deadlock + 3 real
+test-only races (all fixed); ASan found 1 real heap-buffer-overflow + 5 real memory leaks across
+2 categories (all fixed); UBSan found 1 real (if practically harmless) UB call (fixed). All
+three now run clean project-wide — a first in this project's history for all three.
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12371 tests passed
-at the last verification (HEAD `0713156`). `plan.sqlite3`'s `ticket` table has zero `blocked`,
-`todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
+**There is no active build/test blocker right now.** Build was clean and all 12378 tests passed
+at the last verification (HEAD `1cdc80a`), including clean full-suite runs under all three
+sanitizers (TSan/ASan/UBSan). `plan.sqlite3`'s `ticket` table has zero `blocked`, `todo`, or
+`doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
 
 This session is running autonomously (per explicit user authorization). All four of NEXT.md's
 original §8 tasks are done, plus a full post-pilot audit round (4 parallel find-only agents → 4
-fix commits, see §3) — §8 currently holds only natural follow-ons that haven't been started yet
+fix commits) and a full sanitizer-trio investigation (TSan/ASan/UBSan, 6+ real bugs found and
+fixed — see §3) — §8 currently holds only natural follow-ons that haven't been started yet
 (extending the performance pass to other hot-path types; a possible further audit round). Two
 pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
 `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
@@ -428,13 +452,6 @@ update this section (and the whole file) once you understand what changed.
   only been measured for `System::String`'s `Split(char)`/`Concat`/`Join` so far (2026-07-13, see
   §3). Every other type in this codebase — `List<T>`, `StringBuilder`, `Dictionary`, etc. — is
   still unmeasured.
-- **UndefinedBehaviorSanitizer (UBSan) has never been run against this codebase.** TSan and ASan
-  both have now (see §3, both clean) — UBSan checks a third, different class of bugs (signed
-  overflow, misaligned access, invalid enum values, etc.). Same diagnostic-build pattern as the
-  other two would carry over directly (`-fsanitize=undefined -g -O1`, watch for the same GCC
-  `-O1` false-positive warnings that needed `-Wno-array-bounds`/`-Wno-stringop-overread`/
-  `-Wno-stringop-overflow`).
-
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
   delegate types' `DynamicInvoke`, serialization infrastructure, P/Invoke/interop, and
@@ -571,40 +588,30 @@ keep this section actionable): build/test baseline re-verify; `TypedReference` c
 all 8 integer types; `Channel::CreateUnboundedPrioritized`; a `String` performance-audit pilot;
 a full post-pilot audit round (resource-management fixes, `String::Format` validation,
 `Task::Delay`/`Stream::Seek` fixes, 2 verified test-coverage additions); `Task::WhenAny` (the
-last remaining documented `Task` gap); the project's first-ever full-suite ThreadSanitizer run
-(1 real production deadlock + 3 real test-only races, fixed, now clean); the project's
-first-ever full-suite AddressSanitizer run (1 real heap-buffer-overflow + 5 real memory leaks
-across 2 categories, fixed, now clean).
+last remaining documented `Task` gap); the project's first-ever full-suite sanitizer trio —
+ThreadSanitizer (1 real production deadlock + 3 real test-only races), AddressSanitizer (1 real
+heap-buffer-overflow + 5 real memory leaks), UndefinedBehaviorSanitizer (1 real, if practically
+harmless, UB call) — all fixed, all three now run clean project-wide.
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **UndefinedBehaviorSanitizer run.** Never done in this project's history (§5). Same
-   diagnostic-build pattern as TSan/ASan this session (see §3): separate build dir,
-   `-fsanitize=undefined -g -O1`, expect the same GCC `-O1` false-positive warnings needing
-   `-Wno-array-bounds`/`-Wno-stringop-overread`/`-Wno-stringop-overflow`. **Use a bounded
-   `timeout` on every run from the start** — the TSan run's first attempt hung for 6 real hours
-   undetected because it wasn't bounded (see the `feedback_bounded_timeouts_for_risky_commands`
-   memory). Given TSan/ASan both surfaced real, previously-unknown bugs, UBSan finding something
-   real is a reasonable prior, not just a formality.
-   Verify: `UBSAN_OPTIONS=... timeout <N> ./SharpRuntimeTests` clean (0 diagnostics).
-
-2. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
+1. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
    two real, measurement-justified wins; `List<T>`, `StringBuilder`, and `Dictionary` haven't been
    profiled at all yet. Use `bench/StringBenchmark.cpp` as the template (add a new `bench/*.cpp`
    file, measure before changing anything, only commit changes with a real measured delta).
    Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` (no regressions).
 
-3. **Another audit round, different categories.** This session's post-pilot round covered
+2. **Another audit round, different categories.** This session's post-pilot round covered
    TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
    note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), and
-   memory safety (TSan + ASan — 6 real bugs total, fixed). Categories NOT yet covered:
-   compiler-warning audit under a stricter flag set (e.g. `-Wshadow`, `-Wconversion`),
-   duplicated-implementation search, or missing edge-case handling in recently-added code (the
-   `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny` work from this session is
-   itself a good target for a fresh pair of eyes).
+   memory safety / undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs total, fixed).
+   Categories NOT yet covered: compiler-warning audit under a stricter flag set (e.g.
+   `-Wshadow`, `-Wconversion`), duplicated-implementation search, or missing edge-case handling
+   in recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/
+   `Task::WhenAny` work from this session is itself a good target for a fresh pair of eyes).
 
-4. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
+3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
    since this port's `Task` always launches immediately on construction with no "pending" bridge
    mode. Would need design thought about how to represent a Task that doesn't yet have a
    `std::async` backing it.
@@ -639,10 +646,10 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 35817d9 (12378/12378 tests
-passing, 0 errors/0 warnings, also clean under both ThreadSanitizer and AddressSanitizer, all
-verified at that commit) — re-verify first anyway: cmake --build build --parallel 4 &&
-./build/SharpRuntimeTests.
+Read NEXT.md first. It reflects the repository state as of HEAD 1cdc80a (12378/12378 tests
+passing, 0 errors/0 warnings, also clean under the full ThreadSanitizer/AddressSanitizer/
+UndefinedBehaviorSanitizer trio, all verified at that commit) — re-verify first anyway:
+cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
 open question is which of §8's candidate next tasks (or something else entirely) to work on.
