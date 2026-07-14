@@ -112,16 +112,24 @@ cmake --build build-no-tests --parallel 4
   echo '#include "System/Some/Header.hpp"' > /tmp/tc.cpp
   g++ -fsyntax-only -std=c++23 -Iinclude -Ivendor /tmp/tc.cpp
   ```
-  (or run `scripts/source_header_inventory.py`, which reports the same class of issue at scale).
+  (`scripts/source_header_inventory.py` is a related but different check: it inventories
+  SPDX/namespace/type metadata across every header and cross-references it against
+  `plan.sqlite3`, useful for spotting headers with no matching task row — it does not invoke a
+  compiler and cannot detect this class of transitive-include failure itself; corrected 2026-07-14,
+  external audit finding A-06, after the script's own docstring was checked against this claim).
 - **Generating API documentation**: `Doxyfile` at the repo root is configured to scan `include/`
   and `README.md` recursively (excluding `include/vendor`) and write HTML output to
   `docs/generated/html` (git-ignored — it's build output, not checked in):
   ```bash
   mkdir -p docs/generated && doxygen Doxyfile
   ```
-  Open `docs/generated/html/index.html` in a browser. A clean run produces no warnings in
-  Doxygen's own log; if it does, that's a real doc-comment issue (e.g. a `@param` name that
-  doesn't match the function signature) and should be fixed, not ignored.
+  Open `docs/generated/html/index.html` in a browser. As of 2026-07-14 a run currently emits
+  around 1,869 warnings (mostly undocumented members/parameters on older, pre-doc-comment-era
+  code) — Doxygen coverage is an incremental, in-progress standard applied to newly-ported and
+  newly-touched code (see CLAUDE.md's porting checklist), not yet a zero-warnings gate the way
+  the compiler build is (CLAUDE.md rule #1). Treat a NEW warning introduced by your own change as
+  a real issue to fix; the pre-existing backlog is tracked separately, not something any single
+  change is expected to clear.
 
 ---
 
