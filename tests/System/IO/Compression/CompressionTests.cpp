@@ -145,6 +145,30 @@ TEST(GZipStreamTests, Read_EmptyStream_ReturnsZero) {
     EXPECT_EQ(gz.Read(buf, 0, 4), 0);
 }
 
+// Regression tests for audit finding A-03 (2026-07-14): Read() previously performed no argument
+// validation at all, so a null buffer reached zlib's inflate() unchecked and a negative offset/
+// count was silently swallowed by `count <= 0` instead of throwing, matching MemoryStream::Read
+// and this class's own Write() validation.
+TEST(GZipStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(gz.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(GZipStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(gz.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(GZipStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    GZipStream gz(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(gz.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(GZipStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     GZipStream gz(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -267,6 +291,28 @@ TEST(DeflateStreamTests, Read_EmptyStream_ReturnsZero) {
     EXPECT_EQ(ds.Read(buf, 0, 4), 0);
 }
 
+// Regression tests for audit finding A-03 (2026-07-14) -- see GZipStreamTests's identical tests
+// for the full rationale.
+TEST(DeflateStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(ds.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(DeflateStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(ds.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(DeflateStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    DeflateStream ds(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(ds.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
+}
+
 TEST(DeflateStreamTests, Write_DoesNotThrow) {
     MemoryStream ms;
     DeflateStream ds(&ms, CompressionMode::Compress, /*leaveOpen=*/true);
@@ -375,6 +421,28 @@ TEST(ZLibStreamTests, Read_EmptyStream_ReturnsZero) {
     ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
     SharpRuntime::bytecs buf[4] = {};
     EXPECT_EQ(zl.Read(buf, 0, 4), 0);
+}
+
+// Regression tests for audit finding A-03 (2026-07-14) -- see GZipStreamTests's identical tests
+// for the full rationale.
+TEST(ZLibStreamTests, Read_NullBuffer_ThrowsArgumentNullException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    EXPECT_THROW(zl.Read(nullptr, 0, 4), System::ArgumentNullException);
+}
+
+TEST(ZLibStreamTests, Read_NegativeOffset_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(zl.Read(buf, -1, 4), System::ArgumentOutOfRangeException);
+}
+
+TEST(ZLibStreamTests, Read_NegativeCount_ThrowsArgumentOutOfRangeException) {
+    MemoryStream ms;
+    ZLibStream zl(&ms, CompressionMode::Decompress, /*leaveOpen=*/true);
+    SharpRuntime::bytecs buf[4] = {};
+    EXPECT_THROW(zl.Read(buf, 0, -1), System::ArgumentOutOfRangeException);
 }
 
 TEST(ZLibStreamTests, Write_DoesNotThrow) {
