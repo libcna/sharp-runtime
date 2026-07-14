@@ -44,7 +44,9 @@ ZLibStream::ZLibStream(Stream* stream, CompressionMode mode, bool leaveOpen)
     state_->initialized = true;
 }
 
-ZLibStream::~ZLibStream() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro.
+ZLibStream::~ZLibStream() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Property accessors

@@ -343,7 +343,11 @@ ZipArchive::ZipArchive(const std::string& archivePath, ZipArchiveMode mode)
         openReader(*state_);
 }
 
-ZipArchive::~ZipArchive() { Dispose(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro. Dispose() can
+// throw both from the pre-existing flushWriter() miniz-failure path and from this port's own A-01
+// stream-write-back code (stream->Write()/SetLength() on a failing stream).
+ZipArchive::~ZipArchive() { try { Dispose(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // ZipArchive operations

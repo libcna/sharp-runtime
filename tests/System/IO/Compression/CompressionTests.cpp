@@ -199,6 +199,16 @@ TEST(GZipStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
     EXPECT_NO_THROW(gz.Close());
 }
 
+// Regression test for audit finding A-02 (2026-07-14): GZipStream::~GZipStream() used to call
+// Close() directly with no exception handling, so letting the object go out of scope with a
+// throwing inner stream called std::terminate. Reaching SUCCEED() below -- rather than the test
+// process being killed -- is the actual assertion.
+TEST(GZipStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { GZipStream gz(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
+}
+
 TEST(GZipStreamTests, CompressThenDecompress_Roundtrip) {
     MemoryStream compressed;
     {
@@ -304,6 +314,14 @@ TEST(DeflateStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) 
     EXPECT_NO_THROW(ds.Close());
 }
 
+// Regression test for audit finding A-02 (2026-07-14) -- see GZipStreamTests's identical test for
+// the full rationale.
+TEST(DeflateStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { DeflateStream ds(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
+}
+
 TEST(DeflateStreamTests, CompressThenDecompress_Roundtrip) {
     MemoryStream compressed;
     {
@@ -404,6 +422,14 @@ TEST(ZLibStreamTests, Close_InnerWriteThrows_PropagatesAndSecondCloseIsSafe) {
     ZLibStream zl(&inner, CompressionMode::Compress, /*leaveOpen=*/true);
     EXPECT_THROW(zl.Close(), System::IO::IOException);
     EXPECT_NO_THROW(zl.Close());
+}
+
+// Regression test for audit finding A-02 (2026-07-14) -- see GZipStreamTests's identical test for
+// the full rationale.
+TEST(ZLibStreamTests, Destructor_InnerWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    { ZLibStream zl(&inner, CompressionMode::Compress, /*leaveOpen=*/true); }
+    SUCCEED();
 }
 
 TEST(ZLibStreamTests, CompressThenDecompress_Roundtrip) {
@@ -805,6 +831,34 @@ TEST(ZipArchiveTests, UpdateFromStream_WritesChangesBackToSameStream) {
     for (auto& e : entries) names.push_back(e.getFullNameProperty());
     std::sort(names.begin(), names.end());
     EXPECT_EQ(names, (std::vector<std::string>{"added.txt", "existing.txt"}));
+}
+
+// Regression tests for audit finding A-02 (2026-07-14): ZipArchive::~ZipArchive() used to call
+// Dispose() directly with no exception handling. Dispose() can throw from the A-01 stream
+// write-back code added above (stream->Write() on a failing stream) as well as from the
+// pre-existing flushWriter() miniz-failure path. A throwing Dispose() escaping the destructor
+// used to call std::terminate.
+TEST(ZipArchiveTests, Dispose_StreamWriteThrows_Propagates) {
+    ThrowingWriteStream inner;
+    ZipArchive z(&inner, ZipArchiveMode::Create);
+    auto e = z.CreateEntry("f.txt");
+    std::unique_ptr<System::IO::Stream> s(e.Open());
+    s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+    // Entry content is buffered internally; the throw happens on Dispose()'s write-back of the
+    // finalized archive to the caller-supplied (throwing) stream.
+    EXPECT_THROW(z.Dispose(), System::IO::IOException);
+}
+
+TEST(ZipArchiveTests, Destructor_StreamWriteThrows_DoesNotTerminateProcess) {
+    ThrowingWriteStream inner;
+    {
+        ZipArchive z(&inner, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("f.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+        // z destructed here -- Dispose() throws internally but must not escape.
+    }
+    SUCCEED();
 }
 
 // ===========================================================================

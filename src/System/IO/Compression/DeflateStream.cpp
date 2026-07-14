@@ -45,7 +45,14 @@ DeflateStream::DeflateStream(Stream* stream, CompressionMode mode, bool leaveOpe
     state_->initialized = true;
 }
 
-DeflateStream::~DeflateStream() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14): Close() can propagate the inner
+// stream's I/O failure (e.g. a broken pipe or full disk during the final deflate flush) -- the
+// correct behavior for an EXPLICIT Close() call, but destructors are implicitly noexcept in
+// C++, so letting that exception escape here calls std::terminate instead of allowing the
+// surrounding scope to unwind normally, confirmed via a standalone repro (a Write()-throwing
+// inner stream terminated the process instead of propagating a catchable exception). Swallowed
+// here; callers who need to observe a close failure must call Close() explicitly.
+DeflateStream::~DeflateStream() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Property accessors

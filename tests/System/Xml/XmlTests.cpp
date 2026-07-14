@@ -427,6 +427,28 @@ TEST(XmlWriterTests, Close_DoesNotThrow) {
     EXPECT_NO_THROW(w->Close());
 }
 
+// Regression tests for audit finding A-02 (2026-07-14): XmlWriter::~XmlWriter() used to call
+// Close() directly with no exception handling; Close() calls Flush(), which throws XmlException
+// when tinyxml2's SaveFile() fails (e.g. a path under a nonexistent directory). Since destructors
+// are implicitly noexcept, that used to call std::terminate instead of unwinding normally.
+TEST(XmlWriterTests, Close_SaveFileFails_ThrowsXmlException) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::Create("/nonexistent-dir-for-a02-test/out.xml"));
+    w->WriteStartElement("root");
+    w->WriteEndElement();
+    EXPECT_THROW(w->Close(), XmlException);
+}
+
+TEST(XmlWriterTests, Destructor_SaveFileFails_DoesNotTerminateProcess) {
+    // The destructor swallows the SaveFile failure (best-effort cleanup); reaching this line at
+    // all -- rather than the process being killed by std::terminate -- is the actual assertion.
+    {
+        std::unique_ptr<XmlWriter> w(XmlWriter::Create("/nonexistent-dir-for-a02-test/out.xml"));
+        w->WriteStartElement("root");
+        w->WriteEndElement();
+    }
+    SUCCEED();
+}
+
 // Regression test for a wave-3 audit finding: ToString() always pretty-printed via
 // tinyxml2's XMLPrinter default (compact=false), ignoring XmlWriterSettings::Indent, whose
 // real .NET default is false (compact, no inserted whitespace). Matches

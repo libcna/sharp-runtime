@@ -44,7 +44,9 @@ GZipStream::GZipStream(Stream* stream, CompressionMode mode, bool leaveOpen)
     state_->initialized = true;
 }
 
-GZipStream::~GZipStream() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro.
+GZipStream::~GZipStream() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Property accessors

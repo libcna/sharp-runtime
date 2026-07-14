@@ -77,7 +77,10 @@ XmlWriter::XmlWriter(std::unique_ptr<XmlWriterState> s) : state_(std::move(s)) {
     state_->nodeStack.push(&state_->doc);
 }
 
-XmlWriter::~XmlWriter() { Close(); }
+// Best-effort, non-throwing (audit finding A-02, 2026-07-14) -- see DeflateStream::~DeflateStream's
+// identical doc-comment for the full rationale and confirmed std::terminate repro. Close() can
+// throw via Flush() when tinyxml2's SaveFile() fails (e.g. an unwritable path or a full disk).
+XmlWriter::~XmlWriter() { try { Close(); } catch (...) {} }
 
 // ---------------------------------------------------------------------------
 // Write methods
