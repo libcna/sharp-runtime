@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `498fa71`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `557d0ea`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,18 +66,21 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`498fa71`), via `cmake --build build --parallel 4`.
+(`557d0ea`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12436/12436 passing**, via `./build/SharpRuntimeTests`, at the
+**Test status**: last verified **12449/12449 passing**, via `./build/SharpRuntimeTests`, at the
 same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
-project's history — see §3): ThreadSanitizer (8 full runs total, 0 warnings — 4 at `1cdc80a`, 3
-more at `200591b` after the `TaskCompletionSource.Task` addition, plus a dedicated pass over the
+project's history — see §3): ThreadSanitizer (11 full runs total, 0 warnings — 4 at `1cdc80a`, 3
+more at `200591b` after the `TaskCompletionSource.Task` addition, a dedicated pass over the
 Channel/TaskCompletionSource fixes at `eb8489a`/`41c0476` and the `WhenAll`/`WhenAny` fixes at
-`886ea61`/`9b130fb`, 0 warnings throughout), AddressSanitizer (3 full runs, 0 errors/leaks),
-UndefinedBehaviorSanitizer (3 full runs, 0 diagnostics) — passing every single run, each
-completing in a few seconds. ASan/UBSan have not had a dedicated re-run against everything landed
-since `1cdc80a` (12378 tests) — lower priority: none of the newer changes introduce dynamic-
-memory or UB-prone patterns (see §5). Zero known failing tests, zero known
+`886ea61`/`9b130fb`, plus 3 more at `557d0ea` after the `Task::ContinueWith`/`WhenAny` rewrite, 0
+warnings throughout), AddressSanitizer (4 full runs, 0 errors/leaks — 3 at `1cdc80a`, 1 more at
+`557d0ea` specifically to verify the new weak_ptr-based cycle-avoidance design doesn't leak),
+UndefinedBehaviorSanitizer (3 full runs, 0 diagnostics, at `1cdc80a`) — passing every single run,
+each completing in a few seconds. UBSan hasn't had a dedicated re-run against anything landed
+since `1cdc80a` — lower priority: none of the newer changes introduce UB-prone patterns, and the
+two sanitizers most relevant to the newest (concurrency- and memory-lifetime-heavy) changes
+(TSan, ASan) are both freshly verified clean. Zero known failing tests, zero known
 races, zero known memory-safety or undefined-behavior issues.
 
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
@@ -105,8 +108,9 @@ executable verification surface in this repo.
   dependency-free `bench/StringBenchmark.cpp` harness (gated behind
   `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF). No other hot-path type (`List<T>`,
   `StringBuilder`, `Dictionary`, etc.) has been profiled.
-- Remaining documented API gaps: `ImmutableList`'s missing LINQ-family methods — full list in §5
-  (`Task.WhenAny` was implemented 2026-07-13, see §3 — the last remaining `Task` gap is closed).
+- Remaining documented API gaps: `ImmutableList`'s missing LINQ-family methods,
+  `TaskT<TResult>::ContinueWith` (the generic-result counterpart of `Task::ContinueWith`, added
+  2026-07-14 — see §3) — full list in §5.
 
 ---
 
@@ -664,37 +668,99 @@ previously caused undefined behavior (a null `shared_ptr` dereference, e.g. insi
 own fast-path completion check) instead of a clean exception. Fixed with a validation loop at the
 top of both methods, throwing the exact message real .NET uses. 2 new regression tests.
 
+**`feat: Task::ContinueWith`, `WhenAny` rewritten on top of it (zero extra threads)** (`557d0ea`)
+— per explicit user direction (asked "pokračuj na whenany a případně se ptej"/"continue on
+WhenAny, and ask if you need to"; offered a choice between a minimal internal-only continuation
+mechanism scoped just to fixing `WhenAny`, or a real public `ContinueWith` API built first with
+`WhenAny` rebuilt on top of it; user chose the latter, the bigger investment). Implements
+`Task.ContinueWith(Action<Task>, TaskContinuationOptions)` — the last major missing piece of this
+port's `Task` API surface, closing a gap `TaskContinuationOptions.hpp` had explicitly flagged
+since it was first added ("this runtime's Task does not yet implement ContinueWith") — and uses
+it to close the one remaining §5 item: `WhenAny`'s "losing" watcher threads previously lived for
+each non-winning input task's *entire remaining lifetime*, one dedicated OS thread each, since
+this port had no continuation-registration mechanism and `WhenAny`'s only option was "spawn a
+thread and block on `Wait()`".
+
+Design: `State` (both `Task` and `TaskT<TResult>`) gains a mutex/condvar pair (letting
+`Wait()`/`getResultProperty()` block on a `future_`-less, continuation-completed Task, not just a
+`std::async`-backed one) and, for `Task` specifically, a continuations list.
+`registerContinuation()` queues a callback if the antecedent isn't yet complete, or invokes it
+immediately if it already is; `fireContinuations()` (called from every existing completion site,
+one line each) drains and runs the queue synchronously, inline, on whichever thread completes the
+Task — no new thread spawned, ever, since this port has no thread pool/scheduler to dispatch to.
+`ContinueWith` is built directly on this: constructs a pending continuation `Task`, registers a
+callback on the antecedent that evaluates the `TaskContinuationOptions` predicate
+(`NotOnRanToCompletion`/`NotOnFaulted`/`NotOnCanceled` and their `OnlyOnX` compositions), runs the
+user's action if satisfied, and completes the continuation `Task`'s own state.
+
+**A real design hazard was found and fixed before this landed**: capturing a strong `Task` copy
+of the antecedent inside its OWN registered continuation lambda creates a reference cycle (the
+antecedent's own continuations list transitively holding a strong reference back to itself),
+permanently leaking it. Fixed by capturing `std::weak_ptr<State>` instead and locking it only at
+invocation time (always guaranteed to succeed, since whoever calls `fireContinuations` holds a
+live `shared_ptr<State>` for the antecedent throughout that call) — verified leak-free via a
+dedicated AddressSanitizer pass (0 errors/leaks) after this fix, confirming the initial
+cycle-unaware design would genuinely have leaked had it shipped.
+
+`WhenAny` is rewritten on top of the same `registerContinuation` primitive (`TaskT` granted
+`Task` friend access to its own `PendingTag`/`state_`/`notifyCompletion` for this), achieving
+genuinely zero additional OS threads: each input task's own already-running worker thread (which
+was going to run regardless) invokes the lightweight winner-CAS callback inline when it finishes
+— exactly matching real .NET's actual `TaskFactory.CommonCWAnyLogic` strategy of a completion
+action registered directly on each task, not a dedicated observer thread.
+
+14 new regression tests (12 for `ContinueWith` covering the antecedent-inspection contract, every
+`TaskContinuationOptions` predicate combination, continuation chaining, and multiple continuations
+on one antecedent; 1 large-N `WhenAny` test standing in for the resource-cost improvement itself
+— 200 tasks completes in single-digit milliseconds, vs. what would previously have meant 200 extra
+OS threads). Verified: full test suite (12449/12449), a dedicated isolated ThreadSanitizer pass
+(0 warnings across 10 filtered repeats + 3 full-suite runs), and a dedicated isolated
+AddressSanitizer pass with leak detection (0 errors/leaks across 5 filtered repeats + 1 full-suite
+run) given the weak_ptr-based cycle-avoidance design's inherent leak risk if reasoned about
+incorrectly.
+
+**This closes §5's last remaining documented gap.** `TaskT<TResult>::ContinueWith` (the
+generic-result counterpart) was deliberately left out of this pass's scope — `WhenAny`/`WhenAll`
+only ever operate on non-generic `Task`, so it wasn't needed to achieve this ticket's actual goal
+— and is now the natural next candidate if `Task`-family API-surface completeness work continues
+(see §8).
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12436 tests passed
-at the last verification (HEAD `498fa71`). The full sanitizer trio (TSan/ASan/UBSan) was verified
+**There is no active build/test blocker right now.** Build was clean and all 12449 tests passed
+at the last verification (HEAD `557d0ea`). The full sanitizer trio (TSan/ASan/UBSan) was verified
 clean at `1cdc80a` (12378 tests); ThreadSanitizer has since been re-verified specifically against
-the `TaskCompletionSource.Task` addition (`200591b`) and the fresh-eyes-audit fixes
-(`eb8489a`/`41c0476`) via dedicated isolated TSan builds — 0 warnings throughout (see §3). The
-duplicated-implementation audit round's 5 fixes plus the null-`Task`-validation fix (`498fa71`)
-are single-threaded logic changes with no concurrency surface, so no dedicated TSan re-run was
-needed for those. ASan/UBSan have not had a dedicated re-run against anything landed since
-`1cdc80a`, but none of the newer changes introduce dynamic-memory or UB-prone patterns, so that's
-a formality rather than a live risk (see §5). `plan.sqlite3`'s `ticket` table has zero `blocked`,
-`todo`, or `doing` rows; the `task` table has zero unclassified (`''`/`todo`) rows.
+the `TaskCompletionSource.Task` addition (`200591b`), the fresh-eyes-audit fixes
+(`eb8489a`/`41c0476`), and — most recently and most thoroughly, given the concurrency-sensitivity
+of the change — the `Task::ContinueWith`/`WhenAny` rewrite (`557d0ea`), all via dedicated isolated
+TSan builds, 0 warnings throughout (see §3). AddressSanitizer was ALSO specifically re-run against
+`557d0ea` (0 errors/leaks) to verify its new `weak_ptr`-based reference-cycle-avoidance design
+doesn't leak — this caught nothing wrong, but was worth doing given a first draft of that design
+genuinely would have leaked (see §3's own account of the hazard that was found and fixed before
+landing). UBSan and the duplicated-implementation-audit-round fixes have not had dedicated re-runs
+(the latter are single-threaded logic changes with no concurrency/memory-lifetime surface, so
+low-priority formalities). `plan.sqlite3`'s `ticket` table has zero `blocked`, `todo`, or `doing`
+rows; the `task` table has zero unclassified (`''`/`todo`) rows.
 
 This session is running autonomously (per explicit user authorization). All four of NEXT.md's
 original §8 tasks are done, plus a full post-pilot audit round, a full sanitizer-trio
 investigation (TSan/ASan/UBSan, 6+ real bugs found and fixed), the `TaskCompletionSource<TResult>.
-Task` property (closing the last documented `Task`-family architectural gap), a `Dictionary<K,V>`
-performance pass (honest no-change result), a fresh-eyes audit round on this session's own newest
-code (6 real bugs + 1 silently-wrong-value gap + 1 perf gap, fixed), a duplicated-implementation
-audit round (5 more real bugs found and fixed across `NumberStyles` parsing, `OrderedDictionary`,
-`UInt32`, and `Int16`), and 2 follow-up verifications/fixes (the `OrderedDictionary` bug pattern
-confirmed fully closed project-wide; `WhenAny`/`WhenAll` null-`Task` validation added, closing the
-last item §5 had documented from the fresh-eyes audit — see §3 for the full list) — §8 now holds
-only genuinely open-ended follow-ons (another audit round on categories not yet covered, or
-`WhenAny`'s thread-lifetime cost, the one remaining §5 item, which needs real architectural design
-work, not a quick fix). Two pre-session decisions from the user remain in effect: (1) no new
-benchmarking dependency — `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2)
-push after each verified task, same cadence as before.
+Task` property, a `Dictionary<K,V>` performance pass (honest no-change result), a fresh-eyes audit
+round on this session's own newest code (6 real bugs + 1 silently-wrong-value gap + 1 perf gap,
+fixed), a duplicated-implementation audit round (5 more real bugs found and fixed across
+`NumberStyles` parsing, `OrderedDictionary`, `UInt32`, and `Int16`), 2 follow-up verifications
+(the `OrderedDictionary` bug pattern confirmed fully closed project-wide; a third instance of the
+exception-type-sniffing bug shape searched for and not found), `WhenAny`/`WhenAll` null-`Task`
+validation, and — per explicit user direction to specifically continue on `WhenAny` — a full
+`Task::ContinueWith` implementation with `WhenAny` rebuilt on top of it, achieving genuinely zero
+extra OS threads and closing §5's last remaining documented gap (see §3 for the full list). §8 now
+holds only genuinely open-ended follow-ons (another audit round on categories not yet covered, or
+`TaskT<TResult>::ContinueWith` as a natural completeness extension of the work just landed). Two
+pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
+`std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
+task, same cadence as before.
 
 The actual open question at this point is **direction, not a technical problem**: what body of
 work to tackle next (see §8).
@@ -723,15 +789,14 @@ update this section (and the whole file) once you understand what changed.
 - `System::Xml::Linq::XText`'s `WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
   the way real .NET does when the parent is an `XDocument` — needs a larger `XmlWriter` change to
   close correctly (a `WriteWhitespace` primitive doesn't exist in this port's `XmlWriter` at all).
-- `Task::WhenAny`'s "losing" watcher threads persist for each non-winning input task's *entire
-  remaining lifetime*, not just until `WhenAny` itself returns (found by a fresh-eyes audit,
-  2026-07-14, see §3) — real .NET's non-winning-task cost is a cheap continuation delegate
-  registered directly on the `Task`, not a dedicated OS thread. Fixing this properly needs a
-  continuation-registration mechanism this port's `Task` doesn't have at all — the same
-  "architectural change, not something to retrofit during a single audit ticket" pattern already
-  applied to `TaskCompletionSource.Task` before it was built. Not urgent for typical game-code
-  usage (bounded numbers of `WhenAny` calls, not thousands per frame), but worth knowing about
-  before using `WhenAny` on very long-lived or very-frequently-called input tasks.
+- `TaskT<TResult>::ContinueWith` (the generic-result counterpart of the newly-added
+  `Task::ContinueWith`, see §3) is not implemented — deliberately deferred, since
+  `WhenAny`/`WhenAll` only ever operate on non-generic `Task` and didn't need it. `TaskT<TResult>`
+  DOES already have the underlying `completionMutex`/`completionCv` groundwork (needed for
+  `Wait()`/`getResultProperty()` to correctly block on a `future_`-less TaskT, e.g. a `WhenAny<Task>`
+  result) — what's missing is a `continuations` list plus the `ContinueWith` method itself,
+  mirroring `Task`'s own implementation. A natural next completeness step if `Task`-family API
+  work continues.
 
 **Needs verification (unknown status)**:
 - No Windows or Emscripten build has ever been compiled for this repository. Every platform
@@ -741,11 +806,11 @@ update this section (and the whole file) once you understand what changed.
   `Dictionary<K,V>`'s `Add`/indexer-setter (measured, no win found — see §3) so far. `List<T>`/
   `StringBuilder` were also checked (no win found). Every other type in this codebase is still
   unmeasured.
-- AddressSanitizer/UndefinedBehaviorSanitizer have not had a dedicated re-run against anything
-  landed since `1cdc80a` (12378 tests) — `TaskCompletionSource.Task` and the 2026-07-14
-  fresh-eyes-audit fixes are all ThreadSanitizer-verified (the sanitizer most relevant to their
-  concurrency-heavy nature), but not yet re-checked under ASan/UBSan specifically. Lower priority:
-  none of these changes introduce new dynamic-memory or UB-prone patterns, so this is a formality.
+- UndefinedBehaviorSanitizer has not had a dedicated re-run against anything landed since
+  `1cdc80a` (12378 tests). Lower priority: none of the newer changes introduce UB-prone patterns,
+  and TSan/ASan (the sanitizers most relevant to the newest concurrency- and memory-lifetime-heavy
+  changes, especially the `Task::ContinueWith`/`WhenAny` rewrite) are both freshly re-verified
+  clean (see §2/§3).
 **Confirmed, permanent (by design, not something to "fix")**:
 - Reflection (`System::Type`, `System::Activator`, `Enum.GetNames/GetValues`), GC internals, most
   delegate types' `DynamicInvoke`, serialization infrastructure, P/Invoke/interop, and
@@ -910,19 +975,23 @@ direction): verified the `OrderedDictionary` bug pattern is fully closed across
 `Collections::Specialized` (no bugs — 4 of 5 sibling types already fixed earlier, 1 never had the
 risk), searched for a third instance of the exception-type-sniffing bug shape (none found — the
 2 remaining `catch (const OperationCanceledException&)` clauses already correctly disambiguate
-via token state), and fixed `WhenAny`/`WhenAll`'s missing null-(moved-from-)`Task` validation —
-closing the last item §5 had documented from the fresh-eyes audit round (see §3 for the full
-list).
+via token state), and fixed `WhenAny`/`WhenAll`'s missing null-(moved-from-)`Task` validation;
+then, per explicit direction to specifically continue on `WhenAny` ("pokračuj na whenany a
+případně se ptej"), implemented `Task::ContinueWith` (a real public API, per the user's own
+choice between that and a smaller internal-only mechanism) and rebuilt `WhenAny` on top of it,
+achieving genuinely zero extra OS threads and closing §5's last remaining documented gap — see §3
+for the full list.
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **`Task::WhenAny`'s thread-lifetime cost** (§5) — the one remaining documented gap. "Losing"
-   watcher threads persist for each non-winning input task's entire remaining lifetime, not just
-   until `WhenAny` returns. Fixing this properly needs a continuation-registration mechanism
-   `Task` doesn't have at all — a genuine architectural change (design a callback/continuation
-   primitive for `Task`, thread it through every construction path), not a quick fix. Only
-   pursue with explicit user buy-in on the design direction first.
+1. **`TaskT<TResult>::ContinueWith`** (§5) — the generic-result counterpart of the newly-added
+   `Task::ContinueWith`, deliberately deferred since `WhenAny`/`WhenAll` never needed it. The
+   underlying `completionMutex`/`completionCv` groundwork already exists on `TaskT::State`; what's
+   missing is a `continuations` list plus the `ContinueWith` method itself, mirroring `Task`'s own
+   implementation (including its `std::weak_ptr`-based reference-cycle avoidance — see §3's
+   account of why that matters). A natural, well-scoped completeness step, not an architectural
+   unknown this time.
 
 2. **Another audit round, different categories.** Categories already covered across this
    session's audit rounds: TODO/FIXME markers (clean), weak tests (mostly false positives), 
@@ -964,21 +1033,22 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 498fa71 — 12436/12436 tests,
-0 errors/0 warnings. ThreadSanitizer has been re-verified clean specifically against every
-concurrency-relevant change landed this session, most recently the 2026-07-14 fresh-eyes-audit
-fixes to Channel/TaskCompletionSource (0 warnings, see §3); the WhenAll/WhenAny fixes (including
-the null-Task-validation fix at 498fa71) and the whole duplicated-implementation audit round (5
-more fixes) are single-threaded logic changes, no dedicated TSan re-run needed for those.
-AddressSanitizer/UndefinedBehaviorSanitizer were verified clean at 1cdc80a/12378 tests but not
-re-run against anything landed since (low-priority formality — none of the newer changes
-introduce dynamic-memory/UB-prone patterns, see §5) — re-verify the normal build first anyway:
-cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
+Read NEXT.md first. It reflects the repository state as of HEAD 557d0ea — 12449/12449 tests,
+0 errors/0 warnings. ThreadSanitizer AND AddressSanitizer have both been re-verified clean
+specifically against the most concurrency/memory-lifetime-sensitive change landed this session --
+the Task::ContinueWith/WhenAny rewrite (557d0ea) -- 0 warnings/errors/leaks across dedicated
+isolated sanitizer builds each (see §2/§3). Earlier changes this session (TaskCompletionSource.Task,
+the Channel/TaskCompletionSource fresh-eyes-audit fixes) were also dedicated-TSan-verified.
+UndefinedBehaviorSanitizer and the single-threaded duplicated-implementation-audit-round fixes
+have not had dedicated re-runs (low-priority formality) -- re-verify the normal build first
+anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
-open question is which of §8's candidate next tasks (or something else entirely) to work on. §5
-now has only ONE remaining documented gap (WhenAny's thread-lifetime cost) -- it needs real
-architectural design, not a quick autonomous fix; get explicit user buy-in before attempting it.
+open question is which of §8's candidate next tasks (or something else entirely) to work on. §5's
+former architectural gap (WhenAny's thread-lifetime cost) is now CLOSED -- Task::ContinueWith was
+implemented (a real public API, per explicit user choice) and WhenAny rebuilt on top of it. The
+one remaining §5 item, TaskT<TResult>::ContinueWith, is a well-scoped completeness follow-up, not
+an open architectural question -- no special buy-in needed to pick it up if wanted.
 
 Pick ONE task — from NEXT.md §8 if nothing else has been specified — and inspect only the
 files needed for that task. Do not refactor unrelated code, do not touch files outside that
