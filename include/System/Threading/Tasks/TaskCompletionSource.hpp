@@ -131,11 +131,30 @@ namespace System::Threading::Tasks {
                 throw System::InvalidOperationException(detail::taskCompletionSourceAlreadyCompletedMessage());
         }
 
-        /** Attempts to set a successful result; returns false if already completed. */
+        /**
+         * Attempts to set a successful result; returns false if already completed.
+         *
+         * @note If TResult's copy constructor throws (audit finding A-04, 2026-07-14),
+         * promise_.set_value(result) can fail AFTER completed_ has already been claimed true but
+         * BEFORE the promise's shared state becomes ready. Without the try/catch below, that used
+         * to strand the source permanently: no later TrySetResult/TrySetException/TrySetCanceled
+         * call could re-claim completed_, and everything waiting on GetResult() or the bridging
+         * Task (getTaskProperty()) blocked forever, confirmed via a standalone repro (a
+         * throwing-copy result type left the task incomplete and TrySetCanceled() returning
+         * false, with no way to unblock a waiter). The promise is now settled with the copy
+         * failure itself so no watcher is left hanging, and the failure still propagates to this
+         * immediate caller exactly as it did before (unchanged for callers who already wrap
+         * TrySetResult/SetResult in their own try/catch).
+         */
         bool TrySetResult(const TResult& result) {
             bool expected = false;
             if (!completed_.compare_exchange_strong(expected, true)) return false;
-            promise_.set_value(result);
+            try {
+                promise_.set_value(result);
+            } catch (...) {
+                promise_.set_exception(std::current_exception());
+                throw;
+            }
             return true;
         }
 

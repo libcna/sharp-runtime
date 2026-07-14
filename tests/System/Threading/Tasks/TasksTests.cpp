@@ -655,6 +655,44 @@ TEST(TaskCompletionSourceTests, TrySetCanceled_AfterResult_False) {
     EXPECT_FALSE(tcs.TrySetCanceled());
 }
 
+// Regression test for audit finding A-04 (2026-07-14): TrySetResult used to claim completed_
+// before calling promise_.set_value(result), so a throwing copy constructor left the promise's
+// shared state permanently un-set (completed_ already true, so no later TrySet* could re-claim
+// it). GetResult()/getTaskProperty()'s Wait() would then block forever. Both are exercised here
+// as bounded operations (they now return/throw promptly instead of hanging) to prove the fix.
+namespace {
+struct ThrowOnCopyResult {
+    ThrowOnCopyResult() = default;
+    ThrowOnCopyResult(const ThrowOnCopyResult&) { throw std::runtime_error("ThrowOnCopyResult: copy failed"); }
+    ThrowOnCopyResult(ThrowOnCopyResult&&) = default;
+    ThrowOnCopyResult& operator=(const ThrowOnCopyResult&) = default;
+};
+} // namespace
+
+TEST(TaskCompletionSourceTests, TrySetResult_ThrowingCopy_PropagatesAndDoesNotStrandTask) {
+    TaskCompletionSource<ThrowOnCopyResult> tcs;
+    ThrowOnCopyResult value;
+    // The copy failure still propagates to this immediate call, unchanged from before the fix.
+    EXPECT_THROW(tcs.TrySetResult(value), std::runtime_error);
+    // completed_ was already claimed by the failed attempt, so a later completion attempt
+    // correctly reports "already completed" -- this was already true before the fix and is not
+    // itself the bug.
+    EXPECT_FALSE(tcs.TrySetCanceled());
+    // The actual regression: GetResult() must not hang forever -- the promise is now settled
+    // with the copy failure instead of being left permanently un-set.
+    EXPECT_THROW(tcs.GetResult(), std::runtime_error);
+}
+
+TEST(TaskCompletionSourceTests, TrySetResult_ThrowingCopy_BridgingTaskFaultsInsteadOfHanging) {
+    TaskCompletionSource<ThrowOnCopyResult> tcs;
+    TaskT<ThrowOnCopyResult> t = tcs.getTaskProperty();
+    ThrowOnCopyResult value;
+    EXPECT_THROW(tcs.TrySetResult(value), std::runtime_error);
+    // A bounded wait: before the fix, this would block indefinitely instead of ever returning.
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
 TEST(TaskCompletionSourceTests, GetTaskProperty_BeforeSetResult_IsNotCompleted) {
     TaskCompletionSource<int> tcs;
     TaskT<int> t = tcs.getTaskProperty();
