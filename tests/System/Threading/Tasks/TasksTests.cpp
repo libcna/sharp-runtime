@@ -147,6 +147,19 @@ TEST(TaskWhenAllTests, EmptyVector_ReturnsCompletedTask) {
     EXPECT_TRUE(t.getIsCompletedSuccessfullyProperty());
 }
 
+// Regression test (added 2026-07-14, duplicated-implementation audit follow-up): a moved-from
+// Task -- this port's closest equivalent to real .NET's "null Task" input -- in the tasks vector
+// previously caused undefined behavior instead of a clean ArgumentException, matching real
+// .NET's own Task_MultiTaskContinuation_NullTask check.
+TEST(TaskWhenAllTests, NullTask_InVector_ThrowsArgumentException) {
+    Task valid = Task::Run([]() {});
+    Task movedFrom = Task::Run([]() {});
+    Task other = std::move(movedFrom); // movedFrom.state_ is now null
+    (void)other;
+    std::vector<Task> tasks{valid, movedFrom};
+    EXPECT_THROW(Task::WhenAll(std::move(tasks)), System::ArgumentException);
+}
+
 TEST(TaskWhenAllTests, AllSucceed_CompletesSuccessfully) {
     std::atomic<int> counter{0};
     std::vector<Task> tasks;
@@ -223,6 +236,17 @@ TEST(TaskWhenAllTests, TaskFaultsWithTaskCanceledException_TreatedAsFaultNotCanc
 
 TEST(TaskWhenAnyTests, EmptyVector_Throws) {
     EXPECT_THROW(Task::WhenAny({}), System::ArgumentException);
+}
+
+// See TaskWhenAllTests.NullTask_InVector_ThrowsArgumentException for the full rationale (added
+// 2026-07-14, duplicated-implementation audit follow-up).
+TEST(TaskWhenAnyTests, NullTask_InVector_ThrowsArgumentException) {
+    Task valid = Task::Run([]() {});
+    Task movedFrom = Task::Run([]() {});
+    Task other = std::move(movedFrom); // movedFrom.state_ is now null
+    (void)other;
+    std::vector<Task> tasks{valid, movedFrom};
+    EXPECT_THROW(Task::WhenAny(std::move(tasks)), System::ArgumentException);
 }
 
 TEST(TaskWhenAnyTests, SingleTask_ReturnsThatTask) {

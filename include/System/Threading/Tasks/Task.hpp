@@ -309,9 +309,20 @@ namespace System::Threading::Tasks {
          * (not via cooperative CancellationToken cancellation) would otherwise be
          * misclassified as canceled instead of faulted. Fixed 2026-07-14 after finding the
          * identical type-sniffing bug in TaskCompletionSource::SetException.
+         *
+         * @throws System::ArgumentException if any element of @p tasks is null (a moved-from
+         * Task -- this port's closest equivalent to real .NET's "null Task" input, since a
+         * default-constructed Task is always valid/already-completed here, not null). Matches
+         * real .NET's own Task_MultiTaskContinuation_NullTask check (Task.cs), added 2026-07-14
+         * (duplicated-implementation audit follow-up: this validation was previously entirely
+         * absent, so a moved-from Task in the input vector caused undefined behavior instead of
+         * a clean exception).
          */
         static Task WhenAll(std::vector<Task> tasks) {
             if (tasks.empty()) return Task::CompletedTask();
+            for (const auto& t : tasks) {
+                if (!t.state_) throw System::ArgumentException("The tasks argument included a null value.", "tasks");
+            }
             return Task([tasks]() mutable {
                 std::exception_ptr firstFault;
                 bool anyCanceled = false;
@@ -624,6 +635,15 @@ namespace System::Threading::Tasks {
     inline TaskT<Task> Task::WhenAny(std::vector<Task> tasks) {
         if (tasks.empty()) {
             throw System::ArgumentException("The tasks argument contains no tasks.", "tasks");
+        }
+        // Matches real .NET's own Task_MultiTaskContinuation_NullTask check (Task.cs), added
+        // 2026-07-14 (duplicated-implementation audit follow-up: this port's closest equivalent
+        // to a "null Task" is a moved-from Task, since a default-constructed Task is always
+        // valid/already-completed here, not null -- previously unvalidated, so a moved-from
+        // Task in the input vector caused undefined behavior, e.g. in the fast-path check just
+        // below, instead of a clean exception).
+        for (const auto& t : tasks) {
+            if (!t.state_) throw System::ArgumentException("The tasks argument included a null value.", "tasks");
         }
         // Fast path: if any input task is already complete, return it synchronously without
         // spawning any watcher threads or even the wrapping async task below -- matches real
