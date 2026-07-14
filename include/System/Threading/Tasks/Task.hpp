@@ -614,6 +614,20 @@ namespace System::Threading::Tasks {
         if (tasks.empty()) {
             throw System::ArgumentException("The tasks argument contains no tasks.", "tasks");
         }
+        // Fast path: if any input task is already complete, return it synchronously without
+        // spawning any watcher threads or even the wrapping async task below -- matches real
+        // .NET's own TaskFactory.CommonCWAnyLogic, which checks task.IsCompleted in its setup
+        // loop and short-circuits via promise.Invoke(task) before registering any continuation.
+        // Added 2026-07-14 after a fresh-eyes audit noted the previous version always paid for
+        // 1 (wrapping) + N (per-input-task watcher) OS thread spawns even when the answer was
+        // already known synchronously (e.g. WhenAny() called on a task that was already
+        // .Wait()'d). Checked in input order for a deterministic result when multiple inputs are
+        // already done, matching .NET's own first-match iteration order.
+        for (const auto& t : tasks) {
+            if (t.getIsCompletedProperty()) {
+                return TaskT<Task>::FromResult(t);
+            }
+        }
         return TaskT<Task>([tasks]() mutable -> Task {
             auto mutex = std::make_shared<std::mutex>();
             auto cv = std::make_shared<std::condition_variable>();

@@ -209,6 +209,23 @@ TEST(TaskWhenAnyTests, SingleTask_ReturnsThatTask) {
     EXPECT_TRUE(winner.getIsCompletedProperty());
 }
 
+// Regression test for the fast path added 2026-07-14 (fresh-eyes audit finding): when an input
+// task is already complete before WhenAny() is even called, it should return synchronously
+// (TaskT<Task>::FromResult(t), already completed -- no watcher threads, no wrapping async task)
+// rather than always paying for 1 + N OS thread spawns. Real .NET's own TaskFactory.CommonCWAny-
+// Logic short-circuits the same way. Verified via getIsCompletedProperty() being true
+// IMMEDIATELY after WhenAny() returns, with no .Wait()/blocking call in between -- the async
+// path could never satisfy this (its wrapping TaskT necessarily starts incomplete).
+TEST(TaskWhenAnyTests, AlreadyCompletedTask_ReturnsSynchronously) {
+    Task t = Task::Run([]() {});
+    t.Wait(); // ensure it's actually complete before WhenAny() ever sees it
+    TaskT<Task> any = Task::WhenAny({t});
+    EXPECT_TRUE(any.getIsCompletedProperty());
+    EXPECT_TRUE(any.getIsCompletedSuccessfullyProperty());
+    Task winner = any.getResultProperty();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
 TEST(TaskWhenAnyTests, FastTaskWinsOverSlowTask) {
     Task fast = Task::Run([]() {});
     Task slow = Task::Run([]() {
