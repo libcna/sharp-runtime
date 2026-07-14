@@ -1,6 +1,6 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `9b130fb`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `886ea61`.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -66,9 +66,9 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 ## 2. Current status
 
 **Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`9b130fb`), via `cmake --build build --parallel 4`.
+(`886ea61`), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12407/12407 passing**, via `./build/SharpRuntimeTests`, at the
+**Test status**: last verified **12408/12408 passing**, via `./build/SharpRuntimeTests`, at the
 same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
 project's history — see §3): ThreadSanitizer (7 full runs total, 0 warnings — 4 at `1cdc80a`, 3
 more at `200591b` after the `TaskCompletionSource.Task` addition, plus a dedicated pass over the
@@ -564,17 +564,25 @@ first, §9 for why the second wasn't touched):
   all assume every `Task` in an input list has a valid, non-null internal `state_`) — a real gap,
   but shared across the whole `Task` consumer surface, not specific to any of the 4 audited areas;
   flagged for a future audit round rather than fixed opportunistically mid-ticket.
-- A related, smaller `TaskCanceledException`-type-sniffing issue in `Task::WhenAll` (its
-  `catch (const TaskCanceledException&)` would also misclassify a Task that FAULTED with a
-  directly-thrown `TaskCanceledException`, not just a genuinely canceled one) was noticed while
-  fixing `TaskCompletionSource`'s identical-shaped bug, but `WhenAll` wasn't part of this round's
-  4 audited areas — left as a candidate for the next audit round rather than expanding scope
-  mid-ticket.
 
 Test count grew from 12388 to 12407 across this whole audit round (10 bug-fix + 1 perf-fix
 commits' worth of new tests). All 5 bug-fix commits individually verified: clean build (0
 errors/0 warnings), full test suite passing, and — for the two concurrency-relevant fixes
 (Channel, TaskCompletionSource) — a dedicated isolated ThreadSanitizer pass (0 warnings).
+
+**`fix: Task::WhenAll` same-shaped exception-type-sniffing bug** (`886ea61`) — the one item from
+the audit round above that was explicitly deferred rather than fixed opportunistically; picked up
+immediately afterward per explicit user direction (asked "co dál?"/"what next?", offered this as
+the recommended option, user picked it). `WhenAll`'s `catch (const TaskCanceledException&)` had
+the identical flaw as the `TaskCompletionSource::SetException` bug fixed the same day: `Wait()`
+rethrows a faulted task's stored exception directly, so a task whose action threw
+`TaskCanceledException` itself (no `CancellationToken` involved — not genuine cooperative
+cancellation) was misclassified as canceled instead of faulted, since the exception's TYPE alone
+can't distinguish "faulted with this exact type" from "genuinely canceled" once it's been
+rethrown through `Wait()`. Fixed by checking each task's own `getIsCanceledProperty()`
+(authoritative state, not exception type) inside a single `catch (...)`, instead of a
+type-specific `catch` clause. 1 new regression test, verified flake-free across 10 repeats plus a
+full-suite run. Test count grew from 12407 to 12408.
 
 ---
 
@@ -642,11 +650,6 @@ update this section (and the whole file) once you understand what changed.
   (`WhenAny`/`WhenAll`/`Wait` all assume a valid internal `state_`) — found by the same audit,
   shared across the whole `Task` consumer surface, not specific to any one method. Not yet fixed;
   a candidate for a future audit round.
-- `Task::WhenAll`'s `catch (const TaskCanceledException&)` (used to detect a canceled input task)
-  would also misclassify an input task that *faulted* with a directly-thrown
-  `TaskCanceledException` (not a genuinely canceled one) as canceled — the same type-sniffing
-  shape as the `TaskCompletionSource::SetException` bug fixed 2026-07-14 (see §3), noticed while
-  fixing that one but not yet fixed here since `WhenAll` wasn't part of that audit round's scope.
 
 **Needs verification (unknown status)**:
 - No Windows or Emscripten build has ever been compiled for this repository. Every platform
@@ -812,7 +815,10 @@ covering `NumberStyles` parsing, `Channel::CreateUnboundedPrioritized`, `Task::W
 affecting both channel types; a `TaskCompletionSource` exception-fidelity bug; two `NumberStyles`
 parsing bugs) plus 1 silently-wrong-value gap (`NumberStyles.BinaryNumber` was never wired up)
 plus 1 perf gap (`Task::WhenAny` missing a fast path for already-completed inputs) — see §3 for
-the full list, all individually committed/pushed/TSan-verified where concurrency-relevant.
+the full list, all individually committed/pushed/TSan-verified where concurrency-relevant; plus,
+picked up immediately afterward per explicit user direction ("co dál?" → offered as the
+recommended option → user picked it), the one item that round explicitly deferred: `Task::
+WhenAll`'s same-shaped `TaskCanceledException` type-sniffing bug (`886ea61`).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
@@ -821,15 +827,14 @@ next, or ask the user first if unsure which to prioritize.
    session's audit rounds: TODO/FIXME markers (clean), weak tests (mostly false positives), 
    resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), memory safety /
    undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs, fixed), variable shadowing
-   (`-Wshadow` — clean), and fresh eyes on this session's own newest code (5 real bugs + 1
+   (`-Wshadow` — clean), and fresh eyes on this session's own newest code (6 real bugs + 1
    silently-wrong-value gap + 1 perf gap, fixed — see §3). Categories NOT yet covered:
    `-Wconversion`/`-Wsign-conversion` (skipped so far as likely too noisy given this codebase's
    pervasive intentional `intcs`/`size_t` conversions — would need a smarter triage approach, not
-   a blind full-codebase run), duplicated-implementation search, or the 3 specific follow-up
-   items §5 now documents (`Task::WhenAny`'s thread-lifetime cost, `Task`-family null-`Task`
-   validation, `Task::WhenAll`'s same-shaped `TaskCanceledException` type-sniffing issue) — these
-   3 are concrete, already-scoped leads if a smaller, more targeted task is wanted instead of a
-   full audit round.
+   a blind full-codebase run), duplicated-implementation search, or the 2 remaining specific
+   follow-up items §5 now documents (`Task::WhenAny`'s thread-lifetime cost, `Task`-family
+   null-`Task` validation) — these are concrete, already-scoped leads if a smaller, more targeted
+   task is wanted instead of a full audit round.
 
 ---
 
@@ -861,10 +866,11 @@ next, or ask the user first if unsure which to prioritize.
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD 9b130fb — 12407/12407 tests,
+Read NEXT.md first. It reflects the repository state as of HEAD 886ea61 — 12408/12408 tests,
 0 errors/0 warnings. ThreadSanitizer has been re-verified clean specifically against every
 concurrency-relevant change landed this session, most recently the 2026-07-14 fresh-eyes-audit
-fixes to Channel/TaskCompletionSource (0 warnings, see §3); AddressSanitizer/UndefinedBehavior-
+fixes to Channel/TaskCompletionSource (0 warnings, see §3; the WhenAll fix at 886ea61 is
+single-threaded logic, no dedicated TSan re-run needed); AddressSanitizer/UndefinedBehavior-
 Sanitizer were verified clean at 1cdc80a/12378 tests but not re-run against anything landed since
 (low-priority formality — none of the newer changes introduce dynamic-memory/UB-prone patterns,
 see §5) — re-verify the normal build first anyway: cmake --build build --parallel 4 &&
