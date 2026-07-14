@@ -257,6 +257,55 @@ TEST(OrderedDictionaryTest, IndexerConstMissingKeyThrows) {
     EXPECT_THROW((void)cd["missing"], KeyNotFoundException);
 }
 
+// Regression tests (fixed 2026-07-14, duplicated-implementation audit finding): the non-const
+// operator[] used to return a plain TValue&, which could not distinguish a read from a write --
+// so reading a missing key through a non-const OrderedDictionary silently inserted a
+// default-constructed value instead of throwing, unlike the const overload above and every
+// sibling dictionary type (Dictionary/SortedDictionary/SortedList/ConcurrentDictionary).
+
+TEST(OrderedDictionaryTest, IndexerNonConstMissingKeyRead_ThrowsAndDoesNotInsert) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    // A plain (void)d["missing"] would NOT trigger the throw here: operator[] returns a
+    // ValueProxy BY VALUE (not a reference), and the lookup/throw only happens inside its
+    // `operator const TValue&()` conversion -- a void-cast discards the ValueProxy temporary
+    // without ever converting it. Must actually convert to TValue to exercise the read path,
+    // e.g. via assignment, matching how a real caller would read the value.
+    EXPECT_THROW({ int unused = d["missing"]; (void)unused; }, KeyNotFoundException);
+    // The failed read must not have inserted anything.
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_FALSE(d.ContainsKey("missing"));
+}
+
+TEST(OrderedDictionaryTest, IndexerNonConstExistingKeyRead_ReturnsValueWithoutInserting) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 42);
+    int value = d["a"];
+    EXPECT_EQ(value, 42);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+TEST(OrderedDictionaryTest, IndexerSetter_InsertsNewKeyAtEnd) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    d["b"] = 2;
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_EQ(static_cast<int>(d["b"]), 2);
+    EXPECT_EQ(d.GetAt(1).Value, 2);
+}
+
+TEST(OrderedDictionaryTest, IndexerSetter_OverwritesExistingKeyInPlace) {
+    OrderedDictionary<std::string, int> d;
+    d.Add("a", 1);
+    d.Add("b", 2);
+    d["a"] = 99;
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_EQ(static_cast<int>(d["a"]), 99);
+    // Order must be unchanged -- overwriting an existing key doesn't move it.
+    EXPECT_EQ(d.GetAt(0).Key, "a");
+    EXPECT_EQ(d.GetAt(1).Key, "b");
+}
+
 TEST(OrderedDictionaryTest, GetAtOutOfRangeThrows) {
     OrderedDictionary<std::string, int> d;
     d.Add("a", 1);

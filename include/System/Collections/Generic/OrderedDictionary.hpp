@@ -125,30 +125,69 @@ public:
     }
 
     /**
+     * @brief A proxy for `dict[key]` that throws on read of a missing key while still
+     * supporting `dict[key] = value` to insert-or-update, matching .NET's split get/set
+     * indexer semantics on top of a single C++ `operator[]`.
+     *
+     * Fixed 2026-07-14 (duplicated-implementation audit finding): the previous non-const
+     * `operator[]` returned a plain `TValue&`, which cannot distinguish a read from a
+     * write -- so `orderedDict[missingKey]` used purely as a READ silently inserted a
+     * default-constructed value instead of throwing `KeyNotFoundException`, unlike every
+     * sibling dictionary type in this codebase (`Dictionary`/`SortedDictionary`/
+     * `SortedList`/`ConcurrentDictionary` all already have this exact fix -- see
+     * `Dictionary::ValueProxy` for the precedent this mirrors). Real .NET's
+     * `OrderedDictionary<TKey,TValue>` indexer getter and setter are genuinely separate
+     * accessor methods (`get_Item`/`set_Item`), so only the setter upserts.
+     */
+    class ValueProxy {
+        OrderedDictionary* owner_;
+        TKey key_;
+    public:
+        ValueProxy(OrderedDictionary* owner, const TKey& key) : owner_(owner), key_(key) {}
+
+        /** Reads the current value; throws KeyNotFoundException if the key is absent. */
+        operator const TValue&() const {
+            auto it = owner_->keyIndex_.find(key_);
+            if (it == owner_->keyIndex_.end())
+                throw KeyNotFoundException("The given key was not present in the dictionary.");
+            return owner_->entries_[it->second].second;
+        }
+
+        /**
+         * Inserts or overwrites the value for this key, adding at the end if new. Bumps
+         * the version counter only when a NEW key is inserted, matching
+         * `Dictionary::ValueProxy::operator=`'s identical convention.
+         */
+        ValueProxy& operator=(const TValue& value) {
+            auto it = owner_->keyIndex_.find(key_);
+            if (it != owner_->keyIndex_.end()) {
+                owner_->entries_[it->second].second = value;
+                return *this;
+            }
+            // Mutate entries_ (the operation more likely to throw -- the pair's move/copy
+            // into the vector) BEFORE keyIndex_ -- see the class's own prior exception-
+            // safety note (a genuine ASan heap-buffer-overflow was confirmed here via a
+            // standalone repro using a TValue whose copy constructor throws, before that
+            // fix). This order is exception-neutral: if emplace_back throws, keyIndex_ is
+            // untouched and the dictionary is unchanged.
+            std::size_t newIndex = owner_->entries_.size();
+            owner_->entries_.emplace_back(key_, value);
+            owner_->keyIndex_[key_] = newIndex;
+            ++owner_->version_;
+            return *this;
+        }
+    };
+
+    /**
      * @brief Gets or sets the value associated with the specified key.
      *
-     * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.this[TKey] setter.
-     * If the key does not exist, it is added at the end.
+     * C++ counterpart of .NET OrderedDictionary<TKey,TValue>.this[TKey]. The getter
+     * throws System::Collections::Generic::KeyNotFoundException if @p key is absent (it
+     * does NOT insert a default); the setter inserts (at the end) or overwrites. See
+     * ValueProxy for why this isn't a plain `TValue&`.
      * @param key The key whose value to get or set.
-     * @return A reference to the associated value.
      */
-    TValue& operator[](const TKey& key) {
-        auto it = keyIndex_.find(key);
-        if (it != keyIndex_.end()) return entries_[it->second].second;
-        // Mutate entries_ (the operation more likely to throw -- TValue{}'s construction
-        // and the pair's move/copy into the vector) BEFORE keyIndex_. The previous order
-        // (keyIndex_ first) left keyIndex_ pointing one-past-the-end of entries_ if
-        // emplace_back threw, so any subsequent unchecked lookup (this operator[]'s own
-        // `entries_[it->second]` above, or the const overload) read out of bounds --
-        // confirmed as a genuine ASan heap-buffer-overflow via a standalone repro using a
-        // TValue whose copy constructor throws. This order is exception-neutral: if
-        // emplace_back throws, keyIndex_ is untouched and the dictionary is unchanged.
-        std::size_t newIndex = entries_.size();
-        entries_.emplace_back(key, TValue{});
-        keyIndex_[key] = newIndex;
-        ++version_;
-        return entries_.back().second;
-    }
+    [[nodiscard]] ValueProxy operator[](const TKey& key) { return ValueProxy(this, key); }
 
     /**
      * @brief Gets the key/value pair at the specified index.
