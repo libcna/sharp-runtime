@@ -184,6 +184,19 @@ namespace {
 // pre-existing, non-deleted entry -- previously it wrote only st.pending, silently discarding
 // every pre-existing entry whenever the archive was disposed with at least one CreateEntry()
 // call (real, silent, irreversible data loss on a standard "update a zip" workflow).
+// Passing a null buffer pointer for a zero-length entry (e.g. an empty vector's .data(), which
+// libstdc++ returns as nullptr) eventually reaches miniz's own mz_zip_file_write_func, which
+// calls fwrite(pBuf, 1, 0, file) -- fwrite's first parameter is declared nonnull, so this is
+// technically undefined behavior by the letter of the standard even though it's universally
+// harmless in practice (0 bytes are never actually read through a null pointer). Confirmed via
+// UndefinedBehaviorSanitizer (2026-07-14). vendor/miniz is third-party, unmodified-from-upstream
+// source (see CLAUDE.md) -- not the place to fix this; passing a non-null, never-dereferenced
+// pointer for an empty buffer here avoids the UB entirely at the call site instead.
+static const SharpRuntime::bytecs* safeDataPtr(const SharpRuntime::bytecs* data, size_t size) {
+    static const SharpRuntime::bytecs dummy = 0;
+    return size == 0 ? &dummy : data;
+}
+
 static void flushWriter(ZipArchiveState& st) {
     const bool hasChanges = !st.pending.empty() || !st.deletedEntries.empty();
     if (st.mode == ZipArchiveMode::Update && !hasChanges) return;
@@ -229,14 +242,14 @@ static void flushWriter(ZipArchiveState& st) {
         // mz_zip_writer_end must still run on the throw path to release miniz's internal state.
         try {
             for (auto& e : existing) {
-                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
                                            static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
             for (auto& e : st.pending) {
                 if (st.deletedEntries.count(e.name)) continue;
                 if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                           e.data->data(), e.data->size(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
                                            static_cast<mz_uint>(e.miniLevel)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
@@ -255,14 +268,14 @@ static void flushWriter(ZipArchiveState& st) {
         void* buf = nullptr; size_t sz = 0;
         try {
             for (auto& e : existing) {
-                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), e.data.data(), e.data.size(),
+                if (!mz_zip_writer_add_mem(&writer, e.name.c_str(), safeDataPtr(e.data.data(), e.data.size()), e.data.size(),
                                            static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
             for (auto& e : st.pending) {
                 if (st.deletedEntries.count(e.name)) continue;
                 if (!mz_zip_writer_add_mem(&writer, e.name.c_str(),
-                                           e.data->data(), e.data->size(),
+                                           safeDataPtr(e.data->data(), e.data->size()), e.data->size(),
                                            static_cast<mz_uint>(e.miniLevel)))
                     throw System::IO::IOException("ZipArchive: failed to write entry '" + e.name + "'");
             }
