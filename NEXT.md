@@ -391,6 +391,33 @@ test-only races (all fixed); ASan found 1 real heap-buffer-overflow + 5 real mem
 2 categories (all fixed); UBSan found 1 real (if practically harmless) UB call (fixed). All
 three now run clean project-wide — a first in this project's history for all three.
 
+**`-Wshadow` audit** — added to the existing `-Wall -Wextra -Werror` flag set as a diagnostic-only
+build (same pattern as the sanitizer investigations). Came back essentially clean: **zero**
+shadow warnings anywhere in `include/`/`src/` (the actual library), and only 3 in `tests/`
+(~700 files) — all harmless, idiomatic naming coincidences (a constructor parameter matching a
+member name; a lambda parameter matching its enclosing local variable's name), not real bugs. No
+code changes made — a genuinely clean result, not something that needed fixing. `-Wconversion`/
+`-Wsign-conversion` were considered but skipped: this codebase's own `SharpRuntime::intcs`
+convention means there are thousands of deliberate, already-safe `size_t`↔`intcs` narrowing
+conversions throughout, which would make those flags overwhelmingly noisy without a good way to
+distinguish real bugs from expected, intentional casts.
+
+**Performance-audit pass extended to `List<T>`/`StringBuilder`** — per the "measure first" rule,
+read through both for the same class of anti-pattern the `String` pilot found (`stringstream`,
+missing `reserve()`, O(n²) patterns), then measured the one real candidate found
+(`StringBuilder::Append(intcs)`'s `std::to_string`-based implementation vs. writing digits
+directly into the buffer with `std::to_chars`, avoiding the intermediate string `Append(double)`/
+`Append(float)` already avoid in the same file). **Honest result: no significant win** —
+directly-into-buffer measured only a ~9% speedup, within normal microbenchmark noise, and would
+trade a clean one-line implementation for a more error-prone manual resize/to_chars/resize
+sequence. Per CLAUDE.md's "no speculative optimization" and "don't add complexity for marginal
+gains," **no code changed**. `List<T>` itself is already a thin, direct `std::vector<T>` wrapper
+with no unnecessary copies or missing `reserve()` calls found; its `Contains`/`IndexOf`/`Remove`
+being O(n) matches real .NET's own `List<T>` complexity exactly, not a port-specific inefficiency.
+This is a legitimate audit outcome, not a gap — not every investigation has to find something to
+fix, and manufacturing a marginal "optimization" just to show activity would be the wrong call
+here.
+
 ---
 
 ## 4. Current blocker / main problem
@@ -591,25 +618,30 @@ a full post-pilot audit round (resource-management fixes, `String::Format` valid
 last remaining documented `Task` gap); the project's first-ever full-suite sanitizer trio —
 ThreadSanitizer (1 real production deadlock + 3 real test-only races), AddressSanitizer (1 real
 heap-buffer-overflow + 5 real memory leaks), UndefinedBehaviorSanitizer (1 real, if practically
-harmless, UB call) — all fixed, all three now run clean project-wide.
+harmless, UB call) — all fixed, all three now run clean project-wide; a `-Wshadow` compiler-
+warning audit (clean — see §3); a performance-audit extension to `List<T>`/`StringBuilder`
+(honest no-significant-finding result — see §3, no code changed).
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
 
-1. **Extend the performance-audit pass to another hot-path type.** The `String` pilot (§3) found
-   two real, measurement-justified wins; `List<T>`, `StringBuilder`, and `Dictionary` haven't been
-   profiled at all yet. Use `bench/StringBenchmark.cpp` as the template (add a new `bench/*.cpp`
-   file, measure before changing anything, only commit changes with a real measured delta).
-   Verify: `cmake --build build --parallel 4 && ./build/SharpRuntimeTests` (no regressions).
+1. **`Dictionary<K,V>` performance pass**, if the performance-audit direction continues — the
+   one hot-path collection type from the original `String`/`List<T>`/`StringBuilder` shortlist
+   (§3) not yet looked at. Same "measure first" discipline: read for `stringstream`/missing-
+   `reserve()`/O(n²) patterns, measure any real candidate found, only change with a genuine
+   measured delta. Given `List<T>`/`StringBuilder` both came back clean, treat this as a
+   lower-confidence lead, not an assumed win.
 
 2. **Another audit round, different categories.** This session's post-pilot round covered
    TODO/FIXME markers (clean), weak tests (mostly false positives — see §3's lesson-learned
-   note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), and
-   memory safety / undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs total, fixed).
-   Categories NOT yet covered: compiler-warning audit under a stricter flag set (e.g.
-   `-Wshadow`, `-Wconversion`), duplicated-implementation search, or missing edge-case handling
-   in recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/
-   `Task::WhenAny` work from this session is itself a good target for a fresh pair of eyes).
+   note), resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), memory
+   safety / undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs total, fixed), and
+   variable shadowing (`-Wshadow` — clean). Categories NOT yet covered: `-Wconversion`/
+   `-Wsign-conversion` (skipped so far as likely too noisy given this codebase's pervasive
+   intentional `intcs`/`size_t` conversions — would need a smarter triage approach, not a blind
+   full-codebase run), duplicated-implementation search, or missing edge-case handling in
+   recently-added code (the `NumberStyles`/`Channel::CreateUnboundedPrioritized`/`Task::WhenAny`
+   work from this session is itself a good target for a fresh pair of eyes).
 
 3. **`TaskCompletionSource<TResult>.Task` property.** Still missing (§5) — an architectural gap
    since this port's `Task` always launches immediately on construction with no "pending" bridge
