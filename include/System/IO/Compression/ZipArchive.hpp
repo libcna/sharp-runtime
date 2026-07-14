@@ -94,9 +94,15 @@ namespace System::IO::Compression {
         /**
          * @brief Opens or creates a zip archive backed by @p stream.
          *
-         * In read mode the stream contents are copied to an internal buffer.
+         * In Read/Update mode the stream contents are copied to an internal buffer at
+         * construction time. In Create/Update mode, @p stream is retained (non-owning -- the
+         * caller must keep it alive for this ZipArchive's lifetime) and the finalized archive
+         * is written back to it on Dispose(). If @p stream supports seeking
+         * (getCanSeekProperty()), the write-back correctly repositions to the start and
+         * truncates to the new size first; a non-seekable stream can only be appended to, which
+         * is only correct for a fresh Create-mode stream with nothing already written to it.
          *
-         * @param stream     Source or destination stream.
+         * @param stream     Source or destination stream. Not owned/closed by this ZipArchive.
          * @param mode       Read, Create, or Update.
          * @throws System::IO::InvalidDataException or System::IO::IOException on initialisation failure.
          */

@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <algorithm>
 #include "System/NotImplementedException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/ArgumentNullException.hpp"
@@ -722,6 +723,88 @@ TEST(ZipArchiveTests, UpdateMode_DeletePendingEntry_NeverWritten) {
     auto entries = z2.getEntriesProperty();
     ASSERT_EQ(entries.size(), 1u);
     EXPECT_EQ(entries[0].getFullNameProperty(), "existing.txt");
+}
+
+// Regression tests for audit finding A-01 (2026-07-14): ZipArchive(Stream*, Create/Update) never
+// stored the stream at all, so Dispose() finalized the archive only into an internal buffer and
+// silently discarded it -- the caller-supplied stream was never written to, even though the
+// public doc-comment promised "Create/Update output is written on Dispose()". Confirmed nothing
+// in the existing suite caught this: OpenFromStream_DoesNotThrow only exercises Read mode, and
+// CreateAndReadBack_RoundTrip uses the file-path constructor, not the stream one.
+
+TEST(ZipArchiveTests, CreateFromStream_WritesArchiveBackToStream) {
+    MemoryStream ms; // empty, growable, writable
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto entry = z.CreateEntry("greeting.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'H', 'i', '!'};
+        s->Write(data, 0, 3);
+        // z disposed at end of scope -> must write the finalized archive back into ms.
+    }
+    EXPECT_GT(ms.getLengthProperty(), 0) << "stream must not be empty after Create-mode Dispose()";
+}
+
+TEST(ZipArchiveTests, CreateFromStream_ReadBackThroughSameStream) {
+    MemoryStream ms;
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto entry = z.CreateEntry("greeting.txt");
+        std::unique_ptr<System::IO::Stream> s(entry.Open());
+        const uint8_t data[] = {'H', 'i', '!'};
+        s->Write(data, 0, 3);
+    }
+
+    auto bytes = ms.ToArray();
+    MemoryStream readBack(bytes.data(), static_cast<int>(bytes.size()));
+    ZipArchive z2(&readBack, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries[0].getFullNameProperty(), "greeting.txt");
+
+    std::unique_ptr<System::IO::Stream> s(entries[0].Open());
+    uint8_t out[8]{};
+    int n = s->Read(out, 0, 8);
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(out[0], 'H');
+    EXPECT_EQ(out[1], 'i');
+    EXPECT_EQ(out[2], '!');
+}
+
+TEST(ZipArchiveTests, UpdateFromStream_WritesChangesBackToSameStream) {
+    // Seed a writable, seekable MemoryStream with one entry, then open it in Update mode, add
+    // another entry, and verify the SAME stream object reflects both entries afterward --
+    // exercising the seek+truncate+rewrite path. Uses the default (always-writable) MemoryStream
+    // constructor + an explicit Write() to seed content, rather than the byte-array constructor
+    // (MemoryStream(buffer, size) defaults to read-only in this port, unlike real .NET's
+    // single-array-arg overload -- a separate, unrelated bug, not fixed here).
+    MemoryStream ms;
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Create);
+        auto e = z.CreateEntry("existing.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("x"), 0, 1);
+    }
+    ASSERT_GT(ms.getLengthProperty(), 0);
+    ms.setPositionProperty(0); // ZipArchive's stream constructor reads from the current position
+
+    {
+        ZipArchive z(&ms, ZipArchiveMode::Update);
+        auto e = z.CreateEntry("added.txt");
+        std::unique_ptr<System::IO::Stream> s(e.Open());
+        s->Write(reinterpret_cast<const uint8_t*>("y"), 0, 1);
+        // z disposed here -- must rewrite ms in place with both entries.
+    }
+
+    auto finalBytes = ms.ToArray();
+    MemoryStream readBack(finalBytes.data(), static_cast<int>(finalBytes.size()));
+    ZipArchive z2(&readBack, ZipArchiveMode::Read);
+    auto entries = z2.getEntriesProperty();
+    ASSERT_EQ(entries.size(), 2u);
+    std::vector<std::string> names;
+    for (auto& e : entries) names.push_back(e.getFullNameProperty());
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"added.txt", "existing.txt"}));
 }
 
 // ===========================================================================
