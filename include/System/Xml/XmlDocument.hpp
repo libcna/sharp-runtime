@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <tinyxml2/tinyxml2.h>
 
@@ -46,6 +47,14 @@ namespace System::Xml {
         std::shared_ptr<XmlNameTable> nameTable_;
         std::unique_ptr<XmlImplementation> implementation_;
         std::unordered_map<tinyxml2::XMLNode*, std::unique_ptr<XmlNode>> nodeCache_;
+        // Owns nodes created by factory methods with no native tinyxml2 backing to key nodeCache_
+        // by (XmlAttribute, XmlEntityReference -- see those Create* methods' own comments): tracked
+        // here until either the document is destroyed, or ReleaseUnattachedNode() transfers
+        // ownership out (e.g. XmlElement::SetAttributeNode claims an attribute once attached).
+        // Fixes a confirmed AddressSanitizer-caught leak (2026-07-14): CreateAttribute/
+        // CreateEntityReference previously returned a bare `new`'d object with no owner at all
+        // if it was never attached to anything.
+        std::vector<std::unique_ptr<XmlNode>> unattachedNodes_;
         bool preserveWhitespace_ = false;
         // Scratch parent used to "detach" a node without destroying it (tinyxml2::Unlink is
         // private; InsertEndChild's documented move-if-already-parented semantics let us
@@ -68,6 +77,14 @@ namespace System::Xml {
 
         /** @brief Wraps a native tinyxml2 node in the appropriate XmlNode subclass, caching by identity. @return nullptr if @p native is nullptr. */
         XmlNode* WrapNode(tinyxml2::XMLNode* native);
+
+        /**
+         * @brief Internal: transfers ownership of a node this document is holding in
+         * unattachedNodes_ (see that member's own comment) to the caller, who is taking over its
+         * lifetime (e.g. XmlElement::SetAttributeNode, once an attribute is actually attached).
+         * No-op if @p node isn't currently tracked there.
+         */
+        void ReleaseUnattachedNode(XmlNode* node);
         /** @return The underlying tinyxml2 document, for interop with code that needs direct tinyxml2 access. */
         [[nodiscard]] tinyxml2::XMLDocument& getNativeDocument() { return doc_; }
         /** @brief Internal: purges cached wrappers for @p native and its descendants (call before a tinyxml2 delete). */

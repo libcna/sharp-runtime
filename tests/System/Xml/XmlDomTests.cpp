@@ -618,8 +618,12 @@ TEST(XmlDocumentTests, LoadXml_MalformedXml_ThrowsXmlException) {
 TEST(XmlDocumentTests, GetElementsByTagName_FindsAllDescendants) {
     XmlDocument doc;
     doc.LoadXml("<root><item/><nested><item/></nested></root>");
+    // GetElementsByTagName returns a caller-owned XmlNodeList (documented at its call site in
+    // XmlDocument.cpp) -- delete it explicitly, confirmed as a real AddressSanitizer-caught leak
+    // otherwise (2026-07-14).
     auto* items = doc.GetElementsByTagName("item");
     EXPECT_EQ(items->getCountProperty(), 2);
+    delete items;
 }
 
 TEST(XmlDocumentTests, GetElementById_FindsMatchingElement) {

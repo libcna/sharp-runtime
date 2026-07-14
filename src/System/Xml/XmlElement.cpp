@@ -83,6 +83,12 @@ namespace System::Xml {
         }
         newAttr->AttachTo(this, nativeElement());
         newAttr->setValueProperty(value);
+        // If newAttr came from XmlDocument::CreateAttribute and was never attached before, the
+        // document is holding it in unattachedNodes_ -- release that ownership now that
+        // attrCache_ below is taking over, or the document would double-own (and eventually
+        // double-delete) it. No-op if newAttr wasn't tracked there (e.g. it's being moved from
+        // another element's attrCache_ instead).
+        if (auto* doc = GetDocument()) doc->ReleaseUnattachedNode(newAttr);
         attrCache_[name] = std::unique_ptr<XmlAttribute>(newAttr);
         return replaced;
     }
