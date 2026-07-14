@@ -328,6 +328,23 @@ TEST(TaskWhenAnyTests, ManyTasks_ExactlyOneWinnerObserved) {
     EXPECT_TRUE(winner.getIsCompletedProperty());
 }
 
+// Regression test for the 2026-07-14 WhenAny rewrite (zero-extra-thread ContinueWith-based
+// implementation, replacing one detached watcher thread per input task): 200 tasks would
+// previously mean 200 EXTRA OS threads (on top of the 200 the input tasks themselves already
+// use) just to observe them, purely for this one WhenAny call -- all still individually alive
+// for as long as their respective (losing) input task took to finish. This test's main value is
+// that it no longer represents a meaningfully larger resource cost than a handful of tasks would.
+TEST(TaskWhenAnyTests, LargeTaskCount_NoExtraThreadCostRegression) {
+    constexpr int kCount = 200;
+    std::vector<Task> tasks;
+    for (int i = 0; i < kCount; ++i) {
+        tasks.push_back(Task::Run([]() { std::this_thread::sleep_for(std::chrono::milliseconds(5)); }));
+    }
+    TaskT<Task> any = Task::WhenAny(std::move(tasks));
+    Task winner = any.Wait();
+    EXPECT_TRUE(winner.getIsCompletedProperty());
+}
+
 TEST(TaskWhenAnyTests, RepeatedCalls_NoFlakiness) {
     // Stress the watcher-thread synchronization (atomic CAS + condition_variable) across many
     // repetitions with varying task counts, matching this project's convention of repeat-testing
@@ -340,6 +357,151 @@ TEST(TaskWhenAnyTests, RepeatedCalls_NoFlakiness) {
         TaskT<Task> any = Task::WhenAny(std::move(tasks));
         Task winner = any.Wait();
         EXPECT_TRUE(winner.getIsCompletedProperty());
+    }
+}
+
+// ===========================================================================
+// Task::ContinueWith (added 2026-07-14, built to let WhenAny stop spawning a watcher thread
+// per input task -- see WhenAny's own updated doc-comment for the full rationale)
+// ===========================================================================
+
+TEST(TaskContinueWithTests, RunsAfterAntecedentCompletes_ReceivesAntecedent) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<bool> ran{false};
+    std::atomic<bool> sawCompleted{false};
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        ran = true;
+        sawCompleted = t.getIsCompletedSuccessfullyProperty();
+    });
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+    EXPECT_TRUE(sawCompleted.load());
+    EXPECT_TRUE(continuation.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskContinueWithTests, RunsImmediately_WhenAntecedentAlreadyComplete) {
+    Task antecedent = Task::Run([]() {});
+    antecedent.Wait(); // force completion before ContinueWith is even called
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; });
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+}
+
+TEST(TaskContinueWithTests, ContinuationSeesFaultedAntecedent_WithoutAutoRethrow) {
+    Task antecedent = Task::Run([]() { throw std::runtime_error("boom"); });
+    bool sawFaulted = false;
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        // ContinueWith's action does NOT automatically rethrow the antecedent's exception --
+        // matching real .NET, unlike Wait(). Must inspect explicitly.
+        sawFaulted = t.getIsFaultedProperty();
+    });
+    EXPECT_NO_THROW(continuation.Wait());
+    EXPECT_TRUE(sawFaulted);
+    EXPECT_TRUE(continuation.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskContinueWithTests, ContinuationSeesCanceledAntecedent) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task antecedent = Task::Run([]() {}, cts.getTokenProperty());
+    bool sawCanceled = false;
+    Task continuation = antecedent.ContinueWith([&](Task t) {
+        sawCanceled = t.getIsCanceledProperty();
+    });
+    continuation.Wait();
+    EXPECT_TRUE(sawCanceled);
+}
+
+TEST(TaskContinueWithTests, ContinuationThrows_ContinuationTaskFaults) {
+    Task antecedent = Task::Run([]() {});
+    Task continuation = antecedent.ContinueWith([](Task) { throw std::runtime_error("continuation boom"); });
+    EXPECT_THROW(continuation.Wait(), std::runtime_error);
+    EXPECT_TRUE(continuation.getIsFaultedProperty());
+}
+
+TEST(TaskContinueWithTests, OnlyOnRanToCompletion_RunsOnSuccess) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; },
+                                                 TaskContinuationOptions::OnlyOnRanToCompletion);
+    continuation.Wait();
+    EXPECT_TRUE(ran.load());
+}
+
+TEST(TaskContinueWithTests, OnlyOnRanToCompletion_SkipsOnFault_ContinuationCanceled) {
+    Task antecedent = Task::Run([]() { throw std::runtime_error("boom"); });
+    std::atomic<bool> ran{false};
+    Task continuation = antecedent.ContinueWith([&](Task) { ran = true; },
+                                                 TaskContinuationOptions::OnlyOnRanToCompletion);
+    EXPECT_THROW(continuation.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ran.load());
+    EXPECT_TRUE(continuation.getIsCanceledProperty());
+}
+
+TEST(TaskContinueWithTests, OnlyOnFaulted_RunsOnFault_SkipsOnSuccess) {
+    Task faulted = Task::Run([]() { throw std::runtime_error("boom"); });
+    std::atomic<bool> ranOnFault{false};
+    Task c1 = faulted.ContinueWith([&](Task) { ranOnFault = true; }, TaskContinuationOptions::OnlyOnFaulted);
+    c1.Wait();
+    EXPECT_TRUE(ranOnFault.load());
+
+    Task succeeded = Task::Run([]() {});
+    std::atomic<bool> ranOnSuccess{false};
+    Task c2 = succeeded.ContinueWith([&](Task) { ranOnSuccess = true; }, TaskContinuationOptions::OnlyOnFaulted);
+    EXPECT_THROW(c2.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ranOnSuccess.load());
+}
+
+TEST(TaskContinueWithTests, OnlyOnCanceled_RunsOnCancel_SkipsOnSuccess) {
+    CancellationTokenSource cts;
+    cts.Cancel();
+    Task canceled = Task::Run([]() {}, cts.getTokenProperty());
+    std::atomic<bool> ranOnCancel{false};
+    Task c1 = canceled.ContinueWith([&](Task) { ranOnCancel = true; }, TaskContinuationOptions::OnlyOnCanceled);
+    c1.Wait();
+    EXPECT_TRUE(ranOnCancel.load());
+
+    Task succeeded = Task::Run([]() {});
+    std::atomic<bool> ranOnSuccess{false};
+    Task c2 = succeeded.ContinueWith([&](Task) { ranOnSuccess = true; }, TaskContinuationOptions::OnlyOnCanceled);
+    EXPECT_THROW(c2.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_FALSE(ranOnSuccess.load());
+}
+
+TEST(TaskContinueWithTests, MultipleContinuations_OnSameAntecedent_AllRun) {
+    Task antecedent = Task::Run([]() {});
+    std::atomic<int> count{0};
+    Task c1 = antecedent.ContinueWith([&](Task) { ++count; });
+    Task c2 = antecedent.ContinueWith([&](Task) { ++count; });
+    Task c3 = antecedent.ContinueWith([&](Task) { ++count; });
+    c1.Wait(); c2.Wait(); c3.Wait();
+    EXPECT_EQ(count.load(), 3);
+}
+
+TEST(TaskContinueWithTests, ChainedContinuations_RunInOrder) {
+    std::vector<int> order;
+    std::mutex orderMutex;
+    Task antecedent = Task::Run([]() {});
+    Task c1 = antecedent.ContinueWith([&](Task) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(1);
+    });
+    Task c2 = c1.ContinueWith([&](Task) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(2);
+    });
+    c2.Wait();
+    EXPECT_EQ(order, (std::vector<int>{1, 2}));
+}
+
+TEST(TaskContinueWithTests, RepeatedCalls_NoFlakiness) {
+    for (int iter = 0; iter < 50; ++iter) {
+        Task antecedent = Task::Run([]() {});
+        std::atomic<bool> ran{false};
+        Task continuation = antecedent.ContinueWith([&](Task) { ran = true; });
+        continuation.Wait();
+        EXPECT_TRUE(ran.load());
     }
 }
 

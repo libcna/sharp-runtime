@@ -19,6 +19,7 @@
 #include "System/OperationCanceledException.hpp"
 #include "System/Threading/CancellationToken.hpp"
 #include "System/Threading/Tasks/TaskCanceledException.hpp"
+#include "System/Threading/Tasks/TaskContinuationOptions.hpp"
 #include "System/Threading/Tasks/TaskStatus.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "System/PlatformNotSupportedException.hpp"
@@ -34,12 +35,77 @@ namespace System::Threading::Tasks {
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
     class Task {
+        template<typename T> friend class TaskT;
+
         struct State {
             std::atomic<bool> isCompleted{false};
             std::atomic<bool> isCanceled{false};
             std::atomic<bool> isFaulted{false};
             std::exception_ptr exception;
+            // ContinueWith support, added 2026-07-14: a mutex/condvar pair so Wait() can block
+            // on a continuation-completed Task (which has no future_ of its own -- see
+            // ContinueWith's own doc-comment), plus a list of callbacks invoked synchronously,
+            // inline, by whichever thread transitions this Task to a terminal state. This port
+            // has no thread pool/scheduler, so continuations always run inline rather than
+            // being dispatched to a separate worker -- this is what lets ContinueWith (and the
+            // WhenAny rewrite built on it) avoid spawning any extra OS thread per registration.
+            std::mutex completionMutex;
+            std::condition_variable completionCv;
+            std::vector<std::function<void()>> continuations;
         };
+
+        // Marks a State's terminal flags (already set by the caller) as final: wakes any
+        // Wait()ers and invokes every registered continuation, synchronously, inline, on the
+        // calling thread. Must be called EXACTLY ONCE per State, immediately after its terminal
+        // flags are set, by every code path that completes a Task. Continuations run OUTSIDE
+        // the state's own lock (via the toRun/swap below) to avoid deadlock if a continuation
+        // itself touches this Task (e.g. calls Wait()) or registers a further continuation.
+        static void fireContinuations(const std::shared_ptr<State>& s) {
+            std::vector<std::function<void()>> toRun;
+            {
+                std::lock_guard<std::mutex> lock(s->completionMutex);
+                toRun.swap(s->continuations);
+            }
+            s->completionCv.notify_all();
+            for (auto& c : toRun) c();
+        }
+
+        // Registers a callback to run once this Task reaches a terminal state -- invoked
+        // immediately (synchronously, on the calling thread) if already complete, or later,
+        // synchronously, by whichever thread completes this Task (via fireContinuations above).
+        //
+        // @note @p callback must NOT capture a strong (shared_ptr-based -- e.g. via a Task copy
+        // sharing this SAME state_) reference back to this Task's own State: doing so would
+        // create a reference cycle (this State's own continuations list transitively holding a
+        // strong reference back to itself via the queued callback), permanently leaking it.
+        // Callers needing to reference the completed antecedent inside the callback must
+        // capture state_ as a std::weak_ptr and lock() it when the callback actually runs --
+        // guaranteed to succeed at that point, since whoever is completing this Task (and thus
+        // invoking the callback via fireContinuations) necessarily still holds a live
+        // shared_ptr<State> for the entire duration of that call. See ContinueWith's own
+        // implementation for the reference pattern this applies to.
+        void registerContinuation(std::function<void()> callback) const {
+            std::unique_lock<std::mutex> lock(state_->completionMutex);
+            if (state_->isCompleted) {
+                lock.unlock();
+                callback();
+            } else {
+                state_->continuations.push_back(std::move(callback));
+            }
+        }
+
+        // Constructs a Task that VIEWS an existing, already-completed State without owning any
+        // future_/cancellationToken_ of its own -- used internally to reconstruct a lightweight
+        // "antecedent" handle to pass to a ContinueWith continuation callback (or to record a
+        // WhenAny winner), built from a locked weak_ptr (see registerContinuation's doc-comment
+        // for why a weak_ptr, not a strong Task copy, is captured). Safe to use only when the
+        // referenced State is already known to be complete: getCancellationTokenProperty() will
+        // return CancellationToken::None() regardless of the original token, since that's
+        // tracked separately from State, not inside it -- a documented, minor limitation of
+        // this reconstruction path, accepted because a continuation inspecting its own
+        // antecedent's original CancellationToken is a rare need next to inspecting its
+        // completion status/result/exception (the actually common cases, all read from State).
+        explicit Task(std::shared_ptr<State> s) : state_(std::move(s)) {}
 
         // shared_future, not future: a Task's shared_ptr-based state is designed to be copied
         // and handed to multiple consumers (matching real .NET's Task, which supports being
@@ -85,6 +151,7 @@ namespace System::Threading::Tasks {
                         s->isFaulted   = true;
                         s->isCompleted = true;
                     }
+                    fireContinuations(s);
                 }).share()
             );
 #endif
@@ -131,6 +198,7 @@ namespace System::Threading::Tasks {
                         s->isFaulted   = true;
                         s->isCompleted = true;
                     }
+                    fireContinuations(s);
                 }).share()
             );
 #endif
@@ -169,11 +237,88 @@ namespace System::Threading::Tasks {
          * established, deliberate simplification throughout this Task port — see the existing
          * FromException/Wait regression tests), so the canceled case follows the same
          * convention rather than introducing an inconsistent wrapping just for this path.
+         *
+         * @note A Task with no future_ of its own (constructed via ContinueWith or as a
+         * WhenAny result -- see those methods) blocks on the completion condition variable
+         * instead, added 2026-07-14 alongside ContinueWith.
          */
         void Wait() {
-            if (future_ && future_->valid()) future_->get();
+            if (future_ && future_->valid()) {
+                future_->get();
+            } else if (!state_->isCompleted) {
+                std::unique_lock<std::mutex> lock(state_->completionMutex);
+                state_->completionCv.wait(lock, [&] { return state_->isCompleted.load(); });
+            }
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
             if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
+        }
+
+        /**
+         * @brief Creates a continuation that executes when this Task completes.
+         *
+         * C++ counterpart of .NET Task.ContinueWith(Action&lt;Task&gt;, TaskContinuationOptions).
+         * The continuation receives a copy of the completed antecedent (this Task) as its
+         * argument, from which it can inspect the outcome (getIsFaultedProperty()/
+         * getIsCanceledProperty()/getStatusProperty()/Wait()) -- matching real .NET's contract
+         * that ContinueWith's action does NOT automatically rethrow the antecedent's exception
+         * the way Wait() does; the continuation must inspect it explicitly if it cares.
+         *
+         * @note This port has no thread pool/scheduler, so continuations always run
+         * synchronously, inline, on whichever thread completes the antecedent -- i.e. always as
+         * if TaskContinuationOptions::ExecuteSynchronously were set, regardless of whether it's
+         * actually passed -- or on the calling thread immediately, if the antecedent is already
+         * complete when ContinueWith() is called. This is a deliberate simplification (matching
+         * this class's existing "simple thread-per-task, not tuned for extreme contention"
+         * model) that also means ContinueWith never spawns an additional OS thread of its own --
+         * added 2026-07-14 specifically to let WhenAny stop spawning one watcher thread per
+         * input task (see WhenAny's own updated doc-comment). PreferFairness/LongRunning/
+         * AttachedToParent/DenyChildAttach/HideScheduler/LazyCancellation are accepted for
+         * API-surface parity but have no effect (no scheduler/parent-task tracking to apply them
+         * to) -- only the NotOnRanToCompletion/NotOnFaulted/NotOnCanceled predicate bits (and
+         * their OnlyOnX compositions) are actually honored.
+         *
+         * @param continuationAction Invoked with a copy of this (completed) Task.
+         * @param continuationOptions Filters whether the continuation runs, based on the
+         * antecedent's outcome. If the predicate isn't satisfied, the returned Task transitions
+         * directly to Canceled without running @p continuationAction, matching real .NET.
+         * @return A new Task representing the continuation.
+         */
+        Task ContinueWith(std::function<void(Task)> continuationAction,
+                           TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const {
+            Task continuation(PendingTag{});
+            auto contState = continuation.state_;
+            std::weak_ptr<State> antecedentWeak = state_;
+
+            registerContinuation([antecedentWeak, contState, continuationAction, continuationOptions]() mutable {
+                auto antecedentState = antecedentWeak.lock();
+                // Guaranteed non-null: whoever invokes this callback (fireContinuations) holds
+                // a live shared_ptr<State> for the antecedent for the entire duration of the
+                // call that reaches here -- see registerContinuation's own doc-comment.
+                Task antecedent(antecedentState);
+
+                using TCO = TaskContinuationOptions;
+                bool shouldRun = true;
+                if ((continuationOptions & TCO::NotOnRanToCompletion) != TCO::None && antecedent.getIsCompletedSuccessfullyProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnFaulted) != TCO::None && antecedent.getIsFaultedProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnCanceled) != TCO::None && antecedent.getIsCanceledProperty()) shouldRun = false;
+
+                if (!shouldRun) {
+                    contState->isCanceled  = true;
+                    contState->isCompleted = true;
+                } else {
+                    try {
+                        continuationAction(antecedent);
+                        contState->isCompleted = true;
+                    } catch (...) {
+                        contState->exception   = std::current_exception();
+                        contState->isFaulted   = true;
+                        contState->isCompleted = true;
+                    }
+                }
+                fireContinuations(contState);
+            });
+
+            return continuation;
         }
 
         /**
@@ -274,6 +419,7 @@ namespace System::Threading::Tasks {
                         }
                         s->isCompleted = true;
                     }
+                    fireContinuations(s);
                 }).share()
             );
             return t;
@@ -393,12 +539,26 @@ namespace System::Threading::Tasks {
     /** <summary>Represents an asynchronous operation that returns a value of type TResult.</summary> */
     template<typename TResult>
     class TaskT {
+        // Grants Task::WhenAny access to TaskT<Task>'s privates (PendingTag, state_,
+        // notifyCompletion) so it can construct and directly complete a pending TaskT<Task>
+        // without spawning any watcher thread -- see WhenAny's own updated doc-comment, added
+        // 2026-07-14 alongside Task::ContinueWith.
+        friend class Task;
+
         struct State {
             std::atomic<bool> isCompleted{false};
             std::atomic<bool> isCanceled{false};
             std::atomic<bool> isFaulted{false};
             std::exception_ptr exception;
             TResult result{};
+            // Lets Wait()/getResultProperty() block on a TaskT with no future_ of its own (e.g.
+            // a WhenAny result, manually completed by whichever input task wins) -- see
+            // Task::State's identical fields for the full rationale. TaskT<TResult>::
+            // ContinueWith itself is not yet implemented (see class-level note), so unlike
+            // Task::State there is no continuations list here yet -- only notifyCompletion is
+            // needed for the current WhenAny use.
+            std::mutex completionMutex;
+            std::condition_variable completionCv;
         };
 
         // shared_future, not future -- see Task::future_'s comment above for why (safe for
@@ -418,6 +578,16 @@ namespace System::Threading::Tasks {
         // identical comment for the full rationale.
         struct PendingTag {};
         explicit TaskT(PendingTag) : state_(std::make_shared<State>()) {}
+
+        // Wakes any Wait()/getResultProperty() callers blocked on a future_-less State (see
+        // State::completionMutex/completionCv above). Unlike Task::fireContinuations, this does
+        // NOT also drain/invoke a continuations list -- TaskT::ContinueWith isn't implemented in
+        // this pass, so nothing can be registered to run. Added 2026-07-14 for Task::WhenAny's
+        // use (a friend of this class) to notify a manually-completed TaskT<Task> result.
+        static void notifyCompletion(const std::shared_ptr<State>& s) {
+            std::lock_guard<std::mutex> lock(s->completionMutex);
+            s->completionCv.notify_all();
+        }
 
     public:
         /**
@@ -524,6 +694,10 @@ namespace System::Threading::Tasks {
          * Blocks until the task finishes and returns the result; re-throws any stored exception,
          * or throws TaskCanceledException if the task was canceled (matching Task::Wait()'s own
          * documented convention of rethrowing directly rather than wrapping in AggregateException).
+         *
+         * @note A TaskT with no future_ of its own (e.g. a WhenAny<Task> result -- see
+         * Task::WhenAny) blocks on the completion condition variable instead, added 2026-07-14
+         * alongside Task::ContinueWith.
          */
         TResult getResultProperty() {
             // Read into a local instead of writing back through state_->result: with future_
@@ -532,10 +706,17 @@ namespace System::Threading::Tasks {
             // plain, non-atomic member -- writing to it from every caller would just move the
             // data race here instead of fixing it. shared_future::get() itself is safe to call
             // repeatedly/concurrently and already returns the completed value.
-            TResult r = (future_ && future_->valid()) ? future_->get() : state_->result;
+            bool hasFuture = future_ && future_->valid();
+            TResult r{};
+            if (hasFuture) {
+                r = future_->get();
+            } else if (!state_->isCompleted) {
+                std::unique_lock<std::mutex> lock(state_->completionMutex);
+                state_->completionCv.wait(lock, [&] { return state_->isCompleted.load(); });
+            }
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
             if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
-            return r;
+            return hasFuture ? r : state_->result;
         }
 
         /** Waits for the task and returns its result; equivalent to getResultProperty(). */
@@ -606,32 +787,19 @@ namespace System::Threading::Tasks {
     // visible -- see WhenAny's own declaration/doc-comment inside class Task for the full
     // rationale and .NET-parity contract.
     //
-    // std::future/std::shared_future has no native "wait for first of N" combinator, so this
-    // spawns one lightweight watcher thread per input task, each calling Wait() on its own copy
-    // of that Task (shared_future::get() is documented safe for concurrent calls -- see Task's
-    // own future_ comment above). The first watcher to observe its task completing wins via an
-    // atomic compare-exchange and notifies a shared condition variable; every other watcher's
-    // result is simply discarded. The atomic CAS (not the mutex) is what decides the winner;
-    // the mutex/condition_variable pair exists purely to wake the blocked caller thread without
-    // busy-polling, and is race-free by the standard wait(lock, predicate)/notify protocol (a
-    // watcher can't reach notify_all() until it acquires the same mutex the waiting thread either
-    // never released [if the predicate was already true] or released atomically with entering the
-    // wait queue [if it wasn't] -- no window exists where a notify can be sent with no one either
-    // already registered to receive it or about to see the predicate already satisfied).
-    //
-    // Watchers are detach()'d, never join()'d: joining would block this function on EVERY
-    // watcher, including "losing" ones still waiting on a slower task -- defeating WhenAny's
-    // entire "return once the first completes" contract (confirmed via a real repro: an early
-    // join()-based version of this consistently took as long as the slowest input task, not the
-    // fastest). Each detached watcher captures its own Task COPY (by value, not a reference into
-    // this function's stack frame) plus shared_ptr copies of mutex/cv/winnerIndex, so it stays
-    // fully self-contained and safe to keep running in the background after this function
-    // returns -- matching real .NET's own behavior, where non-winning tasks are not canceled and
-    // simply keep running independently.
-    //
-    // This is a real cost -- N extra OS threads per WhenAny call, on top of the N already spawned
-    // by the input tasks themselves -- but matches this port's existing "simple thread-per-task,
-    // not tuned for extreme contention" model used throughout this class and Channel<T>.
+    // Rewritten 2026-07-14 on top of Task::ContinueWith (via the lower-level registerContinuation
+    // it's itself built on) to spawn ZERO extra OS threads, closing a documented gap: the
+    // previous version spawned one detached watcher thread per input task, each just blocking on
+    // Wait() -- and since losing watchers aren't canceled (matching real .NET's own
+    // don't-cancel-losers behavior), they lived for each respective input task's ENTIRE
+    // remaining lifetime, not just until WhenAny returned. registerContinuation instead queues a
+    // callback directly on each input task's own State, invoked synchronously -- inline, on
+    // whichever thread already completes that task (its own std::async worker, which was going
+    // to run regardless) -- with NO new thread spawned to observe it. The first task to invoke
+    // its callback wins via the same atomic compare-exchange the old implementation used; losing
+    // callbacks are cheap no-ops once they lose the race, matching real .NET's actual
+    // TaskFactory.CommonCWAnyLogic strategy (a lightweight completion action registered directly
+    // on each task, not a dedicated observer thread).
     inline TaskT<Task> Task::WhenAny(std::vector<Task> tasks) {
         if (tasks.empty()) {
             throw System::ArgumentException("The tasks argument contains no tasks.", "tasks");
@@ -646,39 +814,41 @@ namespace System::Threading::Tasks {
             if (!t.state_) throw System::ArgumentException("The tasks argument included a null value.", "tasks");
         }
         // Fast path: if any input task is already complete, return it synchronously without
-        // spawning any watcher threads or even the wrapping async task below -- matches real
-        // .NET's own TaskFactory.CommonCWAnyLogic, which checks task.IsCompleted in its setup
-        // loop and short-circuits via promise.Invoke(task) before registering any continuation.
-        // Added 2026-07-14 after a fresh-eyes audit noted the previous version always paid for
-        // 1 (wrapping) + N (per-input-task watcher) OS thread spawns even when the answer was
-        // already known synchronously (e.g. WhenAny() called on a task that was already
-        // .Wait()'d). Checked in input order for a deterministic result when multiple inputs are
-        // already done, matching .NET's own first-match iteration order.
+        // registering any continuations at all -- matches real .NET's own
+        // TaskFactory.CommonCWAnyLogic, which checks task.IsCompleted in its setup loop and
+        // short-circuits via promise.Invoke(task) before registering any continuation. Checked
+        // in input order for a deterministic result when multiple inputs are already done,
+        // matching .NET's own first-match iteration order.
         for (const auto& t : tasks) {
             if (t.getIsCompletedProperty()) {
                 return TaskT<Task>::FromResult(t);
             }
         }
-        return TaskT<Task>([tasks]() mutable -> Task {
-            auto mutex = std::make_shared<std::mutex>();
-            auto cv = std::make_shared<std::condition_variable>();
-            auto winnerIndex = std::make_shared<std::atomic<int>>(-1);
 
-            for (size_t i = 0; i < tasks.size(); ++i) {
-                std::thread([task = tasks[i], i, mutex, cv, winnerIndex]() mutable {
-                    try { task.Wait(); } catch (...) {}
-                    int expected = -1;
-                    if (winnerIndex->compare_exchange_strong(expected, static_cast<int>(i))) {
-                        std::lock_guard<std::mutex> lock(*mutex);
-                        cv->notify_all();
-                    }
-                }).detach();
-            }
+        TaskT<Task> result{TaskT<Task>::PendingTag{}};
+        auto resultState = result.state_;
+        auto winnerIndex = std::make_shared<std::atomic<int>>(-1);
 
-            std::unique_lock<std::mutex> lock(*mutex);
-            cv->wait(lock, [&] { return winnerIndex->load() >= 0; });
-            return tasks[static_cast<size_t>(winnerIndex->load())];
-        });
+        for (size_t i = 0; i < tasks.size(); ++i) {
+            // Weak, not a strong Task copy: registering a continuation on tasks[i] that itself
+            // captured a strong reference back to tasks[i]'s own state would create a reference
+            // cycle (that State's own continuations list transitively holding a strong
+            // reference to itself) -- see registerContinuation's doc-comment. Locking it back
+            // to a Task is safe at invocation time (see that same doc-comment for why).
+            std::weak_ptr<Task::State> taskWeak = tasks[i].state_;
+            tasks[i].registerContinuation([taskWeak, i, winnerIndex, resultState]() mutable {
+                int expected = -1;
+                if (winnerIndex->compare_exchange_strong(expected, static_cast<int>(i))) {
+                    resultState->result    = Task(taskWeak.lock());
+                    resultState->isCompleted = true;
+                    TaskT<Task>::notifyCompletion(resultState);
+                }
+                // A losing callback (CAS failed) is a no-op past this point -- cheap, and does
+                // not keep anything alive beyond this call's own local captures unwinding.
+            });
+        }
+
+        return result;
     }
 
 } // namespace System::Threading::Tasks
