@@ -40,10 +40,22 @@ class OrderedDictionary {
     std::unordered_map<TKey, std::size_t>      keyIndex_;
     intcs version_ = 0;
 
+    // Builds the replacement index in a local temporary and swaps it in only after every
+    // insertion succeeds (audit finding A-05, 2026-07-14) -- previously cleared keyIndex_
+    // FIRST and repopulated it in place, so a throw partway through (e.g. a user-supplied
+    // std::hash<TKey>, a throwing key copy, or an allocation failure) left keyIndex_
+    // partially populated and inconsistent with entries_, confirmed via a standalone repro.
+    // unordered_map::swap is noexcept for the default (always-equal) allocator this class
+    // uses, so this call is strongly exception-safe: either keyIndex_ becomes the fully
+    // rebuilt index, or (if the loop above throws) keyIndex_ is left completely unchanged.
+    // Callers that mutate entries_ before calling this must roll that mutation back on a
+    // caught exception -- see Insert/Remove/RemoveAt.
     void rebuildIndex() {
-        keyIndex_.clear();
+        std::unordered_map<TKey, std::size_t> newIndex;
+        newIndex.reserve(entries_.size());
         for (std::size_t i = 0; i < entries_.size(); ++i)
-            keyIndex_[entries_[i].first] = i;
+            newIndex[entries_[i].first] = i;
+        keyIndex_.swap(newIndex);
     }
 
 public:
@@ -172,7 +184,18 @@ public:
             // untouched and the dictionary is unchanged.
             std::size_t newIndex = owner_->entries_.size();
             owner_->entries_.emplace_back(key_, value);
-            owner_->keyIndex_[key_] = newIndex;
+            try {
+                owner_->keyIndex_[key_] = newIndex;
+            } catch (...) {
+                // Roll back the vector append so entries_ and keyIndex_ stay consistent
+                // (audit finding A-05, 2026-07-14) -- e.g. a throwing std::hash<TKey> during
+                // map insertion used to leave entries_ with the new item but keyIndex_
+                // without it, so Count reported one more element than ContainsKey(key)
+                // could ever find. pop_back() is noexcept, so this rollback cannot itself
+                // throw a second exception.
+                owner_->entries_.pop_back();
+                throw;
+            }
             ++owner_->version_;
             return *this;
         }
@@ -218,7 +241,14 @@ public:
         // so a throwing TKey/TValue copy leaves keyIndex_ untouched instead of desynced.
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
-        keyIndex_[key] = newIndex;
+        try {
+            keyIndex_[key] = newIndex;
+        } catch (...) {
+            // Roll back the append (audit finding A-05, 2026-07-14) -- see ValueProxy::
+            // operator='s identical rollback for the full rationale.
+            entries_.pop_back();
+            throw;
+        }
         ++version_;
     }
 
@@ -235,7 +265,14 @@ public:
         // See operator[]'s comment: entries_ must be mutated before keyIndex_ is updated.
         std::size_t newIndex = entries_.size();
         entries_.emplace_back(key, value);
-        keyIndex_[key] = newIndex;
+        try {
+            keyIndex_[key] = newIndex;
+        } catch (...) {
+            // Roll back the append (audit finding A-05, 2026-07-14) -- see ValueProxy::
+            // operator='s identical rollback for the full rationale.
+            entries_.pop_back();
+            throw;
+        }
         ++version_;
         return true;
     }
@@ -307,7 +344,16 @@ public:
             throw System::ArgumentOutOfRangeException("index");
         if (keyIndex_.count(key)) throw System::ArgumentException("An item with the same key has already been added.");
         entries_.insert(entries_.begin() + index, {key, value});
-        rebuildIndex();
+        try {
+            rebuildIndex();
+        } catch (...) {
+            // Roll back the vector insertion so entries_ and keyIndex_ stay consistent
+            // (audit finding A-05, 2026-07-14) -- see rebuildIndex()'s own doc-comment:
+            // keyIndex_ is left completely unchanged by the failed call, so it still
+            // matches the original (pre-insert) entries_ once this erase restores it.
+            entries_.erase(entries_.begin() + index);
+            throw;
+        }
         ++version_;
     }
 
@@ -336,8 +382,22 @@ public:
     bool Remove(const TKey& key) {
         auto it = keyIndex_.find(key);
         if (it == keyIndex_.end()) return false;
-        entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(it->second));
-        rebuildIndex();
+        auto pos = static_cast<std::ptrdiff_t>(it->second);
+        // Copy the entry before erasing (audit finding A-05, 2026-07-14) so it can be
+        // restored if rebuildIndex() below throws; if this copy itself throws, nothing has
+        // been mutated yet and the dictionary is left unchanged.
+        auto erased = entries_[static_cast<std::size_t>(pos)];
+        entries_.erase(entries_.begin() + pos);
+        try {
+            rebuildIndex();
+        } catch (...) {
+            // Roll back the erase so entries_ and keyIndex_ stay consistent -- see
+            // rebuildIndex()'s own doc-comment: keyIndex_ is left completely unchanged by
+            // the failed call, so it still matches the original (pre-erase) entries_ once
+            // this re-insertion restores it.
+            entries_.insert(entries_.begin() + pos, erased);
+            throw;
+        }
         ++version_;
         return true;
     }
@@ -352,8 +412,16 @@ public:
     void RemoveAt(intcs index) {
         if (index < 0 || static_cast<std::size_t>(index) >= entries_.size())
             throw System::ArgumentOutOfRangeException("index");
+        // See Remove()'s identical comment on why the entry is copied before erasing (audit
+        // finding A-05, 2026-07-14).
+        auto erased = entries_[static_cast<std::size_t>(index)];
         entries_.erase(entries_.begin() + index);
-        rebuildIndex();
+        try {
+            rebuildIndex();
+        } catch (...) {
+            entries_.insert(entries_.begin() + index, erased);
+            throw;
+        }
         ++version_;
     }
 

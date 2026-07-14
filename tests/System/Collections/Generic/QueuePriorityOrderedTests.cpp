@@ -251,6 +251,184 @@ TEST(OrderedDictionaryTest, Add_ThrowingValueCopy_LeavesDictionaryConsistent) {
     EXPECT_EQ(d.getCountProperty(), 2);
 }
 
+namespace {
+// A key type that can be armed to throw either on its SECOND copy construction (simulating a
+// throwing key copy made when unordered_map constructs a new node) or when hashing a specific
+// "poisoned" key value (simulating a throwing std::hash<TKey>) -- audit finding A-05,
+// 2026-07-14. The prior fix above only protected against a throwing TKey/TValue copy made
+// BEFORE entries_ is mutated (ticket 310); this protects the OTHER direction: entries_ is
+// mutated first (an established, deliberate ordering -- see Add()'s own comment), so a throw
+// from the map-side keyIndex_ update (Add/TryAdd/operator[]'s new-key path) or from
+// rebuildIndex() (Insert/Remove/RemoveAt) used to leave keyIndex_ out of sync with entries_,
+// confirmed via a standalone repro matching the audit's own: Count reported one more element
+// than ContainsKey() could ever find.
+struct FaultInjectingKey {
+    static inline bool copyArmed = false;
+    static inline int copyCount = 0;
+    // Which copy (1-based, counted from when copyArmed is turned on) should throw. Different
+    // call paths make a different number of copies before reaching the map-side operation
+    // under test: Add()/TryAdd() copy once into entries_ then once into keyIndex_ (throw on
+    // the 2nd), while `d[key] = value` additionally copies once into the ValueProxy itself
+    // before that (throw on the 3rd) -- each test sets this to match its own call path.
+    static inline int throwOnCopyNumber = 2;
+    static inline std::string poisonedValue; // hashing this value throws when non-empty
+
+    std::string s;
+    FaultInjectingKey() = default;
+    explicit FaultInjectingKey(std::string v) : s(std::move(v)) {}
+    FaultInjectingKey(const FaultInjectingKey& o) : s(o.s) {
+        if (copyArmed && ++copyCount == throwOnCopyNumber) throw std::runtime_error("simulated key copy failure");
+    }
+    FaultInjectingKey& operator=(const FaultInjectingKey&) = default;
+    bool operator==(const FaultInjectingKey& o) const { return s == o.s; }
+};
+} // namespace
+
+namespace std {
+template<> struct hash<FaultInjectingKey> {
+    std::size_t operator()(const FaultInjectingKey& k) const {
+        if (!FaultInjectingKey::poisonedValue.empty() && k.s == FaultInjectingKey::poisonedValue)
+            throw std::runtime_error("simulated hash failure");
+        return std::hash<std::string>{}(k.s);
+    }
+};
+} // namespace std
+
+TEST(OrderedDictionaryTest, Add_ThrowingKeyCopy_LeavesDictionaryConsistent) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::copyCount = 0;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+
+    FaultInjectingKey::copyArmed = true;
+    FaultInjectingKey::copyCount = 0;
+    // 1st copy of "b" is entries_.emplace_back's own stored key (succeeds); 2nd is the copy
+    // unordered_map makes constructing a node for a not-yet-present key in keyIndex_ (throws).
+    EXPECT_THROW(d.Add(FaultInjectingKey("b"), 2), std::runtime_error);
+    FaultInjectingKey::copyArmed = false;
+
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_FALSE(d.ContainsKey(FaultInjectingKey("b")));
+    EXPECT_EQ(d.IndexOf(FaultInjectingKey("b")), -1);
+    EXPECT_TRUE(d.ContainsKey(FaultInjectingKey("a")));
+    EXPECT_NO_THROW(d.Add(FaultInjectingKey("c"), 3));
+    EXPECT_EQ(d.getCountProperty(), 2);
+}
+
+TEST(OrderedDictionaryTest, TryAdd_ThrowingKeyCopy_LeavesDictionaryConsistent) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::copyCount = 0;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+
+    FaultInjectingKey::copyArmed = true;
+    FaultInjectingKey::copyCount = 0;
+    EXPECT_THROW(d.TryAdd(FaultInjectingKey("b"), 2), std::runtime_error);
+    FaultInjectingKey::copyArmed = false;
+
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_FALSE(d.ContainsKey(FaultInjectingKey("b")));
+}
+
+TEST(OrderedDictionaryTest, IndexerSetter_ThrowingKeyCopy_LeavesDictionaryConsistent) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::copyCount = 0;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+
+    FaultInjectingKey::copyArmed = true;
+    FaultInjectingKey::copyCount = 0;
+    // `d[key] = value` makes an extra copy (into the ValueProxy itself) before the two copies
+    // Add() makes, so the map-side insertion this test targets is the 3rd copy, not the 2nd.
+    FaultInjectingKey::throwOnCopyNumber = 3;
+    EXPECT_THROW(d[FaultInjectingKey("b")] = 2, std::runtime_error);
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::throwOnCopyNumber = 2;
+
+    EXPECT_EQ(d.getCountProperty(), 1);
+    EXPECT_FALSE(d.ContainsKey(FaultInjectingKey("b")));
+}
+
+TEST(OrderedDictionaryTest, Insert_ThrowingHash_RollsBackInsertion) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+    d.Add(FaultInjectingKey("c"), 3);
+
+    // Poison an EXISTING key ("a"), not the one being inserted ("b"): Insert()'s own
+    // duplicate-key check only hashes "b" (unaffected), so the poisoned hash fires only once
+    // rebuildIndex() re-hashes every entry afterward, including "a".
+    FaultInjectingKey::poisonedValue = "a";
+    EXPECT_THROW(d.Insert(1, FaultInjectingKey("b"), 2), std::runtime_error);
+    FaultInjectingKey::poisonedValue.clear();
+
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_FALSE(d.ContainsKey(FaultInjectingKey("b")));
+    EXPECT_EQ(d.IndexOf(FaultInjectingKey("a")), 0);
+    EXPECT_EQ(d.IndexOf(FaultInjectingKey("c")), 1);
+}
+
+TEST(OrderedDictionaryTest, Remove_ThrowingHash_RollsBackRemoval) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+    d.Add(FaultInjectingKey("b"), 2);
+
+    FaultInjectingKey::poisonedValue = "b";
+    EXPECT_THROW(d.Remove(FaultInjectingKey("a")), std::runtime_error);
+    FaultInjectingKey::poisonedValue.clear();
+
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_TRUE(d.ContainsKey(FaultInjectingKey("a")));
+    EXPECT_EQ(d.IndexOf(FaultInjectingKey("a")), 0);
+    EXPECT_TRUE(d.ContainsKey(FaultInjectingKey("b")));
+}
+
+TEST(OrderedDictionaryTest, RemoveAt_ThrowingHash_RollsBackRemoval) {
+    FaultInjectingKey::copyArmed = false;
+    FaultInjectingKey::poisonedValue.clear();
+    // Reserved capacity up front so entries_/keyIndex_ never need to grow mid-test -- growth
+    // would relocate EXISTING elements (via K's copy constructor, since it has no noexcept
+    // move constructor) and could spuriously trip the fault injection on the wrong key,
+    // confirmed via a standalone diagnostic before this fix.
+    OrderedDictionary<FaultInjectingKey, int> d(8);
+    d.Add(FaultInjectingKey("a"), 1);
+    d.Add(FaultInjectingKey("b"), 2);
+
+    FaultInjectingKey::poisonedValue = "b";
+    EXPECT_THROW(d.RemoveAt(0), std::runtime_error);
+    FaultInjectingKey::poisonedValue.clear();
+
+    EXPECT_EQ(d.getCountProperty(), 2);
+    EXPECT_TRUE(d.ContainsKey(FaultInjectingKey("a")));
+    EXPECT_EQ(d.IndexOf(FaultInjectingKey("a")), 0);
+}
+
 TEST(OrderedDictionaryTest, IndexerConstMissingKeyThrows) {
     OrderedDictionary<std::string, int> d;
     const auto& cd = d;
