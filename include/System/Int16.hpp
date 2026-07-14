@@ -198,6 +198,60 @@ public:
         return value < 0 ? static_cast<SharpRuntime::shortcs>(-value) : value;
     }
 
+    /**
+     * @brief Returns a value with the magnitude of @p value and the sign of @p sign.
+     * C++ counterpart of .NET Int16.CopySign(short, short) -- added 2026-07-14
+     * (duplicated-implementation audit finding: Int16 was the sole signed integer type
+     * missing this and the four methods below, mirrored here from SByte's identical
+     * implementation).
+     * @throws System::OverflowException if @p value is MinValue and @p sign is non-negative
+     *         (its magnitude does not fit in a signed Int16).
+     */
+    [[nodiscard]] static SharpRuntime::shortcs CopySign(SharpRuntime::shortcs value, SharpRuntime::shortcs sign) {
+        SharpRuntime::shortcs abs = value < 0 ? (value == MinValue ? value : static_cast<SharpRuntime::shortcs>(-value)) : value;
+        if (sign >= 0) {
+            if (abs < 0) throw System::OverflowException("Negating MinValue is not representable.");
+            return abs;
+        }
+        return static_cast<SharpRuntime::shortcs>(-abs);
+    }
+
+    /** @brief Returns true if @p value is negative. C++ counterpart of .NET Int16.IsNegative(short). */
+    [[nodiscard]] static bool IsNegative(SharpRuntime::shortcs value) noexcept { return value < 0; }
+
+    /** @brief Returns true if @p value is positive (> 0). C++ counterpart of .NET Int16.IsPositive(short). */
+    [[nodiscard]] static bool IsPositive(SharpRuntime::shortcs value) noexcept { return value > 0; }
+
+    /**
+     * @brief Returns the value with greater magnitude; if magnitudes are equal, returns @p x.
+     *
+     * C++ counterpart of .NET Int16.MaxMagnitude(short, short). MinValue has no
+     * representable positive magnitude, so it always wins, matching .NET (which detects
+     * this via a wrapped-negation check; here via a direct equality check to avoid
+     * relying on signed-overflow behavior).
+     */
+    [[nodiscard]] static SharpRuntime::shortcs MaxMagnitude(SharpRuntime::shortcs x, SharpRuntime::shortcs y) noexcept {
+        if (x == MinValue) return x;
+        if (y == MinValue) return y;
+        SharpRuntime::shortcs ax = x < 0 ? static_cast<SharpRuntime::shortcs>(-x) : x;
+        SharpRuntime::shortcs ay = y < 0 ? static_cast<SharpRuntime::shortcs>(-y) : y;
+        return ax >= ay ? x : y;
+    }
+
+    /**
+     * @brief Returns the value with smaller magnitude; if magnitudes are equal, returns @p x.
+     *
+     * C++ counterpart of .NET Int16.MinMagnitude(short, short). MinValue has no
+     * representable positive magnitude, so it always loses, matching .NET.
+     */
+    [[nodiscard]] static SharpRuntime::shortcs MinMagnitude(SharpRuntime::shortcs x, SharpRuntime::shortcs y) noexcept {
+        if (x == MinValue) return y;
+        if (y == MinValue) return x;
+        SharpRuntime::shortcs ax = x < 0 ? static_cast<SharpRuntime::shortcs>(-x) : x;
+        SharpRuntime::shortcs ay = y < 0 ? static_cast<SharpRuntime::shortcs>(-y) : y;
+        return ax <= ay ? x : y;
+    }
+
     /** @brief Clamps @p value to [@p min, @p max]. C++ counterpart of .NET Int16.Clamp(short,short,short). */
     [[nodiscard]] static SharpRuntime::shortcs Clamp(SharpRuntime::shortcs value, SharpRuntime::shortcs min, SharpRuntime::shortcs max) noexcept {
         return std::clamp(value, min, max);
