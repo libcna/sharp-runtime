@@ -54,23 +54,49 @@ namespace System::Threading::Tasks {
      * internal watcher thread (blocked on this source's own future) would still be waiting for
      * promise_ to resolve while the destructor destroying task_ is itself blocked waiting for
      * that same watcher thread -- a cycle with no way out. Resolving promise_ first breaks it.
+     *
+     * @warning **Lifetime requirement, unlike real .NET**: real .NET's TaskCompletionSource is a
+     * GC-tracked reference type, so the common "spin up a producer thread that completes the
+     * source, hand out .Task, let the local reference go" idiom is automatically safe -- the GC
+     * keeps the object alive as long as anything (including the producer thread's closure) still
+     * references it. This C++ port has ordinary RAII lifetime: **a TaskCompletionSource must
+     * remain alive for as long as any thread might still call one of its completion methods
+     * (SetResult/SetException/SetCanceled, or their Try-prefixed equivalents).** Destroying it
+     * while another thread is genuinely still inside one of those calls is
+     * undefined behavior (confirmed via a standalone ThreadSanitizer repro, 2026-07-14) -- the
+     * same as destroying any C++ object while a method call on it is concurrently in flight
+     * elsewhere, not something specific to this class's internals. When completing from a
+     * background thread, hold the source via `std::shared_ptr<TaskCompletionSource<TResult>>`
+     * and capture that shared_ptr **by value** in the worker thread's closure (not a reference or
+     * raw pointer to a stack-local instance) -- the shared_ptr copy keeps the source alive for as
+     * long as the worker needs it, independent of when the original local goes out of scope. The
+     * returned `getTaskProperty()` Task/TaskT is always safe to read independently (it owns its
+     * own state via shared_ptr) -- only the *source* itself has this constraint.
      */
     template<typename TResult>
     class TaskCompletionSource {
         std::promise<TResult> promise_;
         std::shared_future<TResult> future_;
         std::atomic<bool> completed_{false}; ///< True once the source has been completed.
+        // Producer-set, out-of-band signal so the bridging TaskT (via FromExternalFuture) can
+        // distinguish genuine cancellation (TrySetCanceled()/the destructor's own abandonment
+        // path) from a caller-supplied TaskCanceledException passed to SetException() -- see
+        // TaskT::FromExternalFuture's doc-comment for why exception-type sniffing alone can't
+        // tell the two apart. Declared before task_ so it's already constructed by the time
+        // task_'s initializer runs (member init order follows declaration order).
+        std::shared_ptr<std::atomic<bool>> canceledFlag_ = std::make_shared<std::atomic<bool>>(false);
         TaskT<TResult> task_;
 
     public:
         /** Default constructor — creates an unresolved source. */
         TaskCompletionSource()
             : future_(promise_.get_future().share()),
-              task_(TaskT<TResult>::FromExternalFuture(std::make_shared<std::shared_future<TResult>>(future_))) {}
+              task_(TaskT<TResult>::FromExternalFuture(std::make_shared<std::shared_future<TResult>>(future_), canceledFlag_)) {}
 
         /** See the class-level @note on why this can't be the implicitly-generated destructor. */
         ~TaskCompletionSource() {
             if (!completed_.exchange(true)) {
+                canceledFlag_->store(true);
                 promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
             }
         }
@@ -125,6 +151,7 @@ namespace System::Threading::Tasks {
         bool TrySetCanceled() {
             bool expected = false;
             if (!completed_.compare_exchange_strong(expected, true)) return false;
+            canceledFlag_->store(true);
             promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
             return true;
         }
@@ -137,24 +164,28 @@ namespace System::Threading::Tasks {
      * Specialisation of TaskCompletionSource for void tasks (no result value).
      *
      * @note Declares an explicit destructor for the same reason as the primary template -- see
-     * its class-level @note for the full deadlock rationale.
+     * its class-level @note for the full deadlock rationale, the exception-fidelity rationale
+     * behind canceledFlag_, and the @warning about this class's lifetime requirements (unlike
+     * real .NET's GC-tracked TaskCompletionSource).
      */
     template<>
     class TaskCompletionSource<void> {
         std::promise<void> promise_;
         std::shared_future<void> future_;
         std::atomic<bool> completed_{false}; ///< True once the source has been completed.
+        std::shared_ptr<std::atomic<bool>> canceledFlag_ = std::make_shared<std::atomic<bool>>(false);
         Task task_;
 
     public:
         /** Default constructor — creates an unresolved source. */
         TaskCompletionSource()
             : future_(promise_.get_future().share()),
-              task_(Task::FromExternalFuture(std::make_shared<std::shared_future<void>>(future_))) {}
+              task_(Task::FromExternalFuture(std::make_shared<std::shared_future<void>>(future_), canceledFlag_)) {}
 
         /** See the class-level @note on why this can't be the implicitly-generated destructor. */
         ~TaskCompletionSource() {
             if (!completed_.exchange(true)) {
+                canceledFlag_->store(true);
                 promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
             }
         }
@@ -209,6 +240,7 @@ namespace System::Threading::Tasks {
         bool TrySetCanceled() {
             bool expected = false;
             if (!completed_.compare_exchange_strong(expected, true)) return false;
+            canceledFlag_->store(true);
             promise_.set_exception(std::make_exception_ptr(System::Threading::Tasks::TaskCanceledException()));
             return true;
         }

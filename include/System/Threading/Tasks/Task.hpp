@@ -242,21 +242,36 @@ namespace System::Threading::Tasks {
          * that state_->isCompleted was set before Wait() returned -- caught by a real, flaky
          * test failure (TaskCompletionSourceTests.GetTaskProperty_AfterSetResult_*) before this
          * fix, not merely a theoretical concern.
+         *
+         * @param cancellationFlag Optional. When non-null and observed true after @p
+         * sharedFuture throws, the resulting Task is marked Canceled instead of Faulted,
+         * regardless of the caught exception's own type/content. An earlier version of this
+         * method used `catch (const TaskCanceledException&)` to detect cancellation, which
+         * collided with TaskCompletionSource::SetException(ex) being called with a
+         * caller-supplied TaskCanceledException: since TrySetCanceled() also completes the
+         * promise with a TaskCanceledException internally, the watcher couldn't tell the two
+         * apart by type alone, silently discarding the caller's real exception and its message
+         * (confirmed via a standalone repro, 2026-07-14). The producer side (e.g.
+         * TaskCompletionSource::TrySetCanceled()) sets this flag itself, out of band from the
+         * exception, so only an ACTUAL cancellation sets it -- a caller-supplied
+         * TaskCanceledException passed to SetException() now correctly faults instead.
          */
-        static Task FromExternalFuture(std::shared_ptr<std::shared_future<void>> sharedFuture) {
+        static Task FromExternalFuture(std::shared_ptr<std::shared_future<void>> sharedFuture,
+                                        std::shared_ptr<std::atomic<bool>> cancellationFlag = nullptr) {
             Task t(PendingTag{});
             auto s = t.state_;
             t.future_ = std::make_shared<std::shared_future<void>>(
-                std::async(std::launch::async, [sharedFuture, s]() {
+                std::async(std::launch::async, [sharedFuture, s, cancellationFlag]() {
                     try {
                         sharedFuture->get();
                         s->isCompleted = true;
-                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
-                        s->isCanceled  = true;
-                        s->isCompleted = true;
                     } catch (...) {
-                        s->exception   = std::current_exception();
-                        s->isFaulted   = true;
+                        if (cancellationFlag && cancellationFlag->load()) {
+                            s->isCanceled = true;
+                        } else {
+                            s->exception = std::current_exception();
+                            s->isFaulted = true;
+                        }
                         s->isCompleted = true;
                     }
                 }).share()
@@ -519,25 +534,29 @@ namespace System::Threading::Tasks {
          * API. Not part of the public .NET-mirroring surface -- see Task::FromExternalFuture's
          * identical doc-comment for the full rationale, including why this wraps @p sharedFuture
          * in a new std::async task (state mutation inside the same future-producing lambda that
-         * getResultProperty()/Wait() blocks on) rather than a separately-detached watcher thread.
+         * getResultProperty()/Wait() blocks on) rather than a separately-detached watcher thread,
+         * and why @p cancellationFlag exists (a producer-set, out-of-band signal distinguishing
+         * genuine cancellation from a caller-supplied TaskCanceledException passed to
+         * SetException() -- exception-type sniffing alone can't tell the two apart).
          */
-        static TaskT<TResult> FromExternalFuture(std::shared_ptr<std::shared_future<TResult>> sharedFuture) {
+        static TaskT<TResult> FromExternalFuture(std::shared_ptr<std::shared_future<TResult>> sharedFuture,
+                                                  std::shared_ptr<std::atomic<bool>> cancellationFlag = nullptr) {
             TaskT<TResult> t(PendingTag{});
             auto s = t.state_;
             t.future_ = std::make_shared<std::shared_future<TResult>>(
-                std::async(std::launch::async, [sharedFuture, s]() -> TResult {
+                std::async(std::launch::async, [sharedFuture, s, cancellationFlag]() -> TResult {
                     try {
                         TResult r = sharedFuture->get();
                         s->result      = r;
                         s->isCompleted = true;
                         return r;
-                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
-                        s->isCanceled  = true;
-                        s->isCompleted = true;
-                        return TResult{};
                     } catch (...) {
-                        s->exception   = std::current_exception();
-                        s->isFaulted   = true;
+                        if (cancellationFlag && cancellationFlag->load()) {
+                            s->isCanceled = true;
+                        } else {
+                            s->exception = std::current_exception();
+                            s->isFaulted = true;
+                        }
                         s->isCompleted = true;
                         return TResult{};
                     }

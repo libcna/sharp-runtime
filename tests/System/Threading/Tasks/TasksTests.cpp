@@ -451,6 +451,31 @@ TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetException_Faults) {
     EXPECT_TRUE(t.getIsFaultedProperty());
 }
 
+// Regression test (fixed 2026-07-14): SetException() called with a TaskCanceledException used
+// to be silently reinterpreted as SetCanceled(), because the bridging watcher distinguished
+// cancellation from a fault purely by catching `const TaskCanceledException&` -- the same
+// exception type TrySetCanceled() uses internally as its own completion sentinel, so the two
+// were indistinguishable by type alone. A caller-supplied TaskCanceledException must still
+// fault (matching real .NET's SetException, which never special-cases exception type), and its
+// exact type/message must survive, not get replaced by a fresh default-constructed one.
+TEST(TaskCompletionSourceTests, SetException_WithTaskCanceledException_FaultsNotCancels) {
+    TaskCompletionSource<int> tcs;
+    TaskT<int> t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(
+        System::Threading::Tasks::TaskCanceledException("custom cancellation reason XYZ")));
+    try {
+        t.Wait();
+        FAIL() << "expected TaskCanceledException to be rethrown";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom cancellation reason XYZ");
+    }
+    // Wait() above blocks until the watcher thread has finished processing the exception, so
+    // these reads are guaranteed to observe the final state (see FromExternalFuture's own
+    // doc-comment on why future_->get() and state mutation are ordered together).
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
 TEST(TaskCompletionSourceTests, GetTaskProperty_AfterSetCanceled_Cancels) {
     TaskCompletionSource<int> tcs;
     TaskT<int> t = tcs.getTaskProperty();
@@ -466,6 +491,24 @@ TEST(TaskCompletionSourceTests, GetTaskProperty_CalledTwice_ReturnsSameUnderlyin
     tcs.SetResult(7);
     EXPECT_EQ(t1.getResultProperty(), 7);
     EXPECT_EQ(t2.getResultProperty(), 7);
+}
+
+// Demonstrates the SAFE cross-thread completion idiom this class's own doc-comment now warns
+// is required (2026-07-14): unlike real .NET's GC-tracked TaskCompletionSource, this port has
+// ordinary RAII lifetime, so the source must be kept alive (e.g. via std::shared_ptr, captured
+// BY VALUE in the worker closure) for as long as any thread might still complete it -- capturing
+// a stack-local TaskCompletionSource by reference in a detached/joined-later thread and letting
+// it go out of scope before that thread finishes is undefined behavior. This is the pattern
+// callers should copy; repeated to build statistical confidence this exact pattern is race-free.
+TEST(TaskCompletionSourceTests, SharedPtrOwnedSource_CompletedFromWorkerThread_IsSafe) {
+    for (int iter = 0; iter < 50; ++iter) {
+        auto tcs = std::make_shared<TaskCompletionSource<int>>();
+        TaskT<int> task = tcs->getTaskProperty();
+        std::thread worker([tcs]() { tcs->SetResult(42); }); // shared_ptr captured by value
+        tcs.reset(); // drop this scope's reference; the worker's copy keeps the source alive
+        EXPECT_EQ(task.getResultProperty(), 42);
+        worker.join();
+    }
 }
 
 // ===========================================================================
@@ -522,6 +565,23 @@ TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetException_Faults) {
     tcs.SetException(std::make_exception_ptr(std::runtime_error("void task error")));
     EXPECT_THROW(t.Wait(), std::runtime_error);
     EXPECT_TRUE(t.getIsFaultedProperty());
+}
+
+// See TaskCompletionSourceTests.SetException_WithTaskCanceledException_FaultsNotCancels for the
+// full rationale (fixed 2026-07-14).
+TEST(TaskCompletionSourceVoidTests, SetException_WithTaskCanceledException_FaultsNotCancels) {
+    TaskCompletionSource<void> tcs;
+    Task t = tcs.getTaskProperty();
+    tcs.SetException(std::make_exception_ptr(
+        System::Threading::Tasks::TaskCanceledException("custom void cancellation reason")));
+    try {
+        t.Wait();
+        FAIL() << "expected TaskCanceledException to be rethrown";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom void cancellation reason");
+    }
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
 }
 
 TEST(TaskCompletionSourceVoidTests, GetTaskProperty_AfterSetCanceled_Cancels) {
