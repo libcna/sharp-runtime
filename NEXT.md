@@ -1,6 +1,8 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD: `e014d4c`.*
+*Last updated: 2026-07-14. Branch: `feature/work`. HEAD is this checkpoint commit itself; the
+last code-affecting commit was `8514a9d` (A-05 `OrderedDictionary` fix), followed by a docs-only
+fix at `6aa719f` (A-06 README correction) — see §3.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a long chronological session-log that had grown to ~6000 lines. That prior log is not
@@ -65,12 +67,13 @@ direction for the next body of work (see §8 for candidate next tasks, §10 for 
 
 ## 2. Current status
 
-**Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at HEAD
-(`e014d4c`, re-verified after the `557d0ea` `Task::ContinueWith`/`WhenAny` work — no code changed
-since, this commit is docs-only), via `cmake --build build --parallel 4`.
+**Build status**: last verified clean — 0 errors, 0 warnings, full clean rebuild — at `6aa719f`
+(the last commit; docs-only, see §3), via `cmake --build build --parallel 4`.
 
-**Test status**: last verified **12449/12449 passing**, via `./build/SharpRuntimeTests`, at the
-same HEAD. Additionally verified under **the full sanitizer trio** (all three firsts in this
+**Test status**: last verified **12476/12476 passing**, via `./build/SharpRuntimeTests`, at
+`8514a9d` (the last commit that touched code; unchanged since). Test count grew from 12449 to
+12476 (+27) fixing an external audit's findings — see §3. Additionally verified under **the full
+sanitizer trio** (all three firsts in this
 project's history — see §3): ThreadSanitizer (11 full runs total, 0 warnings — 4 at `1cdc80a`, 3
 more at `200591b` after the `TaskCompletionSource.Task` addition, a dedicated pass over the
 Channel/TaskCompletionSource fixes at `eb8489a`/`41c0476` and the `WhenAll`/`WhenAny` fixes at
@@ -84,13 +87,24 @@ two sanitizers most relevant to the newest (concurrency- and memory-lifetime-hea
 (TSan, ASan) are both freshly verified clean. Zero known failing tests, zero known
 races, zero known memory-safety or undefined-behavior issues.
 
+The `audit.md` remediation (A-01 through A-06, see §3) has **not** had a dedicated sanitizer
+re-run yet — it's a plausible next-priority item given A-02's fix touches destructor exception
+paths and A-05's touches exception-unwind rollback logic in `OrderedDictionary`, both squarely in
+TSan/ASan's wheelhouse even though the changes are single-threaded. Every fix was, however,
+individually verified by temporarily reverting it and confirming its own regression test fails
+(see §3) — a stronger-than-usual bar for this session, applied because two early test drafts
+(for A-01's Update-mode round-trip and A-05's Add() rollback) initially passed for the wrong
+reason (an unrelated `std::vector`/`MemoryStream` behavior masking the real bug) before being
+corrected.
+
 **CLI/tools/apps/libraries currently available**: this repository produces a single static
 library target, `SHARP_RUNTIME` (`libSHARP_RUNTIME.a`), plus one test executable,
 `SharpRuntimeTests` (GoogleTest-based). **There is no CLI tool, sample app, or demo binary in
 this repo** — it is a library-only dependency, consumed by CNA/mobile-eggbert (neither of which
 lives in this repository).
 
-**Recently implemented features** (this session's tail — see §3 for the full list): version-
+**Recently implemented features** (this session's tail — see §3 for the full list): a full
+external-audit remediation pass (`audit.md`, 6 of 7 findings fixed — see §3); version-
 tracking fail-fast enumeration across all mutable generic collections; `NumberStyles`-aware
 `Parse`/`TryParse` for all 8 integer primitive types (partial — see §5); `CopyTo` for `List<T>`
 and `StringBuilder`; disposed-state tracking for `MemoryStream`; a reentrancy-safe
@@ -726,13 +740,70 @@ only ever operate on non-generic `Task`, so it wasn't needed to achieve this tic
 — and is now the natural next candidate if `Task`-family API-surface completeness work continues
 (see §8).
 
+**External audit remediation** (2026-07-14, per explicit user direction — "precti audit.md a
+prosim oprav"). A comprehensive external audit (`audit.md`, revision `6540fde`, still untracked
+in the repo root — never committed, since it's an external report, not project source) found 7
+findings (3 High, 2 Medium, 2 Low). Fixed 6 of 7, each independently verified against actual
+current source (not blindly trusted — the audit's own cited line numbers had drifted from this
+session's earlier edits) and individually committed/pushed:
+- **A-01 (High, `221bb92`)**: stream-backed `ZipArchive` never wrote Create/Update output back to
+  its `Stream*` — buffered everything into an internal `memBuf` and never flushed it to the
+  caller's stream. Fixed by retaining a non-owning `Stream*` in Create/Update mode and writing
+  the finalized buffer back once, unconditionally, in `Dispose()` (seek+truncate+rewrite if the
+  stream supports seeking, else append-only). While writing a broader-than-minimum regression
+  test suite for this fix, incidentally found and fixed a SECOND, previously unknown bug in the
+  same constructor: `openReader()` was only called for `Read` mode, not `Update`, so
+  `flushWriter()`'s "carry forward every pre-existing entry" step silently dropped every existing
+  entry on every Update-via-stream `Dispose()`. Also found but deliberately NOT fixed (flagged for
+  later, out of scope for this commit): `MemoryStream(buffer, size)` defaults to read-only in this
+  port, unlike real .NET's single-array-arg overload, which defaults to writable.
+- **A-02 (High, `f1266ae`)**: `DeflateStream`/`GZipStream`/`ZLibStream`/`ZipArchive`/`XmlWriter`
+  destructors all called their throwing `Close()`/`Dispose()` directly with no exception
+  handling — since destructors are implicitly `noexcept`, an I/O failure during ordinary RAII
+  cleanup called `std::terminate()` instead of unwinding normally. Fixed by wrapping each
+  destructor's delegate call in `try { ... } catch (...) {}` (best-effort cleanup); the explicit
+  `Close()`/`Dispose()` methods are unchanged and still propagate errors.
+- **A-03 (High, `5cf5fa5`)**: `DeflateStream`/`GZipStream`/`ZLibStream::Read()` (unlike their own
+  `Write()`) accepted a null buffer or negative offset/count with no validation — a null buffer
+  reached zlib unchecked (surfacing as the wrong exception type), a negative count was silently
+  swallowed. Fixed by adding the same `ArgumentNullException`/`ArgumentOutOfRangeException`
+  validation `Write()` and `MemoryStream::Read` already have.
+- **A-04 (Medium, `95e88f0`)**: `TaskCompletionSource<TResult>::TrySetResult` claimed `completed_`
+  before calling `promise_.set_value(result)`; if `TResult`'s copy constructor threw, the promise
+  was left permanently un-set (no later `TrySet*` could re-claim it), stranding every waiter on
+  `GetResult()`/the bridging `Task` forever. Fixed by catching a `set_value()` failure, fulfilling
+  the promise with that same exception (so nothing hangs), then re-throwing (the immediate caller
+  still observes the failure, unchanged).
+- **A-05 (Medium, `8514a9d`)**: `OrderedDictionary` mutates `entries_` before `keyIndex_` in every
+  operation (a deliberate ordering from an earlier ticket), but wasn't transaction-safe in the
+  other direction — a throwing `std::hash<TKey>`, key copy, or map rehash on the `keyIndex_` side
+  could throw after `entries_` already changed, desyncing `Count` from `ContainsKey`. Fixed:
+  `rebuildIndex()` now builds a replacement index in a local temporary and swaps it in only on
+  full success (`unordered_map::swap` is noexcept here); `Add`/`TryAdd`/the indexer setter roll
+  back the just-appended `entries_` element on a `keyIndex_` failure; `Insert`/`Remove`/`RemoveAt`
+  roll back their `entries_` mutation if `rebuildIndex()` throws. All 6 new regression tests were
+  verified to actually fail when their corresponding fix was temporarily reverted — worth calling
+  out because two early test drafts passed even with the fix removed, for the wrong reason
+  (`std::vector` reallocation was relocating an unrelated *existing* element and incidentally
+  restoring consistency, never reaching the code under test); redesigned with pre-reserved
+  capacity and a call-count-aware fault-injection key to close that gap.
+- **A-06 (Low, `6aa719f`)**: README overclaimed Doxygen coverage ("a clean run produces no
+  warnings" — actually ~1,869) and mischaracterized `scripts/source_header_inventory.py` as a
+  standalone-header compile check (it only inventories SPDX/namespace/type metadata; invokes no
+  compiler). Fixed by rewording both claims to match actual behavior. No code changes.
+- **A-07 (Low, deferred)**: "no tracked CI pipeline" — offered the user three options (basic CI,
+  comprehensive CI, or skip); user chose to skip for now. Not fixed, not forgotten — see §5/§8.
+
+12476/12476 tests pass (+27 from the 12449 baseline: 3 for A-01, 7 for A-02, 9 for A-03, 2 for
+A-04, 6 for A-05), 0 build warnings/errors throughout.
+
 ---
 
 ## 4. Current blocker / main problem
 
-**There is no active build/test blocker right now.** Build was clean and all 12449 tests passed
-at the last verification (HEAD `e014d4c`, re-verified — no code changed since `557d0ea`, this
-commit is docs-only). The full sanitizer trio (TSan/ASan/UBSan) was verified
+**There is no active build/test blocker right now.** Build was clean and all 12476 tests passed
+at the last verification (`8514a9d`, the last code-touching commit; two docs-only commits
+followed — `6aa719f` for A-06, then this checkpoint). The full sanitizer trio (TSan/ASan/UBSan) was verified
 clean at `1cdc80a` (12378 tests); ThreadSanitizer has since been re-verified specifically against
 the `TaskCompletionSource.Task` addition (`200591b`), the fresh-eyes-audit fixes
 (`eb8489a`/`41c0476`), and — most recently and most thoroughly, given the concurrency-sensitivity
@@ -757,9 +828,13 @@ fixed), a duplicated-implementation audit round (5 more real bugs found and fixe
 exception-type-sniffing bug shape searched for and not found), `WhenAny`/`WhenAll` null-`Task`
 validation, and — per explicit user direction to specifically continue on `WhenAny` — a full
 `Task::ContinueWith` implementation with `WhenAny` rebuilt on top of it, achieving genuinely zero
-extra OS threads and closing §5's last remaining documented gap (see §3 for the full list). §8 now
-holds only genuinely open-ended follow-ons (another audit round on categories not yet covered, or
-`TaskT<TResult>::ContinueWith` as a natural completeness extension of the work just landed). Two
+extra OS threads and closing §5's last remaining documented gap; then, per explicit user direction
+("precti audit.md a prosim oprav"), a full remediation pass over an external audit report
+(`audit.md`) — 6 of 7 findings fixed (3 High: stream-backed `ZipArchive` write-back,
+destructor `std::terminate` risk across 5 types, missing `Read()` buffer validation; 2 Medium:
+`TaskCompletionSource` exception-safety, `OrderedDictionary` exception-safety; 1 Low: README
+accuracy), with A-07 (no tracked CI) explicitly deferred by user choice (see §3 for the full
+list). §8 now holds only genuinely open-ended follow-ons. Two
 pre-session decisions from the user remain in effect: (1) no new benchmarking dependency —
 `std::chrono`-based timing only, per `bench/StringBenchmark.cpp`; (2) push after each verified
 task, same cadence as before.
@@ -799,6 +874,20 @@ update this section (and the whole file) once you understand what changed.
   result) — what's missing is a `continuations` list plus the `ContinueWith` method itself,
   mirroring `Task`'s own implementation. A natural next completeness step if `Task`-family API
   work continues.
+- **No tracked CI pipeline** (external audit finding A-07, 2026-07-14) — no
+  `.github/workflows/*.yml` or equivalent exists; `scripts/local_ci_check.sh` is a local-only
+  build+test gate. User was explicitly offered a basic CI workflow, a comprehensive one (matching
+  the audit's own recommendation: build/test + sanitizers + Doxygen accounting + Windows/
+  Emscripten compile-only jobs), or skipping — chose to skip for now. Revisit if/when the user
+  wants CI; don't add `.github/workflows/*.yml` unilaterally, since it activates real GitHub
+  Actions runs against the repo (see §9).
+- `MemoryStream(const bytecs* buffer, intcs size)` unconditionally sets `writable_(false)`, but
+  real .NET's single-array-arg `MemoryStream(byte[] buffer)` constructor defaults to WRITABLE
+  (`this(buffer, true)` — verified against `/rv/tmp/runtime/src/libraries/System.Private.CoreLib/
+  src/System/IO/MemoryStream.cs`). Found incidentally while writing A-01's regression tests
+  (2026-07-14); deliberately not fixed in that commit to avoid scope creep. A well-scoped,
+  independent parity fix if picked up (see §8) — likely just changing the default and auditing
+  existing callers that rely on the current read-only-by-default behavior.
 
 **Needs verification (unknown status)**:
 - No Windows or Emscripten build has ever been compiled for this repository. Every platform
@@ -981,8 +1070,10 @@ via token state), and fixed `WhenAny`/`WhenAll`'s missing null-(moved-from-)`Tas
 then, per explicit direction to specifically continue on `WhenAny` ("pokračuj na whenany a
 případně se ptej"), implemented `Task::ContinueWith` (a real public API, per the user's own
 choice between that and a smaller internal-only mechanism) and rebuilt `WhenAny` on top of it,
-achieving genuinely zero extra OS threads and closing §5's last remaining documented gap — see §3
-for the full list.
+achieving genuinely zero extra OS threads and closing §5's last remaining documented gap; then,
+per explicit direction ("precti audit.md a prosim oprav"), a full external-audit remediation pass
+— A-01 through A-06 fixed (3 High, 2 Medium, 1 Low), A-07 (CI pipeline) explicitly deferred by
+user choice — see §3 for the full list.
 
 None of the tasks below are currently blocking anything — pick based on what's actually wanted
 next, or ask the user first if unsure which to prioritize.
@@ -995,15 +1086,31 @@ next, or ask the user first if unsure which to prioritize.
    account of why that matters). A natural, well-scoped completeness step, not an architectural
    unknown this time.
 
-2. **Another audit round, different categories.** Categories already covered across this
+2. **`MemoryStream(buffer, size)` writability parity fix** (§5) — real .NET's single-array-arg
+   `MemoryStream(byte[] buffer)` defaults to writable; this port's equivalent constructor defaults
+   to read-only. Found incidentally during the `audit.md` A-01 fix (2026-07-14), deliberately not
+   fixed there to avoid scope creep. Small, well-scoped: change the default, then audit existing
+   callers/tests that may implicitly rely on the current (wrong) read-only default.
+
+3. **A-07 CI pipeline, if the user revisits it** (§5) — was explicitly offered and declined for
+   now (basic vs. comprehensive vs. skip). Don't add `.github/workflows/*.yml` without asking
+   again first — it activates real GitHub Actions runs against the repo (see §9).
+
+4. **A dedicated sanitizer pass over the `audit.md` remediation** (§2) — A-02's destructor fixes
+   and A-05's exception-unwind rollback logic in `OrderedDictionary` are natural TSan/ASan
+   candidates, even though the changes themselves are single-threaded; hasn't been done yet.
+
+5. **Another audit round, different categories.** Categories already covered across this
    session's audit rounds: TODO/FIXME markers (clean), weak tests (mostly false positives), 
    resource-management/RAII (4 real bugs, fixed), `plan.sqlite3` drift (clean), memory safety /
    undefined behavior (the full TSan/ASan/UBSan trio — 8 real bugs, fixed), variable shadowing
    (`-Wshadow` — clean), fresh eyes on this session's own newest code (6 real bugs + 1
-   silently-wrong-value gap + 1 perf gap, fixed), and duplicated-implementation search (5 real
-   bugs, fixed — see §3). Categories NOT yet covered: `-Wconversion`/`-Wsign-conversion` (skipped
-   so far as likely too noisy given this codebase's pervasive intentional `intcs`/`size_t`
-   conversions — would need a smarter triage approach, not a blind full-codebase run).
+   silently-wrong-value gap + 1 perf gap, fixed), duplicated-implementation search (5 real bugs,
+   fixed), and a comprehensive external audit (`audit.md` — 6 real bugs across ZIP/compression/
+   XML I/O, `Task`, and `OrderedDictionary`, fixed — see §3). Categories NOT yet covered:
+   `-Wconversion`/`-Wsign-conversion` (skipped so far as likely too noisy given this codebase's
+   pervasive intentional `intcs`/`size_t` conversions — would need a smarter triage approach, not
+   a blind full-codebase run).
 
 ---
 
@@ -1029,29 +1136,41 @@ next, or ask the user first if unsure which to prioritize.
 - **No merge to `master`/`develop`, and no tags**, without explicit per-action user approval.
 - **No touching `Decimal`/`Int128`/`UInt128`'s `__int128`-based MSVC limitation** — permanent,
   accepted (2026-07-11 decision); do not attempt a hand-rolled 128-bit arithmetic workaround.
+- **No adding `.github/workflows/*.yml` (or any other CI config) without asking first** — audit
+  finding A-07 (2026-07-14) was explicitly offered to the user (basic/comprehensive/skip) and
+  declined for now. This is a real infrastructure decision (it activates GitHub Actions runs
+  against the actual repo), not a code fix — different in kind from the rest of this list.
 
 ---
 
 ## 10. Resume prompt
 
 ```
-Read NEXT.md first. It reflects the repository state as of HEAD e014d4c (docs-only checkpoint;
-the code itself is at 557d0ea, re-verified unchanged) — 12449/12449 tests, 0 errors/0 warnings.
-ThreadSanitizer AND AddressSanitizer have both been re-verified clean
-specifically against the most concurrency/memory-lifetime-sensitive change landed this session --
-the Task::ContinueWith/WhenAny rewrite (557d0ea) -- 0 warnings/errors/leaks across dedicated
-isolated sanitizer builds each (see §2/§3). Earlier changes this session (TaskCompletionSource.Task,
-the Channel/TaskCompletionSource fresh-eyes-audit fixes) were also dedicated-TSan-verified.
-UndefinedBehaviorSanitizer and the single-threaded duplicated-implementation-audit-round fixes
-have not had dedicated re-runs (low-priority formality) -- re-verify the normal build first
-anyway: cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
+Read NEXT.md first. It reflects the repository state as of the last code-touching commit,
+8514a9d (an OrderedDictionary exception-safety fix, audit finding A-05), followed by a docs-only
+commit 6aa719f (README correction, A-06) and this checkpoint commit -- 12476/12476 tests, 0
+errors/0 warnings.
+
+This session just finished a full remediation pass over an external audit report (audit.md,
+still untracked in the repo root -- an external report, not project source, per explicit user
+direction "precti audit.md a prosim oprav"). 6 of 7 findings fixed (3 High: ZipArchive
+stream-backed Create/Update never wrote back to its Stream*; 5 destructors could std::terminate
+on an ordinary I/O failure; DeflateStream/GZipStream/ZLibStream::Read() had no buffer validation.
+2 Medium: TaskCompletionSource<TResult>::TrySetResult could strand a task forever on a throwing
+result copy; OrderedDictionary could desync entries_/keyIndex_ on a throwing hash/key-copy. 1 Low:
+README overclaimed Doxygen/tooling coverage). A-07 (no tracked CI pipeline) was explicitly offered
+to the user and declined for now -- do NOT add .github/workflows/*.yml without asking again, it
+activates real GitHub Actions runs against the repo (see §9). Full details and exact commit
+hashes per finding are in §3.
+
+Neither TSan nor ASan has been re-run specifically against this audit remediation yet (§2) --
+that's a reasonable candidate if picked up, given A-02 touches destructor exception paths and
+A-05 touches exception-unwind rollback logic, both single-threaded but in TSan/ASan's usual
+wheelhouse. Re-verify the normal build first regardless:
+cmake --build build --parallel 4 && ./build/SharpRuntimeTests.
 
 Do not assume anything beyond what NEXT.md documents. There is no known active blocker — the
-open question is which of §8's candidate next tasks (or something else entirely) to work on. §5's
-former architectural gap (WhenAny's thread-lifetime cost) is now CLOSED -- Task::ContinueWith was
-implemented (a real public API, per explicit user choice) and WhenAny rebuilt on top of it. The
-one remaining §5 item, TaskT<TResult>::ContinueWith, is a well-scoped completeness follow-up, not
-an open architectural question -- no special buy-in needed to pick it up if wanted.
+open question is which of §8's candidate next tasks (or something else entirely) to work on.
 
 Pick ONE task — from NEXT.md §8 if nothing else has been specified — and inspect only the
 files needed for that task. Do not refactor unrelated code, do not touch files outside that
@@ -1059,7 +1178,10 @@ task's stated scope, and do not restart the completed intcs/getXxxProperty() rol
 
 Make one small, verified improvement: implement the task, run its stated verification command
 (build clean, zero warnings; full test suite passes; new/changed behavior has a regression
-test), and only then consider it done.
+test), and only then consider it done. If a fix involves rolling back a mutation on an exception
+path, verify the regression test actually exercises that path by temporarily reverting the fix
+and confirming the test fails -- this session found two cases where a plausible-looking test
+passed for the wrong reason (an unrelated std::vector reallocation masking the real bug).
 
 Update NEXT.md after finishing: move the completed task out of §8, note what changed in §3,
 and update the "Last updated" line and test count at the top of the file.
