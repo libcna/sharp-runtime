@@ -633,6 +633,18 @@ type-name bugs across all 8 integer types (none found).
 Test count grew from 12408 to 12434 across this round (5 commits, 27 new regression tests total).
 All 5 fix commits individually verified: clean build, full test suite passing.
 
+**Follow-up verification: same bug pattern checked across `System::Collections::Specialized`**
+(no code change) — after fixing `Generic::OrderedDictionary`'s non-const-indexer-inserts-on-read
+bug above, checked whether the identical pattern exists in the sibling non-generic dictionary
+types (`ListDictionary`, `HybridDictionary`, `StringDictionary`, `Specialized::OrderedDictionary`,
+`NameValueCollection`). All clean: the first 4 already had this exact bug fixed in an earlier
+session (commit `3605260`, referenced explicitly in their own doc-comments) by using a read-only
+`operator[]` plus a separate named `set(key, value)` method instead of a single ambiguous
+`operator[]`; `NameValueCollection` never had the risk (const-only, delegates to `Get()`).
+Confirms `Generic::OrderedDictionary<TKey,TValue>` (a newer, separate .NET-9+ generic type, not
+part of that earlier fix batch) was the one remaining gap — now closed, and this bug class is
+fully closed project-wide.
+
 ---
 
 ## 4. Current blocker / main problem
