@@ -300,6 +300,15 @@ namespace System::Threading::Tasks {
          *              the .NET reference — so an empty @p tasks is likewise valid here and
          *              returns CompletedTask() directly without spawning a thread.
          * @return A Task that completes once every task in @p tasks has completed.
+         *
+         * @note Distinguishes a genuinely canceled input task from one that FAULTED with a
+         * directly-thrown TaskCanceledException by checking each task's own
+         * getIsCanceledProperty() after Wait() returns, not by catching `const
+         * TaskCanceledException&` -- Wait() rethrows a faulted task's stored exception directly
+         * (see its own doc-comment), so a task whose action threw TaskCanceledException itself
+         * (not via cooperative CancellationToken cancellation) would otherwise be
+         * misclassified as canceled instead of faulted. Fixed 2026-07-14 after finding the
+         * identical type-sniffing bug in TaskCompletionSource::SetException.
          */
         static Task WhenAll(std::vector<Task> tasks) {
             if (tasks.empty()) return Task::CompletedTask();
@@ -309,10 +318,12 @@ namespace System::Threading::Tasks {
                 for (auto& t : tasks) {
                     try {
                         t.Wait();
-                    } catch (const System::Threading::Tasks::TaskCanceledException&) {
-                        anyCanceled = true;
                     } catch (...) {
-                        if (!firstFault) firstFault = std::current_exception();
+                        if (t.getIsCanceledProperty()) {
+                            anyCanceled = true;
+                        } else if (!firstFault) {
+                            firstFault = std::current_exception();
+                        }
                     }
                 }
                 if (firstFault) std::rethrow_exception(firstFault);

@@ -193,6 +193,30 @@ TEST(TaskWhenAllTests, OneCanceled_NoFault_WaitThrowsTaskCanceledException) {
     EXPECT_THROW(all.Wait(), System::Threading::Tasks::TaskCanceledException);
 }
 
+// Regression test (fixed 2026-07-14): a task that FAULTS with a directly-thrown
+// TaskCanceledException (no CancellationToken involved -- not genuine cooperative cancellation)
+// used to be misclassified as canceled by WhenAll's old `catch (const TaskCanceledException&)`.
+// Wait() rethrows a faulted task's stored exception directly (see its own doc-comment), so the
+// caught exception's TYPE alone can't distinguish "faulted with this exact type" from
+// "genuinely canceled" -- the same shape as the TaskCompletionSource::SetException bug fixed the
+// same day. Fixed by checking each task's own getIsCanceledProperty() after Wait() instead.
+TEST(TaskWhenAllTests, TaskFaultsWithTaskCanceledException_TreatedAsFaultNotCancel) {
+    std::vector<Task> tasks;
+    tasks.push_back(Task::Run([]() {}));
+    tasks.push_back(Task::Run([]() {
+        throw System::Threading::Tasks::TaskCanceledException("custom fault reason, not real cancellation");
+    }));
+    Task all = Task::WhenAll(std::move(tasks));
+    try {
+        all.Wait();
+        FAIL() << "expected the original TaskCanceledException to be rethrown as a FAULT";
+    } catch (const System::Threading::Tasks::TaskCanceledException& ex) {
+        EXPECT_STREQ(ex.getMessageProperty().c_str(), "custom fault reason, not real cancellation");
+    }
+    EXPECT_TRUE(all.getIsFaultedProperty());
+    EXPECT_FALSE(all.getIsCanceledProperty());
+}
+
 // ===========================================================================
 // Task::WhenAny
 // ===========================================================================
