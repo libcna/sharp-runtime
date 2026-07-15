@@ -47,9 +47,15 @@ namespace System::IO {
         // A FileSystemWatcher with a live watch thread can never be safely copied or moved (the
         // thread captures `this` for the lifetime of the watch), so copy/move are deleted below
         // rather than leaving a dangling-`this` hazard for a caller to discover the hard way.
+        // Guarded to match FileSystemWatcher.cpp's own SHARP_RUNTIME_FSW_LINUX condition exactly --
+        // on non-Linux targets (e.g. Emscripten, where startWatchingIfPossible() always throws)
+        // these fields are never touched, and declaring them unconditionally left them dead code
+        // there, tripping -Werror=unused-private-field.
+#if defined(__linux__)
         int inotifyFd_ = -1;
         int watchDescriptor_ = -1;
         int stopEventFd_ = -1;
+#endif
         std::thread watchThread_;
 
         void startWatchingIfPossible();
