@@ -16,15 +16,19 @@ namespace System::IO
     using SharpRuntime::shortcs;
     using SharpRuntime::ushortcs;
     using SharpRuntime::longcs;
+    using SharpRuntime::charcs;
     using SharpRuntime::Single;
 
     /**
      * @brief Reads primitive data types from a Stream in binary, little-endian format.
      *
      * C++ counterpart of the .NET System.IO.BinaryReader class. This is a byte-oriented
-     * subset: .NET's Encoding/Decoder-based char methods (ReadChar, PeekChar, ReadChars,
-     * Read(char[])) are not implemented, since this codebase's Stream has no character
-     * encoding layer — a deliberate simplification, not a silent gap.
+     * subset: real .NET's BinaryReader accepts an arbitrary, pluggable Encoding; this port
+     * always decodes UTF-8 (matching .NET's own default `BinaryReader(Stream)` constructor,
+     * which uses UTF8Encoding — the only encoding real-world .NET/XNA content ever uses).
+     * `PeekChar`, `ReadChars`, and `Read(char[])` are not implemented, since this codebase's
+     * Stream has no general character-buffer decoding layer — a deliberate simplification,
+     * not a silent gap.
      */
     class BinaryReader
     {
@@ -76,6 +80,23 @@ namespace System::IO
 
         /** Reads a boolean (one byte; non-zero = true). */
         [[nodiscard]] virtual bool ReadBoolean();
+
+        /**
+         * @brief Reads one character, decoded from UTF-8, advancing the stream by however
+         *        many bytes that character's encoding occupies.
+         *
+         * C++ counterpart of .NET `BinaryReader.ReadChar()` under its default UTF8Encoding.
+         * A `System::Char`/`charcs` is a single UTF-16 code unit, so a codepoint above the
+         * Basic Multilingual Plane (encoded as 4 UTF-8 bytes, requiring a surrogate pair)
+         * cannot be returned by this method — matching real .NET, whose own `ReadChar()`
+         * throws in that same case (decoding such a character produces two `char`s, which
+         * does not fit the single-`char` output buffer `ReadChar()` decodes into).
+         * @return The decoded character.
+         * @throws System::IO::EndOfStreamException if the stream ends before a full character is read.
+         * @throws System::FormatException if the bytes are not valid UTF-8, or encode a codepoint
+         *         above U+FFFF.
+         */
+        [[nodiscard]] virtual charcs ReadChar();
 
         /** Reads a UTF-8 string prefixed with its 7-bit encoded length. */
         [[nodiscard]] virtual std::string ReadString();

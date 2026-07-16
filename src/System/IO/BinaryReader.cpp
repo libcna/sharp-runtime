@@ -123,6 +123,39 @@ namespace System::IO
         return ReadByte() != 0;
     }
 
+    charcs BinaryReader::ReadChar()
+    {
+        const bytecs lead = ReadByte();
+
+        uint32_t codepoint;
+        int continuationBytes;
+        if ((lead & 0x80u) == 0x00u)      { codepoint = lead;          continuationBytes = 0; }
+        else if ((lead & 0xE0u) == 0xC0u) { codepoint = lead & 0x1Fu;  continuationBytes = 1; }
+        else if ((lead & 0xF0u) == 0xE0u) { codepoint = lead & 0x0Fu;  continuationBytes = 2; }
+        else if ((lead & 0xF8u) == 0xF0u) { codepoint = lead & 0x07u;  continuationBytes = 3; }
+        else throw System::FormatException("Invalid UTF-8 lead byte while reading a char.");
+
+        for (int i = 0; i < continuationBytes; ++i)
+        {
+            const bytecs cont = ReadByte();
+            if ((cont & 0xC0u) != 0x80u)
+                throw System::FormatException("Invalid UTF-8 continuation byte while reading a char.");
+            codepoint = (codepoint << 6) | (cont & 0x3Fu);
+        }
+
+        if (codepoint > 0xFFFFu)
+        {
+            // A System.Char is one UTF-16 code unit; a codepoint above the BMP would need a
+            // surrogate pair. Real .NET's BinaryReader.ReadChar() cannot produce that either
+            // (its Decoder.GetChars call targets a 1-char buffer and throws for a 2-char
+            // result) -- match that failure instead of silently truncating to one surrogate.
+            throw System::FormatException(
+                "Character requires a surrogate pair; ReadChar() only supports a single UTF-16 code unit.");
+        }
+
+        return static_cast<charcs>(codepoint);
+    }
+
     intcs BinaryReader::Read7BitEncodedInt()
     {
         // Unlike writing, we can't delegate to the 64-bit read: we want to stop

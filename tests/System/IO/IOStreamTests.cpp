@@ -12,6 +12,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/FormatException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/NotSupportedException.hpp"
 #include "System/IO/DirectoryNotFoundException.hpp"
@@ -880,6 +881,69 @@ TEST(BinaryReaderWriterTests, ReadBytes_NegativeCount_ThrowsArgumentOutOfRange) 
     MemoryStream ms;
     BinaryReader br(&ms, true);
     EXPECT_THROW(br.ReadBytes(-1), System::ArgumentOutOfRangeException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_AsciiOneByte) {
+    std::vector<uint8_t> bytes{0x41}; // 'A'
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_EQ(br.ReadChar(), u'A');
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_TwoByteUtf8) {
+    std::vector<uint8_t> bytes{0xC3, 0xA9}; // U+00E9 'e' with acute accent
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0x00E9));
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_ThreeByteUtf8) {
+    std::vector<uint8_t> bytes{0xE2, 0x82, 0xAC}; // U+20AC EURO SIGN
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0x20AC));
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_AdvancesStreamByExactByteCount) {
+    std::vector<uint8_t> bytes{0xE2, 0x82, 0xAC, 0x42}; // U+20AC then 'B'
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0x20AC));
+    EXPECT_EQ(br.ReadChar(), u'B');
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_FourByteUtf8SupplementaryPlane_ThrowsFormatException) {
+    std::vector<uint8_t> bytes{0xF0, 0x9F, 0x98, 0x80}; // U+1F600, needs a surrogate pair
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadChar(), System::FormatException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_InvalidLeadByte_ThrowsFormatException) {
+    std::vector<uint8_t> bytes{0xFF};
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadChar(), System::FormatException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_InvalidContinuationByte_ThrowsFormatException) {
+    std::vector<uint8_t> bytes{0xC3, 0x00}; // lead byte says 2-byte sequence, continuation byte is invalid
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadChar(), System::FormatException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_TruncatedMultiByteSequence_ThrowsEndOfStreamException) {
+    std::vector<uint8_t> bytes{0xC3}; // 2-byte lead with no continuation byte
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChar_PastEndOfStream_ThrowsEndOfStreamException) {
+    MemoryStream ms; // empty stream
+    BinaryReader br(&ms, true);
+    EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
 }
 
 TEST(BinaryReaderWriterTests, Read7BitEncodedInt_RoundTripsWithReadString) {
