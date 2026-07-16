@@ -9,6 +9,13 @@
 #include "System/IO/Stream.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
+// System::Decimal requires unsigned __int128 (GCC/Clang only) and #error's out on MSVC -- guard
+// ReadDecimal() the same way, rather than making the whole of BinaryReader MSVC-unsupported over
+// one method. Matches sharp-runtime's own existing Decimal/Int128/UInt128 MSVC-unsupported policy.
+#if !defined(_MSC_VER)
+#include "System/Decimal.hpp"
+#endif
+
 namespace System::IO
 {
     using SharpRuntime::bytecs;
@@ -100,6 +107,23 @@ namespace System::IO
 
         /** Reads a UTF-8 string prefixed with its 7-bit encoded length. */
         [[nodiscard]] virtual std::string ReadString();
+
+#if !defined(_MSC_VER)
+        /**
+         * @brief Reads a 16-byte .NET `System.Decimal` value.
+         *
+         * C++ counterpart of .NET `BinaryReader.ReadDecimal()`. Matches real .NET's actual
+         * on-disk field order -- `lo`, `mid`, `hi`, `flags` (four little-endian `int32`s, per
+         * `decimal.ToDecimal(ReadOnlySpan<byte>)` in the .NET reference source) -- which is
+         * *not* the same order as `Decimal`'s own in-memory struct layout (`flags`, `hi`,
+         * `lo64`). `flags`' bit 31 is the sign; bits 16-23 are the scale (0-28).
+         *
+         * @return The decoded Decimal value.
+         * @note MSVC-unsupported: guarded out because `System::Decimal` itself requires
+         *       `unsigned __int128` (GCC/Clang only) -- see this project's MSVC-unsupported policy.
+         */
+        [[nodiscard]] virtual System::Decimal ReadDecimal();
+#endif
 
         /** Reads exactly count bytes into the caller-supplied buffer. */
         virtual intcs Read(bytecs buffer[], intcs offset, intcs count);

@@ -230,4 +230,19 @@ namespace System::IO
             disposed_ = true;
         }
     }
+
+#if !defined(_MSC_VER)
+    System::Decimal BinaryReader::ReadDecimal()
+    {
+        const int32_t lo = ReadInt32();
+        const int32_t mid = ReadInt32();
+        const int32_t hi = ReadInt32();
+        const int32_t flags = ReadInt32();
+
+        const bool isNegative = (static_cast<uint32_t>(flags) & 0x80000000u) != 0;
+        const auto scale = static_cast<bytecs>((static_cast<uint32_t>(flags) >> 16) & 0xFFu);
+
+        return System::Decimal(lo, mid, hi, isNegative, scale);
+    }
+#endif
 }

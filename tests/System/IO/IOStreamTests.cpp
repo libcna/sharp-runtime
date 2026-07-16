@@ -12,6 +12,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Decimal.hpp"
 #include "System/FormatException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/NotSupportedException.hpp"
@@ -944,6 +945,52 @@ TEST(BinaryReaderWriterTests, ReadChar_PastEndOfStream_ThrowsEndOfStreamExceptio
     MemoryStream ms; // empty stream
     BinaryReader br(&ms, true);
     EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadDecimal_PositiveValueRoundTrips) {
+    // 123.45 as a .NET decimal: mantissa 12345, scale 2, positive -- lo=12345, mid=0, hi=0,
+    // flags = scale<<16 = 0x00020000.
+    std::vector<uint8_t> bytes;
+    auto appendInt32 = [&bytes](int32_t v) {
+        for (int i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>((static_cast<uint32_t>(v) >> (i * 8)) & 0xFF));
+    };
+    appendInt32(12345); // lo
+    appendInt32(0);     // mid
+    appendInt32(0);     // hi
+    appendInt32(0x00020000); // flags: scale=2, positive
+
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    const System::Decimal d = br.ReadDecimal();
+
+    int32_t lo, mid, hi, flags;
+    System::Decimal::GetBits(d, lo, mid, hi, flags);
+    EXPECT_EQ(lo, 12345);
+    EXPECT_EQ(mid, 0);
+    EXPECT_EQ(hi, 0);
+    EXPECT_EQ((static_cast<uint32_t>(flags) >> 16) & 0xFF, 2u);
+    EXPECT_EQ(static_cast<uint32_t>(flags) & 0x80000000u, 0u);
+}
+
+TEST(BinaryReaderWriterTests, ReadDecimal_NegativeValueRoundTrips) {
+    std::vector<uint8_t> bytes;
+    auto appendInt32 = [&bytes](int32_t v) {
+        for (int i = 0; i < 4; ++i) bytes.push_back(static_cast<uint8_t>((static_cast<uint32_t>(v) >> (i * 8)) & 0xFF));
+    };
+    appendInt32(500); // lo
+    appendInt32(0);   // mid
+    appendInt32(0);   // hi
+    appendInt32(static_cast<int32_t>(0x80010000)); // flags: scale=1, negative
+
+    MemoryStream ms(bytes.data(), (int32_t)bytes.size());
+    BinaryReader br(&ms, true);
+    const System::Decimal d = br.ReadDecimal();
+
+    int32_t lo, mid, hi, flags;
+    System::Decimal::GetBits(d, lo, mid, hi, flags);
+    EXPECT_EQ(lo, 500);
+    EXPECT_EQ((static_cast<uint32_t>(flags) >> 16) & 0xFF, 1u);
+    EXPECT_NE(static_cast<uint32_t>(flags) & 0x80000000u, 0u);
 }
 
 TEST(BinaryReaderWriterTests, Read7BitEncodedInt_RoundTripsWithReadString) {
