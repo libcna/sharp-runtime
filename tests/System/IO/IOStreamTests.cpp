@@ -884,6 +884,34 @@ TEST(BinaryReaderWriterTests, ReadBytes_NegativeCount_ThrowsArgumentOutOfRange) 
     EXPECT_THROW(br.ReadBytes(-1), System::ArgumentOutOfRangeException);
 }
 
+TEST(BinaryReaderWriterTests, ReadBytes_HugeAdversarialCount_ClampsAllocationAndStillTrims) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write((uint8_t)1);
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    // A seekable stream's remaining length (1 byte here) bounds the eager allocation instead of
+    // the raw, adversarial count -- this must return promptly with the trimmed 1-byte result
+    // rather than attempting a ~2GB allocation.
+    auto bytes = br.ReadBytes(2000000000);
+    ASSERT_EQ(bytes.size(), 1u);
+    EXPECT_EQ(bytes[0], 1);
+}
+
+TEST(BinaryReaderWriterTests, ReadString_DeclaredLengthExceedsRemaining_ThrowsEndOfStreamException) {
+    MemoryStream ms;
+    BinaryWriter bw(&ms, true);
+    bw.Write7BitEncodedInt(2000000000); // declared length far exceeds the (zero) remaining bytes
+    bw.Flush();
+    auto buf = ms.ToArray();
+    MemoryStream ms2(buf.data(), (int32_t)buf.size());
+    BinaryReader br(&ms2, true);
+    // Must reject before attempting a ~2GB allocation for the string buffer.
+    EXPECT_THROW(br.ReadString(), System::IO::EndOfStreamException);
+}
+
 TEST(BinaryReaderWriterTests, ReadChar_AsciiOneByte) {
     std::vector<uint8_t> bytes{0x41}; // 'A'
     MemoryStream ms(bytes.data(), (int32_t)bytes.size());

@@ -105,7 +105,21 @@ namespace System::IO
          */
         [[nodiscard]] virtual charcs ReadChar();
 
-        /** Reads a UTF-8 string prefixed with its 7-bit encoded length. */
+        /**
+         * @brief Reads a UTF-8 string prefixed with its 7-bit encoded length.
+         *
+         * For a seekable @ref stream_ (`getCanSeekProperty()` true), a declared length exceeding
+         * the stream's own remaining bytes is rejected before the string buffer is allocated --
+         * a corrupt or adversarial length prefix (up to ~2GB from a single 5-byte 7-bit-encoded
+         * value) can otherwise trigger a huge allocation attempt before the truncation would
+         * naturally be detected. Non-seekable streams (`Length`/`Position` not meaningful, e.g.
+         * `NetworkStream`) are unaffected -- same behavior as before.
+         *
+         * @return The decoded string.
+         * @throws System::IO::IOException if the decoded length is negative.
+         * @throws System::IO::EndOfStreamException if the declared length exceeds the seekable
+         *         stream's remaining length, or the stream ends before the full string is read.
+         */
         [[nodiscard]] virtual std::string ReadString();
 
 #if !defined(_MSC_VER)
@@ -134,6 +148,14 @@ namespace System::IO
          * C++ counterpart of .NET BinaryReader.ReadBytes(int).
          * If the end of the stream is reached before @p count bytes are read, the
          * returned vector is trimmed to the number of bytes actually read (no exception).
+         *
+         * For a seekable @ref stream_, the initial allocation is clamped to the stream's own
+         * remaining length when that is smaller than @p count, since a seekable stream can never
+         * actually deliver more bytes than that -- avoids attempting a huge allocation for a
+         * corrupt or adversarial @p count (e.g. a `.xnb` reader that trusts an attacker-controlled
+         * byte count) that could never be more than partially satisfied anyway. The final
+         * (possibly trimmed) result is identical to the pre-existing behavior either way.
+         *
          * @param count The number of bytes to read.
          * @return A vector containing the bytes read (may be shorter than @p count at EOF).
          * @throws System::ArgumentOutOfRangeException if @p count is negative.

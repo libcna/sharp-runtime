@@ -190,6 +190,15 @@ namespace System::IO
         if (length < 0)
             throw System::IO::IOException("Invalid string length.");
         if (length == 0) return {};
+
+        if (stream_->getCanSeekProperty())
+        {
+            const intcs remaining = stream_->getLengthProperty() - stream_->getPositionProperty();
+            if (remaining >= 0 && length > remaining)
+                throw System::IO::EndOfStreamException(
+                    "BinaryReader::ReadString(): declared string length exceeds the remaining stream length.");
+        }
+
         std::string result(static_cast<std::size_t>(length), '\0');
         ReadBytesExact(reinterpret_cast<bytecs*>(result.data()), length);
         return result;
@@ -209,11 +218,24 @@ namespace System::IO
         System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
         if (count == 0) return {};
 
-        std::vector<bytecs> result(static_cast<std::size_t>(count));
-        intcs total = 0;
-        while (total < count)
+        // A seekable stream can never deliver more bytes than its own remaining length -- clamp
+        // the eager allocation to that bound instead of the raw (possibly adversarial) `count`,
+        // so a corrupt/attacker-controlled count can't force a huge allocation attempt for bytes
+        // that could never be read anyway. The read loop below and the final trim still produce
+        // the exact same result this would have without the clamp.
+        intcs allocateCount = count;
+        if (stream_->getCanSeekProperty())
         {
-            intcs n = stream_->Read(result.data(), total, count - total);
+            const intcs remaining = stream_->getLengthProperty() - stream_->getPositionProperty();
+            if (remaining >= 0 && remaining < allocateCount)
+                allocateCount = remaining;
+        }
+
+        std::vector<bytecs> result(static_cast<std::size_t>(allocateCount));
+        intcs total = 0;
+        while (total < allocateCount)
+        {
+            intcs n = stream_->Read(result.data(), total, allocateCount - total);
             if (n == 0) break; // .NET trims the result instead of throwing here.
             total += n;
         }
