@@ -32,6 +32,16 @@
 #include <cstring>
 #include <sstream>
 
+// HOST_NAME_MAX is a Linux/glibc extension (POSIX.1-2001 mentions it but doesn't mandate it) --
+// Apple's libc headers never define it at all (confirmed via a real macOS CI build: "use of
+// undeclared identifier 'HOST_NAME_MAX'"), even though gethostname() itself is fully POSIX and
+// available everywhere. 255 is the POSIX-guaranteed minimum (_POSIX_HOST_NAME_MAX), a safe,
+// portable buffer size fallback for any platform (macOS, other BSDs, Emscripten) that omits the
+// Linux-specific constant.
+#if !defined(_WIN32) && !defined(HOST_NAME_MAX)
+#  define HOST_NAME_MAX 255
+#endif
+
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 extern char** environ; // POSIX — global process environment array
 #endif
@@ -317,7 +327,16 @@ SharpRuntime::longcs Environment::getTickCount64Property() {
     return static_cast<SharpRuntime::longcs>(GetTickCount64());
 #else
     struct timespec ts{};
+    // CLOCK_BOOTTIME is Linux-specific (added in kernel 2.6.39) -- undeclared on Apple/BSD
+    // platforms entirely (confirmed via a real macOS CI build: "use of undeclared identifier
+    // 'CLOCK_BOOTTIME'"). CLOCK_MONOTONIC is the portable POSIX fallback available on every
+    // Unix-like platform, and matches .NET's own cross-platform GetTickCount64 PAL
+    // implementation, which uses CLOCK_MONOTONIC uniformly rather than a Linux-only clock.
+#if defined(CLOCK_BOOTTIME)
     clock_gettime(CLOCK_BOOTTIME, &ts);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     return static_cast<SharpRuntime::longcs>(ts.tv_sec) * 1000LL
          + static_cast<SharpRuntime::longcs>(ts.tv_nsec) / 1000000LL;
 #endif
