@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "SharpRuntime/PortableFromChars.hpp"
 #include "System/Diagnostics/UnreachableException.hpp"
 #include "System/Double.hpp"
 #include "System/Xml/XPath/XPathException.hpp"
@@ -509,7 +510,15 @@ namespace System::Xml::XPath {
             double result = 0.0;
             const char* begin = s.data();
             const char* end = s.data() + s.size();
-            auto [ptr, ec] = std::from_chars(begin, end, result, std::chars_format::fixed);
+            // SharpRuntime::FromCharsFloat rather than a bare std::from_chars call: Apple's
+            // libc++ omits the floating-point std::from_chars overload entirely below a 13.3+
+            // deployment target (see PortableFromChars.hpp's own header comment). The explicit
+            // chars_format::fixed restriction the real std::from_chars call used is redundant
+            // here anyway (not lost by using the portable, format-less helper instead): the
+            // char-by-char filter loop just above already guarantees `s` contains only
+            // [-0-9.], so no exponent ('e'/'E') could ever reach this point regardless of which
+            // chars_format would otherwise have been requested.
+            auto [ptr, ec] = SharpRuntime::FromCharsFloat(begin, end, result);
             if (ec != std::errc{} || ptr != end) return std::numeric_limits<double>::quiet_NaN();
             return result;
         }

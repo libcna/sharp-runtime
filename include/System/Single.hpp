@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+#include "SharpRuntime/PortableFromChars.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/ArithmeticException.hpp"
@@ -547,7 +548,11 @@ private:
             result = -std::numeric_limits<float>::infinity();
             return true;
         }
-        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+        // SharpRuntime::FromCharsFloat, not a bare std::from_chars call: Apple's libc++ omits
+        // the floating-point std::from_chars overload entirely below a 13.3+ deployment target
+        // (see PortableFromChars.hpp's own header comment) -- this stays correct either way
+        // without forcing a higher minimum runtime macOS version.
+        auto [ptr, ec] = SharpRuntime::FromCharsFloat(s.data(), s.data() + s.size(), result);
         if (ec != std::errc{} || ptr != s.data() + s.size() || !std::isfinite(result)) {
             result = 0.0f;
             return false;
