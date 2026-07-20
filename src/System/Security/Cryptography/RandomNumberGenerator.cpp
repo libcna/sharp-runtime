@@ -36,7 +36,7 @@ namespace {
             (void)data;
             throw System::PlatformNotSupportedException(
                 "RandomNumberGenerator is not implemented on Emscripten in this runtime.");
-#else
+#elif defined(__linux__)
             size_t total = 0;
             while (total < data.size()) {
                 ssize_t n = ::getrandom(data.data() + total, data.size() - total, 0);
@@ -45,6 +45,26 @@ namespace {
                     throw CryptographicException(std::string("getrandom() failed: ") + std::strerror(errno));
                 }
                 total += static_cast<size_t>(n);
+            }
+#else
+            // getrandom() is Linux-only (glibc 2.25+ wrapper around the Linux 3.17+ syscall) --
+            // undeclared on Apple/BSD platforms entirely (confirmed via a real macOS CI build:
+            // "no member named 'getrandom' in the global namespace"). BSD/Darwin's real
+            // equivalent is getentropy() (also declared in <sys/random.h>, already included
+            // above): same cryptographic-quality guarantee, but a simpler signature (no flags
+            // parameter, no partial-read return value) and, critically, a hard 256-byte-per-call
+            // maximum -- requesting more fails with EIO rather than silently truncating, per its
+            // own man page ("the maximum buffer size permitted is 256 bytes"). Chunked here in
+            // <=256-byte calls for exactly that reason.
+            constexpr size_t maxChunk = 256;
+            size_t total = 0;
+            while (total < data.size()) {
+                size_t remaining = data.size() - total;
+                size_t chunk = remaining < maxChunk ? remaining : maxChunk;
+                if (::getentropy(data.data() + total, chunk) != 0) {
+                    throw CryptographicException(std::string("getentropy() failed: ") + std::strerror(errno));
+                }
+                total += chunk;
             }
 #endif
         }
