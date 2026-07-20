@@ -26,6 +26,27 @@
 #include <netinet/ip_icmp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#if defined(__linux__)
+#define SHARP_RUNTIME_PING_LINUX_ICMP 1
+#else
+// BSD/Darwin's <netinet/ip_icmp.h> ships a genuinely different ICMPv4 ABI from Linux's: the
+// header struct is named `struct icmp` (not `icmphdr`), and its type/code/checksum/id/sequence
+// fields are reached as `icmp_type`/`icmp_code`/`icmp_cksum`/`icmp_id`/`icmp_seq` (the last two
+// via the system header's own convenience macros over a nested union), not
+// `type`/`code`/`checksum`/`un.echo.id`/`un.echo.sequence` like Linux's `icmphdr`. The
+// Destination-Unreachable/Time-Exceeded sub-code constants this file's own mapIcmpV4Status()
+// switch already names are aliased onto BSD's OWN real macros (ICMP_UNREACH/ICMP_UNREACH_NET/
+// etc.) below -- deliberately not hand-typed numeric values, so the actual RFC 792 type/code
+// numbers always come from the system's own header, never guessed. ICMP_ECHOREPLY and ICMP_ECHO
+// need no alias -- both platforms already use those exact names for the same RFC 792 values.
+#define ICMP_DEST_UNREACH   ICMP_UNREACH
+#define ICMP_NET_UNREACH    ICMP_UNREACH_NET
+#define ICMP_HOST_UNREACH   ICMP_UNREACH_HOST
+#define ICMP_PROT_UNREACH   ICMP_UNREACH_PROTOCOL
+#define ICMP_PORT_UNREACH   ICMP_UNREACH_PORT
+#define ICMP_TIME_EXCEEDED  ICMP_TIMXCEED
+#endif
 #endif
 
 namespace System::Net::NetworkInformation {
@@ -55,6 +76,17 @@ void Ping::checkArgs(const System::Net::IPAddress& address, SharpRuntime::intcs 
 
 #if defined(SHARP_RUNTIME_PING_POSIX)
 namespace {
+
+    // Real struct name differs (Linux: `icmphdr`, BSD/Darwin: `icmp`) -- see the platform-detect
+    // block above the includes for why. This alias lets sizeof(IcmpV4Header)/pointer-cast call
+    // sites stay identical on both platforms; the few field-name-dependent lines (construction,
+    // parsing) are still written per-platform explicitly, deliberately not hidden behind further
+    // macros, so they stay easy to read and verify against each platform's real header.
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
+    using IcmpV4Header = ::icmphdr;
+#else
+    using IcmpV4Header = ::icmp;
+#endif
 
     uint16_t internetChecksum(const void* data, size_t len) {
         const auto* p = static_cast<const uint8_t*>(data);
@@ -170,22 +202,38 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
             std::memcpy(packet.data() + sizeof(icmp6_hdr), buffer.data(), buffer.size());
         }
     } else {
-        packet.resize(sizeof(icmphdr) + buffer.size());
+        packet.resize(sizeof(IcmpV4Header) + buffer.size());
         // Same rationale as the icmp6_hdr branch above.
-        icmphdr hdr{};
+        IcmpV4Header hdr{};
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
         hdr.type = ICMP_ECHO;
         hdr.code = 0;
         hdr.checksum = 0;
         hdr.un.echo.id = htons(identifier);
         hdr.un.echo.sequence = htons(sequence);
+#else
+        // BSD/Darwin `struct icmp`: icmp_id/icmp_seq are the system header's own convenience
+        // macros over a nested union (icmp_hun.ih_idseq.icd_id/icd_seq) -- assigning through them
+        // directly, exactly like real BSD ping(8)/traceroute(8) implementations do, rather than
+        // reaching into the union by hand.
+        hdr.icmp_type = ICMP_ECHO;
+        hdr.icmp_code = 0;
+        hdr.icmp_cksum = 0;
+        hdr.icmp_id = htons(identifier);
+        hdr.icmp_seq = htons(sequence);
+#endif
         std::memcpy(packet.data(), &hdr, sizeof(hdr));
         if (!buffer.empty()) {
-            std::memcpy(packet.data() + sizeof(icmphdr), buffer.data(), buffer.size());
+            std::memcpy(packet.data() + sizeof(IcmpV4Header), buffer.data(), buffer.size());
         }
         // The checksum covers the whole packet (header + payload), so it can only be computed
         // once the payload has been copied in; patch it into both the local header and the
         // packet buffer afterward.
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
         hdr.checksum = htons(internetChecksum(packet.data(), packet.size()));
+#else
+        hdr.icmp_cksum = htons(internetChecksum(packet.data(), packet.size()));
+#endif
         std::memcpy(packet.data(), &hdr, sizeof(hdr));
     }
 
@@ -236,11 +284,15 @@ PingReply Ping::sendPingCore(const System::Net::IPAddress& address, const std::v
             }
         }
     } else {
-        if (static_cast<size_t>(received) >= sizeof(icmphdr)) {
-            const auto* hdr = reinterpret_cast<const icmphdr*>(recvBuf.data());
+        if (static_cast<size_t>(received) >= sizeof(IcmpV4Header)) {
+            const auto* hdr = reinterpret_cast<const IcmpV4Header*>(recvBuf.data());
+#if defined(SHARP_RUNTIME_PING_LINUX_ICMP)
             status = mapIcmpV4Status(hdr->type, hdr->code);
-            if (static_cast<size_t>(received) > sizeof(icmphdr)) {
-                replyBuffer.assign(recvBuf.begin() + sizeof(icmphdr), recvBuf.begin() + received);
+#else
+            status = mapIcmpV4Status(hdr->icmp_type, hdr->icmp_code);
+#endif
+            if (static_cast<size_t>(received) > sizeof(IcmpV4Header)) {
+                replyBuffer.assign(recvBuf.begin() + sizeof(IcmpV4Header), recvBuf.begin() + received);
             }
         }
     }
