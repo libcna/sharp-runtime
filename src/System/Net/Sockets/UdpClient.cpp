@@ -102,7 +102,7 @@ UdpClient::UdpClient(int port) {
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = ::htons(static_cast<uint16_t>(port));
+    addr.sin_port        = htons(static_cast<uint16_t>(port));
     if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
@@ -120,8 +120,8 @@ UdpClient::UdpClient(const Net::IPEndPoint& localEP) {
     fd_ = makeUdpSocket();
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(localEP.getAddressProperty().getAddressProperty());
-    addr.sin_port        = ::htons(static_cast<uint16_t>(localEP.getPortProperty()));
+    addr.sin_addr.s_addr = htonl(localEP.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(localEP.getPortProperty()));
     if (::bind(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
         auto err = netErr();
@@ -147,14 +147,14 @@ void UdpClient::Connect(const std::string& hostname, int port) {
         throw SocketException(SocketError::HostNotFound, "UdpClient::Connect: DNS failed: " + gaErr(rc));
 
     auto* sa = reinterpret_cast<struct sockaddr_in*>(res->ai_addr);
-    remote_.setAddressProperty(Net::IPAddress(::ntohl(sa->sin_addr.s_addr)));
-    remote_.setPortProperty(static_cast<SharpRuntime::intcs>(::ntohs(sa->sin_port)));
+    remote_.setAddressProperty(Net::IPAddress(ntohl(sa->sin_addr.s_addr)));
+    remote_.setPortProperty(static_cast<SharpRuntime::intcs>(ntohs(sa->sin_port)));
     ::freeaddrinfo(res);
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(remote_.getAddressProperty().getAddressProperty());
-    addr.sin_port        = ::htons(static_cast<uint16_t>(remote_.getPortProperty()));
+    addr.sin_addr.s_addr = htonl(remote_.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(remote_.getPortProperty()));
     if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Connect: connect() failed: " + netErr());
     hasRemote_ = true;
@@ -169,8 +169,8 @@ void UdpClient::Connect(const Net::IPEndPoint& remoteEP) {
     remote_ = remoteEP;
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(remoteEP.getAddressProperty().getAddressProperty());
-    addr.sin_port        = ::htons(static_cast<uint16_t>(remoteEP.getPortProperty()));
+    addr.sin_addr.s_addr = htonl(remoteEP.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(remoteEP.getPortProperty()));
     if (::connect(toSk(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Connect: connect() failed: " + netErr());
     hasRemote_ = true;
@@ -211,8 +211,8 @@ std::vector<SharpRuntime::bytecs> UdpClient::Receive(Net::IPEndPoint& remoteEP) 
                         reinterpret_cast<struct sockaddr*>(&sender), &len);
     if (n < 0)
         throw SocketException(toSocketError(lastErrorCode()), "UdpClient::Receive: recvfrom() failed: " + netErr());
-    remoteEP.setAddressProperty(Net::IPAddress(::ntohl(sender.sin_addr.s_addr)));
-    remoteEP.setPortProperty(static_cast<SharpRuntime::intcs>(::ntohs(sender.sin_port)));
+    remoteEP.setAddressProperty(Net::IPAddress(ntohl(sender.sin_addr.s_addr)));
+    remoteEP.setPortProperty(static_cast<SharpRuntime::intcs>(ntohs(sender.sin_port)));
     buf.resize(static_cast<size_t>(n));
     return buf;
 #endif

@@ -128,8 +128,8 @@ void TcpClient::Connect(const IPEndPoint& remoteEP) {
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(remoteEP.getAddressProperty().getAddressProperty());
-    addr.sin_port        = ::htons(static_cast<uint16_t>(remoteEP.getPortProperty()));
+    addr.sin_addr.s_addr = htonl(remoteEP.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(remoteEP.getPortProperty()));
 
     if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
@@ -237,8 +237,8 @@ void TcpListener::Start() {
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(local_.getAddressProperty().getAddressProperty());
-    addr.sin_port        = ::htons(static_cast<uint16_t>(local_.getPortProperty()));
+    addr.sin_addr.s_addr = htonl(local_.getAddressProperty().getAddressProperty());
+    addr.sin_port        = htons(static_cast<uint16_t>(local_.getPortProperty()));
 
     if (::bind(toSk(sock), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
         auto code = lastErrorCode();
@@ -265,7 +265,7 @@ void TcpListener::Start() {
         struct sockaddr_in actual{};
         socklen_t len = sizeof(actual);
         if (::getsockname(toSk(fd_), reinterpret_cast<struct sockaddr*>(&actual), &len) == 0)
-            local_.setPortProperty(static_cast<SharpRuntime::intcs>(::ntohs(actual.sin_port)));
+            local_.setPortProperty(static_cast<SharpRuntime::intcs>(ntohs(actual.sin_port)));
     }
 #endif
 }
