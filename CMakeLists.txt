@@ -43,7 +43,13 @@ target_link_libraries(SHARP_RUNTIME PRIVATE ZLIB::ZLIB tinyxml2 miniz)
 if(MSVC)
     target_compile_options(SHARP_RUNTIME PRIVATE /W4 /WX)
 else()
-    target_compile_options(SHARP_RUNTIME PRIVATE -Wall -Wextra -Werror -Wno-format-truncation)
+    target_compile_options(SHARP_RUNTIME PRIVATE -Wall -Wextra -Werror)
+    # -Wformat-truncation is a GCC-only diagnostic -- Clang (incl. Apple Clang) never implemented
+    # it, so -Wno-format-truncation is an unrecognized flag there, which -Werror then turns into a
+    # hard build error (-Werror,-Wunknown-warning-option) rather than a harmless no-op.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(SHARP_RUNTIME PRIVATE -Wno-format-truncation)
+    endif()
 endif()
 
 if(WIN32)
@@ -82,7 +88,11 @@ if(SHARP_RUNTIME_BUILD_TESTS)
     )
 
     if(NOT MSVC)
-        target_compile_options(SharpRuntimeTests PRIVATE -Wall -Wextra -Werror -Wno-format-truncation -Wno-unused-result)
+        target_compile_options(SharpRuntimeTests PRIVATE -Wall -Wextra -Werror -Wno-unused-result)
+        # See SHARP_RUNTIME's own identical guard above for why this is GCC-only.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(SharpRuntimeTests PRIVATE -Wno-format-truncation)
+        endif()
     endif()
 
     include(GoogleTest)
