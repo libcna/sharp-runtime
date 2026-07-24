@@ -46,6 +46,16 @@ function(sharp_runtime_register_component)
         set(component_type "ALIAS")
         set(component_target "")
         set(component_dependencies "${SHARP_COMPONENT_ALIAS_OF}")
+
+        _sharp_runtime_component_key(
+            aliased_component_key
+            "${SHARP_COMPONENT_ALIAS_OF}"
+        )
+        set_property(
+            GLOBAL APPEND PROPERTY
+            "SHARP_RUNTIME_COMPONENT_${aliased_component_key}_ALIASES"
+            "${SHARP_COMPONENT_NAME}"
+        )
     else()
         if(NOT SHARP_COMPONENT_TARGET)
             message(FATAL_ERROR
@@ -265,6 +275,23 @@ function(sharp_runtime_enable_component component)
         sharp_runtime_enable_component("${dependency}")
     endforeach()
 
+    # Enabling a physical component also creates all names that alias it. An
+    # explicitly requested alias therefore already exists after its dependency
+    # has been enabled.
+    if(TARGET "SharpRuntime::${component}")
+        set_property(
+            GLOBAL PROPERTY
+            "SHARP_RUNTIME_COMPONENT_${component_key}_STATE"
+            "ENABLED"
+        )
+        set_property(
+            GLOBAL APPEND PROPERTY
+            SHARP_RUNTIME_ENABLED_COMPONENTS
+            "${component}"
+        )
+        return()
+    endif()
+
     get_property(
         component_type
         GLOBAL
@@ -317,6 +344,21 @@ function(sharp_runtime_enable_component component)
             ALIAS
             "${component_target}"
         )
+
+        get_property(
+            component_aliases
+            GLOBAL
+            PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_ALIASES"
+        )
+        foreach(component_alias IN LISTS component_aliases)
+            if(NOT TARGET "SharpRuntime::${component_alias}")
+                add_library(
+                    "SharpRuntime::${component_alias}"
+                    ALIAS
+                    "${component_target}"
+                )
+            endif()
+        endforeach()
 
         foreach(dependency IN LISTS component_dependencies)
             if(component_type STREQUAL "STATIC")
