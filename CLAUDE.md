@@ -151,7 +151,10 @@ Every `.hpp` and `.cpp` file starts with:
 
 - **Complex types:** `.hpp` declaration + `.cpp` body. Move bodies to `.cpp` when a header grows unwieldy.
 - **Simple types:** header-only is fine.
-- **CMake:** `GLOB_RECURSE` auto-discovers `src/*.cpp` — no manual registration needed.
+- **CMake:** component-specific `CONFIGURE_DEPENDS` globs discover `src/*.cpp`;
+  configuration validates that every implementation source belongs to exactly
+  one component. A new namespace/source directory must be added to the
+  appropriate mapping in `cmake/SharpRuntimeSources.cmake`.
 - **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to `include/`, `src/`, and `tests/`.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
 

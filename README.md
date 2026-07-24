@@ -81,14 +81,55 @@ cmake -S . -B build-no-tests -DSHARP_RUNTIME_BUILD_TESTS=OFF
 cmake --build build-no-tests --parallel 4
 ```
 
+## CMake components
+
+Sharp Runtime is split into opt-in CMake components. When no component list is
+specified, the default remains `All`, so existing standalone builds keep
+working. A parent application can request only the modules it uses:
+
+```cmake
+set(SHARP_RUNTIME_COMPONENTS
+    Text.Json
+)
+set(SHARP_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(sharp-runtime)
+
+target_link_libraries(MyApp PRIVATE
+    SharpRuntime::Text.Json
+)
+```
+
+The dependency closure is automatic. This example enables only `Core`, `Text`,
+`Collections`, and `Text.Json`; it does not configure or build IO, networking,
+XML, ZLIB, miniz, tinyxml2, or SDL.
+
+Multiple components form a normal CMake list:
+
+```cmake
+set(SHARP_RUNTIME_COMPONENTS
+    IO
+    IO.Hashing
+)
+```
+
+`SharpRuntime::All` enables every component. The legacy `SHARP_RUNTIME` target
+continues to forward to `SharpRuntime::All` when the `All` component is
+enabled. Building the repository-wide test suite also enables `All`, because
+the suite covers every namespace.
+
+See [CMake components](docs/CMakeComponents.md) for the complete component
+catalogue, dependency and external-library mapping, and migration details.
+
 ## Build troubleshooting
 
 - **`vendor/googletest is missing` (`FATAL_ERROR` from CMake)** — the git submodule wasn't
   initialized. Run `git submodule update --init --recursive` from the repo root.
 - **A new `.cpp`/`.hpp` file doesn't seem to be picked up** — `src/*.cpp` and `tests/*.cpp` are
-  auto-discovered via `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)`, so a plain `cmake --build`
-  re-runs CMake's configure step automatically when the file list changes (you'll see
-  `-- GLOB mismatch!` in the build output). If a build still doesn't pick up a new file, force a
+  auto-discovered via component-specific `CONFIGURE_DEPENDS` globs, so a plain
+  `cmake --build` re-runs CMake's configure step automatically when the file
+  list changes. Configuration fails if a source is assigned to zero or
+  multiple modules. If a build still doesn't pick up a new file, force a
   reconfigure: `cmake -S . -B build` before building.
 - **Isolating warnings from a large build log**:
   ```bash
@@ -101,7 +142,7 @@ cmake --build build-no-tests --parallel 4
 - **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
   and neither has been wired into CI, but both are real, working, verified targets (not
   aspirational): `x86_64-w64-mingw32-g++` and `emcmake cmake` both build the `SHARP_RUNTIME`
-  library target cleanly as of the fixes tracked under stabilization tickets #40 (Windows) and
+  libraries cleanly as of the fixes tracked under stabilization tickets #40 (Windows) and
   #41 (Emscripten) — see those tickets' notes in `plan.sqlite3` for the exact blockers found and
   fixed, and for what wasn't verified (the test binary itself is not built under either
   cross-compilation target — GoogleTest isn't cross-compiled for wasm/MinGW in this repo).
@@ -321,4 +362,3 @@ Instead, it focuses on a **practical subset** useful for native development.
 # 🔗 Related Projects
 
 * CNA — C++ reimplementation of XNA 4.0 (built on top of this library)
-
