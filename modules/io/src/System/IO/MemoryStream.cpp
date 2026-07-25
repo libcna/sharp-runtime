@@ -14,8 +14,8 @@ namespace System::IO
     MemoryStream::MemoryStream()
         : position_(0), writable_(true) {}
 
-    MemoryStream::MemoryStream(const bytecs* buffer, intcs size)
-        : data_(buffer, buffer + size), position_(0), writable_(false) {}
+    MemoryStream::MemoryStream(const bytecs* buffer, intcs size, bool writable)
+        : data_(buffer, buffer + size), position_(0), writable_(writable) {}
 
     void MemoryStream::ensureNotClosed() const
     {

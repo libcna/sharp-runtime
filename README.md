@@ -7,7 +7,7 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-25 is a warning-free build
-with **12,586 passing tests across 37 test executables**.
+with **12,588 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -181,7 +181,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 12,586 tests. |
+| Linux/GCC | Current full component build and all 12,588 tests. |
 | Windows/MinGW | The pre-component library build was warning-free in the ticket #40 audit; GoogleTest was not cross-built, and the post-modular tree is not covered by repository CI. |
 | Emscripten | The pre-component library build was warning-free in the ticket #41 audit; tests were not cross-built, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |

@@ -5,6 +5,7 @@
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/BinaryData.hpp"
 #include "System/IO/MemoryStream.hpp"
+#include "System/NotSupportedException.hpp"
 
 using System::BinaryData;
 
@@ -91,6 +92,15 @@ TEST(BinaryDataTests, ToStream_CorrectBytes) {
     ms.Read(buf.data(), 0, 5);
     EXPECT_EQ(buf[0], static_cast<uint8_t>('h'));
     EXPECT_EQ(buf[4], static_cast<uint8_t>('o'));
+}
+
+TEST(BinaryDataTests, ToStream_RemainsReadOnly) {
+    auto bd = BinaryData::FromString("hello");
+    auto ms = bd.ToStream();
+    uint8_t replacement[] = {0};
+
+    EXPECT_FALSE(ms.getCanWriteProperty());
+    EXPECT_THROW(ms.Write(replacement, 0, 1), System::NotSupportedException);
 }
 
 TEST(BinaryDataTests, ImplicitConversion_ToReadOnlyMemory) {

@@ -3,9 +3,9 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-25. Branch: `feature/work`. The active P0 component
-boundary repair is complete: 41 physical modules, 90 production dependency
-edges, and 12,586 tests across 37 executables.*
+*Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
+repair and first P1 parity repair are complete: 41 physical modules, 90
+production dependency edges, and 12,588 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -27,11 +27,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,586 passing tests
+- The full native baseline is a warning-free build with 12,588 passing tests
   across 36 component executables and one integration executable.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,737 completed tickets. Ticket #1737 records the completed P0 split. The
+1,738 completed tickets. Ticket #1737 records the completed P0 split and
+ticket #1738 records the MemoryStream repair. The
 database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
@@ -47,24 +48,29 @@ Text.Json negative assertion. The narrow component is intentional: consumers
 that need blocking, cancellation, and timeout semantics select
 `Collections.Blocking`; unrelated collections consumers keep the lean closure.
 
+## P1 completion: MemoryStream buffer constructor
+
+`MemoryStream(buffer, size)` now follows .NET's single-buffer constructor and
+is writable by default. The port retains its copying ownership model. Callers
+that require a read-only stream pass `false` explicitly: this preserves the
+contracts of `BinaryData::ToStream()` and read-mode `ZipArchiveEntry::Open()`.
+Regression tests cover writing, resizing, and BinaryData's protected read-only
+stream.
+
 ## Recommended next bounded tasks
 
 Choose one, create a ticket, and keep the changes isolated.
 
-1. **`MemoryStream` writability parity.** `MemoryStream(buffer, size)` is
-   currently read-only, while the corresponding .NET single-buffer
-   constructor is writable. Audit callers, correct the default, and add a
-   regression test.
-2. **`TaskT<TResult>::ContinueWith`.** Add the missing generic continuation
+1. **`TaskT<TResult>::ContinueWith`.** Add the missing generic continuation
    API with success, fault, cancellation, option filtering, chaining, and
    lifetime tests.
-3. **`XmlWriter::WriteWhitespace` plus `XText` parity.** `XText::WriteTo`
+2. **`XmlWriter::WriteWhitespace` plus `XText` parity.** `XText::WriteTo`
    currently always writes a string; match the document-child whitespace rule
    through a deliberate writer API addition.
-4. **Post-modular portability evidence.** Re-run documented MinGW and
+3. **Post-modular portability evidence.** Re-run documented MinGW and
    Emscripten library configurations for `All` and one selective component;
    record exact toolchains and distinguish build evidence from runtime tests.
-5. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
+4. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
    and ASan/LSan for task/weak-ownership teardown. Keep test adaptations
    separate from production fixes.
 

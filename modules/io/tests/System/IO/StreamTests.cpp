@@ -139,14 +139,14 @@ TEST(MemoryStreamTests, CanWriteIsTrue) {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStream — read-only (from buffer ctor)
+// MemoryStream — constructed from a buffer
 // ---------------------------------------------------------------------------
 
-TEST(MemoryStreamTests, ReadOnlyCtorFromBuffer) {
+TEST(MemoryStreamTests, BufferCtorCopiesBytes) {
     uint8_t src[] = {1, 2, 3, 4, 5};
     MemoryStream ms(src, 5);
     EXPECT_EQ(ms.getLengthProperty(), 5);
-    EXPECT_FALSE(ms.getCanWriteProperty());
+    EXPECT_TRUE(ms.getCanWriteProperty());
 }
 
 TEST(MemoryStreamTests, ReadFromBuffer) {
@@ -189,7 +189,7 @@ TEST(MemoryStreamTests, WriteReadRoundtrip) {
     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF};
     writer.Write(payload, 0, 4);
 
-    // Construct a read-only stream from the written data
+    // Construct a buffered stream from the written data.
     const auto& buf = writer.ToArray();
     MemoryStream reader(buf.data(), static_cast<int>(buf.size()));
     uint8_t readback[4] = {};
@@ -312,26 +312,39 @@ TEST(MemoryStreamTests, SetLengthNegativeThrows) {
     EXPECT_THROW(ms.SetLength(-1), System::ArgumentOutOfRangeException);
 }
 
-TEST(MemoryStreamTests, SetLengthOnReadOnlyThrowsNotSupportedException) {
+TEST(MemoryStreamTests, BufferConstructorIsWritable) {
     uint8_t src[] = {1, 2, 3};
     MemoryStream ms(src, 3);
+    ASSERT_TRUE(ms.getCanWriteProperty());
+
+    ms.setPositionProperty(1);
+    ms.WriteByte(9);
+    uint8_t extension[] = {8};
+    ms.setPositionProperty(3);
+    ms.Write(extension, 0, 1);
+    ms.SetLength(5);
+
+    EXPECT_EQ(ms.ToArray(), (std::vector<uint8_t>{1, 9, 3, 8, 0}));
+    EXPECT_EQ(src[1], 2); // The C++ constructor owns a copy of the source bytes.
+}
+
+TEST(MemoryStreamTests, SetLengthOnExplicitReadOnlyBufferThrowsNotSupportedException) {
+    uint8_t src[] = {1, 2, 3};
+    MemoryStream ms(src, 3, false);
     EXPECT_THROW(ms.SetLength(1), System::NotSupportedException);
 }
 
-TEST(MemoryStreamTests, WriteOnReadOnlyThrowsNotSupportedException) {
-    // Regression: Write() previously silently no-op'd instead of throwing when !CanWrite,
-    // matching SetLength()'s existing correct behavior (above) rather than being the one
-    // internally-inconsistent silent-drop path.
+TEST(MemoryStreamTests, WriteOnExplicitReadOnlyBufferThrowsNotSupportedException) {
     uint8_t src[] = {1, 2, 3};
-    MemoryStream ms(src, 3);
+    MemoryStream ms(src, 3, false);
     ASSERT_FALSE(ms.getCanWriteProperty());
     uint8_t buf[] = {9, 9};
     EXPECT_THROW(ms.Write(buf, 0, 2), System::NotSupportedException);
 }
 
-TEST(MemoryStreamTests, WriteByteOnReadOnlyThrowsNotSupportedException) {
+TEST(MemoryStreamTests, WriteByteOnExplicitReadOnlyBufferThrowsNotSupportedException) {
     uint8_t src[] = {1, 2, 3};
-    MemoryStream ms(src, 3);
+    MemoryStream ms(src, 3, false);
     EXPECT_THROW(ms.WriteByte(9), System::NotSupportedException);
 }
 

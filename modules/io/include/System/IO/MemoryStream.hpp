@@ -37,12 +37,17 @@ namespace System::IO
         MemoryStream();
 
         /**
-         * @brief Creates a read-only MemoryStream over a byte buffer.
+         * @brief Creates a MemoryStream over a copy of a byte buffer.
+         *
+         * The default is writable, matching .NET's MemoryStream(byte[])
+         * constructor. Callers that explicitly need a read-only stream can
+         * pass false for @p writable.
          *
          * @param buffer Pointer to the source bytes.
-         * @param size   Number of bytes to copy.
+         * @param size Number of bytes to copy.
+         * @param writable Whether writing to the copied buffer is allowed.
          */
-        MemoryStream(const bytecs* buffer, intcs size);
+        MemoryStream(const bytecs* buffer, intcs size, bool writable = true);
 
         ~MemoryStream() override = default;
 

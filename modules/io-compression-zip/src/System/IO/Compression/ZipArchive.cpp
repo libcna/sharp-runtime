@@ -137,7 +137,8 @@ System::IO::Stream* ZipArchiveEntry::Open() {
 
     auto* ms = new System::IO::MemoryStream(
         reinterpret_cast<SharpRuntime::bytecs*>(raw),
-        static_cast<SharpRuntime::intcs>(outSize));
+        static_cast<SharpRuntime::intcs>(outSize),
+        false);
     mz_free(raw);
     return ms;
 }

@@ -302,7 +302,8 @@ namespace System {
          */
         [[nodiscard]] System::IO::MemoryStream ToStream() const {
             return System::IO::MemoryStream(bytes_.data(),
-                                             static_cast<SharpRuntime::intcs>(bytes_.size()));
+                                             static_cast<SharpRuntime::intcs>(bytes_.size()),
+                                             false);
         }
 
         /**
