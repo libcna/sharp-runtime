@@ -7,7 +7,7 @@ Sharp Runtime exposes independently selectable CMake targets. Applications
 request only their direct components; Sharp Runtime resolves and enables the
 transitive dependency closure.
 
-The registered graph currently contains 40 physical modules and 88 direct
+The registered graph currently contains 41 physical modules and 90 direct
 production dependency edges. The boundary validator reports no cycles,
 duplicate include paths, orphan files, undeclared edges, stale edges, or
 visibility mismatches. The dependency allow-list is empty.
@@ -17,11 +17,10 @@ representative-header table is generated from the CMake registrations:
 [generated component catalogue](ComponentCatalog.md). Local validation and
 the tracked GitHub Actions workflow reject an out-of-date catalogue.
 
-> **Known isolation regression:** the graph is structurally valid, but commit
-> `227111cb` added `Collections.Core -> Threading` for
-> `BlockingCollection`. The Text.Json selective job now fails because it
-> correctly expects no threading target. `plan.md` and `NEXT.md` describe the
-> planned narrow `Collections.Blocking` split.
+`BlockingCollection<T>` is owned by the narrow `Collections.Blocking`
+component. This preserves the `Collections.Core` boundary: consumers such as
+`Text.Json` do not configure `Threading` or `TimeZone` unless they explicitly
+request a component that needs them.
 
 ## Selecting components
 
@@ -82,19 +81,17 @@ New code should prefer the narrow physical targets:
   `SharpRuntime::Uri`, and `SharpRuntime::TimeZone` are optional physical
   components.
 - `SharpRuntime::Collections.Core` is intended to own synchronous collection
-  fundamentals without optional high-level closures.
-  `SharpRuntime::Collections.Async` and
-  `SharpRuntime::Collections.ObjectModel` isolate asynchronous and
-  notification-specific dependencies. At the current baseline,
-  `BlockingCollection` has temporarily reintroduced `Threading` into
-  `Collections.Core`; the planned `Collections.Blocking` component restores
-  this separation.
+  fundamentals without optional high-level closures. `BlockingCollection<T>`
+  belongs to `SharpRuntime::Collections.Blocking`, which isolates its
+  `Threading` dependency. `SharpRuntime::Collections.Async` and
+  `SharpRuntime::Collections.ObjectModel` similarly isolate asynchronous and
+  notification-specific dependencies.
 
 Compatibility targets preserve the historical broad surfaces:
 
 - `SharpRuntime::Core` aggregates `Core.Base`, `Console`, `Uri`, and
   `TimeZone`.
-- `SharpRuntime::Collections` aggregates all three collection components.
+- `SharpRuntime::Collections` aggregates all four collection components.
 - `SharpRuntime::Xml.XPath` aliases the physical `SharpRuntime::Xml` archive.
 - `SharpRuntime::All` aggregates every physical component.
 - The legacy `SHARP_RUNTIME` target forwards to `SharpRuntime::All` when `All`
@@ -134,7 +131,7 @@ are named `SharpRuntimeTests_<Component>`; genuinely cross-module scenarios
 are in `SharpRuntimeIntegrationTests`. CTest also discovers every individual
 GoogleTest case.
 
-The verified 2026-07-25 `All` baseline contains 12,586 tests across 35
+The verified 2026-07-25 `All` baseline contains 12,586 tests across 36
 component executables and one integration executable.
 
 ## Boundary validation and CI
@@ -151,18 +148,13 @@ Run the selective consumer matrix with:
 scripts/check_selective_components.sh
 ```
 
-`.github/workflows/components.yml` runs the nine selective configurations and
+`.github/workflows/components.yml` runs the ten selective configurations and
 the full compatibility build on Ubuntu for pushes and pull requests. It does
 not currently provide Windows, macOS, or Emscripten coverage.
 
-At `03c7d4bb`, the command stops in the Text.Json job after its 147 tests pass:
-
-```text
-FAIL: selective build unexpectedly configured target sharp_runtime_threading
-```
-
-The full native job remains green. Do not report the selective matrix as green
-until the Collections closure regression is fixed.
+The full selective matrix is green. Its Text.Json job explicitly verifies that
+the configured target graph excludes `Threading`, `ComponentModel`, networking
+and external-library targets, then compiles negative include-leakage fixtures.
 
 ## External dependency isolation
 
@@ -176,10 +168,9 @@ External libraries are configured only by their owning component:
 - `Security.Cryptography.Random` links `bcrypt` privately on Windows.
 - `Storage` privately links an existing SDL3 target on Android.
 
-A `Text.Json`-only build configures none of ZLIB, miniz, tinyxml2, SDL, socket,
-or platform-crypto targets. Its current unexpected dependencies are internal
-`Threading` and `TimeZone` targets. The negative consumer fixtures also cover
-private/sibling header leakage: `Text.Json` must not expose
+A `Text.Json`-only build configures none of `Threading`, `TimeZone`, ZLIB,
+miniz, tinyxml2, SDL, socket, or platform-crypto targets. The negative
+consumer fixtures also cover private/sibling header leakage: `Text.Json` must not expose
 `Collections.Core` or `Collections.ObjectModel`, and `Xml.Linq` must not
 expose Xml's private `Diagnostics` dependency.
 
@@ -230,18 +221,16 @@ specific reason.
 
 ## Isolation result
 
-The original remediation removed the broad Collections umbrella from four
-principal closures. The later `BlockingCollection` port regressed the
-threading part of that result:
+`Collections.Blocking` restores the lean closures below while preserving the
+same public header path, namespace, and `Collections` compatibility umbrella:
 
-| Requested component | Current production closure | Intended closure after `Collections.Blocking` split |
-|---|---|---|
-| `Text.Json` | Core.Base, Buffers, Text, TimeZone, Threading, Collections.Core, Text.Json | Core.Base, Buffers, Text, Collections.Core, Text.Json |
-| `Net.Http.Headers` | Core.Base, Uri, TimeZone, Threading, Collections.Core, Net.Http.Headers | Core.Base, Uri, Collections.Core, Net.Http.Headers |
-| `Net.Mime` | Core.Base, TimeZone, Threading, Collections.Core, Net.Mime | Core.Base, Collections.Core, Net.Mime |
-| `Numerics` | Core.Base, Buffers, TimeZone, Threading, Collections.Core, Numerics | Core.Base, Buffers, Collections.Core, Numerics |
+| Requested component | Production closure |
+|---|---|
+| `Text.Json` | Core.Base, Buffers, Text, Collections.Core, Text.Json |
+| `Net.Http.Headers` | Core.Base, Uri, Collections.Core, Net.Http.Headers |
+| `Net.Mime` | Core.Base, Collections.Core, Net.Mime |
+| `Numerics` | Core.Base, Buffers, Collections.Core, Numerics |
 
-The current closures still avoid `ComponentModel`, the broad Collections
-umbrella, Console, networking/XML, and unrelated external libraries. Existing
-include paths, namespaces, and compatibility targets remain available; no
-public runtime behavior was removed by the physical relocation.
+These closures avoid `Threading`, `TimeZone`, `ComponentModel`, the broad
+Collections umbrella, Console, networking/XML, and unrelated external
+libraries.

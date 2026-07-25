@@ -1,15 +1,14 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-25 — code baseline `03c7d4bb`; 40 physical
-components, 88 direct production dependency edges, clean build, and 12,586
-passing tests across 36 executables; Text.Json selective isolation currently
-fails because `Collections.Core` pulls `Threading`.*
+*Last verified: 2026-07-25 — 41 physical components, 90 direct production
+dependency edges, a clean native build, 12,586 passing tests across 37
+executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
 classification and stabilization queues are complete, and the full native
-build/test baseline is healthy. A post-modular API addition has, however,
-reintroduced an unwanted dependency closure and currently breaks one
-selective CI job. Restoring that boundary is the first priority.
+build/test and selective-isolation baselines are healthy. Work now proceeds
+from bounded consumer requirements, confirmed parity gaps, and newly measured
+validation findings.
 
 ## Sources of truth
 
@@ -33,19 +32,18 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,586 passing across 35 component binaries plus one integration
+- Tests: 12,586 passing across 36 component binaries plus one integration
   binary.
-- Component graph: 40 physical modules and 88 direct production edges.
+- Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
   files, unresolved includes, undeclared edges, stale edges, or visibility
   mismatches.
 - Dependency allow-list: empty.
-- Selective matrix: Core.Base and the Text.Json test binary pass, but the
-  Text.Json isolation assertion fails because `sharp_runtime_threading` is
-  configured unexpectedly. The full nine-job matrix is therefore not green.
+- Selective matrix: all ten positive consumers pass. The Text.Json target
+  absence assertion verifies that neither `Threading` nor `TimeZone` is
+  configured, and negative include-leakage fixtures remain rejected.
 - Tracked CI: Ubuntu selective matrix and full compatibility build in
-  `.github/workflows/components.yml`; its Text.Json job is expected to
-  reproduce the local isolation failure.
+  `.github/workflows/components.yml`.
 
 ### Local planning database
 
@@ -54,53 +52,27 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,736 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,737 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
 
-## Active architecture regression
+## P0 completed: Collections blocking isolation
 
-`scripts/check_selective_components.sh` currently stops in the `Text.Json`
-job with:
+Ticket #1737 resolved the post-modular closure regression caused by
+`BlockingCollection.hpp`. It created the physical `Collections.Blocking`
+component, moved that header and its eight dedicated tests there, and declared
+the direct public dependencies `Collections.Core`, `Core.Base`, and
+`Threading`. `Collections.Core` now depends publicly only on `Core.Base` and
+the `Collections` compatibility umbrella includes all four collection
+components.
 
-```text
-FAIL: selective build unexpectedly configured target sharp_runtime_threading
-```
-
-The cause is commit `227111cb`: `BlockingCollection.hpp` publicly includes
-`CancellationToken`, `CancellationTokenRegistration`, and `Timeout`, so the
-commit added `Collections.Core -> Threading`. Since `Threading -> TimeZone`,
-every consumer that needs only `Collections.Core` now also configures both
-archives.
-
-Affected closures include the four isolation examples that motivated the
-Collections split:
-
-| Requested component | Current unwanted additions |
-|---|---|
-| `Text.Json` | `Threading`, `TimeZone` |
-| `Net.Http.Headers` | `Threading`, `TimeZone` |
-| `Net.Mime` | `Threading`, `TimeZone` |
-| `Numerics` | `Threading`, `TimeZone` |
-
-The boundary validator still passes because the new edge is declared
-correctly; this is a product-level closure regression, not an undeclared-edge
-error.
-
-**Recommended remediation:** create a narrow physical component (provisional
-name `Collections.Blocking`), move `BlockingCollection.hpp` and its dedicated
-tests there, give it public dependencies on `Collections.Core`, `Core.Base`,
-and `Threading`, and include it in the `Collections` compatibility umbrella.
-The other concurrent collection headers do not include `System/Threading/*`
-and can remain in `Collections.Core`, avoiding an unnecessary compatibility
-move. Then remove `Threading` from `Collections.Core`, add/update consumer
-fixtures, regenerate the catalogue, and run the full selective matrix plus
-native gate.
-
-Keeping the broader closure and weakening the negative fixture is possible
-but contradicts MOD-003/MOD-006's accepted isolation goal. It should be done
-only after an explicit architecture decision.
+The repair restores lean closures for `Text.Json`, `Net.Http.Headers`,
+`Net.Mime`, and `Numerics`: none configures `Threading` or `TimeZone` unless a
+requested component actually requires them. The Text.Json negative assertion
+and a direct `Collections.Blocking` consumer fixture guard this result. Do not
+move `BlockingCollection<T>` back to `Collections.Core` or weaken that
+assertion without an explicit architecture decision.
 
 ## Completed milestones
 
@@ -135,17 +107,16 @@ It delivered:
 
 - One physical owner for every production header, source, and module test.
 - Explicit public, private, and test-only dependency visibility.
-- Narrow `Core.Base`, `Collections.Core`, `Collections.Async`, and
-  `Collections.ObjectModel` targets while preserving compatibility umbrellas.
+- Narrow `Core.Base`, `Collections.Core`, `Collections.Blocking`,
+  `Collections.Async`, and `Collections.ObjectModel` targets while preserving
+  compatibility umbrellas.
 - Component-scoped test executables and a separate integration executable.
 - Automated boundary validation, catalogue generation, isolated consumers,
   negative fixtures, and GitHub Actions coverage.
 - Generated component documentation in `docs/ComponentCatalog.md`.
 
-The graph landed with 85 production edges and has since grown to 88. The
-validator and generated catalogue remain green, but the
-`Collections.Core -> Threading` edge is the active closure regression
-described above.
+The graph landed with 85 production edges and has since grown to 90. The
+validator, generated catalogue, native gate, and selective matrix are green.
 
 ### Post-modular API expansion
 
@@ -168,43 +139,34 @@ to 12,586.
 No implementation is active yet. Create or reopen a `ticket` row with
 acceptance criteria and a validation command before changing code.
 
-### P0 — Restore the accepted component boundary
-
-1. **Split the threading-dependent blocking collection from
-   `Collections.Core`.**
-   Implement the `Collections.Blocking` remediation described in the active
-   regression section. Acceptance requires the Text.Json negative assertion,
-   all nine selective jobs, the boundary/catalogue checks, and the 12,586-test
-   native floor to pass.
-
 ### P1 — Confirmed parity and correctness gaps
 
-2. **Fix `MemoryStream(buffer, size)` writability parity.**
+1. **Fix `MemoryStream(buffer, size)` writability parity.**
    The constructor currently sets `writable_` to `false`; the corresponding
    .NET single-buffer constructor is writable. Audit callers that may depend
    on the current behavior, change the default, and add a regression test that
    fails before the fix.
 
-3. **Add `TaskT<TResult>::ContinueWith`.**
+2. **Add `TaskT<TResult>::ContinueWith`.**
    Non-generic `Task::ContinueWith` exists, and `TaskT` already has completion
    synchronization used by `TaskExtensions::Unwrap`, but the generic
    continuation list/API is still absent. Preserve weak ownership and verify
    success, fault, cancellation, option filtering, chaining, and leak-free
    teardown.
 
-4. **Close the `XText::WriteTo` whitespace distinction.**
+3. **Close the `XText::WriteTo` whitespace distinction.**
    `XText` always calls `XmlWriter::WriteString`; .NET calls
    `WriteWhitespace` for text directly under `XDocument`. This requires a
    deliberate `XmlWriter` API addition and tests before changing `XText`.
 
 ### P1 — Revalidation after architectural and concurrency changes
 
-5. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
-   The recorded cross-builds predate the 40-component graph. Validate an
+4. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
+   The recorded cross-builds predate the 41-component graph. Validate an
    `All` build and at least one selective build, record exact toolchain
    versions, and distinguish compile success from runtime test coverage.
 
-6. **Run focused sanitizer passes over new concurrent code.**
+5. **Run focused sanitizer passes over new concurrent code.**
    Prioritize `ConcurrentBag`, `BlockingCollection`,
    `TaskExtensions::Unwrap`, and `ConditionalWeakTable`. Use TSan for
    synchronization paths and ASan/LSan for continuation/ownership teardown;
@@ -212,19 +174,19 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Consumer-driven API breadth
 
-7. **Choose a bounded `ImmutableList<T>` slice.**
+6. **Choose a bounded `ImmutableList<T>` slice.**
    Its documented omissions include sorting/reversing, copy/range/conversion,
    predicate search, builder support, and comparer overloads. Do not attempt
    the entire surface in one change; select methods required by a real
    consumer and port them against the .NET reference.
 
-8. **Complete only demanded `BinaryReader` character APIs.**
+7. **Complete only demanded `BinaryReader` character APIs.**
    `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
    `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
    when a consumer needs them, preserving decoder state and truncated-input
    behavior.
 
-9. **Review other documented partial surfaces by demand.**
+8. **Review other documented partial surfaces by demand.**
    Examples include `BigInteger` bitwise operations, full UTF-7 behavior,
    debugger/process breadth, and richer XML reader/writer functionality.
    A documented partial API is not automatically higher priority than a
@@ -232,11 +194,11 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Developer experience
 
-10. **Reduce the Doxygen warning backlog incrementally.**
+9. **Reduce the Doxygen warning backlog incrementally.**
    Establish a reproducible baseline first, then require touched public APIs
    not to regress it. Avoid a mass comment-only rewrite.
 
-11. **Decide whether distribution support is wanted.**
+10. **Decide whether distribution support is wanted.**
     The repository currently supports `add_subdirectory`; it has no installed
     package/export configuration and no standalone sample application. Add
     install rules, package config, or a sample only after the desired consumer

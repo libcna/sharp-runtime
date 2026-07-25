@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **40 physical modules** and **88 direct production dependency edges**.
+The graph contains **41 physical modules** and **90 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -33,7 +33,8 @@ for maintainers and are not part of the consumer include surface.
 | `Uri` | `modules/uri` | static | `Core.Base` | — | — | — | `System/Uri.hpp` |
 | `TimeZone` | `modules/time-zone` | static | `Core.Base` | — | — | — | `System/InvalidTimeZoneException.hpp` |
 | `Buffers` | `modules/buffers` | interface | `Core.Base` | — | — | — | `System/Buffers/ArrayBufferWriter.hpp` |
-| `Collections.Core` | `modules/collections` | interface | `Core.Base`, `Threading` | — | `IO`, `Text` | — | `System/Collections/ArrayList.hpp` |
+| `Collections.Core` | `modules/collections` | interface | `Core.Base` | — | `IO`, `Text` | — | `System/Collections/ArrayList.hpp` |
+| `Collections.Blocking` | `modules/collections-blocking` | interface | `Collections.Core`, `Core.Base`, `Threading` | — | — | — | `System/Collections/Concurrent/BlockingCollection.hpp` |
 | `Collections.Async` | `modules/collections-async` | interface | `Threading` | — | — | — | `System/Collections/Generic/IAsyncEnumerable.hpp` |
 | `Collections.ObjectModel` | `modules/collections-object-model` | interface | `Collections.Core`, `ComponentModel`, `Core.Base` | — | — | — | `System/Collections/ObjectModel/ObservableCollection.hpp` |
 | `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |
@@ -77,6 +78,6 @@ prefer the narrow physical component from the table above.
 | Component | Owner | Kind | Direct dependencies | Representative public header |
 |---|---|---|---|---|
 | `Core` | `modules/core` | compatibility umbrella | `Console`, `Core.Base`, `TimeZone`, `Uri` | `SharpRuntime/Experimental/Property.hpp` |
-| `Collections` | `modules/collections` | compatibility umbrella | `Collections.Async`, `Collections.Core`, `Collections.ObjectModel` | `System/Collections/ArrayList.hpp` |
+| `Collections` | `modules/collections` | compatibility umbrella | `Collections.Async`, `Collections.Blocking`, `Collections.Core`, `Collections.ObjectModel` | `System/Collections/ArrayList.hpp` |
 | `Xml.XPath` | `modules/xml` | alias of Xml | `Xml` | `System/Xml/ConformanceLevel.hpp` |
-| `All` | CMake aggregate | compatibility umbrella | `Buffers`, `Collections.Async`, `Collections.Core`, `Collections.ObjectModel`, `ComponentModel`, `Console`, `Core.Base`, `Diagnostics`, `Globalization`, `IO`, `IO.Compression`, `IO.Compression.Zip`, `IO.Hashing`, `IO.IsolatedStorage`, `Net`, `Net.Http`, `Net.Http.Headers`, `Net.Http.Json`, `Net.Mime`, `Net.NetworkInformation`, `Net.Security`, `Net.Sockets`, `Net.WebSockets`, `Numerics`, `Runtime`, `Security`, `Security.Cryptography`, `Security.Cryptography.Random`, `Storage`, `Text`, `Text.Json`, `Text.RegularExpressions`, `Threading`, `Threading.Channels`, `Threading.Tasks`, `TimeZone`, `Timers`, `Uri`, `Xml`, `Xml.Linq` | `SharpRuntime/Experimental/Property.hpp` |
+| `All` | CMake aggregate | compatibility umbrella | `Buffers`, `Collections.Async`, `Collections.Blocking`, `Collections.Core`, `Collections.ObjectModel`, `ComponentModel`, `Console`, `Core.Base`, `Diagnostics`, `Globalization`, `IO`, `IO.Compression`, `IO.Compression.Zip`, `IO.Hashing`, `IO.IsolatedStorage`, `Net`, `Net.Http`, `Net.Http.Headers`, `Net.Http.Json`, `Net.Mime`, `Net.NetworkInformation`, `Net.Security`, `Net.Sockets`, `Net.WebSockets`, `Numerics`, `Runtime`, `Security`, `Security.Cryptography`, `Security.Cryptography.Random`, `Storage`, `Text`, `Text.Json`, `Text.RegularExpressions`, `Threading`, `Threading.Channels`, `Threading.Tasks`, `TimeZone`, `Timers`, `Uri`, `Xml`, `Xml.Linq` | `SharpRuntime/Experimental/Property.hpp` |

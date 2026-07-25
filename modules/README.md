@@ -3,7 +3,7 @@
 
 # Sharp Runtime modules
 
-The tree contains 40 physical CMake components. Every directory owns one
+The tree contains 41 physical CMake components. Every directory owns one
 physical component and its `include/`, `src/`, and `tests/` trees; `core`,
 `collections`, and `xml` additionally publish compatibility surfaces.
 Header-only modules retain an empty, versioned `src/` directory so the layout

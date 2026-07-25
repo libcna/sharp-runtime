@@ -5,9 +5,9 @@ Sharp Runtime is a C++23 implementation of a practical subset of the .NET
 ports, especially CNA, without attempting to implement a CLR, JIT, garbage
 collector, or the complete .NET platform.
 
-The repository currently builds as 40 independently selectable CMake
+The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-25 is a warning-free build
-with **12,586 passing tests across 36 test executables**.
+with **12,586 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -94,12 +94,11 @@ target_link_libraries(MyApp PRIVATE
 ```
 
 CMake resolves the dependency closure automatically. At the current code
-baseline, `Text.Json` enables `Core.Base`, `Buffers`, `Text`, `TimeZone`,
-`Threading`, `Collections.Core`, and `Text.Json`. The `TimeZone`/`Threading`
-part is a known isolation regression introduced when `BlockingCollection`
-made `Collections.Core` depend on `Threading`; the planned fix is to move the
-threading-dependent concurrent surface into its own physical component.
-Networking, XML, ZLIB, miniz, tinyxml2, and SDL remain outside this closure.
+baseline, `Text.Json` enables only `Core.Base`, `Buffers`, `Text`,
+`Collections.Core`, and `Text.Json`. `BlockingCollection<T>` lives in the
+separate `Collections.Blocking` component, so its `Threading`/`TimeZone`
+requirements do not broaden ordinary collections consumers. Networking, XML,
+ZLIB, miniz, tinyxml2, and SDL remain outside this closure.
 
 Multiple components form a normal CMake list:
 
@@ -116,7 +115,7 @@ targets remain available:
 - `SharpRuntime::Core` aggregates `Core.Base`, `Console`, `Uri`, and
   `TimeZone`.
 - `SharpRuntime::Collections` aggregates `Collections.Core`,
-  `Collections.Async`, and `Collections.ObjectModel`.
+  `Collections.Blocking`, `Collections.Async`, and `Collections.ObjectModel`.
 - `SharpRuntime::Xml.XPath` aliases the physical `Xml` archive.
 - `SharpRuntime::All` aggregates all physical components.
 - The legacy `SHARP_RUNTIME` target forwards to `SharpRuntime::All` in an
@@ -164,18 +163,16 @@ The component graph is enforced rather than documented only:
 - `test/validate_module_boundaries_test.py` exercises negative validator
   fixtures.
 - `scripts/generate_component_catalog.py --check` rejects catalogue drift.
-- `scripts/check_selective_components.sh` defines nine isolated positive
+- `scripts/check_selective_components.sh` defines ten isolated positive
   consumers and negative leakage fixtures.
 - `.github/workflows/components.yml` runs the selective matrix and the full
   compatibility build on Ubuntu for pushes and pull requests.
 
-At the current baseline the graph has **40 physical modules and 88 direct
+At the current baseline the graph has **41 physical modules and 90 direct
 production dependency edges**, with no allow-listed exception. The boundary
-validator and full build/test gate pass, but the complete selective matrix is
-**not green**: its `Text.Json` job rejects the newly reintroduced
-`sharp_runtime_threading` target. Until the Collections split described in
-`plan.md` is completed, the corresponding GitHub Actions job is expected to
-fail even though `scripts/local_ci_check.sh build` passes.
+validator, the complete ten-job selective matrix, and the full build/test gate
+pass. The Text.Json negative assertion confirms that the target does not
+configure `Threading` or `TimeZone`.
 
 ## Platform status
 

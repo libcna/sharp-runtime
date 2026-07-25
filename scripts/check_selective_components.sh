@@ -10,6 +10,7 @@ trap 'rm -rf "$MATRIX_ROOT"' EXIT
 
 MATRIX=(
     "Core.Base:core_base.cpp"
+    "Collections.Blocking:blocking_collection.cpp"
     "Text.Json:text_json.cpp"
     "Net.Http.Headers:net_http_headers.cpp"
     "Net.WebSockets:net_websockets.cpp"

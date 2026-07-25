@@ -17,6 +17,7 @@ set(sharp_runtime_module_directories
     time-zone
     buffers
     collections
+    collections-blocking
     collections-async
     collections-object-model
     component-model

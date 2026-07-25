@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 12,586 tests across 35 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
+2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 12,586 tests across 36 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
@@ -173,10 +173,9 @@ Every `.hpp` and `.cpp` file starts with:
   `All` compatibility umbrellas. Public-header edges are
   `PUBLIC_DEPENDENCIES`, implementation-only edges are
   `PRIVATE_DEPENDENCIES`, and test-only edges are `TEST_DEPENDENCIES`.
-  The current `Collections.Core -> Threading` edge is a documented isolation
-  regression from `BlockingCollection`, not a new baseline to normalize; see
-  `NEXT.md` before changing collection component metadata or its negative
-  fixture.
+  `BlockingCollection<T>` belongs to `Collections.Blocking`; do not add its
+  `Threading` requirements back to `Collections.Core` or weaken the Text.Json
+  isolation fixture.
 - **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
 

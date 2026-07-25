@@ -5,7 +5,7 @@ sharp_runtime_register_module(
     NAME Collections.Core
     TARGET sharp_runtime_collections_core
     TYPE INTERFACE
-    PUBLIC_DEPENDENCIES Core.Base Threading
+    PUBLIC_DEPENDENCIES Core.Base
     TEST_DEPENDENCIES IO Text
 )
 
@@ -18,6 +18,7 @@ sharp_runtime_register_component(
     TYPE INTERFACE
     PUBLIC_DEPENDENCIES
         Collections.Core
+        Collections.Blocking
         Collections.Async
         Collections.ObjectModel
     INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include"
