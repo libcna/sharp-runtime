@@ -90,9 +90,9 @@ Known permanent deviations (not bugs, not TODO):
   `*EventHandler`/`*Callback` aliases across the codebase) are bare `using X = std::function<...>;`
   aliases — single-target only, no multicast, no `BeginInvoke`/`EndInvoke` (async delegate
   invocation is out of scope entirely, matching .NET's own removal of the pattern). But
-  `System::Delegate` (`include/System/Delegate.hpp`) is a real multicast delegate base class with
+  `System::Delegate` (`modules/core/include/System/Delegate.hpp`) is a real multicast delegate base class with
   working `Combine`/`Remove`/`RemoveAll`/`GetInvocationList`, and `System::MulticastAction<Args...>`
-  (`include/System/MulticastAction.hpp`) is a purpose-built multicast event-field type with `+=`/`=`
+  (`modules/core/include/System/MulticastAction.hpp`) is a purpose-built multicast event-field type with `+=`/`=`
   and reentrancy-safe snapshot invocation — both genuinely support multicast where a ported type
   needs it. `Delegate::DynamicInvoke` always throws `NotImplementedException` (no late-bound
   `object[]` invocation equivalent in C++) in all three tiers.
@@ -109,7 +109,7 @@ When a method cannot be meaningfully implemented (e.g. it requires reflection), 
 A type may be marked `ported` only when **all** of the following hold:
 
 ### 1. Implementation complete
-- Header `include/System/.../*.hpp` exists with the full public API: all public methods, constructors, properties, and operators that appear in the .NET `ref/` surface file.
+- A header under the owning module's `include/System/.../*.hpp` exists with the full public API: all public methods, constructors, properties, and operators that appear in the .NET `ref/` surface file.
 - Properties follow `getXxxProperty()` / `setXxxProperty()` naming.
 - Complex types have a `.cpp` body file; simple types may be header-only.
 - No method body is a bare `throw NotImplementedException()` stub — those are **STUB**, not ported.
@@ -151,11 +151,12 @@ Every `.hpp` and `.cpp` file starts with:
 
 - **Complex types:** `.hpp` declaration + `.cpp` body. Move bodies to `.cpp` when a header grows unwieldy.
 - **Simple types:** header-only is fine.
-- **CMake:** component-specific `CONFIGURE_DEPENDS` globs discover `src/*.cpp`;
+- **CMake:** component-specific `CONFIGURE_DEPENDS` globs discover
+  `modules/*/src/*.cpp`;
   configuration validates that every implementation source belongs to exactly
-  one component. A new namespace/source directory must be added to the
-  appropriate mapping in `cmake/SharpRuntimeSources.cmake`.
-- **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to `include/`, `src/`, and `tests/`.
+  one component. Every module declares its include root, sources, tests,
+  dependencies, and platform setup in `modules/<module>/CMakeLists.txt`.
+- **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
 
 ---

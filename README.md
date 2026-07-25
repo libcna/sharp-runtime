@@ -100,9 +100,9 @@ target_link_libraries(MyApp PRIVATE
 )
 ```
 
-The dependency closure is automatic. This example enables only `Core`, `Text`,
-`Collections`, and `Text.Json`; it does not configure or build IO, networking,
-XML, ZLIB, miniz, tinyxml2, or SDL.
+The dependency closure is automatic. This example enables `Core`, `Buffers`,
+`Text`, `ComponentModel`, `Threading`, `Collections`, and `Text.Json`; it does
+not configure or build IO, networking, XML, ZLIB, miniz, tinyxml2, or SDL.
 
 Multiple components form a normal CMake list:
 
@@ -121,22 +121,43 @@ the suite covers every namespace.
 See [CMake components](docs/CMakeComponents.md) for the complete component
 catalogue, dependency and external-library mapping, and migration details.
 
+## CLion
+
+Open the repository root as the CMake project. In
+**Settings | Build, Execution, Deployment | CMake**, use a profile with:
+
+```text
+Build directory: cmake-build-debug
+CMake options:   -DSHARP_RUNTIME_COMPONENTS=All -DSHARP_RUNTIME_BUILD_TESTS=ON
+Build options:   --parallel 4
+```
+
+Reload CMake, then choose **Build | Build Project** for the `all` target (or
+build `SharpRuntimeTests` when the test executable is what you need).
+
+For a selective application profile, replace `All` with the semicolon-separated
+component list and set `SHARP_RUNTIME_BUILD_TESTS=OFF`. The individual
+`modules/*/CMakeLists.txt` files are module declarations used by the root
+superproject; they are intentionally not standalone CLion projects and should
+not get separate `cmake-build-debug` directories.
+
 ## Build troubleshooting
 
 - **`vendor/googletest is missing` (`FATAL_ERROR` from CMake)** — the git submodule wasn't
   initialized. Run `git submodule update --init --recursive` from the repo root.
-- **A new `.cpp`/`.hpp` file doesn't seem to be picked up** — `src/*.cpp` and `tests/*.cpp` are
-  auto-discovered via component-specific `CONFIGURE_DEPENDS` globs, so a plain
-  `cmake --build` re-runs CMake's configure step automatically when the file
-  list changes. Configuration fails if a source is assigned to zero or
-  multiple modules. If a build still doesn't pick up a new file, force a
-  reconfigure: `cmake -S . -B build` before building.
+- **A new `.cpp`/`.hpp`/test file doesn't seem to be picked up** —
+  `modules/*/{src,tests}` are auto-discovered via component-specific
+  `CONFIGURE_DEPENDS` globs. Public headers belong under the same module's
+  `include/` tree. A plain `cmake --build` re-runs configuration when a source
+  or test list changes, and configuration fails if an implementation source is
+  not owned by exactly one module. If needed, force a reconfigure with
+  `cmake -S . -B build`.
 - **Isolating warnings from a large build log**:
   ```bash
   cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
   ```
   The build must produce zero output from this command before any commit (CLAUDE.md rule #1).
-- **Running one test suite instead of the full ~10 900+ suite**: `./build/SharpRuntimeTests
+- **Running one test suite instead of the full 12,494-test suite**: `./build/SharpRuntimeTests
   --gtest_filter="SuiteName.*"` (standard GoogleTest filter syntax — see
   `scripts/local_ci_check.sh` for a full build+test gate you can run locally before pushing).
 - **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
@@ -151,15 +172,16 @@ catalogue, dependency and external-library mapping, and migration details.
   it first, rather than including everything it uses itself. Check with:
   ```bash
   echo '#include "System/Some/Header.hpp"' > /tmp/tc.cpp
-  g++ -fsyntax-only -std=c++23 -Iinclude -Ivendor /tmp/tc.cpp
+  g++ -fsyntax-only -std=c++23 \
+    $(find modules -type d -name include -printf '-I%p ') -Ivendor /tmp/tc.cpp
   ```
   (`scripts/source_header_inventory.py` is a related but different check: it inventories
   SPDX/namespace/type metadata across every header and cross-references it against
   `plan.sqlite3`, useful for spotting headers with no matching task row — it does not invoke a
   compiler and cannot detect this class of transitive-include failure itself; corrected 2026-07-14,
   external audit finding A-06, after the script's own docstring was checked against this claim).
-- **Generating API documentation**: `Doxyfile` at the repo root is configured to scan `include/`
-  and `README.md` recursively (excluding `include/vendor`) and write HTML output to
+- **Generating API documentation**: `Doxyfile` at the repo root is configured to scan every
+  `modules/*/include` tree and `README.md` recursively and write HTML output to
   `docs/generated/html` (git-ignored — it's build output, not checked in):
   ```bash
   mkdir -p docs/generated && doxygen Doxyfile

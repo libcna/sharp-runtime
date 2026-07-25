@@ -30,7 +30,7 @@ work (§8 for candidates, §10 for a resume prompt).
 
 **Key architectural decisions**:
 - `SharpRuntime::intcs`/`longcs`/`shortcs`/`uintcs`/`ulongcs`/`ushortcs`/`bytecs`/`sbytecs`
-  (fixed-width aliases in `include/SharpRuntime/SharpRuntimeHelper.hpp`) are mandatory in every
+  (fixed-width aliases in `modules/core/include/SharpRuntime/SharpRuntimeHelper.hpp`) are mandatory in every
   public API that mirrors a .NET `int`/`long`/etc. Rollout is complete project-wide.
 - Properties are `getXxxProperty()`/`setXxxProperty()`, with one documented exception: C#
   indexers map to `getItem()`/`setItem()`. `getCurrent()` → `getCurrentProperty()` was the last
@@ -132,7 +132,7 @@ re-itemized; see `git log` for the full trail and exact per-commit test-count de
 - UndefinedBehaviorSanitizer: 1 UB call (empty-vector `.data()` reaching `fwrite`'s `nonnull`
   parameter inside vendored miniz) — fixed at this project's own call site.
 - All three now run clean project-wide. A `-Wshadow` diagnostic build also came back clean
-  (3 harmless test-file coincidences, zero in `include/`/`src/`) — no code changed.
+  (3 harmless test-file coincidences, zero in the production module trees) — no code changed.
 
 **Performance audits** (measure-first discipline; `bench/StringBenchmark.cpp`, gated behind
 `SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF — no vendored benchmarking library):
@@ -245,16 +245,19 @@ document, and update this section once you understand what changed.
 ## 6. Architecture notes
 
 **Layout**:
-- `include/System/...` — public headers, mirroring the .NET namespace hierarchy 1:1.
-- `src/System/...` — `.cpp` bodies for complex types (simple types are header-only).
-- `tests/System/...` — GoogleTest suites, generally mirroring `include/`.
+- `modules/<module>/include/System/...` — public headers; include spelling still mirrors the
+  .NET namespace hierarchy 1:1.
+- `modules/<module>/src/System/...` — `.cpp` bodies for complex types (simple types are
+  header-only).
+- `modules/<module>/tests/System/...` — module-owned GoogleTest suites.
+- `tests/integration/...` — the small set of suites intentionally spanning multiple modules.
 - `vendor/` — third-party sources (GoogleTest, nlohmann/json, tinyxml2, miniz) — **exempt** from
   this project's SPDX-header, doc-comment, and naming rules.
 - `plan.sqlite3` (gitignored) — two-table (`task`, `ticket`) work-tracking database. See
   `prompt.md` for the full workflow.
 
-**Build**: CMake with `GLOB_RECURSE` auto-discovering `src/*.cpp` — a new `.cpp` file needs a
-`cmake .` re-run in the build dir, no `CMakeLists.txt` edit.
+**Build**: CMake with module-local `GLOB_RECURSE` auto-discovering `src/*.cpp` and
+`tests/*.cpp` — a new file needs a CMake reconfigure, but no source-list edit.
 
 **Invariants that must be preserved by any new code**:
 1. Every public API parameter/return mirroring a .NET `int`/`long`/`short`/`byte`/etc. uses the
@@ -280,7 +283,8 @@ document, and update this section once you understand what changed.
   `PlatformNotSupportedException` on unsupported platforms, never silently degrade.
 - No LINQ-style chaining in code this project writes internally — use `std::ranges` (auditing/
   porting an existing `System::Linq` surface is different and fine).
-- SPDX header on every file under `include/`, `src/`, `tests/` (not `vendor/`).
+- SPDX header on every file under module `include/`, `src/`, `tests/` and root
+  `tests/integration/` (not `vendor/`).
 
 **Compatibility/API rules**:
 - Push only to `feature/work`. Never `develop`/`master`, never tags, without explicit per-action
