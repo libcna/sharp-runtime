@@ -4,9 +4,12 @@
 //
 #include <gtest/gtest.h>
 #include <any>
+#include <exception>
 #include <optional>
+#include <stdexcept>
 #include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/CancelEventArgs.hpp"
+#include "System/ComponentModel/AsyncCompletedEventArgs.hpp"
 #include "System/ComponentModel/IChangeTracking.hpp"
 #include "System/ComponentModel/IEditableObject.hpp"
 #include "System/ComponentModel/IRevertibleChangeTracking.hpp"
@@ -20,6 +23,7 @@
 #include "System/ComponentModel/PropertyChangedEventArgs.hpp"
 #include "System/ComponentModel/PropertyChangingEventArgs.hpp"
 #include "System/ComponentModel/EditorBrowsableAttribute.hpp"
+#include "System/ComponentModel/TypeConverterAttribute.hpp"
 
 using System::ComponentModel::DescriptionAttribute;
 using System::ComponentModel::DefaultValueAttribute;
@@ -32,6 +36,7 @@ using System::ComponentModel::LocalizableAttribute;
 using System::ComponentModel::TypeConverterAttribute;
 using System::ComponentModel::EditorBrowsableAttribute;
 using System::ComponentModel::EditorBrowsableState;
+using System::ComponentModel::AsyncCompletedEventArgs;
 using System::ComponentModel::INotifyPropertyChanged;
 using System::ComponentModel::INotifyPropertyChanging;
 using System::ComponentModel::PropertyChangedEventArgs;
@@ -333,6 +338,21 @@ TEST(TypeConverterAttributeTests, DefaultConstructor_EmptyTypeName) {
 TEST(TypeConverterAttributeTests, Constructor_StoresTypeName) {
     TypeConverterAttribute attr("System.Int32Converter");
     EXPECT_EQ(attr.getConverterTypeNameProperty(), "System.Int32Converter");
+}
+
+TEST(TypeConverterAttributeTests, TypeConstructor_StoresTheRttiTypeName) {
+    TypeConverterAttribute attr(System::Type::From<int>());
+    EXPECT_EQ(attr.getConverterTypeNameProperty(), System::Type::From<int>().getFullNameProperty());
+}
+
+TEST(TypeConverterAttributeTests, DefaultEqualityAndHashCode_MatchTheConverterTypeName) {
+    TypeConverterAttribute first("Converter");
+    TypeConverterAttribute same("Converter");
+    TypeConverterAttribute different("OtherConverter");
+    EXPECT_TRUE(TypeConverterAttribute::Default.getConverterTypeNameProperty().empty());
+    EXPECT_TRUE(first.Equals(same));
+    EXPECT_FALSE(first.Equals(different));
+    EXPECT_EQ(first.GetHashCode(), same.GetHashCode());
 }
 
 // ===========================================================================
@@ -640,6 +660,70 @@ TEST(IChangeTrackingTests, AcceptChanges_Idempotent_WhenNotChanged) {
 
 TEST(IChangeTrackingTests, IsAbstractInterface) {
     EXPECT_TRUE(std::is_abstract_v<System::ComponentModel::IChangeTracking>);
+}
+
+// ===========================================================================
+// AsyncCompletedEventArgs
+// ===========================================================================
+
+class TestAsyncCompletedEventArgs : public AsyncCompletedEventArgs {
+public:
+    using AsyncCompletedEventArgs::AsyncCompletedEventArgs;
+
+    void RaiseStoredExceptionIfNecessary() const { RaiseExceptionIfNecessary(); }
+};
+
+TEST(AsyncCompletedEventArgsTests, Constructor_StoresCompletionState) {
+    TestAsyncCompletedEventArgs args(nullptr, true, std::string("token"));
+    EXPECT_TRUE(args.getCancelledProperty());
+    EXPECT_FALSE(args.getErrorProperty());
+    EXPECT_EQ(std::any_cast<std::string>(args.getUserStateProperty()), "token");
+    System::EventArgs& base = args;
+    (void)base;
+}
+
+TEST(AsyncCompletedEventArgsTests, EmptyState_RepresentsNullUserState) {
+    TestAsyncCompletedEventArgs args(nullptr, false, std::any{});
+    EXPECT_FALSE(args.getUserStateProperty().has_value());
+}
+
+TEST(AsyncCompletedEventArgsTests, RaiseExceptionIfNecessary_DoesNothingAfterSuccessfulCompletion) {
+    TestAsyncCompletedEventArgs args(nullptr, false, std::any{});
+    EXPECT_NO_THROW(args.RaiseStoredExceptionIfNecessary());
+}
+
+TEST(AsyncCompletedEventArgsTests, RaiseExceptionIfNecessary_ThrowsForCancellation) {
+    TestAsyncCompletedEventArgs args(nullptr, true, std::any{});
+    EXPECT_THROW(args.RaiseStoredExceptionIfNecessary(), System::InvalidOperationException);
+}
+
+TEST(AsyncCompletedEventArgsTests, RaiseExceptionIfNecessary_PreservesTheOriginalErrorAsInnerException) {
+    const auto error = std::make_exception_ptr(std::runtime_error("boom"));
+    TestAsyncCompletedEventArgs args(error, false, std::any{});
+    EXPECT_TRUE(args.getErrorProperty());
+
+    try {
+        args.RaiseStoredExceptionIfNecessary();
+        FAIL() << "Expected InvalidOperationException";
+    } catch (const System::InvalidOperationException& exception) {
+        ASSERT_TRUE(exception.getInnerExceptionProperty());
+        EXPECT_THROW(std::rethrow_exception(exception.getInnerExceptionProperty()), std::runtime_error);
+    }
+}
+
+TEST(AsyncCompletedEventArgsTests, CompletionHandler_ReceivesSenderAndEventData) {
+    TestAsyncCompletedEventArgs args(nullptr, false, SharpRuntime::intcs{42});
+    void* observedSender = nullptr;
+    SharpRuntime::intcs observedState = 0;
+    System::ComponentModel::AsyncCompletedEventHandler handler =
+        [&](void* sender, const AsyncCompletedEventArgs& eventArgs) {
+            observedSender = sender;
+            observedState = std::any_cast<SharpRuntime::intcs>(eventArgs.getUserStateProperty());
+        };
+    int sender = 0;
+    handler(&sender, args);
+    EXPECT_EQ(observedSender, &sender);
+    EXPECT_EQ(observedState, 42);
 }
 
 // ===========================================================================
