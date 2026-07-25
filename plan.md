@@ -13,10 +13,10 @@ The namespace-planning material in this file and
 [plan_namespaces.md](plan_namespaces.md) is **historical** — the interactive,
 per-namespace-table workflow it describes has been replaced by `plan.sqlite3`, a git-ignored
 SQLite database that is the live, authoritative source of truth. The remediation plan below was
-approved and implemented; its work items are tracked as tickets 1729–1736. They remain `doing`
-until the changes are committed and pushed, as required by the repository ticket policy. See
-`README.md`'s "Tracking: plan.sqlite3" section for the full explanation of its two tables (`task`
-for .NET type classification, `ticket` for stabilization work).
+approved, implemented, committed as `b0e944ad`, and pushed to `feature/work`; its work items are
+closed as tickets 1729–1736. See `README.md`'s "Tracking: plan.sqlite3" section for the full
+explanation of its two tables (`task` for .NET type classification, `ticket` for stabilization
+work).
 
 ```bash
 # Namespace-level porting status
