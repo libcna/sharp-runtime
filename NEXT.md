@@ -6,9 +6,9 @@ fix at `6aa719f` (A-06 README correction) — see §3.*
 
 This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
 replacing a ~6000-line chronological session log. That log is not lost — it's in git history
-(`git log --oneline -- NEXT.md`) and in `POST_STABILIZATION_AUDIT.md`. Condensed again on
-2026-07-14 (the prior structured version had regrown to ~1200 lines of session narrative); this
-file intentionally contains only the current, load-bearing state — not a blow-by-blow log.
+(`git log --oneline -- NEXT.md`). Condensed again on 2026-07-14 (the prior structured version
+had regrown to ~1200 lines of session narrative); this file intentionally contains only the
+current, load-bearing state — not a blow-by-blow log.
 
 ---
 
@@ -23,10 +23,10 @@ repo; this is a standalone dependency.
 realistically needs, as idiomatic modern C++, not a literal transliteration.
 
 **Current phase**: post-stabilization. The original porting/stabilization backlog
-(`plan.sqlite3`'s `ticket` table) is fully complete. A subsequent fresh audit
-(`POST_STABILIZATION_AUDIT.md`) found 20 issues; all fixed. No open, pre-scoped work item exists
-anywhere in `plan.sqlite3` — the project is stable and awaiting direction for the next body of
-work (§8 for candidates, §10 for a resume prompt).
+(`plan.sqlite3`'s `ticket` table) is fully complete. A subsequent fresh audit found 19 issues;
+all fixed. No open, pre-scoped work item exists anywhere in `plan.sqlite3` — the project is
+stable and awaiting direction for the next body of work (§8 for candidates, §10 for a resume
+prompt).
 
 **Key architectural decisions**:
 - `SharpRuntime::intcs`/`longcs`/`shortcs`/`uintcs`/`ulongcs`/`ushortcs`/`bytecs`/`sbytecs`
@@ -89,7 +89,7 @@ original porting/stabilization pass — was completed earlier in the same sessio
 re-itemized; see `git log` for the full trail and exact per-commit test-count deltas.
 
 **Foundational fixes and additions**:
-- `POST_STABILIZATION_AUDIT.md` — fresh independent audit, 20 findings, all fixed.
+- Fresh independent post-stabilization audit — 19 findings, all fixed.
 - `version_` tracking + fail-fast enumeration added to 10 mutable collection types (see §1).
 - `NumberStyles`-aware `Parse`/`TryParse` for all 8 integer types — `Integer`, `HexNumber`,
   `Number`, `Currency`, `BinaryNumber` now fully supported (`AllowExponent` is the one remaining

@@ -3,8 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
 // Regression tests for ticket 1717 (NumberStyles-aware Parse/TryParse for the 8 integer
-// primitive types) and ticket 1718 (List<T>/StringBuilder CopyTo), both from
-// POST_STABILIZATION_AUDIT.md findings #8/#9.
+// primitive types) and ticket 1718 (List<T>/StringBuilder CopyTo).
 #include <gtest/gtest.h>
 #include "System/Byte.hpp"
 #include "System/Int16.hpp"

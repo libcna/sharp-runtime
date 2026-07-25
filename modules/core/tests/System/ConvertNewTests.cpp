@@ -222,7 +222,7 @@ TEST(ConvertTests, RawStringLiteral_ResolvesToStringOverload_NotBool) {
 // Post-stabilization audit ticket 1710: ToXxx(double)/ToXxx(float) family rounded to nearest
 // (ties to even, matching Math.Round's default) instead of truncating toward zero, and
 // ToInt64(double) had no overflow check at all. Verified against the exact real .NET reference
-// algorithm (Convert.cs) for each type -- see POST_STABILIZATION_AUDIT.md finding #1.
+// algorithm (Convert.cs) for each type.
 // ---------------------------------------------------------------------------
 
 TEST(ConvertTests, ToByte_FromDouble_RoundsHalfToEven) {

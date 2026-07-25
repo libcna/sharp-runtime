@@ -2,8 +2,8 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Regression tests for ticket 1713 (POST_STABILIZATION_AUDIT.md finding #4): SortedDictionary,
-// SortedSet, and OrderedDictionary's enumerators must detect structural modification during
+// Regression tests for ticket 1713: SortedDictionary, SortedSet, and OrderedDictionary's
+// enumerators must detect structural modification during
 // iteration and throw System::InvalidOperationException, matching real .NET's fail-fast
 // enumerator contract. (PriorityQueue<TElement,TPriority> has no enumeration surface at all, so
 // this bug does not apply to it -- verified during this ticket's audit, not covered here.)

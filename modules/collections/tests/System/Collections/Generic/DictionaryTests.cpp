@@ -79,7 +79,7 @@ TEST(DictionaryTest, OperatorBracketConstThrowsIfMissing) {
     EXPECT_THROW(d["missing"], KeyNotFoundException);
 }
 
-// Regression test for POST_STABILIZATION_AUDIT.md finding #3 / ticket 1712: the non-const
+// Regression test for ticket 1712: the non-const
 // operator[] getter previously silently inserted a default-constructed value on a missing key
 // (std::unordered_map::operator[]'s convention) instead of throwing, unlike real .NET's
 // Dictionary<TKey,TValue> indexer, which throws KeyNotFoundException on the getter regardless

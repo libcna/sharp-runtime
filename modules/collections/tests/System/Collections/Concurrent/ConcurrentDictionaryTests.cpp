@@ -140,7 +140,7 @@ TEST(ConcurrentDictionaryTest, Indexer_Set_ExistingKey_Overwrites) {
     EXPECT_EQ(static_cast<int>(d["a"]), 2);
 }
 
-// Regression tests for POST_STABILIZATION_AUDIT.md finding #7 / ticket 1716: GetOrAdd and
+// Regression tests for ticket 1716: GetOrAdd and
 // AddOrUpdate previously held the internal mutex across the entire user-supplied factory
 // callback, so a factory that reentrantly called back into the same ConcurrentDictionary
 // instance (a realistic memoization pattern) deadlocked the thread against itself
