@@ -2,5 +2,9 @@
 
 # SharpRuntime::Net.Http
 
-Compiled HTTP module. Direct dependencies: `Core`, `IO`, `Net`, and
-`Threading.Tasks`. External dependencies: none.
+Compiled HTTP component. Public dependencies: `Core.Base`, `IO`, `Net`,
+`Threading`, and `Threading.Tasks`; `Uri` is implementation-only and
+`Net.Sockets` is test-only.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

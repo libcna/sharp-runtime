@@ -2,5 +2,8 @@
 
 # SharpRuntime::Net.Http.Headers
 
-Compiled HTTP header-values module. Direct dependencies: `Collections` and
-`Core`. External dependencies: none.
+Compiled HTTP header-values component. Public dependencies:
+`Collections.Core`, `Core.Base`, and `Uri`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

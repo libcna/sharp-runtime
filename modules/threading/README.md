@@ -2,5 +2,8 @@
 
 # SharpRuntime::Threading
 
-Compiled threading module. Direct dependency: `Core`. External dependencies:
-none.
+Compiled threading and synchronization component. Public dependencies:
+`Core.Base` and `TimeZone`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

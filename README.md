@@ -1,91 +1,84 @@
 # Sharp Runtime
 
-**Sharp Runtime** is a C++ reimplementation of a small C#/.NET runtime subset (mainly used by CNA and game ports).
+Sharp Runtime is a C++23 implementation of a practical subset of the .NET
+`System.*` libraries. It provides familiar APIs for native game and framework
+ports, especially CNA, without attempting to implement a CLR, JIT, garbage
+collector, or the complete .NET platform.
 
-The goal of this project is to provide a lightweight, .NET-inspired foundation layer for C++ projects, with a focus on:
+The repository currently builds as 40 independently selectable CMake
+components. The verified Linux baseline on 2026-07-25 is a warning-free build
+with **12,586 passing tests across 36 test executables**.
 
-* familiar API design (`System::*`-like namespaces)
-* clean and modern C++ implementation
-* compatibility with higher-level frameworks (e.g. CNA)
+## What is included
 
-> ⚠️ This is **not** a full .NET runtime or CLR implementation.
-> It is a pragmatic subset designed for use in native C++ applications.
+- Core value types, strings, spans, dates, times, exceptions, delegates, and
+  environment helpers.
+- Generic, immutable, object-model, concurrent, and asynchronous collections.
+- Text, regular expressions, globalization, JSON, XML, and XML LINQ APIs.
+- Streams, files, compression, ZIP archives, hashing, and isolated storage.
+- Networking primitives, sockets, HTTP, MIME, WebSockets, and network
+  information.
+- Threads, tasks, task continuations, channels, timers, and synchronization
+  primitives.
+- Numerics plus non-encryption cryptography such as hashes, HMAC, PBKDF2, and
+  secure random-number generation.
 
----
+The public surface follows .NET naming and behavior where that maps cleanly to
+C++. The implementation uses RAII, standard-library ownership types, and
+fixed-width aliases such as `SharpRuntime::intcs` for .NET-sized integral API
+values.
 
-# License
+## Quick start
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+Requirements:
 
-## Attribution
+- CMake 3.20 or newer.
+- A compiler with C++23 support.
+- Git submodules when tests are enabled.
+- A development package providing ZLIB when `All` or `IO.Compression` is
+  selected.
 
-Sharp Runtime is **partly derived from the .NET runtime**
-([dotnet/runtime](https://github.com/dotnet/runtime), MIT License, © .NET Foundation and Contributors).
-
-Specifically:
-- The **public API design** of `System::*` types — class names, method signatures, namespace structure, and enum values — is based on the .NET standard library.
-- Some **algorithmic implementations** (number formatting, date/time arithmetic, Unicode handling, etc.) are informed by or translated from the dotnet/runtime source code.
-- The **C++ implementation** (headers, `.cpp` bodies, CMake build, tests) is original work by Robert Vokac and contributors.
-
-The dotnet/runtime source is available at https://github.com/dotnet/runtime under the MIT License.
-
-## Third-party components
-
-This project vendors a small number of third-party libraries under `vendor/`, each under its
-own permissive license (embedded in the vendored source itself, plus a standalone `LICENSE`
-file where the upstream project provides one):
-
-- [GoogleTest](https://github.com/google/googletest) (`vendor/googletest`) — BSD 3-Clause, `LICENSE` included.
-- [nlohmann/json](https://github.com/nlohmann/json) (`vendor/nlohmann`) — MIT License, embedded in `json.hpp`.
-- [tinyxml2](https://github.com/leethomason/tinyxml2) (`vendor/tinyxml2`) — zlib License, embedded in `tinyxml2.h`.
-- [miniz](https://github.com/richgel999/miniz) (`vendor/miniz`) — MIT License, embedded in `miniz.c`.
-
-None of these licenses are modified or removed from the vendored source.
-
-## Permanent deviations from .NET
-
-Some .NET features are intentionally out of scope and will never be ported — reflection
-(`System.Type`, `Activator`, `Enum.GetNames`/`GetValues`), the GC, delegates beyond
-`std::function`, serialization infrastructure, P/Invoke, and full symmetric/asymmetric
-cryptography, X.509 certificates, and TLS (`SslStream`). See **[CLAUDE.md](CLAUDE.md)**
-("Parity philosophy" section) for the complete list and the reasoning behind each one.
-
----
-
-# 🚀 Goals
-
-* Recreate useful parts of `.NET` API in idiomatic C++
-* Provide building blocks such as:
-
-    * exceptions
-    * events / delegates
-    * basic system types
-* Serve as a foundation for higher-level frameworks (e.g. CNA)
-* Keep the codebase simple, readable, and well-documented
-
----
-
-# 🛠️ Build
+Configure, build, and run the full repository suite:
 
 ```bash
 git submodule update --init --recursive
-cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake -S . -B build \
+  -DSHARP_RUNTIME_COMPONENTS=All \
+  -DSHARP_RUNTIME_BUILD_TESTS=ON
 cmake --build build --target SharpRuntimeTests --parallel 4
 scripts/run_component_tests.sh build
 ```
 
-A library-only build (no test binary) is also supported:
+`SharpRuntimeTests` is an aggregate build target, not a test executable. The
+actual binaries are component-scoped, for example:
 
 ```bash
-cmake -S . -B build-no-tests -DSHARP_RUNTIME_BUILD_TESTS=OFF
+./build/SharpRuntimeTests_Net_Sockets \
+  --gtest_filter="TcpClient*"
+```
+
+For a library-only build:
+
+```bash
+cmake -S . -B build-no-tests \
+  -DSHARP_RUNTIME_COMPONENTS=All \
+  -DSHARP_RUNTIME_BUILD_TESTS=OFF
 cmake --build build-no-tests --parallel 4
 ```
 
-## CMake components
+The complete local validation gate performs boundary checks, a warning-free
+build, and every component and integration test:
 
-Sharp Runtime is split into opt-in CMake components. When no component list is
-specified, the default remains `All`, so existing standalone builds keep
-working. A parent application can request only the modules it uses:
+```bash
+scripts/local_ci_check.sh build
+```
+
+Some HTTP, socket, and ping tests require the environment to permit local
+network operations.
+
+## Selecting CMake components
+
+Applications should request only the components they use:
 
 ```cmake
 set(SHARP_RUNTIME_COMPONENTS
@@ -93,17 +86,20 @@ set(SHARP_RUNTIME_COMPONENTS
 )
 set(SHARP_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(sharp-runtime)
+add_subdirectory(path/to/sharp-runtimervc)
 
 target_link_libraries(MyApp PRIVATE
     SharpRuntime::Text.Json
 )
 ```
 
-The dependency closure is automatic. This example enables `Core.Base`,
-`Buffers`, `Text`, `Collections.Core`, and `Text.Json`; it does not configure
-or build `Threading`, `ComponentModel`, IO, networking, XML, ZLIB, miniz,
-tinyxml2, or SDL.
+CMake resolves the dependency closure automatically. At the current code
+baseline, `Text.Json` enables `Core.Base`, `Buffers`, `Text`, `TimeZone`,
+`Threading`, `Collections.Core`, and `Text.Json`. The `TimeZone`/`Threading`
+part is a known isolation regression introduced when `BlockingCollection`
+made `Collections.Core` depend on `Threading`; the planned fix is to move the
+threading-dependent concurrent surface into its own physical component.
+Networking, XML, ZLIB, miniz, tinyxml2, and SDL remain outside this closure.
 
 Multiple components form a normal CMake list:
 
@@ -114,277 +110,171 @@ set(SHARP_RUNTIME_COMPONENTS
 )
 ```
 
-`SharpRuntime::All` enables every component. The legacy `SHARP_RUNTIME` target
-continues to forward to `SharpRuntime::All` when the `All` component is
-enabled. Tests respect the requested component list; select `All` explicitly
-for the repository-wide suite.
+The narrow physical targets are preferred for new consumers. Compatibility
+targets remain available:
 
-See [CMake components](docs/CMakeComponents.md) for the complete component
-catalogue, dependency and external-library mapping, and migration details.
+- `SharpRuntime::Core` aggregates `Core.Base`, `Console`, `Uri`, and
+  `TimeZone`.
+- `SharpRuntime::Collections` aggregates `Collections.Core`,
+  `Collections.Async`, and `Collections.ObjectModel`.
+- `SharpRuntime::Xml.XPath` aliases the physical `Xml` archive.
+- `SharpRuntime::All` aggregates all physical components.
+- The legacy `SHARP_RUNTIME` target forwards to `SharpRuntime::All` in an
+  `All` configuration.
 
-## CLion
+See [CMake components](docs/CMakeComponents.md) and the
+[generated component catalogue](docs/ComponentCatalog.md) for the complete
+dependency and external-library map.
 
-Open the repository root as the CMake project. In
-**Settings | Build, Execution, Deployment | CMake**, use a profile with:
+### Selective component tests
 
-```text
-Build directory: cmake-build-debug
-CMake options:   -DSHARP_RUNTIME_COMPONENTS=All -DSHARP_RUNTIME_BUILD_TESTS=ON
-Build options:   --parallel 4
-```
-
-Reload CMake, then choose **Build | Build Project** for the `all` target (or
-build the aggregate `SharpRuntimeTests` target). Actual test executables are
-named `SharpRuntimeTests_<Component>`.
-
-For a selective application profile, replace `All` with the semicolon-separated
-component list and set `SHARP_RUNTIME_BUILD_TESTS=OFF`. The individual
-`modules/*/CMakeLists.txt` files are module declarations used by the root
-superproject; they are intentionally not standalone CLion projects and should
-not get separate `cmake-build-debug` directories.
-
-## Build troubleshooting
-
-- **`vendor/googletest is missing` (`FATAL_ERROR` from CMake)** — the git submodule wasn't
-  initialized. Run `git submodule update --init --recursive` from the repo root.
-- **A new `.cpp`/`.hpp`/test file doesn't seem to be picked up** —
-  `modules/*/{src,tests}` are auto-discovered via component-specific
-  `CONFIGURE_DEPENDS` globs. Public headers belong under the same module's
-  `include/` tree. A plain `cmake --build` re-runs configuration when a source
-  or test list changes, and configuration fails if an implementation source is
-  not owned by exactly one module. If needed, force a reconfigure with
-  `cmake -S . -B build`.
-- **Isolating warnings from a large build log**:
-  ```bash
-  cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
-  ```
-  The build must produce zero output from this command before any commit (CLAUDE.md rule #1).
-- **Running one test suite instead of the full 12,494-test suite**:
-  `./build/SharpRuntimeTests_Net_Sockets --gtest_filter="SuiteName.*"`
-  (standard GoogleTest filter syntax). Use
-  `scripts/run_component_tests.sh build` to run every component binary once,
-  or `scripts/local_ci_check.sh` for the full local gate.
-- **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
-  and neither has been wired into CI, but both are real, working, verified targets (not
-  aspirational): `x86_64-w64-mingw32-g++` and `emcmake cmake` both build the `SHARP_RUNTIME`
-  libraries cleanly as of the fixes tracked under stabilization tickets #40 (Windows) and
-  #41 (Emscripten) — see those tickets' notes in `plan.sqlite3` for the exact blockers found and
-  fixed, and for what wasn't verified (the test binary itself is not built under either
-  cross-compilation target — GoogleTest isn't cross-compiled for wasm/MinGW in this repo).
-- **A header fails to compile when included on its own but works in the full build** — this
-  usually means the header is relying on a transitive `#include` pulled in by whatever included
-  it first, rather than including everything it uses itself. Check with:
-  ```bash
-  echo '#include "System/Some/Header.hpp"' > /tmp/tc.cpp
-  g++ -fsyntax-only -std=c++23 \
-    $(find modules -type d -name include -printf '-I%p ') -Ivendor /tmp/tc.cpp
-  ```
-  (`scripts/source_header_inventory.py` is a related but different check: it inventories
-  SPDX/namespace/type metadata across every header and cross-references it against
-  `plan.sqlite3`, useful for spotting headers with no matching task row — it does not invoke a
-  compiler and cannot detect this class of transitive-include failure itself; corrected 2026-07-14,
-  external audit finding A-06, after the script's own docstring was checked against this claim).
-- **Generating API documentation**: `Doxyfile` at the repo root is configured to scan every
-  `modules/*/include` tree and `README.md` recursively and write HTML output to
-  `docs/generated/html` (git-ignored — it's build output, not checked in):
-  ```bash
-  mkdir -p docs/generated && doxygen Doxyfile
-  ```
-  Open `docs/generated/html/index.html` in a browser. As of 2026-07-14 a run currently emits
-  around 1,869 warnings (mostly undocumented members/parameters on older, pre-doc-comment-era
-  code) — Doxygen coverage is an incremental, in-progress standard applied to newly-ported and
-  newly-touched code (see CLAUDE.md's porting checklist), not yet a zero-warnings gate the way
-  the compiler build is (CLAUDE.md rule #1). Treat a NEW warning introduced by your own change as
-  a real issue to fix; the pre-existing backlog is tracked separately, not something any single
-  change is expected to clear.
-
----
-
-# 🗂️ Tracking: `plan.sqlite3`
-
-Porting progress and stabilization work are tracked in a local, git-ignored SQLite database,
-`plan.sqlite3`, with **two separate tables that must not be confused with each other**:
-
-## `task` — .NET type classification
-
-One row per type from [dotnet/runtime](https://github.com/dotnet/runtime)'s public surface. Tracks
-*whether and how* a given `System.*` type has been dealt with.
-
-| `task.status` | Meaning |
-|---|---|
-| `''` / `todo` | Not yet classified or ported. |
-| `ported` | Implemented, tested, meets the full porting checklist. |
-| `ignore` / `ignored` | Permanently out of scope (both values exist — `ignored` predates the current workflow and is left as-is, not "fixed" to `ignore`). |
-| `tobedecided` | Genuinely ambiguous; needs a human architecture decision, not a guess. |
-
-`in_progress` is **not** a valid `task.status` value.
-
-## `ticket` — stabilization work queue
-
-One row per concrete stabilization task (documentation fixes, correctness audits, platform checks,
-test coverage, etc.) that isn't itself "port a .NET type." Independent of `task`.
-
-| `ticket.status` | Meaning |
-|---|---|
-| `todo` | Not started. |
-| `doing` | Actively being worked. |
-| `done` | Complete — acceptance criteria met, build clean, tests passing/updated. |
-| `blocked` | Can't proceed for an external/technical reason (recorded in `notes`). |
-| `needs_user` | Requires a human decision that can't be made safely alone (recorded in `notes`). |
-| `wontfix` | Deliberately not doing this (recorded in `notes`, e.g. permanent out-of-scope). |
-
-`ticket.status` and `task.status` are **different systems with different value sets** — a ticket is
-never `ported`, and a task is never `doing`.
+A selective test configuration builds only the requested component's tests,
+plus explicitly declared test-only dependencies:
 
 ```bash
-# Next ticket to work on
-sqlite3 plan.sqlite3 "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
-
-# Overall progress
-sqlite3 plan.sqlite3 "SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;"
+cmake -S . -B build-json-tests \
+  -DSHARP_RUNTIME_COMPONENTS=Text.Json \
+  -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake --build build-json-tests --target SharpRuntimeTests --parallel 4
+scripts/run_component_tests.sh build-json-tests
 ```
 
-### Ticket completion checklist
+## Repository layout
 
-A ticket may be marked `done` only when **all** of the following hold (this is the pattern
-every stabilization ticket in this repo's history has actually followed — not aspirational):
+- `modules/<module>/include/` contains public headers.
+- `modules/<module>/src/` contains compiled implementations.
+- `modules/<module>/tests/` contains tests owned by that physical component.
+- `tests/integration/` contains deliberately cross-component tests.
+- `cmake/` contains component registration and dependency resolution.
+- `scripts/` contains boundary, catalogue, selective-build, and local-CI
+  checks.
+- `vendor/` contains or references third-party dependencies.
+- `docs/` contains architecture and generated component documentation.
 
-1. **Claim verified against the real .NET source, not memory or an audit finding taken on
-   faith.** If the ticket concerns behavior that should match .NET, the relevant file(s) under
-   `/rv/tmp/runtime/src/libraries/` were actually read for this ticket — an audit agent's or a
-   prior session's finding is a lead to verify, not a fact to act on directly (audit findings in
-   this repo's history have been stale/wrong more than once; always re-check against current
-   source before fixing).
-2. **Real bugs fixed, not papered over.** If a genuine behavioral gap was found, either fix it or
-   explicitly document *why not* (disproportionate scope, needs a user decision, permanent
-   deviation) — never silently narrow the ticket's scope to avoid the harder part.
-3. **Clean build.** `cmake --build build --parallel 4` — zero errors, zero warnings
-   (`scripts/local_ci_check.sh` automates this check).
-4. **Tests updated and passing.** Any test that encoded the *old* (buggy) behavior as expected is
-   fixed, not left red or deleted. New regression tests exist for anything that was actually
-   fixed — a test that would have caught the bug before the fix, not just a test that happens to
-   pass after it. `scripts/run_component_tests.sh build` — zero failures.
-5. **Committed and pushed to `feature/work`** (never `develop`/`master` without explicit
-   per-action approval) with a commit message that states what was wrong, how it was verified,
-   and the ticket number.
-6. **`plan.sqlite3` updated**: `status='done'`, `updated_at=datetime('now')`, and `notes` filled
-   in with enough detail (what was checked, what was found, commit hash, what — if anything —
-   was deliberately deferred and why) that a future session doesn't have to redo the
-   investigation to know whether the ticket is *actually* resolved.
+Module `CMakeLists.txt` files are declarations consumed by the root project;
+they are not standalone projects.
 
-If any of 1–4 can't be satisfied safely (e.g. the fix needs a user decision per CLAUDE.md rule
-#10, or the "bug" turns out to be a documented permanent deviation), the ticket should be
-`blocked`, `needs_user`, or `wontfix` instead of `done` — never `done` with an unresolved caveat
-buried in the notes.
+## Validation and CI
 
-### More `plan.sqlite3` queries
+The component graph is enforced rather than documented only:
+
+- `scripts/validate_module_boundaries.py` checks ownership, include
+  resolution, declared visibility, stale edges, duplicate public paths, and
+  cycles.
+- `test/validate_module_boundaries_test.py` exercises negative validator
+  fixtures.
+- `scripts/generate_component_catalog.py --check` rejects catalogue drift.
+- `scripts/check_selective_components.sh` defines nine isolated positive
+  consumers and negative leakage fixtures.
+- `.github/workflows/components.yml` runs the selective matrix and the full
+  compatibility build on Ubuntu for pushes and pull requests.
+
+At the current baseline the graph has **40 physical modules and 88 direct
+production dependency edges**, with no allow-listed exception. The boundary
+validator and full build/test gate pass, but the complete selective matrix is
+**not green**: its `Text.Json` job rejects the newly reintroduced
+`sharp_runtime_threading` target. Until the Collections split described in
+`plan.md` is completed, the corresponding GitHub Actions job is expected to
+fail even though `scripts/local_ci_check.sh build` passes.
+
+## Platform status
+
+The complete build and test baseline is currently verified on Linux with GCC.
+Other platform evidence is narrower:
+
+| Platform/toolchain | Verified scope |
+|---|---|
+| Linux/GCC | Current full component build and all 12,586 tests. |
+| Windows/MinGW | The pre-component library build was warning-free in the ticket #40 audit; GoogleTest was not cross-built, and the post-modular tree is not covered by repository CI. |
+| Emscripten | The pre-component library build was warning-free in the ticket #41 audit; tests were not cross-built, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
+| macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
+| MSVC | `Decimal`, `Int128`, and `UInt128` remain unsupported because they require the GCC/Clang `__int128` extension. |
+
+Compile portability and runtime feature availability are separate. Unsupported
+operations should compile and fail explicitly with
+`PlatformNotSupportedException`, rather than silently degrade. The detailed
+policy and known runtime-limited areas are in [CLAUDE.md](CLAUDE.md).
+
+## Intentional differences from .NET
+
+Sharp Runtime intentionally excludes:
+
+- CLR execution, JIT compilation, and garbage collection.
+- General runtime reflection and APIs that depend on it.
+- Serialization infrastructure and P/Invoke/interop.
+- Late-bound delegate `DynamicInvoke`.
+- Symmetric/asymmetric encryption, X.509 certificates, and TLS/`SslStream`.
+
+Hash algorithms, HMAC, PBKDF2, and random-number generation remain in scope.
+Individual APIs can also document smaller, explicit deviations where C++ has
+no safe or useful equivalent.
+
+## Planning and implementation status
+
+Versioned planning is split by purpose:
+
+- [plan.md](plan.md) records the current roadmap and completed architecture
+  milestones.
+- [NEXT.md](NEXT.md) is the concise cold-start handoff: verified baseline,
+  recent changes, known gaps, and the next bounded tasks.
+- [CLAUDE.md](CLAUDE.md) defines contributor invariants and the porting
+  checklist.
+- [prompt.md](prompt.md) defines the local SQLite workflow.
+
+Maintainers also use a local, git-ignored `plan.sqlite3` database:
+
+- `task` classifies .NET types as `ported`, `ignore`/legacy `ignored`, or
+  `tobedecided`.
+- `ticket` tracks concrete stabilization work as `todo`, `doing`, `done`,
+  `blocked`, `needs_user`, or `wontfix`.
+
+Useful queries:
 
 ```bash
-# Ticket counts broken down by status, priority, category, and area
-sqlite3 plan.sqlite3 "SELECT status, priority, category, area, COUNT(*) FROM ticket
-  GROUP BY status, priority, category, area ORDER BY priority, status, category;"
+sqlite3 plan.sqlite3 \
+  "SELECT status, COUNT(*) FROM task GROUP BY status ORDER BY status;"
 
-# Blocked / needs-user tickets, with the exact reason and file each is about
-sqlite3 plan.sqlite3 "SELECT ticket_no, status, source_path, notes FROM ticket
-  WHERE status IN ('blocked', 'needs_user') ORDER BY priority, ticket_no;"
+sqlite3 plan.sqlite3 \
+  "SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;"
 
-# Completed tickets missing a validation_command or an updated_at timestamp
-# (a hygiene check — every ticket marked done should have both; see the
-# Ticket completion checklist above)
-sqlite3 plan.sqlite3 "SELECT ticket_no, title FROM ticket
-  WHERE status = 'done' AND (validation_command IS NULL OR validation_command = ''
-  OR updated_at IS NULL) ORDER BY ticket_no;"
+sqlite3 plan.sqlite3 \
+  "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 1;"
 ```
 
-`plan.sqlite3` itself is a plain SQLite3 database file (rollback journal mode, no WAL
-sidecar files, no virtual tables/extensions) — copying/backing it up is always safe as a
-single-file copy, and it's readable with any standard SQLite client.
+The database is not part of a fresh clone; these commands are for maintainers
+who have the local planning database.
 
----
+## API documentation
 
-# 📊 Implementation Status Convention
+`Doxyfile` scans the module include trees and writes generated HTML under the
+git-ignored `docs/generated/` directory:
 
-Doxygen `@note Status: ...` comments on individual classes/methods are a **secondary, human-readable
-hint**, not the source of truth — `plan.sqlite3`'s `task` table is authoritative for whether a type
-counts as ported. These statuses are not enforced by the compiler.
-
-## Status values
-
-* **Todo** — not implemented yet
-* **Stub** — skeleton only, returns placeholder or fails
-* **Partial** — partially implemented; compiles and mostly works but has known, documented gaps
-* **Implemented** — functionally complete
-* **Verified** — validated against expected .NET behavior
-
----
-
-# 📝 Comment Format
-
-Each class or function may include a status note:
-
-```cpp
-/**
- * @note Status: Partial
- */
+```bash
+mkdir -p docs/generated
+doxygen Doxyfile
 ```
 
-Full example:
+The existing codebase has a known documentation-warning backlog. New or
+modified public APIs should not add warnings and must satisfy the doc-comment
+rules in `CLAUDE.md`.
 
-```cpp
-/**
- * @brief Provides 2D sprite rendering functionality.
- *
- * @note Status: Partial
- */
-class SpriteBatch
-{
-public:
-    /**
-     * @brief Begins a sprite drawing batch.
-     *
-     * @note Status: Implemented
-     */
-    void Begin();
+## License and attribution
 
-    /**
-     * @brief Draws a texture at the specified position.
-     *
-     * @note Status: Partial
-     */
-    void Draw(Texture2D& texture, Vector2 position, Color color);
+Sharp Runtime is licensed under the [MIT License](LICENSE).
 
-    /**
-     * @brief Ends a sprite drawing batch.
-     *
-     * @note Status: Todo
-     */
-    void End();
-};
-```
+The API design and parts of the implementation are based on
+[dotnet/runtime](https://github.com/dotnet/runtime), also under the MIT
+License. Public names, signatures, namespace structure, enum values, and some
+algorithms follow the .NET source; the C++ headers, implementations, build
+system, and tests are maintained by Robert Vokac and contributors.
 
----
+Vendored components keep their upstream licenses:
 
-# 🧠 Design Philosophy
+- [GoogleTest](https://github.com/google/googletest) — BSD 3-Clause.
+- [nlohmann/json](https://github.com/nlohmann/json) — MIT.
+- [tinyxml2](https://github.com/leethomason/tinyxml2) — zlib.
+- [miniz](https://github.com/richgel999/miniz) — MIT.
 
-* Prefer clarity over completeness
-* Avoid unnecessary complexity
-* Keep APIs close to .NET where it makes sense
-* Use modern C++ (RAII, strong typing, clear ownership)
-
----
-
-# ⚠️ Scope
-
-Sharp Runtime intentionally **does not aim to implement:**
-
-* the CLR (Common Language Runtime)
-* JIT compilation
-* full .NET standard compatibility
-
-Instead, it focuses on a **practical subset** useful for native development.
-
----
-
-# 🔗 Related Projects
-
-* CNA — C++ reimplementation of XNA 4.0 (built on top of this library)
+ZLIB is discovered from the host only when `IO.Compression` is enabled. On
+Android, `Storage` can privately use an SDL3 target supplied by its parent
+project.

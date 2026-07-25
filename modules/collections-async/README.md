@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 
-# SharpRuntime::Text.RegularExpressions
+# SharpRuntime::Collections.Async
 
-Header-only regular-expression component. Public dependency: `Core.Base`.
+Header-only physical component for asynchronous enumerable/enumerator
+contracts. Public dependency: `Threading`.
 
 See the [generated component catalogue](../../docs/ComponentCatalog.md) for
 authoritative dependency metadata.

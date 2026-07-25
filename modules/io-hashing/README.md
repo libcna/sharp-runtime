@@ -2,5 +2,8 @@
 
 # SharpRuntime::IO.Hashing
 
-Compiled non-cryptographic hashing module. Direct dependencies: `Core` and
-`IO`. External dependencies: none.
+Compiled non-cryptographic hashing component. Public dependencies:
+`Core.Base` and `IO`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

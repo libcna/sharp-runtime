@@ -2,5 +2,8 @@
 
 # SharpRuntime::Runtime
 
-Compiled runtime-services module. Direct dependency: `Core`. External
-dependencies: none.
+Compiled runtime-services and compiler-services component. Public
+dependencies: `Collections.Core` and `Core.Base`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

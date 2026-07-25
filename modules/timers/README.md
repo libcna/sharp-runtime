@@ -2,5 +2,8 @@
 
 # SharpRuntime::Timers
 
-Compiled timers module. Direct dependencies: `ComponentModel`, `Core`, and
-`Threading`. External dependencies: none.
+Compiled timers component. Public dependencies: `ComponentModel` and
+`Core.Base`; `Threading` is implementation-only.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

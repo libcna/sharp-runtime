@@ -2,5 +2,8 @@
 
 # SharpRuntime::IO.Compression.Zip
 
-Compiled ZIP archive module. Direct dependencies: `Core` and `IO`. External
-dependency: vendored miniz, built only when this module is enabled.
+Compiled ZIP archive component. Public dependency: `IO`; `Core.Base` and
+vendored miniz are private implementation dependencies.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

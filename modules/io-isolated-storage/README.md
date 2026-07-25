@@ -2,5 +2,8 @@
 
 # SharpRuntime::IO.IsolatedStorage
 
-Compiled isolated-storage module. Direct dependencies: `Core`, `IO`, and
-`Storage`. External dependencies: none.
+Compiled isolated-storage component. Public dependencies: `Core.Base` and
+`IO`; `Storage` is implementation-only.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

@@ -2,5 +2,8 @@
 
 # SharpRuntime::Xml.Linq
 
-Compiled XML LINQ module. Direct dependencies: `Core` and `Xml`. External XML
-support arrives transitively through `Xml`.
+Compiled XML LINQ component. Public dependencies: `Core.Base` and `Xml`;
+tinyxml2 arrives transitively through the public `Xml` surface.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

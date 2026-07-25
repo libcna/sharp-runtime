@@ -2,5 +2,9 @@
 
 # SharpRuntime::IO.Compression
 
-Compiled Deflate/GZip/ZLib module. Direct dependencies: `Buffers`, `Core`, and
-`IO`. External dependency: ZLIB, discovered only when this module is enabled.
+Compiled Deflate/GZip/ZLib component. Public dependencies: `Buffers`,
+`Core.Base`, and `IO`. System ZLIB is discovered and linked privately only
+when this component is enabled.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

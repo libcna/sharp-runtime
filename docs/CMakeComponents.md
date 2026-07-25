@@ -7,15 +7,21 @@ Sharp Runtime exposes independently selectable CMake targets. Applications
 request only their direct components; Sharp Runtime resolves and enables the
 transitive dependency closure.
 
-The registered graph currently contains 40 physical modules and 87 direct
+The registered graph currently contains 40 physical modules and 88 direct
 production dependency edges. The boundary validator reports no cycles,
 duplicate include paths, orphan files, undeclared edges, stale edges, or
 visibility mismatches. The dependency allow-list is empty.
 
 The complete component, ownership, dependency, external-library, and
 representative-header table is generated from the CMake registrations:
-[generated component catalogue](ComponentCatalog.md). Local CI rejects an
-out-of-date catalogue.
+[generated component catalogue](ComponentCatalog.md). Local validation and
+the tracked GitHub Actions workflow reject an out-of-date catalogue.
+
+> **Known isolation regression:** the graph is structurally valid, but commit
+> `227111cb` added `Collections.Core -> Threading` for
+> `BlockingCollection`. The Text.Json selective job now fails because it
+> correctly expects no threading target. `plan.md` and `NEXT.md` describe the
+> planned narrow `Collections.Blocking` split.
 
 ## Selecting components
 
@@ -75,10 +81,14 @@ New code should prefer the narrow physical targets:
 - `SharpRuntime::Core.Base` owns foundation types. `SharpRuntime::Console`,
   `SharpRuntime::Uri`, and `SharpRuntime::TimeZone` are optional physical
   components.
-- `SharpRuntime::Collections.Core` owns synchronous collection fundamentals.
+- `SharpRuntime::Collections.Core` is intended to own synchronous collection
+  fundamentals without optional high-level closures.
   `SharpRuntime::Collections.Async` and
-  `SharpRuntime::Collections.ObjectModel` carry the threading and notification
-  closures only when requested.
+  `SharpRuntime::Collections.ObjectModel` isolate asynchronous and
+  notification-specific dependencies. At the current baseline,
+  `BlockingCollection` has temporarily reintroduced `Threading` into
+  `Collections.Core`; the planned `Collections.Blocking` component restores
+  this separation.
 
 Compatibility targets preserve the historical broad surfaces:
 
@@ -124,6 +134,36 @@ are named `SharpRuntimeTests_<Component>`; genuinely cross-module scenarios
 are in `SharpRuntimeIntegrationTests`. CTest also discovers every individual
 GoogleTest case.
 
+The verified 2026-07-25 `All` baseline contains 12,586 tests across 35
+component executables and one integration executable.
+
+## Boundary validation and CI
+
+Run the full native gate with:
+
+```bash
+scripts/local_ci_check.sh build
+```
+
+Run the selective consumer matrix with:
+
+```bash
+scripts/check_selective_components.sh
+```
+
+`.github/workflows/components.yml` runs the nine selective configurations and
+the full compatibility build on Ubuntu for pushes and pull requests. It does
+not currently provide Windows, macOS, or Emscripten coverage.
+
+At `03c7d4bb`, the command stops in the Text.Json job after its 147 tests pass:
+
+```text
+FAIL: selective build unexpectedly configured target sharp_runtime_threading
+```
+
+The full native job remains green. Do not report the selective matrix as green
+until the Collections closure regression is fixed.
+
 ## External dependency isolation
 
 External libraries are configured only by their owning component:
@@ -137,10 +177,11 @@ External libraries are configured only by their owning component:
 - `Storage` privately links an existing SDL3 target on Android.
 
 A `Text.Json`-only build configures none of ZLIB, miniz, tinyxml2, SDL, socket,
-or platform-crypto targets. Automated negative consumer fixtures also prove
-that `Text.Json` does not leak `Collections.Core` or
-`Collections.ObjectModel`, and that `Xml.Linq` does not leak Xml's private
-`Diagnostics` dependency.
+or platform-crypto targets. Its current unexpected dependencies are internal
+`Threading` and `TimeZone` targets. The negative consumer fixtures also cover
+private/sibling header leakage: `Text.Json` must not expose
+`Collections.Core` or `Collections.ObjectModel`, and `Xml.Linq` must not
+expose Xml's private `Diagnostics` dependency.
 
 ## Intentional ownership exceptions
 
@@ -189,16 +230,18 @@ specific reason.
 
 ## Isolation result
 
-The principal closures that motivated the split now contain:
+The original remediation removed the broad Collections umbrella from four
+principal closures. The later `BlockingCollection` port regressed the
+threading part of that result:
 
-| Requested component | Final production closure | Removed unrelated closure |
+| Requested component | Current production closure | Intended closure after `Collections.Blocking` split |
 |---|---|---|
-| `Text.Json` | Core.Base, Buffers, Text, Collections.Core, Text.Json | Threading, ComponentModel, Collections umbrella |
-| `Net.Http.Headers` | Core.Base, Uri, Collections.Core, Net.Http.Headers | Threading, ComponentModel, Collections umbrella |
-| `Net.Mime` | Core.Base, Collections.Core, Net.Mime | Threading, ComponentModel, Collections umbrella |
-| `Numerics` | Core.Base, Buffers, Collections.Core, Numerics | Threading, ComponentModel, Collections umbrella |
+| `Text.Json` | Core.Base, Buffers, Text, TimeZone, Threading, Collections.Core, Text.Json | Core.Base, Buffers, Text, Collections.Core, Text.Json |
+| `Net.Http.Headers` | Core.Base, Uri, TimeZone, Threading, Collections.Core, Net.Http.Headers | Core.Base, Uri, Collections.Core, Net.Http.Headers |
+| `Net.Mime` | Core.Base, TimeZone, Threading, Collections.Core, Net.Mime | Core.Base, Collections.Core, Net.Mime |
+| `Numerics` | Core.Base, Buffers, TimeZone, Threading, Collections.Core, Numerics | Core.Base, Buffers, Collections.Core, Numerics |
 
-Selective builds also avoid the optional Console and TimeZone archives unless
-their real graph closure requires them. Existing include paths, namespaces, and
-compatibility targets remain available; no public runtime API or behavior was
-removed by the physical relocation.
+The current closures still avoid `ComponentModel`, the broad Collections
+umbrella, Console, networking/XML, and unrelated external libraries. Existing
+include paths, namespaces, and compatibility targets remain available; no
+public runtime behavior was removed by the physical relocation.

@@ -9,9 +9,9 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **10711+ tests passing.** `scripts/run_component_tests.sh build` must show no failures. (Current baseline: 12,494 tests across component and integration executables; this floor should be raised as new tests are added, never lowered.)
+2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 12,586 tests across 35 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
-4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
+4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
    (C# `this[key]` equivalents) use `getItem()` / `setItem()`, not
    `getItemProperty()`/`setItemProperty()` — a deliberate, consistent convention for the
@@ -27,20 +27,31 @@
 
 ## Platform policy
 
-### What is POSIX-only (known bugs, not features)
+### Compile support is not runtime support
 
-These subsystems currently work only on Linux/macOS and are **documented bugs**, not done status:
+The current full build/test baseline is Linux/GCC. MinGW and Emscripten
+library builds were compile-verified before the final component split
+(tickets #40 and #41), and real downstream Apple Clang/Xcode 15.4 builds
+drove the portability fixes from `1d22a7b2` through `b797928f`. The
+repository's tracked CI is Ubuntu-only, so do not describe Windows,
+Emscripten, or macOS as having the same current test coverage as Linux.
 
-| Subsystem | POSIX-only API used | Status |
-|-----------|--------------------|----|
-| `System::Net::Sockets` | `<sys/socket.h>`, `<unistd.h>`, `pread`/`pwrite` | POSIX-only |
-| `System::IO::RandomAccess` | `pread`, `pwrite`, `fsync` | POSIX-only |
-| `System::AppDomain/AppContext` | `/proc/self/exe` | Linux-only |
-| `System::TimeZoneInfo` | `localtime_r`, `/usr/share/zoneinfo` | POSIX-only |
-| `System::Diagnostics::Process` | `fork`, `execve`, `waitpid` | POSIX-only |
-| `System::Runtime::InteropServices::PosixSignal`/`PosixSignalRegistration` | `sigaction` | POSIX-only |
-| `System::Net::NetworkInformation::NetworkInterface` | `getifaddrs` | Linux-only |
-| `System::IO::FileSystemWatcher` | `inotify` | Linux-only |
+Unsupported runtime operations must still compile. They should throw
+`PlatformNotSupportedException` clearly rather than fail the build or silently
+degrade.
+
+Current platform-limited areas include:
+
+| Subsystem | Implemented runtime platforms | Explicit limitation |
+|-----------|-------------------------------|---------------------|
+| `System::Net::Sockets` | Windows and POSIX | Socket operations throw on Emscripten. |
+| `System::IO::RandomAccess` | Windows and POSIX | Operations throw on Emscripten. |
+| `System::AppDomain` base directory | Windows, macOS, Linux/POSIX | Emscripten uses the virtual-FS-relative `./` fallback. |
+| `System::TimeZoneInfo` | Windows and POSIX | Emscripten provides UTC/local fallback and rejects system-zone lookup. |
+| `System::Diagnostics::Process` | POSIX | Operations throw on Windows/Emscripten. |
+| `PosixSignal`/`PosixSignalRegistration` | POSIX | Registration throws on Windows/Emscripten. |
+| `NetworkInterface` enumeration | Linux | Enumeration/query operations throw elsewhere. |
+| `FileSystemWatcher` | Linux/inotify | Enabling events throws elsewhere. |
 
 ### What is MSVC-unsupported (compiler-extension dependency, not a platform bug)
 
@@ -70,9 +81,9 @@ target MSVC as a first-class compiler).
 
 ## Status terminology
 
-- **✅ DONE** — implemented, tested, compiles clean on Linux, no known bugs.
-- **⚠️ PARTIAL** — compiles and mostly works but has known gaps (documented in NEXT.md §4).
-- **⚠️ POSIX-only** — works on Linux/macOS but will not compile or link on Windows/Emscripten without additional work. Treat as a known bug.
+- **✅ DONE** — implemented, tested, compiles clean on the verified native baseline, no known bugs.
+- **⚠️ PARTIAL** — compiles and mostly works but has known, documented API or behavior gaps.
+- **⚠️ PLATFORM-LIMITED** — compiles across the intended toolchains but some operations are available only on named platforms and throw explicitly elsewhere.
 - **⚠️ STUB** — API surface exists, bodies are no-ops or throw `NotImplementedException`.
 
 ---
@@ -157,6 +168,15 @@ Every `.hpp` and `.cpp` file starts with:
   validates every implementation/header owner and public/private/test
   dependency. Every module declares its include root, sources, tests,
   dependencies, and platform setup in `modules/<module>/CMakeLists.txt`.
+- **Component boundaries:** internal code depends on narrow physical targets
+  (`Core.Base`, `Collections.Core`, etc.), never the `Core`, `Collections`, or
+  `All` compatibility umbrellas. Public-header edges are
+  `PUBLIC_DEPENDENCIES`, implementation-only edges are
+  `PRIVATE_DEPENDENCIES`, and test-only edges are `TEST_DEPENDENCIES`.
+  The current `Collections.Core -> Threading` edge is a documented isolation
+  regression from `BlockingCollection`, not a new baseline to normalize; see
+  `NEXT.md` before changing collection component metadata or its negative
+  fixture.
 - **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
 
@@ -164,7 +184,9 @@ Every `.hpp` and `.cpp` file starts with:
 
 ## plan.sqlite3 namespace review workflow
 
-`plan.sqlite3` (table `task`) tracks all .NET types from dotnet/runtime. The **status column starts empty** for each type. Full workflow detail lives in `prompt.md` — this is the summary:
+`plan.sqlite3` (table `task`) tracks indexed .NET types from dotnet/runtime.
+Rows started with an empty status; the current maintainer snapshot is fully
+classified. Full workflow detail lives in `prompt.md` — this is the summary:
 
 1. For each type where status is `''` or `todo` (System-namespace types first), look up what it does in `/rv/tmp/runtime/src/libraries/` and classify it **without asking the user**:
    - **Port it** → check if the file exists in sharp-runtime, review against the full checklist, port or fix, then set `status = 'ported'` and commit.
@@ -172,7 +194,11 @@ Every `.hpp` and `.cpp` file starts with:
    - **Genuinely ambiguous** → set `status = 'tobedecided'` rather than guessing; the user reviews these by hand later.
 2. Keep processing items back-to-back — do not stop between items to ask for confirmation.
 
-Valid status values: `''` (unset), `todo`, `ported`, `ignore`, `tobedecided`. **`in_progress` does not exist** — porting happens directly with no intermediate state.
+Valid statuses written by the current workflow are `''` (unset), `todo`,
+`ported`, `ignore`, and `tobedecided`. The database also contains legacy
+`ignored` rows; treat them as classified and do not rename them mechanically.
+**`in_progress` does not exist** — porting happens directly with no
+intermediate state.
 
 State lives in `plan.sqlite3` + git history, not conversation memory, so this process resumes cleanly after any context reset — just re-open `prompt.md` and continue from Step 1.
 

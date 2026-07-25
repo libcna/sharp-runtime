@@ -2,5 +2,8 @@
 
 # SharpRuntime::Numerics
 
-Compiled numerics module. Direct dependencies: `Buffers`, `Collections`, and
-`Core`. External dependencies: none.
+Compiled numerics component. Public dependencies: `Buffers`,
+`Collections.Core`, and `Core.Base`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

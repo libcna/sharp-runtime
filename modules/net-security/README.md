@@ -2,5 +2,8 @@
 
 # SharpRuntime::Net.Security
 
-Header-only network-security API module. Direct dependency: `Core`. External
-dependencies: none; TLS remains outside the runtime's supported scope.
+Header-only network-security metadata component. Public dependency:
+`Core.Base`; TLS remains outside the runtime's supported scope.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

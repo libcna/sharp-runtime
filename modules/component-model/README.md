@@ -2,4 +2,9 @@
 
 # SharpRuntime::ComponentModel
 
-Header-only module. Direct dependency: `Core`. External dependencies: none.
+Header-only physical component for attributes, notifications, initialization,
+change tracking, and async-completion metadata. Public dependency:
+`Core.Base`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

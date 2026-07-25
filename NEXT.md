@@ -1,438 +1,351 @@
 # NEXT.md
 
-*Last updated: 2026-07-14. Branch: `feature/work`. HEAD is this checkpoint commit itself; the
-last code-affecting commit was `8514a9d` (A-05 `OrderedDictionary` fix), followed by a docs-only
-fix at `6aa719f` (A-06 README correction) — see §3.*
+*Last verified: 2026-07-25. Branch: `feature/work`. Code baseline:
+`03c7d4bb`. Native baseline: clean build and 12,586 passing tests across 36
+executables. Selective baseline: failing `Text.Json` isolation assertion
+because `Collections.Core` now pulls `Threading`.*
 
-This document was rewritten from scratch on 2026-07-13 into a structured handoff format,
-replacing a ~6000-line chronological session log. That log is not lost — it's in git history
-(`git log --oneline -- NEXT.md`). Condensed again on 2026-07-14 (the prior structured version
-had regrown to ~1200 lines of session narrative); this file intentionally contains only the
-current, load-bearing state — not a blow-by-blow log.
+This is the cold-start handoff for the next working session. Keep it focused
+on facts needed to resume: current validation state, recent architectural/API
+changes, known gaps, and a short ordered task list. Historical session detail
+belongs in git history and `plan.sqlite3`, not in an ever-growing transcript.
 
----
+## 1. Project and phase
 
-## 1. Project summary
+Sharp Runtime is a C++23 implementation of a practical subset of .NET
+`System.*`, primarily for CNA and native game ports.
 
-**sharp-runtime** is a C++23 static library that reimplements a practical subset of .NET's
-`System.*` namespace, so ported C#/XNA game code compiles against C++ headers with minimal
-changes. Foundation for **CNA** (a C++ XNA port) and **mobile-eggbert** — neither lives in this
-repo; this is a standalone dependency.
+The project is now in **consumer-driven expansion after stabilization and
+modularization**:
 
-**Main goal**: broad, behaviorally-faithful coverage of the .NET BCL surface a 2D/3D game
-realistically needs, as idiomatic modern C++, not a literal transliteration.
+- The local `task` classification queue has no unclassified rows.
+- All 1,736 stabilization/architecture tickets are `done`.
+- The original component-boundary remediation landed, but a later collection
+  port regressed one accepted isolation property.
+- The full native build/test gate is green; the selective CI matrix is not.
+- No database ticket records the regression yet.
 
-**Current phase**: post-stabilization. The original porting/stabilization backlog
-(`plan.sqlite3`'s `ticket` table) is fully complete. A subsequent fresh audit found 19 issues;
-all fixed. No open, pre-scoped work item exists anywhere in `plan.sqlite3` — the project is
-stable and awaiting direction for the next body of work (§8 for candidates, §10 for a resume
-prompt).
+Start new work only from a concrete consumer requirement, a confirmed parity
+gap, or a reproducible validation finding. Create a bounded ticket before
+implementation so the local database remains the durable source of detail.
 
-**Key architectural decisions**:
-- `SharpRuntime::intcs`/`longcs`/`shortcs`/`uintcs`/`ulongcs`/`ushortcs`/`bytecs`/`sbytecs`
-  (fixed-width aliases in `modules/core/include/SharpRuntime/SharpRuntimeHelper.hpp`) are mandatory in every
-  public API that mirrors a .NET `int`/`long`/etc. Rollout is complete project-wide.
-- Properties are `getXxxProperty()`/`setXxxProperty()`, with one documented exception: C#
-  indexers map to `getItem()`/`setItem()`. `getCurrent()` → `getCurrentProperty()` was the last
-  naming gap, closed this session across 23 files/61 occurrences — **a deliberate breaking
-  change, no backward-compat alias**.
-- A fixed set of .NET subsystems is permanently out of scope: reflection, GC internals, delegate
-  `DynamicInvoke`, serialization infra, P/Invoke, symmetric/asymmetric crypto + TLS + X.509 (hash
-  algorithms remain in scope). Full list in `CLAUDE.md`.
-- A fixed set of subsystems are POSIX/Linux-only by necessity: `System::Net::Sockets`,
-  `System::IO::RandomAccess`, `AppDomain`/`AppContext`, `TimeZoneInfo`, `Diagnostics::Process`,
-  `PosixSignal`/`PosixSignalRegistration`, `NetworkInterface`, `FileSystemWatcher`. All correctly
-  throw `PlatformNotSupportedException` elsewhere (verified by review, not by an actual
-  Windows/Emscripten compile — see §5).
-- Every mutable generic collection (`List`, `Dictionary`, `HashSet`, `LinkedList`, `Queue`,
-  `Stack`, `SortedDictionary`, `SortedList`, `SortedSet`, `OrderedDictionary`) tracks a
-  `version_` counter, checked by its enumerator on every step — mutating during enumeration
-  throws `InvalidOperationException`, matching .NET's fail-fast contract. New invariant this
-  session; see §6 for what it means for new collection types.
+## 2. Verified current state
 
----
+The following passed on 2026-07-25:
 
-## 2. Current status
+```text
+Module validator: 40 physical modules, 88 production dependency edges
+Validator fixtures: 7 passed
+Generated component catalogue: current
+Build: 0 warnings, 0 errors
+Tests: 12,586 passed across 36 executables
+```
 
-**Build**: clean — 0 errors, 0 warnings — at `6aa719f` (last commit, docs-only), via
-`cmake --build build --parallel 4`.
+The exact gate was:
 
-**Tests**: **12476/12476 passing** at `8514a9d` (last code-touching commit), grown from a 12173
-session-start baseline (~300 new regression tests this session).
+```bash
+scripts/local_ci_check.sh build
+```
 
-**Sanitizers**: the full trio (TSan/ASan/UBSan) is verified clean project-wide. TSan has been
-re-run repeatedly against each new concurrency-sensitive change, most recently the
-`Task::ContinueWith`/`WhenAny` rewrite (`557d0ea`, 0 warnings); ASan was re-run against the same
-change to verify its new `weak_ptr`-based cycle-avoidance design doesn't leak (0 leaks). UBSan
-hasn't been re-run since the original pass at `1cdc80a` — low priority, no UB-prone patterns
-introduced since. The `audit.md` remediation (A-01–A-06) has **not** had a dedicated sanitizer
-re-run yet (candidate: A-02's destructor paths, A-05's exception-rollback logic — see §8).
+The suite includes 35 component executables and
+`SharpRuntimeIntegrationTests`. `SharpRuntimeTests` is only a CMake aggregate
+target; there is no monolithic `./build/SharpRuntimeTests` executable.
 
-**Targets**: single static library `SHARP_RUNTIME` + `SharpRuntimeTests` (GoogleTest). No CLI,
-sample, or demo binary exists in this repo.
+The complete selective check currently fails after both the `Core.Base` and
+`Text.Json` test binaries pass:
 
-**Not yet done/verified**:
-- No Windows or Emscripten build has ever actually been compiled (this sandbox is Linux-only).
-  `#ifdef` branches for those platforms are code-reviewed only.
-- Performance work: only `String` (`Split`/`Concat`/`Join`, optimized ~2.6x/~1.4x), `Dictionary`,
-  `List<T>`, `StringBuilder` (all three measured, no significant win found) have been profiled.
-  Everything else in the codebase is unmeasured.
-- Known API gaps: `ImmutableList`'s missing LINQ-family methods; `TaskT<TResult>::ContinueWith`
-  (see §5).
+```text
+FAIL: selective build unexpectedly configured target sharp_runtime_threading
+```
 
----
+Tracked CI now exists in `.github/workflows/components.yml`:
 
-## 3. Recent changes
+- Nine Ubuntu selective-component jobs exercise positive consumer fixtures
+  and negative leakage assertions.
+- A full Ubuntu compatibility job runs `scripts/local_ci_check.sh build`.
+- The `Text.Json` job is expected to reproduce the current local isolation
+  failure; workflow presence must not be described as a green CI result.
 
-Scoped to this session's most significant work. A much larger backlog — 1709 tickets covering the
-original porting/stabilization pass — was completed earlier in the same session and isn't
-re-itemized; see `git log` for the full trail and exact per-commit test-count deltas.
+The local `plan.sqlite3` snapshot contains:
 
-**Foundational fixes and additions**:
-- Fresh independent post-stabilization audit — 19 findings, all fixed.
-- `version_` tracking + fail-fast enumeration added to 10 mutable collection types (see §1).
-- `NumberStyles`-aware `Parse`/`TryParse` for all 8 integer types — `Integer`, `HexNumber`,
-  `Number`, `Currency`, `BinaryNumber` now fully supported (`AllowExponent` is the one remaining
-  gap, and real .NET's `Number`/`Currency` styles don't include it either — a non-gap).
-- Correctness fixes: `Convert::ToXxx(double/float)` round-to-nearest (was truncate);
-  `Span`/`ReadOnlySpan` indexer now throws `IndexOutOfRangeException`; `Dictionary`/
-  `SortedDictionary`/`SortedList` non-const indexers now throw `KeyNotFoundException` instead of
-  silently inserting; `ConcurrentDictionary::GetOrAdd`/`AddOrUpdate` reentrancy deadlock;
-  `MemoryStream`/compression-stream write validation (a negative offset previously caused a
-  confirmed OOB read) and disposed-state tracking; `Math::Round` no longer depends on ambient
-  `fesetround()`; `StringInfo` UTF-8-aware text-element handling; `FileSystemWatcher` now throws
-  `PlatformNotSupportedException` on non-Linux instead of silently no-opping.
-- `getCurrent()` → `getCurrentProperty()` rename — 23 files, 61 occurrences, one commit, no
-  compat alias (see §1).
+```text
+task:   1,082 ported; 140 ignore; 14,979 legacy ignored; 0 open/TBD
+ticket: 1,736 done; 0 todo/doing/blocked/needs_user
+```
 
-**`Task`/async completeness** (`9d4e77e`, `2be9c3c`, `200591b`, `557d0ea`):
-- Added `Task::WhenAll`, `Task::WhenAny`, `TaskCompletionSource<TResult>.Task`, and
-  `Task::ContinueWith` (with `WhenAny` rebuilt on top of it, achieving zero extra OS threads —
-  matches real .NET's `TaskFactory.CommonCWAnyLogic` completion-registration strategy instead of
-  a dedicated watcher thread per input task).
-- Real bugs found and fixed along the way: `WhenAny` originally `join()`'d losing watcher
-  threads, making it as slow as the slowest input (fixed via `detach()`); a genuine
-  `~TaskCompletionSource()` deadlock from GCC/libstdc++'s `shared_future` destruction semantics;
-  an exception-type-sniffing bug (`catch (const TaskCanceledException&)` used to distinguish
-  cancellation from a fault) that misclassified a task that legitimately *threw*
-  `TaskCanceledException`, found independently in both `TaskCompletionSource::SetException`
-  (`eb8489a`) and `Task::WhenAll` (`886ea61`); a `weak_ptr`-vs-reference-cycle leak risk in
-  `ContinueWith`'s continuation-registration design (fixed before landing, verified leak-free via
-  ASan); missing null/moved-from-`Task` validation in `WhenAny`/`WhenAll` (`498fa71`).
-- `Channel<T>::CreateUnboundedPrioritized` added (`3a8adfa`); both channel types' `TryRead`/
-  `TryWrite` had `notify_one()` lost-wakeup bugs under multiple blocked waiters, fixed to
-  `notify_all()` (`41c0476`).
+The database is git-ignored and is not available in a fresh clone.
 
-**Sanitizer trio — first-ever full runs in this project's history**:
-- ThreadSanitizer: 1 real production deadlock (`Channel` missing `notify_all`) + 3 test-only
-  races from `sleep_for`-as-synchronization — all fixed.
-- AddressSanitizer: 1 confirmed heap-buffer-overflow (`NativeMemory::AlignedRealloc` copying the
-  new size from an old, smaller allocation) + 5 leaked allocations in the XML subsystem
-  (`XmlDocument::CreateAttribute`/`CreateEntityReference` had no owner) — all fixed.
-- UndefinedBehaviorSanitizer: 1 UB call (empty-vector `.data()` reaching `fwrite`'s `nonnull`
-  parameter inside vendored miniz) — fixed at this project's own call site.
-- All three now run clean project-wide. A `-Wshadow` diagnostic build also came back clean
-  (3 harmless test-file coincidences, zero in the production module trees) — no code changed.
+## 3. What changed since the previous handoff
 
-**Performance audits** (measure-first discipline; `bench/StringBenchmark.cpp`, gated behind
-`SHARP_RUNTIME_BUILD_BENCHMARKS`, default OFF — no vendored benchmarking library):
-- `String::Split(char)`/`Concat`/`Join`: optimized (~2.6x / ~1.4x faster); also fixed a
-  correctness bug found as a side effect (`Split("", ',')` now returns `{""}`, matching .NET,
-  not an empty vector).
-- `List<T>`, `StringBuilder`, `Dictionary<K,V>` (`Add`/indexer-setter): measured, no significant
-  win found in any of the three — no code changed. Three honest negative results this session,
-  not gaps (see CLAUDE.md's "no speculative optimization" rule).
+### Binary IO and platform portability
 
-**Duplicated-implementation audit round** — comparing near-identical code across sibling types
-surfaced 5 real bugs, all fixed with regression tests: unsigned integer parser accepted repeated
-sign tokens (`edb77f0`); `OrderedDictionary`'s non-const indexer inserted a default value on a
-missing-key read, the same bug class already fixed on `Dictionary`/`SortedDictionary`/
-`SortedList`/`ConcurrentDictionary` (`e48c381`); `OrderedDictionary::EnsureCapacity` didn't bump
-`version_` (`31b77f6`); `UInt32` was the one integer type missing `ToString(value, format)`
-(`8adb63e`); `Int16` was the one signed integer type missing `CopySign`/`IsNegative`/
-`IsPositive`/`MaxMagnitude`/`MinMagnitude` (`68d1068`). Follow-up checks confirmed the
-indexer-insert bug is now closed across `Collections::Specialized` too, and found no third
-instance of the exception-type-sniffing pattern beyond the two already fixed.
+- `BinaryReader::ReadChar` gained incremental UTF-8 decoding (`167b0bc4`).
+- `BinaryReader::ReadDecimal` gained the .NET four-int32 wire layout
+  (`2505d58c`).
+- `BinaryReader::ReadString` and `ReadBytes` now avoid adversarial huge
+  pre-allocation on short seekable streams (`d2cc9cce`).
+- Real downstream Apple Clang/Xcode 15.4 builds drove fixes for GCC-only
+  warning flags, missing floating-point `from_chars`, Apple host/clock APIs,
+  socket byte-order macros, BSD ICMPv4 layout, and BSD/Darwin entropy
+  (`1d22a7b2` through `b797928f`).
 
-**External audit remediation** (`audit.md`, 2026-07-14, untracked report in repo root) — 6 of 7
-findings fixed:
-- **A-01** (High, `221bb92`): stream-backed `ZipArchive` never wrote Create/Update output back to
-  its `Stream*`; a second bug found while testing it — Update mode silently dropped all
-  pre-existing entries. Both fixed.
-- **A-02** (High, `f1266ae`): 5 destructors (`DeflateStream`/`GZipStream`/`ZLibStream`/
-  `ZipArchive`/`XmlWriter`) could call `std::terminate()` on an ordinary I/O failure during RAII
-  cleanup — wrapped in `try/catch(...)`.
-- **A-03** (High, `5cf5fa5`): `DeflateStream`/`GZipStream`/`ZLibStream::Read()` had no buffer
-  validation, unlike their own `Write()` — added the same checks.
-- **A-04** (Medium, `95e88f0`): `TaskCompletionSource<TResult>::TrySetResult` could strand every
-  waiter forever if `TResult`'s copy constructor threw mid-`set_value()` — fixed with a
-  catch-and-fulfill-then-rethrow.
-- **A-05** (Medium, `8514a9d`): `OrderedDictionary` could desync `entries_`/`keyIndex_` if a hash
-  or key copy threw partway through a mutation — added transactional rollback.
-- **A-06** (Low, `6aa719f`): README overclaimed Doxygen/tooling coverage — reworded, no code
-  change.
-- **A-07** (Low, deferred): no tracked CI pipeline — offered to the user (basic/comprehensive/
-  skip), declined for now. See §5/§9.
+### Physical component architecture
 
----
+The work from `7a99e061` through `27e4d680`, principally `b0e944ad`:
 
-## 4. Current blocker / main problem
+- Moved public headers, implementations, and tests under one owning
+  `modules/<module>` tree.
+- Split broad Core and Collections closures into narrow physical targets.
+- Added public/private/test-only dependency metadata.
+- Added component-scoped test binaries and a separate integration binary.
+- Added executable boundary validation, generated catalogue checks,
+  selective consumer fixtures, and GitHub Actions.
+- Preserved include spellings and compatibility targets.
 
-**No active build/test blocker.** Build clean, 12476/12476 tests passing at the last
-code-touching commit (`8514a9d`); re-verified after two docs-only commits at `6aa719f`.
-`plan.sqlite3`'s `ticket` table has zero `blocked`/`todo`/`doing` rows; the `task` table has zero
-unclassified rows.
+The modularization checkpoint had 12,494 tests. Subsequent API work increased
+the current baseline to 12,586 and the graph from 85 to 88 production edges.
 
-This session has run autonomously (per explicit user authorization) through NEXT.md's original
-§8 tasks plus several self-directed audit rounds — see §3. Two standing user decisions remain in
-effect: (1) no new benchmarking dependency — `std::chrono`-only timing, per
-`bench/StringBenchmark.cpp`; (2) push after each verified task.
+### Consumer-driven ports after modularization
 
-**The open question is direction, not a technical problem** — what to work on next (see §8).
+- Runtime compiler-services helpers, including `ConditionalWeakTable`,
+  `RuntimeHelpers`, state-machine attributes, and compiler feature metadata
+  (`84f50c5d`).
+- Component-model notification, change-tracking, initialization, attribute,
+  and async-completion primitives (`db0a172a`, `c97cc024`).
+- `HttpMessageHandler`, `HttpMessageInvoker`, request options, and related
+  HTTP primitives (`8a7077eb`).
+- `IWebProxy` and `WebProxy` (`b775e773`).
+- `ConcurrentBag` and `BlockingCollection` (`227111cb`).
+- Generic and non-generic `TaskExtensions::Unwrap` (`0310c7d1`).
+- `XmlSchemaException` and `XmlSchemaValidationException` (`5ef799e3`).
 
-If you're resuming and something is failing, trust the failing command's own output over this
-document, and update this section once you understand what changed.
+`03c7d4bb` removed a completed audit document and corrected stale test
+comments; it did not change production behavior.
 
----
+## 4. Active architecture regression
 
-## 5. Known bugs and limitations
+Commit `227111cb` placed `BlockingCollection` in `Collections.Core`.
+`BlockingCollection.hpp` publicly includes `CancellationToken`,
+`CancellationTokenRegistration`, and `Timeout`, so the commit also added the
+public edge:
 
-**Deliberately deferred (documented scope decisions, not bugs)**:
-- `ImmutableList<T>` is missing `Sort`/`Reverse`/`ForEach`/`CopyTo`/`GetRange`/`ConvertAll`/the
-  `Find` family/`ToBuilder`/comparer overloads — cataloged in its class doc-comment.
-- `Span<char>`/UTF-8 `ReadOnlySpan<byte>`-based `Parse`/`TryParse` overloads for the 8 integer
-  types — not implemented, explicitly out of scope for the ticket that added the
-  `NumberStyles`-aware overloads.
-- `System::Xml::Linq::XText::WriteTo` doesn't distinguish `WriteWhitespace` vs `WriteString`
-  under an `XDocument` parent the way real .NET does — needs a `WriteWhitespace` primitive
-  `XmlWriter` doesn't have yet.
-- `TaskT<TResult>::ContinueWith` (generic-result counterpart of `Task::ContinueWith`) is not
-  implemented — `WhenAny`/`WhenAll` only operate on non-generic `Task` and didn't need it. The
-  `completionMutex`/`completionCv` groundwork already exists on `TaskT::State`; missing is a
-  `continuations` list + the method itself, mirroring `Task`'s `weak_ptr`-based cycle avoidance.
-- **No tracked CI pipeline** (external audit finding A-07, 2026-07-14) — no
-  `.github/workflows/*.yml` exists; `scripts/local_ci_check.sh` is the local-only equivalent.
-  Offered to the user and declined for now. Don't add CI config unilaterally (see §9).
-- `MemoryStream(const bytecs* buffer, intcs size)` defaults `writable_(false)`, but real .NET's
-  single-array-arg constructor defaults to writable (`this(buffer, true)`). Found incidentally
-  during A-01's regression tests, deliberately not fixed there to avoid scope creep. Well-scoped
-  fix if picked up: change the default, audit callers/tests relying on the current behavior.
+```text
+Collections.Core -> Threading -> TimeZone
+```
 
-**Needs verification (unknown status)**:
-- No Windows or Emscripten build has ever been compiled for this repo — every platform `#ifdef`
-  branch is unverified beyond code review.
-- Performance is measured only for `String` (optimized), `Dictionary`, `List<T>`, `StringBuilder`
-  (measured, no win found) — see §3. Everything else is unmeasured.
-- UndefinedBehaviorSanitizer hasn't had a dedicated re-run since `1cdc80a` (12378 tests) — low
-  priority, no UB-prone patterns introduced since, and TSan/ASan (more relevant to the newest
-  concurrency/memory-lifetime-heavy changes) are both freshly re-verified clean.
+That edge is declared correctly, which is why the 40-module/88-edge boundary
+validator passes. It nevertheless defeats the lean Collections closure:
+`Text.Json`, `Net.Http.Headers`, `Net.Mime`, and `Numerics` all pull
+`Threading` and `TimeZone` again. The Text.Json target-absence assertion
+catches this and makes the selective GitHub Actions job fail.
 
-**Permanent (by design, not something to "fix")**:
-- Reflection, GC internals, most delegates' `DynamicInvoke`, serialization infra, P/Invoke/
-  interop, symmetric/asymmetric crypto + TLS + X.509 — all permanently out of scope. See
-  `CLAUDE.md`.
-- `System::Decimal`/`Int128`/`UInt128` require the GCC/Clang `__int128` extension and
-  hard-`#error` on MSVC — permanent, accepted (2026-07-11 decision); not to be "fixed" with
-  hand-rolled 128-bit arithmetic.
-- `getCurrent()` → `getCurrentProperty()` has **no backward-compat alias** — any code (including
-  CNA) calling the old name won't compile until updated on the consumer side. Explicit decision.
-- `TypedReference` — re-verified 2026-07-13: correctly `status='ignore'`/`outofscope=1`. Its
-  functionality depends entirely on C# compiler intrinsics and CLR reflection, squarely inside
-  the "reflection is out of scope" deviation. False alarm from an earlier audit pass, not a bug.
+The preferred fix is a narrow new physical component (provisional name
+`Collections.Blocking`):
 
----
+1. Move `BlockingCollection.hpp` and its dedicated tests out of
+   `Collections.Core`. Leave the other concurrent headers in place because
+   they do not include `System/Threading/*`.
+2. Give it the direct dependencies proved by its headers:
+   `Collections.Core`, `Core.Base`, and `Threading`.
+3. Add it to the `Collections` compatibility umbrella.
+4. Remove `Threading` from `Collections.Core`.
+5. Add/update a selective consumer fixture, regenerate the catalogue, then
+   run the full selective matrix and native gate.
 
-## 6. Architecture notes
+Do not merely remove the negative assertion: accepting the broader closure
+would reverse MOD-003/MOD-006's approved goal and needs an explicit
+architecture decision.
 
-**Layout**:
-- `modules/<module>/include/System/...` — public headers; include spelling still mirrors the
-  .NET namespace hierarchy 1:1.
-- `modules/<module>/src/System/...` — `.cpp` bodies for complex types (simple types are
-  header-only).
-- `modules/<module>/tests/System/...` — module-owned GoogleTest suites.
-- `tests/integration/...` — the small set of suites intentionally spanning multiple modules.
-- `vendor/` — third-party sources (GoogleTest, nlohmann/json, tinyxml2, miniz) — **exempt** from
-  this project's SPDX-header, doc-comment, and naming rules.
-- `plan.sqlite3` (gitignored) — two-table (`task`, `ticket`) work-tracking database. See
-  `prompt.md` for the full workflow.
+## 5. Architecture facts to preserve
 
-**Build**: CMake with module-local `GLOB_RECURSE` auto-discovering `src/*.cpp` and
-`tests/*.cpp` — a new file needs a CMake reconfigure, but no source-list edit.
+### Components and ownership
 
-**Invariants that must be preserved by any new code**:
-1. Every public API parameter/return mirroring a .NET `int`/`long`/`short`/`byte`/etc. uses the
-   matching `SharpRuntime::*cs` alias, never the raw C++ type. Enforced project-wide.
-2. Every property getter/setter is `getXxxProperty()`/`setXxxProperty()`; the only exception is
-   `getItem()`/`setItem()` for C# indexers. Zero other exceptions exist — don't introduce one
-   without updating `CLAUDE.md`.
-3. Any mutable collection-like type with an enumerator/iterator tracks a `version_` counter,
-   bumped on structural mutation (not on value-only updates), checked every enumerator step,
-   throwing `InvalidOperationException("Collection was modified; enumeration operation may not
-   execute.")` on mismatch. Reference: `List<T>`, `Dictionary<K,V>`, `ArrayList`/`Hashtable`.
-   **Note**: this port has twice bumped `version_` on `Remove()`/`Clear()` even where real .NET
-   doesn't, because `std::unordered_map`/`set` iterators are invalidated by erase/clear in ways
-   .NET's array-backed entries aren't — verify against both the .NET reference and actual C++
-   iterator-invalidation rules when adding this to a new type, don't copy .NET blindly.
-4. Any dictionary-like `operator[]` must distinguish get-intent (throw `KeyNotFoundException` on
-   a missing key) from set-intent (insert on missing key) via a `ValueProxy` wrapper — see
-   `ConcurrentDictionary.hpp`, `Dictionary.hpp`, `SortedDictionary.hpp`, or `SortedList.hpp`.
+- There are 40 physical components and four compatibility surfaces:
+  `Core`, `Collections`, `Xml.XPath`, and `All`.
+- New internal and external consumers should use narrow physical targets such
+  as `Core.Base` and `Collections.Core`.
+- Public headers live under `modules/<module>/include/`.
+- Implementations live under `modules/<module>/src/`.
+- Module tests live under `modules/<module>/tests/`.
+- Only genuinely cross-module scenarios belong in `tests/integration/`.
+- Module `CMakeLists.txt` files are declarations for the root project, not
+  standalone projects.
 
-**Boundaries that must not be broken**:
-- No POSIX `#include`s (`<unistd.h>`, `<sys/socket.h>`, etc.) in public `.hpp` headers — only in
-  `.cpp` files behind `#ifdef _WIN32` / `#elif defined(__EMSCRIPTEN__)` / `#else`. Throw
-  `PlatformNotSupportedException` on unsupported platforms, never silently degrade.
-- No LINQ-style chaining in code this project writes internally — use `std::ranges` (auditing/
-  porting an existing `System::Linq` surface is different and fine).
-- SPDX header on every file under module `include/`, `src/`, `tests/` and root
-  `tests/integration/` (not `vendor/`).
+### Enforced dependency model
 
-**Compatibility/API rules**:
-- Push only to `feature/work`. Never `develop`/`master`, never tags, without explicit per-action
-  approval.
-- `getCurrent()` → `getCurrentProperty()` is a completed, intentional breaking change — don't
-  reintroduce the old name.
-- No further broad, project-wide renames/refactors without the same explicit, per-action
-  authorization the `intcs` and `getCurrentProperty()` changes required (CLAUDE.md rule #10).
+- Public-header edges use `PUBLIC_DEPENDENCIES`.
+- Implementation-only edges use `PRIVATE_DEPENDENCIES`.
+- Test-only edges use `TEST_DEPENDENCIES`.
+- Optional vendor/platform libraries are attached by the owning component.
+- Internal modules must not depend on the `Core`, `Collections`, or `All`
+  compatibility umbrellas.
+- `scripts/validate_module_boundaries.py` rejects missing, stale, cyclic, or
+  incorrectly visible edges.
 
----
+### Public API conventions
+
+- .NET-sized integral values in public APIs use the corresponding
+  `SharpRuntime::*cs` aliases.
+- Properties use `getXxxProperty()`/`setXxxProperty()`; C# indexers use
+  `getItem()`/`setItem()`.
+- Mutable collection enumerators must detect structural mutation.
+- Dictionary-like mutable indexing must not silently insert on a read.
+- Platform-specific headers stay out of public headers; unsupported runtime
+  operations throw `PlatformNotSupportedException`.
+- Permanent deviations in `CLAUDE.md` are not backlog items.
+
+## 6. Known gaps and limitations
+
+### Confirmed, bounded parity gaps
+
+- `MemoryStream(const bytecs*, intcs)` sets `writable_` to `false`; .NET's
+  corresponding single-buffer constructor is writable.
+- `TaskT<TResult>::ContinueWith` is absent. Non-generic
+  `Task::ContinueWith` exists, and `TaskT` has completion synchronization, but
+  not a generic continuation list/API.
+- `XText::WriteTo` always calls `WriteString`; .NET uses `WriteWhitespace`
+  when the parent is an `XDocument`. This port's `XmlWriter` has no
+  `WriteWhitespace` primitive yet.
+
+### Documented partial surfaces
+
+- `ImmutableList<T>` lacks several sorting, range/copy, conversion, predicate,
+  builder, and comparer APIs documented in its class comment.
+- `BinaryReader` now has `ReadChar` and `ReadDecimal`, but not `PeekChar`,
+  `ReadChars`, or `Read(char[])`.
+- Other explicitly documented partial APIs include `BigInteger` bitwise
+  operations, full UTF-7 behavior, and broader process/debugger/XML surfaces.
+  Prioritize them only when a consumer needs them.
+
+### Validation gaps
+
+- The full selective matrix currently fails as described in §4.
+- The current 40-component tree has not been revalidated with MinGW or
+  Emscripten since the pre-modular ticket #40/#41 cross-builds.
+- macOS portability fixes came from real downstream Xcode 15.4 builds, but
+  this repository has no macOS CI job or recorded full standalone suite.
+- Repository CI is Ubuntu-only.
+- The latest concurrent additions (`ConcurrentBag`, `BlockingCollection`,
+  `TaskExtensions::Unwrap`, and `ConditionalWeakTable`) have not had a
+  dedicated post-port sanitizer pass.
+- Doxygen still has a pre-existing warning backlog; unlike compiler warnings,
+  it is not yet a zero-warning gate.
+
+### Permanent deviations
+
+- Reflection, GC internals, serialization infrastructure, P/Invoke, and
+  late-bound delegate invocation remain out of scope.
+- Symmetric/asymmetric encryption, TLS, and X.509 remain out of scope.
+- `Decimal`, `Int128`, and `UInt128` retain their accepted `__int128`
+  dependency and are unsupported by MSVC.
+- Some platform operations intentionally compile but throw
+  `PlatformNotSupportedException`; see `CLAUDE.md`.
 
 ## 7. Useful commands
 
 ```bash
-# Configure + build (from repo root)
-cmake -S . -B build
-cmake --build build --parallel 4      # use --parallel 2 if the machine is thermally constrained
+# Inspect state
+git status --short --branch
+git log --oneline -12
 
-# Run the full test suite
-./build/SharpRuntimeTests
+# Full local gate: validator, catalogue, clean build, all tests
+scripts/local_ci_check.sh build
 
-# Run one suite/type's tests only
-./build/SharpRuntimeTests --gtest_filter="TypeName*"
+# Configure/build explicitly
+cmake -S . -B build \
+  -DSHARP_RUNTIME_COMPONENTS=All \
+  -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake --build build --target SharpRuntimeTests --parallel 4
 
-# Repeat a suite to check for flakiness (useful after any concurrency-related change)
-./build/SharpRuntimeTests --gtest_filter="*Concurrent*" --gtest_repeat=5
+# Run all component/integration executables exactly once
+scripts/run_component_tests.sh build
 
-# CI-parity check (clean build + zero warnings + full suite, mirrors CLAUDE.md rules #1/#2)
-./scripts/local_ci_check.sh
+# Run one suite
+./build/SharpRuntimeTests_Threading_Tasks \
+  --gtest_filter="TaskExtensionsTests.*"
 
-# Errors/warnings only, from a build log
-cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
+# Validate only module metadata and generated docs
+python3 scripts/validate_module_boundaries.py
+python3 test/validate_module_boundaries_test.py
+python3 scripts/generate_component_catalog.py --check
 
-# Reconfigure after adding a new .cpp file (GLOB_RECURSE needs a re-run to pick it up)
-cd build && cmake . && cd ..
+# Reproduce the active Text.Json isolation regression
+scripts/check_selective_components.sh
 
-# Generate API docs (output already exists under docs/generated/ from a prior run)
+# Inspect planning queues
+sqlite3 plan.sqlite3 \
+  "SELECT status, COUNT(*) FROM task GROUP BY status ORDER BY status;"
+sqlite3 plan.sqlite3 \
+  "SELECT ticket_no, priority, title FROM ticket WHERE status='todo' ORDER BY priority, ticket_no LIMIT 10;"
+
+# Generate API documentation
+mkdir -p docs/generated
 doxygen Doxyfile
 ```
 
-**Lint/format**: no `.clang-format` or other formatter/linter configuration exists in this repo.
+HTTP/socket/ping tests need permission to use local networking. A sandbox that
+denies `socket()` can make those tests fail even when the code baseline is
+healthy.
 
-**Reproduce the current bug**: not applicable — no known failing reproduction exists (see §4).
+## 8. Recommended next bounded tasks
 
-**Most important demo/sample**: none exists. `./build/SharpRuntimeTests` is the closest thing to
-a "does this actually work" check available in this repo.
+Choose one, create a ticket, and keep its changes isolated.
 
----
+1. **Restore the Collections boundary** — create a ticket and implement the
+   `Collections.Blocking` split from §4. The acceptance gate is all nine
+   selective jobs plus the full native baseline.
 
-## 8. Next smallest tasks
+2. **`MemoryStream` writability parity** — smallest confirmed behavior fix.
+   Audit callers, change the constructor default, and add a regression test.
 
-Completed this session: all of NEXT.md's original tasks, a full post-pilot audit round, the
-sanitizer trio (8 real bugs fixed, all three clean project-wide now), a `-Wshadow` audit (clean),
-`Task::WhenAll`/`WhenAny`/`ContinueWith`/`TaskCompletionSource.Task`, several further audit rounds
-(fresh-eyes self-review, duplicated-implementation search, external `audit.md` remediation), and
-performance passes on `String`/`List<T>`/`StringBuilder`/`Dictionary<K,V>`. Full detail and commit
-hashes are in §3.
+3. **Post-modular MinGW/Emscripten build verification** — re-run the known
+   toolchains against `All` plus a selective component and record exact
+   results. Do not imply cross-platform runtime-test coverage from a
+   library-only build.
 
-None of the tasks below are currently blocking anything — pick based on what's actually wanted
-next, or ask the user first if unsure which to prioritize.
+4. **Focused sanitizer pass for the newest concurrent types** — TSan
+   `ConcurrentBag`/`BlockingCollection` and ASan/LSan task/weak-ownership
+   teardown.
 
-1. **`TaskT<TResult>::ContinueWith`** (§5) — generic-result counterpart of `Task::ContinueWith`,
-   deliberately deferred since `WhenAny`/`WhenAll` never needed it. Groundwork already exists on
-   `TaskT::State`; a well-scoped completeness step, not an architectural unknown.
+5. **`TaskT<TResult>::ContinueWith`** — medium-sized API completion with
+   success/fault/cancel, option-filtering, chaining, and lifetime tests.
 
-2. **`MemoryStream(buffer, size)` writability parity fix** (§5) — real .NET's single-array-arg
-   constructor defaults to writable; this port defaults to read-only. Small, well-scoped: change
-   the default, then audit existing callers/tests that may implicitly rely on the current
-   (wrong) behavior.
+6. **`XmlWriter::WriteWhitespace` plus `XText` parity** — scoped XML API
+   addition, not a one-line behavior change.
 
-3. **A-07 CI pipeline, if the user revisits it** (§5) — was explicitly offered and declined for
-   now. Don't add `.github/workflows/*.yml` without asking again — it activates real GitHub
-   Actions runs against the repo (see §9).
+7. **One consumer-requested partial surface** — select a bounded
+   `ImmutableList`, `BinaryReader`, or other documented gap rather than a
+   broad completeness sweep.
 
-4. **A dedicated sanitizer pass over the `audit.md` remediation** (§2) — A-02's destructor fixes
-   and A-05's exception-unwind rollback logic in `OrderedDictionary` are natural TSan/ASan
-   candidates, even though the changes themselves are single-threaded; hasn't been done yet.
+The longer roadmap and definition of done are in `plan.md`.
 
-5. **Another audit round, different category.** Already covered this session: TODO/FIXME
-   markers, weak tests, resource-management/RAII, `plan.sqlite3` drift, memory safety/UB (full
-   sanitizer trio), variable shadowing, fresh-eyes self-review, duplicated-implementation search,
-   and the external `audit.md` remediation. Not yet covered: `-Wconversion`/`-Wsign-conversion` —
-   skipped so far, since this codebase's pervasive intentional `intcs`/`size_t` conversions would
-   make a blind run overwhelmingly noisy; would need a smarter triage approach first.
+## 9. Guardrails
 
----
+- Do not restart completed project-wide naming or integer-alias rollouts.
+- Do not add compatibility aliases for deliberately removed public names
+  without an explicit decision.
+- Do not add cross-platform CI jobs, dependencies, or broad public-header
+  refactors without user direction.
+- Do not implement permanent out-of-scope reflection/GC/TLS/crypto areas.
+- Do not optimize without a measurement that demonstrates a real bottleneck.
+- Do not weaken component dependencies by linking internal code to an
+  umbrella target.
+- Do not treat the aggregate `SharpRuntimeTests` build target as an
+  executable.
+- Push only to `feature/work`; never merge/push to `develop` or `master`, or
+  create tags, without explicit per-action approval.
 
-## 9. Do not do yet
+## 10. Cold resume
 
-- **No restarting the `intcs`/`getXxxProperty()` naming rollouts** — both complete, project-wide.
-  Don't re-scan for "one more" instance without a specific, concrete finding first.
-- **No backward-compatibility shim for the `getCurrent()` → `getCurrentProperty()` rename** —
-  explicit, deliberate decision; downstream consumers fix their own call sites.
-- **No Windows/Emscripten CI setup** — still explicitly out of scope per `CLAUDE.md`.
-- **No TLS/`SslStream`, asymmetric cryptography, or X.509 implementation** — permanent,
-  documented deviation.
-- **No reflection, GC-internals, serialization-infrastructure, or P/Invoke implementation
-  attempts** — permanent, documented deviations.
-- **No speculative performance optimization without measurement first** — the `String` pilot
-  (§3) measured with a standalone script before changing anything; follow the same discipline,
-  using `bench/StringBenchmark.cpp` as the template.
-- **No further broad, many-file refactors or renames** without the same explicit, per-action
-  authorization the `intcs` and `getCurrentProperty()` changes required.
-- **No mass rewrite or reformatting in a single commit** — keep changes small, reviewable, and
-  scoped to one ticket/task per commit.
-- **No merge to `master`/`develop`, and no tags**, without explicit per-action user approval.
-- **No touching `Decimal`/`Int128`/`UInt128`'s `__int128`-based MSVC limitation** — permanent,
-  accepted (2026-07-11 decision); do not attempt a hand-rolled 128-bit arithmetic workaround.
-- **No adding `.github/workflows/*.yml` (or any other CI config) without asking first** — audit
-  finding A-07 (2026-07-14) was explicitly offered and declined for now. This is a real
-  infrastructure decision (it activates GitHub Actions runs against the actual repo), not a code
-  fix — different in kind from the rest of this list.
+From a fresh context:
 
----
-
-## 10. Resume prompt
-
-```
-Read NEXT.md first. It reflects the repository state as of the last code-touching commit,
-8514a9d (an OrderedDictionary exception-safety fix, audit finding A-05), followed by a docs-only
-commit 6aa719f (README correction, A-06) and this checkpoint commit -- 12476/12476 tests, 0
-errors/0 warnings.
-
-This session just finished a remediation pass over an external audit report (audit.md, still
-untracked in the repo root -- an external report, not project source). 6 of 7 findings fixed --
-see §3 for the full list and exact commit hashes. A-07 (no tracked CI pipeline) was explicitly
-offered to the user and declined for now -- do NOT add .github/workflows/*.yml without asking
-again, it activates real GitHub Actions runs against the repo (see §9).
-
-Re-verify the baseline first regardless:
-cmake --build build --parallel 4 && ./build/SharpRuntimeTests
-
-Neither TSan nor ASan has been re-run specifically against this audit remediation yet (§2/§8) --
-a reasonable candidate if picked up, given A-02 touches destructor exception paths and A-05
-touches exception-unwind rollback logic, both single-threaded but in TSan/ASan's usual
-wheelhouse.
-
-There is no known active blocker -- the open question is which of §8's candidate next tasks (or
-something else entirely) to work on. Pick ONE task, inspect only the files it needs. Do not
-refactor unrelated code, do not touch files outside that task's scope, and do not restart the
-completed intcs/getXxxProperty() rollouts.
-
-Implement the task, run its verification (clean build, zero warnings; full suite passes;
-new/changed behavior has a regression test). If a fix rolls back a mutation on an exception path,
-verify the test actually exercises that path by temporarily reverting the fix and confirming it
-fails -- this session found two cases where a plausible-looking test passed for the wrong reason
-(an unrelated std::vector reallocation masking the real bug).
-
-Update NEXT.md after finishing: move the completed task out of §8, note what changed in §3, and
-update the "Last updated" line and test count at the top of the file.
-```
+1. Read `CLAUDE.md`, this file, and `plan.md`.
+2. Run `git status --short --branch`.
+3. Run `scripts/local_ci_check.sh build`.
+4. Reproduce the selective failure with
+   `scripts/check_selective_components.sh`.
+5. Query `plan.sqlite3` for an existing `todo`/`doing` ticket; if none exists,
+   create one for the §4 Collections split.
+6. Inspect only the collection modules, component registration/fixtures, and
+   affected tests needed for that remediation.
+7. Update the measured baseline and this handoff after verified work lands.

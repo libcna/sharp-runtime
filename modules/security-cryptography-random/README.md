@@ -2,5 +2,8 @@
 
 # SharpRuntime::Security.Cryptography.Random
 
-Compiled random-number-generation module. Direct dependency: `Core`. On
-Windows it links `bcrypt`.
+Compiled secure random-number-generation component. Public dependency:
+`Core.Base`; Windows builds link `bcrypt` privately.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.

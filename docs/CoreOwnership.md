@@ -39,15 +39,15 @@ These components retain their original include paths. The compatibility
 
 | Include path owned by Core.Base | Reason |
 |---|---|
-| `System/Buffers/MemoryHandle.hpp` | `System::Memory` and `ReadOnlyMemory` expose it; making Core depend on Buffers would reverse the base dependency. |
-| `System/Collections/Generic/IEqualityComparer.hpp` | Primitive and string equality infrastructure uses it; the full Collections component depends on Core. |
+| `System/Buffers/MemoryHandle.hpp` | `System::Memory` and `ReadOnlyMemory` expose it; making `Core.Base` depend on `Buffers` would reverse the base dependency. |
+| `System/Collections/Generic/IEqualityComparer.hpp` | Primitive and string equality infrastructure uses it; `Collections.Core` depends on `Core.Base`. |
 | `System/Diagnostics/Stopwatch.hpp` | `TimeProvider` and timing primitives need the lightweight clock abstraction without the process/debugging component. |
-| `System/Globalization/CharUnicodeInfo.hpp`, `NumberStyles.hpp`, `UnicodeCategory.hpp` | Character and numeric primitives expose these types; the full Globalization component depends on Core. |
+| `System/Globalization/CharUnicodeInfo.hpp`, `NumberStyles.hpp`, `UnicodeCategory.hpp` | Character and numeric primitives expose these types; `Globalization` depends on `Core.Base`. |
 | `System/IO/IOException.hpp`, `DirectoryNotFoundException.hpp` | `Environment` throws `DirectoryNotFoundException`; moving them to IO creates `Core.Base -> IO -> Core.Base`. |
-| `System/Numerics/BFloat16.hpp` | `BitConverter` exposes the value type while Numerics depends on Core and Collections. |
+| `System/Numerics/BFloat16.hpp` | `BitConverter` exposes the value type while `Numerics` depends on `Core.Base` and `Collections.Core`. |
 | `System/Security/Cryptography/CryptographicException.hpp` | Root conversion/parsing helpers and cryptography APIs need one base exception without reversing the cryptography dependency. |
-| `System/Text/NormalizationForm.hpp` | Root string normalization APIs expose the enum while Text depends on Core and Buffers. |
-| `System/Threading/LazyThreadSafetyMode.hpp` | `System::Lazy<T>` exposes the enum while Threading depends on Core. |
+| `System/Text/NormalizationForm.hpp` | Root string normalization APIs expose the enum while `Text` depends on `Core.Base` and `Buffers`. |
+| `System/Threading/LazyThreadSafetyMode.hpp` | `System::Lazy<T>` exposes the enum while `Threading` depends on `Core.Base`. |
 
 New cross-namespace ownership in `Core.Base` requires a concrete cycle or
 public-foundation rationale in this table and must pass

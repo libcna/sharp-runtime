@@ -1,273 +1,272 @@
-# plan.md — sharp-runtime planning index
-*Last updated: 2026-07-25 — modular-architecture remediation implemented and locally verified; current test baseline: 12494 passing*
+# Sharp Runtime plan
 
-sharp-runtime is a C++23 static library reimplementing a practical subset of .NET `System.*` for **CNA** (C++ XNA port) and **mobile-eggbert** (ported Windows Phone game).
+*Last verified: 2026-07-25 — code baseline `03c7d4bb`; 40 physical
+components, 88 direct production dependency edges, clean build, and 12,586
+passing tests across 36 executables; Text.Json selective isolation currently
+fails because `Collections.Core` pulls `Threading`.*
 
-Reference source: `/rv/tmp/runtime/src/libraries/` (dotnet/runtime, MIT License)
+Sharp Runtime is in a consumer-driven expansion phase. The original type
+classification and stabilization queues are complete, and the full native
+build/test baseline is healthy. A post-modular API addition has, however,
+reintroduced an unwanted dependency closure and currently breaks one
+selective CI job. Restoring that boundary is the first priority.
 
----
+## Sources of truth
 
-## Planning is now database-driven
+Planning is deliberately split:
 
-The namespace-planning material in this file and
-[plan_namespaces.md](plan_namespaces.md) is **historical** — the interactive,
-per-namespace-table workflow it describes has been replaced by `plan.sqlite3`, a git-ignored
-SQLite database that is the live, authoritative source of truth. The remediation plan below was
-approved, implemented, committed as `b0e944ad`, and pushed to `feature/work`; its work items are
-closed as tickets 1729–1736. See `README.md`'s "Tracking: plan.sqlite3" section for the full
-explanation of its two tables (`task` for .NET type classification, `ticket` for stabilization
-work).
+- `plan.md` is the versioned roadmap and milestone index.
+- `NEXT.md` is the current cold-start handoff and ordered list of bounded next
+  tasks.
+- `plan.sqlite3` is the local, git-ignored detailed database:
+  - `task` classifies .NET types.
+  - `ticket` records concrete stabilization and architecture work.
+- `CLAUDE.md` defines non-negotiable implementation and validation rules.
+- `prompt.md` defines the database workflow.
 
-```bash
-# Namespace-level porting status
-sqlite3 plan.sqlite3 "SELECT namespace, status, COUNT(*) FROM task GROUP BY namespace, status ORDER BY namespace;"
+The old namespace-table workflow and `plan_namespaces.md` were retired and
+removed in commit `528d9ab7`. `plan_files.md` was referenced historically but
+was never created. Neither file should be linked as current documentation.
 
-# Overall status counts
-sqlite3 plan.sqlite3 "SELECT status, COUNT(*) FROM task GROUP BY status ORDER BY COUNT(*) DESC;"
+## Current measured state
 
-# Stabilization ticket queue
-sqlite3 plan.sqlite3 "SELECT status, priority, COUNT(*) FROM ticket GROUP BY status, priority ORDER BY priority, status;"
+### Code and validation
+
+- Native Linux/GCC build: zero errors and zero warnings.
+- Tests: 12,586 passing across 35 component binaries plus one integration
+  binary.
+- Component graph: 40 physical modules and 88 direct production edges.
+- Boundary validator: no cycles, duplicate public include paths, orphan
+  files, unresolved includes, undeclared edges, stale edges, or visibility
+  mismatches.
+- Dependency allow-list: empty.
+- Selective matrix: Core.Base and the Text.Json test binary pass, but the
+  Text.Json isolation assertion fails because `sharp_runtime_threading` is
+  configured unexpectedly. The full nine-job matrix is therefore not green.
+- Tracked CI: Ubuntu selective matrix and full compatibility build in
+  `.github/workflows/components.yml`; its Text.Json job is expected to
+  reproduce the local isolation failure.
+
+### Local planning database
+
+The 2026-07-25 local snapshot contains:
+
+| Table | State |
+|---|---|
+| `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
+| `ticket` | 1,736 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+
+Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
+snapshot, not data shipped in a fresh clone.
+
+## Active architecture regression
+
+`scripts/check_selective_components.sh` currently stops in the `Text.Json`
+job with:
+
+```text
+FAIL: selective build unexpectedly configured target sharp_runtime_threading
 ```
 
-`plan_files.md`, referenced by an earlier version of this file, was never created and does not exist.
+The cause is commit `227111cb`: `BlockingCollection.hpp` publicly includes
+`CancellationToken`, `CancellationTokenRegistration`, and `Timeout`, so the
+commit added `Collections.Core -> Threading`. Since `Threading -> TimeZone`,
+every consumer that needs only `Collections.Core` now also configures both
+archives.
 
-## Implemented modular-architecture remediation
+Affected closures include the four isolation examples that motivated the
+Collections split:
 
-**Status:** implementation and local acceptance audit complete on 2026-07-25. No production C++
-behavior was changed and no public `System::*` API was removed; the work concerns physical
-ownership, CMake usage requirements, dependency isolation, tests, and documentation. The final
-fresh build produced zero warnings and zero errors, and 12494 tests passed exactly once across 36
-executables.
+| Requested component | Current unwanted additions |
+|---|---|
+| `Text.Json` | `Threading`, `TimeZone` |
+| `Net.Http.Headers` | `Threading`, `TimeZone` |
+| `Net.Mime` | `Threading`, `TimeZone` |
+| `Numerics` | `Threading`, `TimeZone` |
 
-The tasks are ordered. A later task may start only after its listed dependencies and acceptance
-criteria are complete.
+The boundary validator still passes because the new edge is declared
+correctly; this is a product-level closure regression, not an undeclared-edge
+error.
 
-### MOD-001 — Add an executable module-boundary validator (P1) — implemented
+**Recommended remediation:** create a narrow physical component (provisional
+name `Collections.Blocking`), move `BlockingCollection.hpp` and its dedicated
+tests there, give it public dependencies on `Collections.Core`, `Core.Base`,
+and `Threading`, and include it in the `Collections` compatibility umbrella.
+The other concurrent collection headers do not include `System/Threading/*`
+and can remain in `Collections.Core`, avoiding an unnecessary compatibility
+move. Then remove `Threading` from `Collections.Core`, add/update consumer
+fixtures, regenerate the catalogue, and run the full selective matrix plus
+native gate.
 
-**Goal:** turn the current manually verified module graph into an enforceable invariant before
-moving files or changing targets.
+Keeping the broader closure and weakening the negative fixture is possible
+but contradicts MOD-003/MOD-006's accepted isolation goal. It should be done
+only after an explicit architecture decision.
 
-**Work:**
+## Completed milestones
 
-- Inventory every `modules/<module>` directory and require it to be registered exactly once.
-- Require every production `.cpp` and public header to have exactly one physical owner.
-- Reject duplicate logical public include paths across module include roots.
-- Parse project-local `System/...` and `SharpRuntime/...` includes and reject unresolved includes,
-  undeclared cross-module edges, dependency cycles, and stale declared edges.
-- Distinguish includes originating in public headers from includes used only by implementation
-  sources so the validator can enforce the visibility model introduced by MOD-002.
-- Add a narrowly documented allow-list mechanism for genuine link-only or generated dependencies;
-  an allow-list entry must include its reason and owner.
-- Run the validator from the normal local/CI validation path.
+### Porting and stabilization
 
-**Acceptance criteria:**
+- Classified the indexed .NET type surface and completed the original
+  porting/stabilization queue.
+- Established fixed-width public API aliases, property/indexer naming, SPDX
+  headers, .NET-reference review, and regression-test requirements.
+- Completed native TSan, ASan, and UBSan passes during stabilization and
+  fixed the production findings discovered by those runs.
+- Added consumer-driven coverage across core, collections, IO, networking,
+  threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
+  hashing/random APIs.
 
-- The validator passes on the pre-refactor tree and reports the current 35 physical modules as an
-  acyclic graph.
-- Deliberate fixtures prove that an orphan header, duplicate include path, undeclared edge, stale
-  edge, and cycle each fail validation with an actionable message.
-- The validator does not modify the source tree or depend on an existing build directory.
+### Platform work
 
-**Depends on:** none.
+- MinGW library cross-build audit completed under ticket #40.
+- Emscripten library cross-build audit completed under ticket #41.
+- Real downstream Apple Clang/Xcode 15.4 builds drove the portability fixes
+  in commits `1d22a7b2` through `b797928f`.
 
-### MOD-002 — Model public and private component dependencies explicitly (P1) — implemented
+These results predate or only partially overlap the final component
+architecture. They are evidence of portability, not a current cross-platform
+test matrix.
 
-**Goal:** stop implementation-only include roots and usage requirements from leaking to consumers.
+### Modular architecture
 
-**Work:**
+The remediation plan MOD-001 through MOD-008 was implemented in
+`b0e944ad`, documented in `27e4d680`, and closed as tickets 1729–1736.
+It delivered:
 
-- Extend `sharp_runtime_register_module()` with explicit public and private dependency fields.
-- Map public dependencies to `PUBLIC`/`INTERFACE` CMake usage requirements and implementation-only
-  dependencies to `PRIVATE` link requirements, preserving static-library link closure.
-- Migrate every module declaration and remove or deprecate the ambiguous catch-all dependency
-  field after all callers are converted.
-- Initially classify these currently implementation-only edges as private:
-  `IO.Compression.Zip -> Core`, `IO.IsolatedStorage -> Storage`,
-  `Net.WebSockets -> Net`, `Text.Json -> Collections`, `Timers -> Threading`, and
-  `Xml -> Diagnostics`.
-- Keep platform/vendor dependencies private unless a public header exposes their types. Preserve
-  tinyxml2 as a public XML dependency while `XmlDocument.hpp` exposes tinyxml2 types.
-- Preserve `SharpRuntime::All`, all component aliases, and the legacy `SHARP_RUNTIME` target.
+- One physical owner for every production header, source, and module test.
+- Explicit public, private, and test-only dependency visibility.
+- Narrow `Core.Base`, `Collections.Core`, `Collections.Async`, and
+  `Collections.ObjectModel` targets while preserving compatibility umbrellas.
+- Component-scoped test executables and a separate integration executable.
+- Automated boundary validation, catalogue generation, isolated consumers,
+  negative fixtures, and GitHub Actions coverage.
+- Generated component documentation in `docs/ComponentCatalog.md`.
 
-**Acceptance criteria:**
+The graph landed with 85 production edges and has since grown to 88. The
+validator and generated catalogue remain green, but the
+`Collections.Core -> Threading` edge is the active closure regression
+described above.
 
-- MOD-001 confirms that every public-header edge is public and every source-only edge is private
-  or explicitly justified.
-- A consumer linking a component cannot compile against an implementation-only component merely
-  through leaked include paths.
-- Full and representative selective builds succeed on the supported toolchains with no new
-  compiler warnings.
+### Post-modular API expansion
 
-**Depends on:** MOD-001.
+The first consumer-driven ports after modularization added:
 
-### MOD-003 — Split the oversized Collections dependency closure (P1) — implemented
+- Runtime compiler-services helpers, including `ConditionalWeakTable` and
+  `RuntimeHelpers`.
+- Component-model notification, initialization, and async-completion
+  metadata.
+- HTTP handler/invoker/request-option primitives and web-proxy APIs.
+- `ConcurrentBag` and `BlockingCollection`.
+- `TaskExtensions::Unwrap` for generic and non-generic nested tasks.
+- XML schema exception types.
 
-**Goal:** using a basic collection must not pull `Threading` and `ComponentModel`.
+The verified test baseline grew from 12,494 at the modularization checkpoint
+to 12,586.
 
-**Work:**
+## Candidate roadmap
 
-- Introduce a lean physical target for collection fundamentals (working name
-  `SharpRuntime::Collections.Core`) containing the generic, specialized, immutable, frozen, and
-  concurrent collection facilities that do not require higher layers.
-- Move asynchronous enumeration contracts into
-  `SharpRuntime::Collections.Async`, depending on the lean collection target and the minimal
-  cancellation/threading component.
-- Move the observable `System::Collections::ObjectModel` types and their notification-specific
-  support into `SharpRuntime::Collections.ObjectModel`, depending on the lean collection target
-  and `ComponentModel`. Keep dependency-free ObjectModel wrappers such as `ReadOnlyCollection`
-  with the lean target because `List<T>` exposes them directly.
-- Retain `SharpRuntime::Collections` as a compatibility umbrella exposing the same header set as
-  before.
-- Change `Text.Json`, `Net`, `Net.Http.Headers`, `Net.Mime`, and `Numerics` to depend on the
-  narrowest collection target actually used by their public headers or sources.
-- Preserve all existing include spellings and `System::*` namespaces.
+No implementation is active yet. Create or reopen a `ticket` row with
+acceptance criteria and a validation command before changing code.
 
-**Acceptance criteria:**
+### P0 — Restore the accepted component boundary
 
-- A selective `Text.Json` build no longer configures or builds `Threading` or `ComponentModel`.
-- Selective `Net.Http.Headers`, `Net.Mime`, and `Numerics` builds no longer acquire unrelated
-  collection subcomponents.
-- Existing consumers linking `SharpRuntime::Collections` retain source compatibility.
-- All collection tests run against their owning narrow target and pass.
+1. **Split the threading-dependent blocking collection from
+   `Collections.Core`.**
+   Implement the `Collections.Blocking` remediation described in the active
+   regression section. Acceptance requires the Text.Json negative assertion,
+   all nine selective jobs, the boundary/catalogue checks, and the 12,586-test
+   native floor to pass.
 
-**Depends on:** MOD-001, MOD-002.
+### P1 — Confirmed parity and correctness gaps
 
-### MOD-004 — Reduce Core to a deliberate foundation layer (P1) — implemented
+2. **Fix `MemoryStream(buffer, size)` writability parity.**
+   The constructor currently sets `writable_` to `false`; the corresponding
+   .NET single-buffer constructor is writable. Audit callers that may depend
+   on the current behavior, change the default, and add a regression test that
+   fails before the fix.
 
-**Goal:** prevent every component from compiling and exposing optional high-level Core clusters
-while retaining a stable compatibility target.
+3. **Add `TaskT<TResult>::ContinueWith`.**
+   Non-generic `Task::ContinueWith` exists, and `TaskT` already has completion
+   synchronization used by `TaskExtensions::Unwrap`, but the generic
+   continuation list/API is still absent. Preserve weak ownership and verify
+   success, fault, cancellation, option filtering, chaining, and leak-free
+   teardown.
 
-**Work:**
+4. **Close the `XText::WriteTo` whitespace distinction.**
+   `XText` always calls `XmlWriter::WriteString`; .NET calls
+   `WriteWhitespace` for text directly under `XDocument`. This requires a
+   deliberate `XmlWriter` API addition and tests before changing `XText`.
 
-- Produce and commit a Core ownership map grouping its headers and implementations by primitive,
-  exception, memory/span, time, URI, console, runtime-compatibility, and cross-namespace
-  cycle-breaking roles.
-- Introduce a lean foundation target (working name `SharpRuntime::Core.Base`) and preserve
-  `SharpRuntime::Core` as a compatibility umbrella.
-- Extract at least the demonstrably optional URI, Console, and TimeZone clusters into explicit
-  components when the MOD-001 graph proves the extraction acyclic.
-- Change internal modules to depend on `Core.Base` plus only the extracted clusters they actually
-  include; they must not use the compatibility umbrella internally.
-- Keep `System::IO::IOException`, `System::IO::DirectoryNotFoundException`, and other
-  cross-namespace foundation types in the base only when the ownership map documents the concrete
-  cycle they prevent.
-- Preserve all public header paths, namespaces, exception behavior, and the legacy
-  `SharpRuntime::Core` consumer surface.
+### P1 — Revalidation after architectural and concurrency changes
 
-**Acceptance criteria:**
+5. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
+   The recorded cross-builds predate the 40-component graph. Validate an
+   `All` build and at least one selective build, record exact toolchain
+   versions, and distinguish compile success from runtime test coverage.
 
-- The resulting graph is acyclic and MOD-001 reports no undeclared or stale edges.
-- A basic selective component such as `Text.Json` does not build the extracted URI, Console, or
-  TimeZone archives.
-- Each exceptional cross-namespace type remaining in `Core.Base` has a documented dependency
-  rationale.
-- Existing code linking `SharpRuntime::Core` continues to compile without include changes.
+6. **Run focused sanitizer passes over new concurrent code.**
+   Prioritize `ConcurrentBag`, `BlockingCollection`,
+   `TaskExtensions::Unwrap`, and `ConditionalWeakTable`. Use TSan for
+   synchronization paths and ASan/LSan for continuation/ownership teardown;
+   keep any sanitizer-only test adaptations separate from production fixes.
 
-**Depends on:** MOD-001, MOD-002, MOD-003.
+### P2 — Consumer-driven API breadth
 
-### MOD-005 — Make tests respect component boundaries (P1) — implemented
+7. **Choose a bounded `ImmutableList<T>` slice.**
+   Its documented omissions include sorting/reversing, copy/range/conversion,
+   predicate search, builder support, and comparer overloads. Do not attempt
+   the entire surface in one change; select methods required by a real
+   consumer and port them against the .NET reference.
 
-**Goal:** module tests must prove the declared dependency closure instead of compiling against
-`SharpRuntime::All`.
+8. **Complete only demanded `BinaryReader` character APIs.**
+   `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
+   `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
+   when a consumer needs them, preserving decoder state and truncated-input
+   behavior.
 
-**Work:**
+9. **Review other documented partial surfaces by demand.**
+   Examples include `BigInteger` bitwise operations, full UTF-7 behavior,
+   debugger/process breadth, and richer XML reader/writer functionality.
+   A documented partial API is not automatically higher priority than a
+   consumer-visible bug.
 
-- Add a reusable CMake helper that creates a test target for each enabled physical component.
-- Link each module test only to its owning component, GoogleTest, and explicitly declared
-  test-only dependencies.
-- Keep genuinely cross-module scenarios under `tests/integration` in a separate integration
-  target.
-- Stop forcing `All` merely because `SHARP_RUNTIME_BUILD_TESTS=ON`; a selective configuration
-  should build tests for the requested component closure only.
-- Preserve a convenient repository-wide target/CTest invocation that runs all module and
-  integration tests.
+### P2 — Developer experience
 
-**Acceptance criteria:**
+10. **Reduce the Doxygen warning backlog incrementally.**
+   Establish a reproducible baseline first, then require touched public APIs
+   not to regress it. Avoid a mass comment-only rewrite.
 
-- `SHARP_RUNTIME_COMPONENTS=Text.Json` with tests enabled does not enable unrelated networking,
-  XML, compression, crypto, or collection subcomponents.
-- A test that includes an undeclared module header fails to compile in its owning test target.
-- The repository-wide suite still discovers and runs every existing test exactly once.
+11. **Decide whether distribution support is wanted.**
+    The repository currently supports `add_subdirectory`; it has no installed
+    package/export configuration and no standalone sample application. Add
+    install rules, package config, or a sample only after the desired consumer
+    workflow is selected.
 
-**Depends on:** MOD-002, MOD-003, MOD-004.
+### Requires explicit user direction
 
-### MOD-006 — Add a selective-component CI matrix and negative isolation fixtures (P1) — implemented
+- Adding Windows, macOS, or Emscripten jobs to the repository CI matrix.
+- Introducing a new third-party dependency.
+- Broad public-header renames or compatibility-breaking refactors.
+- Expanding permanent out-of-scope areas such as reflection, TLS/X.509, or
+  symmetric/asymmetric encryption.
 
-**Goal:** continuously verify that optional components and external libraries remain isolated.
+## Definition of done for future work
 
-**Work:**
+A task is complete only when all applicable items hold:
 
-- Add clean configure/build/test jobs for representative leaves, including at least Core base,
-  Text.Json, Net.Http.Headers, Net.WebSockets, both compression implementations,
-  IO.IsolatedStorage, Security.Cryptography.Random, and Xml.Linq.
-- Add small consumer fixtures proving that requested public headers compile and link with only
-  the documented component target.
-- Add negative fixtures proving that headers from an unrequested sibling or implementation-only
-  dependency are unavailable.
-- Verify that JSON-only and other lightweight configurations do not configure ZLIB, miniz,
-  tinyxml2, SDL, socket, or platform-crypto dependencies unless required.
-
-**Acceptance criteria:**
-
-- The matrix starts from clean build directories and passes without relying on `SharpRuntime::All`.
-- Removing a required dependency or making a private dependency leak is caught by at least one
-  automated job.
-- The full-build job remains present as a separate compatibility check.
-
-**Depends on:** MOD-001 through MOD-005.
-
-### MOD-007 — Document the final ownership and migration model (P2) — implemented
-
-**Goal:** make the narrower graph understandable to maintainers and consumers.
-
-**Work:**
-
-- Update `README.md` and `docs/CMakeComponents.md` with the final component catalogue, public and
-  private dependency meanings, external-library mapping, and selective-test commands.
-- Document compatibility umbrellas (`Core`, `Collections`, `All`) separately from lean physical
-  targets intended for new internal and external consumers.
-- Record the rationale for intentional exceptions such as Core-owned IO exceptions,
-  public tinyxml2 exposure, and the shared Xml/XPath archive.
-- Add a maintainer checklist for assigning new headers, sources, tests, dependencies, and vendor
-  libraries without weakening module boundaries.
-
-**Acceptance criteria:**
-
-- Every exported component has documented ownership, direct public dependencies, optional
-  external dependencies, and one minimal usage example.
-- Documentation dependency tables are checked against the registered graph or generated from the
-  same metadata so they cannot silently drift.
-
-**Depends on:** MOD-003 through MOD-006.
-
-### MOD-008 — Perform the final modularity acceptance audit (P1) — implemented
-
-**Goal:** close the remediation only after the architecture is measurably isolated and compatible.
-
-**Work and acceptance criteria:**
-
-- Run MOD-001 and record zero cycles, duplicate include paths, orphan files, undeclared edges,
-  stale edges, and visibility mismatches.
-- Run the full build/test suite and all MOD-006 selective jobs from clean directories.
-- Compare dependency closures before and after the work, explicitly confirming that Text.Json,
-  Net.Http.Headers, Net.Mime, and Numerics no longer pull unrelated threading/component-model
-  modules.
-- Verify compatibility targets and existing include spellings with consumer fixtures.
-- Confirm that no public runtime behavior or API was removed as an incidental consequence of
-  physical relocation.
-- Record the final module/edge counts and intentional exceptions in
-  `docs/CMakeComponents.md`.
-
-**Depends on:** MOD-001 through MOD-007.
-
-## Legend (task.status — see CLAUDE.md and README.md for the full definitions)
-
-| Status | Meaning |
-|--------|---------|
-| `ported` | Implemented in sharp-runtime, meets the full porting checklist |
-| `todo` / `''` | Needs to be ported/classified |
-| `ignore` / `ignored` | Out of scope for sharp-runtime |
-| `tobedecided` | Genuinely ambiguous — needs a human architecture decision |
-
-`in_progress` is **not** a valid status value in the current workflow (it was used by an older,
-now-retired interactive process — see `plan_namespaces.md`).
+1. The expected behavior is verified against the actual .NET source under
+   `/rv/tmp/runtime/src/libraries/`, not memory or an old audit statement.
+2. The change has one clear physical module owner and declares only necessary
+   public/private/test dependency edges.
+3. A regression test demonstrates any corrected behavior; existing tests are
+   not weakened to hide a failure.
+4. `scripts/local_ci_check.sh build` passes with zero warnings/errors and the
+   test count does not decrease without a documented reason.
+5. Boundary/catalogue checks pass, and selective fixtures are updated when a
+   component surface or dependency changes.
+6. Concurrency, lifetime, or low-level memory changes receive the relevant
+   sanitizer pass.
+7. `README.md`, `NEXT.md`, component documentation, and `plan.sqlite3` are
+   updated when their stated facts change.
+8. The focused change is committed and pushed only according to the branch
+   policy in `CLAUDE.md`.

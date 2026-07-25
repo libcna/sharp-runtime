@@ -2,5 +2,8 @@
 
 # SharpRuntime::Security.Cryptography
 
-Compiled hash, HMAC, and PBKDF module. Direct dependency: `Core`. External
-dependencies: none.
+Compiled hash, HMAC, PBKDF, and related non-encryption cryptography
+component. Public dependency: `Core.Base`.
+
+See the [generated component catalogue](../../docs/ComponentCatalog.md) for
+authoritative dependency metadata.
