@@ -5,7 +5,7 @@
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
 repair, three P1 parity repairs, and P1 portability revalidation are complete:
-41 physical modules, 90 production dependency edges, and 12,601 tests across
+41 physical modules, 90 production dependency edges, and 12,605 tests across
 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
@@ -28,7 +28,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,601 passing tests
+- The full native baseline is a warning-free build with 12,605 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
@@ -43,11 +43,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,742 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,743 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
-`WebProxy` portability fix, and #1742 focused sanitizer evidence. The database
-is git-ignored and is not part of a fresh clone.
+`WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
+`ImmutableList<T>` predicate-query slice. The database is git-ignored and is
+not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -107,17 +108,26 @@ excluded on that platform; its definition is now excluded too, preserving the
 `-Werror` build. The native `WebProxyTests` regression filter passes 11 tests.
 Cross-platform runtime tests were deliberately not built or run.
 
+## P2 completion: `ImmutableList<T>` predicate queries
+
+`ImmutableList<T>` now provides `ForEach`, `Exists`, `Find`, `FindAll`,
+`FindIndex`, `FindLast`, `FindLastIndex`, and `TrueForAll`. Query methods
+preserve the source list, return .NET-compatible default/index results when no
+element matches, and reject an empty delegate with `ArgumentNullException`.
+Four focused tests cover ordering, immutability, empty-list semantics, and
+delegate validation.
+
 ## Recommended next bounded tasks
 
 All currently planned P1 work is complete. Choose one consumer-driven P2
 slice, create a ticket, and keep the changes isolated:
 
-1. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
-   sorting/reversing, copy/range/conversion, predicate search, builder support,
-   or comparer overloads.
-2. **`BinaryReader` character APIs.** Add only demanded `PeekChar`,
+1. **`BinaryReader` character APIs.** Add only demanded `PeekChar`,
    `ReadChars`, or `Read(char[])` behavior while preserving decoder state and
    truncated-input semantics.
+2. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
+   sorting/reversing, copy/range/conversion, builder support, or comparer
+   overloads.
 3. **Other documented partial surfaces.** Examples include `BigInteger`
    bitwise operations, fuller UTF-7 behavior, and wider debugger/process/XML
    surfaces.

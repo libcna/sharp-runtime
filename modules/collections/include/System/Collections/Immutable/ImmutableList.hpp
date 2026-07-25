@@ -9,6 +9,7 @@
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 
 namespace System::Collections::Immutable {
@@ -25,8 +26,8 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Contains/IndexOf/LastIndexOf/BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
  * by an AVL tree, not a flat vector): Sort/Reverse (in-place-returning-new-instance variants),
- * ForEach, the 3 CopyTo overloads, GetRange, ConvertAll<TOutput>, Exists/Find/FindAll/FindIndex/
- * FindLast/FindLastIndex/TrueForAll, ToBuilder/Builder, RemoveRange(IEnumerable<T>), and every
+ * the 3 CopyTo overloads, GetRange, ConvertAll<TOutput>, ToBuilder/Builder,
+ * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
  * real gaps, not incorrect behavior for the surface that does exist -- left undone here rather
@@ -55,6 +56,12 @@ class ImmutableList {
             throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than or equal to the size of the collection.");
         if (count < 0 || index > static_cast<intcs>(data_->size()) - count)
             throw System::ArgumentOutOfRangeException("count", "Count must refer to a location within the collection.");
+    }
+
+    static void requirePredicate(const std::function<bool(const T&)>& predicate) {
+        if (!predicate) {
+            throw System::ArgumentNullException("match");
+        }
     }
 
 public:
@@ -264,6 +271,131 @@ public:
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index, v->begin() + index + count);
         return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Performs @p action on each element in list order.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.ForEach(Action<T>).
+     * @param action The action to perform.
+     * @throws System::ArgumentNullException if @p action is empty.
+     */
+    void ForEach(std::function<void(const T&)> action) const {
+        if (!action) {
+            throw System::ArgumentNullException("action");
+        }
+        for (const auto& item : *data_) {
+            action(item);
+        }
+    }
+
+    /**
+     * @brief Determines whether any element matches @p match.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Exists(Predicate<T>).
+     * @param match The predicate to test.
+     * @return true if at least one element matches; otherwise false.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] bool Exists(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        return std::any_of(data_->begin(), data_->end(), match);
+    }
+
+    /**
+     * @brief Returns the first element that matches @p match, or default T{} if none does.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Find(Predicate<T>).
+     * @param match The predicate to test.
+     * @return The first matching element, or default T{}.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] T Find(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        const auto found = std::find_if(data_->begin(), data_->end(), match);
+        return found == data_->end() ? T{} : *found;
+    }
+
+    /**
+     * @brief Returns a new list containing every element that matches @p match.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.FindAll(Predicate<T>).
+     * @param match The predicate to test.
+     * @return An immutable list of the matching elements, in list order.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] ImmutableList<T> FindAll(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        auto values = std::make_shared<std::vector<T>>();
+        values->reserve(data_->size());
+        for (const auto& item : *data_) {
+            if (match(item)) {
+                values->push_back(item);
+            }
+        }
+        return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Returns the index of the first element that matches @p match, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.FindIndex(Predicate<T>).
+     * @param match The predicate to test.
+     * @return The first matching index, or -1 if no element matches.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] intcs FindIndex(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        for (intcs index = 0; index < getCountProperty(); ++index) {
+            if (match((*data_)[static_cast<size_t>(index)])) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * @brief Returns the last element that matches @p match, or default T{} if none does.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.FindLast(Predicate<T>).
+     * @param match The predicate to test.
+     * @return The last matching element, or default T{}.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] T FindLast(std::function<bool(const T&)> match) const {
+        const intcs index = FindLastIndex(std::move(match));
+        return index == -1 ? T{} : (*data_)[static_cast<size_t>(index)];
+    }
+
+    /**
+     * @brief Returns the index of the last element that matches @p match, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.FindLastIndex(Predicate<T>).
+     * @param match The predicate to test.
+     * @return The last matching index, or -1 if no element matches.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] intcs FindLastIndex(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        for (intcs index = getCountProperty() - 1; index >= 0; --index) {
+            if (match((*data_)[static_cast<size_t>(index)])) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * @brief Determines whether every element matches @p match.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.TrueForAll(Predicate<T>).
+     * @param match The predicate to test.
+     * @return true if all elements match, including when the list is empty.
+     * @throws System::ArgumentNullException if @p match is empty.
+     */
+    [[nodiscard]] bool TrueForAll(std::function<bool(const T&)> match) const {
+        requirePredicate(match);
+        return std::all_of(data_->begin(), data_->end(), match);
     }
 
     /**
