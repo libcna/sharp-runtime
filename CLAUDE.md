@@ -29,12 +29,15 @@
 
 ### Compile support is not runtime support
 
-The current full build/test baseline is Linux/GCC. MinGW and Emscripten
-library builds were compile-verified before the final component split
-(tickets #40 and #41), and real downstream Apple Clang/Xcode 15.4 builds
-drove the portability fixes from `1d22a7b2` through `b797928f`. The
-repository's tracked CI is Ubuntu-only, so do not describe Windows,
-Emscripten, or macOS as having the same current test coverage as Linux.
+The current full build/test baseline is Linux/GCC. Post-modular MinGW library
+builds were revalidated with MinGW-w64 GCC 14-win32 and CMake 3.31.6 (the
+`All` graph and a selective `Text.Json` graph, without GoogleTest/runtime
+execution). Emscripten's earlier library audit (ticket #41) predates the final
+component split and needs an installed Emscripten toolchain for revalidation.
+Real downstream Apple Clang/Xcode 15.4 builds drove the portability fixes from
+`1d22a7b2` through `b797928f`. The repository's tracked CI is Ubuntu-only, so
+do not describe Windows, Emscripten, or macOS as having the same current test
+coverage as Linux.
 
 Unsupported runtime operations must still compile. They should throw
 `PlatformNotSupportedException` clearly rather than fail the build or silently

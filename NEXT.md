@@ -34,11 +34,15 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   antecedent state, while scheduler and parent-task options remain no-ops.
 - `XmlWriter::WriteWhitespace` validates XML whitespace and `XText::WriteTo`
   selects it only for text directly under an `XDocument`.
+- MinGW-w64 GCC 14-win32/CMake 3.31.6 now compile the post-modular `All` graph
+  and selective `Text.Json` libraries; this is compile-only evidence because
+  cross tests were deliberately disabled. Emscripten is not installed locally.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,740 completed tickets. Ticket #1737 records the completed P0 split, tickets
-#1738/#1739 the MemoryStream and generic-continuation repairs, and ticket
-#1740 the XML whitespace repair. The
+1,741 tickets: 1,740 completed plus blocked ticket #1741. Ticket #1737 records
+the completed P0 split, tickets #1738/#1739 the MemoryStream and
+generic-continuation repairs, ticket #1740 the XML whitespace repair, and
+#1741 the partial cross-build revalidation. The
 database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
@@ -85,9 +89,9 @@ serialization paths.
 
 Choose one, create a ticket, and keep the changes isolated.
 
-1. **Post-modular portability evidence.** Re-run documented MinGW and
-   Emscripten library configurations for `All` and one selective component;
-   record exact toolchains and distinguish build evidence from runtime tests.
+1. **Post-modular Emscripten evidence.** Provision an Emscripten toolchain,
+   then build `All` and one selective component without tests; record the
+   exact toolchain and distinguish compile evidence from runtime coverage.
 2. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
    and ASan/LSan for task/weak-ownership teardown. Keep test adaptations
    separate from production fixes.

@@ -90,14 +90,17 @@ assertion without an explicit architecture decision.
 
 ### Platform work
 
-- MinGW library cross-build audit completed under ticket #40.
-- Emscripten library cross-build audit completed under ticket #41.
+- MinGW library cross-build audit completed under ticket #40; a post-modular
+  `All` and selective `Text.Json` library revalidation passed with MinGW-w64
+  GCC 14-win32 and CMake 3.31.6 under ticket #1741. It is compile evidence;
+  GoogleTest/runtime tests were not cross-built or run.
+- Emscripten library cross-build audit completed under ticket #41. Its
+  post-modular revalidation remains pending an installed Emscripten toolchain.
 - Real downstream Apple Clang/Xcode 15.4 builds drove the portability fixes
   in commits `1d22a7b2` through `b797928f`.
 
-These results predate or only partially overlap the final component
-architecture. They are evidence of portability, not a current cross-platform
-test matrix.
+These results only partially overlap the final component architecture. They
+are evidence of portability, not a current cross-platform test matrix.
 
 ### Modular architecture
 
@@ -147,10 +150,12 @@ acceptance criteria and a validation command before changing code.
 
 ### P1 — Revalidation after architectural and concurrency changes
 
-1. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
-   The recorded cross-builds predate the 41-component graph. Validate an
-   `All` build and at least one selective build, record exact toolchain
-   versions, and distinguish compile success from runtime test coverage.
+1. **Complete Emscripten revalidation on the post-modular tree.**
+   MinGW `All` and selective builds now pass, but Emscripten's recorded
+   cross-build predates the 41-component graph and its toolchain is unavailable
+   in the maintainer environment. Once provisioned, validate an `All` build and
+   one selective build; record the exact version and distinguish compile
+   success from runtime test coverage.
 
 2. **Run focused sanitizer passes over new concurrent code.**
    Prioritize `ConcurrentBag`, `BlockingCollection`,

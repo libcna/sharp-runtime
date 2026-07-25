@@ -182,8 +182,8 @@ Other platform evidence is narrower:
 | Platform/toolchain | Verified scope |
 |---|---|
 | Linux/GCC | Current full component build and all 12,601 tests. |
-| Windows/MinGW | The pre-component library build was warning-free in the ticket #40 audit; GoogleTest was not cross-built, and the post-modular tree is not covered by repository CI. |
-| Emscripten | The pre-component library build was warning-free in the ticket #41 audit; tests were not cross-built, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
+| Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
+| Emscripten | The pre-component library build was warning-free in ticket #41; post-component revalidation awaits an installed Emscripten toolchain. Tests were not cross-built, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
 | MSVC | `Decimal`, `Int128`, and `UInt128` remain unsupported because they require the GCC/Clang `__int128` extension. |
 
