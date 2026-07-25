@@ -2,9 +2,12 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 //
-// Coverage for the standalone System.Xml enums and XmlException. See XmlDomTests.cpp for the
+// Coverage for the standalone System.Xml enums and exception types. See XmlDomTests.cpp for the
 // XmlDocument DOM API and XmlTests.cpp for XmlReader/XmlWriter.
 #include <gtest/gtest.h>
+
+#include <any>
+#include <stdexcept>
 #include "System/Xml/ConformanceLevel.hpp"
 #include "System/Xml/DtdProcessing.hpp"
 #include "System/Xml/EntityHandling.hpp"
@@ -22,6 +25,8 @@
 #include "System/Xml/XmlNodeOrder.hpp"
 #include "System/Xml/XmlNodeType.hpp"
 #include "System/Xml/XmlOutputMethod.hpp"
+#include "System/Xml/Schema/XmlSchemaException.hpp"
+#include "System/Xml/Schema/XmlSchemaValidationException.hpp"
 #include "System/Xml/XmlSpace.hpp"
 #include "System/Xml/XmlTokenizedType.hpp"
 
@@ -169,4 +174,76 @@ TEST(XmlExceptionTests, IsA_SystemException) {
     EXPECT_NO_THROW({
         try { throw ex; } catch (const System::SystemException&) {}
     });
+}
+
+// ===========================================================================
+// XmlSchemaException / XmlSchemaValidationException
+// ===========================================================================
+
+TEST(XmlSchemaExceptionTests, DefaultCtor_HasSchemaMessageAndHResult) {
+    System::Xml::Schema::XmlSchemaException ex;
+    EXPECT_STREQ(ex.what(), "A schema error occurred.");
+    EXPECT_EQ(ex.getHResultProperty(), static_cast<SharpRuntime::intcs>(0x80131941u));
+    EXPECT_EQ(ex.getLineNumberProperty(), 0);
+    EXPECT_EQ(ex.getLinePositionProperty(), 0);
+    EXPECT_TRUE(ex.getSourceUriProperty().empty());
+    EXPECT_EQ(ex.getSourceSchemaObjectProperty(), nullptr);
+}
+
+TEST(XmlSchemaExceptionTests, FullCtor_PreservesMessageInnerExceptionAndPosition) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::Xml::Schema::XmlSchemaException ex("schema failure", inner, 7, 19);
+    EXPECT_STREQ(ex.what(), "schema failure");
+    EXPECT_EQ(ex.getInnerExceptionProperty(), inner);
+    EXPECT_EQ(ex.getLineNumberProperty(), 7);
+    EXPECT_EQ(ex.getLinePositionProperty(), 19);
+}
+
+TEST(XmlSchemaExceptionTests, OtherConstructors_PreserveMessageAndInnerException) {
+    System::Xml::Schema::XmlSchemaException messageOnly("schema failure");
+    EXPECT_STREQ(messageOnly.what(), "schema failure");
+
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::Xml::Schema::XmlSchemaException withInner("schema failure", inner);
+    EXPECT_EQ(withInner.getInnerExceptionProperty(), inner);
+}
+
+namespace {
+using XmlSchemaValidationExceptionBase = System::Xml::Schema::XmlSchemaValidationException;
+
+class TestXmlSchemaValidationException final
+    : public XmlSchemaValidationExceptionBase {
+public:
+    using XmlSchemaValidationExceptionBase::XmlSchemaValidationExceptionBase;
+    using XmlSchemaValidationExceptionBase::SetSourceObject;
+};
+} // namespace
+
+TEST(XmlSchemaValidationExceptionTests, Constructors_PreserveSchemaMetadata) {
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::Xml::Schema::XmlSchemaValidationException ex("validation failure", inner, 3, 11);
+    EXPECT_STREQ(ex.what(), "validation failure");
+    EXPECT_EQ(ex.getInnerExceptionProperty(), inner);
+    EXPECT_EQ(ex.getLineNumberProperty(), 3);
+    EXPECT_EQ(ex.getLinePositionProperty(), 11);
+    EXPECT_FALSE(ex.getSourceObjectProperty().has_value());
+}
+
+TEST(XmlSchemaValidationExceptionTests, OtherConstructors_PreserveBaseExceptionBehavior) {
+    System::Xml::Schema::XmlSchemaValidationException defaultException;
+    EXPECT_STREQ(defaultException.what(), "A schema error occurred.");
+
+    System::Xml::Schema::XmlSchemaValidationException messageOnly("validation failure");
+    EXPECT_STREQ(messageOnly.what(), "validation failure");
+
+    auto inner = std::make_exception_ptr(std::runtime_error("inner"));
+    System::Xml::Schema::XmlSchemaValidationException withInner("validation failure", inner);
+    EXPECT_EQ(withInner.getInnerExceptionProperty(), inner);
+}
+
+TEST(XmlSchemaValidationExceptionTests, SetSourceObject_ExposesTypeErasedObject) {
+    int source = 42;
+    TestXmlSchemaValidationException ex("validation failure");
+    ex.SetSourceObject(&source);
+    EXPECT_EQ(*std::any_cast<int*>(&ex.getSourceObjectProperty()), &source);
 }
