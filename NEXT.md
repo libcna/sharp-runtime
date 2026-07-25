@@ -32,7 +32,8 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   across 36 component executables and one integration executable.
 - Doxygen 1.9.8 emits 1,942 warnings with the tracked configuration. Run
   `scripts/check_doxygen_warnings.sh` to prevent increases; lower totals are
-  accepted, and a Doxygen-version change requires a deliberate re-baseline.
+  accepted, and a dedicated Ubuntu 24.04 CI job enforces the same limit. A
+  Doxygen-version change requires a deliberate re-baseline.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
   antecedent state, while scheduler and parent-task options remain no-ops.

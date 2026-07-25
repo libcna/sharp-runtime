@@ -42,7 +42,8 @@ was never created. Neither file should be linked as current documentation.
 - Selective matrix: all ten positive consumers pass. The Text.Json target
   absence assertion verifies that neither `Threading` nor `TimeZone` is
   configured, and negative include-leakage fixtures remain rejected.
-- Tracked CI: Ubuntu selective matrix and full compatibility build in
+- Tracked CI: Ubuntu selective matrix, full compatibility build, and a pinned
+  Ubuntu 24.04 Doxygen-warning-baseline job in
   `.github/workflows/components.yml`.
 - Doxygen 1.9.8: 1,942 warnings. `scripts/check_doxygen_warnings.sh` enforces
   that ceiling; lower counts are accepted and a Doxygen upgrade requires a
