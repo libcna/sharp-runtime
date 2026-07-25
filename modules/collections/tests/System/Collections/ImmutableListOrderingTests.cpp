@@ -6,6 +6,7 @@
 #include <functional>
 
 #include "System/ArgumentNullException.hpp"
+#include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
 
 using System::Collections::Immutable::ImmutableList;
@@ -67,4 +68,38 @@ TEST(ImmutableListOrderingTests, SortWithEmptyComparisonThrowsArgumentNullExcept
     const std::function<SharpRuntime::intcs(const int&, const int&)> comparison;
 
     EXPECT_THROW(source.Sort(comparison), System::ArgumentNullException);
+}
+
+TEST(ImmutableListOrderingTests, ReverseRangeReturnsIndependentPartiallyReorderedCopy) {
+    const auto source = ImmutableList<int>::Create({10, 20, 30, 40, 50});
+    const auto reversed = source.Reverse(1, 3);
+
+    EXPECT_EQ(source[0], 10);
+    EXPECT_EQ(source[1], 20);
+    EXPECT_EQ(source[3], 40);
+    EXPECT_EQ(reversed[0], 10);
+    EXPECT_EQ(reversed[1], 40);
+    EXPECT_EQ(reversed[2], 30);
+    EXPECT_EQ(reversed[3], 20);
+    EXPECT_EQ(reversed[4], 50);
+}
+
+TEST(ImmutableListOrderingTests, ReverseRangeAllowsEmptyRangeAtBothBoundaries) {
+    const auto source = ImmutableList<int>::Create({10, 20});
+
+    const auto atStart = source.Reverse(0, 0);
+    const auto atEnd = source.Reverse(2, 0);
+    EXPECT_EQ(atStart[0], 10);
+    EXPECT_EQ(atStart[1], 20);
+    EXPECT_EQ(atEnd[0], 10);
+    EXPECT_EQ(atEnd[1], 20);
+}
+
+TEST(ImmutableListOrderingTests, ReverseRangeInvalidRangesThrowArgumentOutOfRangeException) {
+    const auto source = ImmutableList<int>::Create({10, 20});
+
+    EXPECT_THROW(source.Reverse(-1, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(source.Reverse(3, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(source.Reverse(0, -1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(source.Reverse(1, 2), System::ArgumentOutOfRangeException);
 }
