@@ -14,8 +14,8 @@ namespace System::Diagnostics {
      * Partial C++ counterpart of .NET System.Diagnostics.Trace.
      *
      * @note Status: Partial — writes to std::cerr; no TraceListeners/TraceListenerCollection,
-     * no CorrelationManager, no Refreshing event, no WriteIf/WriteLineIf family, no
-     * category-suffixed Write/WriteLine overloads, and no object-typed Write/WriteLine
+     * no CorrelationManager, no Refreshing event, no category-suffixed Write/WriteLine
+     * overloads, and no object-typed Write/WriteLine
      * overloads. Real .NET's Trace and Debug share the same underlying static IndentLevel
      * state (both delegate to an internal TraceInternal class); this port keeps them as
      * separate, independently-tracked indent levels since Debug's provider-hook design isn't
@@ -78,6 +78,20 @@ namespace System::Diagnostics {
         static void WriteLine(const std::string& message) { std::cerr << message << '\n'; }
         /** @brief Writes a blank line to stderr. */
         static void WriteLine()                         { std::cerr << '\n'; }
+
+        /** @brief Writes @p message to stderr only when @p condition is true. */
+        static void WriteIf(bool condition, const std::string& message) {
+            if (condition) {
+                Write(message);
+            }
+        }
+
+        /** @brief Writes @p message and a newline to stderr only when @p condition is true. */
+        static void WriteLineIf(bool condition, const std::string& message) {
+            if (condition) {
+                WriteLine(message);
+            }
+        }
 
         /** @brief Writes an informational @p message prefixed with [Info]. */
         static void TraceInformation(const std::string& message) {

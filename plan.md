@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-25 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,672 passing tests across 37
+dependency edges, a clean native build, 12,675 passing tests across 37
 executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
@@ -32,7 +32,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,672 passing across 36 component binaries plus one integration
+- Tests: 12,675 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,761 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,762 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -148,6 +148,9 @@ assertion without an explicit architecture decision.
   shifts over UTF-16BE units, optional-direct-character control, astral
   Unicode support, and U+FFFD recovery for malformed input. It remains
   obsolete and unsuitable for new protocols.
+- Added conditional `Trace::WriteIf` and `Trace::WriteLineIf` under ticket
+  #1762. They suppress output when false and retain the existing stderr
+  write/newline behavior when true.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -208,7 +211,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,672.
+to 12,675.
 
 ## Candidate roadmap
 

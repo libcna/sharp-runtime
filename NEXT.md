@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and nineteen bounded
+repair, three P1 parity repairs, P1 portability revalidation, and twenty bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,672 tests across 37 executables.*
+edges, and 12,675 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,7 +28,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,672 passing tests
+- The full native baseline is a warning-free build with 12,675 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
@@ -77,6 +77,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - `UTF7Encoding` implements RFC 2152 modified-Base64 conversion for BMP and
   astral Unicode, including optional direct characters and U+FFFD recovery for
   malformed shifts. UTF-7 remains obsolete and unsuitable for new protocols.
+- `Trace::WriteIf` and `Trace::WriteLineIf` now conditionally preserve the
+  existing stderr write/newline behavior; category and listener surfaces stay
+  intentionally deferred.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
   compile the post-modular `All` graph and selective `Text.Json` libraries.
   This is compile-only evidence: cross tests were deliberately disabled.
@@ -85,7 +88,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,761 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,762 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -99,8 +102,8 @@ for its equality-based item mutations, #1754 for its equality-based range
 queries, #1755 for its comparer-aware binary search, #1756 for its default
 range sort, #1757 for `BigInteger` bitwise operators, #1758 for signed
 `BigInteger` shifts, #1759 for byte-vector conversion, and #1760 for the
-`ImmutableList<T>` Builder core, and #1761 for RFC 2152 UTF-7; it is
-git-ignored and is not part of a fresh clone.
+`ImmutableList<T>` Builder core, #1761 for RFC 2152 UTF-7, and #1762 for
+conditional Trace writes; it is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
