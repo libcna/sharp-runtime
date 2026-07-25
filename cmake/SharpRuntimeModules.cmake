@@ -5,18 +5,54 @@ include_guard(GLOBAL)
 
 set(SHARP_RUNTIME_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
 cmake_path(NORMAL_PATH SHARP_RUNTIME_ROOT)
+string(REGEX REPLACE "/$" "" SHARP_RUNTIME_ROOT "${SHARP_RUNTIME_ROOT}")
 
 include("${CMAKE_CURRENT_LIST_DIR}/SharpRuntimeCommon.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/SharpRuntimeComponents.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/SharpRuntimeSources.cmake")
 
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Core.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Text.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Threading.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/IO.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Net.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Security.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/Xml.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/modules/HeaderOnly.cmake")
+set(sharp_runtime_module_directories
+    core
+    buffers
+    collections
+    component-model
+    diagnostics
+    globalization
+    numerics
+    runtime
+    text
+    text-json
+    text-regular-expressions
+    threading
+    threading-tasks
+    threading-channels
+    timers
+    io
+    io-compression
+    io-compression-zip
+    io-hashing
+    storage
+    io-isolated-storage
+    net
+    net-sockets
+    net-http
+    net-http-headers
+    net-http-json
+    net-mime
+    net-network-information
+    net-security
+    net-websockets
+    security
+    security-cryptography
+    security-cryptography-random
+    xml
+    xml-linq
+)
+
+foreach(module_directory IN LISTS sharp_runtime_module_directories)
+    add_subdirectory(
+        "${SHARP_RUNTIME_ROOT}/modules/${module_directory}"
+        "${CMAKE_CURRENT_BINARY_DIR}/sharp-runtime-modules/${module_directory}"
+    )
+endforeach()
 
 sharp_runtime_validate_source_partition()

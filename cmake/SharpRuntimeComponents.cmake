@@ -12,7 +12,7 @@ endfunction()
 
 function(sharp_runtime_register_component)
     set(options)
-    set(one_value_args NAME TARGET TYPE SETUP ALIAS_OF)
+    set(one_value_args NAME TARGET TYPE SETUP ALIAS_OF INCLUDE_DIRECTORY)
     set(multi_value_args SOURCES DEPENDENCIES)
     cmake_parse_arguments(
         SHARP_COMPONENT
@@ -39,7 +39,7 @@ function(sharp_runtime_register_component)
 
     if(SHARP_COMPONENT_ALIAS_OF)
         if(SHARP_COMPONENT_TARGET OR SHARP_COMPONENT_TYPE OR SHARP_COMPONENT_SOURCES
-                OR SHARP_COMPONENT_SETUP)
+                OR SHARP_COMPONENT_SETUP OR SHARP_COMPONENT_INCLUDE_DIRECTORY)
             message(FATAL_ERROR
                 "Alias component '${SHARP_COMPONENT_NAME}' may only specify ALIAS_OF")
         endif()
@@ -73,6 +73,12 @@ function(sharp_runtime_register_component)
         if(SHARP_COMPONENT_TYPE STREQUAL "INTERFACE" AND SHARP_COMPONENT_SOURCES)
             message(FATAL_ERROR
                 "Header-only component '${SHARP_COMPONENT_NAME}' may not have sources")
+        endif()
+        if(NOT SHARP_COMPONENT_INCLUDE_DIRECTORY
+                OR NOT IS_DIRECTORY "${SHARP_COMPONENT_INCLUDE_DIRECTORY}")
+            message(FATAL_ERROR
+                "Sharp Runtime component '${SHARP_COMPONENT_NAME}' has no valid "
+                "INCLUDE_DIRECTORY")
         endif()
 
         set(component_type "${SHARP_COMPONENT_TYPE}")
@@ -115,6 +121,11 @@ function(sharp_runtime_register_component)
         "SHARP_RUNTIME_COMPONENT_${component_key}_SETUP"
         "${SHARP_COMPONENT_SETUP}"
     )
+    set_property(
+        GLOBAL PROPERTY
+        "SHARP_RUNTIME_COMPONENT_${component_key}_INCLUDE_DIRECTORY"
+        "${SHARP_COMPONENT_INCLUDE_DIRECTORY}"
+    )
 
     set_property(
         GLOBAL APPEND PROPERTY
@@ -137,6 +148,40 @@ function(sharp_runtime_register_component)
             ${SHARP_COMPONENT_SOURCES}
         )
     endif()
+endfunction()
+
+function(sharp_runtime_register_module)
+    set(options)
+    set(one_value_args NAME TARGET TYPE SETUP)
+    set(multi_value_args DEPENDENCIES)
+    cmake_parse_arguments(
+        SHARP_MODULE
+        "${options}"
+        "${one_value_args}"
+        "${multi_value_args}"
+        ${ARGN}
+    )
+
+    set(module_sources)
+    if(SHARP_MODULE_TYPE STREQUAL "STATIC")
+        file(GLOB_RECURSE module_sources CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+        )
+    elseif(NOT SHARP_MODULE_TYPE STREQUAL "INTERFACE")
+        message(FATAL_ERROR
+            "Sharp Runtime module '${SHARP_MODULE_NAME}' has invalid TYPE "
+            "'${SHARP_MODULE_TYPE}'")
+    endif()
+
+    sharp_runtime_register_component(
+        NAME "${SHARP_MODULE_NAME}"
+        TARGET "${SHARP_MODULE_TARGET}"
+        TYPE "${SHARP_MODULE_TYPE}"
+        SOURCES ${module_sources}
+        DEPENDENCIES ${SHARP_MODULE_DEPENDENCIES}
+        SETUP "${SHARP_MODULE_SETUP}"
+        INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
 endfunction()
 
 function(sharp_runtime_validate_source_partition)
@@ -313,6 +358,11 @@ function(sharp_runtime_enable_component component)
             GLOBAL
             PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_TARGET"
         )
+        get_property(
+            component_include_directory
+            GLOBAL
+            PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_INCLUDE_DIRECTORY"
+        )
 
         if(component_type STREQUAL "STATIC")
             get_property(
@@ -326,6 +376,11 @@ function(sharp_runtime_enable_component component)
                 PUBLIC
                     SharpRuntime::Headers
             )
+            target_include_directories(
+                "${component_target}"
+                PUBLIC
+                    "$<BUILD_INTERFACE:${component_include_directory}>"
+            )
             sharp_runtime_apply_build_options("${component_target}")
         elseif(component_type STREQUAL "INTERFACE")
             add_library("${component_target}" INTERFACE)
@@ -333,6 +388,11 @@ function(sharp_runtime_enable_component component)
                 "${component_target}"
                 INTERFACE
                     SharpRuntime::Headers
+            )
+            target_include_directories(
+                "${component_target}"
+                INTERFACE
+                    "$<BUILD_INTERFACE:${component_include_directory}>"
             )
         else()
             message(FATAL_ERROR

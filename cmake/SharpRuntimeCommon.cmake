@@ -7,11 +7,6 @@ add_library(sharp_runtime_headers INTERFACE)
 add_library(SharpRuntime::Headers ALIAS sharp_runtime_headers)
 
 target_include_directories(sharp_runtime_headers
-    INTERFACE
-        "$<BUILD_INTERFACE:${SHARP_RUNTIME_ROOT}/include>"
-)
-
-target_include_directories(sharp_runtime_headers
     SYSTEM INTERFACE
         "$<BUILD_INTERFACE:${SHARP_RUNTIME_ROOT}/vendor>"
 )
