@@ -37,12 +37,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 now compile the post-modular `All` graph
   and selective `Text.Json` libraries; this is compile-only evidence because
   cross tests were deliberately disabled. Emscripten is not installed locally.
+- Focused TSan scenarios for concurrent collections, `ConditionalWeakTable`,
+  generic task continuations, and `TaskExtensions::Unwrap` are clean; matching
+  ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,741 tickets: 1,740 completed plus blocked ticket #1741. Ticket #1737 records
+1,742 tickets: 1,741 completed plus blocked ticket #1741. Ticket #1737 records
 the completed P0 split, tickets #1738/#1739 the MemoryStream and
-generic-continuation repairs, ticket #1740 the XML whitespace repair, and
-#1741 the partial cross-build revalidation. The
+generic-continuation repairs, ticket #1740 the XML whitespace repair, #1741
+the partial cross-build revalidation, and #1742 focused sanitizer evidence.
+The
 database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
@@ -85,6 +89,15 @@ only for direct children of `XDocument`, as .NET does; element text continues
 through `WriteString`. Regression coverage guards input validation and both
 serialization paths.
 
+## P1 validation: concurrent ownership sanitizers
+
+Focused ThreadSanitizer runs exercised `ConcurrentBag`, bounded
+`BlockingCollection`, `ConditionalWeakTable`, concurrent generic-task
+continuation registration, and `TaskExtensions::Unwrap` without race reports.
+AddressSanitizer/LeakSanitizer passed the same ownership scenario plus a
+100-iteration continuation capture-release check. These are focused native
+validation runs, not a cross-platform runtime test matrix.
+
 ## Recommended next bounded tasks
 
 Choose one, create a ticket, and keep the changes isolated.
@@ -92,9 +105,6 @@ Choose one, create a ticket, and keep the changes isolated.
 1. **Post-modular Emscripten evidence.** Provision an Emscripten toolchain,
    then build `All` and one selective component without tests; record the
    exact toolchain and distinguish compile evidence from runtime coverage.
-2. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
-   and ASan/LSan for task/weak-ownership teardown. Keep test adaptations
-   separate from production fixes.
 
 `ImmutableList<T>` breadth, remaining `BinaryReader` character APIs,
 `BigInteger` bitwise operations, fuller UTF-7 behavior, and wider

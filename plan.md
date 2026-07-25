@@ -84,6 +84,9 @@ assertion without an explicit architecture decision.
   headers, .NET-reference review, and regression-test requirements.
 - Completed native TSan, ASan, and UBSan passes during stabilization and
   fixed the production findings discovered by those runs.
+- Revalidated `ConcurrentBag`, `BlockingCollection`, `ConditionalWeakTable`,
+  generic task continuations, and `TaskExtensions::Unwrap` with focused TSan
+  and ASan/LSan scenarios under ticket #1742.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -157,27 +160,21 @@ acceptance criteria and a validation command before changing code.
    one selective build; record the exact version and distinguish compile
    success from runtime test coverage.
 
-2. **Run focused sanitizer passes over new concurrent code.**
-   Prioritize `ConcurrentBag`, `BlockingCollection`,
-   `TaskExtensions::Unwrap`, and `ConditionalWeakTable`. Use TSan for
-   synchronization paths and ASan/LSan for continuation/ownership teardown;
-   keep any sanitizer-only test adaptations separate from production fixes.
-
 ### P2 — Consumer-driven API breadth
 
-3. **Choose a bounded `ImmutableList<T>` slice.**
+2. **Choose a bounded `ImmutableList<T>` slice.**
    Its documented omissions include sorting/reversing, copy/range/conversion,
    predicate search, builder support, and comparer overloads. Do not attempt
    the entire surface in one change; select methods required by a real
    consumer and port them against the .NET reference.
 
-4. **Complete only demanded `BinaryReader` character APIs.**
+3. **Complete only demanded `BinaryReader` character APIs.**
    `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
    `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
    when a consumer needs them, preserving decoder state and truncated-input
    behavior.
 
-5. **Review other documented partial surfaces by demand.**
+4. **Review other documented partial surfaces by demand.**
    Examples include `BigInteger` bitwise operations, full UTF-7 behavior,
    debugger/process breadth, and richer XML reader/writer functionality.
    A documented partial API is not automatically higher priority than a
@@ -185,11 +182,11 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Developer experience
 
-6. **Reduce the Doxygen warning backlog incrementally.**
+5. **Reduce the Doxygen warning backlog incrementally.**
    Establish a reproducible baseline first, then require touched public APIs
    not to regress it. Avoid a mass comment-only rewrite.
 
-7. **Decide whether distribution support is wanted.**
+6. **Decide whether distribution support is wanted.**
     The repository currently supports `add_subdirectory`; it has no installed
     package/export configuration and no standalone sample application. Add
     install rules, package config, or a sample only after the desired consumer
