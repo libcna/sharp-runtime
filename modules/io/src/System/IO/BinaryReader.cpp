@@ -9,6 +9,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/FormatException.hpp"
+#include "System/NotSupportedException.hpp"
 #include "System/ObjectDisposedException.hpp"
 #include "System/IO/EndOfStreamException.hpp"
 #include "System/IO/IOException.hpp"
@@ -121,6 +122,30 @@ namespace System::IO
     bool BinaryReader::ReadBoolean()
     {
         return ReadByte() != 0;
+    }
+
+    intcs BinaryReader::PeekChar()
+    {
+        ThrowIfDisposed();
+        if (!stream_->getCanSeekProperty())
+            throw System::NotSupportedException(
+                "BinaryReader::PeekChar requires a seekable stream in this implementation.");
+
+        const intcs originalPosition = stream_->getPositionProperty();
+        if (originalPosition >= stream_->getLengthProperty())
+            return -1;
+
+        try
+        {
+            const charcs character = ReadChar();
+            stream_->setPositionProperty(originalPosition);
+            return static_cast<intcs>(character);
+        }
+        catch (...)
+        {
+            stream_->setPositionProperty(originalPosition);
+            throw;
+        }
     }
 
     charcs BinaryReader::ReadChar()

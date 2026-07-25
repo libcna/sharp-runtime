@@ -33,9 +33,9 @@ namespace System::IO
      * subset: real .NET's BinaryReader accepts an arbitrary, pluggable Encoding; this port
      * always decodes UTF-8 (matching .NET's own default `BinaryReader(Stream)` constructor,
      * which uses UTF8Encoding — the only encoding real-world .NET/XNA content ever uses).
-     * `PeekChar`, `ReadChars`, and `Read(char[])` are not implemented, since this codebase's
-     * Stream has no general character-buffer decoding layer — a deliberate simplification,
-     * not a silent gap.
+     * `PeekChar` is available for seekable streams by decoding and restoring the stream position.
+     * `ReadChars` and `Read(char[])` are not implemented, since this codebase's Stream has no
+     * general character-buffer decoding layer — a deliberate simplification, not a silent gap.
      */
     class BinaryReader
     {
@@ -87,6 +87,21 @@ namespace System::IO
 
         /** Reads a boolean (one byte; non-zero = true). */
         [[nodiscard]] virtual bool ReadBoolean();
+
+        /**
+         * @brief Returns the next UTF-8 character without advancing a seekable stream.
+         *
+         * C++ counterpart of .NET `BinaryReader.PeekChar()` under its default UTF8Encoding.
+         * This narrow implementation records and restores the stream position rather than
+         * maintaining a character decoder buffer, so it requires `getCanSeekProperty()`.
+         * @return The next UTF-16 character as an intcs, or -1 when already at end of stream.
+         * @throws System::NotSupportedException if the underlying stream is not seekable.
+         * @throws System::IO::EndOfStreamException if the next character is truncated. The
+         *         original stream position is restored before throwing.
+         * @throws System::FormatException if the next bytes are not a valid supported UTF-8
+         *         character. The original stream position is restored before throwing.
+         */
+        [[nodiscard]] virtual intcs PeekChar();
 
         /**
          * @brief Reads one character, decoded from UTF-8, advancing the stream by however

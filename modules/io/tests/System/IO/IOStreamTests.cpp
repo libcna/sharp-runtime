@@ -633,6 +633,29 @@ namespace {
         [[nodiscard]] intcs getLengthProperty() const override { return 0; }
         [[nodiscard]] bool getCanWriteProperty() const override { return true; }
     };
+
+    class NonSeekableReadStream final : public System::IO::Stream {
+        std::vector<SharpRuntime::bytecs> data_;
+        std::size_t position_ = 0;
+
+    public:
+        explicit NonSeekableReadStream(std::vector<SharpRuntime::bytecs> data)
+            : data_(std::move(data)) {}
+
+        intcs Read(SharpRuntime::bytecs* buffer, intcs offset, intcs count) override {
+            intcs read = 0;
+            while (read < count && position_ < data_.size()) {
+                buffer[offset + read] = data_[position_++];
+                ++read;
+            }
+            return read;
+        }
+
+        void Close() override {}
+        [[nodiscard]] intcs getLengthProperty() const override {
+            return static_cast<intcs>(data_.size());
+        }
+    };
 }
 
 // Regression tests for a wave-3 audit finding: BinaryWriter::Close()/~BinaryWriter() with
@@ -973,6 +996,53 @@ TEST(BinaryReaderWriterTests, ReadChar_PastEndOfStream_ThrowsEndOfStreamExceptio
     MemoryStream ms; // empty stream
     BinaryReader br(&ms, true);
     EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_ReturnsUtf8CharacterWithoutAdvancingStream) {
+    std::vector<uint8_t> bytes{0xE2, 0x82, 0xAC, 0x42}; // U+20AC then 'B'
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    EXPECT_EQ(br.PeekChar(), static_cast<intcs>(0x20AC));
+    EXPECT_EQ(ms.getPositionProperty(), 0);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0x20AC));
+    EXPECT_EQ(br.PeekChar(), static_cast<intcs>(u'B'));
+    EXPECT_EQ(ms.getPositionProperty(), 3);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_AtEndReturnsMinusOneWithoutAdvancingStream) {
+    MemoryStream ms;
+    BinaryReader br(&ms, true);
+
+    EXPECT_EQ(br.PeekChar(), -1);
+    EXPECT_EQ(ms.getPositionProperty(), 0);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_InvalidUtf8RestoresStreamPosition) {
+    std::vector<uint8_t> bytes{0xC3, 0x00};
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    EXPECT_THROW(br.PeekChar(), System::FormatException);
+    EXPECT_EQ(ms.getPositionProperty(), 0);
+    EXPECT_EQ(br.ReadByte(), 0xC3u);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_TruncatedUtf8RestoresStreamPosition) {
+    std::vector<uint8_t> bytes{0xC3};
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    EXPECT_THROW(br.PeekChar(), System::IO::EndOfStreamException);
+    EXPECT_EQ(ms.getPositionProperty(), 0);
+    EXPECT_EQ(br.ReadByte(), 0xC3u);
+}
+
+TEST(BinaryReaderWriterTests, PeekChar_NonSeekableStreamThrowsNotSupportedException) {
+    NonSeekableReadStream stream({0x41});
+    BinaryReader br(&stream, true);
+
+    EXPECT_THROW(br.PeekChar(), System::NotSupportedException);
 }
 
 TEST(BinaryReaderWriterTests, ReadDecimal_PositiveValueRoundTrips) {

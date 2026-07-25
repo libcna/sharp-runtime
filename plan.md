@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-25 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,605 passing tests across 37
+dependency edges, a clean native build, 12,610 passing tests across 37
 executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
@@ -32,7 +32,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,605 passing across 36 component binaries plus one integration
+- Tests: 12,610 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,743 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,744 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -90,6 +90,10 @@ assertion without an explicit architecture decision.
 - Added `ImmutableList<T>` predicate/action queries (`ForEach`, `Exists`,
   `Find*`, and `TrueForAll`) under ticket #1743, including empty-delegate,
   empty-list, ordering, and immutability regression coverage.
+- Added seekable `BinaryReader::PeekChar` under ticket #1744. It returns the
+  next UTF-8 character or EOF without advancing, restores the position after
+  decode failure, and explicitly rejects non-seekable streams rather than
+  pretending a general decoder buffer exists.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -150,7 +154,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,605.
+to 12,610.
 
 ## Candidate roadmap
 
@@ -166,10 +170,10 @@ acceptance criteria and a validation command before changing code.
    against the .NET reference.
 
 2. **Complete only demanded `BinaryReader` character APIs.**
-   `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
-   `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
-   when a consumer needs them, preserving decoder state and truncated-input
-   behavior.
+   `ReadChar`, `ReadDecimal`, and seekable `PeekChar` are implemented, while
+   `ReadChars` and `Read(char[])` remain deliberately absent. Add them only
+   when a consumer needs them, preserving decoder state, supplementary UTF-8
+   handling, and truncated-input behavior.
 
 3. **Review other documented partial surfaces by demand.**
    Examples include `BigInteger` bitwise operations, full UTF-7 behavior,

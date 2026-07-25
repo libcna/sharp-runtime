@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, and P1 portability revalidation are complete:
-41 physical modules, 90 production dependency edges, and 12,605 tests across
-37 executables.*
+repair, three P1 parity repairs, P1 portability revalidation, and two bounded
+P2 API slices are complete: 41 physical modules, 90 production dependency
+edges, and 12,610 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,13 +28,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,605 passing tests
+- The full native baseline is a warning-free build with 12,610 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
   antecedent state, while scheduler and parent-task options remain no-ops.
 - `XmlWriter::WriteWhitespace` validates XML whitespace and `XText::WriteTo`
   selects it only for text directly under an `XDocument`.
+- `BinaryReader::PeekChar` returns the next UTF-8 character without advancing
+  a seekable stream, returns `-1` at EOF, and restores the position on decode
+  failure. It deliberately throws on non-seekable streams.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
   compile the post-modular `All` graph and selective `Text.Json` libraries.
   This is compile-only evidence: cross tests were deliberately disabled.
@@ -43,12 +46,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,743 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,744 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
-`ImmutableList<T>` predicate-query slice. The database is git-ignored and is
-not part of a fresh clone.
+`ImmutableList<T>` predicate-query slice. Ticket #1744 records seekable
+`BinaryReader::PeekChar`. The database is git-ignored and is not part of a
+fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -117,14 +121,24 @@ element matches, and reject an empty delegate with `ArgumentNullException`.
 Four focused tests cover ordering, immutability, empty-list semantics, and
 delegate validation.
 
+## P2 completion: seekable `BinaryReader::PeekChar`
+
+`PeekChar` records a seekable stream position, decodes one UTF-8 character,
+and restores the position before returning it. It returns `-1` at EOF and also
+restores the position before propagating invalid or truncated UTF-8 errors.
+Without a general character decoder buffer the port cannot implement that
+contract on non-seekable streams, so it throws `NotSupportedException` there.
+Five regressions cover UTF-8, EOF, invalid/truncated input, and the explicit
+non-seekable limitation.
+
 ## Recommended next bounded tasks
 
 All currently planned P1 work is complete. Choose one consumer-driven P2
 slice, create a ticket, and keep the changes isolated:
 
-1. **`BinaryReader` character APIs.** Add only demanded `PeekChar`,
-   `ReadChars`, or `Read(char[])` behavior while preserving decoder state and
-   truncated-input semantics.
+1. **`BinaryReader` character APIs.** Add only demanded `ReadChars` or
+   `Read(char[])` behavior while preserving decoder state and truncated-input
+   semantics, including supplementary UTF-8 characters.
 2. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
    sorting/reversing, copy/range/conversion, builder support, or comparer
    overloads.
