@@ -23,10 +23,11 @@ using SharpRuntime::intcs;
  * Internally shares the underlying std::vector via shared_ptr; mutations return new instances.
  *
  * Covers the core mutation/lookup surface (Add/AddRange/Insert/InsertRange/SetItem/Replace/
- * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Contains/IndexOf/LastIndexOf/BinarySearch).
+ * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
+ * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): Sort/Reverse (in-place-returning-new-instance variants),
- * the 3 CopyTo overloads, GetRange, ConvertAll<TOutput>, ToBuilder/Builder,
+ * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads, the 3
+ * CopyTo overloads, GetRange, ConvertAll<TOutput>, ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -271,6 +272,32 @@ public:
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index, v->begin() + index + count);
         return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list with all elements sorted using T::operator<.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Sort(). Range and custom-comparer
+     * overloads remain deliberately unimplemented.
+     * @return A sorted immutable list; the source list is unchanged.
+     */
+    [[nodiscard]] ImmutableList<T> Sort() const {
+        auto values = std::make_shared<std::vector<T>>(*data_);
+        std::sort(values->begin(), values->end());
+        return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Returns a new list whose elements are in reverse order.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Reverse(). Range overloads remain
+     * deliberately unimplemented.
+     * @return A reversed immutable list; the source list is unchanged.
+     */
+    [[nodiscard]] ImmutableList<T> Reverse() const {
+        auto values = std::make_shared<std::vector<T>>(*data_);
+        std::reverse(values->begin(), values->end());
+        return ImmutableList<T>(std::move(values));
     }
 
     /**
