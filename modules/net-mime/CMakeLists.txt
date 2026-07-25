@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Net.Mime
     TARGET sharp_runtime_net_mime
     TYPE STATIC
-    DEPENDENCIES Collections Core
+    PUBLIC_DEPENDENCIES Collections.Core Core.Base
 )

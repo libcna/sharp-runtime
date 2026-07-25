@@ -13,7 +13,14 @@ endfunction()
 function(sharp_runtime_register_component)
     set(options)
     set(one_value_args NAME TARGET TYPE SETUP ALIAS_OF INCLUDE_DIRECTORY)
-    set(multi_value_args SOURCES DEPENDENCIES TEST_SOURCES)
+    set(multi_value_args
+        SOURCES
+        DEPENDENCIES
+        PUBLIC_DEPENDENCIES
+        PRIVATE_DEPENDENCIES
+        TEST_SOURCES
+        TEST_DEPENDENCIES
+    )
     cmake_parse_arguments(
         SHARP_COMPONENT
         "${options}"
@@ -40,13 +47,17 @@ function(sharp_runtime_register_component)
     if(SHARP_COMPONENT_ALIAS_OF)
         if(SHARP_COMPONENT_TARGET OR SHARP_COMPONENT_TYPE OR SHARP_COMPONENT_SOURCES
                 OR SHARP_COMPONENT_SETUP OR SHARP_COMPONENT_INCLUDE_DIRECTORY
-                OR SHARP_COMPONENT_TEST_SOURCES)
+                OR SHARP_COMPONENT_TEST_SOURCES OR SHARP_COMPONENT_DEPENDENCIES
+                OR SHARP_COMPONENT_PUBLIC_DEPENDENCIES
+                OR SHARP_COMPONENT_PRIVATE_DEPENDENCIES)
             message(FATAL_ERROR
                 "Alias component '${SHARP_COMPONENT_NAME}' may only specify ALIAS_OF")
         endif()
         set(component_type "ALIAS")
         set(component_target "")
         set(component_dependencies "${SHARP_COMPONENT_ALIAS_OF}")
+        set(component_public_dependencies)
+        set(component_private_dependencies)
 
         _sharp_runtime_component_key(
             aliased_component_key
@@ -58,6 +69,13 @@ function(sharp_runtime_register_component)
             "${SHARP_COMPONENT_NAME}"
         )
     else()
+        if(SHARP_COMPONENT_DEPENDENCIES
+                AND (SHARP_COMPONENT_PUBLIC_DEPENDENCIES
+                    OR SHARP_COMPONENT_PRIVATE_DEPENDENCIES))
+            message(FATAL_ERROR
+                "Sharp Runtime component '${SHARP_COMPONENT_NAME}' mixes legacy "
+                "DEPENDENCIES with PUBLIC_DEPENDENCIES/PRIVATE_DEPENDENCIES")
+        endif()
         if(NOT SHARP_COMPONENT_TARGET)
             message(FATAL_ERROR
                 "Sharp Runtime component '${SHARP_COMPONENT_NAME}' must have a TARGET")
@@ -75,6 +93,12 @@ function(sharp_runtime_register_component)
             message(FATAL_ERROR
                 "Header-only component '${SHARP_COMPONENT_NAME}' may not have sources")
         endif()
+        if(SHARP_COMPONENT_TYPE STREQUAL "INTERFACE"
+                AND SHARP_COMPONENT_PRIVATE_DEPENDENCIES)
+            message(FATAL_ERROR
+                "Header-only component '${SHARP_COMPONENT_NAME}' may not have "
+                "PRIVATE_DEPENDENCIES")
+        endif()
         if(NOT SHARP_COMPONENT_INCLUDE_DIRECTORY
                 OR NOT IS_DIRECTORY "${SHARP_COMPONENT_INCLUDE_DIRECTORY}")
             message(FATAL_ERROR
@@ -84,7 +108,24 @@ function(sharp_runtime_register_component)
 
         set(component_type "${SHARP_COMPONENT_TYPE}")
         set(component_target "${SHARP_COMPONENT_TARGET}")
-        set(component_dependencies "${SHARP_COMPONENT_DEPENDENCIES}")
+        if(SHARP_COMPONENT_DEPENDENCIES)
+            set(component_public_dependencies "${SHARP_COMPONENT_DEPENDENCIES}")
+        else()
+            set(
+                component_public_dependencies
+                "${SHARP_COMPONENT_PUBLIC_DEPENDENCIES}"
+            )
+        endif()
+        set(
+            component_private_dependencies
+            "${SHARP_COMPONENT_PRIVATE_DEPENDENCIES}"
+        )
+        set(
+            component_dependencies
+            ${component_public_dependencies}
+            ${component_private_dependencies}
+        )
+        list(REMOVE_DUPLICATES component_dependencies)
     endif()
 
     set_property(
@@ -119,6 +160,16 @@ function(sharp_runtime_register_component)
     )
     set_property(
         GLOBAL PROPERTY
+        "SHARP_RUNTIME_COMPONENT_${component_key}_PUBLIC_DEPENDENCIES"
+        "${component_public_dependencies}"
+    )
+    set_property(
+        GLOBAL PROPERTY
+        "SHARP_RUNTIME_COMPONENT_${component_key}_PRIVATE_DEPENDENCIES"
+        "${component_private_dependencies}"
+    )
+    set_property(
+        GLOBAL PROPERTY
         "SHARP_RUNTIME_COMPONENT_${component_key}_SETUP"
         "${SHARP_COMPONENT_SETUP}"
     )
@@ -131,6 +182,11 @@ function(sharp_runtime_register_component)
         GLOBAL PROPERTY
         "SHARP_RUNTIME_COMPONENT_${component_key}_TEST_SOURCES"
         "${SHARP_COMPONENT_TEST_SOURCES}"
+    )
+    set_property(
+        GLOBAL PROPERTY
+        "SHARP_RUNTIME_COMPONENT_${component_key}_TEST_DEPENDENCIES"
+        "${SHARP_COMPONENT_TEST_DEPENDENCIES}"
     )
 
     set_property(
@@ -166,7 +222,12 @@ endfunction()
 function(sharp_runtime_register_module)
     set(options)
     set(one_value_args NAME TARGET TYPE SETUP)
-    set(multi_value_args DEPENDENCIES)
+    set(multi_value_args
+        DEPENDENCIES
+        PUBLIC_DEPENDENCIES
+        PRIVATE_DEPENDENCIES
+        TEST_DEPENDENCIES
+    )
     cmake_parse_arguments(
         SHARP_MODULE
         "${options}"
@@ -188,6 +249,19 @@ function(sharp_runtime_register_module)
             "Sharp Runtime module '${SHARP_MODULE_NAME}' has invalid TYPE "
             "'${SHARP_MODULE_TYPE}'")
     endif()
+    if(SHARP_MODULE_DEPENDENCIES
+            AND (SHARP_MODULE_PUBLIC_DEPENDENCIES
+                OR SHARP_MODULE_PRIVATE_DEPENDENCIES))
+        message(FATAL_ERROR
+            "Sharp Runtime module '${SHARP_MODULE_NAME}' mixes legacy DEPENDENCIES "
+            "with PUBLIC_DEPENDENCIES/PRIVATE_DEPENDENCIES")
+    endif()
+    if(SHARP_MODULE_TYPE STREQUAL "INTERFACE"
+            AND SHARP_MODULE_PRIVATE_DEPENDENCIES)
+        message(FATAL_ERROR
+            "Header-only module '${SHARP_MODULE_NAME}' may not have "
+            "PRIVATE_DEPENDENCIES")
+    endif()
 
     sharp_runtime_register_component(
         NAME "${SHARP_MODULE_NAME}"
@@ -195,9 +269,12 @@ function(sharp_runtime_register_module)
         TYPE "${SHARP_MODULE_TYPE}"
         SOURCES ${module_sources}
         DEPENDENCIES ${SHARP_MODULE_DEPENDENCIES}
+        PUBLIC_DEPENDENCIES ${SHARP_MODULE_PUBLIC_DEPENDENCIES}
+        PRIVATE_DEPENDENCIES ${SHARP_MODULE_PRIVATE_DEPENDENCIES}
         SETUP "${SHARP_MODULE_SETUP}"
         INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include"
         TEST_SOURCES ${module_test_sources}
+        TEST_DEPENDENCIES ${SHARP_MODULE_TEST_DEPENDENCIES}
     )
 endfunction()
 
@@ -437,7 +514,19 @@ function(sharp_runtime_enable_component component)
             endif()
         endforeach()
 
-        foreach(dependency IN LISTS component_dependencies)
+        get_property(
+            component_public_dependencies
+            GLOBAL
+            PROPERTY
+                "SHARP_RUNTIME_COMPONENT_${component_key}_PUBLIC_DEPENDENCIES"
+        )
+        get_property(
+            component_private_dependencies
+            GLOBAL
+            PROPERTY
+                "SHARP_RUNTIME_COMPONENT_${component_key}_PRIVATE_DEPENDENCIES"
+        )
+        foreach(dependency IN LISTS component_public_dependencies)
             if(component_type STREQUAL "STATIC")
                 target_link_libraries(
                     "${component_target}"
@@ -451,6 +540,13 @@ function(sharp_runtime_enable_component component)
                         "SharpRuntime::${dependency}"
                 )
             endif()
+        endforeach()
+        foreach(dependency IN LISTS component_private_dependencies)
+            target_link_libraries(
+                "${component_target}"
+                PRIVATE
+                    "SharpRuntime::${dependency}"
+            )
         endforeach()
 
         get_property(
@@ -497,4 +593,102 @@ function(sharp_runtime_get_registered_test_sources output)
         PROPERTY SHARP_RUNTIME_REGISTERED_TEST_SOURCES
     )
     set("${output}" "${registered_test_sources}" PARENT_SCOPE)
+endfunction()
+
+function(sharp_runtime_add_component_tests component)
+    _sharp_runtime_component_key(component_key "${component}")
+    get_property(
+        registered
+        GLOBAL
+        PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_REGISTERED"
+    )
+    if(NOT registered)
+        message(FATAL_ERROR
+            "Cannot create tests for unknown Sharp Runtime component '${component}'")
+    endif()
+
+    get_property(
+        component_type
+        GLOBAL
+        PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_TYPE"
+    )
+    if(component_type STREQUAL "ALIAS")
+        get_property(
+            aliased_component
+            GLOBAL
+            PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_DEPENDENCIES"
+        )
+        sharp_runtime_add_component_tests("${aliased_component}")
+        return()
+    endif()
+
+    get_property(
+        test_sources
+        GLOBAL
+        PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_TEST_SOURCES"
+    )
+    if(NOT test_sources)
+        return()
+    endif()
+
+    set(test_target "SharpRuntimeTests_${component_key}")
+    if(TARGET "${test_target}")
+        return()
+    endif()
+
+    get_property(
+        test_dependencies
+        GLOBAL
+        PROPERTY "SHARP_RUNTIME_COMPONENT_${component_key}_TEST_DEPENDENCIES"
+    )
+    foreach(test_dependency IN LISTS test_dependencies)
+        sharp_runtime_enable_component("${test_dependency}")
+    endforeach()
+
+    add_executable("${test_target}" ${test_sources})
+    target_link_libraries(
+        "${test_target}"
+        PRIVATE
+            "SharpRuntime::${component}"
+            gtest_main
+    )
+    foreach(test_dependency IN LISTS test_dependencies)
+        target_link_libraries(
+            "${test_target}"
+            PRIVATE
+                "SharpRuntime::${test_dependency}"
+        )
+    endforeach()
+    sharp_runtime_apply_build_options("${test_target}")
+    if(NOT MSVC)
+        target_compile_options("${test_target}" PRIVATE -Wno-unused-result)
+    endif()
+
+    gtest_discover_tests(
+        "${test_target}"
+        TEST_PREFIX "${component}::"
+    )
+    set_property(
+        GLOBAL APPEND PROPERTY
+        SHARP_RUNTIME_TEST_TARGETS
+        "${test_target}"
+    )
+endfunction()
+
+function(sharp_runtime_get_primary_components output)
+    get_property(
+        primary_components
+        GLOBAL
+        PROPERTY SHARP_RUNTIME_PRIMARY_COMPONENTS
+    )
+    set("${output}" "${primary_components}" PARENT_SCOPE)
+endfunction()
+
+function(sharp_runtime_get_test_targets output)
+    get_property(
+        test_targets
+        GLOBAL
+        PROPERTY SHARP_RUNTIME_TEST_TARGETS
+    )
+    set("${output}" "${test_targets}" PARENT_SCOPE)
 endfunction()

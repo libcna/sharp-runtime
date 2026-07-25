@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Text.RegularExpressions
     TARGET sharp_runtime_text_regular_expressions
     TYPE INTERFACE
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )

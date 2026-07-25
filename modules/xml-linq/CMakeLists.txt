@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Xml.Linq
     TARGET sharp_runtime_xml_linq
     TYPE STATIC
-    DEPENDENCIES Core Xml
+    PUBLIC_DEPENDENCIES Core.Base Xml
 )

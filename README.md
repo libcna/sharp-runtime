@@ -70,8 +70,8 @@ cryptography, X.509 certificates, and TLS (`SslStream`). See **[CLAUDE.md](CLAUD
 ```bash
 git submodule update --init --recursive
 cmake -S . -B build -DSHARP_RUNTIME_BUILD_TESTS=ON
-cmake --build build --parallel 4
-./build/SharpRuntimeTests
+cmake --build build --target SharpRuntimeTests --parallel 4
+scripts/run_component_tests.sh build
 ```
 
 A library-only build (no test binary) is also supported:
@@ -100,9 +100,10 @@ target_link_libraries(MyApp PRIVATE
 )
 ```
 
-The dependency closure is automatic. This example enables `Core`, `Buffers`,
-`Text`, `ComponentModel`, `Threading`, `Collections`, and `Text.Json`; it does
-not configure or build IO, networking, XML, ZLIB, miniz, tinyxml2, or SDL.
+The dependency closure is automatic. This example enables `Core.Base`,
+`Buffers`, `Text`, `Collections.Core`, and `Text.Json`; it does not configure
+or build `Threading`, `ComponentModel`, IO, networking, XML, ZLIB, miniz,
+tinyxml2, or SDL.
 
 Multiple components form a normal CMake list:
 
@@ -115,8 +116,8 @@ set(SHARP_RUNTIME_COMPONENTS
 
 `SharpRuntime::All` enables every component. The legacy `SHARP_RUNTIME` target
 continues to forward to `SharpRuntime::All` when the `All` component is
-enabled. Building the repository-wide test suite also enables `All`, because
-the suite covers every namespace.
+enabled. Tests respect the requested component list; select `All` explicitly
+for the repository-wide suite.
 
 See [CMake components](docs/CMakeComponents.md) for the complete component
 catalogue, dependency and external-library mapping, and migration details.
@@ -133,7 +134,8 @@ Build options:   --parallel 4
 ```
 
 Reload CMake, then choose **Build | Build Project** for the `all` target (or
-build `SharpRuntimeTests` when the test executable is what you need).
+build the aggregate `SharpRuntimeTests` target). Actual test executables are
+named `SharpRuntimeTests_<Component>`.
 
 For a selective application profile, replace `All` with the semicolon-separated
 component list and set `SHARP_RUNTIME_BUILD_TESTS=OFF`. The individual
@@ -157,9 +159,11 @@ not get separate `cmake-build-debug` directories.
   cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
   ```
   The build must produce zero output from this command before any commit (CLAUDE.md rule #1).
-- **Running one test suite instead of the full 12,494-test suite**: `./build/SharpRuntimeTests
-  --gtest_filter="SuiteName.*"` (standard GoogleTest filter syntax — see
-  `scripts/local_ci_check.sh` for a full build+test gate you can run locally before pushing).
+- **Running one test suite instead of the full 12,494-test suite**:
+  `./build/SharpRuntimeTests_Net_Sockets --gtest_filter="SuiteName.*"`
+  (standard GoogleTest filter syntax). Use
+  `scripts/run_component_tests.sh build` to run every component binary once,
+  or `scripts/local_ci_check.sh` for the full local gate.
 - **Cross-compiling for Windows (MinGW) or Emscripten** — neither is part of the default build
   and neither has been wired into CI, but both are real, working, verified targets (not
   aspirational): `x86_64-w64-mingw32-g++` and `emcmake cmake` both build the `SHARP_RUNTIME`
@@ -259,7 +263,7 @@ every stabilization ticket in this repo's history has actually followed — not 
 4. **Tests updated and passing.** Any test that encoded the *old* (buggy) behavior as expected is
    fixed, not left red or deleted. New regression tests exist for anything that was actually
    fixed — a test that would have caught the bug before the fix, not just a test that happens to
-   pass after it. `./build/SharpRuntimeTests` — zero failures.
+   pass after it. `scripts/run_component_tests.sh build` — zero failures.
 5. **Committed and pushed to `feature/work`** (never `develop`/`master` without explicit
    per-action approval) with a commit message that states what was wrong, how it was verified,
    and the ticket number.

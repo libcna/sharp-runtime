@@ -5,5 +5,7 @@ sharp_runtime_register_module(
     NAME IO
     TARGET sharp_runtime_io
     TYPE STATIC
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base Uri
+    PRIVATE_DEPENDENCIES TimeZone
+    TEST_DEPENDENCIES IO.IsolatedStorage TimeZone
 )

@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Threading
     TARGET sharp_runtime_threading
     TYPE STATIC
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base TimeZone
 )

@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Buffers
     TARGET sharp_runtime_buffers
     TYPE INTERFACE
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )

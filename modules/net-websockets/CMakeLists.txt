@@ -5,11 +5,12 @@ sharp_runtime_register_module(
     NAME Net.WebSockets
     TARGET sharp_runtime_net_websockets
     TYPE STATIC
-    DEPENDENCIES
+    PUBLIC_DEPENDENCIES
         ComponentModel
-        Core
-        Net
+        Core.Base
         Net.Sockets
         Threading
         Threading.Tasks
+        Uri
+    PRIVATE_DEPENDENCIES Net
 )

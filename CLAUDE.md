@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **10711+ tests passing.** `./build/SharpRuntimeTests` must show no failures. (Baseline verified 2026-07-07 — this floor should be raised as new tests are added, never lowered.)
+2. **10711+ tests passing.** `scripts/run_component_tests.sh build` must show no failures. (Current baseline: 12,494 tests across component and integration executables; this floor should be raised as new tests are added, never lowered.)
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every file** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
@@ -142,7 +142,8 @@ Every `.hpp` and `.cpp` file starts with:
 - `cmake --build build --parallel 4` — **zero errors, zero warnings**.
 
 ### 7. Tests passing
-- `./build/SharpRuntimeTests` — all tests pass (no failures, no crashes).
+- `scripts/run_component_tests.sh build` — all component and integration tests
+  pass exactly once (no failures, no crashes).
 - At least basic GoogleTest coverage exists for the ported type's key methods.
 
 ---
@@ -152,9 +153,9 @@ Every `.hpp` and `.cpp` file starts with:
 - **Complex types:** `.hpp` declaration + `.cpp` body. Move bodies to `.cpp` when a header grows unwieldy.
 - **Simple types:** header-only is fine.
 - **CMake:** component-specific `CONFIGURE_DEPENDS` globs discover
-  `modules/*/src/*.cpp`;
-  configuration validates that every implementation source belongs to exactly
-  one component. Every module declares its include root, sources, tests,
+  `modules/*/{src,tests}/*.cpp`; `scripts/validate_module_boundaries.py`
+  validates every implementation/header owner and public/private/test
+  dependency. Every module declares its include root, sources, tests,
   dependencies, and platform setup in `modules/<module>/CMakeLists.txt`.
 - **Vendored libs:** GoogleTest, nlohmann/json, tinyxml2, miniz, all under `vendor/`. Never commit binaries. Files under `vendor/` are third-party source unmodified from upstream and are exempt from this project's SPDX-header, doc-comment, and `getXxxProperty()`/namespace-syntax naming rules — those rules apply only to module `include/`, `src/`, and `tests/` trees.
 - **Templates:** deferred `inline` definitions after forward declarations to resolve circular includes.
@@ -184,11 +185,11 @@ State lives in `plan.sqlite3` + git history, not conversation memory, so this pr
 cmake --build build --parallel 4
 
 # Run all tests
-./build/SharpRuntimeTests
+scripts/run_component_tests.sh build
 
 # Errors/warnings only
 cmake --build build --parallel 4 2>&1 | grep -E "error:|warning:" | grep -v "^#"
 
 # Run a specific suite
-./build/SharpRuntimeTests --gtest_filter="TcpClient*"
+./build/SharpRuntimeTests_Net_Sockets --gtest_filter="TcpClient*"
 ```

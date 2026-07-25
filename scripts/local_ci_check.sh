@@ -3,11 +3,17 @@
 # then the full test suite. Exits non-zero on the first failure so it can be
 # used as a pre-push gate. Mirrors CLAUDE.md's non-negotiable rules #1/#2.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 BUILD_DIR="${1:-build}"
+
+echo "==> Validating module boundaries"
+python3 scripts/validate_module_boundaries.py
+python3 test/validate_module_boundaries_test.py
+python3 scripts/generate_component_catalog.py --check
 
 echo "==> Configuring ($BUILD_DIR)"
 cmake -S . -B "$BUILD_DIR" >/dev/null
@@ -33,24 +39,6 @@ fi
 echo "    build clean: 0 warnings, 0 errors"
 
 echo "==> Running tests"
-TEST_BIN="$BUILD_DIR/SharpRuntimeTests"
-if [ ! -x "$TEST_BIN" ]; then
-    echo "FAIL: test binary not found at $TEST_BIN" >&2
-    exit 1
-fi
-
-TEST_LOG="$(mktemp)"
-trap 'rm -f "$BUILD_LOG" "$TEST_LOG"' EXIT
-
-if ! "$TEST_BIN" > "$TEST_LOG" 2>&1; then
-    echo "FAIL: test suite failed" >&2
-    grep -E "FAILED|\[  FAILED  \]" "$TEST_LOG" >&2 || true
-    tail -40 "$TEST_LOG" >&2
-    exit 1
-fi
-
-SUMMARY_LINE="$(grep -E "^\[==========\] .* ran\." "$TEST_LOG" | tail -1)"
-echo "    $SUMMARY_LINE"
-echo "    all tests passed"
+scripts/run_component_tests.sh "$BUILD_DIR"
 
 echo "==> Local CI check passed"

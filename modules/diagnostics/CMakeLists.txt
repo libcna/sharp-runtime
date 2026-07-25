@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Diagnostics
     TARGET sharp_runtime_diagnostics
     TYPE STATIC
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )

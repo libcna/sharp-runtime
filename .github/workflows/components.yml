@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Robert Vokac and contributors
+
+name: Component boundaries
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selective:
+    name: ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: Core.Base
+            fixture: core_base.cpp
+          - component: Text.Json
+            fixture: text_json.cpp
+          - component: Net.Http.Headers
+            fixture: net_http_headers.cpp
+          - component: Net.WebSockets
+            fixture: net_websockets.cpp
+          - component: IO.Compression
+            fixture: io_compression.cpp
+          - component: IO.Compression.Zip
+            fixture: io_compression_zip.cpp
+          - component: IO.IsolatedStorage
+            fixture: io_isolated_storage.cpp
+          - component: Security.Cryptography.Random
+            fixture: security_cryptography_random.cpp
+          - component: Xml.Linq
+            fixture: xml_linq.cpp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: scripts/check_selective_components.sh "${{ matrix.component }}" "${{ matrix.fixture }}"
+
+  full:
+    name: Full compatibility build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: scripts/local_ci_check.sh build

@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Text
     TARGET sharp_runtime_text
     TYPE STATIC
-    DEPENDENCIES Buffers Core
+    PUBLIC_DEPENDENCIES Buffers Core.Base
 )

@@ -11,6 +11,6 @@ sharp_runtime_register_module(
     NAME Net
     TARGET sharp_runtime_net
     TYPE STATIC
-    DEPENDENCIES Collections ComponentModel Core
+    PUBLIC_DEPENDENCIES Collections.Core ComponentModel Core.Base Uri
     SETUP _sharp_runtime_setup_net
 )

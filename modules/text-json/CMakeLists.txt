@@ -5,5 +5,7 @@ sharp_runtime_register_module(
     NAME Text.Json
     TARGET sharp_runtime_text_json
     TYPE STATIC
-    DEPENDENCIES Collections Core Text
+    PUBLIC_DEPENDENCIES Core.Base Text
+    PRIVATE_DEPENDENCIES Collections.Core
+    TEST_DEPENDENCIES Collections.Core
 )

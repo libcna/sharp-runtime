@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Net.NetworkInformation
     TARGET sharp_runtime_net_network_information
     TYPE STATIC
-    DEPENDENCIES ComponentModel Core Net Threading.Tasks
+    PUBLIC_DEPENDENCIES ComponentModel Core.Base Net Threading.Tasks
 )

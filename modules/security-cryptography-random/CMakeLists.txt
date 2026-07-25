@@ -11,6 +11,6 @@ sharp_runtime_register_module(
     NAME Security.Cryptography.Random
     TARGET sharp_runtime_security_cryptography_random
     TYPE STATIC
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
     SETUP _sharp_runtime_setup_cryptography_random
 )

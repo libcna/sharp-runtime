@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME ComponentModel
     TARGET sharp_runtime_component_model
     TYPE INTERFACE
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )

@@ -22,6 +22,7 @@ sharp_runtime_register_module(
     NAME IO.Compression.Zip
     TARGET sharp_runtime_io_compression_zip
     TYPE STATIC
-    DEPENDENCIES Core IO
+    PUBLIC_DEPENDENCIES IO
+    PRIVATE_DEPENDENCIES Core.Base
     SETUP _sharp_runtime_setup_io_compression_zip
 )

@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Threading.Channels
     TARGET sharp_runtime_threading_channels
     TYPE INTERFACE
-    DEPENDENCIES Core Threading.Tasks
+    PUBLIC_DEPENDENCIES Core.Base Threading.Tasks
 )

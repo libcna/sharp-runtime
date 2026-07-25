@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Net.Http.Headers
     TARGET sharp_runtime_net_http_headers
     TYPE STATIC
-    DEPENDENCIES Collections Core
+    PUBLIC_DEPENDENCIES Collections.Core Core.Base Uri
 )

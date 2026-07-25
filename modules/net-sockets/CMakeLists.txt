@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Net.Sockets
     TARGET sharp_runtime_net_sockets
     TYPE STATIC
-    DEPENDENCIES Core IO Net Threading.Tasks
+    PUBLIC_DEPENDENCIES Core.Base IO Net Threading.Tasks
 )

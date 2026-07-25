@@ -5,5 +5,6 @@ sharp_runtime_register_module(
     NAME Timers
     TARGET sharp_runtime_timers
     TYPE STATIC
-    DEPENDENCIES ComponentModel Core Threading
+    PUBLIC_DEPENDENCIES ComponentModel Core.Base
+    PRIVATE_DEPENDENCIES Threading
 )

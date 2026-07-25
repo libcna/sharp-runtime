@@ -12,8 +12,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/SharpRuntimeComponents.cmake")
 
 set(sharp_runtime_module_directories
     core
+    console
+    uri
+    time-zone
     buffers
     collections
+    collections-async
+    collections-object-model
     component-model
     diagnostics
     globalization

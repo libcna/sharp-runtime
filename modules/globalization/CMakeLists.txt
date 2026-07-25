@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Globalization
     TARGET sharp_runtime_globalization
     TYPE STATIC
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )

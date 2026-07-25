@@ -10,6 +10,6 @@ sharp_runtime_register_module(
     NAME IO.Compression
     TARGET sharp_runtime_io_compression
     TYPE STATIC
-    DEPENDENCIES Buffers Core IO
+    PUBLIC_DEPENDENCIES Buffers Core.Base IO
     SETUP _sharp_runtime_setup_io_compression
 )

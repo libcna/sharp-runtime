@@ -7,12 +7,15 @@ Sharp Runtime exposes independently selectable CMake targets. Applications
 request only their direct components; Sharp Runtime resolves and enables the
 transitive dependency closure.
 
-Each component physically owns its public headers, implementation, tests, and
-CMake declaration under `modules/<module>/{include,src,tests,CMakeLists.txt}`.
-The original include spelling remains unchanged (`#include
-<System/.../Type.hpp>`), but only include roots from enabled targets are exposed
-to an application. Including a header from a component that was not requested
-therefore fails during compilation instead of being deferred to link time.
+The registered graph currently contains 40 physical modules and 85 direct
+production dependency edges. The boundary validator reports no cycles,
+duplicate include paths, orphan files, undeclared edges, stale edges, or
+visibility mismatches. The dependency allow-list is empty.
+
+The complete component, ownership, dependency, external-library, and
+representative-header table is generated from the CMake registrations:
+[generated component catalogue](ComponentCatalog.md). Local CI rejects an
+out-of-date catalogue.
 
 ## Selecting components
 
@@ -33,11 +36,8 @@ target_link_libraries(MyApp PRIVATE
 )
 ```
 
-The application does not list transitive dependencies. In this example,
-`Net.WebSockets` enables its socket, IO, threading, collection, component-model,
-and core closure; `Text.Json` adds its text and collection closure.
-
-For a standalone configuration, pass a semicolon-separated list:
+The application does not list transitive dependencies. For a standalone
+configuration, pass a semicolon-separated list:
 
 ```bash
 cmake -S . -B build-components \
@@ -46,110 +46,159 @@ cmake -S . -B build-components \
 cmake --build build-components --parallel 4
 ```
 
-An unset or empty component list selects `All`. The repository-wide tests and
-benchmarks also enable `All`, regardless of a narrower requested list.
+An unset or empty list selects `All` in a standalone repository build.
+Embedding applications should always set the list explicitly.
 
-## Compiled components
+## Dependency visibility
 
-| Target | Direct Sharp Runtime dependencies | Optional external/platform dependency |
-|---|---|---|
-| `SharpRuntime::Core` | — | — |
-| `SharpRuntime::Diagnostics` | Core | — |
-| `SharpRuntime::Globalization` | Core | — |
-| `SharpRuntime::Numerics` | Buffers, Collections, Core | — |
-| `SharpRuntime::Runtime` | Core | — |
-| `SharpRuntime::Text` | Buffers, Core | — |
-| `SharpRuntime::Text.Json` | Collections, Core, Text | — |
-| `SharpRuntime::Threading` | Core | — |
-| `SharpRuntime::Threading.Tasks` | Core, Threading | — |
-| `SharpRuntime::Timers` | ComponentModel, Core, Threading | — |
-| `SharpRuntime::IO` | Core | — |
-| `SharpRuntime::IO.Compression` | Core, IO, Buffers | ZLIB |
-| `SharpRuntime::IO.Compression.Zip` | Core, IO | vendored miniz |
-| `SharpRuntime::IO.Hashing` | Core, IO | — |
-| `SharpRuntime::Storage` | — | SDL3 on Android when provided by the parent |
-| `SharpRuntime::IO.IsolatedStorage` | Core, IO, Storage | — |
-| `SharpRuntime::Net` | Collections, ComponentModel, Core | `ws2_32` on Windows |
-| `SharpRuntime::Net.Sockets` | Core, IO, Net, Threading.Tasks | — |
-| `SharpRuntime::Net.Http` | Core, IO, Net, Threading.Tasks | — |
-| `SharpRuntime::Net.Http.Headers` | Core, Collections | — |
-| `SharpRuntime::Net.Mime` | Collections, Core | — |
-| `SharpRuntime::Net.NetworkInformation` | ComponentModel, Core, Net, Threading.Tasks | — |
-| `SharpRuntime::Net.WebSockets` | ComponentModel, Core, Net, Net.Sockets, Threading, Threading.Tasks | — |
-| `SharpRuntime::Security.Cryptography` | Core | — |
-| `SharpRuntime::Security.Cryptography.Random` | Core | bcrypt on Windows |
-| `SharpRuntime::Xml` | Core, Diagnostics | vendored tinyxml2 |
-| `SharpRuntime::Xml.Linq` | Core, Xml | — |
+Each physical module owns its public headers, implementation, tests, and CMake
+declaration under `modules/<module>/{include,src,tests,CMakeLists.txt}`.
+Existing `System/...` and `SharpRuntime/...` include spellings are unchanged.
 
-`SharpRuntime::Xml.XPath` is an alias of `SharpRuntime::Xml`. Xml and XPath
-have mutual binary dependencies in the existing implementation, so they
-intentionally share one physical archive.
+- `PUBLIC_DEPENDENCIES` are used by a module's public headers. Their include
+  roots and link requirements propagate to consumers.
+- `PRIVATE_DEPENDENCIES` are used only by implementation sources. Static-link
+  requirements remain correct, but their include roots do not leak to
+  consumers.
+- `TEST_DEPENDENCIES` are available only to the owning module's test binary.
+  They do not affect production targets or consumers.
+- Platform and vendor targets are attached by the owning module's setup
+  function with the narrowest valid visibility.
 
-`Core` also owns the implementations of `System::IO::IOException` and
-`System::IO::DirectoryNotFoundException`. `Environment.cpp` needs the latter;
-keeping these two implementations in Core avoids a `Core`/`IO` static-library
-cycle without changing their namespaces or public include spelling.
+The validator derives actual edges from project-local includes and rejects a
+missing, stale, or incorrectly visible declaration.
 
-## Header-only components
+## Lean targets and compatibility umbrellas
 
-These targets currently have no `.cpp` sources, but provide stable ownership
-and dependency names:
+New code should prefer the narrow physical targets:
 
-| Target | Direct Sharp Runtime dependencies |
-|---|---|
-| `SharpRuntime::Buffers` | Core |
-| `SharpRuntime::Collections` | ComponentModel, Core, Threading |
-| `SharpRuntime::ComponentModel` | Core |
-| `SharpRuntime::Security` | Core |
-| `SharpRuntime::Text.RegularExpressions` | Core |
-| `SharpRuntime::Threading.Channels` | Core, Threading.Tasks |
-| `SharpRuntime::Net.Security` | Core |
-| `SharpRuntime::Net.Http.Json` | Net.Http, Text.Json, Threading.Tasks |
+- `SharpRuntime::Core.Base` owns foundation types. `SharpRuntime::Console`,
+  `SharpRuntime::Uri`, and `SharpRuntime::TimeZone` are optional physical
+  components.
+- `SharpRuntime::Collections.Core` owns synchronous collection fundamentals.
+  `SharpRuntime::Collections.Async` and
+  `SharpRuntime::Collections.ObjectModel` carry the threading and notification
+  closures only when requested.
+
+Compatibility targets preserve the historical broad surfaces:
+
+- `SharpRuntime::Core` aggregates `Core.Base`, `Console`, `Uri`, and
+  `TimeZone`.
+- `SharpRuntime::Collections` aggregates all three collection components.
+- `SharpRuntime::Xml.XPath` aliases the physical `SharpRuntime::Xml` archive.
+- `SharpRuntime::All` aggregates every physical component.
+- The legacy `SHARP_RUNTIME` target forwards to `SharpRuntime::All` when `All`
+  is enabled.
+
+The legacy target is deliberately absent from selective configurations because
+creating it unconditionally would instantiate every optional dependency.
+
+## Component-scoped tests
+
+Tests no longer force `All`. A selective configuration builds the requested
+component's tests plus explicitly declared test-only production dependencies:
+
+```bash
+cmake -S . -B build-json-tests \
+  -DSHARP_RUNTIME_COMPONENTS=Text.Json \
+  -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake --build build-json-tests --target SharpRuntimeTests --parallel 4
+scripts/run_component_tests.sh build-json-tests
+```
+
+That command runs only `SharpRuntimeTests_Text_Json`. It does not build tests
+for dependencies or unrelated components.
+
+For the repository-wide suite:
+
+```bash
+cmake -S . -B build \
+  -DSHARP_RUNTIME_COMPONENTS=All \
+  -DSHARP_RUNTIME_BUILD_TESTS=ON
+cmake --build build --target SharpRuntimeTests --parallel 4
+scripts/run_component_tests.sh build
+```
+
+`SharpRuntimeTests` is a convenient aggregate build target. Executable targets
+are named `SharpRuntimeTests_<Component>`; genuinely cross-module scenarios
+are in `SharpRuntimeIntegrationTests`. CTest also discovers every individual
+GoogleTest case.
 
 ## External dependency isolation
 
-External libraries are configured only when their owning component is enabled:
+External libraries are configured only by their owning component:
 
-- `IO.Compression` calls `find_package(ZLIB REQUIRED)`.
-- `IO.Compression.Zip` builds the vendored miniz sources.
-- `Xml` builds the vendored tinyxml2 source.
-- `Net` propagates `ws2_32` only on Windows.
-- `Security.Cryptography.Random` propagates bcrypt only on Windows.
-- `Storage` links an existing `SDL3::SDL3` or `SDL3::SDL3-static` target only
-  on Android.
+- `IO.Compression` finds ZLIB privately.
+- `IO.Compression.Zip` builds vendored miniz privately.
+- `Xml` builds vendored tinyxml2 and exposes it publicly because
+  `XmlDocument.hpp` exposes tinyxml2 types.
+- `Net` links `ws2_32` privately on Windows.
+- `Security.Cryptography.Random` links `bcrypt` privately on Windows.
+- `Storage` privately links an existing SDL3 target on Android.
 
-Consequently, a JSON-only application does not need any compression, XML,
-socket, crypto RNG, or SDL dependency.
+A `Text.Json`-only build configures none of ZLIB, miniz, tinyxml2, SDL, socket,
+or platform-crypto targets. Automated negative consumer fixtures also prove
+that `Text.Json` does not leak `Collections.Core` or
+`Collections.ObjectModel`, and that `Xml.Linq` does not leak Xml's private
+`Diagnostics` dependency.
 
-## Compatibility and migration
+## Intentional ownership exceptions
 
-`SharpRuntime::All` is an interface umbrella over every component. When `All`
-is enabled, the legacy `SHARP_RUNTIME` CMake target is also created and
-forwards to it:
+The detailed Core classification is recorded in
+[Core ownership](CoreOwnership.md). In particular, selected cross-namespace
+foundation types remain in `Core.Base` when moving them would create a static
+dependency cycle. Examples include `System::IO::IOException`,
+`System::IO::DirectoryNotFoundException`, and
+`System::Buffers::MemoryHandle`.
 
-```cmake
-target_link_libraries(ExistingApp PRIVATE SHARP_RUNTIME)
-```
+Xml and XPath remain one physical archive because their existing
+implementations have mutual binary dependencies. This preserves both public
+component names without introducing a graph cycle.
 
-Existing consumers can therefore migrate incrementally:
+## Maintainer checklist
 
-1. Keep the default `All` selection and the `SHARP_RUNTIME` target.
-2. Replace `SHARP_RUNTIME` with `SharpRuntime::All`.
-3. Set `SHARP_RUNTIME_COMPONENTS` and link only direct component targets.
+When adding or moving runtime code:
 
-The compatibility target is deliberately not created for a selective build:
-creating an unconditional `SHARP_RUNTIME -> All` dependency would instantiate
-every optional target and defeat component selection.
+1. Place every public header, source, and module test under one physical
+   `modules/<module>` owner. Put only genuinely cross-module scenarios under
+   `tests/integration`.
+2. Register each new physical directory once in
+   `cmake/SharpRuntimeModules.cmake`.
+3. Declare public-header edges as `PUBLIC_DEPENDENCIES`, source-only edges as
+   `PRIVATE_DEPENDENCIES`, and test-only edges as `TEST_DEPENDENCIES`.
+4. Attach vendor or platform libraries only in the owning module setup
+   function. Propagate them publicly only if a public header exposes their
+   types.
+5. Avoid depending internally on the `Core`, `Collections`, or `All`
+   compatibility umbrellas.
+6. Regenerate the catalogue and run all boundary fixtures:
 
-## Maintaining the partition
+   ```bash
+   python3 scripts/validate_module_boundaries.py
+   python3 test/validate_module_boundaries_test.py
+   python3 scripts/generate_component_catalog.py
+   ```
 
-Each component is declared by its own `modules/<module>/CMakeLists.txt`.
-Implementation and test files are discovered only inside that module's `src/`
-and `tests/` directories. Public include roots and direct component
-dependencies are registered by the same declaration.
+7. Run `scripts/check_selective_components.sh` and
+   `scripts/local_ci_check.sh` before committing.
 
-Every configure checks the complete `modules/*/src/*.cpp` partition, including
-selective builds. Configuration fails if a source is missing from the
-partition, is assigned more than once, or points to a nonexistent path. Mixed
-cross-module tests live under `tests/integration`; all other tests live with
-their owning module.
+Allow-list entries in
+`cmake/SharpRuntimeModuleDependencyAllowlist.json` are reserved for genuine
+link-only or generated edges. Every entry requires an owner, visibility, and
+specific reason.
+
+## Isolation result
+
+The principal closures that motivated the split now contain:
+
+| Requested component | Final production closure | Removed unrelated closure |
+|---|---|---|
+| `Text.Json` | Core.Base, Buffers, Text, Collections.Core, Text.Json | Threading, ComponentModel, Collections umbrella |
+| `Net.Http.Headers` | Core.Base, Uri, Collections.Core, Net.Http.Headers | Threading, ComponentModel, Collections umbrella |
+| `Net.Mime` | Core.Base, Collections.Core, Net.Mime | Threading, ComponentModel, Collections umbrella |
+| `Numerics` | Core.Base, Buffers, Collections.Core, Numerics | Threading, ComponentModel, Collections umbrella |
+
+Selective builds also avoid the optional Console and TimeZone archives unless
+their real graph closure requires them. Existing include paths, namespaces, and
+compatibility targets remain available; no public runtime API or behavior was
+removed by the physical relocation.

@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Security
     TARGET sharp_runtime_security
     TYPE INTERFACE
-    DEPENDENCIES Core
+    PUBLIC_DEPENDENCIES Core.Base
 )
