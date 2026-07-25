@@ -26,8 +26,7 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads,
- * ToBuilder/Builder,
+ * by an AVL tree, not a flat vector): range Sort/Reverse overloads, ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -373,13 +372,36 @@ public:
     /**
      * @brief Returns a new list with all elements sorted using T::operator<.
      *
-     * C++ counterpart of .NET ImmutableList<T>.Sort(). Range and custom-comparer
-     * overloads remain deliberately unimplemented.
+     * C++ counterpart of .NET ImmutableList<T>.Sort(). Range overloads remain
+     * deliberately unimplemented.
      * @return A sorted immutable list; the source list is unchanged.
      */
     [[nodiscard]] ImmutableList<T> Sort() const {
         auto values = std::make_shared<std::vector<T>>(*data_);
         std::sort(values->begin(), values->end());
+        return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Returns a new list sorted by a custom comparison delegate.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Sort(Comparison<T>). The comparison follows
+     * the established project convention: negative means before, zero equivalent, and positive
+     * means after.
+     * @param comparison The comparison delegate.
+     * @return A sorted immutable list; the source list is unchanged.
+     * @throws System::ArgumentNullException if @p comparison is empty.
+     */
+    [[nodiscard]] ImmutableList<T> Sort(std::function<intcs(const T&, const T&)> comparison) const {
+        if (!comparison) {
+            throw System::ArgumentNullException("comparison");
+        }
+
+        auto values = std::make_shared<std::vector<T>>(*data_);
+        std::sort(values->begin(), values->end(),
+                  [&comparison](const T& left, const T& right) {
+                      return comparison(left, right) < 0;
+                  });
         return ImmutableList<T>(std::move(values));
     }
 

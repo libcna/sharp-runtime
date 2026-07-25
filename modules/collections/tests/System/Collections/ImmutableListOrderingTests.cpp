@@ -3,6 +3,9 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
 
+#include <functional>
+
+#include "System/ArgumentNullException.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
 
 using System::Collections::Immutable::ImmutableList;
@@ -43,4 +46,25 @@ TEST(ImmutableListOrderingTests, SortAndReverseHandleEmptyAndSingletonLists) {
     EXPECT_EQ(single.Sort()[0], 42);
     ASSERT_EQ(single.Reverse().getCountProperty(), 1);
     EXPECT_EQ(single.Reverse()[0], 42);
+}
+
+TEST(ImmutableListOrderingTests, SortWithCustomComparisonReturnsIndependentOrder) {
+    const auto source = ImmutableList<int>::Create({4, 1, 3, 2});
+    const auto sorted = source.Sort([](const int& left, const int& right) {
+        return right - left;
+    });
+
+    EXPECT_EQ(source[0], 4);
+    EXPECT_EQ(source[1], 1);
+    EXPECT_EQ(sorted[0], 4);
+    EXPECT_EQ(sorted[1], 3);
+    EXPECT_EQ(sorted[2], 2);
+    EXPECT_EQ(sorted[3], 1);
+}
+
+TEST(ImmutableListOrderingTests, SortWithEmptyComparisonThrowsArgumentNullException) {
+    const auto source = ImmutableList<int>::Create({1});
+    const std::function<SharpRuntime::intcs(const int&, const int&)> comparison;
+
+    EXPECT_THROW(source.Sort(comparison), System::ArgumentNullException);
 }
