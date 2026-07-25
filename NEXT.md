@@ -30,6 +30,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   absence and negative include-leakage assertions.
 - The full native baseline is a warning-free build with 12,681 passing tests
   across 36 component executables and one integration executable.
+- Doxygen 1.9.8 emits 1,942 warnings with the tracked configuration. Run
+  `scripts/check_doxygen_warnings.sh` to prevent increases; lower totals are
+  accepted, and a Doxygen-version change requires a deliberate re-baseline.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
   antecedent state, while scheduler and parent-task options remain no-ops.
@@ -110,8 +113,10 @@ range sort, #1757 for `BigInteger` bitwise operators, #1758 for signed
 `BigInteger` shifts, #1759 for byte-vector conversion, and #1760 for the
 `ImmutableList<T>` Builder core, #1761 for RFC 2152 UTF-7, and #1762 for
 conditional Trace writes, #1763 for ProcessStartInfo environment overrides, and
-#1764 for synchronous Process startup-failure reporting;
-it is git-ignored and is not part of a fresh clone.
+#1764 for synchronous Process startup-failure reporting, and #1765 for the
+Doxygen warning baseline. The baseline is 1,942 warnings under Doxygen 1.9.8,
+enforced by `scripts/check_doxygen_warnings.sh` without a mass comment-only
+rewrite; the database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -259,9 +264,9 @@ slice, create a ticket, and keep the changes isolated:
 2. **Advanced `ImmutableList<T>::Builder` operations by consumer need.**
    Query, sorting, and copy overloads remain explicitly deferred; retain the
    vector-backed snapshot semantics if a focused consumer requires one.
-3. **Doxygen warning baseline.** Establish a reproducible warning count, then
-   keep touched public APIs from increasing it; do not do a mass comment-only
-   rewrite.
+3. **Reduce the Doxygen backlog incrementally.** The reproducible Doxygen 1.9.8
+   baseline is 1,942 warnings. Keep touched public APIs from increasing it and
+   avoid a mass comment-only rewrite.
 
 ## Useful commands
 

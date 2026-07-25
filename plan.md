@@ -44,6 +44,9 @@ was never created. Neither file should be linked as current documentation.
   configured, and negative include-leakage fixtures remain rejected.
 - Tracked CI: Ubuntu selective matrix and full compatibility build in
   `.github/workflows/components.yml`.
+- Doxygen 1.9.8: 1,942 warnings. `scripts/check_doxygen_warnings.sh` enforces
+  that ceiling; lower counts are accepted and a Doxygen upgrade requires a
+  deliberate re-baseline.
 
 ### Local planning database
 
@@ -52,7 +55,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,764 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,765 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -157,6 +160,9 @@ assertion without an explicit architecture decision.
 - Added synchronous POSIX Process startup failure reporting under ticket #1764.
   Child setup and exec errors now reach Start() with the executable name and
   native error text instead of appearing later as exit code 127.
+- Established the Doxygen warning baseline under ticket #1765: Doxygen 1.9.8
+  emits 1,942 warnings. The dedicated check permits incremental reductions,
+  rejects regressions, and avoids a mass comment-only rewrite.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -246,8 +252,8 @@ acceptance criteria and a validation command before changing code.
 ### P2 — Developer experience
 
 4. **Reduce the Doxygen warning backlog incrementally.**
-   Establish a reproducible baseline first, then require touched public APIs
-   not to regress it. Avoid a mass comment-only rewrite.
+   The reproducible Doxygen 1.9.8 baseline is 1,942 warnings. Require touched
+   public APIs not to regress it; avoid a mass comment-only rewrite.
 
 5. **Decide whether distribution support is wanted.**
     The repository currently supports `add_subdirectory`; it has no installed

@@ -251,9 +251,18 @@ mkdir -p docs/generated
 doxygen Doxyfile
 ```
 
-The existing codebase has a known documentation-warning backlog. New or
-modified public APIs should not add warnings and must satisfy the doc-comment
-rules in `CLAUDE.md`.
+The tracked Doxygen 1.9.8 baseline is **1,942 warnings**, measured on
+2026-07-25. Check it before submitting public-API documentation changes:
+
+```bash
+scripts/check_doxygen_warnings.sh
+```
+
+The check permits fewer warnings but fails if the total increases. Warning
+totals are Doxygen-version-sensitive, so deliberately re-establish the
+baseline when upgrading Doxygen. Do not mass-rewrite comments just to reduce
+the number; new or modified public APIs must satisfy the doc-comment rules in
+`CLAUDE.md`.
 
 ## License and attribution
 

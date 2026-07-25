@@ -47,3 +47,13 @@ jobs:
         with:
           submodules: recursive
       - run: scripts/local_ci_check.sh build
+
+  documentation:
+    name: Doxygen warning baseline
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install --yes doxygen graphviz
+      - run: scripts/check_doxygen_warnings.sh
