@@ -141,7 +141,7 @@ endfunction()
 
 function(sharp_runtime_validate_source_partition)
     file(GLOB_RECURSE all_runtime_sources CONFIGURE_DEPENDS
-        "${SHARP_RUNTIME_ROOT}/src/*.cpp"
+        "${SHARP_RUNTIME_ROOT}/modules/*/src/*.cpp"
     )
     get_property(
         registered_sources

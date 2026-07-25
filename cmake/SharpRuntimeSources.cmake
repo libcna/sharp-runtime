@@ -3,111 +3,91 @@
 
 include_guard(GLOBAL)
 
-file(GLOB SHARP_RUNTIME_CORE_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/*.cpp"
+function(_sharp_runtime_collect_module_sources output module)
+    file(GLOB_RECURSE module_sources CONFIGURE_DEPENDS
+        "${SHARP_RUNTIME_ROOT}/modules/${module}/src/*.cpp"
+    )
+    set("${output}" "${module_sources}" PARENT_SCOPE)
+endfunction()
+
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_CORE_SOURCES core)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_DIAGNOSTICS_SOURCES
+    diagnostics
 )
-list(APPEND SHARP_RUNTIME_CORE_SOURCES
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/IOException.cpp"
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/DirectoryNotFoundException.cpp"
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_GLOBALIZATION_SOURCES
+    globalization
+)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_NUMERICS_SOURCES numerics)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_RUNTIME_SOURCES runtime)
+
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_TEXT_SOURCES text)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_TEXT_JSON_SOURCES text-json)
+
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_THREADING_SOURCES
+    threading
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_THREADING_TASKS_SOURCES
+    threading-tasks
+)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_TIMERS_SOURCES timers)
+
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_IO_SOURCES io)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_IO_COMPRESSION_SOURCES
+    io-compression
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_IO_COMPRESSION_ZIP_SOURCES
+    io-compression-zip
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_IO_HASHING_SOURCES
+    io-hashing
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_IO_ISOLATED_STORAGE_SOURCES
+    io-isolated-storage
+)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_STORAGE_SOURCES storage)
+
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_NET_SOURCES net)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_HTTP_SOURCES
+    net-http
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_HTTP_HEADERS_SOURCES
+    net-http-headers
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_MIME_SOURCES
+    net-mime
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_NETWORK_INFORMATION_SOURCES
+    net-network-information
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_SOCKETS_SOURCES
+    net-sockets
+)
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_NET_WEBSOCKETS_SOURCES
+    net-websockets
 )
 
-file(GLOB SHARP_RUNTIME_DIAGNOSTICS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Diagnostics/*.cpp"
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_CRYPTOGRAPHY_SOURCES
+    security-cryptography
 )
-file(GLOB SHARP_RUNTIME_GLOBALIZATION_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Globalization/*.cpp"
-)
-file(GLOB SHARP_RUNTIME_NUMERICS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Numerics/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_RUNTIME_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Runtime/*.cpp"
+_sharp_runtime_collect_module_sources(
+    SHARP_RUNTIME_CRYPTOGRAPHY_RANDOM_SOURCES
+    security-cryptography-random
 )
 
-file(GLOB SHARP_RUNTIME_TEXT_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Text/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_TEXT_JSON_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Text/Json/*.cpp"
-)
-
-file(GLOB SHARP_RUNTIME_THREADING_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Threading/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_THREADING_TASKS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Threading/Tasks/*.cpp"
-)
-file(GLOB SHARP_RUNTIME_TIMERS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Timers/*.cpp"
-)
-
-file(GLOB SHARP_RUNTIME_IO_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/*.cpp"
-)
-list(REMOVE_ITEM SHARP_RUNTIME_IO_SOURCES
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/IOException.cpp"
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/DirectoryNotFoundException.cpp"
-)
-file(GLOB SHARP_RUNTIME_IO_COMPRESSION_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/Compression/*.cpp"
-)
-file(GLOB SHARP_RUNTIME_IO_COMPRESSION_ZIP_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/Compression/Zip*.cpp"
-)
-list(REMOVE_ITEM SHARP_RUNTIME_IO_COMPRESSION_SOURCES
-    ${SHARP_RUNTIME_IO_COMPRESSION_ZIP_SOURCES}
-)
-file(GLOB_RECURSE SHARP_RUNTIME_IO_HASHING_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/Hashing/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_IO_ISOLATED_STORAGE_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/IO/IsolatedStorage/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_STORAGE_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/SharpRuntime/Storage/*.cpp"
-)
-
-file(GLOB SHARP_RUNTIME_NET_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/*.cpp"
-)
-file(GLOB SHARP_RUNTIME_NET_HTTP_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/Http/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_NET_HTTP_HEADERS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/Http/Headers/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_NET_MIME_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/Mime/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_NET_NETWORK_INFORMATION_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/NetworkInformation/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_NET_SOCKETS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/Sockets/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_NET_WEBSOCKETS_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Net/WebSockets/*.cpp"
-)
-
-file(GLOB_RECURSE SHARP_RUNTIME_CRYPTOGRAPHY_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Security/Cryptography/*.cpp"
-)
-set(SHARP_RUNTIME_CRYPTOGRAPHY_RANDOM_SOURCES
-    "${SHARP_RUNTIME_ROOT}/src/System/Security/Cryptography/RandomNumberGenerator.cpp"
-)
-list(REMOVE_ITEM SHARP_RUNTIME_CRYPTOGRAPHY_SOURCES
-    ${SHARP_RUNTIME_CRYPTOGRAPHY_RANDOM_SOURCES}
-)
-
-file(GLOB SHARP_RUNTIME_XML_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Xml/*.cpp"
-)
-file(GLOB_RECURSE SHARP_RUNTIME_XML_XPATH_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Xml/XPath/*.cpp"
-)
-list(APPEND SHARP_RUNTIME_XML_SOURCES
-    ${SHARP_RUNTIME_XML_XPATH_SOURCES}
-)
-file(GLOB_RECURSE SHARP_RUNTIME_XML_LINQ_SOURCES CONFIGURE_DEPENDS
-    "${SHARP_RUNTIME_ROOT}/src/System/Xml/Linq/*.cpp"
-)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_XML_SOURCES xml)
+_sharp_runtime_collect_module_sources(SHARP_RUNTIME_XML_LINQ_SOURCES xml-linq)
