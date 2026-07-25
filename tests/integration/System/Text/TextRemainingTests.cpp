@@ -289,20 +289,16 @@ TEST(UTF7EncodingTests, AllowOptionals_DefaultFalse) {
     EXPECT_FALSE(enc.getAllowOptionals());
 }
 
-// Real UTF-7 (RFC 2152) encodes non-ASCII text via modified-Base64 shift sequences, which
-// this port does not implement. Per CLAUDE.md's rule against silently returning a wrong
-// value for something that can't be meaningfully implemented, GetBytes/GetString must throw
-// for non-ASCII input rather than substituting '?' (this port's old, silently-corrupting
-// behavior).
-TEST(UTF7EncodingTests, GetBytes_NonAscii_Throws) {
+TEST(UTF7EncodingTests, GetBytes_NonAscii_UsesModifiedBase64ShiftSequence) {
     UTF7Encoding enc;
-    EXPECT_THROW(enc.GetBytes("caf\xC3\xA9"), System::NotImplementedException);
+    const auto bytes = enc.GetBytes("caf\xC3\xA9");
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), "caf+AOk-");
 }
 
-TEST(UTF7EncodingTests, GetString_NonAsciiByte_Throws) {
+TEST(UTF7EncodingTests, GetString_NonAsciiByte_UsesReplacementFallback) {
     UTF7Encoding enc;
     std::vector<SharpRuntime::bytecs> bytes = {'A', 'B', 0x80};
-    EXPECT_THROW(enc.GetString(bytes.data(), 0, 3), System::NotImplementedException);
+    EXPECT_EQ(enc.GetString(bytes.data(), 0, 3), "AB\xEF\xBF\xBD");
 }
 
 // ===========================================================================

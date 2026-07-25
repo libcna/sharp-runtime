@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and eighteen bounded
+repair, three P1 parity repairs, P1 portability revalidation, and nineteen bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,666 tests across 37 executables.*
+edges, and 12,672 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,7 +28,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,666 passing tests
+- The full native baseline is a warning-free build with 12,672 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
@@ -74,6 +74,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   mutable operations and independent `ToImmutable()` snapshots. The current
   vector backend copies source/snapshot contents rather than claiming .NET's
   tree-backed O(1) conversion characteristics.
+- `UTF7Encoding` implements RFC 2152 modified-Base64 conversion for BMP and
+  astral Unicode, including optional direct characters and U+FFFD recovery for
+  malformed shifts. UTF-7 remains obsolete and unsuitable for new protocols.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
   compile the post-modular `All` graph and selective `Text.Json` libraries.
   This is compile-only evidence: cross tests were deliberately disabled.
@@ -82,7 +85,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,760 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,761 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -96,8 +99,8 @@ for its equality-based item mutations, #1754 for its equality-based range
 queries, #1755 for its comparer-aware binary search, #1756 for its default
 range sort, #1757 for `BigInteger` bitwise operators, #1758 for signed
 `BigInteger` shifts, #1759 for byte-vector conversion, and #1760 for the
-`ImmutableList<T>` Builder core; it is git-ignored and is not part of a fresh
-clone.
+`ImmutableList<T>` Builder core, and #1761 for RFC 2152 UTF-7; it is
+git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -240,8 +243,8 @@ full-list/range order and invalid range validation.
 All currently planned P1 work is complete. Choose one consumer-driven P2
 slice, create a ticket, and keep the changes isolated:
 
-1. **Other documented partial surfaces.** Examples include fuller UTF-7
-   behavior and wider debugger/process/XML surfaces.
+1. **Other documented partial surfaces.** Examples include wider
+   debugger/process/XML surfaces.
 2. **Advanced `ImmutableList<T>::Builder` operations by consumer need.**
    Query, sorting, and copy overloads remain explicitly deferred; retain the
    vector-backed snapshot semantics if a focused consumer requires one.
