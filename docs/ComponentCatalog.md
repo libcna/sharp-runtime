@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **40 physical modules** and **87 direct production dependency edges**.
+The graph contains **40 physical modules** and **88 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -33,7 +33,7 @@ for maintainers and are not part of the consumer include surface.
 | `Uri` | `modules/uri` | static | `Core.Base` | — | — | — | `System/Uri.hpp` |
 | `TimeZone` | `modules/time-zone` | static | `Core.Base` | — | — | — | `System/InvalidTimeZoneException.hpp` |
 | `Buffers` | `modules/buffers` | interface | `Core.Base` | — | — | — | `System/Buffers/ArrayBufferWriter.hpp` |
-| `Collections.Core` | `modules/collections` | interface | `Core.Base` | — | `IO`, `Text` | — | `System/Collections/ArrayList.hpp` |
+| `Collections.Core` | `modules/collections` | interface | `Core.Base`, `Threading` | — | `IO`, `Text` | — | `System/Collections/ArrayList.hpp` |
 | `Collections.Async` | `modules/collections-async` | interface | `Threading` | — | — | — | `System/Collections/Generic/IAsyncEnumerable.hpp` |
 | `Collections.ObjectModel` | `modules/collections-object-model` | interface | `Collections.Core`, `ComponentModel`, `Core.Base` | — | — | — | `System/Collections/ObjectModel/ObservableCollection.hpp` |
 | `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |

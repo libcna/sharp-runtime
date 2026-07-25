@@ -5,7 +5,7 @@ sharp_runtime_register_module(
     NAME Collections.Core
     TARGET sharp_runtime_collections_core
     TYPE INTERFACE
-    PUBLIC_DEPENDENCIES Core.Base
+    PUBLIC_DEPENDENCIES Core.Base Threading
     TEST_DEPENDENCIES IO Text
 )
 
