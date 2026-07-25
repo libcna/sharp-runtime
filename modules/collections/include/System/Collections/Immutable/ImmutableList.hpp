@@ -29,12 +29,10 @@ using SharpRuntime::intcs;
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
  * by an AVL tree, not a flat vector): range sort with the default comparison and
- * ToBuilder/Builder. Custom equality is available for item-based mutations and range lookups;
- * custom equality/comparison overloads for BinarySearch remain deferred. These are real gaps,
- * not incorrect behavior for the surface that does exist -- left undone here rather than
- * expanded ad hoc in a single audit pass; a full port would need an AVL/red-black backing
- * structure to match .NET's O(log n) persistent-update complexity (this port's vector-copy
- * approach is O(n) per mutation).
+ * ToBuilder/Builder. These are real gaps, not incorrect behavior for the surface that does
+ * exist -- left undone here rather than expanded ad hoc in a single audit pass; a full port
+ * would need an AVL/red-black backing structure to match .NET's O(log n) persistent-update
+ * complexity (this port's vector-copy approach is O(n) per mutation).
  *
  * @tparam T The type of elements stored in the list.
  */
@@ -860,6 +858,55 @@ public:
             if (mid_val == item) return mid;
             if (mid_val < item) lo = mid + 1;
             else hi = mid - 1;
+        }
+        return ~lo;
+    }
+
+    /**
+     * @brief Searches the entire sorted list using @p comparer.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.BinarySearch(T, IComparer<T>).
+     * @param item The element to search for.
+     * @param comparer The comparison semantics used by the sorted list.
+     * @return The zero-based index if found; otherwise ~insertionPoint.
+     */
+    [[nodiscard]] intcs BinarySearch(
+        const T& item,
+        const System::Collections::Generic::IComparer<T>& comparer) const {
+        return BinarySearch(0, getCountProperty(), item, comparer);
+    }
+
+    /**
+     * @brief Searches a sorted range using @p comparer.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.BinarySearch(int, int, T, IComparer<T>).
+     * @param index The zero-based first index of the range to search.
+     * @param count The number of elements to search.
+     * @param item The element to search for.
+     * @param comparer The comparison semantics used by the sorted range.
+     * @return The zero-based index if found; otherwise the complement of the absolute insertion
+     *         point.
+     * @throws System::ArgumentOutOfRangeException if the range is invalid.
+     */
+    [[nodiscard]] intcs BinarySearch(
+        intcs index,
+        intcs count,
+        const T& item,
+        const System::Collections::Generic::IComparer<T>& comparer) const {
+        requireValidRange(index, count);
+        intcs lo = index;
+        intcs hi = index + count - 1;
+        while (lo <= hi) {
+            const intcs mid = lo + (hi - lo) / 2;
+            const intcs comparison = comparer.Compare(item, (*data_)[static_cast<size_t>(mid)]);
+            if (comparison == 0) {
+                return mid;
+            }
+            if (comparison > 0) {
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
         }
         return ~lo;
     }

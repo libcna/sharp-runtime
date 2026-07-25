@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and twelve bounded
+repair, three P1 parity repairs, P1 portability revalidation, and thirteen bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,645 tests across 37 executables.*
+edges, and 12,648 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,7 +28,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,645 passing tests
+- The full native baseline is a warning-free build with 12,648 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
@@ -59,6 +59,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - `ImmutableList<T>` supports default and comparer-based range `IndexOf` and
   `LastIndexOf` lookups. They validate their distinct forward/backward range
   contracts, including the valid empty `LastIndexOf(..., 0, 0, ...)` case.
+- `ImmutableList<T>` supports full-list and range `BinarySearch` with
+  `IComparer<T>`. A miss returns the complement of the absolute insertion
+  point, including for valid empty ranges.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
   compile the post-modular `All` graph and selective `Text.Json` libraries.
   This is compile-only evidence: cross tests were deliberately disabled.
@@ -67,7 +70,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,754 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,755 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -77,8 +80,9 @@ XML whitespace repair, #1741 the completed cross-build revalidation and
 UTF-8 `BinaryReader` batch-character APIs, #1749 `ImmutableList<T>` copying,
 and #1750 its custom comparison sort, and #1751 its range reverse. The
 database also records #1752 for its `IComparer<T>` sorting overloads, #1753
-for its equality-based item mutations, and #1754 for its equality-based range
-queries; it is git-ignored and is not part of a fresh clone.
+for its equality-based item mutations, #1754 for its equality-based range
+queries, and #1755 for its comparer-aware binary search; it is git-ignored and
+is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
