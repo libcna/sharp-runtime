@@ -27,7 +27,7 @@ using SharpRuntime::intcs;
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
  * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads, the 3
- * CopyTo overloads, GetRange, ConvertAll<TOutput>, ToBuilder/Builder,
+ * CopyTo overloads, ConvertAll<TOutput>, ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -272,6 +272,22 @@ public:
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index, v->begin() + index + count);
         return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list containing the contiguous range at @p index.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.GetRange(int, int).
+     * @param index The zero-based first element in the range.
+     * @param count The number of elements to copy into the result.
+     * @return An immutable list containing the requested range.
+     * @throws System::ArgumentOutOfRangeException if the range is outside this list.
+     */
+    [[nodiscard]] ImmutableList<T> GetRange(intcs index, intcs count) const {
+        requireValidRange(index, count);
+        auto values = std::make_shared<std::vector<T>>(
+            data_->begin() + index, data_->begin() + index + count);
+        return ImmutableList<T>(std::move(values));
     }
 
     /**
