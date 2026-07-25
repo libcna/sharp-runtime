@@ -4,6 +4,7 @@
 #pragma once
 #include "System/Net/Http/HttpMethod.hpp"
 #include "System/Net/Http/HttpContent.hpp"
+#include "System/Net/Http/HttpRequestOptions.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -26,6 +27,7 @@ class HttpRequestMessage {
     std::string                                    uri_;
     std::shared_ptr<HttpContent>                   content_;
     std::unordered_map<std::string, std::string>   headers_;
+    HttpRequestOptions                              options_;
 public:
     /** Constructs an HttpRequestMessage with the default GET method and an empty URI. */
     HttpRequestMessage() : method_(HttpMethod::Get()) {}
@@ -64,6 +66,10 @@ public:
     [[nodiscard]] const std::unordered_map<std::string, std::string>& getHeadersProperty() const {
         return headers_;
     }
+
+    /** Gets the per-request option collection. */
+    [[nodiscard]] HttpRequestOptions& getOptionsProperty() noexcept { return options_; }
+    [[nodiscard]] const HttpRequestOptions& getOptionsProperty() const noexcept { return options_; }
 };
 
 } // namespace System::Net::Http

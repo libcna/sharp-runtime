@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **40 physical modules** and **86 direct production dependency edges**.
+The graph contains **40 physical modules** and **87 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -36,7 +36,7 @@ for maintainers and are not part of the consumer include surface.
 | `Collections.Core` | `modules/collections` | interface | `Core.Base` | — | `IO`, `Text` | — | `System/Collections/ArrayList.hpp` |
 | `Collections.Async` | `modules/collections-async` | interface | `Threading` | — | — | — | `System/Collections/Generic/IAsyncEnumerable.hpp` |
 | `Collections.ObjectModel` | `modules/collections-object-model` | interface | `Collections.Core`, `ComponentModel`, `Core.Base` | — | — | — | `System/Collections/ObjectModel/ObservableCollection.hpp` |
-| `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/Attribute.hpp` |
+| `ComponentModel` | `modules/component-model` | interface | `Core.Base` | — | — | — | `System/ComponentModel/AsyncCompletedEventArgs.hpp` |
 | `Diagnostics` | `modules/diagnostics` | static | `Core.Base` | — | — | — | `System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp` |
 | `Globalization` | `modules/globalization` | static | `Core.Base` | — | — | — | `System/Globalization/Calendar.hpp` |
 | `Numerics` | `modules/numerics` | static | `Buffers`, `Collections.Core`, `Core.Base` | — | — | — | `System/Numerics/BigInteger.hpp` |
@@ -56,7 +56,7 @@ for maintainers and are not part of the consumer include surface.
 | `IO.IsolatedStorage` | `modules/io-isolated-storage` | static | `Core.Base`, `IO` | `Storage` | — | — | `System/IO/IsolatedStorage/IsolatedStorage.hpp` |
 | `Net` | `modules/net` | static | `Collections.Core`, `ComponentModel`, `Core.Base`, `Uri` | — | — | `ws2_32` on Windows (private) | `System/Net/Cookie.hpp` |
 | `Net.Sockets` | `modules/net-sockets` | static | `Core.Base`, `IO`, `Net`, `Threading.Tasks` | — | — | — | `System/Net/Sockets/IPPacketInformation.hpp` |
-| `Net.Http` | `modules/net-http` | static | `Core.Base`, `IO`, `Net`, `Threading.Tasks` | `Uri` | `Net.Sockets` | — | `System/Net/Http/ByteArrayContent.hpp` |
+| `Net.Http` | `modules/net-http` | static | `Core.Base`, `IO`, `Net`, `Threading`, `Threading.Tasks` | `Uri` | `Net.Sockets` | — | `System/Net/Http/ByteArrayContent.hpp` |
 | `Net.Http.Headers` | `modules/net-http-headers` | static | `Collections.Core`, `Core.Base`, `Uri` | — | — | — | `System/Net/Http/Headers/AuthenticationHeaderValue.hpp` |
 | `Net.Http.Json` | `modules/net-http-json` | interface | `Net.Http`, `Text.Json`, `Threading.Tasks` | — | `Net.Sockets` | — | `System/Net/Http/Json/HttpClientJsonExtensions.hpp` |
 | `Net.Mime` | `modules/net-mime` | static | `Collections.Core`, `Core.Base` | — | — | — | `System/Net/Mime/ContentType.hpp` |

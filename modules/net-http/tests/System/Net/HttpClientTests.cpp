@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Robert Vokac and contributors
 #include <gtest/gtest.h>
+#include <any>
 #include <thread>
 #include "System/Net/Http/HttpClient.hpp"
 #include "System/Net/IPEndPoint.hpp"
@@ -22,8 +23,11 @@
 #include "System/Net/Http/MultipartContent.hpp"
 #include "System/Net/Http/MultipartFormDataContent.hpp"
 #include "System/Net/Http/HttpMessageHandler.hpp"
+#include "System/Net/Http/HttpMessageInvoker.hpp"
 #include "System/Net/Http/DelegatingHandler.hpp"
 #include "System/Net/Http/HttpClientHandler.hpp"
+#include "System/Net/Http/HttpRequestOptions.hpp"
+#include "System/Net/Http/HttpRequestOptionsKey.hpp"
 #include "System/Net/Cookie.hpp"
 #include "System/Net/CookieContainer.hpp"
 #include "System/Net/CookieException.hpp"
@@ -37,6 +41,9 @@
 #include "System/ArgumentException.hpp"
 #include "System/FormatException.hpp"
 #include "System/InvalidOperationException.hpp"
+#include "System/ObjectDisposedException.hpp"
+#include "System/OperationCanceledException.hpp"
+#include "System/Threading/CancellationTokenSource.hpp"
 
 using namespace System::Net::Http;
 using System::Net::HttpStatusCode;
@@ -461,12 +468,66 @@ TEST(FormUrlEncodedContentTests, SpecialCharsPercentEncoded) {
     EXPECT_EQ(result, "url=a%26b%3Dc");
 }
 
+TEST(FormUrlEncodedContentTests, Rfc3986UnreservedCharacters_ArePreservedAndAsteriskIsEscaped) {
+    FormUrlEncodedContent c({{"key", "-._~*"}});
+    EXPECT_EQ(c.ReadAsString(), "key=-._~%2A");
+}
+
+TEST(FormUrlEncodedContentTests, Utf8Characters_AreEncodedByteByByte) {
+    FormUrlEncodedContent c({{"key", std::string("value\xE3\x82\xAF")}});
+    EXPECT_EQ(c.ReadAsString(), "key=value%E3%82%AF");
+}
+
 TEST(FormUrlEncodedContentTests, ReadAsByteArrayMatchesString) {
     FormUrlEncodedContent c({{"k", "v"}});
     std::string s = c.ReadAsString();
     auto bytes = c.ReadAsByteArray();
     std::string fromBytes(bytes.begin(), bytes.end());
     EXPECT_EQ(s, fromBytes);
+}
+
+// ---------------------------------------------------------------------------
+// HttpRequestOptions / HttpRequestOptionsKey
+// ---------------------------------------------------------------------------
+
+TEST(HttpRequestOptionsKeyTests, Constructor_StoresKeyName) {
+    HttpRequestOptionsKey<bool> key("WebAssemblyEnableStreamingResponse");
+    EXPECT_EQ(key.getKeyProperty(), "WebAssemblyEnableStreamingResponse");
+}
+
+TEST(HttpRequestOptionsTests, TypedSetAndGet_RoundTripThroughRequestOptions) {
+    HttpRequestOptionsKey<bool> key("Streaming");
+    HttpRequestMessage request;
+    request.getOptionsProperty().Set(key, true);
+
+    bool value = false;
+    EXPECT_TRUE(request.getOptionsProperty().TryGetValue(key, value));
+    EXPECT_TRUE(value);
+    EXPECT_EQ(request.getOptionsProperty().getCountProperty(), 1);
+}
+
+TEST(HttpRequestOptionsTests, WrongTypedKey_ReturnsFalseAndDefaultValue) {
+    HttpRequestOptions options;
+    options.Set(HttpRequestOptionsKey<std::string>("Option"), std::string("value"));
+
+    SharpRuntime::intcs value = 42;
+    EXPECT_FALSE(options.TryGetValue(HttpRequestOptionsKey<SharpRuntime::intcs>("Option"), value));
+    EXPECT_EQ(value, 0);
+}
+
+TEST(HttpRequestOptionsTests, UntypedDictionaryOperations_RespectAddRemoveAndLookupSemantics) {
+    HttpRequestOptions options;
+    options.Add("RetryCount", SharpRuntime::intcs{3});
+    EXPECT_TRUE(options.ContainsKey("RetryCount"));
+
+    std::any value;
+    EXPECT_TRUE(options.TryGetValue("RetryCount", value));
+    EXPECT_EQ(std::any_cast<SharpRuntime::intcs>(value), 3);
+    EXPECT_THROW(options.Add("RetryCount", SharpRuntime::intcs{4}), System::ArgumentException);
+    EXPECT_TRUE(options.Remove("RetryCount"));
+    EXPECT_FALSE(options.Remove("RetryCount"));
+    EXPECT_FALSE(options.TryGetValue("RetryCount", value));
+    EXPECT_FALSE(value.has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -795,6 +856,21 @@ public:
         return DelegatingHandler::Send(std::move(request));
     }
 };
+
+class RecordingHandler final : public HttpMessageHandler {
+public:
+    bool sent = false;
+    int disposeCount = 0;
+    std::shared_ptr<HttpRequestMessage> receivedRequest;
+
+    std::shared_ptr<HttpResponseMessage> Send(std::shared_ptr<HttpRequestMessage> request) override {
+        sent = true;
+        receivedRequest = std::move(request);
+        return std::make_shared<HttpResponseMessage>(HttpStatusCode::Accepted);
+    }
+
+    void Dispose() override { ++disposeCount; }
+};
 } // namespace
 
 TEST(HttpMessageHandlerTests, HttpClient_CustomHandlerChain_IsInvokedEndToEnd) {
@@ -833,6 +909,75 @@ TEST(HttpMessageHandlerTests, DelegatingHandler_InnerHandlerProperty_RoundTrips)
     auto inner = std::make_shared<HttpClientHandler>();
     DelegatingHandler handler(inner);
     EXPECT_EQ(handler.getInnerHandlerProperty(), inner);
+}
+
+TEST(HttpMessageInvokerTests, Send_ForwardsRequestToHandler) {
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpMessageInvoker invoker(handler, false);
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+
+    auto response = invoker.Send(request);
+    EXPECT_TRUE(handler->sent);
+    EXPECT_EQ(handler->receivedRequest, request);
+    EXPECT_EQ(response->getStatusCodeProperty(), HttpStatusCode::Accepted);
+}
+
+TEST(HttpMessageInvokerTests, SendAsync_ForwardsRequestToHandler) {
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpMessageInvoker invoker(handler, false);
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+
+    auto task = invoker.SendAsync(request);
+    auto response = task.getResultProperty();
+    EXPECT_TRUE(handler->sent);
+    EXPECT_EQ(response->getStatusCodeProperty(), HttpStatusCode::Accepted);
+}
+
+TEST(HttpMessageInvokerTests, Dispose_HandlerPolicyAndSubsequentSendMatchDotNetLifetimeContract) {
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpMessageInvoker invoker(handler, true);
+    invoker.Dispose();
+    invoker.Dispose();
+
+    EXPECT_EQ(handler->disposeCount, 1);
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+    EXPECT_THROW(invoker.Send(request), System::ObjectDisposedException);
+}
+
+TEST(HttpMessageInvokerTests, CancelledToken_PreventsHandlerInvocation) {
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpMessageInvoker invoker(handler, false);
+    System::Threading::CancellationTokenSource cancellationSource;
+    cancellationSource.Cancel();
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+
+    EXPECT_THROW(invoker.Send(request, cancellationSource.getTokenProperty()),
+                 System::OperationCanceledException);
+    EXPECT_FALSE(handler->sent);
+}
+
+TEST(HttpMessageInvokerTests, NullHandlerAndRequest_ThrowArgumentNullException) {
+    std::shared_ptr<HttpMessageHandler> nullHandler;
+    EXPECT_THROW((void)HttpMessageInvoker{nullHandler}, System::ArgumentNullException);
+
+    auto handler = std::make_shared<RecordingHandler>();
+    HttpMessageInvoker invoker(handler, false);
+    std::shared_ptr<HttpRequestMessage> nullRequest;
+    EXPECT_THROW(invoker.Send(nullRequest), System::ArgumentNullException);
+}
+
+TEST(HttpClientHandlerTests, CapabilityFlagsAndDisposeState_DescribeTheLightweightImplementation) {
+    HttpClientHandler handler;
+    EXPECT_FALSE(handler.getSupportsAutomaticDecompressionProperty());
+    EXPECT_FALSE(handler.getSupportsProxyProperty());
+    EXPECT_FALSE(handler.getSupportsRedirectConfigurationProperty());
+    EXPECT_TRUE(handler.getUseCookiesProperty());
+    EXPECT_THROW(handler.setCookieContainerProperty(nullptr), System::ArgumentNullException);
+
+    handler.Dispose();
+    EXPECT_THROW(handler.getUseCookiesProperty(), System::ObjectDisposedException);
+    auto request = std::make_shared<HttpRequestMessage>(HttpMethod::Get(), "http://example.com/");
+    EXPECT_THROW(handler.Send(request), System::ObjectDisposedException);
 }
 
 // ---------------------------------------------------------------------------

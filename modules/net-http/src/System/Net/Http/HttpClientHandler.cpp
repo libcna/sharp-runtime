@@ -181,12 +181,19 @@ HttpClientHandler::HttpClientHandler() {
 }
 
 HttpClientHandler::~HttpClientHandler() {
+    Dispose();
+}
+
+void HttpClientHandler::Dispose() {
+    if (disposed_) return;
+    disposed_ = true;
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     WSACleanup();
 #endif
 }
 
 std::shared_ptr<HttpResponseMessage> HttpClientHandler::Send(std::shared_ptr<HttpRequestMessage> request) {
+    ThrowIfDisposed();
     System::ArgumentNullException::ThrowIfNull(request.get(), "request");
 #if defined(__EMSCRIPTEN__)
     (void)request;

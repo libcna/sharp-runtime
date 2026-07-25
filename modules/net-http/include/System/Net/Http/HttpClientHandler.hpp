@@ -3,6 +3,8 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <memory>
+#include "System/ArgumentNullException.hpp"
+#include "System/ObjectDisposedException.hpp"
 #include "System/Net/CookieContainer.hpp"
 #include "System/Net/Http/HttpMessageHandler.hpp"
 
@@ -28,29 +30,49 @@ namespace System::Net::Http {
 
         std::shared_ptr<HttpResponseMessage> Send(std::shared_ptr<HttpRequestMessage> request) override;
 
+        /** Releases this handler. Subsequent requests and mutable properties throw. */
+        void Dispose() override;
+
+        /** This lightweight handler has no decompression implementation. */
+        [[nodiscard]] bool getSupportsAutomaticDecompressionProperty() const noexcept { return false; }
+
+        /** This lightweight handler has no proxy implementation. */
+        [[nodiscard]] bool getSupportsProxyProperty() const noexcept { return false; }
+
+        /** This lightweight handler does not implement automatic redirects. */
+        [[nodiscard]] bool getSupportsRedirectConfigurationProperty() const noexcept { return false; }
+
         /**
          * @brief Gets or sets whether the handler sends a Cookie request header (built from
          * getCookieContainerProperty()) and captures Set-Cookie response headers into it.
          * Defaults to true, matching real .NET.
          */
-        [[nodiscard]] bool getUseCookiesProperty() const { return useCookies_; }
-        void setUseCookiesProperty(bool v) { useCookies_ = v; }
+        [[nodiscard]] bool getUseCookiesProperty() const { ThrowIfDisposed(); return useCookies_; }
+        void setUseCookiesProperty(bool v) { ThrowIfDisposed(); useCookies_ = v; }
 
         /**
          * @brief Gets or sets the cookie container used to store server cookies and build the
          * Cookie request header. Defaults to a fresh, empty CookieContainer.
          */
         [[nodiscard]] const std::shared_ptr<System::Net::CookieContainer>& getCookieContainerProperty() const {
+            ThrowIfDisposed();
             return cookieContainer_;
         }
         void setCookieContainerProperty(std::shared_ptr<System::Net::CookieContainer> v) {
+            ThrowIfDisposed();
+            System::ArgumentNullException::ThrowIfNull(v.get(), "value");
             cookieContainer_ = std::move(v);
         }
 
     private:
         bool useCookies_ = true;
+        bool disposed_ = false;
         std::shared_ptr<System::Net::CookieContainer> cookieContainer_ =
             std::make_shared<System::Net::CookieContainer>();
+
+        void ThrowIfDisposed() const {
+            System::ObjectDisposedException::ThrowIf(disposed_, "HttpClientHandler");
+        }
     };
 
 } // namespace System::Net::Http

@@ -5,6 +5,8 @@
 #include <memory>
 #include "System/Net/Http/HttpRequestMessage.hpp"
 #include "System/Net/Http/HttpResponseMessage.hpp"
+#include "System/Threading/CancellationToken.hpp"
+#include "System/Threading/Tasks/Task.hpp"
 
 namespace System::Net::Http {
 
@@ -25,6 +27,34 @@ namespace System::Net::Http {
 
         /** @brief Sends an HTTP request and returns the response. */
         virtual std::shared_ptr<HttpResponseMessage> Send(std::shared_ptr<HttpRequestMessage> request) = 0;
+
+        /**
+         * @brief Sends an HTTP request with cooperative pre-send cancellation.
+         *
+         * Existing synchronous handlers need only override Send(request); this
+         * overload checks the token and forwards to that implementation.
+         */
+        virtual std::shared_ptr<HttpResponseMessage> Send(
+            std::shared_ptr<HttpRequestMessage> request,
+            const System::Threading::CancellationToken& cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Send(std::move(request));
+        }
+
+        /** Sends an HTTP request asynchronously with cooperative cancellation. */
+        virtual System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>> SendAsync(
+            std::shared_ptr<HttpRequestMessage> request,
+            const System::Threading::CancellationToken& cancellationToken)
+        {
+            return System::Threading::Tasks::TaskT<std::shared_ptr<HttpResponseMessage>>(
+                [this, request, cancellationToken]() {
+                    return Send(request, cancellationToken);
+                }, cancellationToken);
+        }
+
+        /** Releases resources held by the handler. The base implementation has no resources. */
+        virtual void Dispose() {}
     };
 
 } // namespace System::Net::Http
