@@ -26,12 +26,11 @@ using SharpRuntime::intcs;
  *
  * Covers the core mutation/lookup surface (Add/AddRange/Insert/InsertRange/SetItem/Replace/
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
- * BinarySearch).
+ * BinarySearch) and the core mutable Builder workflow.
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): ToBuilder/Builder. This is a real gap, not incorrect
- * behavior for the surface that does exist -- left undone here rather than expanded ad hoc in a
- * single audit pass; a full port would need an AVL/red-black backing structure to match .NET's
- * O(log n) persistent-update complexity (this port's vector-copy approach is O(n) per mutation).
+ * by an AVL tree, not a flat vector): advanced Builder query, sorting, and copy operations. The
+ * implemented Builder makes independent vector-backed immutable snapshots, so it does not claim
+ * the .NET tree implementation's O(1) ToBuilder or near-O(1) ToImmutable characteristics.
  *
  * @tparam T The type of elements stored in the list.
  */
@@ -63,6 +62,128 @@ class ImmutableList {
     }
 
 public:
+    /**
+     * @brief Mutable staging collection for building an ImmutableList snapshot.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Builder. It uses the current
+     * vector-backed representation, so ToImmutable copies the current contents
+     * and later Builder changes cannot mutate an already returned list.
+     */
+    class Builder {
+        std::vector<T> data_;
+
+        void requireIndexInRange(intcs index) const {
+            if (index < 0 || index >= static_cast<intcs>(data_.size())) {
+                throw System::ArgumentOutOfRangeException(
+                    "index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+            }
+        }
+
+        void requireValidRange(intcs index, intcs count) const {
+            if (index < 0 || index > static_cast<intcs>(data_.size())) {
+                throw System::ArgumentOutOfRangeException(
+                    "index", "Index was out of range. Must be non-negative and less than or equal to the size of the collection.");
+            }
+            if (count < 0 || index > static_cast<intcs>(data_.size()) - count) {
+                throw System::ArgumentOutOfRangeException(
+                    "count", "Count must refer to a location within the collection.");
+            }
+        }
+
+    public:
+        /** @brief Creates an empty Builder. Prefer ImmutableList<T>::CreateBuilder(). */
+        Builder() = default;
+
+        /** @brief Creates a Builder initialized from the supplied vector. */
+        explicit Builder(const std::vector<T>& items) : data_(items) {}
+
+        /** @brief Gets the number of elements in this Builder. */
+        [[nodiscard]] intcs getCountProperty() const { return static_cast<intcs>(data_.size()); }
+
+        /** @brief Gets a mutable reference to an element after range validation. */
+        T& operator[](intcs index) {
+            requireIndexInRange(index);
+            return data_[static_cast<size_t>(index)];
+        }
+
+        /** @brief Gets a const reference to an element after range validation. */
+        const T& operator[](intcs index) const {
+            requireIndexInRange(index);
+            return data_[static_cast<size_t>(index)];
+        }
+
+        /** @brief Appends an item to this Builder. */
+        void Add(const T& item) { data_.push_back(item); }
+
+        /** @brief Appends all items in @p items to this Builder. */
+        void AddRange(const std::vector<T>& items) {
+            data_.insert(data_.end(), items.begin(), items.end());
+        }
+
+        /** @brief Inserts an item at @p index. */
+        void Insert(intcs index, const T& item) {
+            if (index < 0 || index > static_cast<intcs>(data_.size())) {
+                throw System::ArgumentOutOfRangeException("index");
+            }
+            data_.insert(data_.begin() + index, item);
+        }
+
+        /** @brief Inserts all @p items at @p index. */
+        void InsertRange(intcs index, const std::vector<T>& items) {
+            if (index < 0 || index > static_cast<intcs>(data_.size())) {
+                throw System::ArgumentOutOfRangeException("index");
+            }
+            data_.insert(data_.begin() + index, items.begin(), items.end());
+        }
+
+        /** @brief Replaces the element at @p index. */
+        void SetItem(intcs index, const T& item) {
+            requireIndexInRange(index);
+            data_[static_cast<size_t>(index)] = item;
+        }
+
+        /** @brief Removes the first matching item and reports whether one was removed. */
+        bool Remove(const T& item) {
+            const auto found = std::find(data_.begin(), data_.end(), item);
+            if (found == data_.end()) {
+                return false;
+            }
+            data_.erase(found);
+            return true;
+        }
+
+        /** @brief Removes the element at @p index. */
+        void RemoveAt(intcs index) {
+            requireIndexInRange(index);
+            data_.erase(data_.begin() + index);
+        }
+
+        /** @brief Removes @p count elements starting at @p index. */
+        void RemoveRange(intcs index, intcs count) {
+            requireValidRange(index, count);
+            data_.erase(data_.begin() + index, data_.begin() + index + count);
+        }
+
+        /** @brief Removes all elements from this Builder. */
+        void Clear() { data_.clear(); }
+
+        /** @brief Determines whether this Builder contains @p item. */
+        [[nodiscard]] bool Contains(const T& item) const {
+            return std::find(data_.begin(), data_.end(), item) != data_.end();
+        }
+
+        /** @brief Returns the first index of @p item, or -1 if it is absent. */
+        [[nodiscard]] intcs IndexOf(const T& item) const {
+            const auto found = std::find(data_.begin(), data_.end(), item);
+            return found == data_.end() ? -1 : static_cast<intcs>(found - data_.begin());
+        }
+
+        /** @brief Returns an immutable snapshot unaffected by later Builder mutations. */
+        [[nodiscard]] ImmutableList<T> ToImmutable() const {
+            return ImmutableList<T>(std::make_shared<std::vector<T>>(data_));
+        }
+    };
+
     /** @brief Default-constructs an empty ImmutableList. */
     ImmutableList() : data_(std::make_shared<std::vector<T>>()) {}
 
@@ -73,6 +194,13 @@ public:
      * @return An empty ImmutableList<T>.
      */
     static ImmutableList<T> Empty() { return ImmutableList<T>(); }
+
+    /**
+     * @brief Creates an empty mutable Builder.
+     *
+     * C++ counterpart of .NET ImmutableList.CreateBuilder<T>().
+     */
+    [[nodiscard]] static Builder CreateBuilder() { return Builder(); }
 
     /**
      * @brief Creates an ImmutableList from an initializer list.
@@ -95,6 +223,14 @@ public:
     static ImmutableList<T> Create(const std::vector<T>& items) {
         return ImmutableList<T>(std::make_shared<std::vector<T>>(items));
     }
+
+    /**
+     * @brief Creates a mutable Builder with a copy of this list's contents.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.ToBuilder(). The vector-backed
+     * representation copies contents so the source remains immutable.
+     */
+    [[nodiscard]] Builder ToBuilder() const { return Builder(*data_); }
 
     /**
      * @brief Gets the number of elements in the list.

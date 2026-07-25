@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-25 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,662 passing tests across 37
+dependency edges, a clean native build, 12,666 passing tests across 37
 executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
@@ -32,7 +32,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,662 passing across 36 component binaries plus one integration
+- Tests: 12,666 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,759 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,760 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -140,6 +140,10 @@ assertion without an explicit architecture decision.
 - Added `BigInteger` byte-vector construction and serialization under ticket
   #1759. The default is signed little-endian two's complement; callers can
   select unsigned and/or big-endian conversion, and output is minimal.
+- Added the core `ImmutableList<T>::Builder` workflow under ticket #1760:
+  `CreateBuilder`, `ToBuilder`, checked mutable mutations, and independent
+  `ToImmutable` snapshots. Its vector-backed implementation intentionally
+  copies rather than claiming the tree-backed .NET conversion complexity.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -200,7 +204,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,662.
+to 12,666.
 
 ## Candidate roadmap
 
@@ -209,10 +213,10 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Consumer-driven API breadth
 
-1. **Continue a bounded `ImmutableList<T>` slice.**
-   Its documented omissions include builder support. Do not attempt the
-   entire surface in one change; select methods required by a real consumer
-   and port them against the .NET reference.
+1. **Extend `ImmutableList<T>::Builder` only from a concrete consumer need.**
+   Core construction, mutation, query, and snapshot behavior is implemented.
+   Advanced query, sorting, and copy overloads remain separate bounded work;
+   preserve the documented vector-backed snapshot semantics.
 
 2. **Extend `BinaryReader` only from a concrete consumer need.**
    `ReadChar`, `ReadChars`, `Read(char[])`, `ReadDecimal`, and seekable
