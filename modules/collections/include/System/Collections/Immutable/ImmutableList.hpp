@@ -12,6 +12,7 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Generic/IComparer.hpp"
+#include "System/Collections/Generic/IEqualityComparer.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -27,15 +28,13 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): range sort with the default comparison,
- * ToBuilder/Builder,
- * RemoveRange(IEnumerable<T>), and every
- * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
- * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
- * real gaps, not incorrect behavior for the surface that does exist -- left undone here rather
- * than expanded ad hoc in a single audit pass; a full port would need an AVL/red-black backing
- * structure to match .NET's O(log n) persistent-update complexity (this port's vector-copy
- * approach is O(n) per mutation).
+ * by an AVL tree, not a flat vector): range sort with the default comparison and
+ * ToBuilder/Builder. Custom equality is available for item-based Remove, RemoveRange, and
+ * Replace operations; custom equality/comparison overloads for IndexOf, LastIndexOf, and
+ * BinarySearch remain deferred. These are real gaps, not incorrect behavior for the surface
+ * that does exist -- left undone here rather than expanded ad hoc in a single audit pass; a full
+ * port would need an AVL/red-black backing structure to match .NET's O(log n) persistent-update
+ * complexity (this port's vector-copy approach is O(n) per mutation).
  *
  * @tparam T The type of elements stored in the list.
  */
@@ -212,7 +211,35 @@ public:
     [[nodiscard]] ImmutableList<T> Replace(const T& oldValue, const T& newValue) const {
         auto v = std::make_shared<std::vector<T>>(*data_);
         auto it = std::find(v->begin(), v->end(), oldValue);
-        if (it != v->end()) *it = newValue;
+        if (it == v->end()) {
+            throw System::ArgumentException("Cannot find the old value in the list.", "oldValue");
+        }
+        *it = newValue;
+        return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list with the first comparer-equal occurrence replaced.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Replace(T, T, IEqualityComparer<T>).
+     * @param oldValue The value to replace.
+     * @param newValue The replacement value.
+     * @param equalityComparer The equality semantics used to find @p oldValue.
+     * @return A new ImmutableList with the first matching occurrence replaced.
+     * @throws System::ArgumentException if no matching occurrence exists.
+     */
+    [[nodiscard]] ImmutableList<T> Replace(
+        const T& oldValue,
+        const T& newValue,
+        const System::Collections::Generic::IEqualityComparer<T>& equalityComparer) const {
+        auto v = std::make_shared<std::vector<T>>(*data_);
+        auto it = std::find_if(v->begin(), v->end(), [&oldValue, &equalityComparer](const T& value) {
+            return equalityComparer.Equals(oldValue, value);
+        });
+        if (it == v->end()) {
+            throw System::ArgumentException("Cannot find the old value in the list.", "oldValue");
+        }
+        *it = newValue;
         return ImmutableList<T>(std::move(v));
     }
 
@@ -229,6 +256,27 @@ public:
         for (const auto& x : *data_) {
             if (!removed && x == item) { removed = true; continue; }
             v->push_back(x);
+        }
+        return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list with the first comparer-equal occurrence removed.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Remove(T, IEqualityComparer<T>).
+     * @param item The value to remove.
+     * @param equalityComparer The equality semantics used to find @p item.
+     * @return A new ImmutableList with the first matching element removed.
+     */
+    [[nodiscard]] ImmutableList<T> Remove(
+        const T& item,
+        const System::Collections::Generic::IEqualityComparer<T>& equalityComparer) const {
+        auto v = std::make_shared<std::vector<T>>(*data_);
+        auto it = std::find_if(v->begin(), v->end(), [&item, &equalityComparer](const T& value) {
+            return equalityComparer.Equals(item, value);
+        });
+        if (it != v->end()) {
+            v->erase(it);
         }
         return ImmutableList<T>(std::move(v));
     }
@@ -272,6 +320,49 @@ public:
         requireValidRange(index, count);
         auto v = std::make_shared<std::vector<T>>(*data_);
         v->erase(v->begin() + index, v->begin() + index + count);
+        return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list after removing one occurrence for each requested value.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.RemoveRange(IEnumerable<T>).
+     * Values are processed in input order, so repeated values can remove repeated occurrences.
+     * @param items The values to remove.
+     * @return A new ImmutableList with matching values removed.
+     */
+    [[nodiscard]] ImmutableList<T> RemoveRange(const std::vector<T>& items) const {
+        auto v = std::make_shared<std::vector<T>>(*data_);
+        for (const auto& item : items) {
+            auto it = std::find(v->begin(), v->end(), item);
+            if (it != v->end()) {
+                v->erase(it);
+            }
+        }
+        return ImmutableList<T>(std::move(v));
+    }
+
+    /**
+     * @brief Returns a new list after removing one comparer-equal occurrence for each value.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.RemoveRange(IEnumerable<T>, IEqualityComparer<T>).
+     * Values are processed in input order, so repeated values can remove repeated occurrences.
+     * @param items The values to remove.
+     * @param equalityComparer The equality semantics used to find values.
+     * @return A new ImmutableList with matching values removed.
+     */
+    [[nodiscard]] ImmutableList<T> RemoveRange(
+        const std::vector<T>& items,
+        const System::Collections::Generic::IEqualityComparer<T>& equalityComparer) const {
+        auto v = std::make_shared<std::vector<T>>(*data_);
+        for (const auto& item : items) {
+            auto it = std::find_if(v->begin(), v->end(), [&item, &equalityComparer](const T& value) {
+                return equalityComparer.Equals(item, value);
+            });
+            if (it != v->end()) {
+                v->erase(it);
+            }
+        }
         return ImmutableList<T>(std::move(v));
     }
 
