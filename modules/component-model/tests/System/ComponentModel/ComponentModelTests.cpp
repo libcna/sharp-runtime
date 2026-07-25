@@ -4,6 +4,7 @@
 //
 #include <gtest/gtest.h>
 #include <any>
+#include <optional>
 #include "System/IServiceProvider.hpp"
 #include "System/ComponentModel/CancelEventArgs.hpp"
 #include "System/ComponentModel/IChangeTracking.hpp"
@@ -15,6 +16,9 @@
 #include "System/ComponentModel/CategoryAttribute.hpp"
 #include "System/ComponentModel/INotifyPropertyChanged.hpp"
 #include "System/ComponentModel/INotifyPropertyChanging.hpp"
+#include "System/ComponentModel/ISupportInitialize.hpp"
+#include "System/ComponentModel/PropertyChangedEventArgs.hpp"
+#include "System/ComponentModel/PropertyChangingEventArgs.hpp"
 #include "System/ComponentModel/EditorBrowsableAttribute.hpp"
 
 using System::ComponentModel::DescriptionAttribute;
@@ -128,6 +132,33 @@ TEST(DefaultValueAttributeTests, Constructor_Long) {
     EXPECT_EQ(std::any_cast<long>(attr.getValueProperty()), 100L);
 }
 
+TEST(DefaultValueAttributeTests, Constructor_UnsignedValues) {
+    DefaultValueAttribute uintAttribute(static_cast<SharpRuntime::uintcs>(42));
+    DefaultValueAttribute ulongAttribute(static_cast<SharpRuntime::ulongcs>(99));
+    EXPECT_EQ(std::any_cast<SharpRuntime::uintcs>(uintAttribute.getValueProperty()), 42U);
+    EXPECT_EQ(std::any_cast<SharpRuntime::ulongcs>(ulongAttribute.getValueProperty()), 99U);
+}
+
+TEST(DefaultValueAttributeTests, NullableString_NullIsRepresentedByAnEmptyAny) {
+    DefaultValueAttribute attr(std::optional<std::string>{});
+    EXPECT_FALSE(attr.getValueProperty().has_value());
+}
+
+TEST(DefaultValueAttributeTests, Equals_UsesStoredTypeAndValue) {
+    DefaultValueAttribute first(42);
+    DefaultValueAttribute same(42);
+    DefaultValueAttribute different(43);
+    DefaultValueAttribute differentType(42.0);
+    EXPECT_TRUE(first.Equals(same));
+    EXPECT_FALSE(first.Equals(different));
+    EXPECT_FALSE(first.Equals(differentType));
+}
+
+TEST(DefaultValueAttributeTests, TypeStringConstructor_RequiresTheDeferredTypeConverterSystem) {
+    EXPECT_THROW(DefaultValueAttribute(System::Type::From<int>(), std::string("42")),
+                 System::PlatformNotSupportedException);
+}
+
 TEST(DefaultValueAttributeTests, ValueHasType_AfterStringCtor) {
     DefaultValueAttribute attr(std::string("test"));
     EXPECT_EQ(attr.getValueProperty().type(), typeid(std::string));
@@ -144,14 +175,48 @@ TEST(DefaultValueAttributeTests, IsA_SystemAttribute) {
 // CategoryAttribute
 // ===========================================================================
 
-TEST(CategoryAttributeTests, DefaultConstructor_CategoryIsMisc) {
+TEST(CategoryAttributeTests, DefaultConstructor_CategoryIsDefault) {
     CategoryAttribute attr;
-    EXPECT_EQ(attr.getCategoryProperty(), "Misc");
+    EXPECT_EQ(attr.getCategoryProperty(), "Default");
 }
 
 TEST(CategoryAttributeTests, Constructor_StoresCategory) {
     CategoryAttribute attr("Appearance");
     EXPECT_EQ(attr.getCategoryProperty(), "Appearance");
+}
+
+TEST(CategoryAttributeTests, StaticProperties_ExposeTheDotNetCategories) {
+    EXPECT_EQ(CategoryAttribute::getActionProperty().getCategoryProperty(), "Action");
+    EXPECT_EQ(CategoryAttribute::getAppearanceProperty().getCategoryProperty(), "Appearance");
+    EXPECT_EQ(CategoryAttribute::getAsynchronousProperty().getCategoryProperty(), "Asynchronous");
+    EXPECT_EQ(CategoryAttribute::getBehaviorProperty().getCategoryProperty(), "Behavior");
+    EXPECT_EQ(CategoryAttribute::getDataProperty().getCategoryProperty(), "Data");
+    EXPECT_EQ(CategoryAttribute::getDefaultProperty().getCategoryProperty(), "Default");
+    EXPECT_EQ(CategoryAttribute::getDesignProperty().getCategoryProperty(), "Design");
+    EXPECT_EQ(CategoryAttribute::getDragDropProperty().getCategoryProperty(), "DragDrop");
+    EXPECT_EQ(CategoryAttribute::getFocusProperty().getCategoryProperty(), "Focus");
+    EXPECT_EQ(CategoryAttribute::getFormatProperty().getCategoryProperty(), "Format");
+    EXPECT_EQ(CategoryAttribute::getKeyProperty().getCategoryProperty(), "Key");
+    EXPECT_EQ(CategoryAttribute::getLayoutProperty().getCategoryProperty(), "Layout");
+    EXPECT_EQ(CategoryAttribute::getMouseProperty().getCategoryProperty(), "Mouse");
+    EXPECT_EQ(CategoryAttribute::getWindowStyleProperty().getCategoryProperty(), "WindowStyle");
+}
+
+class LocalizedCategoryAttribute final : public CategoryAttribute {
+public:
+    using CategoryAttribute::CategoryAttribute;
+
+protected:
+    std::optional<std::string> GetLocalizedString(const std::string& value) const override {
+        return value == "Appearance" ? std::optional<std::string>("Vzhled") : std::nullopt;
+    }
+};
+
+TEST(CategoryAttributeTests, DerivedLocalizationHook_IsUsedForValueAndEquality) {
+    LocalizedCategoryAttribute localized("Appearance");
+    LocalizedCategoryAttribute sameLocalized("Appearance");
+    EXPECT_EQ(localized.getCategoryProperty(), "Vzhled");
+    EXPECT_TRUE(localized.Equals(sameLocalized));
 }
 
 // ===========================================================================
@@ -160,20 +225,30 @@ TEST(CategoryAttributeTests, Constructor_StoresCategory) {
 
 TEST(BrowsableAttributeTests, Constructor_True) {
     BrowsableAttribute attr(true);
-    EXPECT_TRUE(attr.Browsable);
+    EXPECT_TRUE(attr.getBrowsableProperty());
 }
 
 TEST(BrowsableAttributeTests, Constructor_False) {
     BrowsableAttribute attr(false);
-    EXPECT_FALSE(attr.Browsable);
+    EXPECT_FALSE(attr.getBrowsableProperty());
 }
 
 TEST(BrowsableAttributeTests, StaticYes_IsTrue) {
-    EXPECT_TRUE(BrowsableAttribute::Yes.Browsable);
+    EXPECT_TRUE(BrowsableAttribute::Yes.getBrowsableProperty());
 }
 
 TEST(BrowsableAttributeTests, StaticNo_IsFalse) {
-    EXPECT_FALSE(BrowsableAttribute::No.Browsable);
+    EXPECT_FALSE(BrowsableAttribute::No.getBrowsableProperty());
+}
+
+TEST(BrowsableAttributeTests, DefaultAndEquality_MatchDotNet) {
+    BrowsableAttribute yes(true);
+    BrowsableAttribute no(false);
+    EXPECT_TRUE(BrowsableAttribute::Default.getBrowsableProperty());
+    EXPECT_TRUE(yes.Equals(BrowsableAttribute::Default));
+    EXPECT_FALSE(no.getIsDefaultAttributeProperty());
+    EXPECT_EQ(yes.GetHashCode(), 1);
+    EXPECT_EQ(no.GetHashCode(), 0);
 }
 
 // ===========================================================================
@@ -210,6 +285,16 @@ TEST(DisplayNameAttributeTests, DefaultConstructor_EmptyName) {
 TEST(DisplayNameAttributeTests, Constructor_StoresName) {
     DisplayNameAttribute attr("My Property");
     EXPECT_EQ(attr.getDisplayNameProperty(), "My Property");
+}
+
+TEST(DisplayNameAttributeTests, DefaultAndEquality_MatchDotNet) {
+    DisplayNameAttribute empty;
+    DisplayNameAttribute sameEmpty("");
+    DisplayNameAttribute named("Name");
+    EXPECT_TRUE(empty.getIsDefaultAttributeProperty());
+    EXPECT_TRUE(empty.Equals(DisplayNameAttribute::Default));
+    EXPECT_TRUE(empty.Equals(sameEmpty));
+    EXPECT_FALSE(empty.Equals(named));
 }
 
 // ===========================================================================
@@ -281,6 +366,15 @@ TEST(EditorBrowsableAttributeTests, Advanced_ValueIsTwo) {
     EXPECT_EQ(static_cast<int>(EditorBrowsableState::Advanced), 2);
 }
 
+TEST(EditorBrowsableAttributeTests, DerivesFromAttributeAndComparesState) {
+    EditorBrowsableAttribute first(EditorBrowsableState::Advanced);
+    EditorBrowsableAttribute same(EditorBrowsableState::Advanced);
+    EditorBrowsableAttribute different(EditorBrowsableState::Never);
+    EXPECT_TRUE((std::is_base_of_v<System::Attribute, EditorBrowsableAttribute>));
+    EXPECT_TRUE(first.Equals(same));
+    EXPECT_FALSE(first.Equals(different));
+}
+
 // ===========================================================================
 // INotifyPropertyChanged
 // ===========================================================================
@@ -293,19 +387,22 @@ public:
         value_ = v;
         OnPropertyChanged("Value");
     }
+    void notifyAllPropertiesChanged() { OnPropertyChanged(std::nullopt); }
 };
 
 TEST(INotifyPropertyChangedTests, PropertyChangedEventArgs_StoresName) {
     PropertyChangedEventArgs args("MyProp");
-    EXPECT_EQ(args.PropertyName, "MyProp");
+    EXPECT_EQ(args.getPropertyNameProperty(), std::optional<std::string>("MyProp"));
+    System::EventArgs& base = args;
+    (void)base;
 }
 
 TEST(INotifyPropertyChangedTests, OnPropertyChanged_FiresHandlers) {
     TestObservable obj;
     std::string captured;
-    obj.PropertyChanged.push_back([&](void*, const PropertyChangedEventArgs& e) {
-        captured = e.PropertyName;
-    });
+    obj.PropertyChanged += [&](void*, const PropertyChangedEventArgs& e) {
+        captured = *e.getPropertyNameProperty();
+    };
     obj.setValue(42);
     EXPECT_EQ(captured, "Value");
 }
@@ -313,8 +410,8 @@ TEST(INotifyPropertyChangedTests, OnPropertyChanged_FiresHandlers) {
 TEST(INotifyPropertyChangedTests, MultipleHandlers_AllFired) {
     TestObservable obj;
     int count = 0;
-    obj.PropertyChanged.push_back([&](void*, const PropertyChangedEventArgs&) { ++count; });
-    obj.PropertyChanged.push_back([&](void*, const PropertyChangedEventArgs&) { ++count; });
+    obj.PropertyChanged += [&](void*, const PropertyChangedEventArgs&) { ++count; };
+    obj.PropertyChanged += [&](void*, const PropertyChangedEventArgs&) { ++count; };
     obj.setValue(1);
     EXPECT_EQ(count, 2);
 }
@@ -322,6 +419,16 @@ TEST(INotifyPropertyChangedTests, MultipleHandlers_AllFired) {
 TEST(INotifyPropertyChangedTests, NoHandlers_DoesNotThrow) {
     TestObservable obj;
     EXPECT_NO_THROW(obj.setValue(5));
+}
+
+TEST(INotifyPropertyChangedTests, NullPropertyName_IsPreservedForAllPropertiesNotification) {
+    TestObservable obj;
+    std::optional<std::string> propertyName = "unexpected";
+    obj.PropertyChanged += [&](void*, const PropertyChangedEventArgs& args) {
+        propertyName = args.getPropertyNameProperty();
+    };
+    obj.notifyAllPropertiesChanged();
+    EXPECT_FALSE(propertyName.has_value());
 }
 
 // ===========================================================================
@@ -340,15 +447,17 @@ public:
 
 TEST(INotifyPropertyChangingTests, PropertyChangingEventArgs_StoresName) {
     PropertyChangingEventArgs args("MyProp");
-    EXPECT_EQ(args.PropertyName, "MyProp");
+    EXPECT_EQ(args.getPropertyNameProperty(), std::optional<std::string>("MyProp"));
+    System::EventArgs& base = args;
+    (void)base;
 }
 
 TEST(INotifyPropertyChangingTests, OnPropertyChanging_FiresHandlers) {
     TestChangingObservable obj;
     std::string captured;
-    obj.PropertyChanging.push_back([&](void*, const PropertyChangingEventArgs& e) {
-        captured = e.PropertyName;
-    });
+    obj.PropertyChanging += [&](void*, const PropertyChangingEventArgs& e) {
+        captured = *e.getPropertyNameProperty();
+    };
     obj.setValue(99);
     EXPECT_EQ(captured, "Value");
 }
@@ -356,9 +465,9 @@ TEST(INotifyPropertyChangingTests, OnPropertyChanging_FiresHandlers) {
 TEST(INotifyPropertyChangingTests, HandlerFiredBeforeValueChanges) {
     TestChangingObservable obj;
     int valueAtFireTime = -1;
-    obj.PropertyChanging.push_back([&](void*, const PropertyChangingEventArgs&) {
+    obj.PropertyChanging += [&](void*, const PropertyChangingEventArgs&) {
         valueAtFireTime = obj.getValue();
-    });
+    };
     obj.setValue(7);
     EXPECT_EQ(valueAtFireTime, 0);   // old value, not 7
     EXPECT_EQ(obj.getValue(), 7);    // new value set after
@@ -420,31 +529,31 @@ using System::ComponentModel::CancelEventArgs;
 
 TEST(CancelEventArgsTests, DefaultCtor_CancelIsFalse) {
     CancelEventArgs e;
-    EXPECT_FALSE(e.Cancel);
+    EXPECT_FALSE(e.getCancelProperty());
 }
 
 TEST(CancelEventArgsTests, Ctor_True) {
     CancelEventArgs e(true);
-    EXPECT_TRUE(e.Cancel);
+    EXPECT_TRUE(e.getCancelProperty());
 }
 
 TEST(CancelEventArgsTests, Ctor_False) {
     CancelEventArgs e(false);
-    EXPECT_FALSE(e.Cancel);
+    EXPECT_FALSE(e.getCancelProperty());
 }
 
 TEST(CancelEventArgsTests, Cancel_CanBeSetToTrue) {
     CancelEventArgs e;
-    e.Cancel = true;
-    EXPECT_TRUE(e.Cancel);
+    e.setCancelProperty(true);
+    EXPECT_TRUE(e.getCancelProperty());
 }
 
 TEST(CancelEventArgsTests, Cancel_CanBeToggled) {
     CancelEventArgs e(true);
-    e.Cancel = false;
-    EXPECT_FALSE(e.Cancel);
-    e.Cancel = true;
-    EXPECT_TRUE(e.Cancel);
+    e.setCancelProperty(false);
+    EXPECT_FALSE(e.getCancelProperty());
+    e.setCancelProperty(true);
+    EXPECT_TRUE(e.getCancelProperty());
 }
 
 TEST(CancelEventArgsTests, InheritsFromEventArgs) {
@@ -456,10 +565,41 @@ TEST(CancelEventArgsTests, InheritsFromEventArgs) {
 
 TEST(CancelEventArgsTests, CancelEventHandler_InvokesAndCanSetCancel) {
     System::ComponentModel::CancelEventHandler handler =
-        [](void*, CancelEventArgs& e) { e.Cancel = true; };
+        [](void*, CancelEventArgs& e) { e.setCancelProperty(true); };
     CancelEventArgs e;
     handler(nullptr, e);
-    EXPECT_TRUE(e.Cancel);
+    EXPECT_TRUE(e.getCancelProperty());
+}
+
+// ===========================================================================
+// ISupportInitialize
+// ===========================================================================
+
+class InitializableObject : public System::ComponentModel::ISupportInitialize {
+    bool initializing_ = false;
+    int beginCalls_ = 0;
+    int endCalls_ = 0;
+
+public:
+    void BeginInit() override { initializing_ = true; ++beginCalls_; }
+    void EndInit() override { initializing_ = false; ++endCalls_; }
+    [[nodiscard]] bool getInitializingProperty() const noexcept { return initializing_; }
+    [[nodiscard]] int getBeginCallsProperty() const noexcept { return beginCalls_; }
+    [[nodiscard]] int getEndCallsProperty() const noexcept { return endCalls_; }
+};
+
+TEST(ISupportInitializeTests, ImplementerReceivesTheInitializationBoundaryCalls) {
+    InitializableObject object;
+    object.BeginInit();
+    EXPECT_TRUE(object.getInitializingProperty());
+    object.EndInit();
+    EXPECT_FALSE(object.getInitializingProperty());
+    EXPECT_EQ(object.getBeginCallsProperty(), 1);
+    EXPECT_EQ(object.getEndCallsProperty(), 1);
+}
+
+TEST(ISupportInitializeTests, IsAbstractInterface) {
+    EXPECT_TRUE((std::is_abstract_v<System::ComponentModel::ISupportInitialize>));
 }
 
 // ===========================================================================

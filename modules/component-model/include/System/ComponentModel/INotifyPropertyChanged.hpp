@@ -3,43 +3,52 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 #include <functional>
+#include <optional>
 #include <string>
-#include <vector>
+#include <utility>
+
+#include "System/MulticastAction.hpp"
+#include "System/ComponentModel/PropertyChangedEventArgs.hpp"
 
 namespace System::ComponentModel {
 
-    /**
-     * @brief Event args carrying the name of the property that changed.
-     *
-     * Partial C++ counterpart of .NET System.ComponentModel.PropertyChangedEventArgs.
-     *
-     * @note Status: Implemented
-     */
-    struct PropertyChangedEventArgs {
-        std::string PropertyName;
-        explicit PropertyChangedEventArgs(const std::string& name) : PropertyName(name) {}
-    };
-
+    /** Delegate type for PropertyChanged event handlers. */
     using PropertyChangedEventHandler = std::function<void(void*, const PropertyChangedEventArgs&)>;
+
+    /**
+     * Multicast storage for PropertyChanged handlers.
+     *
+     * `push_back` remains as a compatibility adapter for the previous vector-based event field;
+     * `operator+=` is the preferred C#-style subscription API.
+     */
+    class PropertyChangedEvent final
+        : public System::MulticastAction<void*, const PropertyChangedEventArgs&> {
+        using Base = System::MulticastAction<void*, const PropertyChangedEventArgs&>;
+
+    public:
+        using Base::operator+=;
+
+        /** Adds a handler using the legacy vector-like subscription spelling. */
+        void push_back(PropertyChangedEventHandler handler) { this->Add(std::move(handler)); }
+    };
 
     /**
      * @brief Notifies clients that a property value has changed.
      *
-     * Partial C++ counterpart of .NET System.ComponentModel.INotifyPropertyChanged.
-     *
-     * @note Status: Implemented
+     * C++ counterpart of .NET System.ComponentModel.INotifyPropertyChanged.
      */
     class INotifyPropertyChanged {
     public:
         virtual ~INotifyPropertyChanged() = default;
 
-        std::vector<PropertyChangedEventHandler> PropertyChanged; ///< Subscribers notified after a property changes.
+        /** Subscribers notified after a property changes. */
+        PropertyChangedEvent PropertyChanged;
 
     protected:
-        /** Raises the PropertyChanged event for the property named @p propertyName. */
-        void OnPropertyChanged(const std::string& propertyName) {
+        /** Raises PropertyChanged for a named property, or for all properties when no name is supplied. */
+        void OnPropertyChanged(const std::optional<std::string>& propertyName) {
             PropertyChangedEventArgs args(propertyName);
-            for (auto& h : PropertyChanged) h(this, args);
+            PropertyChanged.Invoke(this, args);
         }
     };
 

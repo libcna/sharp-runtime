@@ -11,11 +11,20 @@ namespace System::ComponentModel
 {
     class CancelEventArgs : public System::EventArgs
     {
-    public:
-        bool Cancel = false;
+        bool cancel_ = false;
 
+    public:
+        /** Initializes event data with Cancel set to false. */
         CancelEventArgs() = default;
-        explicit CancelEventArgs(bool cancel) : Cancel(cancel) {}
+
+        /** Initializes event data with the supplied cancellation state. */
+        explicit CancelEventArgs(bool cancel) : cancel_(cancel) {}
+
+        /** Gets whether the operation should be cancelled. */
+        [[nodiscard]] bool getCancelProperty() const noexcept { return cancel_; }
+
+        /** Sets whether the operation should be cancelled. */
+        void setCancelProperty(bool value) noexcept { cancel_ = value; }
     };
 
     /** @brief Represents the method that will handle the event raised when canceling an event. */
