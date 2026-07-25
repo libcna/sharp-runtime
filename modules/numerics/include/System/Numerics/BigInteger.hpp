@@ -20,9 +20,8 @@ namespace System::Numerics {
      *
      * Partial C++ counterpart of .NET System.Numerics.BigInteger.
      *
-     * @note Status: Arithmetic, comparisons, formatting/parsing, bitwise, and
-     *   shift operators are implemented. Byte-array conversion APIs remain
-     *   outside this focused port.
+     * @note Status: Arithmetic, comparisons, formatting/parsing, bitwise,
+     *   shifts, and vector-backed byte-array conversion are implemented.
      */
     class BigInteger {
         bool                  negative_ = false;
@@ -72,6 +71,17 @@ namespace System::Numerics {
         /** @brief Constructs from a signed 64-bit integer. */
         BigInteger(longcs v); // NOLINT(*-explicit-*)
 
+        /**
+         * @brief Constructs from a byte vector using two's-complement semantics by default.
+         *
+         * C++ counterpart of .NET BigInteger(ReadOnlySpan<byte>, bool, bool).
+         * @param value Byte representation of the number.
+         * @param isUnsigned Whether @p value is an unsigned magnitude.
+         * @param isBigEndian Whether @p value is in big-endian order.
+         */
+        BigInteger(const std::vector<uint8_t>& value, bool isUnsigned = false,
+                   bool isBigEndian = false);
+
         // ------------------------------------------------------------------
         // Properties
         // ------------------------------------------------------------------
@@ -110,6 +120,20 @@ namespace System::Numerics {
 
         /** @brief Returns the decimal string representation. */
         [[nodiscard]] std::string ToString() const;
+
+        /**
+         * @brief Returns the shortest byte representation of this value.
+         *
+         * C++ counterpart of .NET BigInteger.ToByteArray(bool, bool).
+         * @param isUnsigned Whether to write an unsigned magnitude.
+         * @param isBigEndian Whether to write bytes in big-endian order.
+         * @return A minimally sized byte vector; the default is signed little-endian two's
+         *         complement.
+         * @throws System::OverflowException if an unsigned representation is requested for a
+         *         negative value.
+         */
+        [[nodiscard]] std::vector<uint8_t> ToByteArray(bool isUnsigned = false,
+                                                        bool isBigEndian = false) const;
 
         // ------------------------------------------------------------------
         // Arithmetic operators

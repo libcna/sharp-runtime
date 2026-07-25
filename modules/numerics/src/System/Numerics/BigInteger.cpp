@@ -4,6 +4,7 @@
 #include "System/Numerics/BigInteger.hpp"
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
+#include "System/OverflowException.hpp"
 #include <algorithm>
 #include <limits>
 
@@ -289,6 +290,35 @@ BigInteger::BigInteger(longcs v) {
                                 : static_cast<uint64_t>(v));
 }
 
+BigInteger::BigInteger(const std::vector<uint8_t>& value, bool isUnsigned, bool isBigEndian) {
+    if (value.empty()) {
+        mag_ = {0};
+        return;
+    }
+
+    std::vector<uint8_t> littleEndian = value;
+    if (isBigEndian) {
+        std::reverse(littleEndian.begin(), littleEndian.end());
+    }
+
+    const bool negative = !isUnsigned && (littleEndian.back() & 0x80u) != 0;
+    std::vector<uint16_t> words((littleEndian.size() + 1) / 2, 0);
+    for (size_t index = 0; index < littleEndian.size(); ++index) {
+        words[index / 2] |= static_cast<uint16_t>(littleEndian[index]) << ((index % 2) * 8);
+    }
+    if (negative && (littleEndian.size() % 2) != 0) {
+        words.back() |= 0xFF00u;
+    }
+
+    if (negative) {
+        *this = fromTwosComplement16(std::move(words));
+    } else {
+        mag_ = binary16ToMagnitude(words);
+        negative_ = false;
+        trim();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Properties
 // ---------------------------------------------------------------------------
@@ -343,6 +373,45 @@ std::string BigInteger::ToString() const {
         }
     }
     return negative_ ? "-" + s : s;
+}
+
+std::vector<uint8_t> BigInteger::ToByteArray(bool isUnsigned, bool isBigEndian) const {
+    if (isUnsigned && negative_) {
+        throw System::OverflowException("A negative value cannot be represented as unsigned bytes.");
+    }
+
+    std::vector<uint16_t> words;
+    if (negative_) {
+        words = toTwosComplement16(*this, magnitudeToBinary16(mag_).size() + 1);
+    } else {
+        words = magnitudeToBinary16(mag_);
+    }
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(words.size() * 2);
+    for (const uint16_t word : words) {
+        bytes.push_back(static_cast<uint8_t>(word));
+        bytes.push_back(static_cast<uint8_t>(word >> 8));
+    }
+
+    if (negative_) {
+        while (bytes.size() > 1 && bytes.back() == 0xFFu &&
+               (bytes[bytes.size() - 2] & 0x80u) != 0) {
+            bytes.pop_back();
+        }
+    } else {
+        while (bytes.size() > 1 && bytes.back() == 0) {
+            bytes.pop_back();
+        }
+        if (!isUnsigned && (bytes.back() & 0x80u) != 0) {
+            bytes.push_back(0);
+        }
+    }
+
+    if (isBigEndian) {
+        std::reverse(bytes.begin(), bytes.end());
+    }
+    return bytes;
 }
 
 // ---------------------------------------------------------------------------

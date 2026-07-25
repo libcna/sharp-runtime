@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-25 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,658 passing tests across 37
+dependency edges, a clean native build, 12,662 passing tests across 37
 executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
@@ -32,7 +32,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,658 passing across 36 component binaries plus one integration
+- Tests: 12,662 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,758 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,759 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -137,6 +137,9 @@ assertion without an explicit architecture decision.
 - Added signed `BigInteger` left/right shifts and compound assignments under
   ticket #1758. Negative counts reverse direction, while right shifts retain
   arithmetic floor semantics for negative values.
+- Added `BigInteger` byte-vector construction and serialization under ticket
+  #1759. The default is signed little-endian two's complement; callers can
+  select unsigned and/or big-endian conversion, and output is minimal.
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -197,7 +200,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,658.
+to 12,662.
 
 ## Candidate roadmap
 
@@ -218,8 +221,8 @@ acceptance criteria and a validation command before changing code.
    behavior.
 
 3. **Review other documented partial surfaces by demand.**
-   Examples include `BigInteger` byte-array APIs, full UTF-7 behavior,
-   debugger/process breadth, and richer XML reader/writer functionality.
+   Examples include full UTF-7 behavior, debugger/process breadth, and richer
+   XML reader/writer functionality.
    A documented partial API is not automatically higher priority than a
    consumer-visible bug.
 
