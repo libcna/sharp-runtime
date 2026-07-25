@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and four bounded
+repair, three P1 parity repairs, P1 portability revalidation, and five bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,616 tests across 37 executables.*
+edges, and 12,619 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,7 +28,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,616 passing tests
+- The full native baseline is a warning-free build with 12,619 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
@@ -46,14 +46,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,746 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,747 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
 `ImmutableList<T>` predicate-query slice. Ticket #1744 records seekable
 `BinaryReader::PeekChar`, #1745 `ImmutableList<T>::Sort`/`Reverse`, and #1746
-`ImmutableList<T>::GetRange`. The database is git-ignored and is not part of a
-fresh clone.
+`ImmutableList<T>::GetRange`, and #1747 `ImmutableList<T>::ConvertAll`. The
+database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -147,6 +147,12 @@ slice. It accepts zero-length ranges at either valid boundary and reuses the
 same `ArgumentOutOfRangeException` checks as `RemoveRange`. Three regressions
 cover slice content, source immutability, boundary empties, and invalid ranges.
 
+## P2 completion: `ImmutableList<T>::ConvertAll`
+
+`ConvertAll<TOutput>` converts each source value in order into an independently
+backed immutable list. It preserves an empty source and rejects an empty
+converter with `ArgumentNullException`; three regressions cover those cases.
+
 ## Recommended next bounded tasks
 
 All currently planned P1 work is complete. Choose one consumer-driven P2
@@ -156,7 +162,7 @@ slice, create a ticket, and keep the changes isolated:
    `Read(char[])` behavior while preserving decoder state and truncated-input
    semantics, including supplementary UTF-8 characters.
 2. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
-   copying/conversion, builder support, or comparer overloads.
+   copying, builder support, or comparer overloads.
 3. **Other documented partial surfaces.** Examples include `BigInteger`
    bitwise operations, fuller UTF-7 behavior, and wider debugger/process/XML
    surfaces.

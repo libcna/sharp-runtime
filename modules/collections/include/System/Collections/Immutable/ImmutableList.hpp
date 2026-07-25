@@ -27,7 +27,7 @@ using SharpRuntime::intcs;
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
  * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads, the 3
- * CopyTo overloads, ConvertAll<TOutput>, ToBuilder/Builder,
+ * CopyTo overloads, ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -288,6 +288,30 @@ public:
         auto values = std::make_shared<std::vector<T>>(
             data_->begin() + index, data_->begin() + index + count);
         return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Converts every element and returns an immutable list of the converted values.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.ConvertAll<TOutput>(Converter<T, TOutput>).
+     * @tparam TOutput The target element type.
+     * @param converter The conversion function.
+     * @return A new immutable list containing converted values in source order.
+     * @throws System::ArgumentNullException if @p converter is empty.
+     */
+    template<typename TOutput>
+    [[nodiscard]] ImmutableList<TOutput> ConvertAll(
+        std::function<TOutput(const T&)> converter) const {
+        if (!converter) {
+            throw System::ArgumentNullException("converter");
+        }
+
+        std::vector<TOutput> values;
+        values.reserve(data_->size());
+        for (const auto& item : *data_) {
+            values.push_back(converter(item));
+        }
+        return ImmutableList<TOutput>::Create(values);
     }
 
     /**
