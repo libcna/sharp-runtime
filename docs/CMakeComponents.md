@@ -131,7 +131,7 @@ are named `SharpRuntimeTests_<Component>`; genuinely cross-module scenarios
 are in `SharpRuntimeIntegrationTests`. CTest also discovers every individual
 GoogleTest case.
 
-The verified 2026-07-25 `All` baseline contains 12,675 tests across 36
+The verified 2026-07-25 `All` baseline contains 12,678 tests across 36
 component executables and one integration executable.
 
 ## Boundary validation and CI

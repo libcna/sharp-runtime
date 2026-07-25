@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Diagnostics/Process.hpp"
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/PlatformNotSupportedException.hpp"
 
@@ -134,6 +135,13 @@ bool Process::Start() {
     const ProcessStartInfo& si = impl_->startInfo;
     if (si.getFileNameProperty().empty())
         throw System::InvalidOperationException("Cannot start process because a file name has not been provided.");
+    for (const auto& [name, value] : si.getEnvironmentVariablesProperty()) {
+        (void)value;
+        if (name.empty() || name.find('=') != std::string::npos) {
+            throw System::ArgumentException(
+                "Environment variable names must be nonempty and cannot contain '='.", "name");
+        }
+    }
 
     // Build argv: argv[0] is conventionally the program name, followed by ArgumentList (the
     // unambiguous path -- no shell/OS quoting), then a naive whitespace split of Arguments for
@@ -180,6 +188,9 @@ bool Process::Start() {
         if (redirErr) { ::dup2(stderrPipe[1], STDERR_FILENO); ::close(stderrPipe[0]); ::close(stderrPipe[1]); }
         if (!si.getWorkingDirectoryProperty().empty()) {
             if (::chdir(si.getWorkingDirectoryProperty().c_str()) != 0) ::_exit(127);
+        }
+        for (const auto& [name, value] : si.getEnvironmentVariablesProperty()) {
+            if (::setenv(name.c_str(), value.c_str(), 1) != 0) ::_exit(127);
         }
         ::execvp(argv[0], argv.data());
         ::_exit(127); // execvp only returns on failure

@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -23,9 +24,9 @@ namespace System::Diagnostics {
      * Windows; on POSIX, argv is always a plain string array with no re-quoting step at all) --
      * use @ref getArgumentListProperty directly for anything containing spaces or quotes.
      *
-     * @note Status: Partial. UseShellExecute, redirected standard input, environment-variable
-     * overrides, and window-style/verb properties (all Windows-shell-specific or otherwise out of
-     * scope for a POSIX-only game-runtime launcher) are not implemented -- see
+     * @note Status: Partial. UseShellExecute, redirected standard input, environment enumeration
+     * and removal semantics, and window-style/verb properties (all Windows-shell-specific or
+     * otherwise out of scope for a POSIX-only game-runtime launcher) are not implemented -- see
      * System::Diagnostics::Process's class doc-comment for the full list of deliberately deferred
      * surface.
      */
@@ -33,6 +34,7 @@ namespace System::Diagnostics {
         std::string fileName_;
         std::string arguments_;
         std::vector<std::string> argumentList_;
+        std::map<std::string, std::string> environmentVariables_;
         std::string workingDirectory_;
         bool redirectStandardOutput_ = false;
         bool redirectStandardError_ = false;
@@ -62,6 +64,20 @@ namespace System::Diagnostics {
         /** @brief Gets the collection of command-line arguments, passed to the child process verbatim (no shell quoting). */
         [[nodiscard]] std::vector<std::string>& getArgumentListProperty() { return argumentList_; }
         [[nodiscard]] const std::vector<std::string>& getArgumentListProperty() const { return argumentList_; }
+
+        /**
+         * @brief Gets explicitly supplied child environment-variable overrides.
+         *
+         * Entries are applied only to the launched child; unspecified variables are inherited
+         * from the parent. Variable names must be nonempty and must not contain '=' when Start()
+         * is called. An empty value is passed to the child as an empty variable value.
+         */
+        [[nodiscard]] std::map<std::string, std::string>& getEnvironmentVariablesProperty() {
+            return environmentVariables_;
+        }
+        [[nodiscard]] const std::map<std::string, std::string>& getEnvironmentVariablesProperty() const {
+            return environmentVariables_;
+        }
 
         /** @brief Gets or sets the working directory for the process. Empty means inherit the caller's current directory. */
         [[nodiscard]] const std::string& getWorkingDirectoryProperty() const { return workingDirectory_; }
