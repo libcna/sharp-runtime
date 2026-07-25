@@ -3,6 +3,7 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/XmlWriter.hpp"
 #include <tinyxml2/tinyxml2.h>
+#include "System/ArgumentException.hpp"
 #include "System/Xml/XmlException.hpp"
 #include <stack>
 
@@ -118,6 +119,13 @@ void XmlWriter::WriteString(const std::string& text) {
     if (!state_ || state_->nodeStack.empty()) return;
     tinyxml2::XMLText* tn = state_->doc.NewText(text.c_str());
     state_->nodeStack.top()->InsertEndChild(tn);
+}
+
+void XmlWriter::WriteWhitespace(const std::string& whitespace) {
+    if (whitespace.find_first_not_of(" \t\r\n") != std::string::npos) {
+        throw System::ArgumentException("WriteWhitespace accepts only XML whitespace characters.");
+    }
+    WriteString(whitespace);
 }
 
 void XmlWriter::WriteElementString(const std::string& name, const std::string& value) {

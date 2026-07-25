@@ -45,6 +45,7 @@ namespace System::Xml {
         void WriteEndElement() { inner_->WriteEndElement(); }
         void WriteAttributeString(const std::string& name, const std::string& value) { inner_->WriteAttributeString(name, value); }
         void WriteString(const std::string& text) { inner_->WriteString(text); }
+        void WriteWhitespace(const std::string& whitespace) { inner_->WriteWhitespace(whitespace); }
         void WriteElementString(const std::string& name, const std::string& value) { inner_->WriteElementString(name, value); }
         void WriteComment(const std::string& text) { inner_->WriteComment(text); }
         void WriteCData(const std::string& text) { inner_->WriteCData(text); }

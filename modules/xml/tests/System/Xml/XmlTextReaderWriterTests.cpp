@@ -59,6 +59,14 @@ TEST(XmlTextWriterTests, WritesElementAndAttributeToString) {
     EXPECT_NE(result.find("text"), std::string::npos);
 }
 
+TEST(XmlTextWriterTests, WriteWhitespace_ForwardsToInnerWriter) {
+    XmlTextWriter writer;
+    writer.WriteStartElement("root");
+    writer.WriteWhitespace("\t");
+    writer.WriteEndElement();
+    EXPECT_NE(writer.ToString().find("\t"), std::string::npos);
+}
+
 TEST(XmlTextWriterTests, FormattingProperty_IsSettable) {
     XmlTextWriter writer;
     writer.setFormattingProperty(Formatting::Indented);

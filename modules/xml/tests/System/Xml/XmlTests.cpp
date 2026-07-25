@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/NotImplementedException.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlReader.hpp"
@@ -376,6 +377,19 @@ TEST(XmlWriterTests, WriteString_InOutput) {
     w->WriteString("hello");
     w->WriteEndElement();
     EXPECT_NE(w->ToString().find("hello"), std::string::npos);
+}
+
+TEST(XmlWriterTests, WriteWhitespace_WritesXmlWhitespace) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    w->WriteStartElement("msg");
+    w->WriteWhitespace(" \t\r\n");
+    w->WriteEndElement();
+    EXPECT_NE(w->ToString().find("\t"), std::string::npos);
+}
+
+TEST(XmlWriterTests, WriteWhitespace_NonWhitespaceThrowsArgumentException) {
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    EXPECT_THROW(w->WriteWhitespace("not whitespace"), System::ArgumentException);
 }
 
 TEST(XmlWriterTests, WriteElementString_ShortForm) {

@@ -70,6 +70,18 @@ namespace System::Xml {
         void WriteString(const std::string& text);
 
         /**
+         * @brief Writes XML whitespace as content at the current position.
+         *
+         * @p whitespace may contain only space, tab, carriage return, and line feed. This is
+         * distinct from WriteString so document-level whitespace can be represented and invalid
+         * document text is rejected.
+         *
+         * @param whitespace XML whitespace content.
+         * @throws System::ArgumentException if @p whitespace contains a non-whitespace character.
+         */
+        void WriteWhitespace(const std::string& whitespace);
+
+        /**
          * @brief Writes a complete element: @c <name>value</name>.
          *
          * Equivalent to WriteStartElement + WriteString + WriteEndElement.

@@ -8,6 +8,7 @@
 // covers real (non-stub) XElement::Parse/Load and XDocument::Parse/Load round-tripping mixed
 // content through tinyxml2.
 #include <gtest/gtest.h>
+#include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Xml/XmlException.hpp"
 #include "System/Xml/XmlWriter.hpp"
@@ -460,6 +461,28 @@ TEST(WriteToTests, XDocument_NoExplicitDeclaration_StillWritesXmlDeclaration) {
     doc.WriteTo(*w);
     EXPECT_NE(w->ToString().find("<?xml"), std::string::npos);
     EXPECT_NE(w->ToString().find("<root"), std::string::npos);
+}
+
+TEST(WriteToTests, XTextDirectDocumentChildUsesWriteWhitespace) {
+    XDocument doc;
+    auto text = std::make_shared<XText>("\n");
+    doc.Add(text);
+    doc.Add(std::make_shared<XElement>("root"));
+    // XDocument validates text on insertion. Mutating it afterwards exercises the distinct
+    // WriteWhitespace path in XText::WriteTo, exactly as the .NET implementation does.
+    text->setValueProperty("not document whitespace");
+
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    EXPECT_THROW(doc.WriteTo(*w), System::ArgumentException);
+}
+
+TEST(WriteToTests, XTextElementChildUsesWriteString) {
+    XElement element("root");
+    element.Add(std::make_shared<XText>("ordinary text"));
+
+    std::unique_ptr<XmlWriter> w(XmlWriter::CreateToString());
+    EXPECT_NO_THROW(element.WriteTo(*w));
+    EXPECT_NE(w->ToString().find("ordinary text"), std::string::npos);
 }
 
 // ===========================================================================

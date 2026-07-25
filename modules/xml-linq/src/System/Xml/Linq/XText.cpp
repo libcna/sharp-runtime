@@ -3,11 +3,16 @@
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include "System/Xml/Linq/XText.hpp"
 #include "System/Xml/XmlWriter.hpp"
+#include "System/Xml/Linq/XDocument.hpp"
 
 namespace System::Xml::Linq {
 
     void XText::WriteTo(System::Xml::XmlWriter& writer) const {
-        writer.WriteString(text_);
+        if (dynamic_cast<XDocument*>(parent_) != nullptr) {
+            writer.WriteWhitespace(text_);
+        } else {
+            writer.WriteString(text_);
+        }
     }
 
     void XText::SerializeTo(std::ostream& os, int /*depth*/, bool /*indent*/) const {
