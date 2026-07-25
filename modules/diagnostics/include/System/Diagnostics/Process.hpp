@@ -28,8 +28,10 @@ namespace System::Diagnostics {
      * three static overloads), WaitForExit (blocking and timeout forms), Kill (single process and
      * process-tree via killpg), ExitCode, HasExited, Id, GetCurrentProcess, and optional
      * captured-text stdout/stderr redirection (a deliberate simplification of real .NET's
-     * Stream-based StandardOutput/StandardError -- see getStandardOutputTextProperty). Explicitly
-     * NOT implemented, all deliberately out of scope for this pass: process enumeration
+     * Stream-based StandardOutput/StandardError -- see getStandardOutputTextProperty). Child
+     * setup and exec failures are reported synchronously by Start() rather than being exposed as
+     * a later exit code 127. The following surfaces are explicitly not implemented, all
+     * deliberately out of scope for this pass: process enumeration
      * (GetProcesses/GetProcessById), memory/CPU/priority/module/thread introspection properties,
      * the Exited/OutputDataReceived/ErrorDataReceived event-based async I/O model, UseShellExecute
      * (Windows-shell-specific), and the .NET 10 Run/RunAsync/RunAndCaptureText helper family.
@@ -54,7 +56,12 @@ namespace System::Diagnostics {
         [[nodiscard]] const ProcessStartInfo& getStartInfoProperty() const;
         void setStartInfoProperty(const ProcessStartInfo& value);
 
-        /** @brief Starts (or restarts) the process using getStartInfoProperty(). @return true if a process resource was started. */
+        /**
+         * @brief Starts (or restarts) the process using getStartInfoProperty().
+         * @return true if a process resource was started.
+         * @throws System::InvalidOperationException if child setup or exec fails; its message
+         * includes the executable name and native error text.
+         */
         bool Start();
 
         /**

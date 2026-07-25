@@ -78,6 +78,21 @@ namespace {
         ::close(fd);
     }
 
+    // The child cannot throw back into the parent after fork().  A small status pipe, closed on
+    // successful exec(), lets Start() distinguish an actual launch from the historical
+    // "returned Process which immediately exits 127" failure mode.
+    [[noreturn]] void reportChildStartupFailure(int statusFd, int error) noexcept {
+        while (::write(statusFd, &error, sizeof(error)) < 0 && errno == EINTR) {}
+        ::_exit(127);
+    }
+
+    void closePipe(int fds[2]) noexcept {
+        if (fds[0] >= 0) ::close(fds[0]);
+        if (fds[1] >= 0) ::close(fds[1]);
+        fds[0] = -1;
+        fds[1] = -1;
+    }
+
 }
 
 void Process::reapIfNeeded(Impl& impl) {
@@ -161,6 +176,7 @@ bool Process::Start() {
 
     int stdoutPipe[2] = {-1, -1};
     int stderrPipe[2] = {-1, -1};
+    int startupStatusPipe[2] = {-1, -1};
     bool redirOut = si.getRedirectStandardOutputProperty();
     bool redirErr = si.getRedirectStandardErrorProperty();
     if (redirOut && ::pipe(stdoutPipe) != 0)
@@ -172,31 +188,87 @@ bool Process::Start() {
         if (redirOut) { ::close(stdoutPipe[0]); ::close(stdoutPipe[1]); }
         throw System::InvalidOperationException(std::string("Failed to create stderr pipe: ") + std::strerror(errno));
     }
+    if (::pipe(startupStatusPipe) != 0) {
+        closePipe(stdoutPipe);
+        closePipe(stderrPipe);
+        throw System::InvalidOperationException(
+            std::string("Failed to create process startup status pipe: ") + std::strerror(errno));
+    }
+    int startupStatusFlags = ::fcntl(startupStatusPipe[1], F_GETFD);
+    if (startupStatusFlags < 0 ||
+        ::fcntl(startupStatusPipe[1], F_SETFD, startupStatusFlags | FD_CLOEXEC) != 0) {
+        const int error = errno;
+        closePipe(stdoutPipe);
+        closePipe(stderrPipe);
+        closePipe(startupStatusPipe);
+        throw System::InvalidOperationException(
+            std::string("Failed to configure process startup status pipe: ") + std::strerror(error));
+    }
 
     pid_t pid = ::fork();
     if (pid < 0) {
-        if (redirOut) { ::close(stdoutPipe[0]); ::close(stdoutPipe[1]); }
-        if (redirErr) { ::close(stderrPipe[0]); ::close(stderrPipe[1]); }
+        closePipe(stdoutPipe);
+        closePipe(stderrPipe);
+        closePipe(startupStatusPipe);
         throw System::InvalidOperationException(std::string("Failed to fork: ") + std::strerror(errno));
     }
 
     if (pid == 0) {
+        ::close(startupStatusPipe[0]);
         // Child: put it in its own process group so Kill(entireProcessTree=true) can target the
         // whole tree via killpg without also signaling the parent's group.
         ::setpgid(0, 0);
-        if (redirOut) { ::dup2(stdoutPipe[1], STDOUT_FILENO); ::close(stdoutPipe[0]); ::close(stdoutPipe[1]); }
-        if (redirErr) { ::dup2(stderrPipe[1], STDERR_FILENO); ::close(stderrPipe[0]); ::close(stderrPipe[1]); }
+        if (redirOut) {
+            if (::dup2(stdoutPipe[1], STDOUT_FILENO) < 0)
+                reportChildStartupFailure(startupStatusPipe[1], errno);
+            ::close(stdoutPipe[0]);
+            ::close(stdoutPipe[1]);
+        }
+        if (redirErr) {
+            if (::dup2(stderrPipe[1], STDERR_FILENO) < 0)
+                reportChildStartupFailure(startupStatusPipe[1], errno);
+            ::close(stderrPipe[0]);
+            ::close(stderrPipe[1]);
+        }
         if (!si.getWorkingDirectoryProperty().empty()) {
-            if (::chdir(si.getWorkingDirectoryProperty().c_str()) != 0) ::_exit(127);
+            if (::chdir(si.getWorkingDirectoryProperty().c_str()) != 0)
+                reportChildStartupFailure(startupStatusPipe[1], errno);
         }
         for (const auto& [name, value] : si.getEnvironmentVariablesProperty()) {
-            if (::setenv(name.c_str(), value.c_str(), 1) != 0) ::_exit(127);
+            if (::setenv(name.c_str(), value.c_str(), 1) != 0)
+                reportChildStartupFailure(startupStatusPipe[1], errno);
         }
         ::execvp(argv[0], argv.data());
-        ::_exit(127); // execvp only returns on failure
+        reportChildStartupFailure(startupStatusPipe[1], errno); // execvp only returns on failure
     }
 
     // Parent
+    ::close(startupStatusPipe[1]);
+    startupStatusPipe[1] = -1;
+    int childStartupError = 0;
+    ssize_t statusRead = 0;
+    do {
+        statusRead = ::read(startupStatusPipe[0], &childStartupError, sizeof(childStartupError));
+    } while (statusRead < 0 && errno == EINTR);
+    const int statusReadError = errno;
+    ::close(startupStatusPipe[0]);
+    startupStatusPipe[0] = -1;
+    if (statusRead != 0) {
+        if (statusRead != static_cast<ssize_t>(sizeof(childStartupError))) {
+            ::kill(pid, SIGKILL);
+        }
+        int ignoredStatus = 0;
+        while (::waitpid(pid, &ignoredStatus, 0) < 0 && errno == EINTR) {}
+        closePipe(stdoutPipe);
+        closePipe(stderrPipe);
+        if (statusRead == static_cast<ssize_t>(sizeof(childStartupError))) {
+            throw System::InvalidOperationException(
+                "Failed to start process '" + si.getFileNameProperty() + "': " +
+                std::strerror(childStartupError));
+        }
+        throw System::InvalidOperationException(
+            std::string("Failed to receive process startup status: ") + std::strerror(statusReadError));
+    }
     if (redirOut) {
         ::close(stdoutPipe[1]);
         impl_->stdoutReader = std::thread(drainPipe, stdoutPipe[0], &impl_->stdoutText);
