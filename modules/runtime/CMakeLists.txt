@@ -5,5 +5,5 @@ sharp_runtime_register_module(
     NAME Runtime
     TARGET sharp_runtime_runtime
     TYPE STATIC
-    PUBLIC_DEPENDENCIES Core.Base
+    PUBLIC_DEPENDENCIES Core.Base Collections.Core
 )

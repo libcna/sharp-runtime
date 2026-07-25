@@ -1,0 +1,312 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) Robert Vokac and contributors
+// Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
+#pragma once
+
+#include <algorithm>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <utility>
+#include <vector>
+
+#include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
+#include "System/InvalidOperationException.hpp"
+#include "System/Collections/Generic/IEnumerable.hpp"
+#include "System/Collections/Generic/KeyValuePair.hpp"
+
+namespace System::Runtime::CompilerServices {
+
+/**
+ * Associates values with object keys without keeping those keys alive.
+ *
+ * C++ counterpart of .NET System.Runtime.CompilerServices.ConditionalWeakTable<TKey,TValue>.
+ * Keys and values use `std::shared_ptr`: keys are stored as `std::weak_ptr`, while values remain
+ * strongly owned until their key expires. Consequently, callers must retain a `std::shared_ptr`
+ * to each live key. All public operations are safe for concurrent callers.
+ *
+ * @tparam TKey Type of the object used as a weakly held key.
+ * @tparam TValue Type of the value associated with a key.
+ */
+template<typename TKey, typename TValue>
+class ConditionalWeakTable final
+    : public System::Collections::Generic::IEnumerable<
+          System::Collections::Generic::KeyValuePair<std::shared_ptr<TKey>, std::shared_ptr<TValue>>> {
+public:
+    /** Shared ownership type used for keys. */
+    using KeyPtr = std::shared_ptr<TKey>;
+
+    /** Shared ownership type used for values. A null value is permitted. */
+    using ValuePtr = std::shared_ptr<TValue>;
+
+    /** Pair type returned by the table enumerator. */
+    using Pair = System::Collections::Generic::KeyValuePair<KeyPtr, ValuePtr>;
+
+    /** Callback used by GetValue to construct a value for a missing key. */
+    using CreateValueCallback = std::function<ValuePtr(const KeyPtr&)>;
+
+private:
+    struct Entry {
+        std::weak_ptr<TKey> key;
+        ValuePtr value;
+    };
+
+    class Enumerator final : public System::Collections::Generic::IEnumerator<Pair> {
+        std::vector<Entry> entries_;
+        std::size_t nextIndex_ = 0;
+        Pair current_;
+        bool hasCurrent_ = false;
+
+    public:
+        /** Initializes an enumerator over the table entries visible at creation time. */
+        explicit Enumerator(std::vector<Entry> entries) : entries_(std::move(entries)) {}
+
+        /** Advances to the next key that has not yet expired. */
+        bool MoveNext() override {
+            while (nextIndex_ < entries_.size()) {
+                const Entry& entry = entries_[nextIndex_++];
+                KeyPtr key = entry.key.lock();
+                if (key) {
+                    current_ = Pair(std::move(key), entry.value);
+                    hasCurrent_ = true;
+                    return true;
+                }
+            }
+
+            current_ = Pair{};
+            hasCurrent_ = false;
+            return false;
+        }
+
+        /** Returns the enumerator to its initial, pre-first-element state. */
+        void Reset() override {
+            nextIndex_ = 0;
+            current_ = Pair{};
+            hasCurrent_ = false;
+        }
+
+        /** Gets the current key/value pair. */
+        [[nodiscard]] const Pair& Current() const override {
+            if (!hasCurrent_) {
+                throw System::InvalidOperationException(
+                    "Enumeration has either not started or has already finished.");
+            }
+            return current_;
+        }
+    };
+
+    mutable std::mutex mutex_;
+    std::vector<Entry> entries_;
+
+    static void requireKey(const KeyPtr& key) {
+        if (!key) {
+            throw System::ArgumentNullException("key");
+        }
+    }
+
+    static void requireCallback(const CreateValueCallback& callback, const char* parameterName) {
+        if (!callback) {
+            throw System::ArgumentNullException(parameterName);
+        }
+    }
+
+    void removeExpiredLocked() {
+        std::erase_if(entries_, [](const Entry& entry) { return entry.key.expired(); });
+    }
+
+    [[nodiscard]] auto findEntryLocked(const KeyPtr& key) {
+        return std::find_if(entries_.begin(), entries_.end(), [&key](const Entry& entry) {
+            KeyPtr existing = entry.key.lock();
+            return existing && existing.get() == key.get();
+        });
+    }
+
+    [[nodiscard]] ValuePtr getOrAddLocked(const KeyPtr& key, const ValuePtr& value) {
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        const auto entry = findEntryLocked(key);
+        if (entry != entries_.end()) {
+            return entry->value;
+        }
+
+        entries_.push_back(Entry{key, value});
+        return value;
+    }
+
+public:
+    /** Initializes an empty conditional weak table. */
+    ConditionalWeakTable() = default;
+
+    ConditionalWeakTable(const ConditionalWeakTable&) = delete;
+    ConditionalWeakTable& operator=(const ConditionalWeakTable&) = delete;
+    ConditionalWeakTable(ConditionalWeakTable&&) = delete;
+    ConditionalWeakTable& operator=(ConditionalWeakTable&&) = delete;
+
+    /**
+     * Gets the value associated with a key.
+     * @param key Key to locate; must not be null.
+     * @param value Receives the associated value, or null when no entry exists.
+     * @return true when an entry was found; otherwise false.
+     */
+    [[nodiscard]] bool TryGetValue(const KeyPtr& key, ValuePtr& value) {
+        requireKey(key);
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        const auto entry = findEntryLocked(key);
+        if (entry == entries_.end()) {
+            value.reset();
+            return false;
+        }
+        value = entry->value;
+        return true;
+    }
+
+    /**
+     * Adds a key and value pair.
+     * @throws System::ArgumentNullException when @p key is null.
+     * @throws System::ArgumentException when @p key is already present.
+     */
+    void Add(const KeyPtr& key, const ValuePtr& value) {
+        requireKey(key);
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        if (findEntryLocked(key) != entries_.end()) {
+            throw System::ArgumentException("An item with the same key has already been added.");
+        }
+        entries_.push_back(Entry{key, value});
+    }
+
+    /**
+     * Adds a key and value pair only when the key is absent.
+     * @return true when the pair was added; false when an entry already existed.
+     */
+    [[nodiscard]] bool TryAdd(const KeyPtr& key, const ValuePtr& value) {
+        requireKey(key);
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        if (findEntryLocked(key) != entries_.end()) {
+            return false;
+        }
+        entries_.push_back(Entry{key, value});
+        return true;
+    }
+
+    /** Adds a missing key or updates the value associated with an existing key. */
+    void AddOrUpdate(const KeyPtr& key, const ValuePtr& value) {
+        requireKey(key);
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        const auto entry = findEntryLocked(key);
+        if (entry == entries_.end()) {
+            entries_.push_back(Entry{key, value});
+        } else {
+            entry->value = value;
+        }
+    }
+
+    /** Removes a key and its value from the table. */
+    [[nodiscard]] bool Remove(const KeyPtr& key) {
+        ValuePtr ignored;
+        return Remove(key, ignored);
+    }
+
+    /**
+     * Removes a key and returns its value when present.
+     * @param value Receives the removed value, or null when the key is absent.
+     */
+    [[nodiscard]] bool Remove(const KeyPtr& key, ValuePtr& value) {
+        requireKey(key);
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        const auto entry = findEntryLocked(key);
+        if (entry == entries_.end()) {
+            value.reset();
+            return false;
+        }
+        value = std::move(entry->value);
+        entries_.erase(entry);
+        return true;
+    }
+
+    /** Removes all pairs from the table. */
+    void Clear() {
+        std::lock_guard lock(mutex_);
+        entries_.clear();
+    }
+
+    /** Returns the existing value for a key, or inserts and returns @p value. */
+    [[nodiscard]] ValuePtr GetOrAdd(const KeyPtr& key, const ValuePtr& value) {
+        requireKey(key);
+        ValuePtr existing;
+        if (TryGetValue(key, existing)) {
+            return existing;
+        }
+        return getOrAddLocked(key, value);
+    }
+
+    /**
+     * Returns the existing value for a key, or creates one outside the table lock.
+     *
+     * As in .NET, contending calls may invoke the factory more than once, but only the value
+     * from the winning insertion is retained and returned.
+     */
+    [[nodiscard]] ValuePtr GetOrAdd(const KeyPtr& key, const CreateValueCallback& valueFactory) {
+        requireKey(key);
+        requireCallback(valueFactory, "valueFactory");
+        ValuePtr existing;
+        if (TryGetValue(key, existing)) {
+            return existing;
+        }
+        return getOrAddLocked(key, valueFactory(key));
+    }
+
+    /**
+     * Returns the existing value for a key, or creates one with an additional factory argument.
+     * @tparam TArg Type of the extra factory argument.
+     */
+    template<typename TArg>
+    [[nodiscard]] ValuePtr GetOrAdd(
+        const KeyPtr& key,
+        const std::function<ValuePtr(const KeyPtr&, const TArg&)>& valueFactory,
+        const TArg& factoryArgument) {
+        requireKey(key);
+        if (!valueFactory) {
+            throw System::ArgumentNullException("valueFactory");
+        }
+        ValuePtr existing;
+        if (TryGetValue(key, existing)) {
+            return existing;
+        }
+        return getOrAddLocked(key, valueFactory(key, factoryArgument));
+    }
+
+    /** Returns the existing value for a key, or creates one using the supplied legacy callback. */
+    [[nodiscard]] ValuePtr GetValue(const KeyPtr& key, const CreateValueCallback& createValueCallback) {
+        requireKey(key);
+        requireCallback(createValueCallback, "createValueCallback");
+        ValuePtr existing;
+        if (TryGetValue(key, existing)) {
+            return existing;
+        }
+        return getOrAddLocked(key, createValueCallback(key));
+    }
+
+    /** Returns the existing value for a key, or default-constructs a value for a missing key. */
+    [[nodiscard]] ValuePtr GetOrCreateValue(const KeyPtr& key) {
+        return GetValue(key, [](const KeyPtr&) { return std::make_shared<TValue>(); });
+    }
+
+    /**
+     * Gets an enumerator over entries visible when this method is called.
+     * Expired keys are skipped and entries added later are not enumerated.
+     */
+    [[nodiscard]] System::Collections::Generic::IEnumerator<Pair>* GetEnumerator() override {
+        std::lock_guard lock(mutex_);
+        removeExpiredLocked();
+        return new Enumerator(entries_);
+    }
+};
+
+} // namespace System::Runtime::CompilerServices

@@ -2,12 +2,33 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #include <gtest/gtest.h>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <vector>
 #include "System/Attribute.hpp"
+#include "System/Index.hpp"
+#include "System/Range.hpp"
+#include "System/Runtime/CompilerServices/AsyncStateMachineAttribute.hpp"
 #include "System/Runtime/CompilerServices/MethodImplOptions.hpp"
 #include "System/Runtime/CompilerServices/MethodImplAttribute.hpp"
+#include "System/Runtime/CompilerServices/MethodCodeType.hpp"
+#include "System/Runtime/CompilerServices/CompilerFeatureRequiredAttribute.hpp"
+#include "System/Runtime/CompilerServices/ConditionalWeakTable.hpp"
 #include "System/Runtime/CompilerServices/CallerAttributes.hpp"
 #include "System/Runtime/CompilerServices/CompilerGeneratedAttribute.hpp"
+#include "System/Runtime/CompilerServices/EnumeratorCancellationAttribute.hpp"
+#include "System/Runtime/CompilerServices/ExtensionAttribute.hpp"
+#include "System/Runtime/CompilerServices/InterpolatedStringHandlerAttribute.hpp"
+#include "System/Runtime/CompilerServices/IsExternalInit.hpp"
+#include "System/Runtime/CompilerServices/IteratorStateMachineAttribute.hpp"
+#include "System/Runtime/CompilerServices/ModuleInitializerAttribute.hpp"
+#include "System/Runtime/CompilerServices/RequiredMemberAttribute.hpp"
+#include "System/Runtime/CompilerServices/RuntimeHelpers.hpp"
+#include "System/Runtime/CompilerServices/SkipLocalsInitAttribute.hpp"
+#include "System/Runtime/CompilerServices/StateMachineAttribute.hpp"
 #include "System/Runtime/GCSettings.hpp"
 #include "System/Runtime/AmbiguousImplementationException.hpp"
 #include "System/Runtime/InteropServices/InteropAttributes.hpp"
@@ -43,6 +64,17 @@ TEST(MethodImplOptionsTests, OrOperator_CombinesFlags) {
     EXPECT_EQ(static_cast<int>(combined), 0x0008 | 0x0040);
 }
 
+TEST(MethodImplOptionsTests, Async_Value) {
+    EXPECT_EQ(static_cast<int>(MethodImplOptions::Async), 0x2000);
+}
+
+TEST(MethodCodeTypeTests, Values_MatchDotNet) {
+    EXPECT_EQ(static_cast<int>(MethodCodeType::IL), 0);
+    EXPECT_EQ(static_cast<int>(MethodCodeType::Native), 1);
+    EXPECT_EQ(static_cast<int>(MethodCodeType::OPTIL), 2);
+    EXPECT_EQ(static_cast<int>(MethodCodeType::Runtime), 3);
+}
+
 // ===========================================================================
 // MethodImplAttribute
 // ===========================================================================
@@ -53,8 +85,259 @@ TEST(MethodImplAttributeTests, Constructor_EnumValue) {
 }
 
 TEST(MethodImplAttributeTests, Constructor_IntValue) {
-    MethodImplAttribute attr(static_cast<int16_t>(0x0008));
+    MethodImplAttribute attr(static_cast<SharpRuntime::shortcs>(0x0008));
     EXPECT_EQ(attr.getValueProperty(), MethodImplOptions::NoInlining);
+}
+
+TEST(MethodImplAttributeTests, DefaultConstructor_UsesDefaultOptionsAndILCodeType) {
+    MethodImplAttribute attr;
+    EXPECT_EQ(static_cast<int>(attr.getValueProperty()), 0);
+    EXPECT_EQ(attr.getMethodCodeTypeProperty(), MethodCodeType::IL);
+}
+
+TEST(MethodImplAttributeTests, MethodCodeType_IsMutableMetadata) {
+    MethodImplAttribute attr;
+    attr.setMethodCodeTypeProperty(MethodCodeType::Native);
+    EXPECT_EQ(attr.getMethodCodeTypeProperty(), MethodCodeType::Native);
+}
+
+// ===========================================================================
+// Compiler metadata attributes
+// ===========================================================================
+
+TEST(StateMachineAttributeTests, StateMachineType_IsRetained) {
+    StateMachineAttribute attr(System::Type::From<int>());
+    EXPECT_EQ(attr.getStateMachineTypeProperty().getNameProperty(),
+              System::Type::From<int>().getNameProperty());
+}
+
+TEST(StateMachineAttributeTests, AsyncAndIteratorAttributes_InheritStateMachineType) {
+    AsyncStateMachineAttribute asyncAttr(System::Type::From<double>());
+    IteratorStateMachineAttribute iteratorAttr(System::Type::From<char>());
+    EXPECT_EQ(asyncAttr.getStateMachineTypeProperty().getNameProperty(),
+              System::Type::From<double>().getNameProperty());
+    EXPECT_EQ(iteratorAttr.getStateMachineTypeProperty().getNameProperty(),
+              System::Type::From<char>().getNameProperty());
+}
+
+TEST(CompilerFeatureRequiredAttributeTests, StoresFeatureNameAndOptionalFlag) {
+    CompilerFeatureRequiredAttribute attr("custom-feature");
+    EXPECT_EQ(attr.getFeatureNameProperty(), "custom-feature");
+    EXPECT_FALSE(attr.getIsOptionalProperty());
+    attr.setIsOptionalProperty(true);
+    EXPECT_TRUE(attr.getIsOptionalProperty());
+    EXPECT_EQ(CompilerFeatureRequiredAttribute::RefStructs, "RefStructs");
+    EXPECT_EQ(CompilerFeatureRequiredAttribute::RequiredMembers, "RequiredMembers");
+}
+
+TEST(CompilerMetadataMarkerAttributeTests, MarkersInstantiateAndDeriveFromAttribute) {
+    ExtensionAttribute extension;
+    RequiredMemberAttribute required;
+    EnumeratorCancellationAttribute cancellation;
+    ModuleInitializerAttribute initializer;
+    SkipLocalsInitAttribute skipLocals;
+    InterpolatedStringHandlerAttribute handler;
+    (void)extension;
+    (void)required;
+    (void)cancellation;
+    (void)initializer;
+    (void)skipLocals;
+    (void)handler;
+    EXPECT_TRUE((std::is_base_of_v<System::Attribute, ExtensionAttribute>));
+    EXPECT_TRUE((std::is_base_of_v<System::Attribute, RequiredMemberAttribute>));
+    EXPECT_FALSE((std::is_default_constructible_v<IsExternalInit>));
+}
+
+// ===========================================================================
+// ConditionalWeakTable
+// ===========================================================================
+
+namespace {
+struct ConditionalWeakTableKey {
+    int id = 0;
+};
+
+struct ConditionalWeakTableValue {
+    int value = 0;
+};
+} // namespace
+
+using ConditionalWeakTableUnderTest =
+    ConditionalWeakTable<ConditionalWeakTableKey, ConditionalWeakTableValue>;
+
+TEST(ConditionalWeakTableTests, AddTryGetAndRemove_UseObjectIdentity) {
+    ConditionalWeakTableUnderTest table;
+    auto key = std::make_shared<ConditionalWeakTableKey>();
+    auto value = std::make_shared<ConditionalWeakTableValue>();
+    value->value = 42;
+
+    table.Add(key, value);
+    std::shared_ptr<ConditionalWeakTableValue> actual;
+    EXPECT_TRUE(table.TryGetValue(key, actual));
+    EXPECT_EQ(actual, value);
+    EXPECT_THROW(table.Add(key, value), System::ArgumentException);
+
+    std::shared_ptr<ConditionalWeakTableValue> removed;
+    EXPECT_TRUE(table.Remove(key, removed));
+    EXPECT_EQ(removed, value);
+    EXPECT_FALSE(table.TryGetValue(key, actual));
+    EXPECT_EQ(actual, nullptr);
+}
+
+TEST(ConditionalWeakTableTests, NullKey_ThrowsArgumentNullException) {
+    ConditionalWeakTableUnderTest table;
+    std::shared_ptr<ConditionalWeakTableKey> key;
+    auto value = std::make_shared<ConditionalWeakTableValue>();
+    std::shared_ptr<ConditionalWeakTableValue> actual;
+    EXPECT_THROW(table.Add(key, value), System::ArgumentNullException);
+    EXPECT_THROW(table.TryGetValue(key, actual), System::ArgumentNullException);
+    EXPECT_THROW(table.Remove(key), System::ArgumentNullException);
+}
+
+TEST(ConditionalWeakTableTests, AddOrUpdateAndTryAdd_MatchConditionalTableSemantics) {
+    ConditionalWeakTableUnderTest table;
+    auto key = std::make_shared<ConditionalWeakTableKey>();
+    auto first = std::make_shared<ConditionalWeakTableValue>();
+    auto second = std::make_shared<ConditionalWeakTableValue>();
+    first->value = 1;
+    second->value = 2;
+
+    EXPECT_TRUE(table.TryAdd(key, first));
+    EXPECT_FALSE(table.TryAdd(key, second));
+    table.AddOrUpdate(key, second);
+    std::shared_ptr<ConditionalWeakTableValue> actual;
+    EXPECT_TRUE(table.TryGetValue(key, actual));
+    EXPECT_EQ(actual, second);
+}
+
+TEST(ConditionalWeakTableTests, GetOrAddFactory_RunsOutsideLockAndPreservesExistingValue) {
+    ConditionalWeakTableUnderTest table;
+    auto key = std::make_shared<ConditionalWeakTableKey>();
+    auto relatedKey = std::make_shared<ConditionalWeakTableKey>();
+    auto relatedValue = std::make_shared<ConditionalWeakTableValue>();
+    relatedValue->value = 7;
+    table.Add(relatedKey, relatedValue);
+
+    int factoryCalls = 0;
+    auto actual = table.GetOrAdd(key, [&](const auto&) {
+        ++factoryCalls;
+        return table.GetOrAdd(relatedKey, std::make_shared<ConditionalWeakTableValue>());
+    });
+    EXPECT_EQ(factoryCalls, 1);
+    EXPECT_EQ(actual, relatedValue);
+
+    auto replacement = std::make_shared<ConditionalWeakTableValue>();
+    EXPECT_EQ(table.GetOrAdd(key, replacement), relatedValue);
+    EXPECT_EQ(factoryCalls, 1);
+}
+
+TEST(ConditionalWeakTableTests, ExpiredKeys_AreNotEnumerated) {
+    ConditionalWeakTableUnderTest table;
+    auto value = std::make_shared<ConditionalWeakTableValue>();
+    {
+        auto key = std::make_shared<ConditionalWeakTableKey>();
+        table.Add(key, value);
+    }
+
+    std::unique_ptr<System::Collections::Generic::IEnumerator<ConditionalWeakTableUnderTest::Pair>>
+        enumerator(table.GetEnumerator());
+    EXPECT_FALSE(enumerator->MoveNext());
+}
+
+TEST(ConditionalWeakTableTests, Enumerator_DoesNotIncludeEntriesAddedAfterCreation) {
+    ConditionalWeakTableUnderTest table;
+    auto firstKey = std::make_shared<ConditionalWeakTableKey>();
+    auto secondKey = std::make_shared<ConditionalWeakTableKey>();
+    auto firstValue = std::make_shared<ConditionalWeakTableValue>();
+    auto secondValue = std::make_shared<ConditionalWeakTableValue>();
+    table.Add(firstKey, firstValue);
+
+    std::unique_ptr<System::Collections::Generic::IEnumerator<ConditionalWeakTableUnderTest::Pair>>
+        enumerator(table.GetEnumerator());
+    table.Add(secondKey, secondValue);
+    ASSERT_TRUE(enumerator->MoveNext());
+    EXPECT_EQ(enumerator->Current().Key, firstKey);
+    EXPECT_FALSE(enumerator->MoveNext());
+}
+
+TEST(ConditionalWeakTableTests, GetOrAdd_ConcurrentCallsReturnTheStoredValue) {
+    ConditionalWeakTableUnderTest table;
+    auto key = std::make_shared<ConditionalWeakTableKey>();
+    std::vector<std::shared_ptr<ConditionalWeakTableValue>> results(8);
+    std::vector<std::thread> threads;
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        threads.emplace_back([&table, &key, &results, index]() {
+            results[index] = table.GetOrAdd(key, [index](const auto&) {
+                auto value = std::make_shared<ConditionalWeakTableValue>();
+                value->value = static_cast<int>(index);
+                return value;
+            });
+        });
+    }
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    for (const auto& result : results) {
+        EXPECT_EQ(result, results.front());
+    }
+}
+
+// ===========================================================================
+// RuntimeHelpers
+// ===========================================================================
+
+TEST(RuntimeHelpersTests, IdentityHashAndObjectValue_FollowCppObjectIdentity) {
+    auto object = std::make_shared<ConditionalWeakTableValue>();
+    auto sameObject = object;
+    auto otherObject = std::make_shared<ConditionalWeakTableValue>();
+    EXPECT_TRUE(RuntimeHelpers::Equals(object, sameObject));
+    EXPECT_FALSE(RuntimeHelpers::Equals(object, otherObject));
+    EXPECT_NE(RuntimeHelpers::GetHashCode(object), 0);
+    EXPECT_EQ(RuntimeHelpers::GetHashCode(std::shared_ptr<ConditionalWeakTableValue>{}), 0);
+    EXPECT_EQ(RuntimeHelpers::GetObjectValue(object), object);
+    EXPECT_EQ(RuntimeHelpers::GetObjectValue(5), 5);
+}
+
+TEST(RuntimeHelpersTests, GetSubArray_UsesRangeValidationAndHalfOpenRange) {
+    const std::vector<int> source{1, 2, 3, 4};
+    const auto result = RuntimeHelpers::GetSubArray(source, System::Range(System::Index(1), System::Index(3)));
+    EXPECT_EQ(result, (std::vector<int>{2, 3}));
+    EXPECT_THROW(RuntimeHelpers::GetSubArray(source, System::Range(System::Index(3), System::Index(1))),
+                 System::ArgumentOutOfRangeException);
+}
+
+TEST(RuntimeHelpersTests, GuaranteedCleanup_ReceivesExceptionState) {
+    bool normalCleanupSawException = true;
+    RuntimeHelpers::ExecuteCodeWithGuaranteedCleanup(
+        [](void*) {},
+        [&normalCleanupSawException](void*, bool exceptionThrown) {
+            normalCleanupSawException = exceptionThrown;
+        },
+        nullptr);
+    EXPECT_FALSE(normalCleanupSawException);
+
+    bool throwingCleanupSawException = false;
+    EXPECT_THROW(RuntimeHelpers::ExecuteCodeWithGuaranteedCleanup(
+                     [](void*) { throw std::runtime_error("expected"); },
+                     [&throwingCleanupSawException](void*, bool exceptionThrown) {
+                         throwingCleanupSawException = exceptionThrown;
+                     },
+                     nullptr),
+                 std::runtime_error);
+    EXPECT_TRUE(throwingCleanupSawException);
+}
+
+TEST(RuntimeHelpersTests, ReferenceContainingDetection_IsConservative) {
+    EXPECT_FALSE((RuntimeHelpers::IsReferenceOrContainsReferences<int>()));
+    EXPECT_TRUE((RuntimeHelpers::IsReferenceOrContainsReferences<std::shared_ptr<int>>()));
+    EXPECT_TRUE((RuntimeHelpers::IsReferenceOrContainsReferences<std::string>()));
+}
+
+TEST(RuntimeHelpersTests, ClrMetadataOperations_ThrowPlatformNotSupported) {
+    EXPECT_THROW(RuntimeHelpers::CreateSpan<int>(System::RuntimeFieldHandle{}),
+                 System::PlatformNotSupportedException);
+    EXPECT_THROW(RuntimeHelpers::SizeOf(System::RuntimeTypeHandle{}),
+                 System::PlatformNotSupportedException);
 }
 
 // ===========================================================================

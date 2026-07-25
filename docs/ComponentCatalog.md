@@ -8,7 +8,7 @@ This file is generated from the CMake component registrations. Run
 `python3 scripts/generate_component_catalog.py` after changing module
 metadata, or use `--check` to verify that the committed catalogue is current.
 
-The graph contains **40 physical modules** and **85 direct production dependency edges**.
+The graph contains **40 physical modules** and **86 direct production dependency edges**.
 
 For each row, the component name and representative public header form a
 minimal consumer example using the template below:
@@ -40,7 +40,7 @@ for maintainers and are not part of the consumer include surface.
 | `Diagnostics` | `modules/diagnostics` | static | `Core.Base` | — | — | — | `System/Diagnostics/CodeAnalysis/CodeAnalysisAttributes.hpp` |
 | `Globalization` | `modules/globalization` | static | `Core.Base` | — | — | — | `System/Globalization/Calendar.hpp` |
 | `Numerics` | `modules/numerics` | static | `Buffers`, `Collections.Core`, `Core.Base` | — | — | — | `System/Numerics/BigInteger.hpp` |
-| `Runtime` | `modules/runtime` | static | `Core.Base` | — | — | — | `System/Runtime/AmbiguousImplementationException.hpp` |
+| `Runtime` | `modules/runtime` | static | `Collections.Core`, `Core.Base` | — | — | — | `System/Runtime/AmbiguousImplementationException.hpp` |
 | `Text` | `modules/text` | static | `Buffers`, `Core.Base` | — | — | — | `System/Text/ASCIIEncoding.hpp` |
 | `Text.Json` | `modules/text-json` | static | `Core.Base`, `Text` | `Collections.Core` | `Collections.Core` | — | `System/Text/Json/JsonCommentHandling.hpp` |
 | `Text.RegularExpressions` | `modules/text-regular-expressions` | interface | `Core.Base` | — | — | — | `System/Text/RegularExpressions/Capture.hpp` |

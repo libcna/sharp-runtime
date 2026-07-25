@@ -7,7 +7,7 @@ Sharp Runtime exposes independently selectable CMake targets. Applications
 request only their direct components; Sharp Runtime resolves and enables the
 transitive dependency closure.
 
-The registered graph currently contains 40 physical modules and 85 direct
+The registered graph currently contains 40 physical modules and 86 direct
 production dependency edges. The boundary validator reports no cycles,
 duplicate include paths, orphan files, undeclared edges, stale edges, or
 visibility mismatches. The dependency allow-list is empty.
