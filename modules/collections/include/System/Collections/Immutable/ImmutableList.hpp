@@ -29,12 +29,12 @@ using SharpRuntime::intcs;
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
  * by an AVL tree, not a flat vector): range sort with the default comparison and
- * ToBuilder/Builder. Custom equality is available for item-based Remove, RemoveRange, and
- * Replace operations; custom equality/comparison overloads for IndexOf, LastIndexOf, and
- * BinarySearch remain deferred. These are real gaps, not incorrect behavior for the surface
- * that does exist -- left undone here rather than expanded ad hoc in a single audit pass; a full
- * port would need an AVL/red-black backing structure to match .NET's O(log n) persistent-update
- * complexity (this port's vector-copy approach is O(n) per mutation).
+ * ToBuilder/Builder. Custom equality is available for item-based mutations and range lookups;
+ * custom equality/comparison overloads for BinarySearch remain deferred. These are real gaps,
+ * not incorrect behavior for the surface that does exist -- left undone here rather than
+ * expanded ad hoc in a single audit pass; a full port would need an AVL/red-black backing
+ * structure to match .NET's O(log n) persistent-update complexity (this port's vector-copy
+ * approach is O(n) per mutation).
  *
  * @tparam T The type of elements stored in the list.
  */
@@ -712,6 +712,54 @@ public:
     }
 
     /**
+     * @brief Returns the first index of @p item within the requested range, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.IndexOf(T, int, int, IEqualityComparer<T>)
+     * using the default equality operator.
+     * @param item The element to locate.
+     * @param index The zero-based first index to search.
+     * @param count The number of elements to search.
+     * @return The first matching index in the range, or -1 if not found.
+     * @throws System::ArgumentOutOfRangeException if the range is invalid.
+     */
+    [[nodiscard]] intcs IndexOf(const T& item, intcs index, intcs count) const {
+        requireValidRange(index, count);
+        const intcs end = index + count;
+        for (intcs current = index; current < end; ++current) {
+            if ((*data_)[static_cast<size_t>(current)] == item) {
+                return current;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * @brief Returns the first comparer-equal index within the requested range, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.IndexOf(T, int, int, IEqualityComparer<T>).
+     * @param item The element to locate.
+     * @param index The zero-based first index to search.
+     * @param count The number of elements to search.
+     * @param equalityComparer The equality semantics used to compare values.
+     * @return The first matching index in the range, or -1 if not found.
+     * @throws System::ArgumentOutOfRangeException if the range is invalid.
+     */
+    [[nodiscard]] intcs IndexOf(
+        const T& item,
+        intcs index,
+        intcs count,
+        const System::Collections::Generic::IEqualityComparer<T>& equalityComparer) const {
+        requireValidRange(index, count);
+        const intcs end = index + count;
+        for (intcs current = index; current < end; ++current) {
+            if (equalityComparer.Equals(item, (*data_)[static_cast<size_t>(current)])) {
+                return current;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * @brief Returns the zero-based index of the last occurrence of @p item, or -1 if not found.
      *
      * C++ counterpart of .NET ImmutableList<T>.LastIndexOf(T).
@@ -721,6 +769,77 @@ public:
     [[nodiscard]] intcs LastIndexOf(const T& item) const {
         for (intcs i = getCountProperty() - 1; i >= 0; --i)
             if ((*data_)[static_cast<size_t>(i)] == item) return i;
+        return -1;
+    }
+
+    /**
+     * @brief Returns the last index of @p item within the requested backward range, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.LastIndexOf(T, int, int,
+     * IEqualityComparer<T>) using the default equality operator.
+     * @param item The element to locate.
+     * @param index The zero-based index at which to begin searching backward.
+     * @param count The number of elements to search.
+     * @return The last matching index in the range, or -1 if not found.
+     * @throws System::ArgumentOutOfRangeException if the range is invalid.
+     */
+    [[nodiscard]] intcs LastIndexOf(const T& item, intcs index, intcs count) const {
+        if (index == 0 && count == 0) {
+            return -1;
+        }
+
+        const intcs size = getCountProperty();
+        if (index < 0 || index >= size) {
+            throw System::ArgumentOutOfRangeException("index");
+        }
+        if (count < 0 || count > size || index - count + 1 < 0) {
+            throw System::ArgumentOutOfRangeException("count");
+        }
+
+        const intcs first = index - count + 1;
+        for (intcs current = index; current >= first; --current) {
+            if ((*data_)[static_cast<size_t>(current)] == item) {
+                return current;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * @brief Returns the last comparer-equal index within the requested backward range, or -1.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.LastIndexOf(T, int, int,
+     * IEqualityComparer<T>).
+     * @param item The element to locate.
+     * @param index The zero-based index at which to begin searching backward.
+     * @param count The number of elements to search.
+     * @param equalityComparer The equality semantics used to compare values.
+     * @return The last matching index in the range, or -1 if not found.
+     * @throws System::ArgumentOutOfRangeException if the range is invalid.
+     */
+    [[nodiscard]] intcs LastIndexOf(
+        const T& item,
+        intcs index,
+        intcs count,
+        const System::Collections::Generic::IEqualityComparer<T>& equalityComparer) const {
+        if (index == 0 && count == 0) {
+            return -1;
+        }
+
+        const intcs size = getCountProperty();
+        if (index < 0 || index >= size) {
+            throw System::ArgumentOutOfRangeException("index");
+        }
+        if (count < 0 || count > size || index - count + 1 < 0) {
+            throw System::ArgumentOutOfRangeException("count");
+        }
+
+        const intcs first = index - count + 1;
+        for (intcs current = index; current >= first; --current) {
+            if (equalityComparer.Equals(item, (*data_)[static_cast<size_t>(current)])) {
+                return current;
+            }
+        }
         return -1;
     }
 
