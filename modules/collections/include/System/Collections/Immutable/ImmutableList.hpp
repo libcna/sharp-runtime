@@ -11,6 +11,7 @@
 #include "System/ArgumentException.hpp"
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
+#include "System/Collections/Generic/IComparer.hpp"
 
 namespace System::Collections::Immutable {
 
@@ -26,7 +27,8 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): range Sort overloads, ToBuilder/Builder,
+ * by an AVL tree, not a flat vector): range sort with the default comparison,
+ * ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -372,8 +374,8 @@ public:
     /**
      * @brief Returns a new list with all elements sorted using T::operator<.
      *
-     * C++ counterpart of .NET ImmutableList<T>.Sort(). Range overloads remain
-     * deliberately unimplemented.
+     * C++ counterpart of .NET ImmutableList<T>.Sort(). The range overload with
+     * the default comparison remains deliberately unimplemented.
      * @return A sorted immutable list; the source list is unchanged.
      */
     [[nodiscard]] ImmutableList<T> Sort() const {
@@ -401,6 +403,43 @@ public:
         std::sort(values->begin(), values->end(),
                   [&comparison](const T& left, const T& right) {
                       return comparison(left, right) < 0;
+                  });
+        return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Returns a new list sorted by an `IComparer<T>`.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Sort(IComparer<T>). A C++
+     * reference cannot be null; use the parameterless overload for the default
+     * comparison.
+     * @param comparer The comparer used to order elements.
+     * @return A sorted immutable list; the source list is unchanged.
+     */
+    [[nodiscard]] ImmutableList<T> Sort(
+        const System::Collections::Generic::IComparer<T>& comparer) const {
+        return Sort(0, getCountProperty(), comparer);
+    }
+
+    /**
+     * @brief Returns a new list with a range sorted by an `IComparer<T>`.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Sort(int, int, IComparer<T>).
+     * @param index The zero-based first source element in the range.
+     * @param count The number of elements to sort.
+     * @param comparer The comparer used to order the range.
+     * @return A list with only the requested range sorted; the source is unchanged.
+     * @throws System::ArgumentOutOfRangeException if the range is outside this list.
+     */
+    [[nodiscard]] ImmutableList<T> Sort(
+        intcs index,
+        intcs count,
+        const System::Collections::Generic::IComparer<T>& comparer) const {
+        requireValidRange(index, count);
+        auto values = std::make_shared<std::vector<T>>(*data_);
+        std::sort(values->begin() + index, values->begin() + index + count,
+                  [&comparer](const T& left, const T& right) {
+                      return comparer.Compare(left, right) < 0;
                   });
         return ImmutableList<T>(std::move(values));
     }

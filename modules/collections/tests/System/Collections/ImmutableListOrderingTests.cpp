@@ -8,8 +8,20 @@
 #include "System/ArgumentNullException.hpp"
 #include "System/ArgumentOutOfRangeException.hpp"
 #include "System/Collections/Immutable/ImmutableList.hpp"
+#include "System/Collections/Generic/IComparer.hpp"
 
 using System::Collections::Immutable::ImmutableList;
+
+namespace {
+class DescendingIntComparer final : public System::Collections::Generic::IComparer<int> {
+public:
+    [[nodiscard]] SharpRuntime::intcs Compare(const int& left, const int& right) const override {
+        if (left > right) return -1;
+        if (right > left) return 1;
+        return 0;
+    }
+};
+}
 
 TEST(ImmutableListOrderingTests, SortReturnsOrderedCopyWithoutMutatingSource) {
     const auto source = ImmutableList<int>::Create({4, 1, 3, 2});
@@ -68,6 +80,35 @@ TEST(ImmutableListOrderingTests, SortWithEmptyComparisonThrowsArgumentNullExcept
     const std::function<SharpRuntime::intcs(const int&, const int&)> comparison;
 
     EXPECT_THROW(source.Sort(comparison), System::ArgumentNullException);
+}
+
+TEST(ImmutableListOrderingTests, SortWithIComparerReturnsIndependentCustomOrder) {
+    const auto source = ImmutableList<int>::Create({4, 1, 3, 2});
+    const DescendingIntComparer comparer;
+    const auto sorted = source.Sort(comparer);
+
+    EXPECT_EQ(source[0], 4);
+    EXPECT_EQ(source[1], 1);
+    EXPECT_EQ(sorted[0], 4);
+    EXPECT_EQ(sorted[1], 3);
+    EXPECT_EQ(sorted[2], 2);
+    EXPECT_EQ(sorted[3], 1);
+}
+
+TEST(ImmutableListOrderingTests, SortRangeWithIComparerOnlyReordersRequestedRange) {
+    const auto source = ImmutableList<int>::Create({10, 40, 20, 30, 50});
+    const DescendingIntComparer comparer;
+    const auto sorted = source.Sort(1, 3, comparer);
+
+    EXPECT_EQ(source[1], 40);
+    EXPECT_EQ(source[2], 20);
+    EXPECT_EQ(source[3], 30);
+    EXPECT_EQ(sorted[0], 10);
+    EXPECT_EQ(sorted[1], 40);
+    EXPECT_EQ(sorted[2], 30);
+    EXPECT_EQ(sorted[3], 20);
+    EXPECT_EQ(sorted[4], 50);
+    EXPECT_THROW(source.Sort(-1, 1, comparer), System::ArgumentOutOfRangeException);
 }
 
 TEST(ImmutableListOrderingTests, ReverseRangeReturnsIndependentPartiallyReorderedCopy) {
