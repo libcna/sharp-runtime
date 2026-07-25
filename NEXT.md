@@ -4,9 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and five bounded
+repair, three P1 parity repairs, P1 portability revalidation, and six bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,619 tests across 37 executables.*
+edges, and 12,625 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -28,16 +28,18 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,619 passing tests
+- The full native baseline is a warning-free build with 12,625 passing tests
   across 36 component executables and one integration executable.
 - `TaskT<TResult>::ContinueWith` now supports both action and result-producing
   callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
   antecedent state, while scheduler and parent-task options remain no-ops.
 - `XmlWriter::WriteWhitespace` validates XML whitespace and `XText::WriteTo`
   selects it only for text directly under an `XDocument`.
-- `BinaryReader::PeekChar` returns the next UTF-8 character without advancing
-  a seekable stream, returns `-1` at EOF, and restores the position on decode
-  failure. It deliberately throws on non-seekable streams.
+- `BinaryReader` decodes UTF-8 through `ReadChar`, `ReadChars`, and
+  `Read(char[])`, retaining a pending low surrogate across calls. Batch reads
+  work on non-seekable streams, return partial data at clean EOF, and reject
+  truncated or malformed UTF-8. Seekable `PeekChar` restores both stream and
+  decoder state; it deliberately throws on non-seekable streams.
 - MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
   compile the post-modular `All` graph and selective `Text.Json` libraries.
   This is compile-only evidence: cross tests were deliberately disabled.
@@ -46,14 +48,15 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,747 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,748 completed tickets. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
 `ImmutableList<T>` predicate-query slice. Ticket #1744 records seekable
 `BinaryReader::PeekChar`, #1745 `ImmutableList<T>::Sort`/`Reverse`, and #1746
-`ImmutableList<T>::GetRange`, and #1747 `ImmutableList<T>::ConvertAll`. The
-database is git-ignored and is not part of a fresh clone.
+`ImmutableList<T>::GetRange`, #1747 `ImmutableList<T>::ConvertAll`, and #1748
+the UTF-8 `BinaryReader` batch-character APIs. The database is git-ignored and
+is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -132,6 +135,15 @@ contract on non-seekable streams, so it throws `NotSupportedException` there.
 Five regressions cover UTF-8, EOF, invalid/truncated input, and the explicit
 non-seekable limitation.
 
+## P2 completion: `BinaryReader` batch character APIs
+
+`ReadChars(int)` and `Read(char[], offset, count)` now decode the default
+UTF-8 stream into UTF-16 code units. They return a partial result at clean EOF
+but propagate truncated UTF-8, preserve a pending low surrogate across
+`ReadChar`/batch-call boundaries, and work on non-seekable streams. Six
+regressions cover mixed UTF-8, buffer offsets, clean and truncated EOF,
+supplementary characters, pending-state peeking, and argument validation.
+
 ## P2 completion: `ImmutableList<T>` ordering
 
 `ImmutableList<T>::Sort()` and `Reverse()` now return independently backed,
@@ -158,14 +170,14 @@ converter with `ArgumentNullException`; three regressions cover those cases.
 All currently planned P1 work is complete. Choose one consumer-driven P2
 slice, create a ticket, and keep the changes isolated:
 
-1. **`BinaryReader` character APIs.** Add only demanded `ReadChars` or
-   `Read(char[])` behavior while preserving decoder state and truncated-input
-   semantics, including supplementary UTF-8 characters.
-2. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
+1. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
    copying, builder support, or comparer overloads.
-3. **Other documented partial surfaces.** Examples include `BigInteger`
+2. **Other documented partial surfaces.** Examples include `BigInteger`
    bitwise operations, fuller UTF-7 behavior, and wider debugger/process/XML
    surfaces.
+3. **Doxygen warning baseline.** Establish a reproducible warning count, then
+   keep touched public APIs from increasing it; do not do a mass comment-only
+   rewrite.
 
 ## Useful commands
 

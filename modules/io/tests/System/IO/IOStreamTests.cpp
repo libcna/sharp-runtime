@@ -964,11 +964,13 @@ TEST(BinaryReaderWriterTests, ReadChar_AdvancesStreamByExactByteCount) {
     EXPECT_EQ(br.ReadChar(), u'B');
 }
 
-TEST(BinaryReaderWriterTests, ReadChar_FourByteUtf8SupplementaryPlane_ThrowsFormatException) {
+TEST(BinaryReaderWriterTests, ReadChar_FourByteUtf8SupplementaryPlane_ReturnsSurrogatePairAcrossCalls) {
     std::vector<uint8_t> bytes{0xF0, 0x9F, 0x98, 0x80}; // U+1F600, needs a surrogate pair
     MemoryStream ms(bytes.data(), (int32_t)bytes.size());
     BinaryReader br(&ms, true);
-    EXPECT_THROW(br.ReadChar(), System::FormatException);
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xD83D));
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xDE00));
+    EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
 }
 
 TEST(BinaryReaderWriterTests, ReadChar_InvalidLeadByte_ThrowsFormatException) {
@@ -996,6 +998,79 @@ TEST(BinaryReaderWriterTests, ReadChar_PastEndOfStream_ThrowsEndOfStreamExceptio
     MemoryStream ms; // empty stream
     BinaryReader br(&ms, true);
     EXPECT_THROW(br.ReadChar(), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadChars_DecodesMixedUtf8AndTrimsAtCleanEndOfStream) {
+    std::vector<uint8_t> bytes{0x41, 0xC3, 0xA9, 0xE2, 0x82, 0xAC}; // A, U+00E9, U+20AC
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    const auto characters = br.ReadChars(10);
+    ASSERT_EQ(characters.size(), 3u);
+    EXPECT_EQ(characters[0], u'A');
+    EXPECT_EQ(characters[1], static_cast<char16_t>(0x00E9));
+    EXPECT_EQ(characters[2], static_cast<char16_t>(0x20AC));
+    EXPECT_TRUE(br.ReadChars(1).empty());
+}
+
+TEST(BinaryReaderWriterTests, ReadChars_SupplementaryCharacterCrossesBatchBoundary) {
+    std::vector<uint8_t> bytes{0xF0, 0x9F, 0x98, 0x80, 0x42}; // U+1F600 then B
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    const auto first = br.ReadChars(1);
+    ASSERT_EQ(first.size(), 1u);
+    EXPECT_EQ(first[0], static_cast<char16_t>(0xD83D));
+    EXPECT_EQ(br.PeekChar(), static_cast<intcs>(0xDE00));
+    EXPECT_EQ(br.ReadChar(), static_cast<char16_t>(0xDE00));
+    EXPECT_EQ(br.ReadChar(), u'B');
+}
+
+TEST(BinaryReaderWriterTests, ReadCharArray_RespectsOffsetAndReturnsPartialCountAtCleanEndOfStream) {
+    std::vector<uint8_t> bytes{0x41, 0xC3, 0xA9, 0xE2, 0x82, 0xAC}; // A, U+00E9, U+20AC
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+    char16_t buffer[5]{u'X', u'X', u'X', u'X', u'X'};
+
+    EXPECT_EQ(br.Read(buffer, 1, 4), 3);
+    EXPECT_EQ(buffer[0], u'X');
+    EXPECT_EQ(buffer[1], u'A');
+    EXPECT_EQ(buffer[2], static_cast<char16_t>(0x00E9));
+    EXPECT_EQ(buffer[3], static_cast<char16_t>(0x20AC));
+    EXPECT_EQ(buffer[4], u'X');
+}
+
+TEST(BinaryReaderWriterTests, ReadChars_NonSeekableStreamSupportsSupplementaryUtf8) {
+    NonSeekableReadStream stream({0xF0, 0x9F, 0x98, 0x80, 0x41}); // U+1F600 then A
+    BinaryReader br(&stream, true);
+
+    const auto characters = br.ReadChars(3);
+    ASSERT_EQ(characters.size(), 3u);
+    EXPECT_EQ(characters[0], static_cast<char16_t>(0xD83D));
+    EXPECT_EQ(characters[1], static_cast<char16_t>(0xDE00));
+    EXPECT_EQ(characters[2], u'A');
+}
+
+TEST(BinaryReaderWriterTests, ReadChars_TruncatedUtf8PropagatesEndOfStreamException) {
+    std::vector<uint8_t> bytes{0x41, 0xC3}; // A, then a truncated two-byte sequence
+    MemoryStream ms(bytes.data(), static_cast<intcs>(bytes.size()));
+    BinaryReader br(&ms, true);
+
+    EXPECT_THROW(br.ReadChars(2), System::IO::EndOfStreamException);
+}
+
+TEST(BinaryReaderWriterTests, ReadCharArray_ValidatesArgumentsAndDisposal) {
+    MemoryStream ms;
+    BinaryReader br(&ms, true);
+    char16_t buffer[1]{};
+
+    EXPECT_THROW(br.ReadChars(-1), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(br.Read(static_cast<char16_t*>(nullptr), 0, 0), System::ArgumentNullException);
+    EXPECT_THROW(br.Read(buffer, -1, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(br.Read(buffer, 0, -1), System::ArgumentOutOfRangeException);
+    br.Close();
+    EXPECT_THROW(br.ReadChars(0), System::ObjectDisposedException);
+    EXPECT_THROW(br.Read(buffer, 0, 0), System::ObjectDisposedException);
 }
 
 TEST(BinaryReaderWriterTests, PeekChar_ReturnsUtf8CharacterWithoutAdvancingStream) {

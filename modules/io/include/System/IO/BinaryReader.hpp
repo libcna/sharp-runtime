@@ -34,8 +34,9 @@ namespace System::IO
      * always decodes UTF-8 (matching .NET's own default `BinaryReader(Stream)` constructor,
      * which uses UTF8Encoding — the only encoding real-world .NET/XNA content ever uses).
      * `PeekChar` is available for seekable streams by decoding and restoring the stream position.
-     * `ReadChars` and `Read(char[])` are not implemented, since this codebase's Stream has no
-     * general character-buffer decoding layer — a deliberate simplification, not a silent gap.
+     * Character APIs retain one pending UTF-16 code unit when a supplementary UTF-8 scalar spans
+     * a caller-provided output boundary, so `ReadChar`, `ReadChars`, and `Read(char[])` can be
+     * safely mixed.
      */
     class BinaryReader
     {
@@ -43,9 +44,12 @@ namespace System::IO
         Stream* stream_;
         bool leaveOpen_;
         bool disposed_ = false;
+        bool hasPendingCharacter_ = false;
+        charcs pendingCharacter_ = 0;
 
         void ThrowIfDisposed() const;
         void ReadBytesExact(bytecs* buf, intcs count);
+        [[nodiscard]] bool TryReadChar(charcs& character);
 
     public:
         /** Initializes a new BinaryReader over @p stream, optionally leaving it open on Dispose. */
@@ -108,17 +112,41 @@ namespace System::IO
          *        many bytes that character's encoding occupies.
          *
          * C++ counterpart of .NET `BinaryReader.ReadChar()` under its default UTF8Encoding.
-         * A `System::Char`/`charcs` is a single UTF-16 code unit, so a codepoint above the
-         * Basic Multilingual Plane (encoded as 4 UTF-8 bytes, requiring a surrogate pair)
-         * cannot be returned by this method — matching real .NET, whose own `ReadChar()`
-         * throws in that same case (decoding such a character produces two `char`s, which
-         * does not fit the single-`char` output buffer `ReadChar()` decodes into).
-         * @return The decoded character.
+         * A scalar above the Basic Multilingual Plane is exposed as its UTF-16 surrogate pair
+         * across two character reads. The high surrogate is returned first and the low surrogate
+         * is retained for the next character API call.
+         * @return The next decoded UTF-16 code unit.
          * @throws System::IO::EndOfStreamException if the stream ends before a full character is read.
-         * @throws System::FormatException if the bytes are not valid UTF-8, or encode a codepoint
-         *         above U+FFFF.
+         * @throws System::FormatException if the bytes are not a valid UTF-8 scalar value.
          */
         [[nodiscard]] virtual charcs ReadChar();
+
+        /**
+         * @brief Reads up to @p count UTF-16 code units decoded from UTF-8 into a new array.
+         *
+         * The returned vector is shortened at clean end-of-stream, like .NET's `ReadChars`.
+         * A supplementary Unicode scalar occupies two entries. If it reaches the requested
+         * boundary after its high surrogate, the low surrogate is retained for the next
+         * character API call.
+         *
+         * @throws System::ArgumentOutOfRangeException if @p count is negative.
+         * @throws System::FormatException if the input is malformed UTF-8.
+         * @throws System::IO::EndOfStreamException if the input ends inside a UTF-8 sequence.
+         */
+        [[nodiscard]] virtual std::vector<charcs> ReadChars(intcs count);
+
+        /**
+         * @brief Reads up to @p count UTF-16 code units decoded from UTF-8 into @p buffer.
+         *
+         * Returns a shorter count at clean end-of-stream. The caller must provide storage for
+         * at least `offset + count` `charcs` elements; raw C++ arrays do not carry their length.
+         *
+         * @throws System::ArgumentNullException if @p buffer is null.
+         * @throws System::ArgumentOutOfRangeException if @p offset or @p count is negative.
+         * @throws System::FormatException if the input is malformed UTF-8.
+         * @throws System::IO::EndOfStreamException if the input ends inside a UTF-8 sequence.
+         */
+        virtual intcs Read(charcs buffer[], intcs offset, intcs count);
 
         /**
          * @brief Reads a UTF-8 string prefixed with its 7-bit encoded length.

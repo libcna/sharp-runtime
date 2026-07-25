@@ -49,6 +49,86 @@ namespace System::IO
         }
     }
 
+    bool BinaryReader::TryReadChar(charcs& character)
+    {
+        ThrowIfDisposed();
+
+        if (hasPendingCharacter_)
+        {
+            character = pendingCharacter_;
+            hasPendingCharacter_ = false;
+            return true;
+        }
+
+        const intcs rawLead = stream_->ReadByte();
+        if (rawLead < 0)
+            return false;
+
+        const bytecs lead = static_cast<bytecs>(rawLead);
+        uint32_t codepoint;
+        uint32_t minimumCodepoint;
+        int continuationBytes;
+        if ((lead & 0x80u) == 0x00u)
+        {
+            codepoint = lead;
+            minimumCodepoint = 0;
+            continuationBytes = 0;
+        }
+        else if (lead >= 0xC2u && lead <= 0xDFu)
+        {
+            codepoint = lead & 0x1Fu;
+            minimumCodepoint = 0x80u;
+            continuationBytes = 1;
+        }
+        else if (lead >= 0xE0u && lead <= 0xEFu)
+        {
+            codepoint = lead & 0x0Fu;
+            minimumCodepoint = 0x800u;
+            continuationBytes = 2;
+        }
+        else if (lead >= 0xF0u && lead <= 0xF4u)
+        {
+            codepoint = lead & 0x07u;
+            minimumCodepoint = 0x10000u;
+            continuationBytes = 3;
+        }
+        else
+        {
+            throw System::FormatException("Invalid UTF-8 lead byte while reading a char.");
+        }
+
+        for (int i = 0; i < continuationBytes; ++i)
+        {
+            const intcs rawContinuation = stream_->ReadByte();
+            if (rawContinuation < 0)
+                throw System::IO::EndOfStreamException();
+
+            const bytecs continuation = static_cast<bytecs>(rawContinuation);
+            if ((continuation & 0xC0u) != 0x80u)
+                throw System::FormatException("Invalid UTF-8 continuation byte while reading a char.");
+
+            codepoint = (codepoint << 6) | (continuation & 0x3Fu);
+        }
+
+        if (codepoint < minimumCodepoint || codepoint > 0x10FFFFu ||
+            (codepoint >= 0xD800u && codepoint <= 0xDFFFu))
+        {
+            throw System::FormatException("Invalid UTF-8 scalar value while reading a char.");
+        }
+
+        if (codepoint <= 0xFFFFu)
+        {
+            character = static_cast<charcs>(codepoint);
+            return true;
+        }
+
+        const uint32_t scalarOffset = codepoint - 0x10000u;
+        character = static_cast<charcs>(0xD800u + (scalarOffset >> 10));
+        pendingCharacter_ = static_cast<charcs>(0xDC00u + (scalarOffset & 0x3FFu));
+        hasPendingCharacter_ = true;
+        return true;
+    }
+
     bytecs BinaryReader::ReadByte()
     {
         bytecs b;
@@ -132,6 +212,10 @@ namespace System::IO
                 "BinaryReader::PeekChar requires a seekable stream in this implementation.");
 
         const intcs originalPosition = stream_->getPositionProperty();
+        const bool hadPendingCharacter = hasPendingCharacter_;
+        const charcs originalPendingCharacter = pendingCharacter_;
+        if (hadPendingCharacter)
+            return static_cast<intcs>(originalPendingCharacter);
         if (originalPosition >= stream_->getLengthProperty())
             return -1;
 
@@ -139,46 +223,67 @@ namespace System::IO
         {
             const charcs character = ReadChar();
             stream_->setPositionProperty(originalPosition);
+            hasPendingCharacter_ = hadPendingCharacter;
+            pendingCharacter_ = originalPendingCharacter;
             return static_cast<intcs>(character);
         }
         catch (...)
         {
             stream_->setPositionProperty(originalPosition);
+            hasPendingCharacter_ = hadPendingCharacter;
+            pendingCharacter_ = originalPendingCharacter;
             throw;
         }
     }
 
     charcs BinaryReader::ReadChar()
     {
-        const bytecs lead = ReadByte();
+        charcs character;
+        if (!TryReadChar(character))
+            throw System::IO::EndOfStreamException();
+        return character;
+    }
 
-        uint32_t codepoint;
-        int continuationBytes;
-        if ((lead & 0x80u) == 0x00u)      { codepoint = lead;          continuationBytes = 0; }
-        else if ((lead & 0xE0u) == 0xC0u) { codepoint = lead & 0x1Fu;  continuationBytes = 1; }
-        else if ((lead & 0xF0u) == 0xE0u) { codepoint = lead & 0x0Fu;  continuationBytes = 2; }
-        else if ((lead & 0xF8u) == 0xF0u) { codepoint = lead & 0x07u;  continuationBytes = 3; }
-        else throw System::FormatException("Invalid UTF-8 lead byte while reading a char.");
+    std::vector<charcs> BinaryReader::ReadChars(intcs count)
+    {
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+        ThrowIfDisposed();
 
-        for (int i = 0; i < continuationBytes; ++i)
+        std::vector<charcs> result;
+        if (count == 0)
+            return result;
+
+        // Grow incrementally rather than trusting a caller-controlled count for one large
+        // allocation. This preserves the requested partial-read behavior on non-seekable streams.
+        result.reserve(static_cast<std::size_t>(count < 256 ? count : 256));
+        while (static_cast<intcs>(result.size()) < count)
         {
-            const bytecs cont = ReadByte();
-            if ((cont & 0xC0u) != 0x80u)
-                throw System::FormatException("Invalid UTF-8 continuation byte while reading a char.");
-            codepoint = (codepoint << 6) | (cont & 0x3Fu);
+            charcs character;
+            if (!TryReadChar(character))
+                break;
+            result.push_back(character);
         }
+        return result;
+    }
 
-        if (codepoint > 0xFFFFu)
+    intcs BinaryReader::Read(charcs buffer[], intcs offset, intcs count)
+    {
+        if (buffer == nullptr)
+            throw System::ArgumentNullException("buffer");
+        System::ArgumentOutOfRangeException::ThrowIfNegative(offset, "offset");
+        System::ArgumentOutOfRangeException::ThrowIfNegative(count, "count");
+        ThrowIfDisposed();
+
+        intcs total = 0;
+        while (total < count)
         {
-            // A System.Char is one UTF-16 code unit; a codepoint above the BMP would need a
-            // surrogate pair. Real .NET's BinaryReader.ReadChar() cannot produce that either
-            // (its Decoder.GetChars call targets a 1-char buffer and throws for a 2-char
-            // result) -- match that failure instead of silently truncating to one surrogate.
-            throw System::FormatException(
-                "Character requires a surrogate pair; ReadChar() only supports a single UTF-16 code unit.");
+            charcs character;
+            if (!TryReadChar(character))
+                break;
+            buffer[offset + total] = character;
+            ++total;
         }
-
-        return static_cast<charcs>(codepoint);
+        return total;
     }
 
     intcs BinaryReader::Read7BitEncodedInt()
