@@ -175,6 +175,93 @@ std::vector<uint32_t> BigInteger::fromUInt64(uint64_t v) {
     return r;
 }
 
+std::vector<uint16_t> BigInteger::magnitudeToBinary16(const std::vector<uint32_t>& magnitude) {
+    std::vector<uint32_t> remaining = magnitude;
+    std::vector<uint16_t> words;
+    while (!(remaining.size() == 1 && remaining[0] == 0)) {
+        uint32_t remainder = 0;
+        remaining = divMagByLimb(remaining, 65536u, remainder);
+        words.push_back(static_cast<uint16_t>(remainder));
+    }
+    if (words.empty()) {
+        words.push_back(0);
+    }
+    return words;
+}
+
+std::vector<uint32_t> BigInteger::binary16ToMagnitude(const std::vector<uint16_t>& words) {
+    std::vector<uint32_t> magnitude = {0};
+    for (auto it = words.rbegin(); it != words.rend(); ++it) {
+        magnitude = mulMag(magnitude, {65536u});
+        if (*it != 0) {
+            magnitude = addMag(magnitude, {static_cast<uint32_t>(*it)});
+        }
+    }
+    return magnitude;
+}
+
+std::vector<uint16_t> BigInteger::toTwosComplement16(const BigInteger& value, size_t wordCount) {
+    std::vector<uint16_t> words = magnitudeToBinary16(value.mag_);
+    words.resize(wordCount, 0);
+    if (!value.negative_) {
+        return words;
+    }
+
+    for (auto& word : words) {
+        word = static_cast<uint16_t>(~word);
+    }
+    uint32_t carry = 1;
+    for (auto& word : words) {
+        const uint32_t sum = static_cast<uint32_t>(word) + carry;
+        word = static_cast<uint16_t>(sum);
+        carry = sum >> 16;
+        if (carry == 0) {
+            break;
+        }
+    }
+    return words;
+}
+
+BigInteger BigInteger::fromTwosComplement16(std::vector<uint16_t> words) {
+    const bool negative = (words.back() & 0x8000u) != 0;
+    if (negative) {
+        for (auto& word : words) {
+            word = static_cast<uint16_t>(~word);
+        }
+        uint32_t carry = 1;
+        for (auto& word : words) {
+            const uint32_t sum = static_cast<uint32_t>(word) + carry;
+            word = static_cast<uint16_t>(sum);
+            carry = sum >> 16;
+            if (carry == 0) {
+                break;
+            }
+        }
+    }
+
+    BigInteger result;
+    result.mag_ = binary16ToMagnitude(words);
+    result.negative_ = negative;
+    result.trim();
+    return result;
+}
+
+BigInteger BigInteger::bitwise(const BigInteger& other, char operation) const {
+    const size_t wordCount = std::max(magnitudeToBinary16(mag_).size(),
+                                      magnitudeToBinary16(other.mag_).size()) + 1;
+    const std::vector<uint16_t> left = toTwosComplement16(*this, wordCount);
+    const std::vector<uint16_t> right = toTwosComplement16(other, wordCount);
+    std::vector<uint16_t> result(wordCount);
+    for (size_t index = 0; index < wordCount; ++index) {
+        switch (operation) {
+        case '&': result[index] = static_cast<uint16_t>(left[index] & right[index]); break;
+        case '|': result[index] = static_cast<uint16_t>(left[index] | right[index]); break;
+        default:  result[index] = static_cast<uint16_t>(left[index] ^ right[index]); break;
+        }
+    }
+    return fromTwosComplement16(std::move(result));
+}
+
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------
@@ -338,11 +425,27 @@ BigInteger BigInteger::operator%(const BigInteger& o) const {
     return r;
 }
 
+BigInteger BigInteger::operator&(const BigInteger& o) const { return bitwise(o, '&'); }
+BigInteger BigInteger::operator|(const BigInteger& o) const { return bitwise(o, '|'); }
+BigInteger BigInteger::operator^(const BigInteger& o) const { return bitwise(o, '^'); }
+
+BigInteger BigInteger::operator~() const {
+    const size_t wordCount = magnitudeToBinary16(mag_).size() + 1;
+    std::vector<uint16_t> words = toTwosComplement16(*this, wordCount);
+    for (auto& word : words) {
+        word = static_cast<uint16_t>(~word);
+    }
+    return fromTwosComplement16(std::move(words));
+}
+
 BigInteger& BigInteger::operator+=(const BigInteger& o) { *this = *this + o; return *this; }
 BigInteger& BigInteger::operator-=(const BigInteger& o) { *this = *this - o; return *this; }
 BigInteger& BigInteger::operator*=(const BigInteger& o) { *this = *this * o; return *this; }
 BigInteger& BigInteger::operator/=(const BigInteger& o) { *this = *this / o; return *this; }
 BigInteger& BigInteger::operator%=(const BigInteger& o) { *this = *this % o; return *this; }
+BigInteger& BigInteger::operator&=(const BigInteger& o) { *this = *this & o; return *this; }
+BigInteger& BigInteger::operator|=(const BigInteger& o) { *this = *this | o; return *this; }
+BigInteger& BigInteger::operator^=(const BigInteger& o) { *this = *this ^ o; return *this; }
 
 // ---------------------------------------------------------------------------
 // Comparison

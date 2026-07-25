@@ -20,9 +20,9 @@ namespace System::Numerics {
      *
      * Partial C++ counterpart of .NET System.Numerics.BigInteger.
      *
-     * @note Status: Full arithmetic — add, subtract, multiply, divide, modulo,
-     *   comparisons, ToString, Parse, TryParse all implemented.
-     *   Bitwise operations are not implemented.
+     * @note Status: Arithmetic, comparisons, formatting/parsing, and bitwise
+     *   operators are implemented. Shift and byte-array conversion APIs remain
+     *   outside this focused port.
      */
     class BigInteger {
         bool                  negative_ = false;
@@ -52,6 +52,11 @@ namespace System::Numerics {
                divmodMag(std::vector<uint32_t> a, std::vector<uint32_t> b);
 
         static std::vector<uint32_t> fromUInt64(uint64_t v);
+        static std::vector<uint16_t> magnitudeToBinary16(const std::vector<uint32_t>& magnitude);
+        static std::vector<uint32_t> binary16ToMagnitude(const std::vector<uint16_t>& words);
+        static std::vector<uint16_t> toTwosComplement16(const BigInteger& value, size_t wordCount);
+        static BigInteger fromTwosComplement16(std::vector<uint16_t> words);
+        [[nodiscard]] BigInteger bitwise(const BigInteger& other, char operation) const;
 
     public:
         // ------------------------------------------------------------------
@@ -129,11 +134,23 @@ namespace System::Numerics {
          */
         BigInteger operator%(const BigInteger& o) const;
 
+        /** @brief Returns the bitwise AND using infinite two's-complement semantics. */
+        BigInteger operator&(const BigInteger& o) const;
+        /** @brief Returns the bitwise OR using infinite two's-complement semantics. */
+        BigInteger operator|(const BigInteger& o) const;
+        /** @brief Returns the bitwise XOR using infinite two's-complement semantics. */
+        BigInteger operator^(const BigInteger& o) const;
+        /** @brief Returns the bitwise complement using infinite two's-complement semantics. */
+        BigInteger operator~() const;
+
         BigInteger& operator+=(const BigInteger& o);
         BigInteger& operator-=(const BigInteger& o);
         BigInteger& operator*=(const BigInteger& o);
         BigInteger& operator/=(const BigInteger& o);
         BigInteger& operator%=(const BigInteger& o);
+        BigInteger& operator&=(const BigInteger& o);
+        BigInteger& operator|=(const BigInteger& o);
+        BigInteger& operator^=(const BigInteger& o);
 
         // ------------------------------------------------------------------
         // Comparison operators
