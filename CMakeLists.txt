@@ -44,8 +44,13 @@ if(SHARP_RUNTIME_BUILD_TESTS)
 
     enable_testing()
 
-    file(GLOB_RECURSE SHARP_RUNTIME_TEST_SOURCES CONFIGURE_DEPENDS
-            "tests/*.cpp"
+    sharp_runtime_get_registered_test_sources(SHARP_RUNTIME_TEST_SOURCES)
+    file(GLOB_RECURSE SHARP_RUNTIME_INTEGRATION_TEST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp"
+    )
+    list(APPEND
+        SHARP_RUNTIME_TEST_SOURCES
+        ${SHARP_RUNTIME_INTEGRATION_TEST_SOURCES}
     )
 
     add_executable(SharpRuntimeTests

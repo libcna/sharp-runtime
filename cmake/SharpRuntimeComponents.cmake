@@ -13,7 +13,7 @@ endfunction()
 function(sharp_runtime_register_component)
     set(options)
     set(one_value_args NAME TARGET TYPE SETUP ALIAS_OF INCLUDE_DIRECTORY)
-    set(multi_value_args SOURCES DEPENDENCIES)
+    set(multi_value_args SOURCES DEPENDENCIES TEST_SOURCES)
     cmake_parse_arguments(
         SHARP_COMPONENT
         "${options}"
@@ -39,7 +39,8 @@ function(sharp_runtime_register_component)
 
     if(SHARP_COMPONENT_ALIAS_OF)
         if(SHARP_COMPONENT_TARGET OR SHARP_COMPONENT_TYPE OR SHARP_COMPONENT_SOURCES
-                OR SHARP_COMPONENT_SETUP OR SHARP_COMPONENT_INCLUDE_DIRECTORY)
+                OR SHARP_COMPONENT_SETUP OR SHARP_COMPONENT_INCLUDE_DIRECTORY
+                OR SHARP_COMPONENT_TEST_SOURCES)
             message(FATAL_ERROR
                 "Alias component '${SHARP_COMPONENT_NAME}' may only specify ALIAS_OF")
         endif()
@@ -126,6 +127,11 @@ function(sharp_runtime_register_component)
         "SHARP_RUNTIME_COMPONENT_${component_key}_INCLUDE_DIRECTORY"
         "${SHARP_COMPONENT_INCLUDE_DIRECTORY}"
     )
+    set_property(
+        GLOBAL PROPERTY
+        "SHARP_RUNTIME_COMPONENT_${component_key}_TEST_SOURCES"
+        "${SHARP_COMPONENT_TEST_SOURCES}"
+    )
 
     set_property(
         GLOBAL APPEND PROPERTY
@@ -148,6 +154,13 @@ function(sharp_runtime_register_component)
             ${SHARP_COMPONENT_SOURCES}
         )
     endif()
+    if(SHARP_COMPONENT_TEST_SOURCES)
+        set_property(
+            GLOBAL APPEND PROPERTY
+            SHARP_RUNTIME_REGISTERED_TEST_SOURCES
+            ${SHARP_COMPONENT_TEST_SOURCES}
+        )
+    endif()
 endfunction()
 
 function(sharp_runtime_register_module)
@@ -163,6 +176,9 @@ function(sharp_runtime_register_module)
     )
 
     set(module_sources)
+    file(GLOB_RECURSE module_test_sources CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
+    )
     if(SHARP_MODULE_TYPE STREQUAL "STATIC")
         file(GLOB_RECURSE module_sources CONFIGURE_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
@@ -181,6 +197,7 @@ function(sharp_runtime_register_module)
         DEPENDENCIES ${SHARP_MODULE_DEPENDENCIES}
         SETUP "${SHARP_MODULE_SETUP}"
         INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        TEST_SOURCES ${module_test_sources}
     )
 endfunction()
 
@@ -471,4 +488,13 @@ function(sharp_runtime_get_enabled_components output)
         PROPERTY SHARP_RUNTIME_ENABLED_COMPONENTS
     )
     set("${output}" "${enabled_components}" PARENT_SCOPE)
+endfunction()
+
+function(sharp_runtime_get_registered_test_sources output)
+    get_property(
+        registered_test_sources
+        GLOBAL
+        PROPERTY SHARP_RUNTIME_REGISTERED_TEST_SOURCES
+    )
+    set("${output}" "${registered_test_sources}" PARENT_SCOPE)
 endfunction()
