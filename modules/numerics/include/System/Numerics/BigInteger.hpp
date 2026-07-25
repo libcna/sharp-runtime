@@ -20,8 +20,8 @@ namespace System::Numerics {
      *
      * Partial C++ counterpart of .NET System.Numerics.BigInteger.
      *
-     * @note Status: Arithmetic, comparisons, formatting/parsing, and bitwise
-     *   operators are implemented. Shift and byte-array conversion APIs remain
+     * @note Status: Arithmetic, comparisons, formatting/parsing, bitwise, and
+     *   shift operators are implemented. Byte-array conversion APIs remain
      *   outside this focused port.
      */
     class BigInteger {
@@ -143,6 +143,11 @@ namespace System::Numerics {
         /** @brief Returns the bitwise complement using infinite two's-complement semantics. */
         BigInteger operator~() const;
 
+        /** @brief Returns this value shifted left; a negative count shifts right. */
+        BigInteger operator<<(intcs shift) const;
+        /** @brief Returns this value arithmetically shifted right; a negative count shifts left. */
+        BigInteger operator>>(intcs shift) const;
+
         BigInteger& operator+=(const BigInteger& o);
         BigInteger& operator-=(const BigInteger& o);
         BigInteger& operator*=(const BigInteger& o);
@@ -151,6 +156,8 @@ namespace System::Numerics {
         BigInteger& operator&=(const BigInteger& o);
         BigInteger& operator|=(const BigInteger& o);
         BigInteger& operator^=(const BigInteger& o);
+        BigInteger& operator<<=(intcs shift);
+        BigInteger& operator>>=(intcs shift);
 
         // ------------------------------------------------------------------
         // Comparison operators

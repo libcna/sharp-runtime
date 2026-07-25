@@ -5,6 +5,7 @@
 #include "System/DivideByZeroException.hpp"
 #include "System/FormatException.hpp"
 #include <algorithm>
+#include <limits>
 
 namespace System::Numerics {
 
@@ -438,6 +439,82 @@ BigInteger BigInteger::operator~() const {
     return fromTwosComplement16(std::move(words));
 }
 
+BigInteger BigInteger::operator<<(intcs shift) const {
+    if (shift == 0 || getIsZeroProperty()) {
+        return *this;
+    }
+    if (shift == std::numeric_limits<intcs>::min()) {
+        return (*this >> std::numeric_limits<intcs>::max()) >> 1;
+    }
+    if (shift < 0) {
+        return *this >> -shift;
+    }
+
+    const size_t wordShift = static_cast<size_t>(shift / 16);
+    const uint32_t bitShift = static_cast<uint32_t>(shift % 16);
+    const std::vector<uint16_t> source = magnitudeToBinary16(mag_);
+    std::vector<uint16_t> words(wordShift, 0);
+    uint32_t carry = 0;
+    for (const uint16_t word : source) {
+        const uint32_t shifted = (static_cast<uint32_t>(word) << bitShift) | carry;
+        words.push_back(static_cast<uint16_t>(shifted));
+        carry = shifted >> 16;
+    }
+    if (carry != 0) {
+        words.push_back(static_cast<uint16_t>(carry));
+    }
+
+    BigInteger result;
+    result.mag_ = binary16ToMagnitude(words);
+    result.negative_ = negative_;
+    result.trim();
+    return result;
+}
+
+BigInteger BigInteger::operator>>(intcs shift) const {
+    if (shift == 0 || getIsZeroProperty()) {
+        return *this;
+    }
+    if (shift == std::numeric_limits<intcs>::min()) {
+        return (*this << 1) << std::numeric_limits<intcs>::max();
+    }
+    if (shift < 0) {
+        return *this << -shift;
+    }
+
+    const size_t wordShift = static_cast<size_t>(shift / 16);
+    const uint32_t bitShift = static_cast<uint32_t>(shift % 16);
+    const std::vector<uint16_t> source = magnitudeToBinary16(mag_);
+    if (wordShift >= source.size()) {
+        return negative_ ? BigInteger(-1) : BigInteger::Zero;
+    }
+
+    bool remainder = false;
+    for (size_t index = 0; index < wordShift; ++index) {
+        remainder = remainder || source[index] != 0;
+    }
+
+    std::vector<uint16_t> words(source.begin() + wordShift, source.end());
+    if (bitShift != 0) {
+        const uint32_t lowerMask = (1u << bitShift) - 1u;
+        remainder = remainder || (words.front() & lowerMask) != 0;
+        for (size_t index = 0; index < words.size(); ++index) {
+            const uint32_t next = index + 1 < words.size() ? words[index + 1] : 0;
+            words[index] = static_cast<uint16_t>((words[index] >> bitShift) |
+                                                 (next << (16 - bitShift)));
+        }
+    }
+
+    BigInteger result;
+    result.mag_ = binary16ToMagnitude(words);
+    result.negative_ = negative_;
+    if (negative_ && remainder) {
+        result.mag_ = addMag(result.mag_, {1});
+    }
+    result.trim();
+    return result;
+}
+
 BigInteger& BigInteger::operator+=(const BigInteger& o) { *this = *this + o; return *this; }
 BigInteger& BigInteger::operator-=(const BigInteger& o) { *this = *this - o; return *this; }
 BigInteger& BigInteger::operator*=(const BigInteger& o) { *this = *this * o; return *this; }
@@ -446,6 +523,8 @@ BigInteger& BigInteger::operator%=(const BigInteger& o) { *this = *this % o; ret
 BigInteger& BigInteger::operator&=(const BigInteger& o) { *this = *this & o; return *this; }
 BigInteger& BigInteger::operator|=(const BigInteger& o) { *this = *this | o; return *this; }
 BigInteger& BigInteger::operator^=(const BigInteger& o) { *this = *this ^ o; return *this; }
+BigInteger& BigInteger::operator<<=(intcs shift) { *this = *this << shift; return *this; }
+BigInteger& BigInteger::operator>>=(intcs shift) { *this = *this >> shift; return *this; }
 
 // ---------------------------------------------------------------------------
 // Comparison
