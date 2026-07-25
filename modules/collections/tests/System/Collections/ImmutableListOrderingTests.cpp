@@ -95,6 +95,30 @@ TEST(ImmutableListOrderingTests, SortWithIComparerReturnsIndependentCustomOrder)
     EXPECT_EQ(sorted[3], 1);
 }
 
+TEST(ImmutableListOrderingTests, SortRangeWithDefaultComparisonOnlyReordersRequestedRange) {
+    const auto source = ImmutableList<int>::Create({10, 40, 20, 30, 50});
+    const auto sorted = source.Sort(1, 3);
+
+    EXPECT_EQ(source[1], 40);
+    EXPECT_EQ(source[2], 20);
+    EXPECT_EQ(source[3], 30);
+    EXPECT_EQ(sorted[0], 10);
+    EXPECT_EQ(sorted[1], 20);
+    EXPECT_EQ(sorted[2], 30);
+    EXPECT_EQ(sorted[3], 40);
+    EXPECT_EQ(sorted[4], 50);
+}
+
+TEST(ImmutableListOrderingTests, SortRangeWithDefaultComparisonValidatesAndAllowsEmptyBoundaries) {
+    const auto source = ImmutableList<int>::Create({10, 20});
+
+    EXPECT_EQ(source.Sort(0, 0)[0], 10);
+    EXPECT_EQ(source.Sort(2, 0)[1], 20);
+    EXPECT_THROW(source.Sort(-1, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(source.Sort(3, 0), System::ArgumentOutOfRangeException);
+    EXPECT_THROW(source.Sort(1, 2), System::ArgumentOutOfRangeException);
+}
+
 TEST(ImmutableListOrderingTests, SortRangeWithIComparerOnlyReordersRequestedRange) {
     const auto source = ImmutableList<int>::Create({10, 40, 20, 30, 50});
     const DescendingIntComparer comparer;

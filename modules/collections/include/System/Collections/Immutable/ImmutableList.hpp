@@ -28,11 +28,10 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): range sort with the default comparison and
- * ToBuilder/Builder. These are real gaps, not incorrect behavior for the surface that does
- * exist -- left undone here rather than expanded ad hoc in a single audit pass; a full port
- * would need an AVL/red-black backing structure to match .NET's O(log n) persistent-update
- * complexity (this port's vector-copy approach is O(n) per mutation).
+ * by an AVL tree, not a flat vector): ToBuilder/Builder. This is a real gap, not incorrect
+ * behavior for the surface that does exist -- left undone here rather than expanded ad hoc in a
+ * single audit pass; a full port would need an AVL/red-black backing structure to match .NET's
+ * O(log n) persistent-update complexity (this port's vector-copy approach is O(n) per mutation).
  *
  * @tparam T The type of elements stored in the list.
  */
@@ -463,13 +462,29 @@ public:
     /**
      * @brief Returns a new list with all elements sorted using T::operator<.
      *
-     * C++ counterpart of .NET ImmutableList<T>.Sort(). The range overload with
-     * the default comparison remains deliberately unimplemented.
+     * C++ counterpart of .NET ImmutableList<T>.Sort().
      * @return A sorted immutable list; the source list is unchanged.
      */
     [[nodiscard]] ImmutableList<T> Sort() const {
         auto values = std::make_shared<std::vector<T>>(*data_);
         std::sort(values->begin(), values->end());
+        return ImmutableList<T>(std::move(values));
+    }
+
+    /**
+     * @brief Returns a new list with only the requested range sorted using T::operator<.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.Sort(int, int, IComparer<T>) using the
+     * default comparison.
+     * @param index The zero-based first element in the range.
+     * @param count The number of elements to sort.
+     * @return A list with only the requested range sorted; the source is unchanged.
+     * @throws System::ArgumentOutOfRangeException if the range is outside this list.
+     */
+    [[nodiscard]] ImmutableList<T> Sort(intcs index, intcs count) const {
+        requireValidRange(index, count);
+        auto values = std::make_shared<std::vector<T>>(*data_);
+        std::sort(values->begin() + index, values->begin() + index + count);
         return ImmutableList<T>(std::move(values));
     }
 
