@@ -26,8 +26,8 @@ using SharpRuntime::intcs;
  * Remove/RemoveAll/RemoveAt/RemoveRange(int,int)/Sort/Reverse/Contains/IndexOf/LastIndexOf/
  * BinarySearch).
  * Deliberately deferred relative to real .NET's ImmutableList<T> (a much larger surface backed
- * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads, the 3
- * CopyTo overloads, ToBuilder/Builder,
+ * by an AVL tree, not a flat vector): range and custom-comparer Sort/Reverse overloads,
+ * ToBuilder/Builder,
  * RemoveRange(IEnumerable<T>), and every
  * IEqualityComparer<T>/IComparer<T>-taking overload of Remove/RemoveRange/Replace/IndexOf/
  * LastIndexOf/BinarySearch (this port always uses T::operator== / operator< instead). These are
@@ -312,6 +312,62 @@ public:
             values.push_back(converter(item));
         }
         return ImmutableList<TOutput>::Create(values);
+    }
+
+    /**
+     * @brief Copies every element to a compatible destination vector.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.CopyTo(T[]). The vector is not
+     * resized: callers retain the same fixed-destination-array contract as .NET.
+     * @throws System::ArgumentException if @p destination is too small.
+     */
+    void CopyTo(std::vector<T>& destination) const {
+        CopyTo(0, destination, 0, getCountProperty());
+    }
+
+    /**
+     * @brief Copies every element to @p destination starting at @p arrayIndex.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.CopyTo(T[], int).
+     * @throws System::ArgumentOutOfRangeException if @p arrayIndex is negative.
+     * @throws System::ArgumentException if @p destination cannot hold all elements.
+     */
+    void CopyTo(std::vector<T>& destination, intcs arrayIndex) const {
+        CopyTo(0, destination, arrayIndex, getCountProperty());
+    }
+
+    /**
+     * @brief Copies a source range to a compatible destination vector.
+     *
+     * C++ counterpart of .NET ImmutableList<T>.CopyTo(int, T[], int, int).
+     * @param index The zero-based source index.
+     * @param destination The fixed-size destination vector.
+     * @param arrayIndex The zero-based destination index.
+     * @param count The number of elements to copy.
+     * @throws System::ArgumentOutOfRangeException if a source index, destination index, or
+     *         count is negative, or the source range is invalid.
+     * @throws System::ArgumentException if @p destination is too small.
+     */
+    void CopyTo(intcs index, std::vector<T>& destination, intcs arrayIndex, intcs count) const {
+        const intcs sourceCount = getCountProperty();
+        if (index < 0 || index > sourceCount) {
+            throw System::ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and within the collection.");
+        }
+        if (count < 0 || count > sourceCount - index) {
+            throw System::ArgumentOutOfRangeException("count", "Count must refer to a location within the collection.");
+        }
+        if (arrayIndex < 0) {
+            throw System::ArgumentOutOfRangeException("arrayIndex", "Non-negative number required.");
+        }
+        // Use subtraction after validating the non-negative destination index. This avoids the
+        // signed-overflow hazard in an `arrayIndex + count > destination.size()` check.
+        if (static_cast<intcs>(destination.size()) - arrayIndex < count) {
+            throw System::ArgumentException(
+                "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.");
+        }
+
+        std::copy(data_->begin() + index, data_->begin() + index + count,
+                  destination.begin() + arrayIndex);
     }
 
     /**
