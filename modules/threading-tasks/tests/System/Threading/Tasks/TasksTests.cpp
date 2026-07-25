@@ -9,6 +9,10 @@
 // TaskScheduler, TaskFactory.
 #include <gtest/gtest.h>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -602,6 +606,147 @@ TEST(TaskTCancellationTests, RunWithToken_GetCancellationTokenProperty_ReturnsSa
     TaskT<int> t = TaskT<int>::Run([]() { return 42; }, cts.getTokenProperty());
     EXPECT_EQ(t.Wait(), 42);
     EXPECT_FALSE(t.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
+// ===========================================================================
+// TaskT<TResult>::ContinueWith
+// ===========================================================================
+
+TEST(TaskTContinueWithTests, ResultContinuationRunsAfterPendingAntecedentAndReceivesIt) {
+    auto source = std::make_shared<TaskCompletionSource<int>>();
+    TaskT<int> antecedent = source->getTaskProperty();
+    std::atomic<bool> sawSuccessfulAntecedent{false};
+
+    TaskT<int> continuation = antecedent.ContinueWith([&](TaskT<int> completed) {
+        sawSuccessfulAntecedent = completed.getIsCompletedSuccessfullyProperty();
+        return completed.getResultProperty() * 2;
+    });
+
+    EXPECT_FALSE(continuation.getIsCompletedProperty());
+    source->SetResult(21);
+    EXPECT_EQ(continuation.Wait(), 42);
+    EXPECT_TRUE(sawSuccessfulAntecedent.load());
+    EXPECT_TRUE(continuation.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskTContinueWithTests, RunsImmediatelyForCompletedAntecedent) {
+    TaskT<int> antecedent = TaskT<int>::FromResult(7);
+    TaskT<int> continuation = antecedent.ContinueWith([](TaskT<int> completed) {
+        return completed.getResultProperty() + 1;
+    });
+
+    EXPECT_TRUE(continuation.getIsCompletedProperty());
+    EXPECT_EQ(continuation.Wait(), 8);
+}
+
+TEST(TaskTContinueWithTests, ActionContinuationReturnsTask) {
+    TaskT<int> antecedent = TaskT<int>::FromResult(5);
+    std::atomic<int> observed{0};
+    Task continuation = antecedent.ContinueWith([&](TaskT<int> completed) {
+        observed = completed.getResultProperty();
+    });
+
+    EXPECT_NO_THROW(continuation.Wait());
+    EXPECT_EQ(observed.load(), 5);
+}
+
+TEST(TaskTContinueWithTests, ContinuationCanInspectFaultAndCancellationWithoutAutoRethrow) {
+    TaskT<int> faulted = TaskT<int>::FromException(std::make_exception_ptr(std::runtime_error("boom")));
+    TaskT<std::string> faultContinuation = faulted.ContinueWith([](TaskT<int> completed) {
+        return completed.getIsFaultedProperty() ? std::string("faulted") : std::string("unexpected");
+    });
+    EXPECT_EQ(faultContinuation.Wait(), "faulted");
+
+    TaskT<int> canceled = TaskT<int>::FromCanceled(CancellationToken::None());
+    TaskT<bool> cancelContinuation = canceled.ContinueWith([](TaskT<int> completed) {
+        return completed.getIsCanceledProperty();
+    });
+    EXPECT_TRUE(cancelContinuation.Wait());
+}
+
+TEST(TaskTContinueWithTests, ThrowingContinuationFaultsResultTask) {
+    TaskT<int> antecedent = TaskT<int>::FromResult(1);
+    TaskT<int> continuation = antecedent.ContinueWith([](TaskT<int>) -> int {
+        throw std::runtime_error("continuation failure");
+    });
+
+    EXPECT_THROW(continuation.Wait(), std::runtime_error);
+    EXPECT_TRUE(continuation.getIsFaultedProperty());
+}
+
+TEST(TaskTContinueWithTests, OptionsFilterExecutionAndCancelSkippedContinuation) {
+    TaskT<int> faulted = TaskT<int>::FromException(std::make_exception_ptr(std::runtime_error("boom")));
+    std::atomic<bool> ranOnSuccess{false};
+    TaskT<int> skipped = faulted.ContinueWith([&](TaskT<int>) {
+        ranOnSuccess = true;
+        return 1;
+    }, TaskContinuationOptions::OnlyOnRanToCompletion);
+    EXPECT_THROW(skipped.Wait(), TaskCanceledException);
+    EXPECT_FALSE(ranOnSuccess.load());
+    EXPECT_TRUE(skipped.getIsCanceledProperty());
+
+    std::atomic<bool> ranOnFault{false};
+    TaskT<int> onFault = faulted.ContinueWith([&](TaskT<int> completed) {
+        ranOnFault = completed.getIsFaultedProperty();
+        return 2;
+    }, TaskContinuationOptions::OnlyOnFaulted);
+    EXPECT_EQ(onFault.Wait(), 2);
+    EXPECT_TRUE(ranOnFault.load());
+
+    TaskT<int> canceled = TaskT<int>::FromCanceled(CancellationToken::None());
+    TaskT<int> onCancel = canceled.ContinueWith([](TaskT<int> completed) {
+        return completed.getIsCanceledProperty() ? 3 : 0;
+    }, TaskContinuationOptions::OnlyOnCanceled);
+    EXPECT_EQ(onCancel.Wait(), 3);
+}
+
+TEST(TaskTContinueWithTests, ChainedResultContinuationsRunInOrder) {
+    std::vector<int> order;
+    std::mutex orderMutex;
+    TaskT<int> antecedent = TaskT<int>::FromResult(10);
+    TaskT<int> first = antecedent.ContinueWith([&](TaskT<int> completed) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(1);
+        return completed.getResultProperty() + 1;
+    });
+    TaskT<int> second = first.ContinueWith([&](TaskT<int> completed) {
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(2);
+        return completed.getResultProperty() + 1;
+    });
+
+    EXPECT_EQ(second.Wait(), 12);
+    EXPECT_EQ(order, (std::vector<int>{1, 2}));
+}
+
+TEST(TaskTContinueWithTests, CompletedCallbackReleasesCapturedState) {
+    auto source = std::make_shared<TaskCompletionSource<int>>();
+    TaskT<int> continuation = TaskT<int>::FromResult(0);
+    std::weak_ptr<int> capturedWeak;
+    std::mutex releaseMutex;
+    std::condition_variable releaseCv;
+    bool released = false;
+    {
+        auto captured = std::shared_ptr<int>(new int(7), [&releaseMutex, &releaseCv, &released](int* value) {
+            delete value;
+            {
+                std::lock_guard<std::mutex> lock(releaseMutex);
+                released = true;
+            }
+            releaseCv.notify_all();
+        });
+        capturedWeak = captured;
+        TaskT<int> antecedent = source->getTaskProperty();
+        continuation = antecedent.ContinueWith([captured](TaskT<int> completed) {
+            return completed.getResultProperty() + *captured;
+        });
+    }
+
+    source->SetResult(35);
+    EXPECT_EQ(continuation.Wait(), 42);
+    std::unique_lock<std::mutex> lock(releaseMutex);
+    EXPECT_TRUE(releaseCv.wait_for(lock, std::chrono::seconds(1), [&released] { return released; }));
+    EXPECT_TRUE(capturedWeak.expired());
 }
 
 // ===========================================================================

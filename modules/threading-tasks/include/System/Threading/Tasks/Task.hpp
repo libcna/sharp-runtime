@@ -4,6 +4,7 @@
 #pragma once
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <condition_variable>
 #include <exception>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
@@ -550,6 +552,7 @@ namespace System::Threading::Tasks {
     /** <summary>Represents an asynchronous operation that returns a value of type TResult.</summary> */
     template<typename TResult>
     class TaskT {
+        template<typename> friend class TaskT;
         // Grants Task::WhenAny access to TaskT<Task>'s privates (PendingTag, state_,
         // notifyCompletion) so it can construct and directly complete a pending TaskT<Task>
         // without spawning any watcher thread -- see WhenAny's own updated doc-comment, added
@@ -569,12 +572,11 @@ namespace System::Threading::Tasks {
             std::optional<TResult> result;
             // Lets Wait()/getResultProperty() block on a TaskT with no future_ of its own (e.g.
             // a WhenAny result, manually completed by whichever input task wins) -- see
-            // Task::State's identical fields for the full rationale. TaskT<TResult>::
-            // ContinueWith itself is not yet implemented (see class-level note), so unlike
-            // Task::State there is no continuations list here yet -- only notifyCompletion is
-            // needed for the current WhenAny use.
+            // Task::State's identical fields for the full rationale. Generic continuations use
+            // the same queued-callback model as Task::ContinueWith.
             std::mutex completionMutex;
             std::condition_variable completionCv;
+            std::vector<std::function<void()>> continuations;
         };
 
         // shared_future, not future -- see Task::future_'s comment above for why (safe for
@@ -595,14 +597,40 @@ namespace System::Threading::Tasks {
         struct PendingTag {};
         explicit TaskT(PendingTag) : state_(std::make_shared<State>()) {}
 
-        // Wakes any Wait()/getResultProperty() callers blocked on a future_-less State (see
-        // State::completionMutex/completionCv above). Unlike Task::fireContinuations, this does
-        // NOT also drain/invoke a continuations list -- TaskT::ContinueWith isn't implemented in
-        // this pass, so nothing can be registered to run. Added 2026-07-14 for Task::WhenAny's
-        // use (a friend of this class) to notify a manually-completed TaskT<Task> result.
-        static void notifyCompletion(const std::shared_ptr<State>& s) {
-            std::lock_guard<std::mutex> lock(s->completionMutex);
+        // Wakes Wait()/getResultProperty() callers and invokes every registered continuation,
+        // synchronously and outside the state lock. This mirrors Task::fireContinuations and
+        // must be called exactly once after a State reaches a terminal outcome.
+        static void fireContinuations(const std::shared_ptr<State>& s) {
+            std::vector<std::function<void()>> toRun;
+            {
+                std::lock_guard<std::mutex> lock(s->completionMutex);
+                toRun.swap(s->continuations);
+            }
             s->completionCv.notify_all();
+            for (auto& continuation : toRun) continuation();
+        }
+
+        // Registers a callback to run once this task reaches a terminal state. A weak state
+        // reference must be captured by callbacks that need the antecedent itself: capturing a
+        // TaskT copy here would make State -> continuations -> callback -> State cyclic.
+        void registerContinuation(std::function<void()> callback) const {
+            std::unique_lock<std::mutex> lock(state_->completionMutex);
+            if (state_->isCompleted) {
+                lock.unlock();
+                callback();
+            } else {
+                state_->continuations.push_back(std::move(callback));
+            }
+        }
+
+        // Builds a lightweight view for a continuation callback from a locked weak state. It is
+        // safe only after completion and deliberately has no backing future or original token,
+        // matching Task's corresponding continuation-only constructor.
+        explicit TaskT(std::shared_ptr<State> state) : state_(std::move(state)) {}
+
+        // Retained for Task::WhenAny, which manually completes TaskT<Task> results.
+        static void notifyCompletion(const std::shared_ptr<State>& s) {
+            fireContinuations(s);
         }
 
     public:
@@ -624,11 +652,13 @@ namespace System::Threading::Tasks {
                         TResult r  = func();
                         s->result  = r;
                         s->isCompleted = true;
+                        fireContinuations(s);
                         return r;
                     } catch (...) {
                         s->exception   = std::current_exception();
                         s->isFaulted   = true;
                         s->isCompleted = true;
+                        fireContinuations(s);
                         throw;
                     }
                 }).share()
@@ -663,6 +693,7 @@ namespace System::Threading::Tasks {
                         TResult r  = func();
                         s->result  = r;
                         s->isCompleted = true;
+                        fireContinuations(s);
                         return r;
                     } catch (const System::OperationCanceledException&) {
                         if (token.getIsCancellationRequestedProperty()) {
@@ -672,11 +703,13 @@ namespace System::Threading::Tasks {
                             s->isFaulted = true;
                         }
                         s->isCompleted = true;
+                        fireContinuations(s);
                         throw;
                     } catch (...) {
                         s->exception   = std::current_exception();
                         s->isFaulted   = true;
                         s->isCompleted = true;
+                        fireContinuations(s);
                         throw;
                     }
                 }).share()
@@ -749,6 +782,102 @@ namespace System::Threading::Tasks {
         TResult Wait() { return getResultProperty(); }
 
         /**
+         * Creates a non-generic continuation that executes when this TaskT completes.
+         *
+         * The callback receives a completed antecedent and can inspect its status/result. It
+         * runs for successful, faulted, and canceled antecedents unless @p continuationOptions
+         * excludes that outcome. This runtime invokes continuations inline on the completing
+         * thread; only the NotOn and OnlyOn option bits affect scheduling.
+         */
+        Task ContinueWith(
+            std::function<void(TaskT<TResult>)> continuationAction,
+            TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const {
+            Task continuation(Task::PendingTag{});
+            auto continuationState = continuation.state_;
+            std::weak_ptr<State> antecedentWeak = state_;
+
+            registerContinuation([antecedentWeak, continuationState,
+                                  continuationAction = std::move(continuationAction),
+                                  continuationOptions]() mutable {
+                auto antecedentState = antecedentWeak.lock();
+                TaskT<TResult> antecedent(antecedentState);
+
+                using TCO = TaskContinuationOptions;
+                bool shouldRun = true;
+                if ((continuationOptions & TCO::NotOnRanToCompletion) != TCO::None && antecedent.getIsCompletedSuccessfullyProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnFaulted) != TCO::None && antecedent.getIsFaultedProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnCanceled) != TCO::None && antecedent.getIsCanceledProperty()) shouldRun = false;
+
+                if (!shouldRun) {
+                    continuationState->isCanceled = true;
+                    continuationState->isCompleted = true;
+                } else {
+                    try {
+                        continuationAction(antecedent);
+                        continuationState->isCompleted = true;
+                    } catch (...) {
+                        continuationState->exception = std::current_exception();
+                        continuationState->isFaulted = true;
+                        continuationState->isCompleted = true;
+                    }
+                }
+                Task::fireContinuations(continuationState);
+            });
+
+            return continuation;
+        }
+
+        /**
+         * Creates a result-producing continuation that executes when this TaskT completes.
+         *
+         * The result task is canceled when @p continuationOptions excludes the antecedent's
+         * terminal state, or faulted when @p continuationFunction throws. See the action
+         * overload above for this runtime's inline execution and option limitations.
+         */
+        template<typename TContinuation>
+            requires std::invocable<TContinuation, TaskT<TResult>> &&
+                     (!std::is_void_v<std::invoke_result_t<TContinuation, TaskT<TResult>>>)
+        auto ContinueWith(
+            TContinuation continuationFunction,
+            TaskContinuationOptions continuationOptions = TaskContinuationOptions::None) const
+            -> TaskT<std::invoke_result_t<TContinuation, TaskT<TResult>>> {
+            using TNewResult = std::invoke_result_t<TContinuation, TaskT<TResult>>;
+            TaskT<TNewResult> continuation(typename TaskT<TNewResult>::PendingTag{});
+            auto continuationState = continuation.state_;
+            std::weak_ptr<State> antecedentWeak = state_;
+
+            registerContinuation([antecedentWeak, continuationState,
+                                  continuationFunction = std::move(continuationFunction),
+                                  continuationOptions]() mutable {
+                auto antecedentState = antecedentWeak.lock();
+                TaskT<TResult> antecedent(antecedentState);
+
+                using TCO = TaskContinuationOptions;
+                bool shouldRun = true;
+                if ((continuationOptions & TCO::NotOnRanToCompletion) != TCO::None && antecedent.getIsCompletedSuccessfullyProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnFaulted) != TCO::None && antecedent.getIsFaultedProperty()) shouldRun = false;
+                if ((continuationOptions & TCO::NotOnCanceled) != TCO::None && antecedent.getIsCanceledProperty()) shouldRun = false;
+
+                if (!shouldRun) {
+                    continuationState->isCanceled = true;
+                    continuationState->isCompleted = true;
+                } else {
+                    try {
+                        continuationState->result = continuationFunction(antecedent);
+                        continuationState->isCompleted = true;
+                    } catch (...) {
+                        continuationState->exception = std::current_exception();
+                        continuationState->isFaulted = true;
+                        continuationState->isCompleted = true;
+                    }
+                }
+                TaskT<TNewResult>::fireContinuations(continuationState);
+            });
+
+            return continuation;
+        }
+
+        /**
          * Creates a TaskT that is already completed with @p value — works on all platforms.
          * @param value The result value.
          */
@@ -806,6 +935,7 @@ namespace System::Threading::Tasks {
                         TResult r = sharedFuture->get();
                         s->result      = r;
                         s->isCompleted = true;
+                        fireContinuations(s);
                         return r;
                     } catch (...) {
                         if (cancellationFlag && cancellationFlag->load()) {
@@ -815,6 +945,7 @@ namespace System::Threading::Tasks {
                             s->isFaulted = true;
                         }
                         s->isCompleted = true;
+                        fireContinuations(s);
                         throw;
                     }
                 }).share()

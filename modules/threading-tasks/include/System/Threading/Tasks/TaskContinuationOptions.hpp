@@ -8,9 +8,9 @@ namespace System::Threading::Tasks {
     /**
      * @brief Specifies flags that control optional behavior for the creation and execution of continuation tasks.
      *
-     * C++ counterpart of .NET System.Threading.Tasks.TaskContinuationOptions. Provided for API
-     * name/value compatibility; this runtime's Task does not yet implement ContinueWith, so these
-     * flags are not currently consumed anywhere.
+     * C++ counterpart of .NET System.Threading.Tasks.TaskContinuationOptions. `Task` and
+     * `TaskT<TResult>` honor the NotOn and OnlyOn predicate bits in ContinueWith; scheduler and
+     * parent-task flags remain accepted no-ops because this runtime has no task scheduler.
      */
     enum class TaskContinuationOptions {
         /** Default: continuation runs regardless of the antecedent's final TaskStatus. */

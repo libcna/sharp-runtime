@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-25 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,588 passing tests across 37
+dependency edges, a clean native build, 12,596 passing tests across 37
 executables, and a green ten-job selective matrix.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
@@ -32,7 +32,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,588 passing across 36 component binaries plus one integration
+- Tests: 12,596 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,738 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,739 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -130,11 +130,13 @@ The first consumer-driven ports after modularization added:
 - `ConcurrentBag` and `BlockingCollection`.
 - `MemoryStream(buffer, size)` writability parity, while `BinaryData::ToStream`
   and read-mode ZIP entry streams retain their explicit read-only contracts.
+- `TaskT<TResult>::ContinueWith` for action and result-producing callbacks,
+  including terminal-state filtering, chaining, and weak-ownership teardown.
 - `TaskExtensions::Unwrap` for generic and non-generic nested tasks.
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,588.
+to 12,596.
 
 ## Candidate roadmap
 
@@ -143,26 +145,19 @@ acceptance criteria and a validation command before changing code.
 
 ### P1 — Confirmed parity and correctness gaps
 
-1. **Add `TaskT<TResult>::ContinueWith`.**
-   Non-generic `Task::ContinueWith` exists, and `TaskT` already has completion
-   synchronization used by `TaskExtensions::Unwrap`, but the generic
-   continuation list/API is still absent. Preserve weak ownership and verify
-   success, fault, cancellation, option filtering, chaining, and leak-free
-   teardown.
-
-2. **Close the `XText::WriteTo` whitespace distinction.**
+1. **Close the `XText::WriteTo` whitespace distinction.**
    `XText` always calls `XmlWriter::WriteString`; .NET calls
    `WriteWhitespace` for text directly under `XDocument`. This requires a
    deliberate `XmlWriter` API addition and tests before changing `XText`.
 
 ### P1 — Revalidation after architectural and concurrency changes
 
-3. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
+2. **Re-run MinGW and Emscripten library builds on the post-modular tree.**
    The recorded cross-builds predate the 41-component graph. Validate an
    `All` build and at least one selective build, record exact toolchain
    versions, and distinguish compile success from runtime test coverage.
 
-4. **Run focused sanitizer passes over new concurrent code.**
+3. **Run focused sanitizer passes over new concurrent code.**
    Prioritize `ConcurrentBag`, `BlockingCollection`,
    `TaskExtensions::Unwrap`, and `ConditionalWeakTable`. Use TSan for
    synchronization paths and ASan/LSan for continuation/ownership teardown;
@@ -170,19 +165,19 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Consumer-driven API breadth
 
-5. **Choose a bounded `ImmutableList<T>` slice.**
+4. **Choose a bounded `ImmutableList<T>` slice.**
    Its documented omissions include sorting/reversing, copy/range/conversion,
    predicate search, builder support, and comparer overloads. Do not attempt
    the entire surface in one change; select methods required by a real
    consumer and port them against the .NET reference.
 
-6. **Complete only demanded `BinaryReader` character APIs.**
+5. **Complete only demanded `BinaryReader` character APIs.**
    `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
    `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
    when a consumer needs them, preserving decoder state and truncated-input
    behavior.
 
-7. **Review other documented partial surfaces by demand.**
+6. **Review other documented partial surfaces by demand.**
    Examples include `BigInteger` bitwise operations, full UTF-7 behavior,
    debugger/process breadth, and richer XML reader/writer functionality.
    A documented partial API is not automatically higher priority than a
@@ -190,11 +185,11 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Developer experience
 
-8. **Reduce the Doxygen warning backlog incrementally.**
+7. **Reduce the Doxygen warning backlog incrementally.**
    Establish a reproducible baseline first, then require touched public APIs
    not to regress it. Avoid a mass comment-only rewrite.
 
-9. **Decide whether distribution support is wanted.**
+8. **Decide whether distribution support is wanted.**
     The repository currently supports `add_subdirectory`; it has no installed
     package/export configuration and no standalone sample application. Add
     install rules, package config, or a sample only after the desired consumer

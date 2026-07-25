@@ -4,8 +4,8 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair and first P1 parity repair are complete: 41 physical modules, 90
-production dependency edges, and 12,588 tests across 37 executables.*
+repair and two P1 parity repairs are complete: 41 physical modules, 90
+production dependency edges, and 12,596 tests across 37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -27,12 +27,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - The ten-job selective consumer matrix, including a direct
   `Collections.Blocking` consumer, is green. Text.Json retains its target
   absence and negative include-leakage assertions.
-- The full native baseline is a warning-free build with 12,588 passing tests
+- The full native baseline is a warning-free build with 12,596 passing tests
   across 36 component executables and one integration executable.
+- `TaskT<TResult>::ContinueWith` now supports both action and result-producing
+  callbacks. It runs inline on completion; `NotOn*` and `OnlyOn*` filter the
+  antecedent state, while scheduler and parent-task options remain no-ops.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,738 completed tickets. Ticket #1737 records the completed P0 split and
-ticket #1738 records the MemoryStream repair. The
+1,739 completed tickets. Ticket #1737 records the completed P0 split, ticket
+#1738 the MemoryStream repair, and ticket #1739 the generic continuation API.
+The
 database is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
@@ -57,20 +61,27 @@ contracts of `BinaryData::ToStream()` and read-mode `ZipArchiveEntry::Open()`.
 Regression tests cover writing, resizing, and BinaryData's protected read-only
 stream.
 
+## P1 completion: generic task continuations
+
+`TaskT<TResult>` now has `ContinueWith` overloads for action callbacks and
+result-producing callbacks. Continuations receive a completed antecedent,
+propagate their own result, fault when their callback throws, cancel when
+predicate options exclude the antecedent outcome, and may be chained. Pending
+callbacks retain only a weak antecedent state, and regression coverage verifies
+success, fault, cancellation, filtering, chaining, and post-completion
+capture release.
+
 ## Recommended next bounded tasks
 
 Choose one, create a ticket, and keep the changes isolated.
 
-1. **`TaskT<TResult>::ContinueWith`.** Add the missing generic continuation
-   API with success, fault, cancellation, option filtering, chaining, and
-   lifetime tests.
-2. **`XmlWriter::WriteWhitespace` plus `XText` parity.** `XText::WriteTo`
+1. **`XmlWriter::WriteWhitespace` plus `XText` parity.** `XText::WriteTo`
    currently always writes a string; match the document-child whitespace rule
    through a deliberate writer API addition.
-3. **Post-modular portability evidence.** Re-run documented MinGW and
+2. **Post-modular portability evidence.** Re-run documented MinGW and
    Emscripten library configurations for `All` and one selective component;
    record exact toolchains and distinguish build evidence from runtime tests.
-4. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
+3. **Focused sanitizers.** Run TSan for `ConcurrentBag`/`BlockingCollection`
    and ASan/LSan for task/weak-ownership teardown. Keep test adaptations
    separate from production fixes.
 
