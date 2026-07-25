@@ -52,7 +52,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,740 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,742 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -93,17 +93,20 @@ assertion without an explicit architecture decision.
 
 ### Platform work
 
-- MinGW library cross-build audit completed under ticket #40; a post-modular
+- MinGW library cross-build audit completed under ticket #40; its post-modular
   `All` and selective `Text.Json` library revalidation passed with MinGW-w64
-  GCC 14-win32 and CMake 3.31.6 under ticket #1741. It is compile evidence;
-  GoogleTest/runtime tests were not cross-built or run.
-- Emscripten library cross-build audit completed under ticket #41. Its
-  post-modular revalidation remains pending an installed Emscripten toolchain.
+  GCC 14-win32 and CMake 3.31.6 under ticket #1741.
+- Emscripten's earlier library audit is ticket #41. Its post-modular `All` and
+  selective `Text.Json` revalidation passed with Emscripten 5.0.7 and CMake
+  3.31.6 under ticket #1741, which also corrected an Emscripten-only unused
+  `WebProxy` DNS helper warning promoted by `-Werror`.
+- Both cross-build validations are compile evidence only; GoogleTest/runtime
+  tests were not cross-built or run.
 - Real downstream Apple Clang/Xcode 15.4 builds drove the portability fixes
   in commits `1d22a7b2` through `b797928f`.
 
-These results only partially overlap the final component architecture. They
-are evidence of portability, not a current cross-platform test matrix.
+These library builds use the final 41-component architecture. They are
+evidence of portability, not a current cross-platform test matrix.
 
 ### Modular architecture
 
@@ -151,30 +154,21 @@ to 12,601.
 No implementation is active yet. Create or reopen a `ticket` row with
 acceptance criteria and a validation command before changing code.
 
-### P1 — Revalidation after architectural and concurrency changes
-
-1. **Complete Emscripten revalidation on the post-modular tree.**
-   MinGW `All` and selective builds now pass, but Emscripten's recorded
-   cross-build predates the 41-component graph and its toolchain is unavailable
-   in the maintainer environment. Once provisioned, validate an `All` build and
-   one selective build; record the exact version and distinguish compile
-   success from runtime test coverage.
-
 ### P2 — Consumer-driven API breadth
 
-2. **Choose a bounded `ImmutableList<T>` slice.**
+1. **Choose a bounded `ImmutableList<T>` slice.**
    Its documented omissions include sorting/reversing, copy/range/conversion,
    predicate search, builder support, and comparer overloads. Do not attempt
    the entire surface in one change; select methods required by a real
    consumer and port them against the .NET reference.
 
-3. **Complete only demanded `BinaryReader` character APIs.**
+2. **Complete only demanded `BinaryReader` character APIs.**
    `ReadChar` and `ReadDecimal` are implemented, while `PeekChar`,
    `ReadChars`, and `Read(char[])` remain deliberately absent. Add them only
    when a consumer needs them, preserving decoder state and truncated-input
    behavior.
 
-4. **Review other documented partial surfaces by demand.**
+3. **Review other documented partial surfaces by demand.**
    Examples include `BigInteger` bitwise operations, full UTF-7 behavior,
    debugger/process breadth, and richer XML reader/writer functionality.
    A documented partial API is not automatically higher priority than a
@@ -182,11 +176,11 @@ acceptance criteria and a validation command before changing code.
 
 ### P2 — Developer experience
 
-5. **Reduce the Doxygen warning backlog incrementally.**
+4. **Reduce the Doxygen warning backlog incrementally.**
    Establish a reproducible baseline first, then require touched public APIs
    not to regress it. Avoid a mass comment-only rewrite.
 
-6. **Decide whether distribution support is wanted.**
+5. **Decide whether distribution support is wanted.**
     The repository currently supports `add_subdirectory`; it has no installed
     package/export configuration and no standalone sample application. Add
     install rules, package config, or a sample only after the desired consumer

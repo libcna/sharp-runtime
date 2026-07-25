@@ -4,8 +4,9 @@
 # NEXT.md
 
 *Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
-repair and three P1 parity repairs are complete: 41 physical modules, 90
-production dependency edges, and 12,601 tests across 37 executables.*
+repair, three P1 parity repairs, and P1 portability revalidation are complete:
+41 physical modules, 90 production dependency edges, and 12,601 tests across
+37 executables.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -34,20 +35,19 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   antecedent state, while scheduler and parent-task options remain no-ops.
 - `XmlWriter::WriteWhitespace` validates XML whitespace and `XText::WriteTo`
   selects it only for text directly under an `XDocument`.
-- MinGW-w64 GCC 14-win32/CMake 3.31.6 now compile the post-modular `All` graph
-  and selective `Text.Json` libraries; this is compile-only evidence because
-  cross tests were deliberately disabled. Emscripten is not installed locally.
+- MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6 both
+  compile the post-modular `All` graph and selective `Text.Json` libraries.
+  This is compile-only evidence: cross tests were deliberately disabled.
 - Focused TSan scenarios for concurrent collections, `ConditionalWeakTable`,
   generic task continuations, and `TaskExtensions::Unwrap` are clean; matching
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,742 tickets: 1,741 completed plus blocked ticket #1741. Ticket #1737 records
-the completed P0 split, tickets #1738/#1739 the MemoryStream and
-generic-continuation repairs, ticket #1740 the XML whitespace repair, #1741
-the partial cross-build revalidation, and #1742 focused sanitizer evidence.
-The
-database is git-ignored and is not part of a fresh clone.
+1,742 completed tickets. Ticket #1737 records the completed P0 split, tickets
+#1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
+XML whitespace repair, #1741 the completed cross-build revalidation and
+`WebProxy` portability fix, and #1742 focused sanitizer evidence. The database
+is git-ignored and is not part of a fresh clone.
 
 ## P0 completion: restore Collections isolation
 
@@ -98,17 +98,29 @@ AddressSanitizer/LeakSanitizer passed the same ownership scenario plus a
 100-iteration continuation capture-release check. These are focused native
 validation runs, not a cross-platform runtime test matrix.
 
+## P1 completion: post-modular cross-build revalidation
+
+Ticket #1741 revalidated library-only `All` and selective `Text.Json` graphs
+with MinGW-w64 GCC 14-win32/CMake 3.31.6 and Emscripten 5.0.7/CMake 3.31.6.
+Emscripten exposed a `WebProxy` DNS-comparison helper whose only call site is
+excluded on that platform; its definition is now excluded too, preserving the
+`-Werror` build. The native `WebProxyTests` regression filter passes 11 tests.
+Cross-platform runtime tests were deliberately not built or run.
+
 ## Recommended next bounded tasks
 
-Choose one, create a ticket, and keep the changes isolated.
+All currently planned P1 work is complete. Choose one consumer-driven P2
+slice, create a ticket, and keep the changes isolated:
 
-1. **Post-modular Emscripten evidence.** Provision an Emscripten toolchain,
-   then build `All` and one selective component without tests; record the
-   exact toolchain and distinguish compile evidence from runtime coverage.
-
-`ImmutableList<T>` breadth, remaining `BinaryReader` character APIs,
-`BigInteger` bitwise operations, fuller UTF-7 behavior, and wider
-debugger/process/XML surfaces remain consumer-driven P2 work.
+1. **`ImmutableList<T>` breadth.** Select one real consumer-needed group from
+   sorting/reversing, copy/range/conversion, predicate search, builder support,
+   or comparer overloads.
+2. **`BinaryReader` character APIs.** Add only demanded `PeekChar`,
+   `ReadChars`, or `Read(char[])` behavior while preserving decoder state and
+   truncated-input semantics.
+3. **Other documented partial surfaces.** Examples include `BigInteger`
+   bitwise operations, fuller UTF-7 behavior, and wider debugger/process/XML
+   surfaces.
 
 ## Useful commands
 

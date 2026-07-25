@@ -43,10 +43,14 @@ namespace System::Net {
             return decoded;
         }
 
+        // Emscripten does not expose the local DNS lookup used by IsBypassed(),
+        // so the only call site below is compiled out on that target.
+#if !defined(__EMSCRIPTEN__)
         bool equalsIgnoreCase(const std::string& left, const std::string& right) {
             return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin(),
                 [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
         }
+#endif
     }
 
     WebProxy::WebProxy() {
