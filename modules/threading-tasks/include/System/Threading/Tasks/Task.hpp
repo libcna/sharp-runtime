@@ -10,6 +10,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -38,12 +39,14 @@ namespace System::Threading::Tasks {
     using SharpRuntime::intcs;
 
     class TaskFactory;
+    class TaskExtensions;
     template<typename TResult> class TaskT;
 
     // Lightweight Task stub backed by std::future<void>.
     // State is held in a shared_ptr so the async lambda never captures `this`.
     class Task {
         template<typename T> friend class TaskT;
+        friend class TaskExtensions;
 
         struct State {
             std::atomic<bool> isCompleted{false};
@@ -552,13 +555,18 @@ namespace System::Threading::Tasks {
         // without spawning any watcher thread -- see WhenAny's own updated doc-comment, added
         // 2026-07-14 alongside Task::ContinueWith.
         friend class Task;
+        friend class TaskExtensions;
 
         struct State {
             std::atomic<bool> isCompleted{false};
             std::atomic<bool> isCanceled{false};
             std::atomic<bool> isFaulted{false};
             std::exception_ptr exception;
-            TResult result{};
+            // A Task<TResult> may legitimately use a result type without a default
+            // constructor (including another TaskT<TResult>).  The result is absent until
+            // a successful completion stores it, rather than imposing TResult{} as an
+            // accidental public constraint.
+            std::optional<TResult> result;
             // Lets Wait()/getResultProperty() block on a TaskT with no future_ of its own (e.g.
             // a WhenAny result, manually completed by whichever input task wins) -- see
             // Task::State's identical fields for the full rationale. TaskT<TResult>::
@@ -621,7 +629,7 @@ namespace System::Threading::Tasks {
                         s->exception   = std::current_exception();
                         s->isFaulted   = true;
                         s->isCompleted = true;
-                        return TResult{};
+                        throw;
                     }
                 }).share()
             );
@@ -664,12 +672,12 @@ namespace System::Threading::Tasks {
                             s->isFaulted = true;
                         }
                         s->isCompleted = true;
-                        return TResult{};
+                        throw;
                     } catch (...) {
                         s->exception   = std::current_exception();
                         s->isFaulted   = true;
                         s->isCompleted = true;
-                        return TResult{};
+                        throw;
                     }
                 }).share()
             );
@@ -715,16 +723,26 @@ namespace System::Threading::Tasks {
             // data race here instead of fixing it. shared_future::get() itself is safe to call
             // repeatedly/concurrently and already returns the completed value.
             bool hasFuture = future_ && future_->valid();
-            TResult r{};
+            std::optional<TResult> result;
             if (hasFuture) {
-                r = future_->get();
+                try {
+                    result = future_->get();
+                } catch (...) {
+                    // Constructors and FromExternalFuture record the terminal state before
+                    // allowing their backing future to fault.  Map genuine cancellation to
+                    // this port's TaskCanceledException convention, while retaining the
+                    // caller's original fault exception unchanged.
+                    if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
+                    if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
+                    throw;
+                }
             } else if (!state_->isCompleted) {
                 std::unique_lock<std::mutex> lock(state_->completionMutex);
                 state_->completionCv.wait(lock, [&] { return state_->isCompleted.load(); });
             }
             if (state_->isFaulted && state_->exception) std::rethrow_exception(state_->exception);
             if (state_->isCanceled) throw System::Threading::Tasks::TaskCanceledException();
-            return hasFuture ? r : state_->result;
+            return hasFuture ? *result : *state_->result;
         }
 
         /** Waits for the task and returns its result; equivalent to getResultProperty(). */
@@ -736,6 +754,34 @@ namespace System::Threading::Tasks {
          */
         static TaskT<TResult> FromResult(const TResult& value) {
             return TaskT<TResult>(value, true);
+        }
+
+        /**
+         * Creates a TaskT that is already in the Faulted state with @p ex as its exception.
+         *
+         * C++ counterpart of .NET Task<TResult>.FromException(Exception).
+         * @param ex Exception to store.
+         */
+        static TaskT<TResult> FromException(std::exception_ptr ex) {
+            TaskT<TResult> t(PendingTag{});
+            t.state_->isFaulted   = true;
+            t.state_->isCompleted = true;
+            t.state_->exception   = ex;
+            return t;
+        }
+
+        /**
+         * Creates a TaskT that is already in the Canceled state.
+         *
+         * C++ counterpart of .NET Task<TResult>.FromCanceled(CancellationToken).
+         * @param token The CancellationToken associated with the cancellation.
+         */
+        static TaskT<TResult> FromCanceled(System::Threading::CancellationToken token) {
+            TaskT<TResult> t(PendingTag{});
+            t.cancellationToken_  = std::move(token);
+            t.state_->isCanceled  = true;
+            t.state_->isCompleted = true;
+            return t;
         }
 
         /**
@@ -769,7 +815,7 @@ namespace System::Threading::Tasks {
                             s->isFaulted = true;
                         }
                         s->isCompleted = true;
-                        return TResult{};
+                        throw;
                     }
                 }).share()
             );

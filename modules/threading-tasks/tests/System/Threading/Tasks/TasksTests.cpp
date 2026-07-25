@@ -27,6 +27,7 @@
 #include "System/Threading/Tasks/TaskCompletionSource.hpp"
 #include "System/Threading/Tasks/TaskContinuationOptions.hpp"
 #include "System/Threading/Tasks/TaskCreationOptions.hpp"
+#include "System/Threading/Tasks/TaskExtensions.hpp"
 #include "System/Threading/Tasks/TaskFactory.hpp"
 #include "System/Threading/Tasks/TaskSchedulerException.hpp"
 #include "System/Threading/Tasks/TaskStatus.hpp"
@@ -52,6 +53,7 @@ using System::Threading::Tasks::TaskSchedulerException;
 using System::Threading::Tasks::UnobservedTaskExceptionEventArgs;
 using System::Threading::Tasks::TaskScheduler;
 using System::Threading::Tasks::TaskFactory;
+using System::Threading::Tasks::TaskExtensions;
 
 // ===========================================================================
 // Task
@@ -520,6 +522,20 @@ TEST(TaskTTests, FromResult_ReturnsValueImmediately) {
     EXPECT_EQ(t.getResultProperty(), 99);
 }
 
+TEST(TaskTTests, FromException_IsFaulted) {
+    TaskT<int> t = TaskT<int>::FromException(std::make_exception_ptr(std::runtime_error("fail")));
+    EXPECT_THROW(t.Wait(), std::runtime_error);
+    EXPECT_TRUE(t.getIsFaultedProperty());
+    EXPECT_FALSE(t.getIsCanceledProperty());
+}
+
+TEST(TaskTTests, FromCanceled_IsCanceled) {
+    TaskT<int> t = TaskT<int>::FromCanceled(CancellationToken::None());
+    EXPECT_THROW(t.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(t.getIsCanceledProperty());
+    EXPECT_FALSE(t.getIsFaultedProperty());
+}
+
 TEST(TaskTTests, Run_ThrowingFunc_IsFaulted) {
     TaskT<int> t = TaskT<int>::Run([]() -> int { throw std::runtime_error("fail"); });
     EXPECT_THROW(t.Wait(), std::runtime_error);
@@ -586,6 +602,106 @@ TEST(TaskTCancellationTests, RunWithToken_GetCancellationTokenProperty_ReturnsSa
     TaskT<int> t = TaskT<int>::Run([]() { return 42; }, cts.getTokenProperty());
     EXPECT_EQ(t.Wait(), 42);
     EXPECT_FALSE(t.getCancellationTokenProperty().getIsCancellationRequestedProperty());
+}
+
+// ===========================================================================
+// TaskExtensions::Unwrap
+// ===========================================================================
+
+TEST(TaskExtensionsTests, Unwrap_NonGenericCompletedOuterReturnsItsInnerTask) {
+    auto source = std::make_shared<TaskCompletionSource<void>>();
+    Task inner = source->getTaskProperty();
+    TaskT<Task> outer = TaskT<Task>::FromResult(inner);
+
+    Task unwrapped = TaskExtensions::Unwrap(outer);
+    EXPECT_FALSE(unwrapped.getIsCompletedProperty());
+    source->SetResult();
+    EXPECT_NO_THROW(unwrapped.Wait());
+    EXPECT_TRUE(unwrapped.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_NonGenericOuterFault_PropagatesFault) {
+    TaskT<Task> outer = TaskT<Task>::FromException(
+        std::make_exception_ptr(std::runtime_error("outer failure")));
+
+    Task unwrapped = TaskExtensions::Unwrap(outer);
+    EXPECT_THROW(unwrapped.Wait(), std::runtime_error);
+    EXPECT_TRUE(unwrapped.getIsFaultedProperty());
+    EXPECT_FALSE(unwrapped.getIsCanceledProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_NonGenericPendingOuterForwardsInnerCompletion) {
+    auto source = std::make_shared<TaskCompletionSource<Task>>();
+    TaskT<Task> outer = source->getTaskProperty();
+    Task unwrapped = TaskExtensions::Unwrap(outer);
+
+    source->SetResult(Task::CompletedTask());
+    EXPECT_NO_THROW(unwrapped.Wait());
+    EXPECT_TRUE(unwrapped.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_NonGenericOuterOrInnerCanceled_ProducesCanceledProxy) {
+    TaskT<Task> canceledOuter = TaskT<Task>::FromCanceled(CancellationToken::None());
+    Task outerProxy = TaskExtensions::Unwrap(canceledOuter);
+    EXPECT_THROW(outerProxy.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(outerProxy.getIsCanceledProperty());
+
+    TaskT<Task> completedOuter = TaskT<Task>::FromResult(
+        Task::FromCanceled(CancellationToken::None()));
+    Task innerProxy = TaskExtensions::Unwrap(completedOuter);
+    EXPECT_THROW(innerProxy.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(innerProxy.getIsCanceledProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_NonGenericMovedFromInner_ProducesCanceledProxy) {
+    Task movedFrom = Task::CompletedTask();
+    Task retained = std::move(movedFrom);
+    (void)retained;
+    TaskT<Task> outer = TaskT<Task>::FromResult(movedFrom);
+
+    Task unwrapped = TaskExtensions::Unwrap(outer);
+    EXPECT_THROW(unwrapped.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(unwrapped.getIsCanceledProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_MovedFromOuter_ThrowsArgumentNullException) {
+    TaskT<Task> original = TaskT<Task>::FromResult(Task::CompletedTask());
+    TaskT<Task> retained = std::move(original);
+    (void)retained;
+
+    EXPECT_THROW(TaskExtensions::Unwrap(original), System::ArgumentNullException);
+}
+
+TEST(TaskExtensionsTests, Unwrap_GenericCompletedOuterReturnsInnerResult) {
+    TaskT<TaskT<int>> outer = TaskT<TaskT<int>>::FromResult(TaskT<int>::FromResult(42));
+
+    TaskT<int> unwrapped = TaskExtensions::Unwrap(outer);
+    EXPECT_EQ(unwrapped.getResultProperty(), 42);
+    EXPECT_TRUE(unwrapped.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_GenericPendingOuterForwardsInnerResult) {
+    auto source = std::make_shared<TaskCompletionSource<TaskT<int>>>();
+    TaskT<TaskT<int>> outer = source->getTaskProperty();
+    TaskT<int> unwrapped = TaskExtensions::Unwrap(outer);
+
+    source->SetResult(TaskT<int>::FromResult(73));
+    EXPECT_EQ(unwrapped.Wait(), 73);
+    EXPECT_TRUE(unwrapped.getIsCompletedSuccessfullyProperty());
+}
+
+TEST(TaskExtensionsTests, Unwrap_GenericFaultAndCancellation_PropagateState) {
+    TaskT<TaskT<int>> faultedOuter = TaskT<TaskT<int>>::FromException(
+        std::make_exception_ptr(std::runtime_error("outer failure")));
+    TaskT<int> faulted = TaskExtensions::Unwrap(faultedOuter);
+    EXPECT_THROW(faulted.Wait(), std::runtime_error);
+    EXPECT_TRUE(faulted.getIsFaultedProperty());
+
+    TaskT<TaskT<int>> canceledInnerOuter = TaskT<TaskT<int>>::FromResult(
+        TaskT<int>::FromCanceled(CancellationToken::None()));
+    TaskT<int> canceled = TaskExtensions::Unwrap(canceledInnerOuter);
+    EXPECT_THROW(canceled.Wait(), System::Threading::Tasks::TaskCanceledException);
+    EXPECT_TRUE(canceled.getIsCanceledProperty());
 }
 
 // ===========================================================================
