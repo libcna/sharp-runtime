@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 524.
+- Completed per-file reports: 525.
 - Confirmed findings: 151 (thirty-one high, one hundred thirteen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -775,6 +775,11 @@ consumer, UriPartial has no GetLeftPart, and UriHostNameType has no
 CheckHostName classifier (SR-AUD-149 through SR-AUD-151). Other audited enum
 values match .NET. No source/test changes. Resume the next coherent Uri
 header/source/test group.
+
+Audit checkpoint 2026-07-27 01:30:00: 525/1748 mirrored reports. The concise
+Uri module README is audited and its Core.Base dependency claim is accurate.
+All 27 eligible Uri component files now have mirrored evidence reports. No new
+finding or source/test change. Resume the next unreviewed runtime module.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
