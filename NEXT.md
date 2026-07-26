@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 595 audit reports confirm one hundred eighty-four findings: tracked CI omits the
+- The first 597 audit reports confirm one hundred eighty-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -597,6 +597,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   timeouts silently return success/timeout or can loop; SR-AUD-184: invalid
   EventResetMode values are accepted and yield incoherent behavior instead of
   an argument error. No production or test source changed.
+  Dedicated Threading AsyncCallbackTests and Core's mixed MiscNewTests add two
+  reports under green 4/4 and 6/6 filters. They confirm normal marker/callback
+  construction but leave real APM transitions, callback failure, and async
+  wait/lifetime behavior unasserted. No new finding or source/test change
+  resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

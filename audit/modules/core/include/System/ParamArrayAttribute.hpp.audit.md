@@ -4,7 +4,9 @@
 
 - Audit status: AUDITED (22-line marker declaration, fully read).
 - Validation: `ParamArrayAttributeTest.*` passed 3/3 in the 77-test focused
-  Core.Base attribute filter on 2026-07-26.
+  Core.Base attribute filter on 2026-07-26; the additional direct
+  `ParamArrayAttributeTests.*` cases passed 2/2 on 2026-07-27 and are fully
+  audited in `MiscNewTests.cpp.audit.md`.
 - Reference basis: local .NET `System/ParamArrayAttribute.cs:6-13`.
 
 ## Findings

@@ -3,10 +3,9 @@
 ## Metadata
 
 - AUDITED: 20-line public APM callback alias, fully read.
-- Validation: the Core `AsyncCallbackTests.*` cases and the Threading
-  `AsyncCallbackTests.*` fixture are present; their complete fixture-source
-  audits remain pending.  The related focused EventWaitHandle/WaitHandle run
-  passed 9/9 on 2026-07-27.
+- Validation: the dedicated Threading `AsyncCallbackTests.*` filter passed
+  4/4 and the Core mixed `ParamArrayAttributeTests.*:AsyncCallbackTests.*`
+  filter passed 6/6 on 2026-07-27. Both fixture sources are fully audited.
 - Reference basis: local current-.NET `AsyncCallback.cs`, audited
   `IAsyncResult.hpp`, and first-party APM consumer search.
 
