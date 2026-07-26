@@ -1018,7 +1018,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,765 completed tickets, plus active audit ticket #1766. Ticket #1737 records the completed P0 split, tickets
+1,765 completed tickets, including closed audit ticket #1766. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -1175,21 +1175,111 @@ uses a reference, a null comparer is not representable and parameterless
 `Sort()` remains the default-comparer route. Two regressions cover descending
 full-list/range order and invalid range validation.
 
-## Recommended next bounded tasks
+## Post-audit remediation roadmap
 
-Do not start an unrelated consumer-driven P2 slice while the repository-wide
-audit is active. Complete ticket #1766 first, reconcile the findings index,
-then turn evidence-backed findings into isolated repair tickets.  The former
-candidates remain valid only after that work:
+Ticket #1766 is closed as an evidence-only audit.  The next work is *not* a
+return to the old consumer-driven P2 queue: it is a separately authorised
+remediation phase against the 364-item audit inventory (91 high, 262 medium,
+11 low).  Do not begin a repair merely because it appears in this file.  The
+first remediation session must choose one bounded ticket, its owning branch,
+and its compatibility target with the user; until that decision, `feature/audit`
+remains an audit-handoff branch.
 
-1. **Other documented partial surfaces.** Examples include wider
-   debugger/process/XML surfaces.
-2. **Advanced `ImmutableList<T>::Builder` operations by consumer need.**
-   Query, sorting, and copy overloads remain explicitly deferred; retain the
-   vector-backed snapshot semantics if a focused consumer requires one.
-3. **Reduce the Doxygen backlog incrementally.** The reproducible Doxygen 1.9.8
-   baseline is 1,942 warnings. Keep touched public APIs from increasing it and
-   avoid a mass comment-only rewrite.
+### Opening a remediation ticket
+
+Every repair ticket should name its owning `SR-AUD-*` finding(s), link the
+per-file reports and any `CCF-*` shared cause, and state the exact public
+contract that is being restored.  It must also identify affected public
+headers, compatibility/migration risk, focused tests, sanitizer or native
+probe where applicable, and the completion gate.  Preserve the original audit
+probe as a regression until an equivalent permanent test exists; a patch that
+only makes an ad-hoc probe quiet is not closure.
+
+Keep tickets small and independently reviewable.  A shared root cause may
+justify coordinated changes, but it does not justify a catch-all rewrite of a
+module or an unrelated API cleanup.  Update `audit/AUDIT_FINDINGS_INDEX.md`,
+the selected per-file reports, `plan.md`, and this handoff when the status or
+scope changes; retain the evidence and do not delete a finding simply because
+one reproduction changes shape.
+
+### Recommended dependency order
+
+1. **Plan the collection safety contracts before patching their symptoms.**
+   These are the immediate high-priority handoff items from the final shard:
+
+   - A proposed `REMED-COLL-ENUM` ticket should cover SR-AUD-356 and
+     SR-AUD-364 / CCF-018: `IEnumerator<T>::Current` must reject both
+     pre-first and post-end states before any native container access.  It
+     needs one lifecycle policy and permanent regressions across the affected
+     storage categories, not a List-only bounds check.
+   - A proposed `REMED-COLL-LIFETIME` ticket should cover SR-AUD-357's
+     `LinkedListNode` owner/iterator lifetime.  CCF-019 also contains JsonNode
+     and XML LINQ instances, but they should remain separate repair tickets
+     unless a deliberately shared lifetime abstraction is introduced and its
+     public compatibility is reviewed.
+   - SR-AUD-358 / CCF-020 is a design-first item: legacy
+     `ICollection::CopyTo(void*, int)` has no type, nullability, rank, or
+     capacity information to validate.  Decide the compatible typed or
+     length-aware boundary before changing ArrayList, Queue, Stack, Hashtable,
+     or ListDictionaryInternal.  Do not paper over it with one concrete
+     collection check or a silent public-API break.
+   - Then take SR-AUD-359 through SR-AUD-363 as small semantic/concurrency
+     tickets after the lifetime and raw-output decisions have a stable
+     contract.  They are not substitutes for the three safety boundaries.
+
+2. **Take self-contained ASan/UBSan-backed public-input failures next.**
+   SR-AUD-338 and SR-AUD-341 (null text-stream and `MemoryStream`
+   construction boundaries) are suitable examples because the audit has
+   focused reproductions and the affected ownership/input boundary is much
+   smaller than the collection interface redesign.  Similar candidates must
+   remain one public contract per ticket; validate null, empty, valid, and
+   disposal/error paths rather than adding only the crashing input.
+
+3. **Repair shared high-severity causes by a scoped family plan, not by a
+   repository-wide sweep.**  CCF-004 (defined arithmetic at native/fixed-width
+   boundaries), CCF-005 (conversion special values and range validation),
+   CCF-009 (process-wide PRNG concurrency), CCF-013 (in-place Base64 write
+   order), and CCF-019 are high-leverage groups.  First enumerate the exact
+   listed `SR-AUD-*` members and their current tests, then split work along
+   public type/module boundaries.  In particular, preserve documented .NET
+   checked versus unchecked behavior; replacing all arithmetic with one
+   generic "safe" helper without that distinction would create parity
+   regressions.
+
+4. **Follow with contained parity and diagnostics work.**  Date/time grammar
+   validation (CCF-002), numeric formatting/parsing policy (CCF-003 and
+   CCF-006 through CCF-008), floating comparison semantics (CCF-010),
+   formatting/UTF/try-output contracts (CCF-012 and CCF-014 through CCF-017),
+   and the remaining medium/low findings can be scheduled after their owning
+   high-severity blockers.  Assertion-only gaps found by the audit should be
+   strengthened alongside the relevant repair, not claimed as an independent
+   product fix unless they hide a confirmed behavioral defect.
+
+5. **Only resume the former P2 candidates after the remediation queue has a
+   deliberately chosen stopping point.**  Wider debugger/process/XML
+   surfaces, advanced `ImmutableList<T>::Builder` operations, and incremental
+   Doxygen reduction remain legitimate later work, but must not displace
+   confirmed crash, lifetime, or public-contract findings.
+
+### Required evidence for each repair
+
+At a minimum, a remediation ticket must add or improve permanent assertions
+for the normal path, the audited failure path, boundary inputs, and observable
+exception/result semantics.  Memory/lifetime tickets also require the focused
+ASan/UBSan reproduction to be clean after the fix; concurrency tickets require
+an appropriate bounded race/stress check.  Run the smallest relevant test
+target during development, then its owning component target, the configured
+build, component-boundary validation, plan-database consistency, and
+`git diff --check` before marking a ticket done.  Record exact commands and
+results, including any platform limitation, in the ticket handoff.
+
+The sandbox's local-network restriction is not a waiver: the six enabled
+`Net.Http` local-server tests currently fail at `Socket::Socket: socket()
+failed`.  A network-permitted full `scripts/local_ci_check.sh build` run is a
+required closure gate for the first remediation batch and again whenever a
+repair affects networking, shared runtime infrastructure, or the final batch.
+Do not disable, filter out, or recategorize those tests to manufacture green
+evidence.
 
 ## Useful commands
 
@@ -1226,15 +1316,26 @@ HTTP, socket, and ping tests require permission for local network operations.
   classification work.
 - Do not add cross-platform CI, dependencies, or broad public-header refactors
   without direction.
-- Push only to `feature/work`; do not merge to `develop`/`master` or create
+- Keep the audit evidence intact.  Before the first production remediation,
+  agree with the user whether it continues on `feature/audit` or starts on a
+  dedicated remediation branch; do not merge to `develop`/`master` or create
   tags without explicit approval.
 
 ## Cold resume
 
-1. Read `CLAUDE.md`, this file, `plan.md`, and `audit/AUDIT_SCOPE.md`.
-2. Inspect `git status --short --branch`, ticket #1766, and
-   `audit/AUDIT_PROGRESS.md`.
-3. Resume the first pending audit shard; write evidence-backed mirrored reports
-   and update the manifest/progress/index as each coherent shard completes.
-4. Do not repair production code during this phase. Run the project gates at
-   audit milestones and record their exact results before final reconciliation.
+1. Read `CLAUDE.md`, this file, `plan.md`, `audit/AUDIT_FINAL_REPORT.md`,
+   `audit/AUDIT_FINDINGS_INDEX.md`, and
+   `audit/AUDIT_CROSS_CUTTING_FINDINGS.md`.  The first three audit documents
+   are the authoritative closure, inventory, and shared-cause record.
+2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
+   selected finding's mirrored reports and current implementation/tests.  Do
+   not search for a new audit shard: the 1,748-file audit is complete.
+3. With the user, select exactly one proposed remediation ticket from the
+   roadmap, decide the remediation branch, state its public compatibility
+   contract and validation matrix, and record that scoped plan before editing
+   production code.
+4. Implement only that ticket, retaining its audit probe as a permanent
+   regression or replacing it with an equivalent durable test.  Run its
+   focused and component validation as it changes, then record the exact final
+   build, sanitizer, validation-script, and network-gate status in both
+   `plan.md` and this handoff.
