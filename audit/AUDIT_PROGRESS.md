@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 491.
+- Completed per-file reports: 497.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -720,6 +720,14 @@ DuplicateWaitObject/EntryPointNotFound filter passed 33/33. No new finding:
 those tests leave confirmed SR-AUD-094, SR-AUD-095, and SR-AUD-100 HResult
 diagnostics unguarded. No source/test changes. Resume another coherent
 Core.Base header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-27 00:20:00: 497/1748 mirrored reports. Six complete
+member/type-access exception fixture sources were audited; the selected filter
+passed 58/58. No new finding: MissingField/MissingMember/MissingMethod,
+MethodAccess, and InvalidOperation assert their derived HResults; TypeAccess
+asserts its default HResult while header review covers the remaining overloads.
+No source/test changes. Resume another coherent Core.Base header/source/test
+group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
