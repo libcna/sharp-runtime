@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 920 audit reports confirm two hundred fifty-nine findings: tracked CI omits the
+- The first 945 audit reports confirm two hundred sixty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -834,6 +834,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   current-.NET probes add invalid mode/post-close behavior and inert compression
   strategy/options constructors (SR-AUD-256..259). Audit-only; no production/
   test change occurred.
+
+- All twenty-five eligible files in `modules/io-hashing` now have mirrored
+  reports; its target passes 96/96. ASan/UBSan confirms raw positive-null
+  buffer dereferences; a native probe confirms Adler/CRC negative lengths
+  silently succeed; and source comparison confirms XXH's named little-endian
+  helpers are host-endian object copies (SR-AUD-260..262). Audit-only; no
+  production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

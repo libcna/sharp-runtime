@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 920.
-- Confirmed findings: 259 (sixty-one high, one hundred eighty-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 945.
+- Confirmed findings: 262 (sixty-two high, one hundred eighty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1354,6 +1354,14 @@ zlib input and null-stream dereference; native/current-.NET probes add invalid
 mode/post-close behavior and inert compression strategy/options constructors
 (SR-AUD-256 through SR-AUD-259). No source/test changes. Resume another
 coherent module shard.
+
+Audit checkpoint 2026-07-27 14:50:00: 945/1748 mirrored reports, 262
+confirmed findings. All twenty-five IO.Hashing files are mirrored; its target
+passed 96/96. ASan/UBSan confirms raw positive-null buffer dereferences and a
+native probe confirms Adler/CRC negative lengths silently succeed; source
+comparison confirms the XXH `LE` helpers are host-endian copies (SR-AUD-260
+through SR-AUD-262). No source/test changes. Resume another coherent module
+shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
