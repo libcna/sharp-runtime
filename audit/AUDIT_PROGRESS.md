@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 481.
+- Completed per-file reports: 487.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -704,6 +704,14 @@ document SR-AUD-094's missing HResults, ContextMarshal documents SR-AUD-096,
 and the other three fixtures correctly assert their HResults. No source/test
 changes. Resume another complete Core.Base header/source/test group after
 inventory review.
+
+Audit checkpoint 2026-07-26 23:59:55: 487/1748 mirrored reports. Six complete
+runtime exception fixtures (ArrayTypeMismatch, Rank, OutOfMemory,
+NullReference, SystemException, and TypeUnloaded) audited; selected filter
+passed 40/40. No new finding: ArrayTypeMismatch direct text tests omit the
+existing SR-AUD-093 HResult, while the other five verify their important
+HResult paths. No source/test changes. Resume another complete Core.Base
+header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
