@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 542.
+- Completed per-file reports: 551.
 - Confirmed findings: 160 (thirty-one high, one hundred twenty-one medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -828,6 +828,13 @@ the direct CompilerFeatureRequired fixture locks a freely mutable C++
 IsOptional setter where current .NET permits the property only during
 initialization (SR-AUD-160). No source/test changes. Resume another coherent
 Runtime header/source/test group.
+
+Audit checkpoint 2026-07-27 02:40:00: 551/1748 mirrored reports. The remaining
+nine small compiler-marker/derived-state-machine headers were audited against
+current .NET source. Their shared fixture was already green (StateMachine 2/2,
+metadata markers 1/1); all declare their compiler-unconsumed C++ adaptation
+explicitly and have no production consumer. No new finding or source/test
+change. Resume another coherent Runtime header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
