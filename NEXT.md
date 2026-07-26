@@ -6,8 +6,9 @@
 *Last verified: 2026-07-27. Branch: `feature/audit`. The P0 component-boundary
 repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,681 tests across 37 executables. A repository-wide, evidence-only
-audit is now in progress under `audit/` (local ticket #1766).*
+edges, and 12,681 tests across 37 executables. The repository-wide,
+evidence-only audit is complete under `audit/` (local ticket #1766); its
+separately authorized remediation phase has not started.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -15,11 +16,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 
 ## Current state
 
-- A CNA-style deep audit is active. `audit/AUDIT_SCOPE.md` fixes a 1,748-file
-  first-party scope and the mirrored `audit/<source-path>.audit.md` convention;
-  `audit/AUDIT_MANIFEST.md` and `AUDIT_PROGRESS.md` record coverage. This
-  phase must not repair production code or tests: it gathers reproducible
-  evidence, missing assertions/diagnostics, and an ordered remediation backlog.
+- The CNA-style deep audit is complete. `audit/AUDIT_SCOPE.md` fixes its
+  1,748-file first-party scope and the mirrored
+  `audit/<source-path>.audit.md` convention; `AUDIT_FINAL_REPORT.md`,
+  `AUDIT_MANIFEST.md`, and `AUDIT_PROGRESS.md` record the reconciled evidence
+  and remediation backlog. Production repairs remain out of scope until a
+  separately authorized remediation ticket is selected.
 - Initial audit validation passed boundary validation, catalogue freshness, and
   a zero-warning native build. It could not complete the full suite in this
   sandbox because the six local-server `Net.Http` cases fail immediately with

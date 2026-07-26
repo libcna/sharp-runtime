@@ -20,7 +20,7 @@ reproduced the identical zero-millisecond failure. `NEXT.md` already documents
 that HTTP, socket, and ping tests need local-network permission, so this is
 recorded as an environment-limited validation result, not a source regression
 or a reason to weaken/skip the tests. A network-permitted environment must run
-the full gate during final audit reconciliation.
+the full gate before a remediation batch can be closed.
 
 ## Immediate sequence
 
@@ -66,6 +66,11 @@ consistency checker, module-boundary validation (41 physical modules, 90
 production edges), and `git diff --check`.
 
 ## Resume point
+
+The audit is complete. Do not resume source review under ticket #1766; begin
+only separately authorized remediation planning from `AUDIT_FINAL_REPORT.md`
+and `AUDIT_FINDINGS_INDEX.md`. The remaining historical detail below records
+how earlier evidence was obtained.
 
 The integration shard is complete.  `System::String`, `System::Char`,
 `System::Object`, `System::Type`, `System::Int128`, `System::UInt128`,

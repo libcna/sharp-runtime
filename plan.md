@@ -229,13 +229,13 @@ The first consumer-driven ports after modularization added:
 The verified test baseline grew from 12,494 at the modularization checkpoint
 to 12,681.
 
-## Active repository audit
+## Completed repository audit
 
-Ticket #1766 is a P1, evidence-only, repository-wide audit. It mirrors every
+Ticket #1766 was a P1, evidence-only, repository-wide audit. It mirrors every
 tracked first-party text-like source, test, build, CI, and relevant
 documentation file under `audit/`, following the CNA audit format. Its scope,
-exclusions, live manifest, findings index, and resume state are maintained in
-that directory. The audit is deliberately not a repair stream: confirmed
+exclusions, final manifest, findings index, and handoff state are maintained in
+that directory. The audit was deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
 The 2026-07-27 audit closure has all 1,748 of 1,748 mirrored reports complete
@@ -252,9 +252,9 @@ approved, bounded tickets.
 
 ## Candidate roadmap
 
-No production implementation is active while ticket #1766 is in progress.
-After it completes, create or reopen a repair `ticket` row with acceptance
-criteria and a validation command before changing code.
+The audit is complete and no production remediation is active. Create or
+reopen a repair `ticket` row with acceptance criteria and a validation command
+before changing code.
 
 ### P2 — Consumer-driven API breadth
 
