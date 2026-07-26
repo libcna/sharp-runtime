@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 945.
-- Confirmed findings: 262 (sixty-two high, one hundred eighty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 974.
+- Confirmed findings: 267 (sixty-three high, one hundred ninety-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -1362,6 +1362,15 @@ native probe confirms Adler/CRC negative lengths silently succeed; source
 comparison confirms the XXH `LE` helpers are host-endian copies (SR-AUD-260
 through SR-AUD-262). No source/test changes. Resume another coherent module
 shard.
+
+Audit checkpoint 2026-07-27 15:10:00: 974/1748 mirrored reports, 267
+confirmed findings. All twenty-nine Net.Sockets files are mirrored. Its target
+built; 54/88 tests passed and 34 socket/send-dependent cases are blocked by
+sandbox permission. Native probes confirm negative SendPacketsElement count
+coercion and silent invalid-NetworkStream descriptor I/O; source/current-.NET
+comparison confirms raw async Socket lifetime and Tcp/Udp IPv4/argument gaps
+(SR-AUD-263 through SR-AUD-267). No source/test changes. Resume another
+coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
