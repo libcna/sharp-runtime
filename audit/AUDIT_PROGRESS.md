@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 384.
-- Confirmed findings: 113 (twenty-eight high, seventy-nine medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 405.
+- Confirmed findings: 117 (twenty-eight high, eighty-two medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -561,6 +561,19 @@ three dedicated fixtures are now audited. The marker filter passes 18/18, but
 medium SR-AUD-113 confirms that ThreadStaticAttribute has no C++ attachment or
 `thread_local` storage mechanism despite claiming per-thread field values.
 Assembly-load string payloads and the STA/MTA no-effect boundary are explicit.
+
+Audit checkpoint 2026-07-26 20:10: 405/1748 mirrored reports. Attribute
+base/targets/usage declaration and source, ten related attribute headers, and
+eight complete direct fixtures audited; the focused Core.Base attribute filter
+passed 77/77. New SR-AUD-114: Attribute is constructible and gives all
+unoverridden derived attributes identity/address equality rather than .NET's
+abstract fieldwise contract. New SR-AUD-115/116: ObsoleteAttribute cannot
+affect a declaration/compiler diagnostic and erases nullable string state. New
+low SR-AUD-117: deprecated LoaderOptimization values have only Doxygen, not
+C++ compiler, deprecation. Explicit context/serialization/params/reflection
+marker limitations remain documented adaptations. No source/test changes.
+Resume a complete remaining Core.Base header/source/test group after refreshing
+its inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

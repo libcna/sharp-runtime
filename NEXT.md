@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 384 audit reports confirm one hundred thirteen findings: tracked CI omits the
+- The first 405 audit reports confirm one hundred seventeen findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -308,6 +308,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   mechanism despite its per-thread-value contract (medium SR-AUD-113).
   Assembly-load payload and STA/MTA no-effect adaptations are explicit. No
   production or test source changed.
+  The Attribute base, targets/usage value objects, ten related marker/value
+  headers, and eight full fixtures add twenty-one reports; their focused filter
+  passes 77/77. `Attribute` remains publicly constructible and performs
+  address-based equality/hash rather than current .NET's abstract fieldwise
+  contract (SR-AUD-114). `ObsoleteAttribute` cannot attach to a declaration or
+  issue its promised diagnostic (SR-AUD-115), and it collapses nullable string
+  properties into empty strings (SR-AUD-116). Deprecated LoaderOptimization
+  values have Doxygen-only, not C++ compiler, deprecation (low SR-AUD-117).
+  Context/serialization/params/reflection marker limits are explicit permanent
+  adaptations. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

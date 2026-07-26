@@ -345,3 +345,22 @@ SR-AUD-100, and:
 - `modules/core/include/System/AccessViolationException.hpp.audit.md`;
 - `modules/core/include/System/ContextMarshalException.hpp.audit.md`;
 - `modules/core/include/System/DuplicateWaitObjectException.hpp.audit.md`.
+
+## CCF-017 — the Attribute base's identity fallback changes every unoverridden attribute's value semantics
+
+Current .NET makes `Attribute` abstract and supplies same-type fieldwise
+equality/hash semantics.  The C++ base is constructible and compares/hashes
+addresses, so independently constructed equal values of every attribute that
+does not override both methods compare unequal.  The direct probe demonstrates
+this for `CLSCompliantAttribute(true)` and two empty `FlagsAttribute` objects;
+the ContextStatic, ParamArray, Serializable, and Obsolete fixtures likewise
+exercise identity rather than a .NET value contract.  A repair needs one base
+policy plus vectors for payload, empty-marker, type-mismatch, and hash/equality
+behavior rather than per-marker overrides.  See SR-AUD-114 and:
+
+- `modules/core/include/System/Attribute.hpp.audit.md`;
+- `modules/core/include/System/CLSCompliantAttribute.hpp.audit.md`;
+- `modules/core/include/System/ContextStaticAttribute.hpp.audit.md`;
+- `modules/core/include/System/FlagsAttribute.hpp.audit.md`;
+- `modules/core/include/System/ObsoleteAttribute.hpp.audit.md`;
+- `modules/core/tests/System/SystemAttributeTests.cpp.audit.md`.
