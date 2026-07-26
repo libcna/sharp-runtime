@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 430.
+- Completed per-file reports: 444.
 - Confirmed findings: 125 (twenty-eight high, ninety medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -611,6 +611,12 @@ modeling and required name validation, while ToString omits its token and uses
 a different grammar. ApplicationIdentity remains a documented legacy/reflection
 adaptation with no separate finding. No source/test changes. Resume another
 complete Core.Base group after inventory review.
+
+Audit checkpoint 2026-07-26 21:50: 444/1748 mirrored reports. Seven enum
+headers and seven direct fixtures audited; combined filter passed 42/42. Values
+and flag operators match local .NET; SR-AUD-036 remains a consumer validation
+issue for MidpointRounding and no new finding was classified. No source/test
+changes. Resume another complete Core.Base group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
