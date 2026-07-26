@@ -238,14 +238,17 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 Xml checkpoint has 1,607 of 1,748 mirrored reports complete and
-three hundred fifty-five confirmed findings; `audit/AUDIT_PROGRESS.md` is the
-authoritative live count. The complete 119-file Xml shard passed 377/377 focused
-tests. Direct functional probes record SR-AUD-348 through SR-AUD-355 for reader
-lifecycle, writer validation, DOM mutation atomicity/ownership/events, namespace
-scope lookup, XML Schema duration conversion, and XPath adjacent-text semantics.
-The preceding 84-file IO shard passed 527/527. Audit-only work made no production
-or test-source change; the next component is Collections.
+The 2026-07-27 audit closure has all 1,748 of 1,748 mirrored reports complete
+and three hundred sixty-four confirmed findings; `audit/AUDIT_FINAL_REPORT.md`
+and `audit/AUDIT_PROGRESS.md` are the authoritative handoff. The final
+142-file Collections shard passed 1,422/1,422 and adds SR-AUD-356 through
+SR-AUD-364 for unsafe enumerator lifecycle, LinkedListNode lifetime, raw CopyTo
+storage, mutable ReadOnlyDictionary.Empty, concurrent update loss, non-live
+SortedSet views, FrozenDictionary duplicates, Hashtable contracts, and BitArray
+enumeration. Final reconciliation built all configured targets and passed the
+database/boundary/diff controls. Audit-only work made no production or
+test-source changes; begin post-audit remediation only through separately
+approved, bounded tickets.
 
 ## Candidate roadmap
 

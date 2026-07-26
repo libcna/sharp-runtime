@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,607 (91.9% of eligible scope; 1,558/1,699 runtime-module files).
-- Confirmed findings: 355 (eighty-eight high, two hundred fifty-six medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
+- Confirmed findings: 364 (ninety-one high, two hundred sixty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -24,9 +24,11 @@ the full gate during final audit reconciliation.
 
 ## Immediate sequence
 
-1. Select the remaining `Collections` component from the deterministic
-   inventory, retaining component-scoped tests and upstream-reference review.
-2. Reconcile every mirrored report, findings index, and project handoff.
+1. Do not begin remediation in this audit-only phase.  Review the completed
+   final report and findings index with the user, then create bounded repair
+   tickets in severity/dependency order.
+2. Retain the documented network-permitted full-gate run as a validation
+   prerequisite for remediation closure.
 
 ## Assumptions and decisions
 
@@ -40,15 +42,28 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 119-file `Xml` shard is mirrored. Its focused target passed
-377/377. Direct functional probes confirm SR-AUD-348 (reader remains usable
-after Close), SR-AUD-349 (writer emits malformed XML for an invalid name),
-SR-AUD-350 (invalid InnerXml silently destroys children), SR-AUD-351
-(cross-parent child removal), SR-AUD-352 (unraised DOM events), SR-AUD-353
-(outer namespace invisibility), SR-AUD-354 (missing XML Schema duration
-conversion), and SR-AUD-355 (unmerged XPath text-like nodes). The preceding
-84-file IO checkpoint passed 527/527. Audit-only: no production or test source
-was changed.
+The complete 142-file `Collections` shard is mirrored; together with
+`modules/README.md`, it closes the deterministic 1,748-file scope.  Its focused
+target passed 1,422/1,422.  Direct ASan/UBSan probes confirm SR-AUD-356
+(invalid enumerator Current), SR-AUD-357 (retained LinkedListNode use-after-free),
+and SR-AUD-358 (raw ICollection CopyTo null write). Direct functional probes
+confirm SR-AUD-359 (mutable ReadOnlyDictionary.Empty), SR-AUD-360
+(ConcurrentDictionary lost update), SR-AUD-361 (snapshot SortedSet view),
+SR-AUD-362 (duplicate FrozenDictionary key overwrite), and SR-AUD-363
+(Hashtable null-key/null-view contract); source inspection confirms SR-AUD-364
+(BitArray enumerator state/version gap). The preceding XML checkpoint passed
+377/377 and IO passed 527/527. Audit-only: no production or test source changed.
+
+## Audit closure
+
+The reconciled scope has exactly 1,748 eligible source reports and no missing
+mirror.  The final evidence, validation limits, severity roll-up, and repair
+handoff are in `AUDIT_FINAL_REPORT.md`; remediation requires separate user
+direction and bounded follow-up tickets.
+
+Final reconciliation passed `gmake -C build -j4`, the plan database
+consistency checker, module-boundary validation (41 physical modules, 90
+production edges), and `git diff --check`.
 
 ## Resume point
 

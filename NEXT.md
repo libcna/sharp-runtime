@@ -26,7 +26,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,607 audit reports confirm three hundred fifty-five findings. The newly complete
+- Final audit reconciliation completed all configured build targets with
+  `gmake -C build -j4`; plan-database consistency, module-boundary validation
+  (41 physical modules, 90 production edges), and `git diff --check` passed.
+- All 1,748 audit reports are complete and confirm three hundred sixty-four findings. The final
+  142-file `Collections` shard passed 1,422/1,422 focused tests and adds SR-AUD-356 through
+  SR-AUD-364: invalid enumerator Current paths can reach ASan-confirmed out-of-bounds reads;
+  retained LinkedListNode handles use freed storage; raw ICollection CopyTo can ASan-crash;
+  ReadOnlyDictionary.Empty is assignable; ConcurrentDictionary loses updates; SortedSet views
+  are snapshots; FrozenDictionary overwrites duplicate keys; Hashtable accepts null keys and
+  returns null views; and BitArray enumeration has no valid-state/mutation guard. The preceding
   119-file `Xml` shard passed 377/377 focused tests and adds SR-AUD-348 through SR-AUD-355:
   XmlReader reads after Close; XmlWriter emits malformed XML for invalid names; invalid InnerXml
   silently removes children; cross-parent DOM removal detaches unrelated children; XmlDocument

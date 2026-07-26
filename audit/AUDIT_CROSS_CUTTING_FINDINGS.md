@@ -376,3 +376,60 @@ behavior rather than per-marker overrides.  See SR-AUD-114 and:
 - `modules/core/include/System/FlagsAttribute.hpp.audit.md`;
 - `modules/core/include/System/ObsoleteAttribute.hpp.audit.md`;
 - `modules/core/tests/System/SystemAttributeTests.cpp.audit.md`.
+
+## CCF-018 — enumerator lifecycle checks are not consistently enforced before native storage access
+
+The `IEnumerator<T>` abstraction must reject `Current` before a successful
+first `MoveNext` and after enumeration ends. Generic List, Queue, Stack,
+SortedList, LinkedList, ObjectModel Collection and ReadOnlyCollection, and the
+ConcurrentBag/Queue/Stack snapshot enumerators all directly index native
+storage instead. The List probe is ASan-confirmed as a heap-buffer-overflow;
+the sibling implementations have the same unguarded cursor shape. BitArray
+independently returns a stale cache and lacks mutation/version detection. A
+repair needs one lifecycle policy and tests across each storage category, not
+only a List bounds check. See SR-AUD-356, SR-AUD-364, and:
+
+- `modules/collections/include/System/Collections/Generic/IEnumerator.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/List.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/Queue.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/Stack.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/SortedList.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/LinkedList.hpp.audit.md`;
+- `modules/collections/include/System/Collections/ObjectModel/Collection.hpp.audit.md`;
+- `modules/collections/include/System/Collections/ObjectModel/ReadOnlyCollection.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Concurrent/ConcurrentBag.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Concurrent/ConcurrentQueue.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Concurrent/ConcurrentStack.hpp.audit.md`;
+- `modules/collections/include/System/Collections/BitArray.hpp.audit.md`.
+
+## CCF-019 — borrowed native handles outlive the owner without a liveness boundary
+
+JsonNode children, XML LINQ children, and now LinkedListNode each expose a
+copyable public handle while retaining a raw parent/container pointer or native
+iterator. Retaining the child/node after owner destruction reaches
+ASan-confirmed use-after-free in all three representative surfaces. The
+implementations differ, but ownership cannot remain an undocumented raw pointer
+when the handle is publicly storable. Repair requires an explicit lifetime or
+detachment policy and tests that retain handles across owner destruction and
+structural removal. See SR-AUD-327, SR-AUD-333, SR-AUD-357, and:
+
+- `modules/text-json/include/System/Text/Json/Nodes/JsonNode.hpp.audit.md`;
+- `modules/xml-linq/include/System/Xml/Linq/XObject.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Generic/LinkedList.hpp.audit.md`.
+
+## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
+
+The legacy non-generic ICollection interface accepts `void*` plus a starting
+index but has no element type, nullability, rank, or capacity representation.
+ArrayList, Queue, Stack, Hashtable, and ListDictionaryInternal therefore write
+through unvalidated caller storage; ArrayList's null destination is
+ASan-confirmed. This is a shared interface-design fault rather than five
+independent bounds omissions. A safe repair needs a typed/length-aware adapter
+or a deliberately constrained API migration. See SR-AUD-358 and:
+
+- `modules/collections/include/System/Collections/ICollection.hpp.audit.md`;
+- `modules/collections/include/System/Collections/ArrayList.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Queue.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Stack.hpp.audit.md`;
+- `modules/collections/include/System/Collections/Hashtable.hpp.audit.md`;
+- `modules/collections/include/System/Collections/ListDictionaryInternal.hpp.audit.md`.
