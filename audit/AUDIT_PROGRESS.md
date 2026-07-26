@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 475.
+- Completed per-file reports: 481.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -694,6 +694,16 @@ HResult, inner-exception, null/UTF-8, and real consumer-route assertion gaps.
 PlatformNotSupported's existing header report was corrected to reflect its
 three-constructor HResult test. No source/test changes. Resume another complete
 Core.Base header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-26 23:59:45: 481/1748 mirrored reports. Six complete
+exception fixtures (CannotUnloadAppDomain, DataMisaligned, ContextMarshal,
+ExecutionEngine, MemberAccess, and MulticastNotSupported) audited; selected
+filter passed 31/31, including three duplicate CannotUnload suite cases from
+another source. No new finding: direct CannotUnload/DataMisaligned tests now
+document SR-AUD-094's missing HResults, ContextMarshal documents SR-AUD-096,
+and the other three fixtures correctly assert their HResults. No source/test
+changes. Resume another complete Core.Base header/source/test group after
+inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
