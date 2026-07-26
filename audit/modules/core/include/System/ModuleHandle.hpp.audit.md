@@ -4,8 +4,10 @@
 
 - Audit status: AUDITED (48-line public handle stub, fully read with
   `RuntimeTypeHandle.hpp` and its consuming test sections).
-- Validation: the combined runtime-handle filter passed 19/19 on 2026-07-26,
-  but standalone compile of a translation unit that includes `ModuleHandle.hpp`
+- Validation: the combined runtime-handle filter passed 19/19 on 2026-07-26;
+  the direct Batch15 runtime-handle filter passed 59/59 on 2026-07-27 and is
+  fully audited in `Batch15TypesTests.cpp.audit.md`. However, standalone
+  compile of a translation unit that includes `ModuleHandle.hpp`
   fails: `return type 'struct System::RuntimeTypeHandle' is incomplete` at the
   inline `ResolveTypeHandle` definition.
 - Reference basis: local .NET `ModuleHandle`/`RuntimeTypeHandle` metadata-handle

@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 599.
+- Completed per-file reports: 600.
 - Confirmed findings: 184 (thirty-five high, one hundred forty medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1025,6 +1025,13 @@ vector coverage but omits all high raw/overlap/nontrivial Array paths and
 medium float/callable diagnostics already recorded as SR-AUD-044/046/051/052.
 No new finding or source/test change. Resume another coherent Core source/test
 group.
+
+Audit checkpoint 2026-07-27 06:50:00: 600/1748 mirrored reports, 184
+confirmed findings. Core Batch15TypesTests was audited; its seven-suite filter
+passed 59/59. It supplies normal Math/exception/type-handle coverage but locks
+in SR-AUD-068's constructible identity ValueType and masks SR-AUD-111 through
+include order. No new finding or source/test change. Resume another coherent
+Core source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
