@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 538.
-- Confirmed findings: 159 (thirty-one high, one hundred twenty-one medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 542.
+- Confirmed findings: 160 (thirty-one high, one hundred twenty-one medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -819,6 +819,15 @@ Ambiguous has the wrong catch hierarchy and no inner-cause constructor, and
 External omits error-code construction/ErrorCode diagnostics (SR-AUD-157
 through SR-AUD-159). No source/test changes. Resume another coherent Runtime
 header/source/test group.
+
+Audit checkpoint 2026-07-27 02:30:00: 542/1748 mirrored reports. Caller,
+CompilerGenerated, StateMachine, and CompilerFeatureRequired compiler-services
+metadata headers were audited; their shared filter passed 9/9. Three headers
+make their compiler-unconsumed native adaptation explicit. One low finding:
+the direct CompilerFeatureRequired fixture locks a freely mutable C++
+IsOptional setter where current .NET permits the property only during
+initialization (SR-AUD-160). No source/test changes. Resume another coherent
+Runtime header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

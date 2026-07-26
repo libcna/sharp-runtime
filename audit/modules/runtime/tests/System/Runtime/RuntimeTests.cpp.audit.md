@@ -49,6 +49,10 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
   inner-cause rethrow/identity, and ExternalException ErrorCode/hex-format
   assertion; their green normal-message tests therefore cannot detect
   SR-AUD-157 through SR-AUD-159.
+- CompilerFeatureRequiredAttribute's sole test mutates IsOptional after
+  construction, encoding the C++ setter even though current .NET exposes an
+  init-only property; it therefore preserves SR-AUD-160 rather than checking
+  construction-time-only state.
 
 ## Final assessment
 
