@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 664 audit reports confirm two hundred fifteen findings: tracked CI omits the
+- The first 667 audit reports confirm two hundred twenty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -682,6 +682,15 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   throws `InvalidOperationException` (SR-AUD-215).  The focused native suite
   passed 10/10; direct C++/.NET probes provide the behavioral evidence.  These
   are audit records only, not production changes.
+
+- Subsequent Threading review adds TSan-confirmed races in lock-free
+  `LazyInitializer` target publication and `ThreadLocal<T>::Dispose`, and an
+  ASan-confirmed dangling `SynchronizationContext::Current` raw pointer.
+  `ThreadLocal<T>` also defers empty factories, permits disposed
+  `IsValueCreated`, and ignores its `trackAllValues` option; default
+  `SynchronizationContext::Send` silently drops an empty callback.  These are
+  SR-AUD-216 through SR-AUD-222; focused native tests remain green (16/16 and
+  6/6) because they omit those boundaries.  Audit-only, no source/test change.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 664.
-- Confirmed findings: 215 (forty-seven high, one hundred fifty-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 667.
+- Confirmed findings: 222 (fifty high, one hundred sixty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1167,6 +1167,15 @@ value before commit) and SR-AUD-215 (null ExecutionContext::Run succeeds
 instead of InvalidOperationException); AsyncLocalValueChangedArgs has no new
 finding. Audit-only; no source/test changes. Resume remaining Threading source
 inventory.
+
+Audit checkpoint 2026-07-27 10:40:00: 667/1748 mirrored reports, 222
+confirmed findings. LazyInitializer/ThreadLocal focus passed 16/16 and
+SynchronizationContext focus passed 6/6. TSan confirms SR-AUD-216 (mixed
+non-atomic/atomic Lazy target access) and SR-AUD-218 (ThreadLocal Dispose
+race); ASan confirms SR-AUD-221 (dangling Current context). Direct C++/.NET
+probes add SR-AUD-217, SR-AUD-219/220, and SR-AUD-222 for factory/property,
+tracking, and Send callback divergences. Audit-only; no source/test changes.
+Resume Threading CMake/README completion.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
