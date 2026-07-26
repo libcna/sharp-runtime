@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 534.
-- Confirmed findings: 155 (thirty-one high, one hundred seventeen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 536.
+- Confirmed findings: 156 (thirty-one high, one hundred eighteen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -802,6 +802,14 @@ pass. Current-.NET/C++ probes confirm new medium SR-AUD-155: null exception_ptr
 is accepted and deferred to an undefined rethrow path instead of immediate
 ArgumentNullException. No source/test changes. Resume another coherent Runtime
 header/source/test group.
+
+Audit checkpoint 2026-07-27 02:10:00: 536/1748 mirrored reports. GCSettings
+and the complete aggregate Runtime fixture were audited; the direct GC filter
+passed 9/9 and the full shared filter passed 82/82. Current-.NET source/C++
+probe confirms new medium SR-AUD-156: both setters persist invalid enum casts
+instead of rejecting them, and callers can set NoGCRegion despite its
+runtime-owned current-.NET state. No source/test changes. Resume another
+coherent Runtime header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

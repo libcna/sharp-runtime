@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 534 audit reports confirm one hundred fifty-five findings: tracked CI omits the
+- The first 536 audit reports confirm one hundred fifty-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -464,6 +464,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   green 4/4 filter. Current-.NET/C++ probes confirm medium SR-AUD-155: null
   exception_ptr is accepted then deferred to undefined rethrow behavior instead
   of immediate ArgumentNullException. No production or test source changed.
+  GCSettings and the complete shared Runtime fixture add two reports under a
+  green 82/82 filter (with the direct GC subset 9/9). Current-.NET source/C++
+  probes confirm medium SR-AUD-156: both setters retain invalid enum values,
+  including caller-set NoGCRegion, instead of validating their public domains.
+  No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
