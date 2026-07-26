@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 565.
+- Completed per-file reports: 567.
 - Confirmed findings: 172 (thirty-four high, one hundred thirty medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -892,6 +892,13 @@ filter passed 3/3 and a warnings-as-errors standalone compile passed. Their
 near-empty C++ surfaces are explicitly documented permanent legacy-serialization
 stubs with no production consumer, so no new finding was classified. No
 source/test changes. Resume the next coherent module source/test group.
+
+Audit checkpoint 2026-07-27 04:00:00: 567/1748 mirrored reports.
+Runtime's CMake registration and README were audited; boundary validation
+passed with 41 modules/90 edges and the generated catalogue is current. Their
+dependency and component claims match. All 518 eligible Runtime files now
+have mirrored reports; no new finding or source/test change. Resume the next
+coherent module source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
