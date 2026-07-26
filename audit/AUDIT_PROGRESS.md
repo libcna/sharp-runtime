@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 365.
-- Confirmed findings: 108 (twenty-eight high, seventy-four medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 370.
+- Confirmed findings: 110 (twenty-eight high, seventy-six medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -535,6 +535,14 @@ pressure, finalizer, and no-GC-region APIs are consistent no-op/zero adapters,
 and notification waits correctly return `NotApplicable`. No new classified
 defect or source/test change resulted. Resume the next coherent Core.Base
 runtime source inventory.
+`Activator`, `RuntimeTypeHandle`, `RuntimeType`, and their two dedicated
+runtime-type fixtures are now audited. The combined direct filter passes
+16/16, but a direct construction probe confirms medium SR-AUD-109: value
+Activator uses braced initialization and changes initializer-list-capable
+constructor arguments. SR-AUD-110 records that the public RuntimeType enum
+occupies the name of an unrelated internal .NET reflection class. No production
+or test source changed. Resume the next coherent Core.Base runtime source
+inventory.
 
 ## Findings recorded in this pass
 
