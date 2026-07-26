@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 623.
-- Confirmed findings: 195 (thirty-eight high, one hundred forty-seven medium, ten low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 629.
+- Confirmed findings: 196 (thirty-eight high, one hundred forty-eight medium, ten low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1091,6 +1091,13 @@ Audit checkpoint 2026-07-27 08:10:00: 623/1748 mirrored reports, 195
 confirmed findings. Batch8ThreadingTests was fully audited; complete Threading
 validation remains 359/359. Low SR-AUD-195 records that its running-state
 fallback masks the zero-valued Running flag and therefore accepts every state.
+No source/test change. Resume ThreadingTests or remaining source inventory.
+
+Audit checkpoint 2026-07-27 08:20:00: 629/1748 mirrored reports, 196
+confirmed findings. ThreadStart and five Thread exception/event headers were
+audited; complete Threading validation remains 359/359. Medium SR-AUD-196
+records public ThreadStartException constructors that managed compilation
+rejects as internal. ThreadStart extends SR-AUD-194; no event producer exists.
 No source/test change. Resume ThreadingTests or remaining source inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
