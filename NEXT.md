@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 831 audit reports confirm two hundred forty-six findings: tracked CI omits the
+- The first 848 audit reports confirm two hundred fifty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -805,6 +805,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   fixture reports add no independent finding but record missing regressions for
   existing String and DateTime defects. Audit-only; no production/test change
   occurred.
+
+- All seventeen eligible files in `modules/net-websockets` now have mirrored
+  reports. Its target builds; 22/24 tests pass while two loopback cases are
+  blocked by sandbox socket policy. ASan confirms raw `ClientWebSocket`
+  lifetime UAF (SR-AUD-247); C++/.NET probes add request-header injection,
+  invalid subprotocol acceptance, dropped causal exception, ignored
+  cancellation, and inert keep-alive options (SR-AUD-248..252). Audit-only; no
+  production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

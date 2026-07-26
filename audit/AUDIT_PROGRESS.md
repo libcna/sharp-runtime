@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 831.
-- Confirmed findings: 246 (fifty-seven high, one hundred seventy-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 848.
+- Confirmed findings: 252 (fifty-nine high, one hundred eighty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1321,6 +1321,15 @@ String declaration/tests retain SR-AUD-015/016 coverage gaps, DateTime
 properties omit SR-AUD-006/007 boundaries, and the remaining mixed fixtures
 are documented without a new independent defect. No source/test changes.
 Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 14:10:00: 848/1748 mirrored reports, 252
+confirmed findings. All seventeen Net.WebSockets files are mirrored. Its target
+built; 22/24 tests passed while two loopback cases are environment-blocked at
+socket creation. ASan confirms SR-AUD-247 raw ClientWebSocket lifetime UAF;
+C++/managed probes add SR-AUD-248 through SR-AUD-251 (header injection,
+subprotocol grammar, lost inner exception, ignored cancellation), and source
+reachability confirms SR-AUD-252 inert keep-alive options. No source/test
+changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
