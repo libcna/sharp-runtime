@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 635.
-- Confirmed findings: 201 (thirty-nine high, one hundred fifty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 636.
+- Confirmed findings: 202 (forty high, one hundred fifty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1098,6 +1098,11 @@ confirmed findings. ThreadingTests was fully audited; complete Threading
 validation remains 359/359. Low SR-AUD-197 records that its CurrentThread ID
 test discards the observed value, so it cannot protect SR-AUD-193. No
 source/test change. Resume remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 09:00:00: 636/1748 mirrored reports, 202
+confirmed findings. Monitor audited; Threading remains 359/359. High
+SR-AUD-202: recursive Wait retains one mutex level and a signaller deadlocks,
+as confirmed by a two-second bounded child timeout. No source/test change.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
