@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 824.
+- Completed per-file reports: 831.
 - Confirmed findings: 246 (fifty-seven high, one hundred seventy-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1313,6 +1313,14 @@ is reduced to bytewise ASCII lowercasing (`ÄDMIN`/`ädmin` false versus managed
 true). VerificationException and CAS/transparency attributes remain recorded
 ignored-surface placeholders. No source/test changes. Resume another coherent
 module shard.
+
+Audit checkpoint 2026-07-27 14:00:00: 831/1748 mirrored reports, 246
+confirmed findings. The remaining seven Core.Base files are mirrored, closing
+all 426 eligible Core.Base reports; complete fixture passed 4,946/4,946.
+String declaration/tests retain SR-AUD-015/016 coverage gaps, DateTime
+properties omit SR-AUD-006/007 boundaries, and the remaining mixed fixtures
+are documented without a new independent defect. No source/test changes.
+Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

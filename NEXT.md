@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 824 audit reports confirm two hundred forty-six findings: tracked CI omits the
+- The first 831 audit reports confirm two hundred forty-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -799,6 +799,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   managed `OrdinalIgnoreCase` accepts it (SR-AUD-246). VerificationException
   and CAS/transparency attributes remain documented ignored-surface
   placeholders. Audit-only; no production/test change occurred.
+
+- All 426 eligible files in `modules/core` now have mirrored reports. The
+  complete Core.Base fixture passes 4,946/4,946; the seven final declaration/
+  fixture reports add no independent finding but record missing regressions for
+  existing String and DateTime defects. Audit-only; no production/test change
+  occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
