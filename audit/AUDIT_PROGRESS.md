@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 620.
-- Confirmed findings: 191 (thirty-seven high, one hundred forty-five medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 622.
+- Confirmed findings: 194 (thirty-eight high, one hundred forty-seven medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1079,6 +1079,13 @@ SR-AUD-131 to TimeProvider timestamp subtraction; C++/managed probes add
 SR-AUD-190 empty Timer callback acceptance and SR-AUD-191 successful Change
 after disposal. The fixture's raw-this Timer comment is obsolete; Timer holds
 shared State. No source/test change. Resume the remaining Threading inventory.
+
+Audit checkpoint 2026-07-27 08:00:00: 622/1748 mirrored reports, 194
+confirmed findings. Thread header/source audited; complete Threading validation
+remains 359/359. Native/managed probes add SR-AUD-192 empty-start termination,
+SR-AUD-193 external CurrentThread ID collision, and SR-AUD-194 discarded
+Start(void*) parameter. Shared RunState avoids the prior raw-owner UAF. No
+source/test change. Resume Threading test fixtures or remaining sources.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
