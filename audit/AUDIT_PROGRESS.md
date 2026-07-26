@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 444.
-- Confirmed findings: 125 (twenty-eight high, ninety medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 450.
+- Confirmed findings: 126 (twenty-eight high, ninety-one medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -617,6 +617,15 @@ headers and seven direct fixtures audited; combined filter passed 42/42. Values
 and flag operators match local .NET; SR-AUD-036 remains a consumer validation
 issue for MidpointRounding and no new finding was classified. No source/test
 changes. Resume another complete Core.Base group after inventory review.
+
+Audit checkpoint 2026-07-26 22:10: 450/1748 mirrored reports. Converter,
+Predicate, and Func declarations plus their three full direct fixtures audited;
+the combined filter passed 17/17. C++ probe output confirms that `Func<void>`
+and `Converter<int, void>` compile and are exact Action aliases, while the
+counterpart C# probe fails with CS1547. New medium SR-AUD-126 records that
+unconstrained C++ result types collapse .NET's separate Action category. No
+source/test changes. Resume another complete Core.Base header/source/test
+group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
