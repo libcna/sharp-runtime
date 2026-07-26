@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 629 audit reports confirm one hundred ninety-six findings: tracked CI omits the
+- The first 630 audit reports confirm one hundred ninety-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -46,7 +46,8 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   to terminate asynchronously, gives external threads the same managed ID, and
   discards the Start(void*) parameter; its Batch8 running-state assertion is
   tautological; ThreadStartException exposes runtime-internal constructors as
-  ordinary public C++ API; and the
+  ordinary public C++ API; the principal Threading CurrentThread ID test
+  discards its result; and the
   cryptographic `GetInt32` full signed-domain path reaches
   implementation-defined conversion and signed-overflow-prone arithmetic; and
   the nominal `SynchronizationContext::Send` test has no observable assertion;
