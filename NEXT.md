@@ -3,7 +3,7 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-26. Branch: `feature/audit`. The P0 component-boundary
+*Last verified: 2026-07-27. Branch: `feature/audit`. The P0 component-boundary
 repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
 edges, and 12,681 tests across 37 executables. A repository-wide, evidence-only
@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 974 audit reports confirm two hundred sixty-seven findings: tracked CI omits the
+- The first 1,008 audit reports confirm two hundred seventy-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -848,6 +848,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   count coercion and silent invalid NetworkStream descriptor I/O; source/.NET
   comparison adds raw Socket task lifetime and Tcp/Udp IPv4/validation gaps
   (SR-AUD-263..267). Audit-only; no production/test change occurred.
+
+- All thirty-four eligible files in `modules/diagnostics` now have mirrored
+  reports; its target passes 159/159. Direct native probes confirm Process
+  negative-timeout, destruction/zombie, restart, EINTR, and detached-tree
+  defects; source review identifies multithreaded-fork child risk; and TSan
+  confirms the Debug provider race (SR-AUD-268..275). Audit-only; no
+  production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

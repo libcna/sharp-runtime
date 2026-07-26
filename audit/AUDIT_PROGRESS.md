@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 974.
-- Confirmed findings: 267 (sixty-three high, one hundred ninety-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,008.
+- Confirmed findings: 275 (sixty-eight high, one hundred ninety-six medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -24,13 +24,9 @@ the full gate during final audit reconciliation.
 
 ## Immediate sequence
 
-1. Continue the foundation-module audit beyond the reviewed DateTime,
-   DateTimeOffset, TimeSpan, TimeOnly, String, Char, Object, Type, numeric,
-   span/view, array, and interface-adapter surfaces, prioritising remaining
-   Core.Base primitive/parser sources and complete test-file inventories.
-2. Continue component by component with their tests and .NET source where
-   applicable.
-3. Reconcile every mirrored report, findings index, and project handoff.
+1. Continue component by component with their tests and .NET source where
+   applicable, prioritising another non-network shard after Diagnostics.
+2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
 
@@ -1371,6 +1367,15 @@ coercion and silent invalid-NetworkStream descriptor I/O; source/current-.NET
 comparison confirms raw async Socket lifetime and Tcp/Udp IPv4/argument gaps
 (SR-AUD-263 through SR-AUD-267). No source/test changes. Resume another
 coherent module shard.
+
+Audit checkpoint 2026-07-27 15:30:00: 1008/1748 mirrored reports, 275
+confirmed findings. All thirty-four Diagnostics files are mirrored; its target
+passed 159/159. Direct native probes confirm Process negative-timeout,
+destruction/zombie, redirected-restart, EINTR, and detached-process-group
+defects (SR-AUD-268 through SR-AUD-273); source review identifies unsafe
+multithreaded-fork child calls (SR-AUD-274); and TSan confirms the global
+Debug provider replacement/write race (SR-AUD-275). Audit-only; no source/test
+changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

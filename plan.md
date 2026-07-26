@@ -1,6 +1,6 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-26 — 41 physical components, 90 direct production
+*Last verified: 2026-07-27 — 41 physical components, 90 direct production
 dependency edges, a clean native build, 12,681 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
@@ -238,8 +238,8 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 checkpoint has 974 of 1,748 mirrored reports complete and
-two hundred sixty-seven confirmed findings; `audit/AUDIT_PROGRESS.md` is the authoritative
+The 2026-07-27 checkpoint has 1,008 of 1,748 mirrored reports complete and
+two hundred seventy-five confirmed findings; `audit/AUDIT_PROGRESS.md` is the authoritative
 live count.
 
 ## Candidate roadmap
