@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 316.
-- Confirmed findings: 93 (twenty-seven high, sixty medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 321.
+- Confirmed findings: 94 (twenty-seven high, sixty-one medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -414,6 +414,14 @@ pass exact assertions. No standalone defect was confirmed; reports preserve
 missing empty/UTF-8 name, stored-inner identity, and native-reflection-boundary
 coverage. No production or test source changed. Resume the next complete
 Core.Base exception/source inventory.
+`ApplicationException`, `AppDomainUnloadedException`,
+`BadImageFormatException`, `CannotUnloadAppDomainException`, and
+`DataMisalignedException` are audited against a complete 43/43 family filter.
+New medium SR-AUD-094: none assigns its derived HResult, leaving one at
+`COR_E_EXCEPTION` and four at `COR_E_SYSTEM` instead of their five documented
+codes. The local .NET source plus `/tmp/sharp-runtimervc-exception-hresult-audit-probe`
+reproduce every mismatch; CCF-016 links it to SR-AUD-093. No production or test
+source changed. Resume the next complete Core.Base exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
