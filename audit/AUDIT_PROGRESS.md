@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 274.
-- Confirmed findings: 88 (twenty-six high, fifty-seven medium, five low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 283.
+- Confirmed findings: 91 (twenty-seven high, fifty-eight medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -359,6 +359,16 @@ tests extend SR-AUD-070's generic-type coverage gap; BinaryPrimitives tests add
 broad direct evidence without replacing byte-exact/cross-platform checks; and
 `EnumeratorTests.cpp` visibly lacks the assertion needed to expose SR-AUD-074.
 Resume the next complete Core.Base source/test inventory.
+`ArgumentException`, `ArgumentNullException`, and
+`ArgumentOutOfRangeException` declarations, implementations, and direct tests
+are audited. Their combined filter passed 64/64, but ASan/UBSan confirms new
+high SR-AUD-089: `ArgumentNullException(const char*)` dereferences a null
+parameter name during message construction. New low SR-AUD-090 records its
+duplicated parameter suffix, and new medium SR-AUD-091 records the hidden
+`std::to_string` requirement in generic comparison/equality guards. The
+Unicode whitespace path extends SR-AUD-048 and creates CCF-015. No production
+or test source changed. Resume the next complete Core.Base exception/source
+inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike

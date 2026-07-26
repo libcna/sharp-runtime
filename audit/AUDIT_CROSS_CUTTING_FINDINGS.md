@@ -292,3 +292,21 @@ is insufficient. See SR-AUD-075, SR-AUD-085, and:
 - `modules/buffers/tests/System/Buffers/Batch6BuffersTests.cpp.audit.md`;
 - `modules/buffers/include/System/Buffers/Text/Utf8Parser.hpp.audit.md`;
 - `modules/buffers/tests/System/Buffers/Utf8ParserTests.cpp.audit.md`.
+
+## CCF-015 — UTF-8 public text cannot use C-locale byte whitespace classification
+
+`MemoryExtensions` trim and `ArgumentException::ThrowIfNullOrWhiteSpace`
+independently pass UTF-8 byte sequences through `std::isspace`.  Both therefore
+retain U+00A0 even though their .NET-shaped character contracts treat it as
+whitespace: the first returns it after Trim and the second accepts it instead
+of throwing.  Casting to `unsigned char` avoids negative-byte undefined
+behavior, but does not turn a byte locale predicate into Unicode character
+classification.  A repair needs one declared UTF-8 decode/Unicode whitespace
+policy and malformed-input diagnostics rather than more isolated byte checks.
+See SR-AUD-048 and:
+
+- `modules/core/include/System/MemoryExtensions.hpp.audit.md`;
+- `modules/core/tests/System/MemoryExtensionsTests.cpp.audit.md`;
+- `modules/core/include/System/ArgumentException.hpp.audit.md`;
+- `modules/core/src/System/ArgumentException.cpp.audit.md`;
+- `modules/core/tests/System/ArgumentExceptionTests.cpp.audit.md`.

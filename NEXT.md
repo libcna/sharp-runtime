@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 274 audit reports confirm eighty-eight findings: tracked CI omits the
+- The first 283 audit reports confirm ninety-one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -186,6 +186,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `MoveNext()` without asserting its result, leaving SR-AUD-074 unobserved;
   ArrayBufferWriter and BinaryPrimitives reports preserve their generic,
   byte-exact, and cross-platform assertion/diagnostic gaps.
+  The argument-exception family passes 64/64 direct tests but adds high
+  SR-AUD-089: `ArgumentNullException(const char*)` null-dereferences a null
+  parameter name in string assembly. Its non-null parameter path also doubles
+  the message suffix (SR-AUD-090), and `ArgumentOutOfRangeException` generic
+  comparison/equality guards silently impose `std::to_string` despite their
+  declared comparison-only contract (SR-AUD-091). `ArgumentException` extends
+  SR-AUD-048 by accepting UTF-8 U+00A0 as non-whitespace; CCF-015 now records
+  that shared byte-`std::isspace` cause.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
