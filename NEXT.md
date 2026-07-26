@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,008 audit reports confirm two hundred seventy-five findings: tracked CI omits the
+- The first 1,031 audit reports confirm two hundred seventy-eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -855,6 +855,15 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   defects; source review identifies multithreaded-fork child risk; and TSan
   confirms the Debug provider race (SR-AUD-268..275). Audit-only; no
   production/test change occurred.
+
+- All twenty-eight eligible files in `modules/numerics` now have mirrored
+  reports; its target passes 299/299. Direct probes confirm that degenerate
+  Vector2/3/4 and Plane normalization returns finite zero instead of current
+  .NET NaN propagation (SR-AUD-276); Complex exposes the wrong `Abs` return
+  type and an incompatible default text form (SR-AUD-277); and generic-math
+  static interface declarations fail only at consumer linkage (SR-AUD-278).
+  Current .NET source confirms zero aspect/orthographic dimensions are not
+  validation defects. Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

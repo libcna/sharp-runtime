@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,008.
-- Confirmed findings: 275 (sixty-eight high, one hundred ninety-six medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,031.
+- Confirmed findings: 278 (sixty-eight high, one hundred ninety-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -25,7 +25,7 @@ the full gate during final audit reconciliation.
 ## Immediate sequence
 
 1. Continue component by component with their tests and .NET source where
-   applicable, prioritising another non-network shard after Diagnostics.
+   applicable, prioritising the Globalization shard after Numerics.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -1376,6 +1376,16 @@ defects (SR-AUD-268 through SR-AUD-273); source review identifies unsafe
 multithreaded-fork child calls (SR-AUD-274); and TSan confirms the global
 Debug provider replacement/write race (SR-AUD-275). Audit-only; no source/test
 changes. Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 15:50:00: 1031/1748 mirrored reports, 278
+confirmed findings. All twenty-eight Numerics files are mirrored; its target
+passed 299/299. Direct probes establish that zero Vector2/3/4 and Plane
+normalization returns finite zero rather than .NET NaN propagation
+(SR-AUD-276), `Complex::Abs` has the wrong public type and default formatting
+is incompatible (SR-AUD-277), and published generic-math static interface
+members compile but fail linkage (SR-AUD-278). Current .NET source verifies
+that zero projection dimensions/aspect are not validation defects. Audit-only;
+no source/test changes. Resume Globalization.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
