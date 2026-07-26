@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 639.
-- Confirmed findings: 205 (forty-two high, one hundred fifty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 642.
+- Confirmed findings: 208 (forty-four high, one hundred fifty-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1117,6 +1117,13 @@ confirms unsynchronized Dispose/entry (SR-AUD-203); direct .NET comparisons
 also confirm disposal while held, queued-writer reader admission/starvation
 (SR-AUD-204), and invalid recursion-policy reflection (SR-AUD-205). No
 source/test change. Resume the remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 09:30:00: 642/1748 mirrored reports, 208
+confirmed findings. Mutex/Semaphore/SemaphoreSlim focused filter passed 22/22.
+UBSan confirms shared Release signed overflow (SR-AUD-206); TSan confirms two
+SemaphoreSlim public-operation races (SR-AUD-207); C++/managed comparison
+confirms a no-op Mutex Close (SR-AUD-208). No source/test change. Resume the
+remaining Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
