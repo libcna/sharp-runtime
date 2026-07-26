@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 326 audit reports confirm ninety-five findings: tracked CI omits the
+- The first 332 audit reports confirm ninety-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -235,6 +235,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   implementations, but the Dll and entry-point derivatives retain
   `COR_E_TYPELOAD` rather than their documented distinct codes (medium
   SR-AUD-095); the shared probe records both and CCF-016 extends accordingly.
+  `AccessViolationException`, `ContextMarshalException`,
+  `InsufficientExecutionStackException`, `InvalidCastException` (header and
+  source), and `InvalidProgramException` add six mirrored audits. A focused
+  32/32 filter confirms correct HResults for the latter three, but the first
+  two retain `COR_E_SYSTEM` rather than `E_POINTER` and
+  `COR_E_CONTEXTMARSHAL` (medium SR-AUD-096); CCF-016 now captures this pair.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

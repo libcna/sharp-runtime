@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 326.
-- Confirmed findings: 95 (twenty-seven high, sixty-two medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 332.
+- Confirmed findings: 96 (twenty-seven high, sixty-three medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -430,6 +430,15 @@ derived codes; local .NET source and the shared HResult probe reproduce both.
 The three base/sibling types correctly set their codes. CCF-016 now covers the
 repeated constructor audit gap. No production or test source changed. Resume
 the next complete Core.Base exception/source inventory.
+`AccessViolationException`, `ContextMarshalException`,
+`InsufficientExecutionStackException`, `InvalidCastException` (declaration and
+implementation), and `InvalidProgramException` are audited against a focused
+32/32 filter. New medium SR-AUD-096: AccessViolation and ContextMarshal leave
+the base `COR_E_SYSTEM` HResult rather than .NET's `E_POINTER` and
+`COR_E_CONTEXTMARSHAL`; local source and the shared probe reproduce both.
+The other three types correctly set their codes. CCF-016 now covers the
+additional pair. No production or test source changed. Resume the next complete
+Core.Base exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
