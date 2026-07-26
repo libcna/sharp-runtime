@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 525 audit reports confirm one hundred fifty-one findings: tracked CI omits the
+- The first 530 audit reports confirm one hundred fifty-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -450,6 +450,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   The Uri module README adds the final 27th eligible URI report; its Core.Base
   dependency claim is accurate, but it does not expose the documented URI
   adaptation limits. No new finding or source/test change resulted.
+  Architecture, OSPlatform, RuntimeInformation declaration/implementation, and
+  their shared fixture add five reports under a green 11/11 filter. New medium
+  findings record missing default OSPlatform, omitted FrameworkDescription/
+  RuntimeIdentifier, and Windows OSArchitecture aliasing process architecture
+  (SR-AUD-152–154). No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
