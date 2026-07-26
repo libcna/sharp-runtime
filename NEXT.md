@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 794 audit reports confirm two hundred forty-four findings: tracked CI omits the
+- The first 808 audit reports confirm two hundred forty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -787,6 +787,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   invalid ConsoleColor values are accepted (SR-AUD-243) and negative cursor
   positions are stored/emitted rather than rejected (SR-AUD-244). Audit-only;
   no production/test change occurred.
+
+- All fourteen eligible files in `modules/text-regular-expressions` now have
+  mirrored reports. ASan confirms a Match continuation captures raw Regex
+  `this` and calls it after Regex destruction (SR-AUD-245), while current .NET
+  continues safely after GC. Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
