@@ -26,7 +26,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,205 audit reports confirm three hundred eighteen findings: tracked CI omits the
+- The first 1,277 audit reports confirm three hundred twenty-three findings. The newly complete
+  72-file `Net.Http.Headers` shard passed 373/373 focused tests and adds SR-AUD-319 through
+  SR-AUD-323: typed quoted/host-like values admit CR/LF/NUL; escaped quoted delimiters split
+  incorrectly; repeated RFC 1123 parsers accept trailing garbage; `TryAddWithoutValidation`
+  accepts invalid field names; and RFC 5987 decoding ignores its declared charset. Earlier work
+  confirms that tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not

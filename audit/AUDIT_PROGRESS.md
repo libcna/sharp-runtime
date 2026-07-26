@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,205.
-- Confirmed findings: 318 (seventy-eight high, two hundred twenty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,277 (73.1% of eligible scope; 1,228/1,699 runtime-module files).
+- Confirmed findings: 323 (eighty high, two hundred thirty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -24,9 +24,8 @@ the full gate during final audit reconciliation.
 
 ## Immediate sequence
 
-1. Continue component by component with their tests and .NET source where
-   applicable, prioritising `Net.Http.Headers` after the completed Net.Http
-   transport/content layer.
+1. Select the next complete unmirrored component from the deterministic
+   inventory, retaining component-scoped tests and upstream-reference review.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -41,15 +40,15 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 32-file `Net.Http` shard is mirrored. Its focused target built and
-126/132 tests passed; all six remaining loopback cases are sandbox-limited at
-socket creation. Direct behavior probes and ASan confirm SR-AUD-310 through
-SR-AUD-318: async HttpClient use-after-free; permissive URL/status parsers;
-reusable request messages; CR/LF HTTP/MIME serialization; case-sensitive
-header maps; invalid response fields; false StringContent charset metadata;
-and unbounded/weak terminal response framing with error-path descriptor leaks.
-The preceding 50-file `Net` shard passed 238/238. Audit-only: no production or
-test source was changed.
+The complete 72-file `Net.Http.Headers` shard is mirrored. Its focused target
+passed 373/373. Direct behavior probes confirm SR-AUD-319 through SR-AUD-323:
+typed header values admit CR/LF/NUL through quoted and host-like paths;
+escaped quoted delimiters are split structurally; repeated RFC 1123 parsers
+accept arbitrary trailing text; `TryAddWithoutValidation` accepts invalid
+field names; and RFC 5987 decoding ignores the declared charset. The preceding
+32-file `Net.Http` target passed 126/132, with its six loopback cases
+sandbox-limited at socket creation. Audit-only: no production or test source
+was changed.
 
 ## Resume point
 
