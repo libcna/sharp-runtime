@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 283 audit reports confirm ninety-one findings: tracked CI omits the
+- The first 289 audit reports confirm ninety-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -194,6 +194,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   declared comparison-only contract (SR-AUD-091). `ArgumentException` extends
   SR-AUD-048 by accepting UTF-8 U+00A0 as non-whitespace; CCF-015 now records
   that shared byte-`std::isspace` cause.
+  Base `Exception`/`SystemException` source and declarations are now audited:
+  their selected 62/62 test filter passes, but C++ default `Exception` returns
+  an empty message where current .NET produces a nonempty fallback diagnostic
+  (new medium SR-AUD-092), and two direct tests lock that result in.
+  The complete `ExceptionTests.cpp`/`ExceptionNewTests.cpp` audit passes its
+  twelve-suite 124/124 filter but documents weak default-message, null C-string,
+  exact-suffix, Unicode-whitespace, and generic-template assertions rather
+  than treating the shared green fixture as evidence of those boundaries.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

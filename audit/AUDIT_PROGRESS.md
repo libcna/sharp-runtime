@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 283.
-- Confirmed findings: 91 (twenty-seven high, fifty-eight medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 289.
+- Confirmed findings: 92 (twenty-seven high, fifty-nine medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -368,6 +368,21 @@ duplicated parameter suffix, and new medium SR-AUD-091 records the hidden
 `std::to_string` requirement in generic comparison/equality guards. The
 Unicode whitespace path extends SR-AUD-048 and creates CCF-015. No production
 or test source changed. Resume the next complete Core.Base exception/source
+inventory.
+The base `Exception` and `SystemException` declarations and implementations
+are audited using the selected 62/62 direct test filter as evidence; the two
+large shared test sources remain pending full file-wide review. New medium
+SR-AUD-092 records that default C++ `Exception` stores an empty message where
+current .NET returns its nonempty fallback diagnostic, and two tests lock that
+behavior in. SystemException has no new standalone defect. No production or
+test source changed. Resume the next complete Core.Base exception/source
+inventory.
+The full `ExceptionTests.cpp` and `ExceptionNewTests.cpp` test sources are now
+audited. Their twelve-suite filter passed 124/124; reports preserve the
+default-message assertion that locks SR-AUD-092, the missing null C-string and
+exact-suffix checks for SR-AUD-089/090, Unicode whitespace coverage for
+SR-AUD-048, and generic-template coverage for SR-AUD-091. No production or
+test source changed. Resume the next complete Core.Base exception/source
 inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
