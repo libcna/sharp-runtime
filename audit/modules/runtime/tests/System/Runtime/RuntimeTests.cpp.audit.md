@@ -69,6 +69,10 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
   metadata states, and mutable Url properties; TargetFramework explicitly
   locks empty rather than null display text and Obsoleted locks the incompatible
   constructor URL route (SR-AUD-163 and SR-AUD-164).
+- Interop tests sample only normal field storage and two UnmanagedType values.
+  They leave LPStruct's collision, missing enum members, StructLayout Pack=8,
+  DllImport PreserveSig/BestFit defaults, typed MarshalAs/COM metadata, and all
+  declaration/PInvoke/ABI effects unguarded (SR-AUD-165 through SR-AUD-168).
 
 ## Final assessment
 

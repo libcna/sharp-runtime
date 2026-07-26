@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 557.
-- Confirmed findings: 164 (thirty-one high, one hundred twenty-five medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 558.
+- Confirmed findings: 168 (thirty-one high, one hundred twenty-nine medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -866,6 +866,15 @@ OSPlatformAttribute hierarchy and common native consumer are absent, while
 nullable/mutable metadata is collapsed into immutable constructor strings
 (SR-AUD-163 and SR-AUD-164). No source/test changes. Resume another coherent
 Runtime header/source/test group.
+
+Audit checkpoint 2026-07-27 03:30:00: 558/1748 mirrored reports.
+InteropAttributes was audited; all eleven fixture suites passed 23/23.
+C++/managed probes and source comparison confirm four medium findings:
+UnmanagedType has a wrong/missing value surface; StructLayout/DllImport defaults
+diverge; MarshalAs/COM metadata is truncated and retyped; and all attributes
+are detached from native declaration/marshalling/PInvoke behavior (SR-AUD-165
+through SR-AUD-168). No source/test changes. Resume another coherent Runtime
+header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

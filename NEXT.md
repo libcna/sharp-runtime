@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 557 audit reports confirm one hundred sixty-four findings: tracked CI omits the
+- The first 558 audit reports confirm one hundred sixty-eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -503,6 +503,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   Current-.NET/C++ probes confirm medium SR-AUD-163 and SR-AUD-164: the public
   OSPlatformAttribute hierarchy/common consumer is absent, and nullable or
   mutable metadata is flattened into immutable constructor strings. No
+  production or test source changed.
+  InteropAttributes adds one report under a green 23/23 fixture group.
+  C++/managed probes confirm medium SR-AUD-165 through SR-AUD-168: the
+  UnmanagedType surface is wrong/incomplete, StructLayout/DllImport defaults
+  diverge, MarshalAs/COM metadata is truncated/retyped, and the declarative
+  attributes have no native ABI, marshalling, or P/Invoke consumer. No
   production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
