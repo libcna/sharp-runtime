@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 568 audit reports confirm one hundred seventy-two findings: tracked CI omits the
+- The first 571 audit reports confirm one hundred seventy-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -531,6 +531,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   target and Core.Base-only public edge agree with the generated catalogue;
   boundary validation still passes with 41 physical modules/90 edges. No new
   finding or source/test change resulted.
+  CharUnicodeInfo, UnicodeCategory, and CharTests2 add three reports under a
+  green 63/63 direct filter. C++/managed probes confirm medium SR-AUD-173 and
+  SR-AUD-174: numeric APIs recognize only ASCII/a few Latin-1 values, while
+  C-locale category predicates label common assigned BMP code points as
+  OtherNotAssigned. The documented non-BMP mapping remains an explicit
+  adaptation. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

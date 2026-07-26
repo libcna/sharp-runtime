@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 568.
-- Confirmed findings: 172 (thirty-four high, one hundred thirty medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 571.
+- Confirmed findings: 174 (thirty-four high, one hundred thirty-two medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -906,6 +906,15 @@ modules/90 edges and the generated catalogue is current. The static target and
 sole Core.Base public dependency match the catalogue. All 28 eligible Uri
 files now have mirrored reports; no new finding or source/test change. Resume
 the next coherent module source/test group.
+
+Audit checkpoint 2026-07-27 04:20:00: 571/1748 mirrored reports.
+CharUnicodeInfo, UnicodeCategory, and CharTests2 were audited; the direct
+filter passed 63/63. C++/managed probes confirm two medium findings: Unicode
+numeric APIs recognize only ASCII/a few Latin-1 values, and the C-locale
+classifier maps ordinary assigned BMP characters to OtherNotAssigned
+(SR-AUD-173 and SR-AUD-174). The documented non-BMP mapping limitation remains
+an adaptation, not a duplicate finding. No source/test changes. Resume the
+next coherent Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
