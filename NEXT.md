@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 667 audit reports confirm two hundred twenty-two findings: tracked CI omits the
+- The first 669 audit reports confirm two hundred twenty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -691,6 +691,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `SynchronizationContext::Send` silently drops an empty callback.  These are
   SR-AUD-216 through SR-AUD-222; focused native tests remain green (16/16 and
   6/6) because they omit those boundaries.  Audit-only, no source/test change.
+
+- All 72 eligible files in `modules/threading` now have mirrored audit reports.
+  Component-boundary validation reports 41 physical modules and 90 dependency
+  edges, its generated catalogue is current, and the Threading target builds.
+  No production or test code changed in this audit phase.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

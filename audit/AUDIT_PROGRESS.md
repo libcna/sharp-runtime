@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 667.
+- Completed per-file reports: 669.
 - Confirmed findings: 222 (fifty high, one hundred sixty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1176,6 +1176,13 @@ race); ASan confirms SR-AUD-221 (dangling Current context). Direct C++/.NET
 probes add SR-AUD-217, SR-AUD-219/220, and SR-AUD-222 for factory/property,
 tracking, and Send callback divergences. Audit-only; no source/test changes.
 Resume Threading CMake/README completion.
+
+Audit checkpoint 2026-07-27 10:50:00: 669/1748 mirrored reports, 222
+confirmed findings. Threading CMake/README audited; module-boundary validator
+reported 41 modules/90 edges, the generated catalogue is current, and the
+Threading target built successfully. No new finding or source/test change. All
+72 eligible Threading module files now have mirrored reports; resume another
+coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
