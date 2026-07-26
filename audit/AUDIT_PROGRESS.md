@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 603.
+- Completed per-file reports: 606.
 - Confirmed findings: 186 (thirty-five high, one hundred forty-two medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1040,6 +1040,14 @@ audited; filters passed 33/33 and 15/15. C++/managed evidence adds SR-AUD-185
 (ReadOnlyMemory snapshot instead of wrapper semantics). BinaryData's
 nonnegative-hash test extends SR-AUD-018. No source/test changes. Resume IO
 direct fixtures or another coherent source/test group.
+
+Audit checkpoint 2026-07-27 07:10:00: 606/1748 mirrored reports, 186
+confirmed findings. Threading WaitCallback, WaitOrTimerCallback, and
+LockRecursionPolicy headers were audited; related registered-wait/ordinal
+filter passed 4/4. Callback aliases are coherent native pointer/function
+adaptations; reports record the absent direct state/timeout/error/lifetime
+coverage. No new finding or source/test change. Resume Threading consumers or
+another coherent source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

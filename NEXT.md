@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 603 audit reports confirm one hundred eighty-six findings: tracked CI omits the
+- The first 606 audit reports confirm one hundred eighty-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -621,6 +621,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   SR-AUD-186: ReadOnlyMemory construction snapshots bytes rather than wrapping
   them. The IO fixture's nonnegative hash assertion extends low SR-AUD-018. No
   production or test source changed.
+  Threading WaitCallback, WaitOrTimerCallback, and LockRecursionPolicy add
+  three reports under a green 4/4 related registered-wait/ordinal filter. The
+  aliases are coherent native pointer/function adaptations, but direct
+  state/timeout/error/lifetime coverage is still absent. No new finding or
+  source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
