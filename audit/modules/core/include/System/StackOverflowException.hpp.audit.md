@@ -3,7 +3,9 @@
 ## Metadata
 
 - Audit status: AUDITED (38-line declaration, fully read with implementation).
-- Validation: the focused five-type exception filter passed 29/29 on 2026-07-26.
+- Validation: the direct four-fixture exception filter passed 41/41 on
+  2026-07-27; its ten direct StackOverflowException cases and four companion
+  cases are now fully audited across two fixture reports.
 - Reference basis: local .NET `StackOverflowException.cs` and `COR_E_STACKOVERFLOW` (`0x800703E9`).
 
 ## Assessment

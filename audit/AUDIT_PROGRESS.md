@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 583.
+- Completed per-file reports: 587.
 - Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -955,6 +955,15 @@ normalized and returns `65CC81`, while .NET reports false and returns `C3A9`.
 The source documents its Unicode-table stub but does not mark the public API
 unsupported. Audit-only; no source/test changes. Resume the next coherent
 Core.Base source/test group.
+
+Audit checkpoint 2026-07-27 05:20:00: 587/1748 mirrored reports, 182
+confirmed findings. UnauthorizedAccessException, ObjectDisposedException,
+TimeoutException, and StackOverflowException direct fixture sources were
+audited; the focused filter passed 41/41 (including four previously audited
+companion StackOverflow cases). Normal construction/HResult coverage is
+coherent. Reports record missing inner-identity, null/UTF-8, non-default
+HResult, producer-integration, and real-overflow assertions. No new finding
+or source/test change. Resume the next coherent Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

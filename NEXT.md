@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 583 audit reports confirm one hundred eighty-two findings: tracked CI omits the
+- The first 587 audit reports confirm one hundred eighty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -565,6 +565,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   it to `C3A9`. The source documents the Unicode-table stub but leaves the
   counterpart API public and otherwise unsupported only by behavior. No
   production or test source changed.
+  The four direct UnauthorizedAccessException, ObjectDisposedException,
+  TimeoutException, and StackOverflowException fixture sources add four
+  reports under a green 41/41 focused filter (four StackOverflow cases are in
+  a previously audited companion source). Normal construction/HResult coverage
+  is coherent; the reports document missing causal-inner, null/UTF-8,
+  non-default-HResult, producer-integration, and real-overflow assertions. No
+  new finding or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

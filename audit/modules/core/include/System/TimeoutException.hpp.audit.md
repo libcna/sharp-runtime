@@ -3,7 +3,9 @@
 ## Metadata
 
 - Audit status: AUDITED (22-line declaration, fully read with implementation).
-- Validation: the focused exception-family filter passed 38/38 on 2026-07-26.
+- Validation: the direct four-fixture exception filter passed 41/41 on
+  2026-07-27; its ten TimeoutException cases are now fully audited in
+  `TimeoutExceptionTests.cpp.audit.md`.
 - Reference basis: local .NET `TimeoutException.cs` and `COR_E_TIMEOUT` (`0x80131505`).
 
 ## Assessment
@@ -12,7 +14,9 @@ The declaration matches the four implementation constructors, which assign the d
 
 ## Other missing assertions and diagnostics
 
-- Tests omit every HResult, C-string null behavior, exact default text, stored-inner identity/rethrow, and UTF-8 text.
+- The direct fixture checks the default HResult and timeout wording, but omits
+  HResult preservation for non-default constructors, C-string null behavior,
+  exact default text, stored-inner identity/rethrow, and UTF-8 text.
 - No reviewed timeout producer proves which asynchronous, I/O, or wait failure is translated into this exception.
 
 ## Final assessment

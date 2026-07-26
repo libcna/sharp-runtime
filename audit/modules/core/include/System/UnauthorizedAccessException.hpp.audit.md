@@ -3,7 +3,9 @@
 ## Metadata
 
 - Audit status: AUDITED (25-line declaration, fully read with implementation).
-- Validation: the focused exception-family filter passed 38/38 on 2026-07-26.
+- Validation: the direct four-fixture exception filter passed 41/41 on
+  2026-07-27; its nine UnauthorizedAccessException cases are now fully
+  audited in `UnauthorizedAccessExceptionTests.cpp.audit.md`.
 - Reference basis: local .NET `UnauthorizedAccessException.cs` and `COR_E_UNAUTHORIZEDACCESS` (`0x80070005`).
 
 ## Assessment
@@ -12,7 +14,9 @@ The declaration exposes the expected default, C-string, string, and inner constr
 
 ## Other missing assertions and diagnostics
 
-- Tests omit every HResult, C-string null behavior, exact default text, stored-inner identity/rethrow, and UTF-8 input.
+- The direct fixture checks the default HResult, but it omits C-string null
+  behavior, exact default text, stored-inner identity/rethrow, UTF-8 input,
+  and HResult preservation for non-default constructors.
 - No reviewed filesystem/OS access error mapping proves that denied native operations are consistently translated into this type.
 
 ## Final assessment

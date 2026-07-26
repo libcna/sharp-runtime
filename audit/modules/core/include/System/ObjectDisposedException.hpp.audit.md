@@ -3,8 +3,9 @@
 ## Metadata
 
 - Audit status: AUDITED (99-line public declaration, fully read).
-- Validation: `ObjectDisposedExceptionNewTests.*` passed 3/3 within the audited
-  124/124 Core.Base shared exception filter on 2026-07-26.
+- Validation: the direct four-fixture exception filter passed 41/41 on
+  2026-07-27; its eight ObjectDisposedException cases are now fully audited in
+  `ObjectDisposedExceptionTests.cpp.audit.md`.
 
 ## Assessment
 
@@ -14,8 +15,10 @@ reproduced in the reviewed native adaptation.
 
 ## Other missing assertions and diagnostics
 
-- Tests do not assert message/object-name composition, `COR_E_OBJECTDISPOSED`,
-  null/empty/non-ASCII C strings, inner identity, or both ThrowIf overloads.
+- Direct tests assert normal message/object-name composition,
+  `COR_E_OBJECTDISPOSED` for all construction routes, and both normal ThrowIf
+  outcomes.  They still omit null/empty/non-ASCII C strings, inner identity,
+  overload-specific diagnostics, and real disposed-resource integration.
 - ThrowIf takes an object-name string rather than .NET's instance/caller
   expression model; this adaptation and its diagnostic limitations are not
   stated at the public call site.
