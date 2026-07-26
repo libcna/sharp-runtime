@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 374.
-- Confirmed findings: 111 (twenty-eight high, seventy-seven medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 377.
+- Confirmed findings: 112 (twenty-eight high, seventy-eight medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -550,6 +550,12 @@ inventory.
 (medium SR-AUD-111). The remaining no-metadata/no-varargs adapters are
 explicitly documented. No production or test source changed. Resume the next
 coherent Core.Base runtime source inventory.
+`ArgIterator`, `TypedReference`, and the complete Batch12 arg-handle fixture
+are now audited. The direct filter passes 11/11, but medium SR-AUD-112 records
+that five ArgIterator tests call non-static methods through reinterpreted
+character storage whose object lifetime never began. TypedReference's
+intrinsic/reflection omission remains explicit. No production or test source
+changed. Resume the next coherent Core.Base runtime source inventory.
 
 ## Findings recorded in this pass
 
