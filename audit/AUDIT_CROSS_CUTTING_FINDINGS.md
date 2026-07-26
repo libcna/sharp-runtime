@@ -231,11 +231,14 @@ empty collection or fails only after reaching `std::function::operator()`.
 `Progress<T>` correctly rejects an empty constructor handler, but its separate
 event-like registration method stores an empty handler and raises
 `std::bad_function_call` only on a future report. `Lazy<T>` similarly accepts
-an empty factory and fails only at first value access. The APIs have different
+an empty factory and fails only at first value access.
+`AggregateException::Handle` likewise accepts an empty predicate and reaches
+`std::bad_function_call` at first inner exception. The APIs have different
 .NET-compatible outcomes (Array arguments need an argument error; adding a
 null event delegate is a no-op; Lazy needs a constructor argument error), but
 none may defer the policy to a native exception or an empty-input accident.
-Tests cover only normal callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065, and:
+Tests cover only normal callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065,
+SR-AUD-099, and:
 
 - `modules/core/include/System/Array.hpp.audit.md`;
 - `modules/core/tests/System/ArrayTests.cpp.audit.md`;
@@ -243,6 +246,7 @@ Tests cover only normal callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065, and:
 - `modules/core/tests/System/ProgressTests.cpp.audit.md`.
 - `modules/core/include/System/Lazy.hpp.audit.md`.
 - `modules/core/tests/System/LazyTests.cpp.audit.md`.
+- `modules/core/include/System/AggregateException.hpp.audit.md`.
 
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 

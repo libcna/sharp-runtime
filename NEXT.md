@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 338 audit reports confirm ninety-six findings: tracked CI omits the
+- The first 339 audit reports confirm ninety-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -247,6 +247,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   focused 29/29 filter and local .NET source confirm all reviewed HResults;
   no new defect was classified, while reports preserve missing special-float,
   all-overload HResult, inner-exception, and real runtime-integration evidence.
+  `AggregateException` now has a mirrored audit. Its 13/13 focused tests are
+  green, but null inner `exception_ptr` causes probe-confirmed segfault
+  (high SR-AUD-097); custom constructors, `Handle`, and `Flatten` lose .NET
+  causal message/first-inner/order behavior (SR-AUD-098); and empty `Handle`
+  predicates defer to native `bad_function_call` (SR-AUD-099, extending
+  CCF-011).
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
