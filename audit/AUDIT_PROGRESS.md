@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 745.
-- Confirmed findings: 237 (fifty-three high, one hundred seventy-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 753.
+- Confirmed findings: 239 (fifty-four high, one hundred seventy-four medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1262,6 +1262,13 @@ its complete fixture passed 124/124. ASan confirms SR-AUD-237: destroying a
 ReadOnlyObservableCollection while its shared source survives leaves the
 source with a callback that dereferences the dead wrapper on its next mutation.
 No source/test changes. Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 12:50:00: 753/1748 mirrored reports, 239
+confirmed findings. All eight Timers files are mirrored and its complete
+fixture passed 9/9. Native/current-.NET probes add SR-AUD-238 (a throwing
+Elapsed handler aborts the C++ process instead of being contained) and
+SR-AUD-239 (the event receives null instead of the Timer as sender). No
+source/test changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

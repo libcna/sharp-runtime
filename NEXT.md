@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 745 audit reports confirm two hundred thirty-seven findings: tracked CI omits the
+- The first 753 audit reports confirm two hundred thirty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -757,6 +757,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   while its shared source survives leaves a captured `this` callback, and a
   later source mutation is stack-use-after-scope (SR-AUD-237). Audit-only; no
   production/test change occurred.
+
+- All eight eligible files in `modules/timers` now have mirrored reports; its
+  complete fixture passes 9/9. Native/current-.NET probes confirm that a
+  throwing `Elapsed` handler aborts the C++ process (SR-AUD-238) and that an
+  Elapsed handler receives null rather than the raising Timer (SR-AUD-239).
+  Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
