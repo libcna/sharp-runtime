@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 501.
-- Confirmed findings: 141 (thirty-one high, one hundred three medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 504.
+- Confirmed findings: 145 (thirty-one high, one hundred seven medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -744,6 +744,14 @@ fuse UserName/Password, relative input serializes as invalid `:///`, raw
 equality/hash disagree with Uri identity, and Scheme/IPv6 Host setters skip
 required normalization/validation (SR-AUD-138 through SR-AUD-141). No
 source/test changes. Resume the next coherent Uri header/source/test group.
+
+Audit checkpoint 2026-07-27 00:50:00: 504/1748 mirrored reports. Uri public
+header, implementation, and full direct fixture were audited; all 57 tests
+pass. C++/current-.NET probes confirm four new medium findings: raw
+case/default-port identity, opaque mailto port loss, incorrect query/fragment/
+network-path base resolution, and malformed IPv6/invalid UriKind acceptance
+(SR-AUD-142 through SR-AUD-145). No source/test changes. Resume the next
+coherent Uri header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

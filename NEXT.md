@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 501 audit reports confirm one hundred forty-one findings: tracked CI omits the
+- The first 504 audit reports confirm one hundred forty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -426,6 +426,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `:///` text, raw equality/hash disagree with Uri identity, and Scheme/IPv6
   Host setters skip required normalization or validation (SR-AUD-138–141).
   No production or test source changed.
+  Uri's header, implementation, and full direct fixture add three reports
+  under a green 57/57 filter, but C++/current-.NET probes confirm four medium
+  defects: raw case/default-port identity, opaque `mailto` port loss,
+  query/fragment/network-path base-resolution errors, and acceptance of
+  malformed IPv6 or invalid UriKind input (SR-AUD-142–145). No production or
+  test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
