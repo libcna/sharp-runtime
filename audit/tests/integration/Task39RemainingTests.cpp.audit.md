@@ -47,6 +47,9 @@ do not use a sleep as the primary proof of synchrony.
   are tested only for non-emptiness, not stable platform policy.
 - `Post_NullCallback_NoThrow` establishes a local choice but no diagnostic
   explains whether it is intentional parity or a benign no-op adaptation.
+- Experimental Property tests cover direct set/get and a read-only exception
+  only.  They miss the stale assignment-expression result (SR-AUD-179) and
+  never compile the broken advertised auto/custom macro family (SR-AUD-181).
 
 ## Final assessment
 

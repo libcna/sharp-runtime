@@ -38,6 +38,10 @@ assuming a 64-bit host.
 - `Win32Exception` asserts that a message contains the code, but no stable
   platform diagnostic policy is tested; system error texts must not be made
   brittle across platforms.
+- Prop macro tests cover only member-backed DDATA/DGETTER.  Keep separate
+  compile coverage for static/read-only forms and do not confuse this working
+  macro family with the broken experimental auto/custom macros in
+  `Property.hpp` (SR-AUD-181).
 
 ## Required post-audit verification
 

@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 574.
-- Confirmed findings: 178 (thirty-four high, one hundred thirty-six medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 579.
+- Confirmed findings: 181 (thirty-five high, one hundred thirty-seven medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -931,6 +931,14 @@ AllowExponent is ignored though current .NET integer parsing accepts it, and
 unknown/incompatible style masks are accepted rather than rejected with
 ArgumentException (SR-AUD-177 and SR-AUD-178). No source/test changes. Resume
 the next coherent Core.Base source/test group.
+
+Audit checkpoint 2026-07-27 04:50:00: 579/1748 mirrored reports.
+Experimental Property/ReadonlyProperty, portable floating from_chars, Prop,
+and SharpRuntimeHelper were audited; their focused integration filter passed
+8/8. Probes confirm high SR-AUD-180 (the old-Apple fallback scans beyond its
+from_chars range), medium SR-AUD-179 (Property assignment returns stale cache),
+and low SR-AUD-181 (advertised experimental auto/custom macros cannot compile).
+No source/test changes. Resume the next coherent Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
