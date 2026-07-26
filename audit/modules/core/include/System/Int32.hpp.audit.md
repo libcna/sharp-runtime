@@ -4,7 +4,8 @@
 
 - Audit status: AUDITED (552 lines, header-only implementation, full read).
 - Validation: the focused Core.Base numeric/style filter passed 167/167 on
-  2026-07-25.
+  2026-07-25; the supplemental `Int32NewTests.*` filter passed 9/9 on
+  2026-07-27 and is fully reviewed in `Int32NewTests.cpp.audit.md`.
 - Cross-width probe: `/tmp/sharp_runtimervc_int64_audit_probe.cpp` links
   `build/libsharp_runtime_core.a` and was run with UBSan enabled.
 

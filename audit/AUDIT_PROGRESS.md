@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 587.
+- Completed per-file reports: 588.
 - Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -964,6 +964,13 @@ companion StackOverflow cases). Normal construction/HResult coverage is
 coherent. Reports record missing inner-identity, null/UTF-8, non-default
 HResult, producer-integration, and real-overflow assertions. No new finding
 or source/test change. Resume the next coherent Core.Base source/test group.
+
+Audit checkpoint 2026-07-27 05:30:00: 588/1748 mirrored reports, 182
+confirmed findings. Int32NewTests was audited; its focused filter passed 9/9.
+The MinValue magnitude checks and normal comparison/hash paths agree with
+current .NET. The report records tautological hash, boundary, tie, parsing,
+formatting, and cross-cutting SR-AUD-021/022 assertion gaps. No new finding or
+source/test change. Resume the next coherent Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
