@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 426.
-- Confirmed findings: 123 (twenty-eight high, eighty-eight medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 430.
+- Confirmed findings: 125 (twenty-eight high, ninety medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -603,6 +603,14 @@ ResolveEventHandler requires a string result and lacks a distinct nullable
 exception payload and sender adaptations are explicit; AppDomain dispatch
 remains covered by SR-AUD-103. No source/test changes. Resume another complete
 Core.Base header/source/test group after refreshing its inventory.
+
+Audit checkpoint 2026-07-26 21:30: 430/1748 mirrored reports. ApplicationId
+and ApplicationIdentity plus their dedicated fixtures audited; focused filter
+passed 22/22. New SR-AUD-124/125: ApplicationId loses byte/null-aware identity
+modeling and required name validation, while ToString omits its token and uses
+a different grammar. ApplicationIdentity remains a documented legacy/reflection
+adaptation with no separate finding. No source/test changes. Resume another
+complete Core.Base group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

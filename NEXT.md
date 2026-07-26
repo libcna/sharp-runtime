@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 426 audit reports confirm one hundred twenty-three findings: tracked CI omits the
+- The first 430 audit reports confirm one hundred twenty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -338,6 +338,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   nullable .NET “not resolved” outcome independently of an empty name
   (SR-AUD-123). The string/reflection and exception-pointer sender adaptations
   are explicit; AppDomain event dispatch remains the SR-AUD-103 stub. No
+  production or test source changed.
+  ApplicationId/ApplicationIdentity and their fixtures add four reports; the
+  focused filter passes 22/22. ApplicationId loses the byte/null-aware identity
+  model and required nonempty-name validation (SR-AUD-124), while its ToString
+  omits public-key token and uses a non-.NET grammar (SR-AUD-125).
+  ApplicationIdentity is a documented legacy/reflection adaptation. No
   production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
