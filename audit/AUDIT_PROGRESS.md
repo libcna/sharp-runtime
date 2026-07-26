@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 563.
+- Completed per-file reports: 565.
 - Confirmed findings: 172 (thirty-four high, one hundred thirty medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -885,6 +885,13 @@ stops a child for non-cancelled SIGTSTP where current .NET does not, and can
 block its raw handler on a full default-blocking pipe (SR-AUD-169 through
 SR-AUD-172). No source/test changes. Resume another coherent Runtime
 header/source/test group.
+
+Audit checkpoint 2026-07-27 03:50:00: 565/1748 mirrored reports.
+SerializationInfo and StreamingContext were audited; their direct shared
+filter passed 3/3 and a warnings-as-errors standalone compile passed. Their
+near-empty C++ surfaces are explicitly documented permanent legacy-serialization
+stubs with no production consumer, so no new finding was classified. No
+source/test changes. Resume the next coherent module source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

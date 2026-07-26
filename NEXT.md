@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 563 audit reports confirm one hundred seventy-two findings: tracked CI omits the
+- The first 565 audit reports confirm one hundred seventy-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -517,6 +517,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   process unlike current .NET's Unix policy, the supposedly non-blocking
   self-pipe can block in the raw handler, and supported positive raw Unix
   signal values are rejected. No production or test source changed.
+  SerializationInfo and StreamingContext add two reports under a green 3/3
+  shared test filter and a standalone warnings-as-errors compile. Their
+  intentionally empty surfaces are the explicit permanent legacy-
+  serialization adaptation recorded in CLAUDE.md, and no production consumer
+  exists; no new finding or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
