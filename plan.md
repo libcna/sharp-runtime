@@ -238,13 +238,13 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 Text.Json checkpoint has 1,320 of 1,748 mirrored reports
-complete and three hundred thirty confirmed findings; `audit/AUDIT_PROGRESS.md`
-is the authoritative live count. The 43-file Text.Json shard passed 147/147
-focused tests and direct probes record SR-AUD-324 through SR-AUD-330, including
-an ASan-confirmed dangling JsonNode parent use-after-free. The preceding
-72-file Net.Http.Headers shard passed 373/373 and records SR-AUD-319 through
-SR-AUD-323. Audit-only work made no production or test-source change.
+The 2026-07-27 Security.Cryptography checkpoint has 1,368 of 1,748 mirrored
+reports complete and three hundred thirty-two confirmed findings;
+`audit/AUDIT_PROGRESS.md` is the authoritative live count. The 50-file
+Security.Cryptography shard passed 80/80 focused tests and direct probes record
+SR-AUD-331 (PBKDF2 remains active after no-op disposal) and SR-AUD-332 (HMAC
+pads retain reconstructable key material). Audit-only work made no production
+or test-source change.
 
 ## Candidate roadmap
 

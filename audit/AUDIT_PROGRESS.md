@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,320 (75.5% of eligible scope; 1,271/1,699 runtime-module files).
-- Confirmed findings: 330 (eighty-one high, two hundred thirty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,368 (78.3% of eligible scope; 1,319/1,699 runtime-module files).
+- Confirmed findings: 332 (eighty-three high, two hundred thirty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -40,15 +40,12 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 43-file `Text.Json` shard is mirrored. Its focused target passed
-147/147. Direct probes confirm SR-AUD-324 through SR-AUD-330: disposed
-documents do not invalidate captured elements; raw element/property rendering
-loses source representation; document parser flags are inert; retained nodes
-can dereference a destroyed raw parent (ASan-confirmed UAF); JsonValue integer
-accessors truncate floats; JsonEncodedText preserves malformed UTF-8 bytes;
-and JsonSerializer deserialization ignores its options. The preceding 72-file
-`Net.Http.Headers` target passed 373/373. Audit-only: no production or test
-source was changed.
+The complete 50-file `Security.Cryptography` shard is mirrored. Its focused
+target passed 80/80. Direct probes confirm SR-AUD-331 and SR-AUD-332: PBKDF2
+inherits a no-op `Dispose`, continuing to derive bytes and retain state, while
+HMAC disposal clears only its direct key and leaves invertible inner/outer pads
+resident. The preceding 43-file `Text.Json` target passed 147/147. Audit-only:
+no production or test source was changed.
 
 ## Resume point
 

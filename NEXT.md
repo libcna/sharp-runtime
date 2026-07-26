@@ -26,14 +26,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,320 audit reports confirm three hundred thirty findings. The newly complete
-  43-file `Text.Json` shard passed 147/147 focused tests and adds SR-AUD-324 through
-  SR-AUD-330: captured JsonElements remain usable after their document is disposed; raw DOM
-  rendering loses source lexemes and JsonProperty names; document parser flags are inert;
-  retained JsonNodes use an ASan-confirmed dangling parent pointer; JsonValue truncates floats
-  through integer accessors; JsonEncodedText accepts malformed UTF-8 unchanged; and serializer
-  deserialization ignores JsonSerializerOptions. The preceding 72-file `Net.Http.Headers` shard
-  passed 373/373 and adds SR-AUD-319 through SR-AUD-323. Earlier work
+- The first 1,368 audit reports confirm three hundred thirty-two findings. The newly complete
+  50-file `Security.Cryptography` shard passed 80/80 focused tests and adds SR-AUD-331 through
+  SR-AUD-332: `Rfc2898DeriveBytes` inherits a no-op `Dispose` and continues PBKDF2 derivation;
+  HMAC clears direct key storage but retains invertible inner/outer pads. The preceding 43-file
+  `Text.Json` shard passed 147/147 and adds SR-AUD-324 through SR-AUD-330, including an
+  ASan-confirmed dangling JsonNode parent pointer. Earlier work
   confirms that tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
