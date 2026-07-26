@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 808 audit reports confirm two hundred forty-five findings: tracked CI omits the
+- The first 824 audit reports confirm two hundred forty-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -792,6 +792,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   mirrored reports. ASan confirms a Match continuation captures raw Regex
   `this` and calls it after Regex destruction (SR-AUD-245), while current .NET
   continues safely after GC. Audit-only; no production/test change occurred.
+
+- All sixteen eligible files in `modules/security` now have mirrored reports;
+  its complete fixture passes 38/38. Native/current-.NET comparison confirms
+  bytewise native role matching rejects Unicode `ÄDMIN`/`ädmin` even though
+  managed `OrdinalIgnoreCase` accepts it (SR-AUD-246). VerificationException
+  and CAS/transparency attributes remain documented ignored-surface
+  placeholders. Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

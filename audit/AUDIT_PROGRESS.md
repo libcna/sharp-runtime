@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 808.
-- Confirmed findings: 245 (fifty-seven high, one hundred seventy-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 824.
+- Confirmed findings: 246 (fifty-seven high, one hundred seventy-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1304,6 +1304,15 @@ mirrored. Direct ASan/current-.NET comparison adds SR-AUD-245: a Match's
 NextMatch continuation captures raw Regex this and dereferences it after the
 Regex leaves scope. No source/test changes. Resume another coherent module
 shard.
+
+Audit checkpoint 2026-07-27 13:50:00: 824/1748 mirrored reports, 246
+confirmed findings. All sixteen Security files are mirrored; the complete
+fixture passed 38/38 and direct C++/current-.NET probes reviewed exception and
+principal behavior. SR-AUD-246 confirms that explicit Unicode role membership
+is reduced to bytewise ASCII lowercasing (`ÄDMIN`/`ädmin` false versus managed
+true). VerificationException and CAS/transparency attributes remain recorded
+ignored-surface placeholders. No source/test changes. Resume another coherent
+module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
