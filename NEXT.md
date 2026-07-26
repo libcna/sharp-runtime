@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 677 audit reports confirm two hundred twenty-three findings: tracked CI omits the
+- The first 681 audit reports confirm two hundred twenty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -704,6 +704,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - TimeZone audit has begun. Legacy `TimeZone::CurrentTimeZone` snapshots one
   base offset and always reports no DST, so under New York it gives the wrong
   January offset/DST result (SR-AUD-223); its exception HResults match .NET.
+
+- `TimeZoneInfo` adds SR-AUD-224 through SR-AUD-229: stale failed TryFind
+  output; missing factory/adjustment validation; case-sensitive IDs; reduced
+  rule identity; and current DST data incorrectly stored as BaseUtcOffset.
+  Focused fixtures pass 99/99 but do not cover these boundaries.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
