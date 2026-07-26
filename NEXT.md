@@ -3,7 +3,7 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-26. Branch: `feature/work`. The P0 component-boundary
+*Last verified: 2026-07-26. Branch: `feature/audit`. The P0 component-boundary
 repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
 edges, and 12,681 tests across 37 executables. A repository-wide, evidence-only
@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 269 audit reports confirm eighty-eight findings: tracked CI omits the
+- The first 274 audit reports confirm eighty-eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -181,6 +181,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `MemoryHandle` adds SR-AUD-088: its comments promise scope-based RAII cleanup
   but its implicit destructor never calls `Dispose`, so a scoped pinned handle
   does not unpin.
+  The full Buffers module is now audited (40/40): its remaining direct fixture
+  filter passes 54/54, but `EnumeratorTests.cpp` calls default-sequence
+  `MoveNext()` without asserting its result, leaving SR-AUD-074 unobserved;
+  ArrayBufferWriter and BinaryPrimitives reports preserve their generic,
+  byte-exact, and cross-platform assertion/diagnostic gaps.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

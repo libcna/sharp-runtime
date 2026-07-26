@@ -4,9 +4,11 @@
 
 - Audit status: AUDITED (311-line public header-only implementation, fully
   read).
-- Validation: `ReadOnlySequenceTests.*` passed 9/9, as part of the complete
-  63/63 `Batch6BuffersTests.cpp` focused filter in
-  `SharpRuntimeTests_Buffers` on 2026-07-26.
+- Validation: `ReadOnlySequenceTests.*` passed 9/9 within the complete 63/63
+  `Batch6BuffersTests.cpp` focused filter.  The dedicated
+  `ReadOnlySequenceEnumeratorTest.*` filter passed 4/4; together with the
+  direct ArrayBufferWriter and BinaryPrimitives fixtures, their combined
+  Buffers filter passed 54/54 in `SharpRuntimeTests_Buffers` on 2026-07-26.
 - ASan/UBSan reproducer: `/tmp/sharp-runtimervc-readonlysequence-audit-probe.cpp`
   was built with `-fsanitize=address,undefined` and
   `build/libsharp_runtime_core.a`. Its modes produce the below evidence.
@@ -72,8 +74,10 @@ versus explicit-empty state.
 - Direct tests omit null/nonzero and negative raw-pointer construction,
   source lifetime, zero-length null policy, and nontrivial element copying.
 - No test calls `TryGet`, tests `advance=false`/`true`, preserves a position at
-  end, rejects a before-start/foreign/reversed position, or covers a default
-  versus explicit-empty enumerator state.
+  end, or rejects a before-start/foreign/reversed position.  The dedicated
+  enumerator fixture calls `MoveNext` on the default state but discards its
+  return value, so it still does not establish default-versus-explicit-empty
+  enumeration behavior.
 - Multi-segment constructors, `FirstSpan`, `TryCopyTo`, equality/hash,
   memory-manager/string backing, and position/segment provenance are absent
   from this single-vector subset and need an explicit unsupported-surface

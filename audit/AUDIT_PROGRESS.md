@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 269.
+- Completed per-file reports: 274.
 - Confirmed findings: 88 (twenty-six high, fifty-seven medium, five low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -352,6 +352,13 @@ SR-AUD-088 records that its documentation promises RAII/destructor cleanup,
 but the type has no destructor calling `Dispose` and scope exit never unpins.
 No production or test source changed. Resume the next complete Buffers/core
 boundary implementation or source/test inventory.
+The Buffers module is now complete at 40/40 mirrored reports. Its remaining
+module metadata and three direct test files passed a combined 54/54 filter. No
+new standalone implementation defect was classified: the ArrayBufferWriter
+tests extend SR-AUD-070's generic-type coverage gap; BinaryPrimitives tests add
+broad direct evidence without replacing byte-exact/cross-platform checks; and
+`EnumeratorTests.cpp` visibly lacks the assertion needed to expose SR-AUD-074.
+Resume the next complete Core.Base source/test inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike

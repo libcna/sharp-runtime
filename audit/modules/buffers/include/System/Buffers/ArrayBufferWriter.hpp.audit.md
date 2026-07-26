@@ -4,9 +4,10 @@
 
 - Audit status: AUDITED (160-line public header-only implementation, fully
   read).
-- Validation: `ArrayBufferWriterTests.*` passed 10/10, as part of the complete
-  63/63 `Batch6BuffersTests.cpp` focused filter in
-  `SharpRuntimeTests_Buffers` on 2026-07-26.
+- Validation: the dedicated `ArrayBufferWriterTest.*` filter passed 13/13;
+  together with the direct BinaryPrimitives and enumerator fixtures, the
+  combined Buffers filter passed 54/54 in `SharpRuntimeTests_Buffers` on
+  2026-07-26.  Earlier `Batch6BuffersTests.cpp` evidence passed 63/63.
 - Reproducer: compiling
   `/tmp/sharp-runtimervc-arraybufferwriter-nondefault-probe.cpp` with C++20
   fails at `GetSpan(1)`: `std::vector::resize` requires
@@ -41,9 +42,9 @@ diagnostic before users select the type.
 
 ## Other missing assertions and diagnostics
 
-- The complete direct batch only instantiates `uint8_t` and `int`; it omits a
-  non-default-constructible, move-only, reference-owning, throwing-copy, and
-  oversized element type.
+- The direct and mixed fixtures instantiate only scalar default-constructible
+  values.  They omit a non-default-constructible, move-only,
+  reference-owning, throwing-copy, and oversized element type.
 - No test checks zero-hint `GetMemory`/`GetSpan`, invalid negative hints,
   advance beyond free capacity after a partial write, or the source guarantee
   that old views must not be used after `Advance`/growth.
