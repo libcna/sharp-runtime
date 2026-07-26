@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 558.
-- Confirmed findings: 168 (thirty-one high, one hundred twenty-nine medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 563.
+- Confirmed findings: 172 (thirty-four high, one hundred thirty medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -874,6 +874,16 @@ UnmanagedType has a wrong/missing value surface; StructLayout/DllImport defaults
 diverge; MarshalAs/COM metadata is truncated and retyped; and all attributes
 are detached from native declaration/marshalling/PInvoke behavior (SR-AUD-165
 through SR-AUD-168). No source/test changes. Resume another coherent Runtime
+header/source/test group.
+
+Audit checkpoint 2026-07-27 03:40:00: 563/1748 mirrored reports.
+PosixSignal, PosixSignalContext, PosixSignalRegistration, its Unix source, and
+the direct fixture were audited; the focused filter passed 9/9. Safe helper
+processes confirm four findings: registration drops a prior signal action and
+never restores it, rejects current-.NET-supported positive raw Unix signals,
+stops a child for non-cancelled SIGTSTP where current .NET does not, and can
+block its raw handler on a full default-blocking pipe (SR-AUD-169 through
+SR-AUD-172). No source/test changes. Resume another coherent Runtime
 header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.

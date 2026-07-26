@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 558 audit reports confirm one hundred sixty-eight findings: tracked CI omits the
+- The first 563 audit reports confirm one hundred seventy-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -510,6 +510,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   diverge, MarshalAs/COM metadata is truncated/retyped, and the declarative
   attributes have no native ABI, marshalling, or P/Invoke consumer. No
   production or test source changed.
+  The POSIX signal header/source/test group adds five reports under a green
+  9/9 direct filter. Safe helpers confirm high SR-AUD-169, SR-AUD-171, and
+  SR-AUD-172 plus medium SR-AUD-170: registration destroys instead of
+  preserving a prior signal disposition, a non-cancelled SIGTSTP stops the
+  process unlike current .NET's Unix policy, the supposedly non-blocking
+  self-pipe can block in the raw handler, and supported positive raw Unix
+  signal values are rejected. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
