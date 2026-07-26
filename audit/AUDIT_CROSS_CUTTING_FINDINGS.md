@@ -203,12 +203,14 @@ singleton leaves the other independently unsafe.  See SR-AUD-010 and:
 `MemoryExtensions` and `Array` both choose raw `<` and `==` for their default
 sort/search paths, while `NullableHelper` and every generic `ValueTuple` /
 `Tuple` `CompareTo` use raw `<`; `Nullable`, `ValueTuple`, and `Tuple` equality
-use raw `==`. Those operators make NaN unequal to itself and unordered against
-every finite number, while .NET's default floating comparer gives NaN a stable
-place before finite values and its equality comparer treats NaN as equal to
-itself. Independent probes show Array/MemoryExtensions sort `{3,NaN,1}` as
-`1,3,NaN` and fail to find NaN, Nullable compares NaN with a finite value as
-equal, and ValueTuple/Tuple do both at their component boundary. The repair
+use raw `==`. LINQ repeats that pattern in Contains, Distinct, Min/Max, and
+OrderBy. Those operators make NaN unequal to itself and unordered against every
+finite number, while .NET's default floating comparer gives NaN a stable place
+before finite values and its equality comparer treats NaN as equal to itself.
+Independent probes show Array/MemoryExtensions sort `{3,NaN,1}` as `1,3,NaN`
+and fail to find NaN, Nullable compares NaN with a finite value as equal,
+ValueTuple/Tuple do both at their component boundary, and LINQ fails Contains,
+retains duplicate NaN, and returns a finite Min for a later NaN. The repair
 must centralize or consistently reuse the local comparison policy; changing
 only one surface leaves the others divergent. See SR-AUD-046 and:
 
@@ -223,6 +225,8 @@ only one surface leaves the others divergent. See SR-AUD-046 and:
 - `modules/core/include/System/Tuple.hpp.audit.md`.
 - `modules/core/tests/System/TupleTests.cpp.audit.md`.
 - `modules/core/tests/System/TupleNewTests.cpp.audit.md`.
+- `modules/core/include/System/Linq.hpp.audit.md`.
+- `modules/core/tests/System/LinqTests.cpp.audit.md`.
 
 ## CCF-011 — empty `std::function` values cross public boundaries without an explicit policy
 
@@ -238,9 +242,11 @@ an empty factory and fails only at first value access.
 null event delegate is a no-op; Lazy needs a constructor argument error), but
 none may defer the policy to a native exception or an empty-input accident.
 `EventHandler<TEventArgs>` repeats the event-specific route: it stores an empty
-subscriber and Raise reaches `std::bad_function_call`. Tests cover only normal
-callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065, SR-AUD-099, SR-AUD-121,
-and:
+subscriber and Raise reaches `std::bad_function_call`. LINQ callback overloads
+also accept empty `std::function` values: empty vectors silently return a
+normal result while nonempty traversal eventually throws the native exception.
+Tests cover only normal callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065,
+SR-AUD-099, SR-AUD-121, SR-AUD-134, and:
 
 - `modules/core/include/System/Array.hpp.audit.md`;
 - `modules/core/tests/System/ArrayTests.cpp.audit.md`;
@@ -251,6 +257,8 @@ and:
 - `modules/core/include/System/AggregateException.hpp.audit.md`.
 - `modules/core/include/System/EventHandler.hpp.audit.md`;
 - `modules/core/tests/System/EventHandlerTests.cpp.audit.md`.
+- `modules/core/include/System/Linq.hpp.audit.md`.
+- `modules/core/tests/System/LinqTests.cpp.audit.md`.
 
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 

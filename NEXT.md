@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 463 audit reports confirm one hundred thirty-three findings: tracked CI omits the
+- The first 465 audit reports confirm one hundred thirty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -374,6 +374,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan-confirmed write crash (SR-AUD-132); normal formatting ignores format and
   emits C++ spellings such as `1`, `255`, and `3.140000` instead of .NET text
   (SR-AUD-133). No production or test source changed.
+  Header-only Linq and its full direct fixture add two reports under a green
+  45/45 filter. Empty callbacks silently succeed on empty vectors but later
+  throw `std::bad_function_call` (SR-AUD-134); `Sum(INT_MAX, 1)` has
+  UBSan-confirmed signed overflow (SR-AUD-135); and raw float logic extends
+  SR-AUD-046 by rejecting/duplicating NaN and missing a late NaN minimum. No
+  production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

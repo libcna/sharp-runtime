@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 463.
-- Confirmed findings: 133 (thirty high, ninety-six medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 465.
+- Confirmed findings: 135 (thirty-one high, ninety-seven medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -663,6 +663,16 @@ filter passed 13/13. Format probe prints bool=1, hex=255, and double=3.140000;
 ASan confirms a positive-length null destination writes through null and exits
 134. New high SR-AUD-132 covers the raw-pointer crash; new medium SR-AUD-133
 covers ignored formats and hardcoded non-.NET value text. No source/test
+changes. Resume another complete Core.Base header/source/test group after
+inventory review.
+
+Audit checkpoint 2026-07-26 23:50: 465/1748 mirrored reports. Header-only
+Linq and its full direct fixture audited; focused filter passed 45/45. Probe
+confirms empty callbacks return normal results for empty vectors but later
+throw std::bad_function_call, raw float comparison rejects/duplicates NaN and
+misses a late NaN minimum, and UBSan confirms Sum(INT_MAX,1) signed overflow.
+New medium SR-AUD-134 covers callback validation; new high SR-AUD-135 covers
+Sum overflow; SR-AUD-046 and CCF-010/011 now include LINQ. No source/test
 changes. Resume another complete Core.Base header/source/test group after
 inventory review.
 No production or test source changed. Resume the next coherent Core.Base
