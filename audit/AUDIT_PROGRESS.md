@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 556.
-- Confirmed findings: 162 (thirty-one high, one hundred twenty-three medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 557.
+- Confirmed findings: 164 (thirty-one high, one hundred twenty-five medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -857,6 +857,14 @@ RuntimeHelpers was audited; its direct filter passed 5/5. Native identity,
 subarray, cleanup, and conservative-reference operations are coherent; CLR
 metadata and stack/CER routes explicitly throw or document their native no-op
 adaptation. No new finding or source/test change. Resume another coherent
+Runtime header/source/test group.
+
+Audit checkpoint 2026-07-27 03:20:00: 557/1748 mirrored reports.
+VersioningAttributes was audited; all seven fixture suites passed 11/11.
+Current-.NET/C++ probes confirm two medium findings: the public
+OSPlatformAttribute hierarchy and common native consumer are absent, while
+nullable/mutable metadata is collapsed into immutable constructor strings
+(SR-AUD-163 and SR-AUD-164). No source/test changes. Resume another coherent
 Runtime header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.

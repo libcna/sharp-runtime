@@ -64,6 +64,11 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
 - RuntimeHelpers tests omit empty/throwing cleanup callbacks, raw identity-hash
   boundaries, from-end/empty/nontrivial subarrays, raw/weak/unique pointer
   reference classification, and no-op stack/constructor capability diagnostics.
+- Versioning tests construct individual data objects only.  They omit the
+  public OSPlatformAttribute hierarchy/attachment/analyzer contract, nullable
+  metadata states, and mutable Url properties; TargetFramework explicitly
+  locks empty rather than null display text and Obsoleted locks the incompatible
+  constructor URL route (SR-AUD-163 and SR-AUD-164).
 
 ## Final assessment
 
