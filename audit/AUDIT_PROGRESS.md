@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 634.
-- Confirmed findings: 199 (thirty-nine high, one hundred forty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 635.
+- Confirmed findings: 201 (thirty-nine high, one hundred fifty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1105,6 +1105,12 @@ CancellationTokenSource, and source were audited; Threading remains 359/359.
 Native/managed probes add SR-AUD-198 empty callback acceptance and ASan/UBSan
 SR-AUD-199 public null-state token crash. No source/test change. Resume
 remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 08:50:00: 635/1748 mirrored reports, 201
+confirmed findings. PeriodicTimer audited with no local fixture. Native probes
+add SR-AUD-200 fractional period truncation and SR-AUD-201 double consumption
+by concurrent waiters; current .NET documentation specifies one consumer. No
+source/test change. Resume remaining Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:20:00: 629/1748 mirrored reports, 196
 confirmed findings. ThreadStart and five Thread exception/event headers were
