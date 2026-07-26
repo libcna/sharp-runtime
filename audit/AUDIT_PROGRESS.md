@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 615.
-- Confirmed findings: 189 (thirty-seven high, one hundred forty-three medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 620.
+- Confirmed findings: 191 (thirty-seven high, one hundred forty-five medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1071,6 +1071,14 @@ were audited; the complete Threading executable remains green at 359/359.
 Public values and both timeout constants match current .NET. Reports record
 invalid-cast, consumer-state, and InfiniteTimeSpan assertion gaps. No
 source/test change. Resume the remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 07:50:00: 620/1748 mirrored reports, 191
+confirmed findings. Timer, ITimer, TimeProvider, its source, and direct tests
+were audited; complete Threading validation passed 359/359. UBSan extends
+SR-AUD-131 to TimeProvider timestamp subtraction; C++/managed probes add
+SR-AUD-190 empty Timer callback acceptance and SR-AUD-191 successful Change
+after disposal. The fixture's raw-this Timer comment is obsolete; Timer holds
+shared State. No source/test change. Resume the remaining Threading inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
