@@ -238,13 +238,16 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 Xml.Linq checkpoint has 1,406 of 1,748 mirrored reports
-complete and three hundred thirty-six confirmed findings;
-`audit/AUDIT_PROGRESS.md` is the authoritative live count. The 38-file
-Xml.Linq shard passed 92/92 focused tests and direct probes record SR-AUD-333
-(ASan-confirmed dangling raw parent), SR-AUD-334 (namespace URI loss),
-SR-AUD-335 (lexical XML corruption), and SR-AUD-336 (inert mutation events).
-Audit-only work made no production or test-source change.
+The 2026-07-27 IO checkpoint has 1,488 of 1,748 mirrored reports complete and
+three hundred forty-seven confirmed findings; `audit/AUDIT_PROGRESS.md` is the
+authoritative live count. The complete 84-file IO shard passed 527/527 focused
+tests. Direct ASan/UBSan probes record SR-AUD-338 (null text wrapper) and
+SR-AUD-341 (null MemoryStream construction); direct functional probes add
+SR-AUD-337, SR-AUD-339 through SR-AUD-340, and SR-AUD-342 through SR-AUD-347
+for text-wrapper lifecycle, FileSystemWatcher live configuration, RandomAccess,
+FileStream access/lifetime, in-memory stream disposal, FileInfo deletion, and
+filesystem exception translation. Audit-only work made no production or
+test-source change.
 
 ## Candidate roadmap
 

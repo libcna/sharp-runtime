@@ -2,6 +2,7 @@
 
 ## Metadata
 
+- Audit status: AUDITED.
 - AUDITED: 116-line direct IO BinaryData fixture, fully read.
 - Validation: `BinaryDataTests.*` passed 15/15 in `SharpRuntimeTests_IO` on
   2026-07-27. It is a different executable from the Core fixture that uses

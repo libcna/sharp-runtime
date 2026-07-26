@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,406 (80.4% of eligible scope; 1,357/1,699 runtime-module files).
-- Confirmed findings: 336 (eighty-four high, two hundred forty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,488 (85.1% of eligible scope; 1,439/1,699 runtime-module files).
+- Confirmed findings: 347 (eighty-six high, two hundred fifty medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -40,12 +40,15 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 38-file `Xml.Linq` shard is mirrored. Its focused target passed
-92/92. Direct probes confirm SR-AUD-333 through SR-AUD-336: retained children
-use an ASan-confirmed dangling raw parent; namespace URI identity is lost in
-parse/save; lexical CDATA/comment/PI delimiters corrupt or emit invalid XML;
-and XObject events accept handlers but never notify. Audit-only: no production
-or test source was changed.
+The complete 84-file `IO` shard is mirrored. Its focused target passed
+527/527. Direct ASan/UBSan probes confirm SR-AUD-338 (null text-wrapper base
+stream) and SR-AUD-341 (null MemoryStream source). Other direct probes confirm
+SR-AUD-337 (leaveOpen wrapper remains usable), SR-AUD-339/346 (FileSystemWatcher
+live Path and NotifyFilter failures), SR-AUD-340 (RandomAccess invalid metadata
+and descriptor suppression), SR-AUD-342 (FileStream access/lifecycle gaps),
+SR-AUD-343/344 (in-memory text/unmanaged disposal), SR-AUD-345 (FileInfo deletes
+an empty directory), and SR-AUD-347 (raw filesystem error leakage). Audit-only:
+no production or test source was changed.
 
 ## Resume point
 

@@ -26,11 +26,17 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,406 audit reports confirm three hundred thirty-six findings. The newly complete
-  38-file `Xml.Linq` shard passed 92/92 focused tests and adds SR-AUD-333 through SR-AUD-336:
-  retained children dereference an ASan-confirmed dangling raw parent; namespaces are lost in
-  parse/save; special XML lexical delimiters corrupt output; and registered XObject events never
-  notify. The preceding 50-file `Security.Cryptography` shard passed 80/80 and adds
+- The first 1,488 audit reports confirm three hundred forty-seven findings. The newly complete
+  84-file `IO` shard passed 527/527 focused tests and adds SR-AUD-337 through SR-AUD-347:
+  leaveOpen text wrappers remain usable after Close; null text streams silently EOF or ASan-crash;
+  FileSystemWatcher misroutes events after live Path changes and ignores NotifyFilter; RandomAccess
+  accepts invalid metadata and suppresses invalid-descriptor failures; MemoryStream null construction
+  ASan-crashes; FileStream bypasses requested access and retains closed metadata; in-memory text and
+  UnmanagedMemoryStream disposal is incomplete; FileInfo deletes an empty directory; and FileInfo/
+  DirectoryInfo empty paths leak raw filesystem errors. The preceding 38-file `Xml.Linq` shard passed
+  92/92 and adds SR-AUD-333 through SR-AUD-336: retained children dereference an ASan-confirmed
+  dangling raw parent; namespaces are lost in parse/save; special XML lexical delimiters corrupt output;
+  and registered XObject events never notify. The preceding 50-file `Security.Cryptography` shard passed 80/80 and adds
   SR-AUD-331 through SR-AUD-332. Earlier work
   confirms that tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has

@@ -2,6 +2,7 @@
 
 ## Metadata
 
+- Audit status: AUDITED.
 - AUDITED: 395-line inline BinaryData implementation, fully read.
 - Validation: Core `MathFTests.*:BinaryDataTests.*` passed 33/33 and IO
   `BinaryDataTests.*` passed 15/15 on 2026-07-27; the corresponding two test
