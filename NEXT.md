@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 710 audit reports confirm two hundred thirty-five findings: tracked CI omits the
+- The first 715 audit reports confirm two hundred thirty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -728,6 +728,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   error rather than wrapping it in `ChannelClosedException` (SR-AUD-234), and
   an invalid FullMode can overfill a bounded channel (SR-AUD-235). Audit-only;
   no production/test change occurred.
+
+- All five eligible files in `modules/collections-async` now have mirrored
+  reports. Its six smoke tests pass; synchronously adapted shared-pointer
+  enumeration/disposal is explicitly documented, with no additional
+  evidence-backed finding. Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
