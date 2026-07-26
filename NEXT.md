@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 530 audit reports confirm one hundred fifty-four findings: tracked CI omits the
+- The first 532 audit reports confirm one hundred fifty-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -455,6 +455,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   findings record missing default OSPlatform, omitted FrameworkDescription/
   RuntimeIdentifier, and Windows OSArchitecture aliasing process architecture
   (SR-AUD-152–154). No production or test source changed.
+  NativeMemory and its complete direct fixture add two reports under a green
+  20/20 filter. The reviewed POSIX AlignedRealloc old-size bounded-copy repair
+  is correct; no new defect, but reports record AllocZeroed overflow,
+  reallocation, and near-limit alignment coverage gaps. No source or test
+  changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
