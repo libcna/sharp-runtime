@@ -53,6 +53,10 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
   construction, encoding the C++ setter even though current .NET exposes an
   init-only property; it therefore preserves SR-AUD-160 rather than checking
   construction-time-only state.
+- MethodImplOptions samples only five of ten flags and one OR operation, while
+  MethodImplAttribute samples one constructor option and one code-type
+  mutation.  The green nominal tests do not establish a boundary for unknown
+  flags/raw shorts or the documented absence of native code-generation effect.
 
 ## Final assessment
 
