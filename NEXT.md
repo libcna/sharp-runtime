@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 671 audit reports confirm two hundred twenty-two findings: tracked CI omits the
+- The first 677 audit reports confirm two hundred twenty-three findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -700,6 +700,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - All five eligible files in `modules/security-cryptography-random` now have
   mirrored reports. Its component graph/catalogue validation and static-target
   build pass; existing SR-AUD-012 remains the module's only confirmed finding.
+
+- TimeZone audit has begun. Legacy `TimeZone::CurrentTimeZone` snapshots one
+  base offset and always reports no DST, so under New York it gives the wrong
+  January offset/DST result (SR-AUD-223); its exception HResults match .NET.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

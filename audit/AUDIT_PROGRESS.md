@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 671.
-- Confirmed findings: 222 (fifty high, one hundred sixty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 677.
+- Confirmed findings: 223 (fifty high, one hundred sixty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1190,6 +1190,13 @@ module-boundary validator reports 41 modules/90 edges, generated catalogue is
 current, and its static target builds. All five eligible module files now have
 mirrored reports. No new finding or source/test change; resume another
 coherent module shard.
+
+Audit checkpoint 2026-07-27 11:10:00: 677/1748 mirrored reports, 223
+confirmed findings. Legacy TimeZone header/source, its two exception headers,
+and related fixtures audited; focused filters passed 15/15. New York C++/.NET
+comparison adds SR-AUD-223: CurrentTimeZone freezes one current offset and
+always reports no DST. Exception default HResults agree. Audit-only; no
+source/test changes. Resume TimeZoneInfo core surface.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
