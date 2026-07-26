@@ -238,8 +238,8 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 checkpoint has 661 of 1,748 mirrored reports complete and
-two hundred thirteen confirmed findings; `audit/AUDIT_PROGRESS.md` is the authoritative
+The 2026-07-27 checkpoint has 664 of 1,748 mirrored reports complete and
+two hundred fifteen confirmed findings; `audit/AUDIT_PROGRESS.md` is the authoritative
 live count.
 
 ## Candidate roadmap

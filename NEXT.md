@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 661 audit reports confirm two hundred thirteen findings: tracked CI omits the
+- The first 664 audit reports confirm two hundred fifteen findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -674,6 +674,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   unbounded `memmove` (SR-AUD-067), while generic typed-vector byte copying
   extends SR-AUD-051 with a string-vector double-free. See
   `audit/AUDIT_FINDINGS_INDEX.md`.
+
+- The current Threading checkpoint adds two medium findings: `AsyncLocal<T>`
+  calls its notification before committing the new thread-local value, so the
+  callback sees stale ambient data (SR-AUD-214); and the documented minimal
+  `ExecutionContext::Run` adapter treats a null context as normal where .NET
+  throws `InvalidOperationException` (SR-AUD-215).  The focused native suite
+  passed 10/10; direct C++/.NET probes provide the behavioral evidence.  These
+  are audit records only, not production changes.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

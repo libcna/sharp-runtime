@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 661.
-- Confirmed findings: 213 (forty-seven high, one hundred fifty-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 664.
+- Confirmed findings: 215 (forty-seven high, one hundred fifty-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1159,6 +1159,14 @@ related three exception filters passed 9/9. Construction/hierarchy paths are
 coherent; reports retain null, inner-identity, HResult, producer, and named-
 handle capability gaps. No new finding or source/test change. Resume remaining
 Threading source inventory.
+
+Audit checkpoint 2026-07-27 10:30:00: 664/1748 mirrored reports, 215
+confirmed findings. AsyncLocal/ExecutionContext focused filter passed 10/10.
+Direct C++/current-.NET probes add SR-AUD-214 (callback observes old local
+value before commit) and SR-AUD-215 (null ExecutionContext::Run succeeds
+instead of InvalidOperationException); AsyncLocalValueChangedArgs has no new
+finding. Audit-only; no source/test changes. Resume remaining Threading source
+inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
