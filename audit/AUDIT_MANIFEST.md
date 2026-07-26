@@ -14,8 +14,8 @@ mirrored report exists and contains evidence rather than a boilerplate verdict.
 | Consumer fixtures and validator tests | 16 | 16 | AUDITED |
 | Integration tests | 7 | 7 | AUDITED |
 | Benchmarks | 1 | 1 | AUDITED |
-| 41 runtime modules (source, headers, tests, module docs/CMake) | 1,699 | 299 | IN PROGRESS |
-| **Total** | **1,748** | **348** | **IN PROGRESS** |
+| 41 runtime modules (source, headers, tests, module docs/CMake) | 1,699 | 304 | IN PROGRESS |
+| **Total** | **1,748** | **353** | **IN PROGRESS** |
 
 The module shard is processed in dependency/risk order rather than directory
 order: component boundaries and `Core.Base` first, then collections, IO/text,

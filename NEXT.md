@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 348 audit reports confirm one hundred findings: tracked CI omits the
+- The first 353 audit reports confirm one hundred one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -260,6 +260,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   confirms the latter eight normal HResult paths; DuplicateWaitObject retains
   generic `COR_E_ARGUMENT` and a divergent wait-array default diagnostic
   (medium SR-AUD-100), extending CCF-016.
+  `System::IO::IOException` (header/source), `DirectoryNotFoundException`
+  (header/source), and `Security::Cryptography::CryptographicException` add
+  five mirrored audits. Their direct test filter selects 0 tests. Existing
+  HResults are probe-correct, but the ports omit IOException custom-HResult,
+  DirectoryNotFound path-plus-inner, and CryptographicException composite-format
+  public overloads (medium SR-AUD-101).
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

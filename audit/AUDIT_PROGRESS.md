@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 348.
-- Confirmed findings: 100 (twenty-eight high, sixty-six medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 353.
+- Confirmed findings: 101 (twenty-eight high, sixty-seven medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -464,6 +464,14 @@ implementation), and `TypeInitializationException` are audited against a
 default wait-array diagnostic; the shared probe and local .NET source reproduce
 it. CCF-016 extends accordingly. No production or test source changed. Resume
 the next complete Core.Base exception/source inventory.
+`System::IO::IOException` (declaration and implementation),
+`DirectoryNotFoundException` (declaration and implementation), and
+`Security::Cryptography::CryptographicException` are audited. Their focused
+filter selects 0 tests, while the shared probe verifies existing default
+HResults. New medium SR-AUD-101 records absent public IOException custom-HResult,
+DirectoryNotFound path-plus-inner, and CryptographicException composite-format
+overloads. No production or test source changed. Resume the next complete
+Core.Base exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
