@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 622.
-- Confirmed findings: 194 (thirty-eight high, one hundred forty-seven medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 623.
+- Confirmed findings: 195 (thirty-eight high, one hundred forty-seven medium, ten low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1086,6 +1086,12 @@ remains 359/359. Native/managed probes add SR-AUD-192 empty-start termination,
 SR-AUD-193 external CurrentThread ID collision, and SR-AUD-194 discarded
 Start(void*) parameter. Shared RunState avoids the prior raw-owner UAF. No
 source/test change. Resume Threading test fixtures or remaining sources.
+
+Audit checkpoint 2026-07-27 08:10:00: 623/1748 mirrored reports, 195
+confirmed findings. Batch8ThreadingTests was fully audited; complete Threading
+validation remains 359/359. Low SR-AUD-195 records that its running-state
+fallback masks the zero-valued Running flag and therefore accepts every state.
+No source/test change. Resume ThreadingTests or remaining source inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

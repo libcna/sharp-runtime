@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 622 audit reports confirm one hundred ninety-four findings: tracked CI omits the
+- The first 623 audit reports confirm one hundred ninety-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -44,7 +44,8 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   accepts an empty callback without an error and TimeProvider reports a
   successful post-disposal timer Change; Thread permits an empty start callback
   to terminate asynchronously, gives external threads the same managed ID, and
-  discards the Start(void*) parameter; and the
+  discards the Start(void*) parameter; its Batch8 running-state assertion is
+  tautological; and the
   cryptographic `GetInt32` full signed-domain path reaches
   implementation-defined conversion and signed-overflow-prone arithmetic; and
   the nominal `SynchronizationContext::Send` test has no observable assertion;
