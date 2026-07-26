@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 703.
-- Confirmed findings: 232 (fifty-one high, one hundred seventy medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 710.
+- Confirmed findings: 235 (fifty-one high, one hundred seventy-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1220,6 +1220,14 @@ Direct current-.NET comparisons add SR-AUD-231 (empty delegates are deferred
 as bad_function_call) and SR-AUD-232 (zero/less-than--1 parallel degrees run
 instead of throwing). Audit-only; no source/test changes. Resume another
 coherent module shard.
+
+Audit checkpoint 2026-07-27 11:50:00: 710/1748 mirrored reports, 235
+confirmed findings. All seven Threading.Channels files are now mirrored and
+the full fixture passed 39/39. Direct C++/.NET comparisons add SR-AUD-233:
+capacity zero behaves as a one-element buffer; SR-AUD-234: ReadAsync leaks a
+completion error instead of ChannelClosedException with it as cause; and
+SR-AUD-235: an invalid FullMode bypasses bounded capacity. Audit-only; no
+source/test changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

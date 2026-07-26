@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 703 audit reports confirm two hundred thirty-two findings: tracked CI omits the
+- The first 710 audit reports confirm two hundred thirty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -721,6 +721,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `bad_function_call` instead of immediate missing-delegate rejection
   (SR-AUD-231) and acceptance of invalid parallel maximum degrees
   (SR-AUD-232). Audit-only; no production/test change occurred.
+
+- All seven eligible files in `modules/threading-channels` now have mirrored
+  reports; its full fixture passes 39/39. Direct C++/.NET comparisons show
+  zero capacity acts as a buffer of one (SR-AUD-233), ReadAsync leaks a close
+  error rather than wrapping it in `ChannelClosedException` (SR-AUD-234), and
+  an invalid FullMode can overfill a bounded channel (SR-AUD-235). Audit-only;
+  no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
