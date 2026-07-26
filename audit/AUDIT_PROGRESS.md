@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 609.
+- Completed per-file reports: 611.
 - Confirmed findings: 189 (thirty-seven high, one hundred forty-three medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1057,6 +1057,13 @@ registration process core-dumps for SR-AUD-188, and C++/managed configuration
 probes confirm SR-AUD-189's no-op success and invalid-input acceptance. No
 source/test change. Resume Threading fixture sources or another coherent
 source/test group.
+
+Audit checkpoint 2026-07-27 07:30:00: 611/1748 mirrored reports, 189
+confirmed findings. Batch9ThreadingTests and ThreadingRemainingTests were
+fully audited; the complete Threading executable passed 359/359. The fixtures
+cover several synchronized regression paths but leave SR-AUD-183/184 and
+SR-AUD-187 through SR-AUD-189 invalid/lifetime/state boundaries unasserted.
+No source/test change. Resume the remaining Threading source inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
