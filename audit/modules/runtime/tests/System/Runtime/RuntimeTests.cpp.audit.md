@@ -61,6 +61,9 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
   MethodImplAttribute samples one constructor option and one code-type
   mutation.  The green nominal tests do not establish a boundary for unknown
   flags/raw shorts or the documented absence of native code-generation effect.
+- RuntimeHelpers tests omit empty/throwing cleanup callbacks, raw identity-hash
+  boundaries, from-end/empty/nontrivial subarrays, raw/weak/unique pointer
+  reference classification, and no-op stack/constructor capability diagnostics.
 
 ## Final assessment
 
