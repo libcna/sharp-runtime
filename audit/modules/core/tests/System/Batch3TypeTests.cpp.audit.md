@@ -17,12 +17,20 @@ copy, pin, equality, raw-boundary, and extreme-slice cases that define the
 memory-view contract.  No additional finding beyond the dedicated
 ReadOnlyMemory audit is independently demonstrated here.
 
+The two `MarshalByRefObjectNewTests` preserve a separate public-contract drift:
+`DefaultCtor_DoesNotThrow` directly creates a base that current .NET declares
+abstract, while the test never attempts its obsolete throwing remoting members.
+See SR-AUD-128.
+
 ## Finding references
 
 - **SR-AUD-043:** no raw pointer/length construction or malformed-length
   consumer is exercised.
 - **SR-AUD-049:** only `Slice(1, 3)` is tested; one-argument negative/extreme
   start validation is absent.
+- **SR-AUD-128:** direct base construction is asserted as success although the
+  current .NET type is abstract and retains observable unsupported remoting
+  members.
 
 ## Required post-audit verification
 

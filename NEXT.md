@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 454 audit reports confirm one hundred twenty-seven findings: tracked CI omits the
+- The first 459 audit reports confirm one hundred twenty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -357,6 +357,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   filter, but the public top-level `System::CrashReason` incorrectly exposes
   an internal nested NativeAOT enum that no production source consumes
   (SR-AUD-127). No production or test source changed.
+  ContextBoundObject, MarshalByRefObject, LocalDataStoreSlot, and two direct
+  fixtures add five reports; their selected filter passes 14/14. C++ permits a
+  direct MarshalByRefObject despite .NET's abstract base and omits its legacy
+  throwing members (SR-AUD-128), while a child write replaces a parent's
+  LocalDataStoreSlot value and no C++ Thread slot API exists (SR-AUD-129).
+  Existing Batch3 coverage locks the invalid base construction; no production
+  or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

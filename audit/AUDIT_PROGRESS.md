@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 454.
-- Confirmed findings: 127 (twenty-eight high, ninety-two medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 459.
+- Confirmed findings: 129 (twenty-eight high, ninety-four medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -636,6 +636,17 @@ records that a public top-level CrashReason copies an internal nested NativeAOT
 enum despite having no first-party production consumer. No source/test changes.
 Resume another complete Core.Base header/source/test group after inventory
 review.
+
+Audit checkpoint 2026-07-26 22:50: 459/1748 mirrored reports.
+ContextBoundObject, MarshalByRefObject, and LocalDataStoreSlot plus two
+complete direct fixtures audited; the selected filter passed 14/14. A C++
+probe confirms direct MarshalByRefObject construction and a child write
+overwriting the parent LocalDataStoreSlot value; the C# counterpart rejects
+base construction as abstract (CS0144). New medium SR-AUD-128/129 cover the
+base's missing abstract/obsolete-public shape and the non-thread-local slot
+with no Thread API. The existing mixed Batch3 report now records the prior
+test that locks base construction. No source/test changes. Resume another
+complete Core.Base header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
