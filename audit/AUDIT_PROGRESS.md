@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 645.
-- Confirmed findings: 209 (forty-four high, one hundred fifty-four medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 648.
+- Confirmed findings: 212 (forty-seven high, one hundred fifty-four medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1131,6 +1131,14 @@ no-op Close to Auto/ManualResetEvent (SR-AUD-208); a paired compile probe
 confirms neither event is a local WaitHandle (SR-AUD-209); TSan extends
 disposal-race SR-AUD-207 to ManualResetEventSlim. No source/test change.
 Resume the remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 09:50:00: 648/1748 mirrored reports, 212
+confirmed findings. Barrier/Countdown focus passed 33/33. Bounded C++/.NET
+probes confirm Barrier post-phase property deadlock (SR-AUD-210) and
+CountdownEvent Reset(0) failing to wake a waiter (SR-AUD-211); TSan confirms
+Barrier ParticipantCount and Countdown disposal races (SR-AUD-212 and
+extension of SR-AUD-207). No source/test change. Resume remaining Threading
+source inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
