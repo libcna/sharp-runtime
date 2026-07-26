@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 554 audit reports confirm one hundred sixty findings: tracked CI omits the
+- The first 555 audit reports confirm one hundred sixty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -490,6 +490,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   state match current .NET; reports record untested flags/unknown raw values
   and explicit non-consumption by C++ code generation. No new finding or
   production/test source change.
+  ConditionalWeakTable adds one report under a green direct 7/7 filter.
+  C++/managed probes confirm medium SR-AUD-161 and SR-AUD-162: snapshot Reset
+  rewinds and retains non-current values where current .NET retains only
+  Current, and unconstrained templates admit scalar tables that managed class
+  constraints reject. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

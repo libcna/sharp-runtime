@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 554.
-- Confirmed findings: 160 (thirty-one high, one hundred twenty-one medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 555.
+- Confirmed findings: 162 (thirty-one high, one hundred twenty-three medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -843,6 +843,14 @@ MethodCodeType match current .NET's representable metadata shape; no new
 finding. Reports record untested flags/unknown values and the explicit absence
 of native code-generation consumption. No source/test changes. Resume another
 coherent Runtime header/source/test group.
+
+Audit checkpoint 2026-07-27 03:00:00: 555/1748 mirrored reports.
+ConditionalWeakTable was audited; direct tests passed 7/7. C++/managed probes
+confirm two new medium findings: snapshot Reset rewinds and retains
+non-current values although current .NET Reset is no-op and retains only
+Current, and unconstrained C++ templates accept working scalar tables where
+.NET requires reference types (SR-AUD-161 and SR-AUD-162). No source/test
+changes. Resume another coherent Runtime header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

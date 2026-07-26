@@ -40,6 +40,10 @@ constructor (SR-AUD-158), or ExternalException's absent error-code route
   factory-call cardinality under racing factories, exception propagation,
   null values, or enumeration after removal; the one thread schedule is not a
   stress diagnostic.
+- ConditionalWeakTable tests omit Reset, enumerator lifetime after key expiry
+  or Clear, and scalar template arguments.  They consequently miss the
+  rewind/non-current-value retention behavior in SR-AUD-161 and the widened
+  generic domain in SR-AUD-162.
 - Interop and versioning coverage samples a few values/default fields.  It
   omits invalid enums, all remaining fields/constructors, and declaration-level
   compiler/interop effects that ordinary C++ object construction cannot prove.
