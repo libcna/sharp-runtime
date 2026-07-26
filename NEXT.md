@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 370 audit reports confirm one hundred ten findings: tracked CI omits the
+- The first 374 audit reports confirm one hundred eleven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -291,6 +291,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   changes initializer-list-capable arguments (medium SR-AUD-109), and the
   public `RuntimeType` enum collides semantically with .NET's unrelated
   internal reflection class (SR-AUD-110). No production or test source changed.
+  `ModuleHandle`, `RuntimeArgumentHandle`, `RuntimeFieldHandle`, and
+  `RuntimeMethodHandle` add four reports. Their focused existing tests pass
+  19/19, but a standalone public-header compile fails because ModuleHandle
+  defines `ResolveTypeHandle` before `RuntimeTypeHandle` is complete (medium
+  SR-AUD-111); the test suite masks it by include order. The other reviewed
+  no-metadata/no-varargs adapters are explicit. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

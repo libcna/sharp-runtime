@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 370.
-- Confirmed findings: 110 (twenty-eight high, seventy-six medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 374.
+- Confirmed findings: 111 (twenty-eight high, seventy-seven medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -543,6 +543,13 @@ constructor arguments. SR-AUD-110 records that the public RuntimeType enum
 occupies the name of an unrelated internal .NET reflection class. No production
 or test source changed. Resume the next coherent Core.Base runtime source
 inventory.
+`ModuleHandle`, `RuntimeArgumentHandle`, `RuntimeFieldHandle`, and
+`RuntimeMethodHandle` are now audited. Their combined existing filter passes
+19/19, but it masks a direct-header compilation failure: ModuleHandle defines
+`ResolveTypeHandle` before its RuntimeTypeHandle return type is complete
+(medium SR-AUD-111). The remaining no-metadata/no-varargs adapters are
+explicitly documented. No production or test source changed. Resume the next
+coherent Core.Base runtime source inventory.
 
 ## Findings recorded in this pass
 
