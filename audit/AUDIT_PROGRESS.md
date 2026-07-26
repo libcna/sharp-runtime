@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 497.
+- Completed per-file reports: 499.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -728,6 +728,14 @@ MethodAccess, and InvalidOperation assert their derived HResults; TypeAccess
 asserts its default HResult while header review covers the remaining overloads.
 No source/test changes. Resume another coherent Core.Base header/source/test
 group after inventory review.
+
+Audit checkpoint 2026-07-27 00:30:00: 499/1748 mirrored reports. Two complete
+TypeLoad/TypeInitialization fixture sources were audited; selected filter
+passed 25/25. No new finding: TypeLoad checks default HResult while header
+review covers its remaining overloads, and TypeInitialization checks its sole
+public constructor's HResult and retrievable inner cause. No source/test
+changes. Resume another coherent Core.Base header/source/test group after
+inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 497 audit reports confirm one hundred thirty-seven findings: tracked CI omits the
+- The first 499 audit reports confirm one hundred thirty-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -415,6 +415,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   and InvalidOperation directly protect their derived HResults; TypeAccess
   tests its default HResult and header review confirms the other constructors.
   No production finding or source/test change resulted.
+  TypeLoad and TypeInitialization fixture sources add two reports under a
+  green 25/25 filter. TypeLoad directly checks its default HResult while the
+  audited header covers remaining overloads; TypeInitialization checks its
+  sole constructor's HResult and retained cause. No production finding or
+  source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
