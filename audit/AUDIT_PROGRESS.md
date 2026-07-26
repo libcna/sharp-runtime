@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 510.
-- Confirmed findings: 148 (thirty-one high, one hundred ten medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 524.
+- Confirmed findings: 151 (thirty-one high, one hundred thirteen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -767,6 +767,14 @@ filter passed 13/13. One new medium finding: the converter throws for empty
 text where current .NET returns null, and its non-nullable C++ return plus test
 lock that behavior (SR-AUD-148). No source/test changes. Resume the next
 coherent Uri header/source/test group.
+
+Audit checkpoint 2026-07-27 01:20:00: 524/1748 mirrored reports. Seven Uri
+value-type headers and all seven direct fixtures were audited; selected filter
+passed 38/38. Three new medium API findings: UriCreationOptions has no Uri
+consumer, UriPartial has no GetLeftPart, and UriHostNameType has no
+CheckHostName classifier (SR-AUD-149 through SR-AUD-151). Other audited enum
+values match .NET. No source/test changes. Resume the next coherent Uri
+header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

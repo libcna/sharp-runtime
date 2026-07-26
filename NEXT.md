@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 510 audit reports confirm one hundred forty-eight findings: tracked CI omits the
+- The first 524 audit reports confirm one hundred fifty-one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -442,6 +442,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   converter empty text throws where current .NET returns null; the non-nullable
   C++ result and direct fixture lock the incompatible behavior. No production
   or test source changed.
+  Seven URI value-type headers and their seven complete direct fixtures add
+  fourteen reports under a green 38/38 filter. New medium findings record that
+  UriCreationOptions has no Uri consumer, UriPartial has no GetLeftPart, and
+  UriHostNameType has no CheckHostName classifier (SR-AUD-149–151); other
+  audited enum values match .NET. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

@@ -15,7 +15,9 @@ AbsoluteUri reconstruction are not implemented adaptations. Those documented
 limits are not classified here. However, it promises a lower-case parsed
 Scheme and .NET-shaped construction/equality operations that the implementation
 does not deliver; see SR-AUD-142 through SR-AUD-145 in the companion source
-report.
+report. `UriCreationOptions`, `UriPartial`, and `UriHostNameType` also name
+public Uri operations that this header does not expose; see SR-AUD-149 through
+SR-AUD-151.
 
 ## Other missing assertions and diagnostics
 
