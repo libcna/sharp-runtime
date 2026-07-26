@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,084.
-- Confirmed findings: 285 (sixty-nine high, two hundred five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,123.
+- Confirmed findings: 299 (seventy-three high, two hundred fifteen medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -25,7 +25,7 @@ the full gate during final audit reconciliation.
 ## Immediate sequence
 
 1. Continue component by component with their tests and .NET source where
-   applicable, prioritising the next coherent module shard after Globalization.
+   applicable, prioritising the next coherent module shard after Text.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -37,6 +37,16 @@ the full gate during final audit reconciliation.
   audit; all other tracked first-party text-like files are in scope.
 - Documentation claims are reviewed for consistency with local source and
   executable validation, not merely spelling or style.
+
+## Latest checkpoint
+
+The complete 39-file `Text` shard is mirrored. Its focused target passed
+233/233 tests. Standalone ASan, UBSan, TSan, and behavioral probes confirmed
+SR-AUD-286 through SR-AUD-299: unsafe raw decode ranges; null/mutable fallback
+state; Latin-1, UTF-16-count, preamble, fallback, and truncated-unit defects;
+ASCII-only Rune classification; StringBuilder overflow and byte-indexing; Web
+encoder/decoder diagnostic gaps; CompositeFormat parsing; and EncodingInfo
+code-page erasure. Audit-only: no production or test source was changed.
 
 ## Resume point
 

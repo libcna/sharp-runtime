@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,084 audit reports confirm two hundred eighty-five findings: tracked CI omits the
+- The first 1,123 audit reports confirm two hundred ninety-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -875,6 +875,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   CurrentUICulture are racy process globals rather than per-thread/task state
   (SR-AUD-280). Audit-only; no production/test change occurred. Resume the
   next coherent module shard.
+
+- All thirty-nine eligible files in `modules/text` now have mirrored reports;
+  its target passes 233/233. ASan confirms unsafe signed raw decoding and
+  null-fallback dereference (SR-AUD-286/287); TSan confirms mutable shared
+  factory state (SR-AUD-288); UBSan confirms `StringBuilder::CopyTo` signed
+  capacity overflow (SR-AUD-295). Behavioral probes add Latin-1,
+  UTF-16-count, preamble/fallback/partial-unit, Rune Unicode, byte-indexed
+  StringBuilder, Web encoder, CompositeFormat, and EncodingInfo gaps
+  (SR-AUD-289..294, SR-AUD-296..299). Audit-only; no production/test change
+  occurred. Resume the next coherent module shard.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
