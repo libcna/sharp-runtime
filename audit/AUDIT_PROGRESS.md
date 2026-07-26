@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 589.
+- Completed per-file reports: 590.
 - Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -977,6 +977,14 @@ confirmed findings. NotFiniteNumberExceptionTests was audited; its direct
 filter passed 9/9. C++/managed probes confirm `80131528` for all six public
 constructors, matching the fixture's expanded coverage. Reports retain NaN
 payload/sign, inner identity, null/UTF-8, and real-producer assertion gaps. No
+new finding or source/test change. Resume the next coherent Core.Base
+source/test group.
+
+Audit checkpoint 2026-07-27 05:50:00: 590/1748 mirrored reports, 182
+confirmed findings. CultureInvariantFormattingTests was audited and ran 1/1
+under an installed `en_US.utf8` locale. The reviewed stream paths explicitly
+imbue `std::locale::classic()` and retain invariant output. The report records
+the host-locale skip path and missing custom-facet/concurrency coverage. No
 new finding or source/test change. Resume the next coherent Core.Base
 source/test group.
 No production or test source changed. Resume the next coherent Core.Base
