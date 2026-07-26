@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 591.
-- Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 595.
+- Confirmed findings: 184 (thirty-five high, one hundred forty medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -995,6 +995,14 @@ and overlap/capacity paths, but has no assertion for high SR-AUD-067 raw
 negative metadata or SR-AUD-051 nontrivial generic-vector copying. No new
 finding or source/test change. Resume the next coherent Core.Base source/test
 group.
+
+Audit checkpoint 2026-07-27 06:10:00: 595/1748 mirrored reports, 184
+confirmed findings. Threading AsyncCallback, EventResetMode, WaitHandle, and
+EventWaitHandle headers were audited; focused valid-mode/multi-wait tests
+passed 9/9. C++/managed probes add SR-AUD-183 (empty/null collections and
+invalid timeouts silently succeed/timeout/loop) and SR-AUD-184 (invalid event
+mode accepted). No source/test changes. Resume Threading direct fixtures or
+another coherent source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
