@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 532.
-- Confirmed findings: 154 (thirty-one high, one hundred sixteen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 534.
+- Confirmed findings: 155 (thirty-one high, one hundred seventeen medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -795,6 +795,13 @@ AlignedRealloc old-size bounded-copy repair is confirmed in source and no new
 defect is classified; reports record AllocZeroed overflow, reallocation, and
 near-limit alignment assertion gaps. No source/test changes. Resume another
 coherent Runtime header/source/test group.
+
+Audit checkpoint 2026-07-27 02:00:00: 534/1748 mirrored reports.
+ExceptionDispatchInfo and its complete direct fixture were audited; all 4 tests
+pass. Current-.NET/C++ probes confirm new medium SR-AUD-155: null exception_ptr
+is accepted and deferred to an undefined rethrow path instead of immediate
+ArgumentNullException. No source/test changes. Resume another coherent Runtime
+header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
