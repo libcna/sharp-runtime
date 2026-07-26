@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 600 audit reports confirm one hundred eighty-four findings: tracked CI omits the
+- The first 603 audit reports confirm one hundred eighty-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -615,6 +615,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   filter. It covers ordinary Math/exception/type-handle paths but locks in
   SR-AUD-068's constructible identity `ValueType` and masks SR-AUD-111 through
   its include order. No new finding or source/test change resulted.
+  IO BinaryData plus its Core and IO direct fixtures add three reports under
+  green 33/33 and 15/15 filters. C++/managed evidence confirms medium
+  SR-AUD-185: invalid UTF-8 byte `FF` remains raw C++ text instead of U+FFFD;
+  SR-AUD-186: ReadOnlyMemory construction snapshots bytes rather than wrapping
+  them. The IO fixture's nonnegative hash assertion extends low SR-AUD-018. No
+  production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

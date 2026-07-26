@@ -32,6 +32,8 @@ forbids a valid negative signed hash, and
 `ReadOnlyMemoryTest::GetHashCode_DifferentRegion_LikelyDifferent`, which again
 forbids a valid collision between unequal regions.  Those tests are recorded
 in their respective reports and do not establish a runtime hash defect.
+`BinaryDataTests::GetHashCode_NonNegative` also forbids a valid negative hash
+in the separately built IO fixture.
 
 ### Required post-audit verification
 
