@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 567.
+- Completed per-file reports: 568.
 - Confirmed findings: 172 (thirty-four high, one hundred thirty medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -899,6 +899,13 @@ passed with 41 modules/90 edges and the generated catalogue is current. Their
 dependency and component claims match. All 518 eligible Runtime files now
 have mirrored reports; no new finding or source/test change. Resume the next
 coherent module source/test group.
+
+Audit checkpoint 2026-07-27 04:10:00: 568/1748 mirrored reports.
+Uri's final CMake registration was audited; boundary validation passed with 41
+modules/90 edges and the generated catalogue is current. The static target and
+sole Core.Base public dependency match the catalogue. All 28 eligible Uri
+files now have mirrored reports; no new finding or source/test change. Resume
+the next coherent module source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

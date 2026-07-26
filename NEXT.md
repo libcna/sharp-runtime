@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 567 audit reports confirm one hundred seventy-two findings: tracked CI omits the
+- The first 568 audit reports confirm one hundred seventy-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -526,6 +526,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   their Core.Base/Collections.Core dependency declaration matches the
   generated catalogue, and module-boundary validation passes with 41 physical
   modules/90 edges. All 518 eligible Runtime files are now mirrored; no new
+  finding or source/test change resulted.
+  Uri's final CMake report completes all 28 eligible Uri files. Its static
+  target and Core.Base-only public edge agree with the generated catalogue;
+  boundary validation still passes with 41 physical modules/90 edges. No new
   finding or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
