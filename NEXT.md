@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 719 audit reports confirm two hundred thirty-five findings: tracked CI omits the
+- The first 726 audit reports confirm two hundred thirty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -738,6 +738,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   StoragePaths smoke tests pass 2/2, component-boundary validation reports
   41/90, and its static target builds. Its platform-specific root-selection
   policy has no direct managed equivalent and produced no new evidence-backed
+  finding. Audit-only; no production/test change occurred.
+
+- All seven eligible files in `modules/net-mime` now have mirrored reports;
+  the full fixture passes 26/26. Direct parser/setter comparisons agree with
+  .NET for trailing separators and an empty Boundary; its documented practical
+  MIME grammar/encoded-word limits create no additional evidence-backed
   finding. Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.

@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 719.
+- Completed per-file reports: 726.
 - Confirmed findings: 235 (fifty-one high, one hundred seventy-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1241,6 +1241,13 @@ StoragePaths integration tests passed 2/2, component boundaries report 41/90,
 and the static target builds. The platform-specific root-selection policy is
 project-specific, with no new evidence-backed finding. Audit-only; no
 source/test changes. Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 12:20:00: 726/1748 mirrored reports, 235
+confirmed findings. All seven Net.Mime files are now mirrored and its complete
+fixture passed 26/26. Direct parser/setter probes agree with current .NET for
+trailing separators and empty Boundary; documented MIME grammar/encoded-word
+limits remain explicit adaptations. Audit-only; no source/test changes. Resume
+another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
