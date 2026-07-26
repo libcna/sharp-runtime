@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 459.
-- Confirmed findings: 129 (twenty-eight high, ninety-four medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 461.
+- Confirmed findings: 131 (twenty-nine high, ninety-five medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -647,6 +647,15 @@ base's missing abstract/obsolete-public shape and the non-thread-local slot
 with no Thread API. The existing mixed Batch3 report now records the prior
 test that locks base construction. No source/test changes. Resume another
 complete Core.Base header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-26 23:10: 461/1748 mirrored reports. Inline
+Diagnostics::Stopwatch and its complete fixture audited; focused filter passed
+20/20. The UBSan probe prints the published 10 MHz frequency then confirms
+signed overflow for GetElapsedTime(INT64_MIN, INT64_MAX). New medium
+SR-AUD-130 records its fabricated 100-ns timer unit versus .NET Unix's native
+1 GHz timestamp frequency; new high SR-AUD-131 records the reachable signed
+overflow. No source/test changes. Resume another complete Core.Base
+header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

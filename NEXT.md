@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 459 audit reports confirm one hundred twenty-nine findings: tracked CI omits the
+- The first 461 audit reports confirm one hundred thirty-one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -364,6 +364,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   LocalDataStoreSlot value and no C++ Thread slot API exists (SR-AUD-129).
   Existing Batch3 coverage locks the invalid base construction; no production
   or test source changed.
+  Diagnostics::Stopwatch and its full direct fixture add two reports under a
+  green 20/20 filter. It publishes 100-ns/10 MHz timestamps even though .NET
+  Unix exposes raw 1 GHz monotonic units (SR-AUD-130), and
+  GetElapsedTime(INT64_MIN, INT64_MAX) reaches UBSan-confirmed signed overflow
+  (SR-AUD-131). No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
