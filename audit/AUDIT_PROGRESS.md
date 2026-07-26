@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 606.
-- Confirmed findings: 186 (thirty-five high, one hundred forty-two medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 609.
+- Confirmed findings: 189 (thirty-seven high, one hundred forty-three medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1048,6 +1048,15 @@ filter passed 4/4. Callback aliases are coherent native pointer/function
 adaptations; reports record the absent direct state/timeout/error/lifetime
 coverage. No new finding or source/test change. Resume Threading consumers or
 another coherent source/test group.
+
+Audit checkpoint 2026-07-27 07:20:00: 609/1748 mirrored reports, 189
+confirmed findings. ThreadPool, RegisteredWaitHandle, and IThreadPoolWorkItem
+were audited; focused Threading validation passed 10/10. ASan confirms
+SR-AUD-187's raw-pointer work-item use-after-free, an isolated null
+registration process core-dumps for SR-AUD-188, and C++/managed configuration
+probes confirm SR-AUD-189's no-op success and invalid-input acceptance. No
+source/test change. Resume Threading fixture sources or another coherent
+source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

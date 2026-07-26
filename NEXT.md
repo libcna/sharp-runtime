@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 606 audit reports confirm one hundred eighty-six findings: tracked CI omits the
+- The first 609 audit reports confirm one hundred eighty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -37,7 +37,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   and `Guid::NewGuid` are not safe for concurrent use despite their public
   contracts; `Guid::NewGuid`/`CreateVersion7` also use a predictable standard
   PRNG rather than .NET's OS CSPRNG; Version
-  serializes undefined fields as `-1` in `ToString(fieldCount)`; and the
+  serializes undefined fields as `-1` in `ToString(fieldCount)`; ThreadPool's
+  raw work-item overload exposes callers to a detached use-after-free,
+  registered waits defer a null WaitHandle crash to a worker, and ThreadPool
+  configuration setters claim success without changing any setting; and the
   cryptographic `GetInt32` full signed-domain path reaches
   implementation-defined conversion and signed-overflow-prone arithmetic; and
   the nominal `SynchronizationContext::Send` test has no observable assertion;
