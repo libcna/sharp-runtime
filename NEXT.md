@@ -26,11 +26,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,277 audit reports confirm three hundred twenty-three findings. The newly complete
-  72-file `Net.Http.Headers` shard passed 373/373 focused tests and adds SR-AUD-319 through
-  SR-AUD-323: typed quoted/host-like values admit CR/LF/NUL; escaped quoted delimiters split
-  incorrectly; repeated RFC 1123 parsers accept trailing garbage; `TryAddWithoutValidation`
-  accepts invalid field names; and RFC 5987 decoding ignores its declared charset. Earlier work
+- The first 1,320 audit reports confirm three hundred thirty findings. The newly complete
+  43-file `Text.Json` shard passed 147/147 focused tests and adds SR-AUD-324 through
+  SR-AUD-330: captured JsonElements remain usable after their document is disposed; raw DOM
+  rendering loses source lexemes and JsonProperty names; document parser flags are inert;
+  retained JsonNodes use an ASan-confirmed dangling parent pointer; JsonValue truncates floats
+  through integer accessors; JsonEncodedText accepts malformed UTF-8 unchanged; and serializer
+  deserialization ignores JsonSerializerOptions. The preceding 72-file `Net.Http.Headers` shard
+  passed 373/373 and adds SR-AUD-319 through SR-AUD-323. Earlier work
   confirms that tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a

@@ -238,14 +238,13 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 Net.Http.Headers checkpoint has 1,277 of 1,748 mirrored
-reports complete and three hundred twenty-three confirmed findings;
-`audit/AUDIT_PROGRESS.md` is the authoritative live count. The 72-file
-Net.Http.Headers shard passed 373/373 focused tests and direct probes record
-SR-AUD-319 through SR-AUD-323. The preceding 32-file Net.Http shard built and
-passed 126/132 focused tests; its six loopback cases are sandbox-limited at
-socket creation and records SR-AUD-310 through SR-AUD-318. Audit-only work
-made no production or test-source change.
+The 2026-07-27 Text.Json checkpoint has 1,320 of 1,748 mirrored reports
+complete and three hundred thirty confirmed findings; `audit/AUDIT_PROGRESS.md`
+is the authoritative live count. The 43-file Text.Json shard passed 147/147
+focused tests and direct probes record SR-AUD-324 through SR-AUD-330, including
+an ASan-confirmed dangling JsonNode parent use-after-free. The preceding
+72-file Net.Http.Headers shard passed 373/373 and records SR-AUD-319 through
+SR-AUD-323. Audit-only work made no production or test-source change.
 
 ## Candidate roadmap
 

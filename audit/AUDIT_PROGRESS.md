@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,277 (73.1% of eligible scope; 1,228/1,699 runtime-module files).
-- Confirmed findings: 323 (eighty high, two hundred thirty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,320 (75.5% of eligible scope; 1,271/1,699 runtime-module files).
+- Confirmed findings: 330 (eighty-one high, two hundred thirty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -40,15 +40,15 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 72-file `Net.Http.Headers` shard is mirrored. Its focused target
-passed 373/373. Direct behavior probes confirm SR-AUD-319 through SR-AUD-323:
-typed header values admit CR/LF/NUL through quoted and host-like paths;
-escaped quoted delimiters are split structurally; repeated RFC 1123 parsers
-accept arbitrary trailing text; `TryAddWithoutValidation` accepts invalid
-field names; and RFC 5987 decoding ignores the declared charset. The preceding
-32-file `Net.Http` target passed 126/132, with its six loopback cases
-sandbox-limited at socket creation. Audit-only: no production or test source
-was changed.
+The complete 43-file `Text.Json` shard is mirrored. Its focused target passed
+147/147. Direct probes confirm SR-AUD-324 through SR-AUD-330: disposed
+documents do not invalidate captured elements; raw element/property rendering
+loses source representation; document parser flags are inert; retained nodes
+can dereference a destroyed raw parent (ASan-confirmed UAF); JsonValue integer
+accessors truncate floats; JsonEncodedText preserves malformed UTF-8 bytes;
+and JsonSerializer deserialization ignores its options. The preceding 72-file
+`Net.Http.Headers` target passed 373/373. Audit-only: no production or test
+source was changed.
 
 ## Resume point
 
