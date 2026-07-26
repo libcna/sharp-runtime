@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 636.
+- Completed per-file reports: 638.
 - Confirmed findings: 202 (forty high, one hundred fifty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1103,6 +1103,13 @@ Audit checkpoint 2026-07-27 09:00:00: 636/1748 mirrored reports, 202
 confirmed findings. Monitor audited; Threading remains 359/359. High
 SR-AUD-202: recursive Wait retains one mutex level and a signaller deadlocks,
 as confirmed by a two-second bounded child timeout. No source/test change.
+
+Audit checkpoint 2026-07-27 09:10:00: 638/1748 mirrored reports, 202
+confirmed findings. ReaderWriterLock and LockCookie audited; complete Threading
+validation remains 359/359. Batch9 covers normal recursion, upgrade/downgrade,
+release/restore, and timeout paths; reports retain contention, TimeSpan, forged
+cookie, and address-reuse gaps. No source/test change. Resume remaining
+Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
