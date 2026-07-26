@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 771.
-- Confirmed findings: 241 (fifty-five high, one hundred seventy-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 781.
+- Confirmed findings: 242 (fifty-six high, one hundred seventy-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1283,6 +1283,13 @@ library and the dependent IO fixture passed 527/527. A safe temporary-root
 probe adds SR-AUD-241: an absolute POSIX path discards the C++ store root,
 unlike current .NET's leading-separator normalization. No source/test changes.
 Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 13:20:00: 781/1748 mirrored reports, 242
+confirmed findings. All ten IO.Compression.Zip files are mirrored; its library
+built and focused integration ZIP fixture passed 38/38. Native/current-.NET
+comparison adds SR-AUD-242: null Stream causes a native Read-mode SIGSEGV and
+is silently retained in Create instead of producing ArgumentNullException. No
+source/test changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
