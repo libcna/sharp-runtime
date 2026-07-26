@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 461.
-- Confirmed findings: 131 (twenty-nine high, ninety-five medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 463.
+- Confirmed findings: 133 (thirty high, ninety-six medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -656,6 +656,15 @@ SR-AUD-130 records its fabricated 100-ns timer unit versus .NET Unix's native
 1 GHz timestamp frequency; new high SR-AUD-131 records the reachable signed
 overflow. No source/test changes. Resume another complete Core.Base
 header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-26 23:30: 463/1748 mirrored reports.
+TryWriteInterpolatedStringHandler and its full direct fixture audited; focused
+filter passed 13/13. Format probe prints bool=1, hex=255, and double=3.140000;
+ASan confirms a positive-length null destination writes through null and exits
+134. New high SR-AUD-132 covers the raw-pointer crash; new medium SR-AUD-133
+covers ignored formats and hardcoded non-.NET value text. No source/test
+changes. Resume another complete Core.Base header/source/test group after
+inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
