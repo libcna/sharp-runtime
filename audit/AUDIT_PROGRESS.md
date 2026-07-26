@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 895.
-- Confirmed findings: 255 (fifty-nine high, one hundred eighty-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 920.
+- Confirmed findings: 259 (sixty-one high, one hundred eighty-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1346,6 +1346,14 @@ blocked by sandbox permissions. C++/managed probes confirm delayed async
 argument validation, sliced Ping inner exceptions, and fabricated default
 reply options (SR-AUD-253 through SR-AUD-255). No source/test changes. Resume
 another coherent module shard.
+
+Audit checkpoint 2026-07-27 14:40:00: 920/1748 mirrored reports, 259
+confirmed findings. All twenty-five IO.Compression files are mirrored; its
+existing target passed 22/22. ASan/UBSan confirms unbounded raw negative-length
+zlib input and null-stream dereference; native/current-.NET probes add invalid
+mode/post-close behavior and inert compression strategy/options constructors
+(SR-AUD-256 through SR-AUD-259). No source/test changes. Resume another
+coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
