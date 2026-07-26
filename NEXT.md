@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 669 audit reports confirm two hundred twenty-two findings: tracked CI omits the
+- The first 671 audit reports confirm two hundred twenty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -696,6 +696,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   Component-boundary validation reports 41 physical modules and 90 dependency
   edges, its generated catalogue is current, and the Threading target builds.
   No production or test code changed in this audit phase.
+
+- All five eligible files in `modules/security-cryptography-random` now have
+  mirrored reports. Its component graph/catalogue validation and static-target
+  build pass; existing SR-AUD-012 remains the module's only confirmed finding.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
