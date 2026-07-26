@@ -16,8 +16,9 @@ also deliberately samples sibling integer widths so shared parser changes do
 not silently regress them.
 
 The tests accurately document the port's invariant-only culture adaptation and
-the `TryParse` false result for unsigned negative syntax.  No new parser defect
-was confirmed from the reviewed paths.
+the `TryParse` false result for unsigned negative syntax.  They do not exercise
+valid integer exponents or style-mask validation, so they leave the later
+shared-parser findings SR-AUD-177 and SR-AUD-178 undetected.
 
 ## Other missing assertions and diagnostics
 
@@ -29,6 +30,9 @@ was confirmed from the reviewed paths.
   against future divergence in the shared parser adapters.
 - No malformed UTF-8/currency-token input is supplied; the parser works on
   byte strings and should document its expected encoding at that API boundary.
+- No case supplies `AllowExponent`, an undefined cast bit, or an invalid
+  Hex/Binary combination such as `HexFloat`; current .NET requires exponent
+  grammar for the first and immediate `ArgumentException` for the latter two.
 
 ## Final assessment
 

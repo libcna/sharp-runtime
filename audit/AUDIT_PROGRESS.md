@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 572.
-- Confirmed findings: 176 (thirty-four high, one hundred thirty-four medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 574.
+- Confirmed findings: 178 (thirty-four high, one hundred thirty-six medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -923,6 +923,14 @@ instead of current .NET round-to-nearest-even, and the public type omits most
 of the managed numeric/parse/format/conversion surface (SR-AUD-175 and
 SR-AUD-176). No source/test changes. Resume the next coherent Core.Base
 source/test group.
+
+Audit checkpoint 2026-07-27 04:40:00: 574/1748 mirrored reports.
+NumberStyles and the shared integer parser were audited; NumberStylesExtended
+passed 43/43. C++/managed probes confirm two medium cross-wrapper findings:
+AllowExponent is ignored though current .NET integer parsing accepts it, and
+unknown/incompatible style masks are accepted rather than rejected with
+ArgumentException (SR-AUD-177 and SR-AUD-178). No source/test changes. Resume
+the next coherent Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

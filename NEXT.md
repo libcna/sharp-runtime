@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 572 audit reports confirm one hundred seventy-six findings: tracked CI omits the
+- The first 574 audit reports confirm one hundred seventy-eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -542,6 +542,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   truncates rather than round-to-nearest-even, and the public type is a narrow
   bit wrapper missing most current .NET numeric/parse/format/conversion
   surface. No production or test source changed.
+  NumberStyles and the shared integer parser add two reports under a green
+  43/43 direct filter. C++/managed probes confirm medium SR-AUD-177 and
+  SR-AUD-178: valid integer `AllowExponent` is ignored, and undefined or
+  incompatible style masks are silently accepted instead of throwing
+  `ArgumentException`. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
