@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 450.
-- Confirmed findings: 126 (twenty-eight high, ninety-one medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 454.
+- Confirmed findings: 127 (twenty-eight high, ninety-two medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -626,6 +626,16 @@ counterpart C# probe fails with CS1547. New medium SR-AUD-126 records that
 unconstrained C++ result types collapse .NET's separate Action category. No
 source/test changes. Resume another complete Core.Base header/source/test
 group after inventory review.
+
+Audit checkpoint 2026-07-26 22:30: 454/1748 mirrored reports. DateTimeKind,
+DayOfWeek, and CrashReason headers plus the complete CrashReason fixture
+audited; their combined filter passed 17/17. The two Date/Day focused sections
+remain in the not-yet-complete `SystemTypesRemainingTests.cpp` and therefore
+do not mark that source audited. Values match .NET, but new medium SR-AUD-127
+records that a public top-level CrashReason copies an internal nested NativeAOT
+enum despite having no first-party production consumer. No source/test changes.
+Resume another complete Core.Base header/source/test group after inventory
+review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

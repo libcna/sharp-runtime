@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 450 audit reports confirm one hundred twenty-six findings: tracked CI omits the
+- The first 454 audit reports confirm one hundred twenty-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -351,6 +351,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   keeps Action distinct because `void` cannot be a generic type argument
   (SR-AUD-126, reproduced by C++ and C# probes). No production or test source
   changed.
+  DateTimeKind and DayOfWeek match their .NET values; their focused sections
+  remain within not-yet-complete `SystemTypesRemainingTests.cpp`. CrashReason
+  and its full direct fixture add four reports under a green 17/17 combined
+  filter, but the public top-level `System::CrashReason` incorrectly exposes
+  an internal nested NativeAOT enum that no production source consumes
+  (SR-AUD-127). No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
