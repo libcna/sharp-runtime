@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 332.
+- Completed per-file reports: 338.
 - Confirmed findings: 96 (twenty-seven high, sixty-three medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -439,6 +439,14 @@ the base `COR_E_SYSTEM` HResult rather than .NET's `E_POINTER` and
 The other three types correctly set their codes. CCF-016 now covers the
 additional pair. No production or test source changed. Resume the next complete
 Core.Base exception/source inventory.
+`MulticastNotSupportedException`, `NotFiniteNumberException`,
+`PlatformNotSupportedException`, `RankException`, and `StackOverflowException`
+(declaration and implementation) are audited against a focused 29/29 filter.
+All reviewed constructors set their documented HResults; no standalone defect
+was confirmed. The reports preserve missing all-overload HResult, special
+floating-value, stored-inner, native delegate/rank/platform, and actual
+stack-overflow integration diagnostics. No production or test source changed.
+Resume the next complete Core.Base exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
