@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 761.
-- Confirmed findings: 240 (fifty-four high, one hundred seventy-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 771.
+- Confirmed findings: 241 (fifty-five high, one hundred seventy-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1276,6 +1276,13 @@ fixture passed 13/13. Generated TLS cipher-suite parity is 310/310; UBSan
 adds SR-AUD-240 because hashing a valid 255-byte ALPN identifier uses signed
 overflow undefined behavior. No source/test changes. Resume another coherent
 module shard.
+
+Audit checkpoint 2026-07-27 13:10:00: 771/1748 mirrored reports, 241
+confirmed findings. All ten IO.IsolatedStorage files are mirrored; its static
+library and the dependent IO fixture passed 527/527. A safe temporary-root
+probe adds SR-AUD-241: an absolute POSIX path discards the C++ store root,
+unlike current .NET's leading-separator normalization. No source/test changes.
+Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

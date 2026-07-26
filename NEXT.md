@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 761 audit reports confirm two hundred forty findings: tracked CI omits the
+- The first 771 audit reports confirm two hundred forty-one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -769,6 +769,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   values match current .NET 310/310, while UBSan confirms signed-overflow UB
   in the hash of a valid 255-byte ALPN protocol (SR-AUD-240). Audit-only; no
   production/test change occurred.
+
+- All ten eligible files in `modules/io-isolated-storage` now have mirrored
+  reports; its library and the dependent IO fixture pass 527/527. A temporary
+  root probe confirms that an absolute POSIX path escapes the C++ isolated
+  store root, unlike current .NET's separator normalization (SR-AUD-241).
+  Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
