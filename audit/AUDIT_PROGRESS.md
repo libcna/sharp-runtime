@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 353.
-- Confirmed findings: 101 (twenty-eight high, sixty-seven medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 358.
+- Confirmed findings: 104 (twenty-eight high, seventy medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -509,6 +509,16 @@ evidence-backed finding. The reports note that the nominal shared-pointer reset
 test explicitly disposes before destruction and that its repeated-dispose
 counter does not test resource idempotence. Resume the next complete Core.Base
 interface or primitive/test inventory.
+`AppContext`, `AppDomain` (declaration and implementation), `AppDomainSetup`,
+and the dedicated setup fixture are now audited. The combined adjacent filter
+passes 11/11, but the direct probe proves that AppContext named data cannot
+configure the base directory or a compatibility switch (medium SR-AUD-102);
+AppDomain then discards data/switch state instead of forwarding to AppContext
+(medium SR-AUD-103). `ApplyPolicy` also accepts empty and NUL-containing names
+that current .NET rejects (medium SR-AUD-104). The reports retain all silent
+event-stub and platform-path fallback assertion gaps. No production or test
+source changed. Resume the next coherent Core.Base runtime/configuration
+source inventory.
 
 ## Findings recorded in this pass
 

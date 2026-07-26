@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 353 audit reports confirm one hundred one findings: tracked CI omits the
+- The first 358 audit reports confirm one hundred four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -266,6 +266,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   HResults are probe-correct, but the ports omit IOException custom-HResult,
   DirectoryNotFound path-plus-inner, and CryptographicException composite-format
   public overloads (medium SR-AUD-101).
+  `AppContext`, `AppDomain` (declaration and implementation), `AppDomainSetup`,
+  and its dedicated fixture add five reports. Their combined 11/11 filter is
+  green, but the isolated probe shows named AppContext data cannot configure
+  BaseDirectory or compatibility switches (medium SR-AUD-102); AppDomain
+  discards public data/switch state instead of delegating to AppContext
+  (SR-AUD-103); and `ApplyPolicy` accepts representable empty/NUL identity
+  strings that .NET rejects (SR-AUD-104). No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
