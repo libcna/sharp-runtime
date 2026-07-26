@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 581.
-- Confirmed findings: 181 (thirty-five high, one hundred thirty-seven medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 583.
+- Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -946,6 +946,15 @@ EnvironmentTests passed 99/99 and the focused comparer filter passed 4/4.
 Their public ordinal/interface contracts and direct consumers are coherent. No
 new finding or source/test change. Resume the next coherent Core.Base
 source/test group.
+
+Audit checkpoint 2026-07-27 05:10:00: 583/1748 mirrored reports, 182
+confirmed findings. StringNormalizationExtensions and NormalizationForm were
+audited; the focused fixture passed 5/5 but covers only ASCII. C++/managed
+FormC probes confirm SR-AUD-182: the C++ API reports decomposed `e` + U+0301
+normalized and returns `65CC81`, while .NET reports false and returns `C3A9`.
+The source documents its Unicode-table stub but does not mark the public API
+unsupported. Audit-only; no source/test changes. Resume the next coherent
+Core.Base source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

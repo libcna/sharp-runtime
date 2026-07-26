@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 581 audit reports confirm one hundred eighty-one findings: tracked CI omits the
+- The first 583 audit reports confirm one hundred eighty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -558,6 +558,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ordinal/interface contracts and direct consumers are coherent; the comparer
   fixture remains pending as a complete collections-source audit. No new
   finding or source/test change resulted.
+  StringNormalizationExtensions and NormalizationForm add two reports under a
+  green 5/5 focused filter, but every direct case is ASCII/empty. C++/managed
+  FormC probes confirm medium SR-AUD-182: decomposed `e` + U+0301 is reported
+  normalized and preserved as `65CC81`, where .NET reports false and composes
+  it to `C3A9`. The source documents the Unicode-table stub but leaves the
+  counterpart API public and otherwise unsupported only by behavior. No
+  production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
