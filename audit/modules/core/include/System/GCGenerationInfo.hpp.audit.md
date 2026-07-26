@@ -16,8 +16,9 @@ misrepresent a real collection.
 
 ## Other missing assertions and diagnostics
 
-- No direct test calls any of the four property methods; the suite tests only
-  that the parent returns an empty vector.
+- Direct Batch4 tests now call all four properties and verify their zero
+  result. They still do not exercise a non-stub telemetry value or the parent
+  vector's ownership/lifetime route.
 - A future telemetry implementation needs tests for values before/after a
   collection, signed-byte ranges, and vector ownership/lifetime rather than
   preserving the present all-zero behavior.

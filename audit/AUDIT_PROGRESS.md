@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 597.
+- Completed per-file reports: 598.
 - Confirmed findings: 184 (thirty-five high, one hundred forty medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1010,6 +1010,13 @@ MiscNewTests were audited; their focused filters passed 4/4 and 6/6. They
 cover normal marker/callback construction but not real APM state transitions,
 callback failures, or asynchronous wait/lifetime behavior. No new finding or
 source/test change. Resume another coherent Threading/Core source/test group.
+
+Audit checkpoint 2026-07-27 06:30:00: 598/1748 mirrored reports, 184
+confirmed findings. Core Batch4Tests was audited; its six-suite focused filter
+passed 21/21. The batch covers normal Resolve/APM/exception/GC stub behavior,
+but omits SR-AUD-123 nullable resolution plus SR-AUD-094/096 HResult paths,
+and real APM/GC telemetry integration. No new finding or source/test change.
+Resume another coherent Core or Threading source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

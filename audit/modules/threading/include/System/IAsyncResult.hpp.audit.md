@@ -3,8 +3,9 @@
 ## Metadata
 
 - Audit status: AUDITED (40-line public interface, fully read).
-- Supporting validation: `IAsyncResultTests2.*` passed 5/5 in
-  `SharpRuntimeTests_Core_Base` on 2026-07-26.
+- Supporting validation: `IAsyncResultTests2.*` passed 5/5 on 2026-07-26;
+  `IAsyncResultTests.*` passed 4/4 on 2026-07-27 and its containing
+  `Batch4Tests.cpp` source is fully audited.
 
 ## Assessment
 
