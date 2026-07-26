@@ -7,7 +7,7 @@
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 358.
-- Confirmed findings: 104 (twenty-eight high, seventy medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Confirmed findings: 108 (twenty-eight high, seventy-four medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -519,6 +519,15 @@ that current .NET rejects (medium SR-AUD-104). The reports retain all silent
 event-stub and platform-path fallback assertion gaps. No production or test
 source changed. Resume the next coherent Core.Base runtime/configuration
 source inventory.
+The existing `Environment` declaration, implementation, and complete 99-test
+fixture reports are now strengthened with direct .NET comparison. The direct
+filter is green, but the isolated probe confirms four medium defects: Unix
+special folders ignore XDG/option/error behavior
+(SR-AUD-105); empty environment values delete their key (SR-AUD-106); valid
+4,866-byte current directories become empty strings (SR-AUD-107); and raw
+command-line concatenation loses argument quoting (SR-AUD-108). No production
+or test source changed. Resume the next coherent Core.Base runtime source
+inventory.
 
 ## Findings recorded in this pass
 
