@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 419.
-- Confirmed findings: 122 (twenty-eight high, eighty-seven medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 426.
+- Confirmed findings: 123 (twenty-eight high, eighty-eight medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -594,6 +594,15 @@ stores an empty callable and Raise later throws std::bad_function_call
 event-argument signature rejects a mutable event-data handler (SR-AUD-122).
 No source/test changes. Resume Resolve/Unhandled event arguments and aliases,
 or another complete Core.Base header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-26 21:10: 426/1748 mirrored reports. Resolve and
+UnhandledException event arguments/handlers plus three full direct/mixed
+fixtures audited; selected event filter passed 33/33. New SR-AUD-123:
+ResolveEventHandler requires a string result and lacks a distinct nullable
+“not resolved” state even under the string/reflection adaptation. Unhandled
+exception payload and sender adaptations are explicit; AppDomain dispatch
+remains covered by SR-AUD-103. No source/test changes. Resume another complete
+Core.Base header/source/test group after refreshing its inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
