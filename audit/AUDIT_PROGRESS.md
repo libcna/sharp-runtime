@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 506.
-- Confirmed findings: 147 (thirty-one high, one hundred nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 510.
+- Confirmed findings: 148 (thirty-one high, one hundred ten medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -760,6 +760,13 @@ registration/participation contract is absent and protected hooks are public
 stubs, while IsKnownScheme accepts invalid input rather than throwing
 (SR-AUD-146 and SR-AUD-147). No source/test changes. Resume the next coherent
 Uri header/source/test group.
+
+Audit checkpoint 2026-07-27 01:10:00: 510/1748 mirrored reports. UriTypeConverter,
+UriFormatException, and both complete direct fixtures were audited; selected
+filter passed 13/13. One new medium finding: the converter throws for empty
+text where current .NET returns null, and its non-nullable C++ return plus test
+lock that behavior (SR-AUD-148). No source/test changes. Resume the next
+coherent Uri header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

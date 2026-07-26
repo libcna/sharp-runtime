@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 506 audit reports confirm one hundred forty-seven findings: tracked CI omits the
+- The first 510 audit reports confirm one hundred forty-eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -437,6 +437,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   participation is absent and protected hooks are public stubs, while
   IsKnownScheme accepts malformed input instead of throwing (SR-AUD-146–147).
   No production or test source changed.
+  UriTypeConverter, UriFormatException, and both complete direct fixtures add
+  four reports under a green 13/13 filter. New medium SR-AUD-148 records that
+  converter empty text throws where current .NET returns null; the non-nullable
+  C++ result and direct fixture lock the incompatible behavior. No production
+  or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
