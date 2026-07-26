@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 681.
+- Completed per-file reports: 683.
 - Confirmed findings: 229 (fifty high, one hundred sixty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1205,6 +1205,12 @@ stale TryFind output, factory/rule validation, case equality, rule identity,
 and New York BaseUtcOffset. Explicit no-DST/serialization subset remains
 documented adaptation. Audit-only; no source/test changes. Resume TimeZone
 CMake/README completion.
+
+Audit checkpoint 2026-07-27 11:30:00: 683/1748 mirrored reports, 229
+confirmed findings. TimeZone CMake/README audited; module boundary validator
+reports 41 modules/90 edges, generated catalogue is current, static target
+built, and full fixture passed 114/114. All 12 eligible TimeZone files are now
+mirrored. No new finding or source/test change; resume another coherent shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 681 audit reports confirm two hundred twenty-nine findings: tracked CI omits the
+- The first 683 audit reports confirm two hundred twenty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -709,6 +709,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   output; missing factory/adjustment validation; case-sensitive IDs; reduced
   rule identity; and current DST data incorrectly stored as BaseUtcOffset.
   Focused fixtures pass 99/99 but do not cover these boundaries.
+
+- All 12 eligible files in `modules/time-zone` now have mirrored reports. The
+  component graph/catalogue validation and static target build pass; the full
+  TimeZone fixture passes 114/114. No production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
