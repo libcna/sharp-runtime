@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 289.
+- Completed per-file reports: 294.
 - Confirmed findings: 92 (twenty-seven high, fifty-nine medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -384,6 +384,13 @@ exact-suffix checks for SR-AUD-089/090, Unicode whitespace coverage for
 SR-AUD-048, and generic-template coverage for SR-AUD-091. No production or
 test source changed. Resume the next complete Core.Base exception/source
 inventory.
+`ArithmeticException`, `DivideByZeroException`, and `OverflowException`
+headers/implementations are audited. Arithmetic/DivideByZero focused filters
+passed 7/7 and overflow remains covered by the 124/124 shared fixture. No new
+standalone defect was classified; reports retain specific HResult,
+inner-exception, null-C-string, and checked-arithmetic integration assertions.
+No production or test source changed. Resume the next complete Core.Base
+exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
