@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 638 audit reports confirm two hundred two findings: tracked CI omits the
+- The first 639 audit reports confirm two hundred five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -47,7 +47,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   discards the Start(void*) parameter; its Batch8 running-state assertion is
   tautological; ThreadStartException exposes runtime-internal constructors as
   ordinary public C++ API; the principal Threading CurrentThread ID test
-  discards its result; and the
+  discards its result; CancellationToken accepts an empty callback and permits
+  a public null state to crash; PeriodicTimer truncates a fractional period and
+  lets two consumers take one tick; recursive Monitor.Wait can deadlock its
+  signaler; and ReaderWriterLockSlim has a TSan-confirmed Dispose/entry race,
+  permits disposal while held, admits readers ahead of queued writers, and
+  reflects invalid recursion-policy values unlike .NET; and the
   cryptographic `GetInt32` full signed-domain path reaches
   implementation-defined conversion and signed-overflow-prone arithmetic; and
   the nominal `SynchronizationContext::Send` test has no observable assertion;

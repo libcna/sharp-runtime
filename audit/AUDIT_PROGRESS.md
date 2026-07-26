@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 638.
-- Confirmed findings: 202 (forty high, one hundred fifty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 639.
+- Confirmed findings: 205 (forty-two high, one hundred fifty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1110,6 +1110,13 @@ validation remains 359/359. Batch9 covers normal recursion, upgrade/downgrade,
 release/restore, and timeout paths; reports retain contention, TimeSpan, forged
 cookie, and address-reuse gaps. No source/test change. Resume remaining
 Threading source inventory.
+
+Audit checkpoint 2026-07-27 09:20:00: 639/1748 mirrored reports, 205
+confirmed findings. ReaderWriterLockSlim direct filter passed 27/27, but TSan
+confirms unsynchronized Dispose/entry (SR-AUD-203); direct .NET comparisons
+also confirm disposal while held, queued-writer reader admission/starvation
+(SR-AUD-204), and invalid recursion-policy reflection (SR-AUD-205). No
+source/test change. Resume the remaining Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
