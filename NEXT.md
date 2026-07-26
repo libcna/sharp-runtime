@@ -3,16 +3,210 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-25. Branch: `feature/work`. The P0 component-boundary
+*Last verified: 2026-07-26. Branch: `feature/work`. The P0 component-boundary
 repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
 P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,681 tests across 37 executables.*
+edges, and 12,681 tests across 37 executables. A repository-wide, evidence-only
+audit is now in progress under `audit/` (local ticket #1766).*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
 
 ## Current state
+
+- A CNA-style deep audit is active. `audit/AUDIT_SCOPE.md` fixes a 1,748-file
+  first-party scope and the mirrored `audit/<source-path>.audit.md` convention;
+  `audit/AUDIT_MANIFEST.md` and `AUDIT_PROGRESS.md` record coverage. This
+  phase must not repair production code or tests: it gathers reproducible
+  evidence, missing assertions/diagnostics, and an ordered remediation backlog.
+- Initial audit validation passed boundary validation, catalogue freshness, and
+  a zero-warning native build. It could not complete the full suite in this
+  sandbox because the six local-server `Net.Http` cases fail immediately with
+  `Socket::Socket: socket() failed`; this matches the documented requirement
+  for local-network permission. The tests remain enabled and need a
+  network-permitted final-gate rerun.
+- The first 269 audit reports confirm eighty-eight findings: tracked CI omits the
+  direct `Collections.Blocking` selective fixture; the boundary validator has
+  narrow negative-fixture coverage; `BlockingCollection<T>` has a
+  fractional-negative timeout parity gap; the source inventory does not
+  implement its advertised plan cross-reference; the .NET indexer defaults to
+  destructively writing a different checkout; DateTime/DateTimeOffset/TimeOnly
+  have confirmed constructor validation and parser false-success defects;
+  TimeSpan parses overflowed day counts as wrapped durations; `Random::Shared`
+  and `Guid::NewGuid` are not safe for concurrent use despite their public
+  contracts; `Guid::NewGuid`/`CreateVersion7` also use a predictable standard
+  PRNG rather than .NET's OS CSPRNG; Version
+  serializes undefined fields as `-1` in `ToString(fieldCount)`; and the
+  cryptographic `GetInt32` full signed-domain path reaches
+  implementation-defined conversion and signed-overflow-prone arithmetic; and
+  the nominal `SynchronizationContext::Send` test has no observable assertion;
+  and file-backed compression tests overwrite or recursively remove fixed
+  `/tmp` paths, making them non-isolated; and `String::Format` mishandles
+  escaped/malformed braces while bounded substring `LastIndexOf` can return a
+  match extending outside the requested range; `Char::Parse` accepts overlong
+  invalid UTF-8; Object and HashCode tests incorrectly require distinct values
+  to have distinct/nonzero hashes; `Int128` invokes undefined signed negation for
+  `MinValue` parsing/formatting; `UInt128` invokes undefined shifts for counts
+  of 128 or more; audited 8/16/32/64/128-bit formatters accept unknown formats
+  (and 128-bit variants leak `std::stoi`); Byte/SByte/Int16/UInt16/Int32/UInt32/
+  Int64/UInt64/UInt128 do not validate inverted Clamp bounds; SByte/Int16/
+  UInt16/UInt32/UInt64/UInt128 omit the integral binary `B`/`b` format; and
+  SByte/Int16 return false from `IsPositive(0)` despite .NET's generic-math
+  zero rule, while their tests assert that incorrect result; and IntPtr
+  Add/Subtract execute signed-overflow UB at native-width extrema rather than
+  defined unchecked wrap; `Convert` silently wraps several signed/narrowing
+  integral overloads, converts NaN to spurious integers, and accepts malformed
+  Base64 padding while rejecting permitted whitespace; and `Single`/`Double`
+  accept invalid `Round` precision, reject subnormal powers of two, map
+  `ILogB(NaN)` to the zero sentinel, lose exact Pi-turn results, and expose a
+  C++ subset for default parsing/formatting. `Single::IsPositive` also rejects
+  a positive-sign NaN. Decimal rejects valid default whitespace/grouping,
+  reports numeric range overflow as `FormatException`, truncates excess parser
+  precision and OA Currency values, accepts invalid rounding enums, and erases
+  its observable negative-zero sign. Math/MathF also retain invalid rounding
+  enums; Math leaks the native `ILogB(NaN)` sentinel and misses double base-log
+  special cases, while MathF accepts inverted Clamp bounds and changes ties-to-
+  even results when the C++ rounding environment is altered. BitConverter's
+  typed vector decoders have ASan-confirmed before/after-buffer reads for
+  negative or short input. `Numerics::BitOperations` passes independent
+  32/64-bit bit-operation checks, but its omission of current .NET `Crc32C`
+  and an exact signed-64 `TrailingZeroCount` overload is an API-baseline
+  decision, not yet a confirmed defect. `DivisionRounding` matches all five
+  .NET values but has no consumer by documented design. `TotalOrderIeee754Comparer`
+  correctly orders raw Half/float/double bit patterns but lacks .NET's
+  `IEqualityComparer<T>` contract, preventing use where total-order equality
+  is required. `HashCode::AddBytes` converts a negative public ReadOnlySpan
+  length to an enormous unsigned raw read; ASan confirms an overflow, with
+  Span's now-confirmed negative-length constructor as the enabling cause.
+  Span/ReadOnlySpan also corrupt overlapping nontrivial ranges because all
+  CopyTo/TryCopyTo paths use forward `std::copy`; static MemoryExtensions
+  CopyTo repeats that overlap defect and ASan confirms that it writes past a
+  shorter destination. `SpanSplitEnumerator` also treats an empty exact sequence
+  as a repeating zero-length separator, creating an infinite range iteration.
+  MemoryExtensions default sort/binary search/sequence comparison use C++
+  operators rather than .NET comparison semantics, mishandling NaN; its
+  whitespace trim treats UTF-8 bytes with locale `std::isspace` and retains
+  U+00A0. `Memory`/`ReadOnlyMemory` extend the malformed-length and
+  overlap-copy defects; `ReadOnlyMemory::Slice(INT_MIN)` additionally reaches
+  signed-overflow UB before its intended range exception. `Guid` span parsing
+  also extends the malformed-length raw-read risk. `Array` vector copy extends
+  overlap corruption; its raw-pointer copy accepts negative metadata and
+  byte-copies nontrivial values, while its float ordering, empty-callback
+  diagnostics, and `MaxLength` constant diverge from .NET. `ArraySegment`
+  extends the overlap and malformed-length patterns; default-segment operations
+  can silently succeed or dereference null, and vector `CopyTo` resizes a short
+  destination. The four Core span-formatting/parsing adapters and three
+  focused test files add no confirmed implementation defect: their 33/33
+  focused test filter passed, while their reports identify missing
+  pre-populated failure-result, non-null-provider, UTF-8/error-taxonomy, and
+  short-buffer assertions. The direct observable fixture is a new medium
+  test-contract finding: it returns no unsubscription handle and permits
+  notifications after completion, while no production observable exists. The
+  adjacent async-disposal/APM, cloning, comparison, and custom-formatting
+  interfaces add no new confirmed defect; their 12/12 focused filter exposes
+  only assertion gaps. Equality and disposal interfaces add no confirmed
+  defect under their 22/22 filter, but their reports distinguish explicit
+  disposal from misleading shared-pointer-reset and counter-only assertions.
+  The IConvertible/DBNull checkpoint adds no defect after Core.Base 9/9 and
+  integration 11/11 filters; its reports retain the culture-invariant adapter
+  and singleton reference boundary as explicit assumptions. `Index`/`Range`
+  add new high SR-AUD-057: their deliberately unvalidated .NET offset path uses
+  signed C++ arithmetic, so an end-based `INT_MAX` index with `INT_MIN` length
+  hits UBSan-confirmed overflow. `Nullable<T>` extends SR-AUD-046: its raw
+  comparator/equality path makes NaN compare equal to finite values or unequal
+  to itself, rather than using .NET default comparer/equality semantics.
+  WeakReference's shared-pointer adaptation adds no new defect under its 23/23
+  filter; TrackResurrection remains explicitly nonfunctional by design.
+  `ValueType` is now confirmed as a medium parity defect: the C++ base is
+  publicly constructible and defaults to identity/address semantics, while
+  current .NET makes it abstract and provides fieldwise default value semantics;
+  the direct tests lock in that fallback.
+  `SequencePosition` is also a medium parity defect: its publicly mutable
+  `void*`/integer components can be rewritten after construction even though
+  .NET reserves its private readonly parts for the position creator; all six
+  focused tests pass without protecting that boundary.
+  `ArrayBufferWriter<T>` adds SR-AUD-070: its `std::vector` growth and clear
+  paths silently require a default-constructible element type, so a valid
+  unconstrained .NET-style generic payload fails to compile at `GetSpan`.
+  `MemoryPool<T>` adds high SR-AUD-071: disposed owners return an empty view
+  rather than throwing, while a retained pre-dispose Memory carries a stale
+  length over freed vector storage and ASan confirms native null dereference.
+  `IBufferWriter<T>` and `IMemoryOwner<T>` add no standalone defect, but their
+  reports retain missing nonempty-view, old-view invalidation, post-dispose,
+  and polymorphic conformance assertions.
+  `ReadOnlySequence<T>` adds high SR-AUD-072/073: its raw pointer constructor
+  dereferences a null nonzero source, while `TryGet` accepts before-start or
+  negative forged positions and exposes pre-slice data or ASan-confirmed
+  out-of-bounds memory. SR-AUD-074 records default sequence enumeration of one
+  empty segment rather than none.
+  `SequenceReader<T>` adds SR-AUD-075: false `TryRead` and `TryPeek` leave
+  caller output unchanged instead of assigning default, allowing stale values
+  to be reused despite the returned false result.
+  `BinaryPrimitives` adds no confirmed implementation defect; its report
+  records missing `Try*`, floating payload, 128-bit, big-endian CI, and MSVC
+  API-baseline evidence.
+  `ArrayPool<T>` adds SR-AUD-076: its configured `Create` factory silently
+  ignores both limits and accepts zero values, while .NET requires positive
+  values and realizes them through pool buckets.
+  `MemoryManager<T>` and `IPinnable` add no new classified defect: manager-
+  backed `Memory<T>` is an explicit unsupported storage adaptation, while the
+  reports retain missing pin/lifecycle conformance assertions.
+  `SearchValues<T>` adds SR-AUD-077: its documented equality-only generic
+  contract actually requires `std::hash<T>` through `unordered_set`, so an
+  equality-only value type fails to compile.
+  `SequenceReaderExtensions` adds no confirmed defect in its signed contiguous
+  byte subset; its report preserves unsigned, multi-segment, false-output,
+  big-endian, union-punning, and include-hygiene evidence gaps.
+  `Base64` adds high SR-AUD-078: its in-place encoder overwrites an unread
+  trailing source remainder after encoding a full triple, silently corrupting
+  four-/five-byte input. SR-AUD-079 through SR-AUD-081 record acceptance of
+  noncanonical padding bits, padded input in a non-final streaming call, and
+  incorrect consumption of whitespace after padding.
+  `Base64Url` independently extends the same in-place corruption and
+  noncanonical-final-bit findings, and SR-AUD-082 records its unsupported
+  rejection of current .NET's optional `=`/`%` final padding.
+  `StandardFormat` adds SR-AUD-083: its `ToString` serializes default or
+  zero-symbol values as embedded-NUL C++ strings rather than .NET's empty
+  string; the mixed test file checks default state but not the rendering.
+  `Utf8Formatter` adds no new confirmed defect in its documented bool/integer
+  subset after its 25/25 direct filter, but reports retain signed-minimum,
+  exact-short-buffer, format-alias, all-overload, and differential-vector gaps.
+  `Utf8Parser` adds high SR-AUD-084: its default and grouped `Int64.MinValue`
+  paths negate a signed minimum under UBSan; SR-AUD-085 retains stale output on
+  false, and SR-AUD-086 rejects valid leading-plus integer input.
+  `ReadOnlySequenceSegment` adds SR-AUD-087: linked segment nodes cannot form a
+  C++ `ReadOnlySequence`, contrary to the header's multi-segment claim; the
+  companion extensions pass only their contiguous 11-test subset.
+  `MemoryHandle` adds SR-AUD-088: its comments promise scope-based RAII cleanup
+  but its implicit destructor never calls `Dispose`, so a scoped pinned handle
+  does not unpin.
+  `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
+  later throw `std::bad_function_call`, unlike .NET event null-add behavior.
+  FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
+  values, breaks escaping, and retains missing indices; its factory also has a
+  low-severity false empty-format exception claim (SR-AUD-059). CharEnumerator
+  adds no confirmed defect under its 11/11 state-machine filter; the MDArray
+  constants-only surface also passed its 2/2 direct filter. `ValueTuple` and
+  its direct tests passed their combined 53/53 filter, but extend SR-AUD-046:
+  raw comparison makes a NaN item compare equal to finite data and raw equality
+  makes a NaN tuple unequal to itself instead of using .NET default comparer /
+  equality-comparer behavior. `DateOnly` source/header/tests passed 119/119,
+  yet its day-number/day/month/year extreme-input paths hit UBSan-confirmed
+  signed overflow before range handling (SR-AUD-060), and its ISO parser
+  accepts arbitrary trailing text (SR-AUD-061). `StringComparer` adds no new
+  implementation defect under its 42/42 filter, but its case-sensitive hash
+  test extends SR-AUD-018 by forbidding a valid collision. `Tuple` and both
+  direct suites passed 94/94, but raw NaN comparison extends SR-AUD-046,
+  `tupleHashCombine` has UBSan-confirmed signed overflow (SR-AUD-062), and
+  public mutable tuple fields violate .NET Tuple immutability (SR-AUD-063). See
+  `Lazy<T>` passes its 38/38 focused filter yet accepts invalid modes,
+  defers empty factories to `bad_function_call`, and wrongly throws for
+  PublicationOnly recursion (SR-AUD-064 through SR-AUD-066). `Buffer` passes
+  38/38 direct tests but raw BlockCopy turns negative count into ASan-confirmed
+  unbounded `memmove` (SR-AUD-067), while generic typed-vector byte copying
+  extends SR-AUD-051 with a string-vector double-free. See
+  `audit/AUDIT_FINDINGS_INDEX.md`.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
@@ -25,9 +219,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Collections.Core`, and `Text.Json`; it excludes `Threading` and `TimeZone`.
 - The module validator reports 41 physical modules and 90 production edges;
   the dependency allow-list is empty. The generated catalogue is current.
-- The ten-job selective consumer matrix, including a direct
-  `Collections.Blocking` consumer, is green. Text.Json retains its target
-  absence and negative include-leakage assertions.
+- The local ten-job selective consumer matrix, including a direct
+  `Collections.Blocking` consumer, previously passed. The tracked GitHub Actions
+  matrix currently covers only nine fixtures and omits that direct consumer;
+  this is recorded as `SR-AUD-001`. Text.Json retains its target absence and
+  negative include-leakage assertions.
 - The full native baseline is a warning-free build with 12,681 passing tests
   across 36 component executables and one integration executable.
 - Doxygen 1.9.8 emits 1,942 warnings with the tracked configuration. Run
@@ -98,7 +294,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,764 completed tickets. Ticket #1737 records the completed P0 split, tickets
+1,765 completed tickets, plus active audit ticket #1766. Ticket #1737 records the completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
 `WebProxy` portability fix, #1742 focused sanitizer evidence, and #1743 the
@@ -257,8 +453,10 @@ full-list/range order and invalid range validation.
 
 ## Recommended next bounded tasks
 
-All currently planned P1 work is complete. Choose one consumer-driven P2
-slice, create a ticket, and keep the changes isolated:
+Do not start an unrelated consumer-driven P2 slice while the repository-wide
+audit is active. Complete ticket #1766 first, reconcile the findings index,
+then turn evidence-backed findings into isolated repair tickets.  The former
+candidates remain valid only after that work:
 
 1. **Other documented partial surfaces.** Examples include wider
    debugger/process/XML surfaces.
@@ -309,9 +507,10 @@ HTTP, socket, and ping tests require permission for local network operations.
 
 ## Cold resume
 
-1. Read `CLAUDE.md`, this file, and `plan.md`.
-2. Inspect `git status --short --branch` and open tickets.
-3. Run `scripts/local_ci_check.sh build` and
-   `scripts/check_selective_components.sh` before starting new work.
-4. Create a bounded ticket for the selected task, implement it, then update
-   the measured baseline and this handoff.
+1. Read `CLAUDE.md`, this file, `plan.md`, and `audit/AUDIT_SCOPE.md`.
+2. Inspect `git status --short --branch`, ticket #1766, and
+   `audit/AUDIT_PROGRESS.md`.
+3. Resume the first pending audit shard; write evidence-backed mirrored reports
+   and update the manifest/progress/index as each coherent shard completes.
+4. Do not repair production code during this phase. Run the project gates at
+   audit milestones and record their exact results before final reconciliation.

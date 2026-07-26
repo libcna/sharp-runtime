@@ -1,8 +1,10 @@
 # Sharp Runtime plan
 
-*Last verified: 2026-07-25 — 41 physical components, 90 direct production
+*Last verified: 2026-07-26 — 41 physical components, 90 direct production
 dependency edges, a clean native build, 12,681 passing tests across 37
-executables, and a green ten-job selective matrix.*
+executables, and a locally green ten-job selective matrix. The tracked CI
+matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
+is recorded as audit finding `SR-AUD-001`.*
 
 Sharp Runtime is in a consumer-driven expansion phase. The original type
 classification and stabilization queues are complete, and the full native
@@ -42,9 +44,10 @@ was never created. Neither file should be linked as current documentation.
 - Selective matrix: all ten positive consumers pass. The Text.Json target
   absence assertion verifies that neither `Threading` nor `TimeZone` is
   configured, and negative include-leakage fixtures remain rejected.
-- Tracked CI: Ubuntu selective matrix, full compatibility build, and a pinned
-  Ubuntu 24.04 Doxygen-warning-baseline job in
-  `.github/workflows/components.yml`.
+- Tracked CI: Ubuntu selective matrix (nine of the ten local fixtures), full
+  compatibility build, and a pinned Ubuntu 24.04 Doxygen-warning-baseline job
+  in `.github/workflows/components.yml`. The missing direct
+  `Collections.Blocking` consumer is `SR-AUD-001`.
 - Doxygen 1.9.8: 1,942 warnings. `scripts/check_doxygen_warnings.sh` enforces
   that ceiling; lower counts are accepted and a Doxygen upgrade requires a
   deliberate re-baseline.
@@ -56,7 +59,7 @@ The 2026-07-25 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,765 rows, all `done`; no `todo`, `doing`, `blocked`, or `needs_user` rows |
+| `ticket` | 1,766 rows: 1,765 `done` and P1 audit ticket #1766 `doing`; no `todo`, `blocked`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -226,10 +229,24 @@ The first consumer-driven ports after modularization added:
 The verified test baseline grew from 12,494 at the modularization checkpoint
 to 12,681.
 
+## Active repository audit
+
+Ticket #1766 is a P1, evidence-only, repository-wide audit. It mirrors every
+tracked first-party text-like source, test, build, CI, and relevant
+documentation file under `audit/`, following the CNA audit format. Its scope,
+exclusions, live manifest, findings index, and resume state are maintained in
+that directory. The audit is deliberately not a repair stream: confirmed
+defects, missing assertions, weak diagnostics, and parity gaps become
+evidence-backed follow-up tickets only after the manifest is reconciled.
+The 2026-07-26 checkpoint has 269 of 1,748 mirrored reports complete and
+eighty-eight confirmed findings; `audit/AUDIT_PROGRESS.md` is the authoritative
+live count.
+
 ## Candidate roadmap
 
-No implementation is active yet. Create or reopen a `ticket` row with
-acceptance criteria and a validation command before changing code.
+No production implementation is active while ticket #1766 is in progress.
+After it completes, create or reopen a repair `ticket` row with acceptance
+criteria and a validation command before changing code.
 
 ### P2 — Consumer-driven API breadth
 
