@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 413.
-- Confirmed findings: 120 (twenty-eight high, eighty-five medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 419.
+- Confirmed findings: 122 (twenty-eight high, eighty-seven medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -585,6 +585,15 @@ remove a multi-entry invocation-list subsequence. MulticastAction's tokenized
 event-field adaptation has no standalone confirmed defect. No source/test
 changes. Resume a complete remaining Core.Base header/source/test group after
 refreshing its inventory.
+
+Audit checkpoint 2026-07-26 20:50: 419/1748 mirrored reports. EventArgs and
+EventHandler declaration/source plus their full dedicated fixtures audited;
+the focused filter passed 32/32. A runtime probe confirms that EventHandler
+stores an empty callable and Raise later throws std::bad_function_call
+(SR-AUD-121, extending CCF-011). A negative compile probe confirms its const
+event-argument signature rejects a mutable event-data handler (SR-AUD-122).
+No source/test changes. Resume Resolve/Unhandled event arguments and aliases,
+or another complete Core.Base header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

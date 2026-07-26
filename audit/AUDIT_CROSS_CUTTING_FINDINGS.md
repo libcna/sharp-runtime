@@ -237,8 +237,10 @@ an empty factory and fails only at first value access.
 .NET-compatible outcomes (Array arguments need an argument error; adding a
 null event delegate is a no-op; Lazy needs a constructor argument error), but
 none may defer the policy to a native exception or an empty-input accident.
-Tests cover only normal callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065,
-SR-AUD-099, and:
+`EventHandler<TEventArgs>` repeats the event-specific route: it stores an empty
+subscriber and Raise reaches `std::bad_function_call`. Tests cover only normal
+callables. See SR-AUD-052, SR-AUD-058, SR-AUD-065, SR-AUD-099, SR-AUD-121,
+and:
 
 - `modules/core/include/System/Array.hpp.audit.md`;
 - `modules/core/tests/System/ArrayTests.cpp.audit.md`;
@@ -247,6 +249,8 @@ SR-AUD-099, and:
 - `modules/core/include/System/Lazy.hpp.audit.md`.
 - `modules/core/tests/System/LazyTests.cpp.audit.md`.
 - `modules/core/include/System/AggregateException.hpp.audit.md`.
+- `modules/core/include/System/EventHandler.hpp.audit.md`;
+- `modules/core/tests/System/EventHandlerTests.cpp.audit.md`.
 
 ## CCF-012 — hand-written composite-format replacement is not a format parser
 

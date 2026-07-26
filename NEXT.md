@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 413 audit reports confirm one hundred twenty findings: tracked CI omits the
+- The first 419 audit reports confirm one hundred twenty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -326,6 +326,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   (SR-AUD-119), and Remove cannot remove a multi-entry final subsequence
   (SR-AUD-120). MulticastAction's token-based event-field adaptation has no
   independent reproduced fault. No production or test source changed.
+  EventArgs/EventHandler declaration and source plus their direct fixtures add
+  six reports; the focused filter passes 32/32. EventHandler nevertheless
+  stores an empty callback and later raises native `std::bad_function_call`
+  (SR-AUD-121, CCF-011), while its `const TEventArgs&` callback type rejects a
+  handler that must mutate event data (SR-AUD-122). No production or test
+  source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
