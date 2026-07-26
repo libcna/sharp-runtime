@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 487.
+- Completed per-file reports: 491.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -712,6 +712,14 @@ passed 40/40. No new finding: ArrayTypeMismatch direct text tests omit the
 existing SR-AUD-093 HResult, while the other five verify their important
 HResult paths. No source/test changes. Resume another complete Core.Base
 header/source/test group after inventory review.
+
+Audit checkpoint 2026-07-27 00:10:00: 491/1748 mirrored reports. The complete
+BadImageFormat fixture and three shared exception fixture sources were audited;
+the selected AppDomainUnloaded/BadImageFormat/DllNotFound/
+DuplicateWaitObject/EntryPointNotFound filter passed 33/33. No new finding:
+those tests leave confirmed SR-AUD-094, SR-AUD-095, and SR-AUD-100 HResult
+diagnostics unguarded. No source/test changes. Resume another coherent
+Core.Base header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
