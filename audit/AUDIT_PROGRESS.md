@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 405.
-- Confirmed findings: 117 (twenty-eight high, eighty-two medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 413.
+- Confirmed findings: 120 (twenty-eight high, eighty-five medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -574,6 +574,17 @@ C++ compiler, deprecation. Explicit context/serialization/params/reflection
 marker limitations remain documented adaptations. No source/test changes.
 Resume a complete remaining Core.Base header/source/test group after refreshing
 its inventory.
+
+Audit checkpoint 2026-07-26 20:30: 413/1748 mirrored reports. Delegate,
+MulticastDelegate, MulticastAction, Delegate implementation, and four complete
+direct/mixed fixtures audited. Delegate filter passed 70/70; the adjacent
+Batch14 filter passed 25/25. The compiled probe confirms SR-AUD-118 through
+SR-AUD-120: Combine/Remove lose concrete type and accept a mismatched subtype;
+separately allocated equal multicast entries compare unequal; and Remove cannot
+remove a multi-entry invocation-list subsequence. MulticastAction's tokenized
+event-field adaptation has no standalone confirmed defect. No source/test
+changes. Resume a complete remaining Core.Base header/source/test group after
+refreshing its inventory.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

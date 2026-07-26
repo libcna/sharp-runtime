@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 405 audit reports confirm one hundred seventeen findings: tracked CI omits the
+- The first 413 audit reports confirm one hundred twenty findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -318,6 +318,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   values have Doxygen-only, not C++ compiler, deprecation (low SR-AUD-117).
   Context/serialization/params/reflection marker limits are explicit permanent
   adaptations. No production or test source changed.
+  Delegate, MulticastDelegate, MulticastAction, implementation, and four full
+  fixtures add eight reports. Delegate-specific filters pass 70/70 and the
+  mixed Batch14 filter 25/25, but a compiled probe confirms that composition
+  loses concrete delegate type and accepts mismatches (SR-AUD-118), multicast
+  equality uses entry pointer identity rather than delegate equality
+  (SR-AUD-119), and Remove cannot remove a multi-entry final subsequence
+  (SR-AUD-120). MulticastAction's token-based event-field adaptation has no
+  independent reproduced fault. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
