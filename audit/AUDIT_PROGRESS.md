@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,488 (85.1% of eligible scope; 1,439/1,699 runtime-module files).
-- Confirmed findings: 347 (eighty-six high, two hundred fifty medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,607 (91.9% of eligible scope; 1,558/1,699 runtime-module files).
+- Confirmed findings: 355 (eighty-eight high, two hundred fifty-six medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -24,7 +24,7 @@ the full gate during final audit reconciliation.
 
 ## Immediate sequence
 
-1. Select the next complete unmirrored component from the deterministic
+1. Select the remaining `Collections` component from the deterministic
    inventory, retaining component-scoped tests and upstream-reference review.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
@@ -40,15 +40,15 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 84-file `IO` shard is mirrored. Its focused target passed
-527/527. Direct ASan/UBSan probes confirm SR-AUD-338 (null text-wrapper base
-stream) and SR-AUD-341 (null MemoryStream source). Other direct probes confirm
-SR-AUD-337 (leaveOpen wrapper remains usable), SR-AUD-339/346 (FileSystemWatcher
-live Path and NotifyFilter failures), SR-AUD-340 (RandomAccess invalid metadata
-and descriptor suppression), SR-AUD-342 (FileStream access/lifecycle gaps),
-SR-AUD-343/344 (in-memory text/unmanaged disposal), SR-AUD-345 (FileInfo deletes
-an empty directory), and SR-AUD-347 (raw filesystem error leakage). Audit-only:
-no production or test source was changed.
+The complete 119-file `Xml` shard is mirrored. Its focused target passed
+377/377. Direct functional probes confirm SR-AUD-348 (reader remains usable
+after Close), SR-AUD-349 (writer emits malformed XML for an invalid name),
+SR-AUD-350 (invalid InnerXml silently destroys children), SR-AUD-351
+(cross-parent child removal), SR-AUD-352 (unraised DOM events), SR-AUD-353
+(outer namespace invisibility), SR-AUD-354 (missing XML Schema duration
+conversion), and SR-AUD-355 (unmerged XPath text-like nodes). The preceding
+84-file IO checkpoint passed 527/527. Audit-only: no production or test source
+was changed.
 
 ## Resume point
 

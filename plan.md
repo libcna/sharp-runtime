@@ -238,16 +238,14 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 IO checkpoint has 1,488 of 1,748 mirrored reports complete and
-three hundred forty-seven confirmed findings; `audit/AUDIT_PROGRESS.md` is the
-authoritative live count. The complete 84-file IO shard passed 527/527 focused
-tests. Direct ASan/UBSan probes record SR-AUD-338 (null text wrapper) and
-SR-AUD-341 (null MemoryStream construction); direct functional probes add
-SR-AUD-337, SR-AUD-339 through SR-AUD-340, and SR-AUD-342 through SR-AUD-347
-for text-wrapper lifecycle, FileSystemWatcher live configuration, RandomAccess,
-FileStream access/lifetime, in-memory stream disposal, FileInfo deletion, and
-filesystem exception translation. Audit-only work made no production or
-test-source change.
+The 2026-07-27 Xml checkpoint has 1,607 of 1,748 mirrored reports complete and
+three hundred fifty-five confirmed findings; `audit/AUDIT_PROGRESS.md` is the
+authoritative live count. The complete 119-file Xml shard passed 377/377 focused
+tests. Direct functional probes record SR-AUD-348 through SR-AUD-355 for reader
+lifecycle, writer validation, DOM mutation atomicity/ownership/events, namespace
+scope lookup, XML Schema duration conversion, and XPath adjacent-text semantics.
+The preceding 84-file IO shard passed 527/527. Audit-only work made no production
+or test-source change; the next component is Collections.
 
 ## Candidate roadmap
 

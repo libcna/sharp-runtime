@@ -26,8 +26,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,488 audit reports confirm three hundred forty-seven findings. The newly complete
-  84-file `IO` shard passed 527/527 focused tests and adds SR-AUD-337 through SR-AUD-347:
+- The first 1,607 audit reports confirm three hundred fifty-five findings. The newly complete
+  119-file `Xml` shard passed 377/377 focused tests and adds SR-AUD-348 through SR-AUD-355:
+  XmlReader reads after Close; XmlWriter emits malformed XML for invalid names; invalid InnerXml
+  silently removes children; cross-parent DOM removal detaches unrelated children; XmlDocument
+  node events never fire; HasNamespace misses outer scopes; XmlConvert rejects XSD durations; and
+  XPath leaves adjacent text/CDATA as separate nodes. The preceding 84-file `IO` shard passed
+  527/527 focused tests and adds SR-AUD-337 through SR-AUD-347:
   leaveOpen text wrappers remain usable after Close; null text streams silently EOF or ASan-crash;
   FileSystemWatcher misroutes events after live Path changes and ignores NotifyFilter; RandomAccess
   accepts invalid metadata and suppresses invalid-descriptor failures; MemoryStream null construction
