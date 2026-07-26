@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 358 audit reports confirm one hundred eight findings: tracked CI omits the
+- The first 365 audit reports confirm one hundred eight findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -280,6 +280,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   real 4,866-byte cwd becoming empty through a fixed buffer (SR-AUD-107), and
   raw command-line joins losing quote/space argument boundaries (SR-AUD-108).
   No production or test source changed.
+  `GC`, its three directly represented support types, two compatibility
+  forwarding headers, and dedicated fixture add seven reports. The complete 61/61 direct fixture is
+  green; all reviewed zero/no-op behavior is an explicit RAII/no-tracing-GC
+  adaptation, and GC notification waits correctly return `NotApplicable`.
+  No new classified defect or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

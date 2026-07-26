@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 358.
+- Completed per-file reports: 365.
 - Confirmed findings: 108 (twenty-eight high, seventy-four medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -528,6 +528,13 @@ special folders ignore XDG/option/error behavior
 command-line concatenation loses argument quoting (SR-AUD-108). No production
 or test source changed. Resume the next coherent Core.Base runtime source
 inventory.
+`GC`, `GCCollectionMode`, `GCGenerationInfo`, `GCNotificationStatus`, the two
+historical forwarding headers, and the complete 61/61 direct fixture are now
+audited. The RAII/no-tracing-GC boundary is explicit: Collect, metrics,
+pressure, finalizer, and no-GC-region APIs are consistent no-op/zero adapters,
+and notification waits correctly return `NotApplicable`. No new classified
+defect or source/test change resulted. Resume the next coherent Core.Base
+runtime source inventory.
 
 ## Findings recorded in this pass
 
