@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 590.
+- Completed per-file reports: 591.
 - Confirmed findings: 182 (thirty-five high, one hundred thirty-eight medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -987,6 +987,14 @@ imbue `std::locale::classic()` and retain invariant output. The report records
 the host-locale skip path and missing custom-facet/concurrency coverage. No
 new finding or source/test change. Resume the next coherent Core.Base
 source/test group.
+
+Audit checkpoint 2026-07-27 06:00:00: 591/1748 mirrored reports, 182
+confirmed findings. Batch13BufferTests was audited; its generic BlockCopy and
+unsigned MemoryCopy filter passed 10/10. It covers checked primitive-vector
+and overlap/capacity paths, but has no assertion for high SR-AUD-067 raw
+negative metadata or SR-AUD-051 nontrivial generic-vector copying. No new
+finding or source/test change. Resume the next coherent Core.Base source/test
+group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

@@ -5,7 +5,9 @@
 - Audit status: AUDITED (253-line public header-only implementation, fully
   read).
 - Validation: `BufferTests.*` passed 38/38 in `SharpRuntimeTests_Core_Base` on
-  2026-07-26.
+  2026-07-26; the direct generic-vector/unsigned-MemoryCopy filter passed
+  10/10 on 2026-07-27 and is fully reviewed in
+  `Batch13BufferTests.cpp.audit.md`.
 - ASan reproducer: `/tmp/sharp-runtimervc-buffer-audit-probe.cpp`, compiled
   with `-fsanitize=address`, reports the raw negative-size and nontrivial
   vector failures below.

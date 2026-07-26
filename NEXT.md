@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 590 audit reports confirm one hundred eighty-two findings: tracked CI omits the
+- The first 591 audit reports confirm one hundred eighty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -586,6 +586,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `std::locale::classic()` and retain invariant output. Its report records the
   host-locale skip path plus custom-facet and concurrency coverage gaps. No
   new finding or source/test change resulted.
+  Batch13BufferTests adds one report under a green 10/10 generic
+  BlockCopy/unsigned-MemoryCopy filter. It guards checked primitive vector,
+  overlap, and capacity paths, but does not assert high SR-AUD-067 raw negative
+  metadata or SR-AUD-051 nontrivial generic-vector lifetime corruption. No new
+  finding or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
