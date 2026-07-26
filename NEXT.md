@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 683 audit reports confirm two hundred twenty-nine findings: tracked CI omits the
+- The first 703 audit reports confirm two hundred thirty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -713,6 +713,14 @@ Historical session detail belongs in git history and `plan.sqlite3`.
 - All 12 eligible files in `modules/time-zone` now have mirrored reports. The
   component graph/catalogue validation and static target build pass; the full
   TimeZone fixture passes 114/114. No production/test change occurred.
+
+- All 21 eligible files in `modules/threading-tasks` now have mirrored reports.
+  Its complete fixture passes 171/171, but ASan confirms that
+  `TaskCanceledException` exposes a dangling raw Task pointer after its input
+  expires (SR-AUD-230). Direct C++/.NET probes also confirm delayed
+  `bad_function_call` instead of immediate missing-delegate rejection
+  (SR-AUD-231) and acceptance of invalid parallel maximum degrees
+  (SR-AUD-232). Audit-only; no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

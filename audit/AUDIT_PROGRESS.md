@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 683.
-- Confirmed findings: 229 (fifty high, one hundred sixty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 703.
+- Confirmed findings: 232 (fifty-one high, one hundred seventy medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1211,6 +1211,15 @@ confirmed findings. TimeZone CMake/README audited; module boundary validator
 reports 41 modules/90 edges, generated catalogue is current, static target
 built, and full fixture passed 114/114. All 12 eligible TimeZone files are now
 mirrored. No new finding or source/test change; resume another coherent shard.
+
+Audit checkpoint 2026-07-27 11:40:00: 703/1748 mirrored reports, 232
+confirmed findings. All 21 eligible Threading.Tasks files are now mirrored;
+the complete fixture passed 171/171. ASan confirms SR-AUD-230: a
+TaskCanceledException retains a dangling Task pointer after a local task dies.
+Direct current-.NET comparisons add SR-AUD-231 (empty delegates are deferred
+as bad_function_call) and SR-AUD-232 (zero/less-than--1 parallel degrees run
+instead of throwing). Audit-only; no source/test changes. Resume another
+coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
