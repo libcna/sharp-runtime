@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 734 audit reports confirm two hundred thirty-six findings: tracked CI omits the
+- The first 745 audit reports confirm two hundred thirty-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -751,6 +751,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   environment-blocked at socket creation. ASan confirms null HttpContent
   dereference in `ReadFromJson` (SR-AUD-236), where current .NET throws
   `ArgumentNullException`. Audit-only; no production/test change occurred.
+
+- All eleven eligible files in `modules/collections-object-model` now have
+  mirrored reports. ASan confirms a `ReadOnlyObservableCollection` destroyed
+  while its shared source survives leaves a captured `this` callback, and a
+  later source mutation is stack-use-after-scope (SR-AUD-237). Audit-only; no
+  production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

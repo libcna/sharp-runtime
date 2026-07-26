@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 734.
-- Confirmed findings: 236 (fifty-two high, one hundred seventy-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 745.
+- Confirmed findings: 237 (fifty-three high, one hundred seventy-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1255,6 +1255,13 @@ tests passed 6/6; two loopback HttpClient tests remain environment-blocked at
 TcpListener socket creation. ASan/current-.NET comparison adds SR-AUD-236:
 null HttpContent segfaults rather than yielding ArgumentNullException. No
 source/test changes. Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 12:40:00: 745/1748 mirrored reports, 237
+confirmed findings. All eleven Collections.ObjectModel files are mirrored and
+its complete fixture passed 124/124. ASan confirms SR-AUD-237: destroying a
+ReadOnlyObservableCollection while its shared source survives leaves the
+source with a callback that dereferences the dead wrapper on its next mutation.
+No source/test changes. Resume another coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
