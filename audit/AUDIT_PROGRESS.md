@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 598.
+- Completed per-file reports: 599.
 - Confirmed findings: 184 (thirty-five high, one hundred forty medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -1017,6 +1017,14 @@ passed 21/21. The batch covers normal Resolve/APM/exception/GC stub behavior,
 but omits SR-AUD-123 nullable resolution plus SR-AUD-094/096 HResult paths,
 and real APM/GC telemetry integration. No new finding or source/test change.
 Resume another coherent Core or Threading source/test group.
+
+Audit checkpoint 2026-07-27 06:40:00: 599/1748 mirrored reports, 184
+confirmed findings. Core Batch11ArrayTests was audited; its fifteen-suite
+range/copy/search/read-only filter passed 38/38. It supplies broad normal int
+vector coverage but omits all high raw/overlap/nontrivial Array paths and
+medium float/callable diagnostics already recorded as SR-AUD-044/046/051/052.
+No new finding or source/test change. Resume another coherent Core source/test
+group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

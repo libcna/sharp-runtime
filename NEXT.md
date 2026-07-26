@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 598 audit reports confirm one hundred eighty-four findings: tracked CI omits the
+- The first 599 audit reports confirm one hundred eighty-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -606,6 +606,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   covers normal Resolve/APM/exception/GC metadata paths but omits SR-AUD-123's
   nullable resolution, SR-AUD-094/096 HResults, and real APM/GC telemetry
   integration. No new finding or source/test change resulted.
+  Core Batch11ArrayTests adds one report under a green 38/38 fifteen-suite
+  range/copy/search/read-only filter. It provides broad normal integer vector
+  coverage but omits existing SR-AUD-044/046/051/052 raw/overlap/nontrivial,
+  float-ordering, and callable-diagnostic paths. No new finding or source/test
+  change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

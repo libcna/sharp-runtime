@@ -4,7 +4,9 @@
 
 - Audit status: AUDITED (554-line header-only implementation, fully read).
 - Validation: `build/SharpRuntimeTests_Core_Base --gtest_filter='ArrayTests.*'`
-  passed 80/80 on 2026-07-26.
+  passed 80/80 on 2026-07-26; the direct fifteen-suite range/copy/search
+  filter passed 38/38 on 2026-07-27 and its source is fully audited in
+  `Batch11ArrayTests.cpp.audit.md`.
 - Independent probe: `/tmp/sharp-runtimervc-array-audit-probe.cpp`, built with
   `-fsanitize=address,undefined -fno-omit-frame-pointer` on 2026-07-26.
 
