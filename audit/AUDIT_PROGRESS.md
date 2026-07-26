@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 499.
-- Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 501.
+- Confirmed findings: 141 (thirty-one high, one hundred three medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -736,6 +736,14 @@ review covers its remaining overloads, and TypeInitialization checks its sole
 public constructor's HResult and retrievable inner cause. No source/test
 changes. Resume another coherent Core.Base header/source/test group after
 inventory review.
+
+Audit checkpoint 2026-07-27 00:40:00: 501/1748 mirrored reports. UriBuilder
+and its complete direct fixture were audited; all 27 direct tests pass. A
+C++/current-.NET probe confirms four new medium findings: copied credentials
+fuse UserName/Password, relative input serializes as invalid `:///`, raw
+equality/hash disagree with Uri identity, and Scheme/IPv6 Host setters skip
+required normalization/validation (SR-AUD-138 through SR-AUD-141). No
+source/test changes. Resume the next coherent Uri header/source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 
