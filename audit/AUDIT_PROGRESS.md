@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 630.
-- Confirmed findings: 197 (thirty-eight high, one hundred forty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 634.
+- Confirmed findings: 199 (thirty-nine high, one hundred forty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1098,6 +1098,13 @@ confirmed findings. ThreadingTests was fully audited; complete Threading
 validation remains 359/359. Low SR-AUD-197 records that its CurrentThread ID
 test discards the observed value, so it cannot protect SR-AUD-193. No
 source/test change. Resume remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
+confirmed findings. CancellationToken, CancellationTokenRegistration,
+CancellationTokenSource, and source were audited; Threading remains 359/359.
+Native/managed probes add SR-AUD-198 empty callback acceptance and ASan/UBSan
+SR-AUD-199 public null-state token crash. No source/test change. Resume
+remaining Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:20:00: 629/1748 mirrored reports, 196
 confirmed findings. ThreadStart and five Thread exception/event headers were
