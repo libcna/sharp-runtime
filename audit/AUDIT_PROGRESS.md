@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 579.
+- Completed per-file reports: 581.
 - Confirmed findings: 181 (thirty-five high, one hundred thirty-seven medium, nine low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -939,6 +939,13 @@ and SharpRuntimeHelper were audited; their focused integration filter passed
 from_chars range), medium SR-AUD-179 (Property assignment returns stale cache),
 and low SR-AUD-181 (advertised experimental auto/custom macros cannot compile).
 No source/test changes. Resume the next coherent Core.Base source/test group.
+
+Audit checkpoint 2026-07-27 05:00:00: 581/1748 mirrored reports.
+EnvironmentVariableTarget and generic IEqualityComparer were audited;
+EnvironmentTests passed 99/99 and the focused comparer filter passed 4/4.
+Their public ordinal/interface contracts and direct consumers are coherent. No
+new finding or source/test change. Resume the next coherent Core.Base
+source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

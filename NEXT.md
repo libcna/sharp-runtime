@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 579 audit reports confirm one hundred eighty-one findings: tracked CI omits the
+- The first 581 audit reports confirm one hundred eighty-one findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -553,6 +553,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   medium SR-AUD-179 (assignment returns stale cache), and low SR-AUD-181
   (documented experimental auto/custom macros do not compile). No production
   or test source changed.
+  EnvironmentVariableTarget and generic IEqualityComparer add two reports
+  under green 99/99 Environment and 4/4 comparer filters. Their public
+  ordinal/interface contracts and direct consumers are coherent; the comparer
+  fixture remains pending as a complete collections-source audit. No new
+  finding or source/test change resulted.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
