@@ -313,20 +313,24 @@ See SR-AUD-048 and:
 
 ## CCF-016 — inline exception constructors need a complete derived-HResult audit
 
-`ArrayTypeMismatchException` and five newly reviewed sibling types rely on the
-code set by `SystemException` or `Exception` rather than explicitly assigning
-the documented error code for the derived exception. Their independently green
+`ArrayTypeMismatchException`, five newly reviewed sibling types, and the two
+`TypeLoadException` derivatives rely on the code set by `SystemException`,
+`Exception`, or `TypeLoadException` rather than explicitly assigning the
+documented error code for the derived exception. Their independently green
 message/inheritance suites omitted HResult assertions, so one class retained
-`0x80131501` instead of `0x80131503`, while the five-class probe found
+`0x80131501` instead of `0x80131503`, a five-class probe found
 `ApplicationException=0x80131500` and four `SystemException` derivatives at
-`0x80131501` instead of five different documented codes. This is a repeatable
-constructor-audit and assertion gap: every .NET-shaped exception should be
-checked against its own HResult on every public overload rather than inheriting
-the immediate base value by accident. See SR-AUD-093, SR-AUD-094, and:
+`0x80131501`, and the TypeLoad pair both reported `0x80131522` instead of their
+two distinct codes. This is a repeatable constructor-audit and assertion gap:
+every .NET-shaped exception should be checked against its own HResult on every
+public overload rather than inheriting the immediate base value by accident.
+See SR-AUD-093 through SR-AUD-095, and:
 
 - `modules/core/include/System/ArrayTypeMismatchException.hpp.audit.md`;
 - `modules/core/include/System/ApplicationException.hpp.audit.md`;
 - `modules/core/include/System/AppDomainUnloadedException.hpp.audit.md`;
 - `modules/core/include/System/BadImageFormatException.hpp.audit.md`;
 - `modules/core/include/System/CannotUnloadAppDomainException.hpp.audit.md`;
-- `modules/core/include/System/DataMisalignedException.hpp.audit.md`.
+- `modules/core/include/System/DataMisalignedException.hpp.audit.md`;
+- `modules/core/include/System/DllNotFoundException.hpp.audit.md`;
+- `modules/core/include/System/EntryPointNotFoundException.hpp.audit.md`.
