@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 571.
-- Confirmed findings: 174 (thirty-four high, one hundred thirty-two medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 572.
+- Confirmed findings: 176 (thirty-four high, one hundred thirty-four medium, eight low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -915,6 +915,14 @@ classifier maps ordinary assigned BMP characters to OtherNotAssigned
 (SR-AUD-173 and SR-AUD-174). The documented non-BMP mapping limitation remains
 an adaptation, not a duplicate finding. No source/test changes. Resume the
 next coherent Core.Base source/test group.
+
+Audit checkpoint 2026-07-27 04:30:00: 572/1748 mirrored reports.
+BFloat16 was audited; existing BitConverterTests passed 67/67 and a C++20
+bit-level probe passed. Two medium findings: float construction truncates
+instead of current .NET round-to-nearest-even, and the public type omits most
+of the managed numeric/parse/format/conversion surface (SR-AUD-175 and
+SR-AUD-176). No source/test changes. Resume the next coherent Core.Base
+source/test group.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

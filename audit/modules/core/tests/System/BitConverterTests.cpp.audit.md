@@ -19,6 +19,11 @@ at offset zero, so the shared bounds defect remains entirely invisible.
   index, index at/beyond size, or fewer remaining bytes than the target width.
   The tested ordinary calls all pass while ASan independently demonstrates
   underflow and overflow reads for `ToInt32`.
+- **SR-AUD-175 / SR-AUD-176:** BFloat16 cases cover raw two-byte
+  reinterpretation only.  They omit float construction midpoint rounding,
+  arithmetic, formatting/parsing, comparisons, classifications, and the broad
+  current-.NET public numeric surface; the standalone BFloat16 audit probe
+  confirms the truncation defect.
 
 ## Required post-audit verification
 

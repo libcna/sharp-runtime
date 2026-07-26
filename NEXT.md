@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 571 audit reports confirm one hundred seventy-four findings: tracked CI omits the
+- The first 572 audit reports confirm one hundred seventy-six findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -537,6 +537,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   C-locale category predicates label common assigned BMP code points as
   OtherNotAssigned. The documented non-BMP mapping remains an explicit
   adaptation. No production or test source changed.
+  BFloat16 adds one report under a green 67/67 BitConverter fixture. A
+  bit-level probe confirms medium SR-AUD-175 and SR-AUD-176: float conversion
+  truncates rather than round-to-nearest-even, and the public type is a narrow
+  bit wrapper missing most current .NET numeric/parse/format/conversion
+  surface. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
