@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,173 audit reports confirm three hundred nine findings: tracked CI omits the
+- The first 1,205 audit reports confirm three hundred eighteen findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -893,7 +893,16 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   validation/filtering gaps (SR-AUD-304), cookie domain isolation, constructor
   state, unbounded storage, and indexing failures (SR-AUD-305..308), and
   incomplete WebUtility HTML behavior (SR-AUD-309). Audit-only; no
-  production/test change occurred. Resume `Net.Http`.
+  production/test change occurred.
+
+- All thirty-two eligible files in `modules/net-http` now have mirrored
+  reports. Its target builds and 126/132 tests pass; all six loopback failures
+  are blocked at sandbox socket creation. ASan confirms an async HttpClient
+  use-after-free; direct probes confirm permissive URL/status parsing,
+  re-sendable request messages, CR/LF HTTP/MIME serialization,
+  case-sensitive headers, invalid response fields, false StringContent charset
+  metadata, and unbounded/weak terminal response framing (SR-AUD-310..318).
+  Audit-only; no production/test change occurred. Resume `Net.Http.Headers`.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

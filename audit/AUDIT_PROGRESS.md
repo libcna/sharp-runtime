@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,173.
-- Confirmed findings: 309 (seventy-six high, two hundred twenty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,205.
+- Confirmed findings: 318 (seventy-eight high, two hundred twenty-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -25,7 +25,8 @@ the full gate during final audit reconciliation.
 ## Immediate sequence
 
 1. Continue component by component with their tests and .NET source where
-   applicable, prioritising `Net.Http` after the completed Net foundation.
+   applicable, prioritising `Net.Http.Headers` after the completed Net.Http
+   transport/content layer.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -40,14 +41,15 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 50-file `Net` shard is mirrored. Its focused target passed 238/238
-tests. Standalone ASan/UBSan and behavior probes confirmed SR-AUD-300 through
-SR-AUD-309: unchecked SocketAddress decoding; IPv6 scope narrowing and
-IPNetwork scope loss; permissive endpoint parsing; DNS fast-path validation;
-cookie domain isolation, constructor state, and unbounded storage; unchecked
-CookieCollection indexing; and incomplete WebUtility HTML behavior. The
-preceding 39-file `Text` shard passed 233/233 tests and recorded SR-AUD-286
-through SR-AUD-299. Audit-only: no production or test source was changed.
+The complete 32-file `Net.Http` shard is mirrored. Its focused target built and
+126/132 tests passed; all six remaining loopback cases are sandbox-limited at
+socket creation. Direct behavior probes and ASan confirm SR-AUD-310 through
+SR-AUD-318: async HttpClient use-after-free; permissive URL/status parsers;
+reusable request messages; CR/LF HTTP/MIME serialization; case-sensitive
+header maps; invalid response fields; false StringContent charset metadata;
+and unbounded/weak terminal response framing with error-path descriptor leaks.
+The preceding 50-file `Net` shard passed 238/238. Audit-only: no production or
+test source was changed.
 
 ## Resume point
 
