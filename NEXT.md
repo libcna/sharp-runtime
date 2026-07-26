@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 536 audit reports confirm one hundred fifty-six findings: tracked CI omits the
+- The first 538 audit reports confirm one hundred fifty-nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -469,6 +469,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   probes confirm medium SR-AUD-156: both setters retain invalid enum values,
   including caller-set NoGCRegion, instead of validating their public domains.
   No production or test source changed.
+  AmbiguousImplementationException and ExternalException add two reports under
+  a green shared 7/7 filter. Current-.NET/C++ probes confirm medium
+  SR-AUD-157 through SR-AUD-159: both retain COR_E_SYSTEM instead of their
+  derived HResults; Ambiguous has the wrong catch hierarchy and lacks a causal
+  constructor; External lacks error-code construction, ErrorCode, and its
+  specialized formatted diagnostic. No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

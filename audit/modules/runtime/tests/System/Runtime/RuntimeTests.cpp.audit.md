@@ -22,6 +22,12 @@ every invalid enum boundary, leaving the confirmed setter-validation failure
 in [SR-AUD-156](../../../../include/System/Runtime/GCSettings.hpp.audit.md#sr-aud-156--medium--gcsettings-setters-retain-values-outside-their-public-enum-domains)
 unguarded.
 
+Its AmbiguousImplementationException and ExternalException segments likewise
+assert normal text/throwability only.  They do not cover the confirmed derived
+HResult failure in SR-AUD-157, Ambiguous's wrong catch hierarchy/missing cause
+constructor (SR-AUD-158), or ExternalException's absent error-code route
+(SR-AUD-159).
+
 ## Other missing assertions and diagnostics
 
 - GCSettings omits `SustainedLowLatency`, invalid latency/LOH casts, attempted
@@ -39,6 +45,10 @@ unguarded.
   compiler/interop effects that ordinary C++ object construction cannot prove.
 - Marker-attribute tests end in `SUCCEED()` after construction, so they do not
   diagnose whether a declaration actually carries the intended metadata.
+- The two exception segments omit every HResult, derived-type catch boundary,
+  inner-cause rethrow/identity, and ExternalException ErrorCode/hex-format
+  assertion; their green normal-message tests therefore cannot detect
+  SR-AUD-157 through SR-AUD-159.
 
 ## Final assessment
 
