@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 1,031 audit reports confirm two hundred seventy-eight findings: tracked CI omits the
+- The first 1,084 audit reports confirm two hundred eighty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -864,6 +864,17 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   static interface declarations fail only at consumer linkage (SR-AUD-278).
   Current .NET source confirms zero aspect/orthographic dimensions are not
   validation defects. Audit-only; no production/test change occurred.
+
+- All fifty-three eligible files in `modules/globalization` now have mirrored
+  reports; its target passes 676/676. Direct probes confirm byte/code-point
+  treatment where .NET requires grapheme text elements (SR-AUD-279), a
+  constructible Gregorian-fallback Calendar base (SR-AUD-281), an inert
+  `IdnMapping::AllowUnassigned` setting (SR-AUD-282), silently ASCII-only
+  comparison/casing behavior (SR-AUD-283/284), and fabricated unknown
+  culture/region metadata (SR-AUD-285). TSan confirms that CurrentCulture and
+  CurrentUICulture are racy process globals rather than per-thread/task state
+  (SR-AUD-280). Audit-only; no production/test change occurred. Resume the
+  next coherent module shard.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.

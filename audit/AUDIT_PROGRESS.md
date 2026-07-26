@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,031.
-- Confirmed findings: 278 (sixty-eight high, one hundred ninety-nine medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,084.
+- Confirmed findings: 285 (sixty-nine high, two hundred five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -25,7 +25,7 @@ the full gate during final audit reconciliation.
 ## Immediate sequence
 
 1. Continue component by component with their tests and .NET source where
-   applicable, prioritising the Globalization shard after Numerics.
+   applicable, prioritising the next coherent module shard after Globalization.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -1386,6 +1386,17 @@ is incompatible (SR-AUD-277), and published generic-math static interface
 members compile but fail linkage (SR-AUD-278). Current .NET source verifies
 that zero projection dimensions/aspect are not validation defects. Audit-only;
 no source/test changes. Resume Globalization.
+
+Audit checkpoint 2026-07-27 16:20:00: 1084/1748 mirrored reports, 285
+confirmed findings. All fifty-three Globalization files are mirrored; its
+target passed 676/676. Direct probes confirm UTF-8 byte/text-element confusion
+and invalid-byte substring output (SR-AUD-279), an abstract-base Calendar
+constructible fallback (SR-AUD-281), inert `IdnMapping::AllowUnassigned`
+(SR-AUD-282), ignored Unicode comparison/casing semantics (SR-AUD-283/284),
+and fabricated unknown culture/region data (SR-AUD-285). TSan confirms the
+process-global CurrentCulture/CurrentUICulture race and cross-thread leakage
+(SR-AUD-280). Audit-only; no source/test changes. Resume the next coherent
+module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
