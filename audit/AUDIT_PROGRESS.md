@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,123.
-- Confirmed findings: 299 (seventy-three high, two hundred fifteen medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,173.
+- Confirmed findings: 309 (seventy-six high, two hundred twenty-two medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -25,7 +25,7 @@ the full gate during final audit reconciliation.
 ## Immediate sequence
 
 1. Continue component by component with their tests and .NET source where
-   applicable, prioritising the next coherent module shard after Text.
+   applicable, prioritising `Net.Http` after the completed Net foundation.
 2. Reconcile every mirrored report, findings index, and project handoff.
 
 ## Assumptions and decisions
@@ -40,13 +40,14 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 39-file `Text` shard is mirrored. Its focused target passed
-233/233 tests. Standalone ASan, UBSan, TSan, and behavioral probes confirmed
-SR-AUD-286 through SR-AUD-299: unsafe raw decode ranges; null/mutable fallback
-state; Latin-1, UTF-16-count, preamble, fallback, and truncated-unit defects;
-ASCII-only Rune classification; StringBuilder overflow and byte-indexing; Web
-encoder/decoder diagnostic gaps; CompositeFormat parsing; and EncodingInfo
-code-page erasure. Audit-only: no production or test source was changed.
+The complete 50-file `Net` shard is mirrored. Its focused target passed 238/238
+tests. Standalone ASan/UBSan and behavior probes confirmed SR-AUD-300 through
+SR-AUD-309: unchecked SocketAddress decoding; IPv6 scope narrowing and
+IPNetwork scope loss; permissive endpoint parsing; DNS fast-path validation;
+cookie domain isolation, constructor state, and unbounded storage; unchecked
+CookieCollection indexing; and incomplete WebUtility HTML behavior. The
+preceding 39-file `Text` shard passed 233/233 tests and recorded SR-AUD-286
+through SR-AUD-299. Audit-only: no production or test source was changed.
 
 ## Resume point
 

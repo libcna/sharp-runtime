@@ -238,11 +238,12 @@ exclusions, live manifest, findings index, and resume state are maintained in
 that directory. The audit is deliberately not a repair stream: confirmed
 defects, missing assertions, weak diagnostics, and parity gaps become
 evidence-backed follow-up tickets only after the manifest is reconciled.
-The 2026-07-27 Text checkpoint has 1,123 of 1,748 mirrored reports complete
-and two hundred ninety-nine confirmed findings; `audit/AUDIT_PROGRESS.md` is
-the authoritative live count. The 39-file Text shard passed 233/233 focused
-tests and records SR-AUD-286 through SR-AUD-299; audit-only work made no
-production or test-source change.
+The 2026-07-27 Net checkpoint has 1,173 of 1,748 mirrored reports complete
+and three hundred nine confirmed findings; `audit/AUDIT_PROGRESS.md` is the
+authoritative live count. The 50-file Net shard passed 238/238 focused tests
+and records SR-AUD-300 through SR-AUD-309; the preceding 39-file Text shard
+passed 233/233 and records SR-AUD-286 through SR-AUD-299. Audit-only work made
+no production or test-source change.
 
 ## Candidate roadmap
 
