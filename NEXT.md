@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 588 audit reports confirm one hundred eighty-two findings: tracked CI omits the
+- The first 589 audit reports confirm one hundred eighty-two findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -577,6 +577,10 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   agree with .NET; the audit records tautological hash, boundary/tie,
   parse/format, and shared SR-AUD-021/022 assertion gaps. No new finding or
   source/test change resulted.
+  NotFiniteNumberExceptionTests adds one report under a green 9/9 filter;
+  direct C++/managed evidence confirms `COR_E_NOTFINITENUMBER` (`80131528`)
+  across all six construction routes. No new finding; the audit retains NaN
+  payload/sign, inner identity, null/UTF-8, and real-producer assertion gaps.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
