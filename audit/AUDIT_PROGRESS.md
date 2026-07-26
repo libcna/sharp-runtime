@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 465.
-- Confirmed findings: 135 (thirty-one high, ninety-seven medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 469.
+- Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -674,6 +674,16 @@ misses a late NaN minimum, and UBSan confirms Sum(INT_MAX,1) signed overflow.
 New medium SR-AUD-134 covers callback validation; new high SR-AUD-135 covers
 Sum overflow; SR-AUD-046 and CCF-010/011 now include LINQ. No source/test
 changes. Resume another complete Core.Base header/source/test group after
+inventory review.
+
+Audit checkpoint 2026-07-26 23:59: 469/1748 mirrored reports. Void and
+UnitySerializationHolder plus both complete direct fixtures audited; combined
+singular-suite filter passed 12/12. Local C# rejects ordinary Void construction,
+ToString, and generic use with CS0673, while C++ tests lock in all three. New
+medium SR-AUD-136 records that false generic/value contract; new medium
+SR-AUD-137 records UnitySerializationHolder's replacement of internal
+serialization-only data/signatures with a public raw-code object. No source/
+test changes. Resume another complete Core.Base header/source/test group after
 inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
