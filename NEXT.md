@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 504 audit reports confirm one hundred forty-five findings: tracked CI omits the
+- The first 506 audit reports confirm one hundred forty-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -432,6 +432,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   query/fragment/network-path base-resolution errors, and acceptance of
   malformed IPv6 or invalid UriKind input (SR-AUD-142–145). No production or
   test source changed.
+  UriParser and its complete direct fixture add two reports under a green 14/14
+  filter. Current-.NET and C++ probes confirm that custom-parser registration/
+  participation is absent and protected hooks are public stubs, while
+  IsKnownScheme accepts malformed input instead of throwing (SR-AUD-146–147).
+  No production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
