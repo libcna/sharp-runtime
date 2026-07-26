@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 469.
+- Completed per-file reports: 475.
 - Confirmed findings: 137 (thirty-one high, ninety-nine medium, seven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -685,6 +685,15 @@ SR-AUD-137 records UnitySerializationHolder's replacement of internal
 serialization-only data/signatures with a public raw-code object. No source/
 test changes. Resume another complete Core.Base header/source/test group after
 inventory review.
+
+Audit checkpoint 2026-07-26 23:59:30: 475/1748 mirrored reports. Six complete
+direct exception fixtures (Arithmetic, Overflow, Format, NotImplemented,
+NotSupported, and PlatformNotSupported) audited; their exact suite filter
+passed 36/36. No new production defect is classified: reports record concrete
+HResult, inner-exception, null/UTF-8, and real consumer-route assertion gaps.
+PlatformNotSupported's existing header report was corrected to reflect its
+three-constructor HResult test. No source/test changes. Resume another complete
+Core.Base header/source/test group after inventory review.
 No production or test source changed. Resume the next coherent Core.Base
 metadata/attribute source inventory.
 

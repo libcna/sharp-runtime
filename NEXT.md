@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 469 audit reports confirm one hundred thirty-seven findings: tracked CI omits the
+- The first 475 audit reports confirm one hundred thirty-seven findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -386,6 +386,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   (SR-AUD-136); UnitySerializationHolder exposes an invented raw-code/data
   object instead of .NET's internal serialization-only boundary (SR-AUD-137).
   No production or test source changed.
+  Six complete exception fixture sources (Arithmetic, Overflow, Format,
+  NotImplemented, NotSupported, and PlatformNotSupported) add six reports;
+  their exact 36/36 filter passes. No new production finding is classified,
+  but reports record HResult, inner-cause, null/UTF-8, and real consumer-route
+  assertion gaps; PlatformNotSupported's older header report is corrected to
+  reflect its existing three-constructor HResult coverage. No source or test
+  was changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted

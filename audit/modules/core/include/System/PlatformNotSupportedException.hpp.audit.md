@@ -15,7 +15,7 @@ was confirmed.
 
 ## Other missing assertions and diagnostics
 
-- Tests omit derived HResult, NotSupportedException inheritance, exact default text, stored-inner identity/rethrow, and empty/UTF-8 messages.
+- Tests omit exact default text, stored-inner identity/rethrow, and empty/UTF-8 messages.
 - No reviewed platform-gated API uses this type, so the operational policy for unsupported native/CLR features is untested.
 
 ## Final assessment
