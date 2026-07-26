@@ -6,7 +6,7 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 311.
+- Completed per-file reports: 316.
 - Confirmed findings: 93 (twenty-seven high, sixty medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
@@ -406,6 +406,14 @@ New medium SR-AUD-093: ArrayTypeMismatch inline constructors retain the base
 SystemException HResult (`0x80131501`) instead of .NET's
 `COR_E_ARRAYTYPEMISMATCH` (`0x80131503`). No production or test source
 changed. Resume the next complete Core.Base exception/source inventory.
+`MemberAccessException`, `MethodAccessException`, `MissingMemberException`,
+`MissingFieldException`, and `MissingMethodException` are audited against a
+complete plural/singular 61/61 filter. Their inline constructor chains assign and override the
+documented HResults correctly, and ordinary class/member diagnostic formats
+pass exact assertions. No standalone defect was confirmed; reports preserve
+missing empty/UTF-8 name, stored-inner identity, and native-reflection-boundary
+coverage. No production or test source changed. Resume the next complete
+Core.Base exception/source inventory.
 `Progress<T>` and its dedicated tests are audited. Its focused filter passed
 9/9, but a standalone probe confirms new medium SR-AUD-058: an empty added
 event-style handler is stored and later throws `std::bad_function_call`, unlike
