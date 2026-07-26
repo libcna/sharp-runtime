@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 1,368 (78.3% of eligible scope; 1,319/1,699 runtime-module files).
-- Confirmed findings: 332 (eighty-three high, two hundred thirty-eight medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
+- Completed per-file reports: 1,406 (80.4% of eligible scope; 1,357/1,699 runtime-module files).
+- Confirmed findings: 336 (eighty-four high, two hundred forty-one medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 2 environment-limited validation runs.
 
 ## Initial validation evidence
 
@@ -40,12 +40,12 @@ the full gate during final audit reconciliation.
 
 ## Latest checkpoint
 
-The complete 50-file `Security.Cryptography` shard is mirrored. Its focused
-target passed 80/80. Direct probes confirm SR-AUD-331 and SR-AUD-332: PBKDF2
-inherits a no-op `Dispose`, continuing to derive bytes and retain state, while
-HMAC disposal clears only its direct key and leaves invertible inner/outer pads
-resident. The preceding 43-file `Text.Json` target passed 147/147. Audit-only:
-no production or test source was changed.
+The complete 38-file `Xml.Linq` shard is mirrored. Its focused target passed
+92/92. Direct probes confirm SR-AUD-333 through SR-AUD-336: retained children
+use an ASan-confirmed dangling raw parent; namespace URI identity is lost in
+parse/save; lexical CDATA/comment/PI delimiters corrupt or emit invalid XML;
+and XObject events accept handlers but never notify. Audit-only: no production
+or test source was changed.
 
 ## Resume point
 
