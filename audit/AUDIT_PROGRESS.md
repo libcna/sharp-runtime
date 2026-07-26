@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 377.
-- Confirmed findings: 112 (twenty-eight high, seventy-eight medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 384.
+- Confirmed findings: 113 (twenty-eight high, seventy-nine medium, six low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -556,6 +556,13 @@ that five ArgIterator tests call non-static methods through reinterpreted
 character storage whose object lifetime never began. TypedReference's
 intrinsic/reflection omission remains explicit. No production or test source
 changed. Resume the next coherent Core.Base runtime source inventory.
+`AssemblyLoadEventArgs`, ThreadStatic/STA/MTA marker attributes, and their
+three dedicated fixtures are now audited. The marker filter passes 18/18, but
+medium SR-AUD-113 confirms that ThreadStaticAttribute has no C++ attachment or
+`thread_local` storage mechanism despite claiming per-thread field values.
+Assembly-load string payloads and the STA/MTA no-effect boundary are explicit.
+No production or test source changed. Resume the next coherent Core.Base
+metadata/attribute source inventory.
 
 ## Findings recorded in this pass
 

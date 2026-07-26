@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 377 audit reports confirm one hundred twelve findings: tracked CI omits the
+- The first 384 audit reports confirm one hundred thirteen findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -302,6 +302,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   tests call methods through raw reinterpreted character storage without an
   ArgIterator lifetime (medium SR-AUD-112). TypedReference's intrinsic/
   reflection omission remains explicit. No production or test source changed.
+  `AssemblyLoadEventArgs`, ThreadStatic/STA/MTA marker attributes, and their
+  three dedicated fixtures add seven reports. The marker filter passes 18/18,
+  but ThreadStaticAttribute has no C++ field-attachment or `thread_local`
+  mechanism despite its per-thread-value contract (medium SR-AUD-113).
+  Assembly-load payload and STA/MTA no-effect adaptations are explicit. No
+  production or test source changed.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
