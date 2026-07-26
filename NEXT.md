@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 304 audit reports confirm ninety-two findings: tracked CI omits the
+- The first 311 audit reports confirm ninety-three findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -211,6 +211,11 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `ObjectDisposedException` add no new classified defect under their shared
   124/124 evidence; their audit reports preserve exact message/HResult,
   null-C-string, inner-exception, and state-transition assertion gaps.
+  `ArrayTypeMismatchException`, `FieldAccessException`,
+  `IndexOutOfRangeException`, `OutOfMemoryException`, and
+  `InsufficientMemoryException` are now audited; ArrayTypeMismatch adds medium
+  SR-AUD-093 because every inline constructor inherits `COR_E_SYSTEM` rather
+  than assigning .NET's `COR_E_ARRAYTYPEMISMATCH` value.
   `Progress<T>` adds SR-AUD-058: empty event-style callbacks are accepted then
   later throw `std::bad_function_call`, unlike .NET event null-add behavior.
   FormattableString extends SR-AUD-015: brace replacement reinterprets inserted
