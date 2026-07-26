@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 872 audit reports confirm two hundred fifty-two findings: tracked CI omits the
+- The first 895 audit reports confirm two hundred fifty-five findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -820,6 +820,13 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   coherent. DataAnnotations and PropertyDescriptorCollection remain explicit
   ignored metadata/stub surfaces. Audit-only; no production/test change
   occurred.
+
+- All twenty-three eligible files in `modules/net-network-information` now
+  have mirrored reports. Its target builds and 28/39 tests pass; eleven live
+  interface/ICMP cases are blocked by sandbox permissions. Native/current-.NET
+  probes confirm delayed Ping async validation, sliced failure causes, and
+  fabricated default reply options (SR-AUD-253..255). Audit-only; no
+  production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
   It depends publicly on `Collections.Core`, `Core.Base`, and `Threading`.
