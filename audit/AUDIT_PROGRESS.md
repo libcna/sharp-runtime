@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 781.
-- Confirmed findings: 242 (fifty-six high, one hundred seventy-five medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 794.
+- Confirmed findings: 244 (fifty-six high, one hundred seventy-seven medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1290,6 +1290,13 @@ built and focused integration ZIP fixture passed 38/38. Native/current-.NET
 comparison adds SR-AUD-242: null Stream causes a native Read-mode SIGSEGV and
 is silently retained in Create instead of producing ArgumentNullException. No
 source/test changes. Resume another coherent module shard.
+
+Audit checkpoint 2026-07-27 13:30:00: 794/1748 mirrored reports, 244
+confirmed findings. All thirteen Console files are mirrored and its complete
+fixture passed 123/123. Native/current-.NET comparison adds SR-AUD-243 (invalid
+ConsoleColor is accepted) and SR-AUD-244 (negative cursor positions are stored
+and emitted instead of rejected). No source/test changes. Resume another
+coherent module shard.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,

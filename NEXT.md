@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 781 audit reports confirm two hundred forty-two findings: tracked CI omits the
+- The first 794 audit reports confirm two hundred forty-four findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -780,6 +780,12 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   reports; its library builds and focused ZIP integration passes 38/38. A
   native null `Stream` causes Read-mode SIGSEGV and Create silently drops its
   output instead of throwing `ArgumentNullException` (SR-AUD-242). Audit-only;
+  no production/test change occurred.
+
+- All thirteen eligible files in `modules/console` now have mirrored reports;
+  its complete fixture passes 123/123. Native/current-.NET probes confirm that
+  invalid ConsoleColor values are accepted (SR-AUD-243) and negative cursor
+  positions are stored/emitted rather than rejected (SR-AUD-244). Audit-only;
   no production/test change occurred.
 
 - `Collections.Blocking` owns `BlockingCollection<T>` and its eight tests.
