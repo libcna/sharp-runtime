@@ -26,7 +26,7 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   `Socket::Socket: socket() failed`; this matches the documented requirement
   for local-network permission. The tests remain enabled and need a
   network-permitted final-gate rerun.
-- The first 642 audit reports confirm two hundred eight findings: tracked CI omits the
+- The first 645 audit reports confirm two hundred nine findings: tracked CI omits the
   direct `Collections.Blocking` selective fixture; the boundary validator has
   narrow negative-fixture coverage; `BlockingCollection<T>` has a
   fractional-negative timeout parity gap; the source inventory does not
@@ -54,7 +54,9 @@ Historical session detail belongs in git history and `plan.sqlite3`.
   permits disposal while held, admits readers ahead of queued writers, and
   reflects invalid recursion-policy values unlike .NET; Mutex Close remains
   usable; Semaphore/SemaphoreSlim Release can overflow before their full-count
-  check; and SemaphoreSlim has TSan-confirmed CurrentCount/Dispose races; and the
+  check; SemaphoreSlim/ManualResetEventSlim have TSan-confirmed disposal races;
+  Auto/ManualResetEvent Close remains usable and neither event can take part in
+  local WaitHandle multi-waits; and the
   cryptographic `GetInt32` full signed-domain path reaches
   implementation-defined conversion and signed-overflow-prone arithmetic; and
   the nominal `SynchronizationContext::Send` test has no observable assertion;

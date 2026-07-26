@@ -6,8 +6,8 @@
 - Scope frozen from a clean `feature/work` source checkout; audit artifacts
   are the only expected working-tree changes.
 - Eligible files: 1,748.  Excluded tracked files: 33.
-- Completed per-file reports: 642.
-- Confirmed findings: 208 (forty-four high, one hundred fifty-three medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
+- Completed per-file reports: 645.
+- Confirmed findings: 209 (forty-four high, one hundred fifty-four medium, eleven low).  Open risks: 2 documented-adaptation questions.  Blocked reviews: 1 environment-limited validation run.
 
 ## Initial validation evidence
 
@@ -1124,6 +1124,13 @@ UBSan confirms shared Release signed overflow (SR-AUD-206); TSan confirms two
 SemaphoreSlim public-operation races (SR-AUD-207); C++/managed comparison
 confirms a no-op Mutex Close (SR-AUD-208). No source/test change. Resume the
 remaining Threading source inventory.
+
+Audit checkpoint 2026-07-27 09:40:00: 645/1748 mirrored reports, 209
+confirmed findings. Reset-event focus passed 21/21. C++/.NET probes extend
+no-op Close to Auto/ManualResetEvent (SR-AUD-208); a paired compile probe
+confirms neither event is a local WaitHandle (SR-AUD-209); TSan extends
+disposal-race SR-AUD-207 to ManualResetEventSlim. No source/test change.
+Resume the remaining Threading source inventory.
 
 Audit checkpoint 2026-07-27 08:40:00: 634/1748 mirrored reports, 199
 confirmed findings. CancellationToken, CancellationTokenRegistration,
