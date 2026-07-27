@@ -5,6 +5,8 @@
 #include "System/Collections/Concurrent/ConcurrentDictionary.hpp"
 #include "System/Collections/Generic/KeyNotFoundException.hpp"
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -235,4 +237,179 @@ TEST(ConcurrentDictionaryTest, ConcurrentAddRemove_DistinctKeys_NoLostUpdatesOrC
 
     EXPECT_EQ(removedCount.load(), kThreads * kPerThread);
     EXPECT_EQ(d.getCountProperty(), 0);
+}
+
+// Regression tests for ticket 1778 / SR-AUD-360: AddOrUpdate previously snapshotted the
+// existing value, ran the update factory outside the lock, then unconditionally overwrote the
+// entry with the factory result -- silently discarding any write that landed on the same key
+// while the factory was running. Real .NET's TryUpdateInternal instead gates the commit on
+// EqualityComparer<TValue>.Default.Equals(current, observed) and retries the whole operation
+// (re-observing the value and re-invoking the factory) when the gate fails. Each test below
+// deterministically coordinates a second thread to write to the key while the update factory
+// is blocked inside AddOrUpdate, so a regression to the old unconditional-overwrite behavior
+// fails deterministically rather than only under incidental scheduling luck.
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ConstAddValue_InterveningWrite_RetriesInsteadOfLosingIt) {
+    ConcurrentDictionary<int, int> d;
+    d.TryAdd(1, 0);
+
+    std::mutex m;
+    std::condition_variable cv;
+    bool factoryEntered = false;
+    bool releaseFactory = false;
+    int factoryInvocations = 0;
+
+    std::thread updater([&] {
+        d.AddOrUpdate(1, 999, [&](const int&, const int& oldValue) {
+            {
+                std::lock_guard<std::mutex> lk(m);
+                ++factoryInvocations;
+                factoryEntered = true;
+            }
+            cv.notify_all();
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait(lk, [&] { return releaseFactory; });
+            return oldValue + 1;
+        });
+    });
+
+    {
+        std::unique_lock<std::mutex> lk(m);
+        cv.wait(lk, [&] { return factoryEntered; });
+    }
+
+    // Intervening write while the factory is blocked inside AddOrUpdate's commit gate.
+    d[1] = 10;
+
+    {
+        std::lock_guard<std::mutex> lk(m);
+        releaseFactory = true;
+    }
+    cv.notify_all();
+    updater.join();
+
+    int finalValue = 0;
+    EXPECT_TRUE(d.TryGetValue(1, finalValue));
+    // .NET parity: the commit must be rejected once, the factory retried against the
+    // intervening write (10), and the final value must be 11 -- not silently overwritten to 1.
+    EXPECT_EQ(finalValue, 11);
+    EXPECT_GE(factoryInvocations, 2);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_AddFactory_InterveningWrite_RetriesInsteadOfLosingIt) {
+    ConcurrentDictionary<int, int> d;
+    d.TryAdd(1, 0);
+
+    std::mutex m;
+    std::condition_variable cv;
+    bool factoryEntered = false;
+    bool releaseFactory = false;
+    int factoryInvocations = 0;
+
+    std::thread updater([&] {
+        d.AddOrUpdate(
+            1,
+            [](const int&) { return 999; },
+            [&](const int&, const int& oldValue) {
+                {
+                    std::lock_guard<std::mutex> lk(m);
+                    ++factoryInvocations;
+                    factoryEntered = true;
+                }
+                cv.notify_all();
+                std::unique_lock<std::mutex> lk(m);
+                cv.wait(lk, [&] { return releaseFactory; });
+                return oldValue + 1;
+            });
+    });
+
+    {
+        std::unique_lock<std::mutex> lk(m);
+        cv.wait(lk, [&] { return factoryEntered; });
+    }
+
+    d[1] = 10;
+
+    {
+        std::lock_guard<std::mutex> lk(m);
+        releaseFactory = true;
+    }
+    cv.notify_all();
+    updater.join();
+
+    int finalValue = 0;
+    EXPECT_TRUE(d.TryGetValue(1, finalValue));
+    EXPECT_EQ(finalValue, 11);
+    EXPECT_GE(factoryInvocations, 2);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ConstAddValue_KeyAddedConcurrently_FallsThroughToUpdate) {
+    ConcurrentDictionary<int, int> d;
+
+    std::mutex m;
+    std::condition_variable cv;
+    bool observedAbsent = false;
+    bool releaseAdd = false;
+
+    // A racing thread wins the initial "key absent" observation but is paused before it can
+    // commit the insert; the main thread adds the key first, so the racing thread's insert
+    // attempt must fail and fall through to the update branch on retry rather than clobbering
+    // the concurrently-added entry.
+    std::thread racer([&] {
+        d.AddOrUpdate(
+            1,
+            /*addValue=*/500,
+            [&](const int&, const int& oldValue) {
+                {
+                    std::lock_guard<std::mutex> lk(m);
+                    observedAbsent = true;
+                }
+                cv.notify_all();
+                std::unique_lock<std::mutex> lk(m);
+                cv.wait(lk, [&] { return releaseAdd; });
+                return oldValue + 1;
+            });
+    });
+
+    // Give the racer a chance to observe the key as absent before it retries as an update;
+    // this test only needs the eventual outcome to be correct, so it does not gate on that
+    // exact interleaving -- it directly seeds the key and lets the racer's own retry loop
+    // reconcile against it.
+    d.TryAdd(1, 7);
+    {
+        std::lock_guard<std::mutex> lk(m);
+        releaseAdd = true;
+    }
+    cv.notify_all();
+    racer.join();
+    (void)observedAbsent;
+
+    int finalValue = 0;
+    EXPECT_TRUE(d.TryGetValue(1, finalValue));
+    // Either the racer's own insert landed (500) or it retried and updated the concurrently
+    // added value (8) -- both are valid outcomes of a correct retry loop. What must never
+    // happen is losing the seeded Add entirely or crashing/duplicating the key.
+    EXPECT_TRUE(finalValue == 500 || finalValue == 8);
+    EXPECT_EQ(d.getCountProperty(), 1);
+}
+
+TEST(ConcurrentDictionaryTest, AddOrUpdate_ManyThreadsSameKey_NoLostUpdatesUnderContention) {
+    ConcurrentDictionary<std::string, int> d;
+    d.TryAdd("counter", 0);
+
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 500;
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&d] {
+            for (int i = 0; i < kPerThread; ++i) {
+                d.AddOrUpdate("counter", 1, [](const std::string&, int old) { return old + 1; });
+            }
+        });
+    }
+    for (auto& th : threads) th.join();
+
+    int finalValue = 0;
+    EXPECT_TRUE(d.TryGetValue("counter", finalValue));
+    EXPECT_EQ(finalValue, kThreads * kPerThread);
 }

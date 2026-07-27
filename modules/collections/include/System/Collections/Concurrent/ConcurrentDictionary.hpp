@@ -161,32 +161,39 @@ namespace System::Collections::Concurrent {
          *
          * @note updateFactory is invoked WITHOUT the dictionary's internal lock held (see
          * GetOrAdd's doc-comment for the full rationale -- same contract, same deadlock-avoidance
-         * reason). If another thread mutates the entry between the existence check and the write
-         * back, this last write wins (a simplification of real .NET's compare-and-retry loop,
-         * which requires TValue equality-comparability this port's ConcurrentDictionary doesn't
-         * assume) -- acceptable since the primary correctness requirement (no lock held across
-         * arbitrary user code) is preserved.
+         * reason). If another thread mutates or removes the entry between the observed read and
+         * the write back, the commit is rejected and the whole operation retries against the
+         * newly observed state -- matching real .NET's TryUpdateInternal, which gates the commit
+         * on EqualityComparer&lt;TValue&gt;.Default.Equals(current, observed) before writing.
+         * This requires TValue to support operator==, the same requirement TryUpdate already
+         * carries on this class.
          */
         TValue AddOrUpdate(const TKey& key, const TValue& addValue,
                            std::function<TValue(const TKey&, const TValue&)> updateFactory) {
-            bool exists;
-            TValue current{};
-            {
+            while (true) {
+                bool exists;
+                TValue observed{};
+                {
+                    std::lock_guard<std::mutex> lk(mutex_);
+                    auto it = map_.find(key);
+                    exists = (it != map_.end());
+                    if (exists) observed = it->second;
+                }
+                if (!exists) {
+                    std::lock_guard<std::mutex> lk(mutex_);
+                    auto [it, inserted] = map_.try_emplace(key, addValue);
+                    if (inserted) return addValue;
+                    continue; // another thread added it first; retry as an update
+                }
+                TValue updated = updateFactory(key, observed);
                 std::lock_guard<std::mutex> lk(mutex_);
                 auto it = map_.find(key);
-                exists = (it != map_.end());
-                if (exists) current = it->second;
+                if (it != map_.end() && it->second == observed) {
+                    it->second = updated;
+                    return updated;
+                }
+                // entry changed or was removed underneath us; retry against the new state
             }
-            if (!exists) {
-                std::lock_guard<std::mutex> lk(mutex_);
-                auto it = map_.find(key);
-                if (it == map_.end()) { map_[key] = addValue; return addValue; }
-                current = it->second; // another thread added it first; fall through to update
-            }
-            TValue updated = updateFactory(key, current);
-            std::lock_guard<std::mutex> lk(mutex_);
-            map_[key] = updated;
-            return updated;
         }
 
         /**
@@ -195,29 +202,36 @@ namespace System::Collections::Concurrent {
          * C++ counterpart of .NET ConcurrentDictionary.AddOrUpdate(TKey, Func&lt;TKey,TValue&gt;, Func&lt;TKey,TValue,TValue&gt;).
          *
          * @note Neither addFactory nor updateFactory is invoked with the dictionary's internal
-         * lock held -- see GetOrAdd's doc-comment for the full rationale.
+         * lock held -- see GetOrAdd's doc-comment for the full rationale. Same compare-and-retry
+         * commit gate as the addValue-constant overload above; see its doc-comment.
          */
         TValue AddOrUpdate(const TKey& key, std::function<TValue(const TKey&)> addFactory,
                            std::function<TValue(const TKey&, const TValue&)> updateFactory) {
-            bool exists;
-            TValue current{};
-            {
+            while (true) {
+                bool exists;
+                TValue observed{};
+                {
+                    std::lock_guard<std::mutex> lk(mutex_);
+                    auto it = map_.find(key);
+                    exists = (it != map_.end());
+                    if (exists) observed = it->second;
+                }
+                if (!exists) {
+                    TValue v = addFactory(key);
+                    std::lock_guard<std::mutex> lk(mutex_);
+                    auto [it, inserted] = map_.try_emplace(key, v);
+                    if (inserted) return v;
+                    continue; // another thread added it first; retry as an update
+                }
+                TValue updated = updateFactory(key, observed);
                 std::lock_guard<std::mutex> lk(mutex_);
                 auto it = map_.find(key);
-                exists = (it != map_.end());
-                if (exists) current = it->second;
+                if (it != map_.end() && it->second == observed) {
+                    it->second = updated;
+                    return updated;
+                }
+                // entry changed or was removed underneath us; retry against the new state
             }
-            if (!exists) {
-                TValue v = addFactory(key);
-                std::lock_guard<std::mutex> lk(mutex_);
-                auto it = map_.find(key);
-                if (it == map_.end()) { map_[key] = v; return v; }
-                current = it->second; // another thread added it first; fall through to update
-            }
-            TValue updated = updateFactory(key, current);
-            std::lock_guard<std::mutex> lk(mutex_);
-            map_[key] = updated;
-            return updated;
         }
 
         /** Returns true if the dictionary contains the specified key (thread-safe). */
