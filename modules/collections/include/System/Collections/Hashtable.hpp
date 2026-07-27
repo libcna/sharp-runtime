@@ -8,10 +8,13 @@
 #include <unordered_map>
 #include <vector>
 #include "System/ArgumentException.hpp"
+#include "System/ArgumentNullException.hpp"
 #include "System/InvalidOperationException.hpp"
 #include "System/Collections/DictionaryEntry.hpp"
+#include "System/Collections/ICollection.hpp"
 #include "System/Collections/IDictionary.hpp"
 #include "System/Collections/IDictionaryEnumerator.hpp"
+#include "System/Collections/IEnumerator.hpp"
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 
 namespace System::Collections {
@@ -102,7 +105,12 @@ public:
 
     /**
      * @brief Gets the value associated with the specified key.
-     * C++ counterpart of .NET Hashtable indexer getter (this[object key]).
+     *
+     * C++ counterpart of .NET Hashtable indexer getter (this[object key]), which
+     * begins with ArgumentNullException.ThrowIfNull(key).
+     * @param key Raw key to look up.
+     * @return Pointer to the stored value, or nullptr if the key is absent.
+     * @throws System::ArgumentNullException if @p key is null.
      */
     [[nodiscard]] void* getItem(const void* key) const override {
         auto k = toKey(key);
@@ -113,7 +121,12 @@ public:
 
     /**
      * @brief Sets the value associated with the specified key.
-     * C++ counterpart of .NET Hashtable indexer setter (this[object key] = value).
+     *
+     * C++ counterpart of .NET Hashtable indexer setter (this[object key] = value),
+     * which reaches Insert and its ArgumentNullException.ThrowIfNull(key).
+     * @param key   Raw key to set.
+     * @param value Value to associate with @p key; null stores an empty std::any.
+     * @throws System::ArgumentNullException if @p key is null.
      */
     void setItem(const void* key, void* value) override {
         _map[toKey(key)] = value ? *static_cast<std::any*>(value) : std::any{};
@@ -121,30 +134,54 @@ public:
     }
 
     /**
-     * @brief Gets an ICollection containing the keys of the Hashtable.
+     * @brief Gets a live ICollection view over the keys of the Hashtable.
      *
-     * C++ counterpart of .NET Hashtable.Keys.
-     * @return nullptr. Real .NET returns a live KeyCollection view backed by the hashtable's own
-     *         buckets; building an equivalent live ICollection view here would need its own
-     *         ICollection subclass (Count/CopyTo/GetEnumerator all delegating back to this
-     *         Hashtable) with a defined lifetime/ownership story, which is out of scope for a
-     *         single audit pass. Use getKeys() for a same-instant snapshot of the string keys
-     *         instead.
+     * C++ counterpart of .NET Hashtable.Keys, which returns a KeyCollection whose
+     * Count, SyncRoot, IsSynchronized, GetEnumerator, and CopyTo all delegate to the
+     * owning table, so "any changes to the hash table are reflected in this
+     * collection". The view returned here has the same live behaviour; it holds no
+     * copy of the keys.
+     *
+     * Each view element is the key boxed as std::any(std::string), matching how
+     * DictionaryEntry stores a Hashtable key, so a CopyTo destination slot is read
+     * back with std::any_cast&lt;std::string&gt;.
+     *
+     * @return A heap-allocated ICollection; **the caller takes ownership** and must
+     *         delete it. That is the same convention as
+     *         ListDictionaryInternal::getKeysProperty() and as GetEnumerator()
+     *         throughout this port: .NET can hand back a cached view because the GC
+     *         owns it, whereas this port has no GC, so a returned reference type is
+     *         caller-owned. The view borrows the Hashtable and must not outlive it.
+     * @note Before ticket #1775 this returned nullptr, so an IDictionary consumer
+     *       using the documented view dereferenced null (audit finding SR-AUD-363).
+     *       getKeys() remains available for a detached same-instant snapshot.
      */
-    [[nodiscard]] ICollection* getKeysProperty() const override { return nullptr; }
+    [[nodiscard]] ICollection* getKeysProperty() const override {
+        return new MemberCollection(this, true);
+    }
 
     /**
-     * @brief Gets an ICollection containing the values of the Hashtable.
+     * @brief Gets a live ICollection view over the values of the Hashtable.
      *
-     * C++ counterpart of .NET Hashtable.Values.
-     * @return nullptr — same documented gap as getKeysProperty(); use getValues() for a
-     *         same-instant snapshot instead.
+     * C++ counterpart of .NET Hashtable.Values; same live behaviour, ownership rule,
+     * and SR-AUD-363 history as getKeysProperty(). Each view element is the stored
+     * std::any value itself, so a CopyTo destination slot is read back with
+     * std::any_cast of the value's own type. Use getValues() for a detached
+     * same-instant snapshot.
+     *
+     * @return A heap-allocated ICollection; the caller takes ownership.
      */
-    [[nodiscard]] ICollection* getValuesProperty() const override { return nullptr; }
+    [[nodiscard]] ICollection* getValuesProperty() const override {
+        return new MemberCollection(this, false);
+    }
 
     /**
      * @brief Returns true if the Hashtable contains the specified key.
-     * C++ counterpart of .NET Hashtable.Contains(object).
+     *
+     * C++ counterpart of .NET Hashtable.Contains(object), which forwards to
+     * ContainsKey and its ArgumentNullException.ThrowIfNull(key).
+     * @param key Raw key to locate.
+     * @throws System::ArgumentNullException if @p key is null.
      */
     [[nodiscard]] bool Contains(const void* key) const override {
         return _map.count(toKey(key)) > 0;
@@ -168,8 +205,13 @@ public:
 
     /**
      * @brief Adds an element with the specified key and value.
-     * C++ counterpart of .NET Hashtable.Add(object, object?).
-     * @throws System::ArgumentException if the key already exists.
+     *
+     * C++ counterpart of .NET Hashtable.Add(object, object?), which reaches Insert
+     * and its ArgumentNullException.ThrowIfNull(key).
+     * @param key   Raw key to add.
+     * @param value Value to associate with @p key; null stores an empty std::any.
+     * @throws System::ArgumentNullException if @p key is null.
+     * @throws System::ArgumentException     if the key already exists.
      */
     void Add(const void* key, void* value) override {
         std::string k = toKey(key);
@@ -196,7 +238,12 @@ public:
 
     /**
      * @brief Removes the element with the specified key.
-     * C++ counterpart of .NET Hashtable.Remove(object).
+     *
+     * C++ counterpart of .NET Hashtable.Remove(object), which begins with
+     * ArgumentNullException.ThrowIfNull(key). Removing an absent key is not an
+     * error, matching .NET.
+     * @param key Raw key to remove.
+     * @throws System::ArgumentNullException if @p key is null.
      */
     void Remove(const void* key) override { _map.erase(toKey(key)); ++version_; }
 
@@ -208,9 +255,18 @@ public:
 
     /**
      * @brief Removes the entry with the specified C-string key.
+     *
      * @param key C-string key to remove.
+     * @throws System::ArgumentNullException if @p key is null. Without the check
+     *         the argument reached std::string's null construction, which
+     *         terminates with a std::logic_error that code catching
+     *         System::Exception& cannot see (audit finding SR-AUD-363).
      */
-    void Remove(const char* key) { _map.erase(key); ++version_; }
+    void Remove(const char* key) {
+        if (key == nullptr) throw System::ArgumentNullException("key");
+        _map.erase(key);
+        ++version_;
+    }
 
     /**
      * @brief Returns a reference to the value for the given string key, inserting a default if absent.
@@ -275,7 +331,29 @@ private:
     std::unordered_map<std::string, std::any> _map;
     intcs version_ = 0;
 
+    /**
+     * @brief Single validating conversion site for every raw `const void*` key.
+     *
+     * Every raw-key entry point (getItem, setItem, Contains, Add, Remove) routes
+     * through this one function, so a null key cannot reach the map through any
+     * of them -- the same "validate once, structurally unskippable" shape that
+     * ticket #1771 gave the copy boundary with
+     * detail::requireValidCopyDestination. Matches .NET Hashtable, where
+     * ContainsKey, Remove, and Insert (reached from Add and the indexer setter)
+     * each begin with ArgumentNullException.ThrowIfNull(key).
+     *
+     * Rejecting null also removes an aliasing defect (audit finding
+     * SR-AUD-363): a null key stringified to the address text "0", which is a
+     * perfectly ordinary key for the Add(const std::string&, const std::any&)
+     * overload, so a null raw key and the string key "0" silently named one
+     * entry. No non-null address stringifies to "0", so the two key spaces can
+     * no longer collide.
+     *
+     * @param key Raw key to convert.
+     * @throws System::ArgumentNullException if @p key is null.
+     */
     static std::string toKey(const void* key) {
+        if (key == nullptr) throw System::ArgumentNullException("key");
         return std::to_string(reinterpret_cast<uintptr_t>(key));
     }
 
@@ -334,6 +412,104 @@ private:
         void ensureCurrent() const {
             if (!started_ || !valid_)
                 throw System::InvalidOperationException("Enumeration has either not started or has already finished.");
+        }
+    };
+
+    /**
+     * @brief Live, read-only ICollection view over either the keys or the values.
+     *
+     * C++ counterpart of .NET Hashtable's private KeyCollection/ValueCollection,
+     * merged into one class selected by a flag exactly as
+     * ListDictionaryInternal::MemberCollection already does in this component.
+     * Every member delegates to the owning Hashtable, so the view never holds a
+     * copy and always reports the table's current contents.
+     *
+     * The view is private and only ever escapes as an ICollection*, so it needs no
+     * typed CopyTo overload of its own: getCountProperty() plus the fixed std::any
+     * element type is enough for a getKeysProperty()/getValuesProperty() consumer
+     * to allocate a correct destination, and ICollection::CopyTo validates that
+     * destination once before copyToCore runs (tickets #1771/#1774).
+     */
+    class MemberCollection : public ICollection {
+        const Hashtable* table_;
+        bool keys_; // true: view the keys; false: view the values
+
+        /**
+         * @brief Projects the owning table's IDictionaryEnumerator onto one member.
+         *
+         * Named MemberEnumerator rather than Enumerator so that it cannot be
+         * confused with Hashtable::Enumerator, which it wraps and owns. The
+         * projection keeps the table's fail-fast versioning: MoveNext()/Reset()
+         * throw InvalidOperationException if the table was modified, and Current
+         * throws before the first MoveNext and after the last element.
+         */
+        class MemberEnumerator : public IEnumerator {
+            IDictionaryEnumerator* inner_;
+            bool keys_;
+
+        public:
+            MemberEnumerator(IDictionaryEnumerator* inner, bool keys) : inner_(inner), keys_(keys) {}
+            ~MemberEnumerator() override { delete inner_; }
+
+            MemberEnumerator(const MemberEnumerator&) = delete;
+            MemberEnumerator& operator=(const MemberEnumerator&) = delete;
+
+            bool MoveNext() override { return inner_->MoveNext(); }
+            void Reset() override { inner_->Reset(); }
+
+            /**
+             * @brief Returns the current key (as std::string*) or value (as std::any*).
+             * @throws System::InvalidOperationException before the first MoveNext,
+             *         after the last element, or if the table was modified.
+             */
+            [[nodiscard]] void* getCurrentProperty() const override {
+                return const_cast<void*>(keys_ ? inner_->getKeyProperty()
+                                               : inner_->getValueProperty());
+            }
+        };
+
+    public:
+        /**
+         * @brief Binds a view to a table; the view borrows and must not outlive it.
+         * @param table Owning Hashtable.
+         * @param keys  true for the key view, false for the value view.
+         */
+        MemberCollection(const Hashtable* table, bool keys) : table_(table), keys_(keys) {}
+
+        /** @brief Returns the owning table's current element count. */
+        [[nodiscard]] intcs getCountProperty() const override { return table_->getCountProperty(); }
+
+        /** @brief Mirrors the owning table's synchronization state, as .NET's views do. */
+        [[nodiscard]] bool getIsSynchronizedProperty() const override {
+            return table_->getIsSynchronizedProperty();
+        }
+
+        /** @brief Mirrors the owning table's SyncRoot, as .NET's views do. */
+        [[nodiscard]] const void* getSyncRootProperty() const override {
+            return table_->getSyncRootProperty();
+        }
+
+        /**
+         * @brief Returns a heap-allocated enumerator over the viewed member; caller takes ownership.
+         */
+        [[nodiscard]] IEnumerator* GetEnumerator() override {
+            return new MemberEnumerator(new Hashtable::Enumerator(table_), keys_);
+        }
+
+    protected:
+        /**
+         * @brief Boxes each key or value into the destination ICollection::CopyTo validated.
+         *
+         * Keys are boxed as std::any(std::string) and values are the stored
+         * std::any itself, so both views hand a consumer the same element shape
+         * the table's own DictionaryEntry copy uses.
+         * @param destination Destination validated by ICollection::CopyTo.
+         * @param index       Validated zero-based destination index.
+         */
+        void copyToCore(ObjectSpan destination, intcs index) override {
+            intcs i = index;
+            for (const auto& [k, v] : table_->_map)
+                destination[i++] = keys_ ? std::any(k) : v;
         }
     };
 };

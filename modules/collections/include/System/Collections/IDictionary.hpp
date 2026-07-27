@@ -39,16 +39,29 @@ public:
     /**
      * @brief Gets an ICollection containing the keys of the dictionary.
      *
-     * C++ counterpart of .NET IDictionary.Keys.
-     * @return Pointer to an ICollection of keys; lifetime managed by the concrete dictionary.
+     * C++ counterpart of .NET IDictionary.Keys. The returned collection is a live
+     * view: it reflects later changes to the dictionary rather than snapshotting
+     * the keys.
+     *
+     * @return A non-null, heap-allocated ICollection over the dictionary's keys;
+     *         **the caller takes ownership** and must delete it, and it must not
+     *         outlive the dictionary it views. .NET can return a cached view
+     *         because the GC owns it; this port has no GC, so a returned reference
+     *         type is caller-owned, matching GetEnumerator() throughout the port.
+     *         An implementation must never return nullptr -- doing so turned every
+     *         contract-following consumer into a null dereference (audit finding
+     *         SR-AUD-363, ticket #1775).
      */
     [[nodiscard]] virtual ICollection* getKeysProperty() const = 0;
 
     /**
      * @brief Gets an ICollection containing the values of the dictionary.
      *
-     * C++ counterpart of .NET IDictionary.Values.
-     * @return Pointer to an ICollection of values; lifetime managed by the concrete dictionary.
+     * C++ counterpart of .NET IDictionary.Values; same liveness, ownership, and
+     * non-null requirements as getKeysProperty().
+     *
+     * @return A non-null, heap-allocated ICollection over the dictionary's values;
+     *         the caller takes ownership.
      */
     [[nodiscard]] virtual ICollection* getValuesProperty() const = 0;
 
