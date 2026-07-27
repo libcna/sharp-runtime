@@ -3,7 +3,7 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-argument-null-message`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-copyto-docs`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
@@ -13,8 +13,9 @@ tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
 design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 `ICollection::CopyTo` zero-length-destination correction), #1775
-(`Hashtable` `IDictionary` key/view contracts), and #1776
-(`ArgumentNullException` duplicate parameter suffix) are complete; the
+(`Hashtable` `IDictionary` key/view contracts), #1776
+(`ArgumentNullException` duplicate parameter suffix), and #1777 (typed
+`CopyTo` doc-comment sync) are complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
@@ -24,9 +25,11 @@ Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) restored the
 `Hashtable` `IDictionary` key and view contracts for SR-AUD-363, which is now
 `remediated`. Ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`, P2, size XS) then
 corrected `ArgumentNullException(paramName)` so its `(Parameter 'x')` suffix is
-appended exactly once instead of twice. **No ticket is active.** The remaining
-inactive follow-up is #1777 (four typed `CopyTo` doc-comments cite ticket
-#1771's superseded rule); it is not a new audit identifier. #1771 removed the
+appended exactly once instead of twice. Ticket #1777
+(`REMED-COLL-COPYTO-DOC-SYNC`, P3, size XS) then corrected the four typed
+`CopyTo` doc-comments that still cited ticket #1771's superseded
+null-destination rule so they state the rule ticket #1774 corrected instead.
+**No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
 source- and ABI-breaking release for downstream consumers, which must rebuild.
@@ -413,10 +416,10 @@ new `SR-AUD-*` identifiers, since the audit numbering is frozen at 364:
   they stay correct once #1776 lands.
 - **#1777** (`REMED-COLL-COPYTO-DOC-SYNC`, P3, XS) — the typed
   `CopyTo(std::vector<T>&, intcs)` doc-comments on `Hashtable` (:87),
-  `Queue` (:73), `Stack` (:73), and `ListDictionaryInternal` (:165) still say
+  `Queue` (:73), `Stack` (:73), and `ListDictionaryInternal` (:165) still said
   `@throws ArgumentNullException if destination has no storage`, which ticket
-  #1774 superseded. Documentation only; it does **not** reopen SR-AUD-358 or
-  CCF-020. Remains inactive.
+  #1774 superseded. Documentation only; it did **not** reopen SR-AUD-358 or
+  CCF-020. **Done** — see below.
 
 ### Completed ArgumentNullException message remediation: ticket #1776
 
@@ -479,7 +482,55 @@ This is a pure message-composition fix with no allocation, ownership, or
 string-lifetime change, so a dedicated sanitizer campaign was not run beyond
 the existing focused-suite coverage.
 
-No repair ticket is active. Ticket #1777 remains the only inactive follow-up.
+### Completed CopyTo doc-sync remediation: ticket #1777
+
+**`P3: correct stale typed CopyTo documentation`**
+(`REMED-COLL-COPYTO-DOC-SYNC`, size XS) is **done**, opened and closed
+2026-07-27 on local branch `feature/remediation-copyto-docs`.
+
+Root cause: the typed `CopyTo(std::vector<T>&, intcs)` doc-comments on
+`Hashtable::CopyTo(std::vector<DictionaryEntry>&, intcs)`,
+`Queue::CopyTo(std::vector<void*>&, intcs)`,
+`Stack::CopyTo(std::vector<void*>&, intcs)`, and
+`ListDictionaryInternal::CopyTo(std::vector<DictionaryEntry>&, intcs)` each
+carried `@throws System::ArgumentNullException if @p destination has no
+storage.` — ticket #1771's original rule, superseded by #1774. A repository-wide
+search for the null-destination/zero-length/insufficient-capacity language
+(`CopyTo`, `null destination`, `zero-length destination`, `ObjectSpan`,
+`ArgumentNullException`, and the concrete destination vector types) across
+`modules/`, `docs/`, `README.md`, `NEXT.md`, and `plan.md` confirmed these were
+the only four current public headers with the stale text; `ICollection.hpp`'s
+own `CopyTo(ObjectSpan, intcs)` doc-comment, `docs/ICollectionCopyToDesign.md`
+section 22, `docs/Migration-ICollectionCopyTo.md` §7, and `README.md` were
+already corrected under #1774 and needed no further change. `List<T>::CopyTo`,
+`LinkedList<T>`'s node-handle `ArgumentNullException` documentation, and
+`ImmutableList<T>`'s delegate-null documentation are unrelated APIs that do not
+route through `detail::requireValidCopyDestination` and were left untouched.
+
+Fix: each of the four doc-comments now states the corrected contract —
+`ArgumentOutOfRangeException` for a negative index, `ArgumentException` for a
+destination that cannot hold `getCountProperty()` elements starting at
+`index` (including a non-empty collection copied into a zero-length
+destination), and `ArgumentNullException` only for a null pointer paired with
+a positive length, with a null pointer at zero length called out explicitly as
+a valid empty destination. No implementation, test assertion, signature, or
+behavior changed. SR-AUD-358 and CCF-020 remain `remediated` and were not
+reopened; ticket #1773 remains `blocked`.
+
+Evidence:
+
+- `SharpRuntimeTests_Collections_Core` `--gtest_filter="*CopyTo*"`: 225/225,
+  unchanged; full suite 1,732/1,732, unchanged;
+- `test/consumer/collections_copyto.cpp` recompiled and rerun against only
+  `SharpRuntime::Collections.Core` + `Core.Base`, `-Wall -Wextra -Wpedantic
+  -Werror`: compiles and exits 0;
+- network-permitted `scripts/local_ci_check.sh build`: 13,017/13,017 tests
+  across 37 executables, zero warnings/errors — unchanged, no regression;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, the ten-job selective matrix green, `git diff --check`
+  clean, and Doxygen 1.9.8 at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+No repair ticket is active.
 
 ### Nominal 500-hour first remediation programme
 
@@ -1915,10 +1966,9 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Tickets #1767, #1768, #1769, #1770, #1771, #1774, and #1775 are complete and
-   no ticket is active; preserve their permanent regressions, the two recorded
-   designs, and the retained audit evidence. Inactive follow-up tickets #1776
-   and #1777 are recorded but not started.
+3. Tickets #1767, #1768, #1769, #1770, #1771, #1774, #1775, #1776, and #1777
+   are complete and no ticket is active; preserve their permanent regressions,
+   the two recorded designs, and the retained audit evidence.
 4. The LinkedListNode lifetime contract is recorded in
    `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
    reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp` and

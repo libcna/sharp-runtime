@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,774 rows: 1,772 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, and follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,777 rows: 1,775 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), and ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -388,7 +388,8 @@ clean under ASan + UBSan + LeakSanitizer; Collections.Core 1,732/1,732; a
 Two separate pre-existing defects found during #1775 were recorded as inactive
 tickets rather than folded in: #1776 (`System::ArgumentNullException(paramName)`
 emits its `(Parameter 'x')` suffix twice) and #1777 (four typed `CopyTo`
-doc-comments still describe ticket #1771's superseded null-destination rule).
+doc-comments still described ticket #1771's superseded null-destination rule).
+Both are now done; see below.
 
 **Correction:** the sentence above and #1776's own opening notes described
 neither as a new audit identifier under the frozen SR-AUD-001..364 numbering.
@@ -415,7 +416,28 @@ extended to cover throw/catch through `System::Exception`; and a full
 `scripts/local_ci_check.sh build` gate. No public signature, virtual member,
 or inheritance changed, so this is neither a source nor an ABI break.
 
-Ticket #1777 remains inactive. No repair ticket is active.
+Ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`, P3, size XS), opened and closed
+2026-07-27 on local branch `feature/remediation-copyto-docs`, then corrected
+the four typed `CopyTo(std::vector<T>&, intcs)` doc-comments on `Hashtable`,
+`Queue`, `Stack`, and `ListDictionaryInternal` that still cited #1771's
+superseded rule (`ArgumentNullException` for any null-pointer destination).
+Each now states the rule #1774 corrected: `ArgumentOutOfRangeException` for a
+negative index, `ArgumentException` for insufficient capacity (including a
+non-empty collection into a zero-length destination), and
+`ArgumentNullException` only for a null pointer paired with a positive length.
+A repository-wide search found no other current public header with the stale
+text; `ICollection.hpp`, the design and migration documents, and `README.md`
+were already corrected under #1774. Documentation only — no implementation,
+test assertion, or public signature changed, so this is neither a source nor
+an ABI break; SR-AUD-358 and CCF-020 remain `remediated` and ticket #1773
+remains `blocked`. Evidence: the 225 focused `CopyTo` tests and the full
+1,732-test `Collections.Core` suite are unchanged; the `-Werror` standalone
+`test/consumer/collections_copyto.cpp` consumer fixture recompiles and runs
+successfully; a full `scripts/local_ci_check.sh build` gate passed
+13,017/13,017 tests across 37 executables with zero warnings/errors; and
+Doxygen 1.9.8 stayed at exactly 1,942/1,942 — unchanged, at the ceiling.
+
+No repair ticket is active.
 
 ### P2 — Consumer-driven API breadth
 
