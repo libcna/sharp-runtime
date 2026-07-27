@@ -546,3 +546,76 @@ needed: explicit confirmation that changing
 `ReadOnlyDictionary<K,V>&` to `const ReadOnlyDictionary<K,V>&` may proceed as a
 public API signature change. Depends on nothing else; SR-AUD-359 remains
 `confirmed` until #1780 lands.
+
+## 21. Implementation complete (ticket #1780, 2026-07-27)
+
+The user explicitly approved the public return-type change. Ticket #1780
+(`REMED-COLL-READONLYDICT-EMPTY`) implemented exactly §9-§16 above with no
+redesign: `Empty()`'s return type is `const ReadOnlyDictionary<K, V>&`; its
+doc-comment states the get-only-property parity rationale; no other member,
+constructor, or the class's copy/move assignment operators changed. SR-AUD-359
+is now `remediated`.
+
+Post-fix verification re-ran the design-phase probes directly against the
+real, now-modified production header (not a copy, unlike §2's design-phase
+probes, which necessarily used `ReadOnlyDictionary_fixed.hpp` since production
+source could not change under a design-only ticket):
+
+- `probe4_production_header_rejects_assignment.cpp` fails to compile with the
+  same diagnostic §2 predicted: `error: passing 'const ReadOnlyDictionary<...>'
+  as 'this' argument discards qualifiers [-fpermissive]`.
+- `probe5_production_header_preserves_behavior.cpp`, compiled and run under
+  ASan+UBSan, reports `all-assertions-passed=1`, confirming singleton
+  identity, emptiness, normal construction, `ContainsKey`, indexer access, and
+  independent copy-construction are exactly as behaved before the fix.
+- The original `probe1_mutable_empty.cpp` was re-run against the
+  still-unmodified header immediately before the change, reconfirming
+  `empty-before=0`/`empty-after-assignment=1`/`second-caller-observes=1`/
+  `same-instance=1` one final time as the pre-fix baseline.
+
+§14's test plan was implemented verbatim in
+`ObjectModelTests.cpp::ReadOnlyDictionaryTests`: `Empty_ReturnTypeIsConstReference`
+(a file-scope `static_assert`, not a `TEST`, since GoogleTest cannot assert a
+compile-time property) and `Empty_RemainsEmptyAfterConstructingUnrelatedInstances`
+were added; `Empty_IsEmptyAndCached` was retained verbatim per §6's constraint.
+`SharpRuntimeTests_Collections_ObjectModel` grew from 124/124 to 125/125.
+
+§16's consumer-fixture plan was implemented as two files rather than one, per
+this run's explicit instruction to separate positive and negative evidence:
+`test/consumer/collections_object_model_readonlydictionary.cpp` (positive:
+constructs a `ReadOnlyDictionary`, reads `Empty()`, `static_assert`s the
+`const&` return type, exercises the ordinary read-only accessors; compiles
+`-Wall -Wextra -Wpedantic -Werror` against only `Collections.Core` +
+`Core.Base` and runs successfully) and
+`test/consumer/collections_object_model_readonlydictionary_negative.cpp`
+(negative: the exact hazardous assignment pattern, which fails to compile with
+the same `discards qualifiers` diagnostic through the repository's own
+`test/consumer/CMakeLists.txt` harness).
+
+**ABI investigation (§ required by this run, not anticipated in the original
+§8 compatibility matrix in this much depth):** a direct `nm -C`/`c++filt`
+comparison of `Empty()`'s mangled symbol in
+`build/SharpRuntimeTests_Collections_ObjectModel`, before and after the
+change, shows byte-identical symbol names
+(`_ZN6System11Collections11ObjectModel18ReadOnlyDictionaryI...E5EmptyEv`) —
+only the symbols' load addresses differ, an artifact of the added test code
+shifting layout, not of the signature change. This is expected: the Itanium
+C++ ABI does not encode a function's return type in its mangled name, `Empty()`
+is emitted as a weak/COMDAT symbol (one per translation unit that instantiates
+it, deduplicated by the linker) rather than exported from a shared library,
+and `Collections.Core` is registered as an `INTERFACE` (header-only) CMake
+target with no static or shared archive of its own. Conclusion: **no binary
+symbol break**; the only compatibility impact is source-level, and only for
+the narrow pattern §17 already identified as absent from this repository.
+Because the type is header-only, the practical rebuild recommendation is the
+same as for any header change in a header-only library: any translation unit
+that includes this header must recompile to observe the new compile-time
+protection, but no downstream consumer needs to relink against a changed
+exported symbol to keep working, since none ever existed.
+
+Full validation gate: `scripts/local_ci_check.sh build` passed 13,022/13,022
+tests across 37 executables with zero warnings/errors (was 13,021); module
+boundaries unchanged at 41 modules/90 edges; validator tests 7/7; catalogue
+current; database consistent; the ten-job selective-component matrix green;
+`git diff --check` clean; Doxygen re-measured at exactly 1,942/1,942 —
+unchanged, at the ceiling.

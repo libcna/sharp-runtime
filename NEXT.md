@@ -3,11 +3,11 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-readonlydict-empty-design`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-readonlydict-empty`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 13,021 tests across 37 executables. The repository-wide,
+dependency edges, and 13,022 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
@@ -16,15 +16,16 @@ design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 (`Hashtable` `IDictionary` key/view contracts), #1776
 (`ArgumentNullException` duplicate parameter suffix), #1777 (typed
 `CopyTo` doc-comment sync), #1778 (`ConcurrentDictionary::AddOrUpdate`
-compare-and-retry), and #1779 (`ReadOnlyDictionary::Empty` const-reference
-design) are complete; the
+compare-and-retry), #1779 (`ReadOnlyDictionary::Empty` const-reference
+design), and #1780 (`ReadOnlyDictionary::Empty` const-reference
+implementation) are complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md), the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
 (see its section 22 for the #1774 correction), and the mutable-singleton
 contract in
-[`docs/ReadOnlyDictionaryEmptyDesign.md`](docs/ReadOnlyDictionaryEmptyDesign.md),
-with consumer guidance in
+[`docs/ReadOnlyDictionaryEmptyDesign.md`](docs/ReadOnlyDictionaryEmptyDesign.md)
+(see its section 21 for the #1780 implementation), with consumer guidance in
 [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
 Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) restored the
 `Hashtable` `IDictionary` key and view contracts for SR-AUD-363, which is now
@@ -42,7 +43,10 @@ design-only) then recorded the selected fix for SR-AUD-359 — changing
 `ReadOnlyDictionary<K,V>::Empty()`'s return type from
 `ReadOnlyDictionary<K,V>&` to `const ReadOnlyDictionary<K,V>&` — without
 making the change, since it is a public signature change requiring the same
-explicit approval `ICollection::CopyTo`'s removal needed.
+explicit approval `ICollection::CopyTo`'s removal needed. The user then
+explicitly approved that change, and implementation ticket #1780
+(`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS) landed it, remediating
+SR-AUD-359.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -51,10 +55,12 @@ source- and ABI-breaking release for downstream consumers, which must rebuild.
 with a zero length (e.g. `ObjectSpan{nullptr, 0}` or a default-constructed empty
 `std::vector<std::any>`) is a valid empty destination; only a null pointer
 paired with a positive length is still rejected. This is a behavioral
-relaxation, not a further source or ABI break. Implementation ticket #1780
-(`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS) is inactive and `blocked`
-pending that approval; see the "Completed ReadOnlyDictionary::Empty design"
-section below.
+relaxation, not a further source or ABI break. #1780's `Empty()` return-type
+change is source-breaking only for the exact hazardous explicit-non-`const`-
+reference/assignment pattern (confirmed absent everywhere in this repository)
+and not an ABI break (header-only `INTERFACE` component, byte-identical
+mangled symbol before/after); see the "Completed ReadOnlyDictionary::Empty
+implementation" section below.
 
 **Correction (ticket #1776, 2026-07-27):** the #1775-era notes below and in
 `plan.md`/`audit/AUDIT_FINAL_REPORT.md` describing ticket #1776 as a fresh,
@@ -784,6 +790,79 @@ status vocabulary supports only `confirmed`/`remediated` — no
 left `confirmed` rather than assigned an invented status, but it must not be
 read as an active, un-investigated defect. It is not counted as `remediated`
 and no code changed.
+
+No repair ticket is active.
+
+### Completed ReadOnlyDictionary::Empty implementation: ticket #1780
+
+**`P2: Return Empty() by const reference to close the mutable-singleton
+hazard`** (`REMED-COLL-READONLYDICT-EMPTY`, SR-AUD-359, size XS) is **done**,
+opened and closed 2026-07-27 on local branch
+`feature/remediation-coll-readonlydict-empty`, after the user explicitly
+approved implementing #1779's design as a public API signature change.
+
+`ReadOnlyDictionary<K,V>::Empty()`'s declared return type changed from
+`ReadOnlyDictionary<K, V>&` to `const ReadOnlyDictionary<K, V>&`, exactly as
+#1779 selected — no redesign. No other member, constructor, or the class's
+copy/move assignment operators changed, so ordinary, non-singleton instances
+remain freely assignable exactly as before; no virtual member was added or
+removed (the class has none, so this is not an ABI break in that sense
+either).
+
+Pre-fix reproduction re-ran #1779's own gitignored
+`build-probe-readonlydict/probe1_mutable_empty.cpp` directly against the
+still-unmodified production header immediately before the change, reconfirming
+`empty-before=0`/`empty-after-assignment=1`/`second-caller-observes=1`/
+`same-instance=1`. Post-fix, two new probes were compiled against the real,
+now-modified production header (not a copy, unlike #1779's design-phase
+probes, which necessarily used a modified copy since production source could
+not change under a design-only ticket):
+`probe4_production_header_rejects_assignment.cpp` fails to compile with
+`error: passing 'const ReadOnlyDictionary<...>' as 'this' argument discards
+qualifiers`, and `probe5_production_header_preserves_behavior.cpp` runs clean
+under ASan+UBSan with `all-assertions-passed=1`, confirming singleton
+identity, emptiness, normal construction, `ContainsKey`, indexer access, and
+independent copy-construction are all unaffected.
+
+**ABI investigation:** a direct `nm -C`/`c++filt` comparison of `Empty()`'s
+mangled symbol in `build/SharpRuntimeTests_Collections_ObjectModel`, before
+and after the change, shows byte-identical symbol names — only load addresses
+differ, an artifact of the added test code shifting layout. This is expected:
+the Itanium C++ ABI does not encode a function's return type in its mangled
+name, `Empty()` is emitted as a weak/COMDAT symbol (one per instantiating
+translation unit, deduplicated by the linker), and `Collections.Core` is
+registered as an `INTERFACE` (header-only) CMake target with no static or
+shared archive of its own. Conclusion: no binary symbol break; the only
+compatibility impact is source-level, and only for the exact hazardous
+explicit-non-`const`-reference/assignment pattern, confirmed absent everywhere
+in this repository (§5 of the design document). Because the type is
+header-only, any translation unit that includes this header must recompile to
+gain the new compile-time protection — the ordinary rebuild expectation for
+any header-only library change, not a new risk this ticket introduces.
+
+Closure evidence:
+
+- two new permanent regressions in
+  `ObjectModelTests.cpp::ReadOnlyDictionaryTests`: `Empty_ReturnTypeIsConstReference`
+  (a file-scope `static_assert`, since GoogleTest cannot assert a compile-time
+  property) and `Empty_RemainsEmptyAfterConstructingUnrelatedInstances`, which
+  constructs and copies several unrelated instances and reconfirms `Empty()`
+  stays empty and identity-stable throughout; `Empty_IsEmptyAndCached` is
+  retained verbatim;
+- `SharpRuntimeTests_Collections_ObjectModel` grew from 124/124 to 125/125;
+- a new standalone `Collections.Core` public-header consumer fixture
+  (`test/consumer/collections_object_model_readonlydictionary.cpp`) compiles
+  `-Wall -Wextra -Wpedantic -Werror` and runs successfully, and a companion
+  negative-compile fixture
+  (`test/consumer/collections_object_model_readonlydictionary_negative.cpp`)
+  fails to compile with the same diagnostic through the repository's own
+  `test/consumer/CMakeLists.txt` harness;
+- network-permitted `scripts/local_ci_check.sh build`: 13,022/13,022 tests
+  across 37 executables (was 13,021), zero warnings/errors;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, the ten-job selective matrix green, `git diff --check`
+  clean, and Doxygen 1.9.8 re-measured at exactly 1,942/1,942 — unchanged, at
+  the ceiling.
 
 No repair ticket is active.
 

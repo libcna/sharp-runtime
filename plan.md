@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 13,021 passing tests across 37
+dependency edges, a clean native build, 13,022 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,781 rows: 1,777 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), and ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`) — one `wontfix` (#1772, obsoleted by #1771), two deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep, and #1780, `REMED-COLL-READONLYDICT-EMPTY`, pending public-signature approval), and one deliberately inactive `todo` row (#1781, `REMED-DOCS-DOXYGEN-COUNT-RECONCILE`); no `doing` or `needs_user` rows |
+| `ticket` | 1,781 rows: 1,778 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), and ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and one deliberately inactive `todo` row (#1781, `REMED-DOCS-DOXYGEN-COUNT-RECONCILE`); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -491,7 +491,7 @@ selected. Recorded in
 change `Empty()`'s return type to `const ReadOnlyDictionary<K,V>&`, the
 literal C++ expression of ".NET has no setter." This is a public signature
 change, so per the same approval boundary ticket #1770/#1771 used, it requires
-explicit user approval; implementation is proposed as inactive ticket **#1780**
+explicit user approval; implementation was proposed as inactive ticket **#1780**
 (`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS), `blocked` on that approval. No
 production or test source changed under #1779. Evidence: three repository-local
 ASan/UBSan-clean probes in the gitignored `build-probe-readonlydict/` tree
@@ -503,6 +503,46 @@ existing observable behavior; the existing 17 `ReadOnlyDictionary` regression
 tests rerun unchanged; and a full `scripts/local_ci_check.sh build` gate of
 13,021/13,021 tests across 37 executables, zero warnings/errors (unchanged,
 since no production/test source changed).
+
+Ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS), opened and closed
+2026-07-27 on local branch `feature/remediation-coll-readonlydict-empty`, then
+implemented #1779's design after the user explicitly approved the public
+return-type change, remediating SR-AUD-359: `Empty()`'s declared return type
+changed from `ReadOnlyDictionary<K, V>&` to `const ReadOnlyDictionary<K, V>&`,
+so assignment through its result is now a compile error instead of a silent,
+process-wide rebind of the shared empty singleton's backing map. No other
+member, constructor, or the class's copy/move assignment operators changed, so
+ordinary, non-singleton instances remain freely assignable exactly as before;
+no virtual member was added or removed (the class has none). This is a
+source-breaking change only for the exact hazardous pattern of declaring an
+explicit non-`const` reference to `Empty()`'s result or assigning through
+it — confirmed absent everywhere in this repository — and not an ABI break: a
+direct `nm`/`c++filt` comparison of the mangled `Empty()` symbol before and
+after the change shows byte-identical names (the Itanium C++ ABI does not
+encode a function's return type in its mangled name), and `Collections.Core`
+is a header-only `INTERFACE` CMake target with no exported archive. Evidence:
+pre-fix reproduction re-ran the design phase's own gitignored
+`build-probe-readonlydict/probe1_mutable_empty.cpp` against the
+still-unmodified production header, reconfirming the exact hazard; two new
+post-fix probes compiled directly against the real, now-modified header (not a
+copy) show the hazardous assignment now fails with `error: passing 'const
+ReadOnlyDictionary<...>' as 'this' argument discards qualifiers`, while a
+companion behavior-preservation probe runs clean under ASan+UBSan; two new
+permanent regressions in `ObjectModelTests.cpp::ReadOnlyDictionaryTests` (a
+`static_assert` pinning the exact return type, and
+`Empty_RemainsEmptyAfterConstructingUnrelatedInstances`), with
+`Empty_IsEmptyAndCached` retained verbatim; a new standalone
+`test/consumer/collections_object_model_readonlydictionary.cpp` positive
+fixture compiling `-Werror` and running successfully, plus a companion
+`test/consumer/collections_object_model_readonlydictionary_negative.cpp`
+negative fixture that fails to compile with the same diagnostic through the
+repository's own consumer-fixture harness; `SharpRuntimeTests_Collections_ObjectModel`
+grew from 124/124 to 125/125; and a full `scripts/local_ci_check.sh build` gate
+of 13,022/13,022 tests across 37 executables, zero warnings/errors (was
+13,021). Module boundaries stayed at 41 modules/90 edges; validator tests 7/7;
+catalogue current; database consistent; the ten-job selective-component matrix
+green; `git diff --check` clean; Doxygen re-measured at exactly 1,942/1,942 —
+unchanged, at the ceiling.
 
 While verifying the Doxygen baseline for ticket #1779, an independent
 re-measurement using the repository's own canonical

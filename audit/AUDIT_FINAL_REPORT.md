@@ -8,9 +8,9 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 356 `confirmed` and eight `remediated`
-(SR-AUD-089, SR-AUD-090, SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-360,
-SR-AUD-363, and SR-AUD-364):
+retains all 364 entries while marking 355 `confirmed` and nine `remediated`
+(SR-AUD-089, SR-AUD-090, SR-AUD-356, SR-AUD-357, SR-AUD-358, SR-AUD-359,
+SR-AUD-360, SR-AUD-363, and SR-AUD-364):
 
 | Severity | Count |
 |---|---:|
@@ -376,3 +376,78 @@ correction rather than silently acted on.
 
 Ticket #1778 remains the only new inactive-follow-up-free closure; no separate
 defect was discovered during its implementation.
+
+Design ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`, P2, size S)
+completed a seventh bounded batch on 2026-07-27 on local branch
+`feature/remediation-coll-readonlydict-empty-design` and answered SR-AUD-359
+without changing any production or test source: `ReadOnlyDictionary<K,V>::
+Empty()` returned a non-`const` reference to a process-wide `static`
+singleton, so ordinary assignment through it silently rebound the singleton's
+private backing map for the remainder of the process, matching the finding's
+own `empty-before=0`/`empty-after-assignment=1` reproduction plus two new
+facts: an unrelated second call site observed the contamination, and the
+identical singleton object (not a copy) was confirmed corrupted. Recorded in
+`docs/ReadOnlyDictionaryEmptyDesign.md`: change `Empty()`'s return type to
+`const ReadOnlyDictionary<K, V>&`, the literal C++ expression of .NET's
+get-only `Empty` property, which has no setter. This is a public signature
+change, so per the same approval boundary ticket #1770/#1771 used, implementation
+was proposed as separate, inactive ticket #1780, `blocked` pending explicit
+user approval; SR-AUD-359 stayed `confirmed` at #1779's close.
+
+Implementation ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS)
+completed an eighth bounded batch on 2026-07-27 on local branch
+`feature/remediation-coll-readonlydict-empty`, after the user explicitly
+approved the public return-type change, and remediates SR-AUD-359; the
+findings index now records **355 open findings and nine `remediated`**. The
+original audit evidence in
+`audit/modules/collections/include/System/Collections/ObjectModel/ReadOnlyDictionary.hpp.audit.md`
+remains in place. `Empty()`'s declared return type changed from
+`ReadOnlyDictionary<K, V>&` to `const ReadOnlyDictionary<K, V>&` exactly as
+#1779 designed; no other member, constructor, or the class's copy/move
+assignment operators changed, so ordinary, non-singleton instances remain
+freely assignable. No public signature other than `Empty()`'s return type
+changed and no virtual member was added or removed (the class has none), so
+this is a source-breaking change only for the exact hazardous pattern of
+declaring an explicit non-`const` reference to hold `Empty()`'s result or
+assigning through it -- confirmed absent everywhere in this repository -- and
+not an ABI break: `Collections.Core` is an `INTERFACE` (header-only) CMake
+target with no exported archive, `Empty()` is emitted as a weak/COMDAT inline
+symbol per translation unit, and a direct `nm`/`c++filt` comparison of the
+mangled symbol before and after the change shows byte-identical symbol names
+(the Itanium C++ ABI does not encode a function's return type in its mangled
+name).
+
+Pre-fix reproduction re-ran the design phase's own gitignored
+`build-probe-readonlydict/probe1_mutable_empty.cpp` directly against the
+still-unmodified production header and reconfirmed
+`empty-before=0`/`empty-after-assignment=1`/`second-caller-observes=1`/
+`same-instance=1`. Post-fix, two new probes were compiled against the real,
+now-modified production header (not a copy, unlike #1779's design-phase
+probes): `probe4_production_header_rejects_assignment.cpp` fails to compile
+with `error: passing 'const ReadOnlyDictionary<...>' as 'this' argument
+discards qualifiers`, and `probe5_production_header_preserves_behavior.cpp`
+runs clean under ASan+UBSan with `all-assertions-passed=1`, confirming
+singleton identity, emptiness, normal construction, `ContainsKey`, indexer
+access, and independent copy-construction are all unaffected.
+
+Closure evidence: two new permanent regressions in
+`ObjectModelTests.cpp::ReadOnlyDictionaryTests` -- a `static_assert` pinning
+the exact `const ReadOnlyDictionary<K,V>&` return type and
+`Empty_RemainsEmptyAfterConstructingUnrelatedInstances`, which constructs and
+copies several unrelated instances and reconfirms `Empty()` stays empty and
+identity-stable throughout -- while the existing `Empty_IsEmptyAndCached` case
+is retained verbatim; a new standalone `Collections.Core` public-header
+consumer fixture
+(`test/consumer/collections_object_model_readonlydictionary.cpp`) compiles
+`-Wall -Wextra -Wpedantic -Werror` and runs successfully, and a companion
+negative-compile fixture
+(`test/consumer/collections_object_model_readonlydictionary_negative.cpp`)
+fails to compile with the same `discards qualifiers` diagnostic through the
+repository's own `test/consumer/CMakeLists.txt` harness;
+`SharpRuntimeTests_Collections_ObjectModel` grew from 124/124 to 125/125; and
+`scripts/local_ci_check.sh build` passed 13,022/13,022 tests across 37
+executables with zero build warnings/errors (was 13,021). Module boundaries
+remain 41 modules/90 edges; validator-test (7/7), catalogue, database, the
+ten-job selective-component matrix, and `git diff --check` all pass, and
+Doxygen 1.9.8 stays at exactly 1,942/1,942 -- unchanged, at the ceiling, since
+no touched header gained or lost a documented public member.

@@ -9,7 +9,7 @@
 ## Non-negotiable rules
 
 1. **Zero errors, zero warnings** before any commit. `cmake --build build --parallel 4` must be clean.
-2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 12,991 tests across 36 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
+2. **No test-count regression.** `scripts/run_component_tests.sh build` must show no failures. The verified baseline is 13,022 tests across 36 component executables and one integration executable; this floor should be raised as new tests are added and lowered only with an explicit, documented reason.
 3. **Push only to `feature/work`.** Never push to `develop` or `master`, and never create tags, without explicit per-action user approval.
 4. **SPDX header on every project source/header** — `// SPDX-License-Identifier: MIT` + copyright + .NET attribution. Vendored sources retain their upstream headers; Markdown uses an HTML SPDX comment where one is present.
 5. **Property naming:** always `getXxxProperty()` / `setXxxProperty()`. Exception: indexers
