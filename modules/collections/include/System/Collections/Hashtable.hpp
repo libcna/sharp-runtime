@@ -84,10 +84,13 @@ public:
      * destination carries its own length, so the copy is bounds-checked before the first write.
      * @param destination Destination vector, sized by the caller; never resized here.
      * @param index       Zero-based index at which copying begins.
-     * @throws System::ArgumentNullException       if @p destination has no storage.
      * @throws System::ArgumentOutOfRangeException if @p index is negative.
      * @throws System::ArgumentException           if @p destination cannot hold
-     *         getCountProperty() elements starting at @p index.
+     *         getCountProperty() elements starting at @p index -- including a
+     *         non-empty collection copied into a zero-length destination.
+     * @throws System::ArgumentNullException       if @p destination has a null
+     *         pointer and a positive length -- a null pointer paired with a zero
+     *         length is a valid empty destination.
      */
     void CopyTo(std::vector<DictionaryEntry>& destination, intcs index) {
         detail::requireValidCopyDestination(destination, index, getCountProperty());
