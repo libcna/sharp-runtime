@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
@@ -305,6 +306,36 @@ TEST(ReadOnlyDictionaryTests, Empty_IsEmptyAndCached) {
     auto& empty2 = ReadOnlyDictionary<std::string, int>::Empty();
     EXPECT_EQ(empty1.getCountProperty(), 0);
     EXPECT_EQ(&empty1, &empty2);
+}
+
+// SR-AUD-359 / ticket #1780: Empty() must return a const reference so that
+// ReadOnlyDictionary<K,V>::Empty() = other; is a compile error rather than a
+// silent, process-wide rebind of the shared empty singleton's backing map.
+static_assert(
+    std::is_same_v<
+        decltype(ReadOnlyDictionary<std::string, int>::Empty()),
+        const ReadOnlyDictionary<std::string, int>&>,
+    "ReadOnlyDictionary<K,V>::Empty() must return a const reference");
+
+TEST(ReadOnlyDictionaryTests, Empty_RemainsEmptyAfterConstructingUnrelatedInstances) {
+    using StringIntReadOnlyDictionary = ReadOnlyDictionary<std::string, int>;
+
+    auto& empty = StringIntReadOnlyDictionary::Empty();
+    EXPECT_EQ(empty.getCountProperty(), 0);
+
+    auto m = std::make_shared<std::unordered_map<std::string, int>>();
+    (*m)["a"] = 1;
+    StringIntReadOnlyDictionary nonEmpty(m);
+    EXPECT_EQ(nonEmpty.getCountProperty(), 1);
+
+    StringIntReadOnlyDictionary copyOfEmpty = empty;
+    StringIntReadOnlyDictionary copyOfNonEmpty = nonEmpty;
+    EXPECT_EQ(copyOfEmpty.getCountProperty(), 0);
+    EXPECT_EQ(copyOfNonEmpty.getCountProperty(), 1);
+
+    EXPECT_EQ(empty.getCountProperty(), 0);
+    auto& emptyAgain = StringIntReadOnlyDictionary::Empty();
+    EXPECT_EQ(&empty, &emptyAgain);
 }
 
 // ===========================================================================

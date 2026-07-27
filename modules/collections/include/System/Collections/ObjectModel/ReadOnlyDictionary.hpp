@@ -41,10 +41,13 @@ public:
     /**
      * @brief Gets an empty ReadOnlyDictionary instance.
      *
-     * C++ counterpart of .NET ReadOnlyDictionary<TKey,TValue>.Empty.
-     * @return A reference to a shared, permanently-empty instance.
+     * C++ counterpart of .NET ReadOnlyDictionary<TKey,TValue>.Empty, a get-only
+     * property with no setter. Returning a const reference is the literal C++
+     * expression of that contract: the process-wide singleton cannot be
+     * reassigned through the value this method returns.
+     * @return A const reference to a shared, permanently-empty instance.
      */
-    static ReadOnlyDictionary<K, V>& Empty() {
+    static const ReadOnlyDictionary<K, V>& Empty() {
         static ReadOnlyDictionary<K, V> empty(std::make_shared<std::unordered_map<K, V>>());
         return empty;
     }
