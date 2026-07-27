@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,743 passing tests across 37
+dependency edges, a clean native build, 12,871 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,743 passing across 36 component binaries plus one integration
+- Tests: 12,871 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,772 rows: 1,770 `done` — including audit ticket #1766 and post-audit tickets #1767, #1768, #1769, and #1770 — plus two deliberately inactive `blocked` rows, #1771 and #1772, awaiting approval of the `ICollection::CopyTo` public-API break; no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,773 rows: 1,771 `done` — including audit ticket #1766 and post-audit tickets #1767, #1768, #1769, #1770, and #1771 — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -200,6 +200,22 @@ assertion without an explicit architecture decision.
   element-type corruption. SR-AUD-358 stays `confirmed`; implementation is
   inactive ticket #1771, gated on explicit approval of the narrow public-API
   break.
+- Remediated SR-AUD-358 / CCF-020 under implementation ticket #1771, after the
+  user explicitly approved the public source- and ABI-breaking change.
+  `CopyTo(void*, intcs)` is removed from `System::Collections::ICollection` and
+  replaced by non-virtual, validating `CopyTo(ObjectSpan, intcs)` and
+  `CopyTo(std::vector<std::any>&, intcs)` over one protected pure virtual
+  `copyToCore(ObjectSpan, intcs)` hook, with checked typed
+  `std::vector<void*>` / `std::vector<DictionaryEntry>` overloads on the
+  concrete collections and `using ICollection::CopyTo;` where one is added. No
+  deprecated shim was retained, so a stale call site is a compile error naming
+  the replacement rather than a run-time throw; because a pure virtual member
+  was removed, every consumer must rebuild. 128 permanent regressions across
+  every implementation, a clean ASan/UBSan/LeakSanitizer probe and suite run, a
+  `-Werror` standalone `Collections.Core` consumer fixture, 1,612
+  Collections.Core tests, and the 12,871-test repository gate pass; Doxygen
+  stays at 1,941/1,942. Consumer guidance is in
+  [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -260,7 +276,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,743, most recently through the post-audit remediation regressions.
+to 12,871, most recently through the post-audit remediation regressions.
 
 ## Completed repository audit
 
@@ -287,10 +303,11 @@ approved, bounded tickets.
 ## Candidate roadmap
 
 The audit is complete. Ticket #1767 remediated SR-AUD-356 and SR-AUD-364 /
-CCF-018, and tickets #1768/#1769 remediated SR-AUD-357 / CCF-019. The findings
-index therefore retains 364 original findings while recording 361 as open
-`confirmed` and three as `remediated`. Post-audit remediation is the active
-priority; optional P2 breadth stays behind confirmed safety defects.
+CCF-018, tickets #1768/#1769 remediated SR-AUD-357 / CCF-019, and tickets
+#1770/#1771 remediated SR-AUD-358 / CCF-020. The findings index therefore
+retains 364 original findings while recording 360 as open `confirmed` and four
+as `remediated`. Post-audit remediation is the active priority; optional P2
+breadth stays behind confirmed safety defects.
 
 Design ticket #1768 selected the SR-AUD-357 / CCF-019 `LinkedListNode`
 lifetime contract — independently allocated, reference-counted nodes with an
@@ -306,16 +323,22 @@ production callers of the raw boundary; compared them with the current .NET
 `ICollection.CopyTo(Array, int)` sources; and selected a length-aware, statically
 typed `System::Span<std::any>` destination behind a non-virtual `ICollection`,
 recorded in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md).
-No production change was made, so SR-AUD-358 stays `confirmed` and the index
-still records 361 open findings and three `remediated`.
+No production change was made under #1770, so SR-AUD-358 stayed `confirmed`
+until implementation closed.
 
-The next bounded decision is therefore whether to approve the narrow
-public-API break that the design requires — removing the pure virtual
-`CopyTo(void*, intcs)` from `System::Collections::ICollection`, which
-`plan.md`'s "Requires explicit user direction" list covers. Implementation
-ticket #1771 (`REMED-COLL-COPYTO`, P0, size M) and cleanup ticket #1772
-(`REMED-COLL-COPYTO-CLEANUP`, P2, size XS) are proposed and inactive until that
-approval. Neither may be combined with a concrete-collection symptom patch.
+The user approved the narrow public-API break on 2026-07-27, and implementation
+ticket #1771 (`REMED-COLL-COPYTO`) landed it: the pure virtual
+`CopyTo(void*, intcs)` is removed from `System::Collections::ICollection`, so
+SR-AUD-358 is now `remediated` and the index records 360 open findings and four
+`remediated`. Cleanup ticket #1772 (`REMED-COLL-COPYTO-CLEANUP`) is `wontfix`:
+both of its items had to be completed inside #1771, because the deprecated shim
+it would have deleted was never created and the `Array.hpp` / `Buffer.hpp`
+doc-comments citing `ArrayList::CopyTo(void*, int)` could not be left pointing at
+a member that no longer exists. The only follow-up is inactive ticket #1773
+(`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S), the CNA and mobile-eggbert sweep
+described in [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md);
+neither repository is in this checkout, so nothing is claimed about their current
+usage. No repair ticket is active.
 
 ### P2 — Consumer-driven API breadth
 

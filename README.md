@@ -7,7 +7,7 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-27 is a warning-free build
-with **12,743 passing tests across 37 test executables**.
+with **12,871 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -181,7 +181,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 12,743 tests. |
+| Linux/GCC | Current full component build and all 12,871 tests. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -205,6 +205,50 @@ Sharp Runtime intentionally excludes:
 Hash algorithms, HMAC, PBKDF2, and random-number generation remain in scope.
 Individual APIs can also document smaller, explicit deviations where C++ has
 no safe or useful equivalent.
+
+## Breaking changes
+
+### 2026-07-27 — `System::Collections::ICollection::CopyTo`
+
+`virtual void CopyTo(void* array, intcs index) = 0;` has been **removed** from
+the non-generic `ICollection`. A raw pointer carries no destination element
+type, element count, element size, alignment, or construction state, and the six
+implementations each cast it to a different element type, so no `ICollection*`
+caller could allocate a correct destination. Copying now goes through a
+length-aware, statically typed destination:
+
+```cpp
+// Before
+void* storage = ...;
+collection.CopyTo(storage, index);
+
+// After — interface level
+std::vector<std::any> destination(collection.getCountProperty());
+collection.CopyTo(destination, 0);
+int value = std::any_cast<int>(destination[0]);
+
+// After — concrete typed overloads
+std::vector<void*>          queueDestination(queue.getCountProperty());
+queue.CopyTo(queueDestination, 0);            // also Stack
+std::vector<DictionaryEntry> tableDestination(table.getCountProperty());
+table.CopyTo(tableDestination, 0);            // also ListDictionaryInternal
+std::vector<std::any>        listDestination(list.getCountProperty());
+list.CopyTo(listDestination, 0);              // ArrayList stores std::any already
+```
+
+This is **source-breaking and ABI-breaking**: removing a pure virtual member
+changes the vtable of `ICollection`, `IList`, and `IDictionary`, so **all C++
+consumers must be rebuilt**. No deprecated compatibility overload was retained —
+one that only threw would let stale call sites compile and fail at run time,
+whereas removal turns each into a compile error that names the replacement, so
+callers should migrate by following the compiler's `note: candidate:` lines.
+
+Full guidance, including how to migrate a class that implemented the interface
+and what each collection puts in a destination slot, is in
+[docs/Migration-ICollectionCopyTo.md](docs/Migration-ICollectionCopyTo.md).
+Downstream consumers such as CNA and mobile-eggbert are outside this repository
+and have not been checked; §9 of that document lists what each of them needs to
+do.
 
 ## Planning and implementation status
 

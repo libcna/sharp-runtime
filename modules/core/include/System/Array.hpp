@@ -114,9 +114,12 @@ namespace System {
          *
          * @note Unlike the std::vector<T> overloads above, this cannot validate bounds -- a raw
          * pointer carries no length information for either side, matching the same structural
-         * limitation as other raw-pointer buffer methods across this codebase (e.g.
-         * ArrayList::CopyTo(void*, int)). The caller is responsible for ensuring both buffers
-         * are large enough.
+         * limitation as the other raw-pointer buffer methods across this codebase (e.g.
+         * Buffer::BlockCopy(const void*, ...)). The caller is responsible for ensuring both
+         * buffers are large enough. The former ArrayList::CopyTo(void*, int) precedent is
+         * deliberately no longer cited: ticket #1771 removed that raw collection boundary in
+         * favour of the length-aware System::Collections::ObjectSpan destination, so it is no
+         * longer an example of an accepted limitation.
          */
         template<typename T>
         static void Copy(const T* src, intcs srcIndex, T* dst, intcs dstIndex, intcs length) {

@@ -43,6 +43,32 @@ database, selective-component, and diff checks pass, and Doxygen stays at
 1,941/1,942 with no new warning from the touched headers. CCF-019's JsonNode
 (SR-AUD-327) and XML LINQ (SR-AUD-333) members remain open by design.
 
+Design ticket #1770 and implementation ticket #1771 then remediated SR-AUD-358
+(CCF-020, raw `ICollection::CopyTo`) on 2026-07-27. #1770 changed no source; it
+recorded the contract in `docs/ICollectionCopyToDesign.md` and established by
+direct probe that the six implementations disagreed on the destination element
+type (`std::any*`/`void**`/`DictionaryEntry*`, sizes 16/8/32) and that an
+element-type mismatch through the interface produced no crash at all, only a
+LeakSanitizer-confirmed 32-byte leak. #1771 landed the approved public source-
+and ABI-breaking change: `virtual void CopyTo(void*, intcs) = 0` is removed from
+`ICollection` in favour of non-virtual, validating `CopyTo(ObjectSpan, intcs)` /
+`CopyTo(std::vector<std::any>&, intcs)` over one protected pure virtual
+`copyToCore(ObjectSpan, intcs)` hook, plus checked typed
+`std::vector<void*>` / `std::vector<DictionaryEntry>` overloads on the concrete
+collections. No deprecated shim was retained, so a stale call site is a compile
+error naming the replacement rather than a run-time throw; every consumer must
+rebuild against the changed vtable, per `docs/Migration-ICollectionCopyTo.md`.
+Permanent regressions pass 128/128 across every `ICollection` implementation
+(and 128/128 again under ASan + UBSan + LeakSanitizer), Collections.Core passes
+1,612/1,612, the standalone `Collections.Core` public-header consumer fixture
+compiles with `-Werror` and runs successfully, the replacement
+ASan/UBSan/LeakSanitizer probe reports `failures=0` with no diagnostic and no
+leak on the four previously unsafe scenarios, and the old raw calls now yield
+four captured `no matching function` compile errors. The full repository gate
+passes 12,871/12,871 tests across 37 executables with zero warnings/errors.
+Module boundaries remain 41/90; validator-test, catalogue, database,
+selective-component, and diff checks pass, and Doxygen stays at 1,941/1,942.
+
 ## Initial validation evidence
 
 `git diff --check` passed. `scripts/local_ci_check.sh build` reached the test

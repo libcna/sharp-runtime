@@ -54,6 +54,65 @@ inactive: removing a pure virtual member from a public interface is a
 compatibility-breaking public-header change and needs explicit user approval
 first.
 
+## Post-audit remediation note for SR-AUD-358 (ticket #1771, 2026-07-27)
+
+**Status: REMEDIATED.** The original audit evidence and the design note above
+are retained unchanged; this section records what closed the finding.
+
+The user approved the public source- and ABI-breaking change on 2026-07-27, and
+ticket #1771 landed it. `virtual void CopyTo(void* array, intcs index) = 0;` is
+removed from `ICollection`. The boundary is now
+
+```cpp
+using ObjectSpan = System::Span<std::any>;
+
+class ICollection : public IEnumerable {
+public:
+    void CopyTo(ObjectSpan destination, intcs index);             // validating, non-virtual
+    void CopyTo(std::vector<std::any>& destination, intcs index); // convenience, non-virtual
+protected:
+    virtual void copyToCore(ObjectSpan destination, intcs index) = 0;
+};
+```
+
+`detail::requireValidCopyDestination` is the single validation site for all six
+implementations and for the typed concrete overloads, so the "five independent
+bounds omissions" reading of the finding is structurally impossible now: an
+implementation cannot be reached without it. Null destination →
+`ArgumentNullException`; negative index → `ArgumentOutOfRangeException`
+("Non-negative number required."); index past the end or insufficient remaining
+capacity → `ArgumentException`, tested as `length - index < count` so a large
+index cannot overflow past the check. Validation precedes the copy, so a rejected
+call performs no partial write.
+
+The approved decision differs from the design record in one respect, recorded in
+section 21 of `docs/ICollectionCopyToDesign.md`: the deprecated, never-writing
+`CopyTo(void*, intcs)` shim was **not** retained. A shim would have let a stale
+call site compile and fail at run time, whereas removal makes every one a compile
+error naming the replacement.
+
+Evidence that the finding is closed:
+
+- The four scenarios of the original probe no longer compile at all — the same
+  source now yields four `error: no matching function for call to
+  '...CopyTo(<raw pointer>, int)'` diagnostics, each followed by `note:
+  candidate:` lines for the two surviving overloads
+  (`build-probe-copyto/probe5_removed_api.log`).
+- The replacement probe (`build-probe-copyto/probe8_new_boundary.cpp`, 13
+  assertions) runs the same scenarios against the new API under
+  `-fsanitize=address,undefined` with LeakSanitizer active: every one throws the
+  documented exception, `failures=0`, exit 0, **no sanitizer diagnostic and no
+  leak** — including the element-type-mismatch case that previously leaked 32
+  bytes silently, whose unsafe form is no longer expressible.
+- The permanent suite
+  `modules/collections/tests/System/Collections/CopyToBoundaryTests.cpp` adds the
+  128 tests the "Missing assertions and diagnostics" section asked for: null,
+  negative, past-end, undersized, overflow-index, zero-length, and no-partial-write
+  cases run through *every* `ICollection` implementation, including both private
+  `MemberCollection` views. It also passes 128/128 under ASan + UBSan + LSan.
+- `SharpRuntimeTests_Collections_Core` 1,612/1,612; repository total 12,871 across
+  37 executables (floor was 12,743).
+
 ## Final assessment
 
 AUDITED. The confirmed finding(s) above have reproducible evidence and a focused remediation target.

@@ -6,15 +6,19 @@
 *Last verified: 2026-07-27. Branch: `feature/remediation-coll-copyto`. The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 12,743 tests across 37 executables. The repository-wide,
+dependency edges, and 12,871 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
-#1769 (LinkedListNode lifetime implementation), and #1770 (raw `ICollection::CopyTo`
-design) are complete; the node contract is recorded in
+#1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
+design), and #1771 (raw `ICollection::CopyTo` implementation) are complete; the
+node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
-boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md).
-No ticket is active. The next step needs a decision, not code: implementation
-ticket #1771 is blocked on explicit approval of a narrow public-API break.*
+boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md),
+with consumer guidance in
+[`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
+No ticket is active. #1771 removed the pure virtual `CopyTo(void*, intcs)` from
+`System::Collections::ICollection` under explicit user approval, so this is a
+source- and ABI-breaking release for downstream consumers, which must rebuild.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -32,8 +36,8 @@ handoff text below.
 
 - The configured native build completed successfully with no compiler
   diagnostics.
-- The build currently exposes 12,743 GoogleTest cases across 37 executables.
-  `SharpRuntimeTests_Collections_Core` passed 1,484/1,484 after ticket #1769.
+- The build currently exposes 12,871 GoogleTest cases across 37 executables.
+  `SharpRuntimeTests_Collections_Core` passed 1,612/1,612 after ticket #1771.
 - Database consistency, component-boundary validation (41 physical modules,
   90 production dependency edges), generated-catalogue freshness, and
   `git diff --check` passed.
@@ -41,11 +45,14 @@ handoff text below.
   such as `audit/.github/` are included. The findings index contains every
   identifier from SR-AUD-001 through SR-AUD-364 exactly once, with no duplicate
   or missing identifier, and every referenced report path exists.
-- The open inventory is 361 findings: 89 high, 261 medium, and 11 low.
-  SR-AUD-356, SR-AUD-357, and SR-AUD-364 are the three remediated findings.
-- Ticket #1769's network-permitted `scripts/local_ci_check.sh build` run is the
-  latest complete repository gate: 12,743/12,743 tests across 37 executables,
-  including the six local-server `Net.Http` cases, with zero warnings/errors.
+- The open inventory is 360 findings: 88 high, 261 medium, and 11 low.
+  SR-AUD-356, SR-AUD-357, SR-AUD-358, and SR-AUD-364 are the four remediated
+  findings.
+- Ticket #1771's repository gate is the latest complete one: a warning-free full
+  build and 12,871/12,871 tests across 37 executables. The last
+  network-permitted `scripts/local_ci_check.sh build` run, which additionally
+  exercised the six local-server `Net.Http` cases, was ticket #1769's
+  12,743/12,743.
 - The worktree was clean after the checks. No ticket or production change was
   created by the planning review.
 
@@ -138,8 +145,8 @@ members stay open by design. Closure evidence:
 all twenty required decisions against the local current-.NET `ICollection.cs`,
 `ArrayList.cs`, `Queue.cs`, `Stack.cs`, `Hashtable.cs`,
 `ListDictionaryInternal.cs`, `Array.cs`, and `Strings.resx` sources rather than
-from memory, and no production or test source changed under it. SR-AUD-358 stays
-`confirmed`; the index still records 361 open findings and three `remediated`.
+from memory, and no production or test source changed under it. SR-AUD-358 stayed
+`confirmed` until implementation ticket #1771 closed it (see below).
 
 Two facts beyond the audit summary were established by direct probe:
 
@@ -176,13 +183,64 @@ still unsafe; the eight affected public headers compile standalone against
 `Collections.Core` + `Core.Base`; and a retained `[[deprecated]]` overload is a
 compile error under the repository's own `-Werror` policy.
 
-**Blocked, not started.** Implementation ticket **#1771**
-(`REMED-COLL-COPYTO`, P0, size M) and cleanup ticket **#1772**
-(`REMED-COLL-COPYTO-CLEANUP`, P2, size XS) are proposed and inactive. #1771
-removes a pure virtual member from a public interface, which `plan.md` lists
-under "Requires explicit user direction". **Obtain that approval before starting
-it.** Do not claim the finding closed after checking only one concrete
-collection.
+### Completed raw-CopyTo implementation: ticket #1771
+
+**Approved and done.** The user explicitly approved the public source- and
+ABI-breaking change on 2026-07-27, including the instruction **not** to retain a
+compatibility overload, so implementation ticket **#1771**
+(`REMED-COLL-COPYTO`, P0, size M) landed the boundary. SR-AUD-358 is now
+`remediated` and CCF-020 is closed; the index records 360 open findings and four
+`remediated`.
+
+`virtual void CopyTo(void* array, intcs index) = 0;` is **removed** from
+`System::Collections::ICollection`. The public surface is now non-virtual
+`CopyTo(ObjectSpan, intcs)` and `CopyTo(std::vector<std::any>&, intcs)` over one
+protected pure virtual `copyToCore(ObjectSpan, intcs)` hook, with
+`detail::requireValidCopyDestination` as the single validation site shared by
+every implementation and by the typed `std::vector<void*>` /
+`std::vector<DictionaryEntry>` overloads on `Queue`/`Stack` and
+`Hashtable`/`ListDictionaryInternal`. `Hashtable`'s `getCountProperty()` and copy
+index moved from `int` to `intcs`.
+
+One decision in the design record was superseded by the approval and is recorded
+in section 21 of the design document: the deprecated, never-writing
+`CopyTo(void*, intcs)` shim was **not** retained. A shim would let stale
+downstream code compile and fail at run time, whereas removal makes each call a
+compile error naming the replacement. **This is an ABI break** — a pure virtual
+member left the interface, so every `ICollection`/`IList`/`IDictionary` vtable
+changed and all C++ consumers must be rebuilt in full. Consumer guidance is in
+[`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md) and
+summarised in `README.md`'s "Breaking changes" section.
+
+Closure evidence:
+
+- 128 permanent regressions in `CopyToBoundaryTests.cpp`, parameterised over
+  every `ICollection` implementation including both private `MemberCollection`
+  views, plus compile-time `AcceptsDestination` assertions proving no overload
+  accepts a raw pointer or a wrongly typed vector;
+- the same 128 tests pass under ASan + UBSan + LeakSanitizer;
+- the replacement probe `build-probe-copyto/probe8_new_boundary.cpp` runs the
+  four originally unsafe scenarios plus non-trivial-value, heterogeneous, and
+  100,000-element cases with `failures=0`, no sanitizer diagnostic, and no leak;
+- the old probe's raw calls now produce four captured `no matching function`
+  compile errors naming the replacements
+  (`build-probe-copyto/probe5_removed_api.log`);
+- `SharpRuntimeTests_Collections_Core` 1,612/1,612; full gate 12,871/12,871
+  across 37 executables with zero warnings/errors;
+- a `-Werror` standalone `Collections.Core` consumer fixture
+  (`test/consumer/collections_copyto.cpp`) that compiles and runs successfully;
+- boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
+  database consistent, selective matrix green, `git diff --check` clean, Doxygen
+  1,941/1,942.
+
+Follow-ups: cleanup ticket **#1772** (`REMED-COLL-COPYTO-CLEANUP`) is `wontfix`
+because both of its items were necessarily completed inside #1771 — the shim it
+would have deleted was never created, and the `Array.hpp` / `Buffer.hpp`
+doc-comments citing `ArrayList::CopyTo(void*, int)` could not be left citing a
+removed member. New ticket **#1773** (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S)
+is **inactive**: it requires the CNA and mobile-eggbert `CopyTo` sweep and full
+rebuild described in `docs/Migration-ICollectionCopyTo.md` §9. Neither repository
+is in this checkout, so nothing is asserted about their current usage.
 
 ### Nominal 500-hour first remediation programme
 
@@ -195,7 +253,7 @@ documentation, and normal focused/component validation:
 |---|---|---:|
 | Planning truth and ticket setup | Synchronize baselines/phase/branch policy, repair twelve broken anchors, identify the two open questions, add severity/effort rules, and seed the bounded queue | 20 |
 | LinkedListNode lifetime | Design plus compatible implementation for SR-AUD-357 / CCF-019 | 40 |
-| Raw ICollection output boundary | ADR, consumer inventory, compile fixtures, and compatible prototype for SR-AUD-358 / CCF-020; no unapproved API break. **Design half delivered by ticket #1770**; the implementation half (#1771) is blocked on approving the narrow public-API break | 20 |
+| Raw ICollection output boundary | ADR, consumer inventory, compile fixtures, and implementation for SR-AUD-358 / CCF-020. **Delivered in full**: design ticket #1770 plus implementation ticket #1771, which landed the user-approved source/ABI break | 20 |
 | Eight immediate public-input crash tickets | SR-AUD-089, SR-AUD-097, SR-AUD-132, SR-AUD-236, SR-AUD-242, SR-AUD-257, SR-AUD-338, and SR-AUD-341 | 80 |
 | Seven bounds/copy safety tickets | SR-AUD-041, SR-AUD-043, SR-AUD-044, SR-AUD-047, SR-AUD-049, SR-AUD-051, SR-AUD-054, SR-AUD-067, SR-AUD-071 through SR-AUD-073, SR-AUD-078, and SR-AUD-084, grouped only by demonstrated shared contract | 90 |
 | Six defined-arithmetic tickets | SR-AUD-008, SR-AUD-019, SR-AUD-020, SR-AUD-025 through SR-AUD-027, SR-AUD-057, SR-AUD-060, SR-AUD-131, and SR-AUD-135 | 70 |
@@ -207,9 +265,8 @@ documentation, and normal focused/component validation:
 Treat the hours as a capacity boundary with roughly +/-30% uncertainty, not a
 promise to batch unrelated findings until the allocation is consumed. Recheck
 the remaining estimate after every five completed tickets. The nominal tranche
-can reasonably close roughly 40-50 high findings; SR-AUD-358 is design-complete
-under ticket #1770 but remains open until implementation ticket #1771 is
-approved and passes closure.
+can reasonably close roughly 40-50 high findings; SR-AUD-358 is closed by
+tickets #1770 and #1771 and is one of the four `remediated` findings.
 
 The preliminary whole-backlog estimate is 1,600-2,400 engineering hours:
 after the first 500-hour tranche, roughly forty high findings and essentially
@@ -233,9 +290,10 @@ presented as complete remediation of all 362 open findings.
   on `feature/remediation-coll-linked-node`. Design-only ticket #1770 then
   recorded the SR-AUD-358 / CCF-020 raw-`CopyTo` contract in
   `docs/ICollectionCopyToDesign.md` on `feature/remediation-coll-copyto`,
-  changing no production or test source. SR-AUD-358 stays `confirmed`; no repair
-  ticket is active, and implementation ticket #1771 is blocked on approving the
-  narrow public-API break it requires.
+  changing no production or test source. Implementation ticket #1771 then landed
+  the user-approved source/ABI break on the same branch: the pure virtual
+  `CopyTo(void*, intcs)` is removed from `ICollection`. SR-AUD-358 is
+  `remediated` and no repair ticket is active.
 - Initial audit validation passed boundary validation, catalogue freshness, and
   a zero-warning native build. It could not complete the full suite in this
   sandbox because the six local-server `Net.Http` cases fail immediately with
@@ -247,8 +305,8 @@ presented as complete remediation of all 362 open findings.
   `gmake -C build -j4`; plan-database consistency, module-boundary validation
   (41 physical modules, 90 production edges), and `git diff --check` passed.
 - All 1,748 audit reports are complete and confirmed three hundred sixty-four
-  findings at audit closure. The index now records 361 open `confirmed`
-  findings and three `remediated` findings. The final
+  findings at audit closure. The index now records 360 open `confirmed`
+  findings and four `remediated` findings. The final
   142-file `Collections` shard passed 1,422/1,422 focused tests and adds SR-AUD-356 through
   SR-AUD-364: invalid enumerator Current paths can reach ASan-confirmed out-of-bounds reads;
   retained LinkedListNode handles use freed storage; raw ICollection CopyTo can ASan-crash;
@@ -1236,10 +1294,11 @@ presented as complete remediation of all 362 open findings.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,772 ticket rows: 1,770 completed, including closed audit ticket #1766 and
-post-audit tickets #1767, #1768, #1769, and #1770, plus two deliberately
-inactive `blocked` rows (#1771, #1772) awaiting approval of the
-`ICollection::CopyTo` public-API break. No ticket is active. Ticket #1737 records the
+1,773 ticket rows: 1,771 completed, including closed audit ticket #1766 and
+post-audit tickets #1767, #1768, #1769, #1770, and #1771, one `wontfix` row
+(#1772, obsoleted by #1771), and one deliberately inactive `blocked` row
+(#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep). No ticket is
+active. Ticket #1737 records the
 completed P0 split, tickets
 #1738/#1739 the MemoryStream and generic-continuation repairs, ticket #1740 the
 XML whitespace repair, #1741 the completed cross-build revalidation and
@@ -1487,17 +1546,17 @@ one reproduction changes shape.
      and XML LINQ instances, but they remain separate repair tickets
      unless a deliberately shared lifetime abstraction is introduced and its
      public compatibility is reviewed.
-   - SR-AUD-358 / CCF-020 was a design-first item and its design is now
-     complete.  Design ticket #1770 (`REMED-COLL-COPYTO-DESIGN`) recorded the
-     selected boundary in `docs/ICollectionCopyToDesign.md`: a length-aware,
-     statically typed `System::Span<std::any>` destination behind a non-virtual
-     `ICollection`, with one protected `copyToCore` hook per implementation and
-     typed `std::vector` overloads on the concrete collections.  Implementation
-     ticket #1771 (`REMED-COLL-COPYTO`, P0, size M) and cleanup ticket #1772
-     (`REMED-COLL-COPYTO-CLEANUP`, P2, size XS) are proposed and inactive;
-     #1771 must not start before the narrow public-API break it needs is
-     explicitly approved.  Do not paper over the finding with one concrete
-     collection check or a silent public-API break.
+   - SR-AUD-358 / CCF-020 was a design-first item and is now closed.  Design
+     ticket #1770 (`REMED-COLL-COPYTO-DESIGN`) recorded the selected boundary in
+     `docs/ICollectionCopyToDesign.md`: a length-aware, statically typed
+     `System::Span<std::any>` destination behind a non-virtual `ICollection`,
+     with one protected `copyToCore` hook per implementation and typed
+     `std::vector` overloads on the concrete collections.  Implementation ticket
+     #1771 (`REMED-COLL-COPYTO`, P0, size M) landed it after the user explicitly
+     approved the source/ABI break, including the instruction not to retain a
+     compatibility overload; cleanup ticket #1772 is `wontfix` because its work
+     had to happen inside #1771.  Do not reopen the finding or re-litigate the
+     removal.
    - Then take SR-AUD-359 through SR-AUD-363 as small semantic/concurrency
      tickets after the lifetime and raw-output decisions have a stable
      contract.  They are not substitutes for the three safety boundaries.
@@ -1604,9 +1663,9 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Tickets #1767, #1768, #1769, and #1770 are complete and no ticket is active;
-   preserve their permanent regressions, the two recorded designs, and the
-   retained audit evidence.
+3. Tickets #1767, #1768, #1769, #1770, and #1771 are complete and no ticket is
+   active; preserve their permanent regressions, the two recorded designs, and
+   the retained audit evidence.
 4. The LinkedListNode lifetime contract is recorded in
    `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
    reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp` and
@@ -1616,18 +1675,26 @@ HTTP, socket, and ping tests require permission for local network operations.
    reproducible from section 9 of the design record, not from a tracked file.
 5. The SR-AUD-358 / CCF-020 `ICollection::CopyTo` boundary is recorded in
    `docs/ICollectionCopyToDesign.md` by completed design ticket #1770
-   (`REMED-COLL-COPYTO-DESIGN`, P0, size S). Do not redesign it and do not
-   reopen the inventory: all six implementations, three test call sites, zero
-   production callers, the .NET reference behaviour, six alternatives, the
-   exception matrix, and seven probes are already recorded there. The probes
-   lived in the gitignored `build-probe-copyto/` directory and are reproducible
-   from section 17 of the design record, not from a tracked file.
-6. **Next recommended ticket, documented but not started:** implementation
-   ticket #1771 (`REMED-COLL-COPYTO`, P0, size M), scoped by sections 9, 10,
-   13, 14, 15, and 16 of the design record. **It is blocked**: it removes a pure
-   virtual member from a public interface, which `plan.md` lists under
-   "Requires explicit user direction". Obtain that approval first. Cleanup
-   ticket #1772 (`REMED-COLL-COPYTO-CLEANUP`, P2, size XS) follows #1771 and
-   deletes the deprecated shim plus the `Array.hpp`/`Buffer.hpp` doc-comments
-   that cite it. Do not combine either with LinkedListNode work or a
-   concrete-collection symptom patch.
+   (`REMED-COLL-COPYTO-DESIGN`, P0, size S) and implemented by ticket #1771;
+   section 21 of that document is the implementation closure, including the one
+   approved deviation (no deprecated shim) and the ABI consequences. Do not
+   redesign it and do not reopen the inventory: all six implementations, three
+   test call sites, zero production callers, the .NET reference behaviour, six
+   alternatives, the exception matrix, and the probes are already recorded there.
+   The probes lived in the gitignored `build-probe-copyto/` directory and are
+   reproducible from sections 17 and 21, not from a tracked file.
+6. Implementation ticket #1771 (`REMED-COLL-COPYTO`, P0, size M) is **done**.
+   It removed the pure virtual `CopyTo(void*, intcs)` from `ICollection` under
+   explicit user approval of the source- and ABI-breaking change, with no
+   retained compatibility overload. Do not reintroduce one, do not reopen
+   SR-AUD-358, and keep `CopyToBoundaryTests.cpp` and
+   `test/consumer/collections_copyto.cpp` in place: those 128 permanent
+   regressions plus the compile-time `AcceptsDestination` assertions are the
+   durable replacement for the probes, which live in the gitignored
+   `build-probe-copyto/` directory and are reproducible from sections 17 and 21
+   of the design record. Cleanup ticket #1772 is `wontfix` (its work happened
+   inside #1771). The only open follow-up is inactive ticket #1773
+   (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S): sweep CNA and mobile-eggbert
+   for `CopyTo` calls and rebuild them against the new vtable, per
+   `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is in this
+   checkout, so do not guess at their usage or modify them from here.

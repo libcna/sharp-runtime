@@ -7,6 +7,14 @@
 SR-AUD-358 / CCF-020. Recorded 2026-07-27 before any production change. No
 production or test source was modified under this ticket.*
 
+> **Implemented by ticket #1771 on 2026-07-27 — see [section 21](#21-implementation-closure-ticket-1771-2026-07-27).**
+> Sections 1-20 below are the design as originally written and are deliberately
+> left unchanged. One decision was superseded by the user's explicit approval:
+> the deprecated, never-writing `CopyTo(void*, intcs)` shim of sections 9.5, 9.7,
+> and 12 was **not** retained — the raw overload is removed outright, so a stale
+> call site is a compile error instead of a run-time throw. Section 21 records
+> that, the resulting ABI break, and the closure evidence.
+
 ---
 
 ## 1. Executive decision
@@ -1222,3 +1230,180 @@ Out of scope for all three tickets: JsonNode (SR-AUD-327), XML LINQ
 (SR-AUD-333), SR-AUD-090, any general array or reflection redesign, the nine
 existing generic `CopyTo` implementations, and every unrelated collection API.
 Tickets #1767, #1768, and #1769 remain intact.
+
+---
+
+## 21. Implementation closure (ticket #1771, 2026-07-27)
+
+*Sections 1-20 are the design record as written under ticket #1770 and are left
+unchanged, including the retained-shim decision this section supersedes. This
+section records what was actually built.*
+
+### 21.1 Approved deviation from section 9.5: no deprecated shim
+
+The user explicitly approved the removal of `CopyTo(void*, intcs)` **without any
+compatibility overload**, and directed that no `[[deprecated]]` shim be retained.
+The design's section 9.5 / 9.7 / 12 shim is therefore **not implemented**, and
+alternative D of section 7 is rejected in full rather than partially adopted.
+
+The reasoning recorded with the approval, which is stronger than the
+diagnostic-quality argument that had favoured the shim:
+
+- A retained overload that only throws lets old downstream code **compile
+  successfully and fail at run time**. A compile error that names the replacement
+  is a strictly safer migration signal than a deferred `NotSupportedException`.
+- Under the repository's own `-Werror` policy (probe 7), calling a
+  `[[deprecated]]` member is already a compile error — so for `-Werror` consumers
+  the shim never preserved source compatibility anyway, while for everyone else it
+  postponed a deterministic failure to run time.
+- The unsafety of the old signature cannot be removed while keeping the
+  signature: one pointer and one index can never carry the destination's element
+  type, element count, element size, alignment, or construction state.
+
+Everything else in sections 9, 10, 11, 13, 14, 15, and 16 is implemented as
+written. Section 11's last row ("Legacy `CopyTo(void*, intcs)` →
+`NotSupportedException`") is replaced by "removed; a call is a compile error",
+and section 14's case 15 (shim throws) is replaced by the compile-time
+`AcceptsDestination` assertions in 21.4.
+
+### 21.2 ABI
+
+Removing a pure virtual member changes the vtable layout of `ICollection` and of
+every class deriving from it, including `IList` and `IDictionary`. Section 9.7's
+"none in practice" ABI note was scoped to *this repository*, which ships no
+installed package or export configuration; it is not a statement about downstream
+binaries. **Every C++ consumer of sharp-runtime must be rebuilt in full.** Mixing
+translation units compiled against the old and new headers is undefined
+behaviour. This is stated for consumers in `docs/Migration-ICollectionCopyTo.md`.
+
+### 21.3 Final public and protected surface
+
+```cpp
+namespace System::Collections {
+
+using ObjectSpan = System::Span<std::any>;
+
+namespace detail {
+inline void requireValidCopyDestination(const void* data, intcs length,
+                                        intcs index, intcs count);
+template<typename T>
+inline void requireValidCopyDestination(std::vector<T>& destination,
+                                        intcs index, intcs count);
+}
+
+class ICollection : public IEnumerable {
+public:
+    void CopyTo(ObjectSpan destination, intcs index);
+    void CopyTo(std::vector<std::any>& destination, intcs index);
+protected:
+    virtual void copyToCore(ObjectSpan destination, intcs index) = 0;
+};
+
+}
+```
+
+Concrete additions, all public unless marked:
+
+| Type | Added |
+|---|---|
+| `ArrayList` | `using ICollection::CopyTo;`; protected `copyToCore` |
+| `Queue` | `using ICollection::CopyTo;`; `void CopyTo(std::vector<void*>&, intcs)`; protected `copyToCore` |
+| `Stack` | as `Queue`, top-to-bottom order |
+| `Hashtable` | `using ICollection::CopyTo;`; `void CopyTo(std::vector<DictionaryEntry>&, intcs)`; protected `copyToCore`; `getCountProperty()` and the copy index normalised `int` → `intcs` |
+| `ListDictionaryInternal` | as `Hashtable` (no `int` normalisation needed) |
+| `ListDictionaryInternal::MemberCollection` | protected `copyToCore` only — the type is private and escapes only as `ICollection*` |
+
+`IList.hpp` and `IDictionary.hpp` are unchanged; they inherit.
+
+### 21.4 Known behavioural note: a null-data destination is always rejected
+
+Section 11's rule is implemented exactly: a destination whose data pointer is null
+throws `ArgumentNullException` even when the collection is empty, matching .NET's
+`ArgumentNullException` for a null `Array`. A `Span` cannot distinguish "the
+caller passed nothing" from "the caller passed a zero-length container", and a
+default-constructed `std::vector` typically has `data() == nullptr`, so
+`collection.CopyTo(emptyVector, 0)` throws even when `getCountProperty() == 0`.
+.NET accepts the equivalent `new object[0]`. This is stricter, never unsafe, and
+documented in the header and in `docs/Migration-ICollectionCopyTo.md` §7; a
+zero-length `ObjectSpan` over real storage *is* accepted for an empty collection.
+Relaxing it would need a deliberate decision, because it trades the null-array
+diagnostic for the zero-length-array one; it is not proposed here.
+
+### 21.5 Files changed
+
+| File | Change |
+|---|---|
+| `modules/collections/include/System/Collections/ICollection.hpp` | `ObjectSpan`, `detail::requireValidCopyDestination` (two overloads), the two public non-virtual `CopyTo` overloads, protected `copyToCore`; raw overload removed |
+| `.../ArrayList.hpp`, `.../Queue.hpp`, `.../Stack.hpp`, `.../Hashtable.hpp`, `.../ListDictionaryInternal.hpp` | `copyToCore`, `using ICollection::CopyTo;`, typed overloads, `int` → `intcs` in `Hashtable` |
+| `modules/core/include/System/Array.hpp`, `.../Buffer.hpp` | doc-comments no longer cite `ArrayList::CopyTo(void*, int)` as the raw-pointer precedent; that precedent no longer exists |
+| `modules/collections/tests/.../CopyToBoundaryTests.cpp` | new permanent suite, 128 tests |
+| `modules/collections/tests/.../InterfacesTests.cpp` | `MinimalCollection` re-implemented as `copyToCore`; `CopyToFillsBuffer` migrated |
+| `modules/collections/tests/.../QueueStackTests.cpp` | `void* buf[4]` → `std::vector<void*> buf(4)` |
+| `modules/collections/tests/.../CollectionsNewTests.cpp` | `ht.CopyTo(dest.data(), 0)` → `ht.CopyTo(dest, 0)` |
+| `test/consumer/collections_copyto.cpp` | new standalone public-header fixture |
+| `docs/Migration-ICollectionCopyTo.md` | new consumer migration document |
+
+### 21.5.1 Compile-time migration assertions
+
+`CopyToBoundaryTests.cpp` proves the removal at compile time with an
+`AcceptsDestination<Collection, Destination>` detector: no `CopyTo` overload on
+`ICollection`, `IList`, `IDictionary`, `ArrayList`, `Queue`, `Stack`,
+`Hashtable`, `ListDictionaryInternal`, or a test implementation accepts `void*`,
+`void**`, `std::any*`, `DictionaryEntry*`, `int*`, a wrongly typed vector, or a
+temporary vector — while the intended destinations are all accepted.
+
+### 21.6 Probes and validation
+
+All probe trees are repository-local and gitignored (`build*`).
+
+| Probe | Command | Result |
+|---|---|---|
+| Removed API (was probe 5) | `g++ -std=c++23 -fsyntax-only -Imodules/collections/include -Imodules/core/include build-probe-copyto/probe5_current_boundary.cpp` | exit 1, **4 errors**, one per scenario: `no matching function for call to '...CopyTo(std::nullptr_t/std::any*/void**, int)'`, each followed by `note: candidate:` lines for both surviving overloads. Captured in `build-probe-copyto/probe5_removed_api.log`. |
+| Probe 8 — new boundary under sanitizers | `g++ -std=c++23 -g -O0 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Imodules/collections/include -Imodules/core/include -o build-probe-copyto/probe8_new_boundary build-probe-copyto/probe8_new_boundary.cpp modules/core/src/System/{Exception,ArgumentException,ArgumentNullException,ArgumentOutOfRangeException,InvalidOperationException,SystemException,IndexOutOfRangeException,NotSupportedException}.cpp` then `ASAN_OPTIONS=detect_leaks=1 build-probe-copyto/probe8_new_boundary` | 13 assertions, `failures=0`, exit 0, **no sanitizer diagnostic and no leak** |
+| Probe 9 — permanent suite under sanitizers | same sanitizer flags over `CopyToBoundaryTests.cpp` + vendored GoogleTest | 128/128 passed, exit 0, no diagnostic, no leak |
+| Probe 6 — standalone public headers | unchanged command from section 17 | exit 0 |
+| Consumer fixture | `cmake -S test/consumer -B build-consumer-copyto -DFIXTURE_COMPONENT=Collections.Core -DFIXTURE_SOURCE=.../collections_copyto.cpp -DFIXTURE_COMPILE_ONLY=ON` then build; plus a linked `fixture_run` | compiles under `-Wall -Wextra -Wpedantic -Werror` against only `Collections.Core` + `Core.Base`; `fixture_run` exits 0 |
+
+Probe 8 covers the four scenarios of section 2.3 plus non-trivial `std::any`
+assignment, source destruction after copying, exactly-once destruction of
+overwritten destination values, heterogeneous values, validation failures with
+proof of no partial write, and 100,000-element exact-fit and one-short copies for
+both `ArrayList` and `Hashtable`. The `typemix` scenario is no longer expressible
+— there is no overload that accepts the wrong element type — so probe 8 runs the
+safe equivalent, the same polymorphic `Hashtable` copy into the one destination
+representation every implementation shares, and confirms it is leak-free.
+
+### 21.7 Gates
+
+| Gate | Result |
+|---|---|
+| `cmake --build build --parallel 4` | 0 errors, 0 warnings |
+| `SharpRuntimeTests_Collections_Core` | 1,612/1,612 (was 1,484; +128) |
+| `scripts/run_component_tests.sh build` | **12,871** across **37** executables (floor was 12,743) |
+| `python3 scripts/validate_module_boundaries.py --root .` | 41 physical modules, 90 dependency edges — unchanged |
+| `python3 test/validate_module_boundaries_test.py` | 7 tests, OK |
+| `python3 scripts/generate_component_catalog.py --check` | catalogue current, no regeneration needed |
+| `python3 scripts/db_consistency_check.py --db plan.sqlite3` | no consistency problems |
+| `scripts/check_selective_components.sh` | all ten jobs pass, both negative fixtures still rejected |
+| `git diff --check` | clean |
+| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,941** warnings (ceiling 1,942) |
+
+As in section 15.2 the new consumer fixture is deliberately **not** added to
+`check_selective_components.sh`'s ten-job matrix, which is documented as exactly
+ten jobs in `plan.md`, `README.md`, `docs/CMakeComponents.md`, and the tracked CI
+workflow.
+
+### 21.8 Ticket outcomes
+
+- **#1771** — done.
+- **#1772** (`REMED-COLL-COPYTO-CLEANUP`, P2/XS) — **obsolete**. Its two work
+  items were both necessarily completed inside #1771: the deprecated shim it
+  would have deleted was never created, and the `Array.hpp` / `Buffer.hpp`
+  doc-comments citing `ArrayList::CopyTo(void*, int)` had to be corrected in the
+  same change that removed the cited precedent, since leaving them would have
+  documented a member that no longer exists. Marked `wontfix` with that reason
+  rather than left inactive.
+- **#1773** (`REMED-COLL-COPYTO-DOWNSTREAM`, P2/S) — new, **inactive**. Requires
+  the CNA and mobile-eggbert sweep described in
+  `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is in this
+  checkout, so nothing is claimed or changed about them.

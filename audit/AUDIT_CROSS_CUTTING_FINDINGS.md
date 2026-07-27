@@ -468,6 +468,31 @@ a working `System::Type`, both permanently out of scope. Implementation is
 proposed as inactive ticket #1771 and is gated on explicit user approval of the
 narrow public-API break.
 
+**Remediation status (ticket #1771, 2026-07-27): REMEDIATED.** SR-AUD-358 is
+`remediated`; the original evidence above and in the per-file reports is retained
+unchanged. The user approved the public source- and ABI-breaking change, and
+ticket #1771 landed it: `virtual void CopyTo(void*, intcs) = 0` is **removed**
+from `ICollection`, replaced by non-virtual, validating
+`CopyTo(ObjectSpan, intcs)` / `CopyTo(std::vector<std::any>&, intcs)` plus one
+protected pure virtual `copyToCore(ObjectSpan, intcs)` per implementation.
+`detail::requireValidCopyDestination` is now the single validation site shared by
+all six implementations and by the typed `std::vector<void*>` /
+`std::vector<DictionaryEntry>` concrete overloads, so the "five independent
+bounds omissions" shape this finding warned about is structurally unreachable: an
+implementation cannot be entered without it. The approved decision departs from
+the design record in one respect (section 21 of `docs/ICollectionCopyToDesign.md`):
+the deprecated, never-writing shim was **not** retained, because a shim would let
+a stale call site compile and fail at run time while removal makes it a compile
+error naming the replacement. Evidence: the original probe's four scenarios no
+longer compile (four `no matching function` diagnostics, each listing the
+surviving overloads); the replacement probe runs the same scenarios plus
+non-trivial-value, heterogeneous, and 100,000-element cases under ASan + UBSan +
+LeakSanitizer with zero diagnostics and zero leaks; 128 permanent regressions
+across every implementation (also clean under sanitizers); 1,612/1,612
+Collections.Core; 12,871 tests across 37 executables. Consumer guidance is in
+`docs/Migration-ICollectionCopyTo.md`. CCF-019's JsonNode and XML LINQ members are
+unaffected and remain `confirmed`.
+
 - `modules/collections/include/System/Collections/ICollection.hpp.audit.md`;
 - `modules/collections/include/System/Collections/ArrayList.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Queue.hpp.audit.md`;

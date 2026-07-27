@@ -119,3 +119,35 @@ affected public headers compile standalone against `Collections.Core` +
 `Core.Base`; and a retained deprecated overload is a compile error under the
 repository's own `-Werror` policy. Implementation is proposed as inactive ticket
 #1771, gated on explicit user approval of the narrow public-API break.
+
+Implementation ticket #1771 closed that batch on 2026-07-27, after the user
+explicitly approved the public source- and ABI-breaking change. SR-AUD-358 /
+CCF-020 is now `remediated`, so the findings index records **360 open findings
+and four `remediated`**; the original audit evidence remains in place.
+`virtual void CopyTo(void*, intcs) = 0` is removed from `ICollection` and
+replaced by non-virtual, validating `CopyTo(ObjectSpan, intcs)` and
+`CopyTo(std::vector<std::any>&, intcs)` over a single protected pure virtual
+`copyToCore(ObjectSpan, intcs)` hook, with checked typed
+`std::vector<void*>` / `std::vector<DictionaryEntry>` overloads on the concrete
+collections. One departure from the design record is recorded in section 21 of
+`docs/ICollectionCopyToDesign.md`: the deprecated, never-writing shim was **not**
+retained, so a stale call site fails to compile rather than throwing at run time.
+Because a pure virtual member was removed, every `ICollection`/`IList`/
+`IDictionary` vtable changes and all consumers must be rebuilt; the consumer
+guidance is in `docs/Migration-ICollectionCopyTo.md`, and the CNA /
+mobile-eggbert sweep is inactive ticket #1773, as neither repository is in this
+checkout.
+
+Closure evidence is 128 permanent regressions in `CopyToBoundaryTests.cpp`
+parameterised over every `ICollection` implementation (also 128/128 under
+ASan + UBSan + LeakSanitizer), 1,612/1,612 Collections.Core tests, a standalone
+`Collections.Core` public-header consumer fixture compiled with `-Werror` and
+executed successfully, a replacement ASan/UBSan/LeakSanitizer probe reporting
+`failures=0` with no diagnostic and no leak on the four scenarios that previously
+crashed or leaked, a captured compile log showing that the old raw calls now
+produce four `no matching function` errors naming the replacements, and a
+`scripts/local_ci_check.sh`-equivalent run of 12,871/12,871 tests across 37
+executables with zero build warnings/errors. Boundary validation is unchanged at
+41 modules and 90 edges; validator-test, catalogue, database, selective-component,
+and diff checks pass, and Doxygen 1.9.8 reports 1,941 warnings against the
+1,942 ceiling.
