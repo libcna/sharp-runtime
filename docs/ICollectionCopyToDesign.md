@@ -1386,7 +1386,7 @@ representation every implementation shares, and confirms it is leak-free.
 | `python3 scripts/db_consistency_check.py --db plan.sqlite3` | no consistency problems |
 | `scripts/check_selective_components.sh` | all ten jobs pass, both negative fixtures still rejected |
 | `git diff --check` | clean |
-| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,941** warnings (ceiling 1,942) |
+| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,942** warnings — at the ceiling, unchanged from the pre-ticket baseline. `ICollection.hpp` loses one warning (`System::Type` written as `%System::Type` so Doxygen stops trying to link the permanently stubbed type); `README.md` gains one, the same unresolved-markdown-link warning that every one of its documentation links already produces. |
 
 As in section 15.2 the new consumer fixture is deliberately **not** added to
 `check_selective_components.sh`'s ten-job matrix, which is documented as exactly

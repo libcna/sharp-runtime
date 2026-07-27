@@ -231,7 +231,10 @@ Closure evidence:
   (`test/consumer/collections_copyto.cpp`) that compiles and runs successfully;
 - boundaries 41 modules/90 edges, validator tests 7/7, catalogue current,
   database consistent, selective matrix green, `git diff --check` clean, Doxygen
-  1,941/1,942.
+  1,942/1,942 -- at the ceiling and unchanged from before the ticket, since the
+  README link to the migration document adds one instance of the pre-existing
+  unresolved-markdown-link warning every README documentation link produces,
+  offsetting one removed from `ICollection.hpp`.
 
 Follow-ups: cleanup ticket **#1772** (`REMED-COLL-COPYTO-CLEANUP`) is `wontfix`
 because both of its items were necessarily completed inside #1771 — the shim it

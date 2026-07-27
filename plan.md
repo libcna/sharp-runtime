@@ -214,7 +214,10 @@ assertion without an explicit architecture decision.
   every implementation, a clean ASan/UBSan/LeakSanitizer probe and suite run, a
   `-Werror` standalone `Collections.Core` consumer fixture, 1,612
   Collections.Core tests, and the 12,871-test repository gate pass; Doxygen
-  stays at 1,941/1,942. Consumer guidance is in
+  stays at 1,942/1,942 -- the new README link to the migration document
+  produces the same unresolved-markdown-link warning that every other README
+  documentation link already produces, offsetting one warning removed from
+  ICollection.hpp. Consumer guidance is in
   [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
@@ -313,9 +316,8 @@ Design ticket #1768 selected the SR-AUD-357 / CCF-019 `LinkedListNode`
 lifetime contract — independently allocated, reference-counted nodes with an
 explicit null/detached/attached state model — and recorded it in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
-Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) completed it, so the
-index now records 361 open `confirmed` findings and three `remediated`. No
-repair ticket is active.
+Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) completed it, taking the
+index to 361 open `confirmed` findings and three `remediated` at that point.
 
 Design ticket #1770 then answered SR-AUD-358 / CCF-020. It inventoried all six
 `ICollection` implementations, the three test call sites, and the zero

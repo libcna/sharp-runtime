@@ -8,9 +8,9 @@
 - Eligible files: 1,748.  Excluded tracked files: 33.
 - Completed per-file reports: 1,748 (100.0% of eligible scope; 1,699/1,699 runtime-module files).
 - Findings confirmed at audit closure: 364 (ninety-one high, two hundred
-  sixty-two medium, eleven low). The post-audit index now has 361 open
-  `confirmed` findings (eighty-nine high, two hundred sixty-one medium, eleven
-  low) and 3 `remediated` findings. Open risks: 2
+  sixty-two medium, eleven low). The post-audit index now has 360 open
+  `confirmed` findings (eighty-eight high, two hundred sixty-one medium, eleven
+  low) and 4 `remediated` findings. Open risks: 2
   documented-adaptation questions.
 
 ## Post-audit remediation checkpoint
@@ -67,7 +67,11 @@ leak on the four previously unsafe scenarios, and the old raw calls now yield
 four captured `no matching function` compile errors. The full repository gate
 passes 12,871/12,871 tests across 37 executables with zero warnings/errors.
 Module boundaries remain 41/90; validator-test, catalogue, database,
-selective-component, and diff checks pass, and Doxygen stays at 1,941/1,942.
+selective-component, and diff checks pass, and Doxygen is at 1,942/1,942 --
+unchanged from before the ticket, because the README link to the new migration
+document adds one instance of the pre-existing unresolved-markdown-link warning
+shared by every README documentation link, offsetting one removed from
+`ICollection.hpp`.
 
 ## Initial validation evidence
 

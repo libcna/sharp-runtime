@@ -8,7 +8,7 @@ under `audit/<source-path>.audit.md`; the 1,699 runtime-module files are also
 fully covered. No production source or test was changed during this phase.
 
 At audit closure, the findings index recorded 364 confirmed issues. It now
-retains all 364 entries while marking 361 `confirmed` and three `remediated`:
+retains all 364 entries while marking 360 `confirmed` and four `remediated`:
 
 | Severity | Count |
 |---|---:|
@@ -102,9 +102,9 @@ The JsonNode (SR-AUD-327) and XML LINQ (SR-AUD-333) members of CCF-019 remain
 open by design.
 
 Design ticket #1770 completed the third bounded batch on 2026-07-27 and made no
-production change. SR-AUD-358 / CCF-020 is **design-complete but still
-`confirmed`**: the findings index therefore still records 361 open findings and
-three `remediated`. The selected contract is recorded in
+production change. SR-AUD-358 / CCF-020 was left **design-complete but still
+`confirmed`** at that point, so the findings index then recorded 361 open
+findings and three `remediated`. The selected contract is recorded in
 `docs/ICollectionCopyToDesign.md` — a length-aware, statically typed
 `System::Span<std::any>` destination behind a non-virtual `ICollection`, so the
 destination's capacity and element type are validated exactly once before any
@@ -149,5 +149,8 @@ produce four `no matching function` errors naming the replacements, and a
 `scripts/local_ci_check.sh`-equivalent run of 12,871/12,871 tests across 37
 executables with zero build warnings/errors. Boundary validation is unchanged at
 41 modules and 90 edges; validator-test, catalogue, database, selective-component,
-and diff checks pass, and Doxygen 1.9.8 reports 1,941 warnings against the
-1,942 ceiling.
+and diff checks pass, and Doxygen 1.9.8 reports 1,942 warnings, exactly at the
+1,942 ceiling and unchanged from the pre-ticket baseline: the README link to the
+new migration document adds one instance of the pre-existing unresolved-
+markdown-link warning that every README documentation link produces, offsetting
+one warning removed from `ICollection.hpp`.
