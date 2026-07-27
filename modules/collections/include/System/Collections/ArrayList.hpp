@@ -115,17 +115,14 @@ public:
     [[nodiscard]] intcs getCountProperty() const override { return static_cast<intcs>(_items.size()); }
 
     /**
-     * @brief Copies the elements of the list into the given buffer starting at @p index.
+     * @brief Makes both validating ICollection::CopyTo overloads visible on ArrayList.
      *
-     * C++ counterpart of .NET ArrayList.CopyTo(Array, int).
-     * @param array Pointer to a std::any[] destination buffer.
-     * @param index Zero-based index at which copying begins.
+     * ArrayList declares no CopyTo overload of its own -- its elements already are
+     * std::any, so ICollection's std::vector&lt;std::any&gt;/ObjectSpan destinations
+     * are its natural typed destinations -- but the declaration is kept explicit so
+     * that adding a typed overload later cannot silently hide the inherited ones.
      */
-    void CopyTo(void* array, intcs index) override {
-        auto* dest = static_cast<std::any*>(array);
-        for (size_t i = 0; i < _items.size(); ++i)
-            dest[static_cast<size_t>(index) + i] = _items[i];
-    }
+    using ICollection::CopyTo;
 
     /**
      * @brief Returns the currently allocated capacity of the internal storage.
@@ -676,6 +673,21 @@ public:
         if (static_cast<size_t>(index) + static_cast<size_t>(count) > _items.size())
             throw System::ArgumentException("Invalid index/count: range exceeds the list's bounds.");
         return new Enumerator(this, index, index + count);
+    }
+
+protected:
+    /**
+     * @brief Copies every stored element into the validated destination.
+     *
+     * C++ counterpart of .NET ArrayList.CopyTo(Array, int)'s Array.Copy call.
+     * The stored std::any values are copy-assigned unchanged, so a caller
+     * retrieves them with std::any_cast&lt;T&gt; for whatever type it stored.
+     * @param destination Destination validated by ICollection::CopyTo.
+     * @param index       Validated zero-based destination index.
+     */
+    void copyToCore(ObjectSpan destination, intcs index) override {
+        for (intcs i = 0; i < static_cast<intcs>(_items.size()); ++i)
+            destination[index + i] = _items[static_cast<size_t>(i)];
     }
 
 private:

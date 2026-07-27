@@ -65,23 +65,32 @@ public:
      * @brief Returns the number of key/value pairs in the table.
      * C++ counterpart of .NET Hashtable.Count.
      */
-    [[nodiscard]] int getCountProperty() const override {
-        return static_cast<int>(_map.size());
+    [[nodiscard]] intcs getCountProperty() const override {
+        return static_cast<intcs>(_map.size());
     }
 
+    /** @brief Keeps the inherited validating CopyTo overloads visible next to the typed one. */
+    using ICollection::CopyTo;
+
     /**
-     * @brief Copies each key/value pair into @p array as a DictionaryEntry, starting at @p index.
+     * @brief Copies each key/value pair into @p destination as a DictionaryEntry, starting at @p index.
      *
      * C++ counterpart of .NET Hashtable.CopyTo(Array, int), matching real .NET's default
      * behavior of copying DictionaryEntry elements (the typed KeyValuePair[] fast path doesn't
-     * apply here, since C++ has no equivalent runtime array-element-type check).
-     * @param array Pointer to a DictionaryEntry[] destination buffer.
-     * @param index Zero-based index at which copying begins.
+     * apply here, since C++ has no equivalent runtime array-element-type check). The
+     * destination carries its own length, so the copy is bounds-checked before the first write.
+     * @param destination Destination vector, sized by the caller; never resized here.
+     * @param index       Zero-based index at which copying begins.
+     * @throws System::ArgumentNullException       if @p destination has no storage.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException           if @p destination cannot hold
+     *         getCountProperty() elements starting at @p index.
      */
-    void CopyTo(void* array, int index) override {
-        auto* dest = static_cast<DictionaryEntry*>(array);
-        int i = index;
-        for (const auto& [k, v] : _map) dest[i++] = DictionaryEntry(k, v);
+    void CopyTo(std::vector<DictionaryEntry>& destination, intcs index) {
+        detail::requireValidCopyDestination(destination, index, getCountProperty());
+        intcs i = index;
+        for (const auto& [k, v] : _map)
+            destination[static_cast<size_t>(i++)] = DictionaryEntry(k, v);
     }
 
     /** @brief Returns false; Hashtable is never read-only. */
@@ -247,6 +256,20 @@ public:
      * order), matching .NET's own documented "no particular order" guarantee for Hashtable.
      */
     IDictionaryEnumerator* GetEnumerator() override { return new Enumerator(this); }
+
+protected:
+    /**
+     * @brief Boxes every key/value pair as std::any(DictionaryEntry) into the validated destination.
+     *
+     * Mirrors .NET's array.SetValue(new DictionaryEntry(...), i) into an object[]
+     * destination; a caller retrieves each slot with std::any_cast&lt;DictionaryEntry&gt;.
+     * @param destination Destination validated by ICollection::CopyTo.
+     * @param index       Validated zero-based destination index.
+     */
+    void copyToCore(ObjectSpan destination, intcs index) override {
+        intcs i = index;
+        for (const auto& [k, v] : _map) destination[i++] = std::any(DictionaryEntry(k, v));
+    }
 
 private:
     std::unordered_map<std::string, std::any> _map;

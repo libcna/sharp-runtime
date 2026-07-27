@@ -2,8 +2,10 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <any>
 #include <list>
 #include <stdexcept>
+#include <vector>
 #include "SharpRuntime/SharpRuntimeHelper.hpp"
 #include "System/ArgumentException.hpp"
 #include "System/InvalidOperationException.hpp"
@@ -114,17 +116,26 @@ class ListDictionaryInternal : public IDictionary {
 
         [[nodiscard]] intcs getCountProperty() const override { return d_->getCountProperty(); }
 
-        void CopyTo(void* array, intcs index) override {
-            auto** dest = static_cast<void**>(array);
-            intcs i = index;
-            for (const auto& n : d_->list_) dest[i++] = keys_ ? const_cast<void*>(n.key) : n.value;
-        }
-
         [[nodiscard]] bool getIsSynchronizedProperty() const override { return false; }
         [[nodiscard]] const void* getSyncRootProperty() const override { return d_; }
 
         [[nodiscard]] IEnumerator* GetEnumerator() override {
             return new Enumerator(new NodeEnumerator(d_), keys_);
+        }
+
+    protected:
+        // Boxes each key or value as std::any(void*) into the destination that
+        // ICollection::CopyTo already validated. Keys are normalised from
+        // const void* to void* so that a caller of either view retrieves every
+        // slot the same way, with std::any_cast<void*>. The view is private and
+        // only ever escapes as an ICollection*, so it needs no typed overload of
+        // its own -- getCountProperty() plus the fixed std::any element type is
+        // now enough for a getKeysProperty()/getValuesProperty() consumer to
+        // allocate a correct destination, which the raw void* boundary never was.
+        void copyToCore(ObjectSpan destination, intcs index) override {
+            intcs i = index;
+            for (const auto& n : d_->list_)
+                destination[i++] = std::any(keys_ ? const_cast<void*>(n.key) : n.value);
         }
     };
 
@@ -141,17 +152,26 @@ public:
         return static_cast<intcs>(list_.size());
     }
 
+    /** @brief Keeps the inherited validating CopyTo overloads visible next to the typed one. */
+    using ICollection::CopyTo;
+
     /**
-     * @brief Copies dictionary entries (as DictionaryEntry) to a buffer starting at the given index.
+     * @brief Copies dictionary entries (as DictionaryEntry) into @p destination starting at @p index.
      *
-     * C++ counterpart of .NET ICollection.CopyTo(Array, int).
-     * @param array Pointer to a DictionaryEntry[] buffer.
-     * @param index Zero-based index at which copying begins.
+     * C++ counterpart of .NET ICollection.CopyTo(Array, int). The destination
+     * carries its own length, so the copy is bounds-checked before the first write.
+     * @param destination Destination vector, sized by the caller; never resized here.
+     * @param index       Zero-based index at which copying begins.
+     * @throws System::ArgumentNullException       if @p destination has no storage.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException           if @p destination cannot hold
+     *         getCountProperty() elements starting at @p index.
      */
-    void CopyTo(void* array, intcs index) override {
-        auto* dest = static_cast<DictionaryEntry*>(array);
+    void CopyTo(std::vector<DictionaryEntry>& destination, intcs index) {
+        detail::requireValidCopyDestination(destination, index, getCountProperty());
         intcs i = index;
-        for (const auto& n : list_) dest[i++] = DictionaryEntry(n.key, n.value);
+        for (const auto& n : list_)
+            destination[static_cast<size_t>(i++)] = DictionaryEntry(n.key, n.value);
     }
 
     /**
@@ -251,6 +271,21 @@ public:
      * @return Heap-allocated IDictionaryEnumerator; caller takes ownership.
      */
     [[nodiscard]] IDictionaryEnumerator* GetEnumerator() override { return new NodeEnumerator(this); }
+
+protected:
+    /**
+     * @brief Boxes every entry as std::any(DictionaryEntry) into the validated destination.
+     *
+     * Mirrors .NET's array.SetValue(new DictionaryEntry(...), index) into an
+     * object[] destination; a caller retrieves each slot with
+     * std::any_cast&lt;DictionaryEntry&gt;.
+     * @param destination Destination validated by ICollection::CopyTo.
+     * @param index       Validated zero-based destination index.
+     */
+    void copyToCore(ObjectSpan destination, intcs index) override {
+        intcs i = index;
+        for (const auto& n : list_) destination[i++] = std::any(DictionaryEntry(n.key, n.value));
+    }
 };
 
 } // namespace System::Collections

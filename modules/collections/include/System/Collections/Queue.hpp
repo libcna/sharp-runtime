@@ -2,6 +2,7 @@
 // Copyright (c) Robert Vokac and contributors
 // Portions based on .NET runtime API (MIT License, Copyright .NET Foundation and Contributors)
 #pragma once
+#include <any>
 #include <deque>
 #include <stdexcept>
 #include <vector>
@@ -58,17 +59,26 @@ public:
         return static_cast<intcs>(q_.size());
     }
 
+    /** @brief Keeps the inherited validating CopyTo overloads visible next to the typed one. */
+    using ICollection::CopyTo;
+
     /**
-     * @brief Copies all elements into a void*[] destination array.
+     * @brief Copies all elements, in FIFO order, into a typed void* destination.
      *
-     * C++ counterpart of .NET Queue.CopyTo(Array, int).
-     * @param array Pointer to a void*[] buffer.
-     * @param index Zero-based index at which copying begins.
+     * C++ counterpart of .NET Queue.CopyTo(Array, int) for the collection's own
+     * element type; the destination carries its own length, so the copy is
+     * bounds-checked before the first write.
+     * @param destination Destination vector, sized by the caller; never resized here.
+     * @param index       Zero-based index at which copying begins.
+     * @throws System::ArgumentNullException       if @p destination has no storage.
+     * @throws System::ArgumentOutOfRangeException if @p index is negative.
+     * @throws System::ArgumentException           if @p destination cannot hold
+     *         getCountProperty() elements starting at @p index.
      */
-    void CopyTo(void* array, intcs index) override {
-        auto** dest = static_cast<void**>(array);
+    void CopyTo(std::vector<void*>& destination, intcs index) {
+        detail::requireValidCopyDestination(destination, index, getCountProperty());
         intcs i = index;
-        for (void* p : q_) dest[i++] = p;
+        for (void* p : q_) destination[static_cast<size_t>(i++)] = p;
     }
 
     /** @brief Returns false; Queue is not synchronized. */
@@ -171,6 +181,21 @@ public:
     auto begin() const { return q_.begin(); }
     /** @brief Returns an iterator past the end of the Queue. */
     auto end()   const { return q_.end(); }
+
+protected:
+    /**
+     * @brief Boxes every element as std::any, in FIFO order, into the validated destination.
+     *
+     * Mirrors .NET's Array.SetValue of each element into an object[] destination:
+     * the natural element type is void*, so each slot receives std::any(void*)
+     * and a caller retrieves it with std::any_cast&lt;void*&gt;.
+     * @param destination Destination validated by ICollection::CopyTo.
+     * @param index       Validated zero-based destination index.
+     */
+    void copyToCore(ObjectSpan destination, intcs index) override {
+        intcs i = index;
+        for (void* p : q_) destination[i++] = std::any(p);
+    }
 
 private:
     std::deque<void*> q_;

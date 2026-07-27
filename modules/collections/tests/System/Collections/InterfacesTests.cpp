@@ -22,12 +22,16 @@ class MinimalCollection : public ICollection {
     std::vector<int> data_;
 public:
     explicit MinimalCollection(std::vector<int> d) : data_(std::move(d)) {}
-    int getCountProperty() const override { return static_cast<int>(data_.size()); }
-    void CopyTo(void* array, int index) override {
-        auto* dest = static_cast<int*>(array);
-        for (size_t i = 0; i < data_.size(); ++i) dest[index + i] = data_[i];
+    SharpRuntime::intcs getCountProperty() const override {
+        return static_cast<SharpRuntime::intcs>(data_.size());
     }
     IEnumerator* GetEnumerator() override { return nullptr; }
+protected:
+    // Boxes each int into the destination ICollection::CopyTo already validated.
+    void copyToCore(ObjectSpan destination, SharpRuntime::intcs index) override {
+        for (size_t i = 0; i < data_.size(); ++i)
+            destination[index + static_cast<SharpRuntime::intcs>(i)] = std::any(data_[i]);
+    }
 };
 
 class IntComparer : public IComparer {
@@ -50,10 +54,10 @@ TEST(ICollectionTest, CountReturnsSize) {
 
 TEST(ICollectionTest, CopyToFillsBuffer) {
     MinimalCollection c({10, 20, 30});
-    int buf[5] = {};
+    std::vector<std::any> buf(5);
     c.CopyTo(buf, 1);
-    EXPECT_EQ(buf[1], 10);
-    EXPECT_EQ(buf[3], 30);
+    EXPECT_EQ(std::any_cast<int>(buf[1]), 10);
+    EXPECT_EQ(std::any_cast<int>(buf[3]), 30);
 }
 
 TEST(ICollectionTest, IsSynchronizedDefault) {

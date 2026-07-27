@@ -123,7 +123,7 @@ TEST(QueueTest, CopyTo) {
     int a = 1, b = 2;
     q.Enqueue(&a);
     q.Enqueue(&b);
-    void* buf[4] = {};
+    std::vector<void*> buf(4);
     q.CopyTo(buf, 1);
     EXPECT_EQ(buf[1], &a);
     EXPECT_EQ(buf[2], &b);

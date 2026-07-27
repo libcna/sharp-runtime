@@ -135,7 +135,7 @@ TEST(HashtableTests, CopyTo_CopiesAllEntriesAsDictionaryEntry) {
     ht.Add("a", std::any(1));
     ht.Add("b", std::any(2));
     std::vector<DictionaryEntry> dest(2);
-    ht.CopyTo(dest.data(), 0);
+    ht.CopyTo(dest, 0);
     int sum = 0;
     for (const auto& entry : dest) sum += std::any_cast<int>(entry.getValueProperty());
     EXPECT_EQ(sum, 3);
