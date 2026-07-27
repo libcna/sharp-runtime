@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,781 rows: 1,778 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), and ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`) — one `wontfix` (#1772, obsoleted by #1771), one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep), and one deliberately inactive `todo` row (#1781, `REMED-DOCS-DOXYGEN-COUNT-RECONCILE`); no `doing` or `needs_user` rows |
+| `ticket` | 1,781 rows: 1,779 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`), ticket #1780 (`REMED-COLL-READONLYDICT-EMPTY`), and ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`) — one `wontfix` (#1772, obsoleted by #1771) and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -553,9 +553,27 @@ behind returned exactly **1,942** warnings — the documented ceiling — not th
 advisory lines that are not `file:line: warning:` diagnostics. This suggests
 ticket #1778's figure came from a looser counting method, not a real
 regression; inactive ticket **#1781**
-(`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS) tracks re-verifying and
+(`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS) tracked re-verifying and
 correcting this at pickup time. Not begun under #1779. See `NEXT.md`'s
 equivalent correction note for full detail.
+
+Ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS), opened and
+closed 2026-07-27 on local branch
+`feature/remediation-docs-doxygen-count-reconcile`, then picked up that
+re-verification: it re-ran `scripts/check_doxygen_warnings.sh` on a clean,
+current tree three times, including once from a fully clean
+`docs/generated/`, and got exactly **1,942** warnings every time, matching the
+documented ceiling and confirming ticket #1779's re-measurement above still
+holds with no drift since. Per the ticket's own acceptance criteria, it then
+corrected ticket #1778's own `plan.sqlite3` notes and
+`audit/AUDIT_PROGRESS.md`'s #1778 entry, both of which stated 1,944 as a
+measured fact, with preserved-history Correction notes rather than rewriting
+them; this document and `NEXT.md` already carried an accurate correction from
+#1779 and needed no further content change beyond this closure paragraph and
+the ticket-count line above. No production or test source changed; no
+`SR-AUD-*` finding was reopened or created; this was kept a
+documentation/measurement-methodology-only change, not folded into any
+unrelated ticket. No repair ticket is active.
 
 SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled
 conservatively alongside #1779, per that finding's own instruction to inspect

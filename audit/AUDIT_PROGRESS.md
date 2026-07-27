@@ -154,6 +154,20 @@ ticket's changes (not the 1,942 figure recorded elsewhere in this document);
 this ticket adds zero new warnings, so it did not introduce that drift --
 see the ticket's planning notes for the measurement.
 
+**Correction (ticket #1781, 2026-07-27):** the paragraph above states this
+ticket's Doxygen figure was "independently found already at 1,944 warnings."
+Ticket #1781 re-ran the repository's canonical
+`scripts/check_doxygen_warnings.sh` (Doxygen 1.9.8, `doxygen Doxyfile`,
+`grep -c ': warning:'`) on the current tree three times, including once from a
+fully clean `docs/generated/`, and got exactly **1,942** warnings every time --
+the documented ceiling, not 1,944. This confirms ticket #1779's own
+re-measurement (see `NEXT.md` and `plan.md`): the 1,944 figure came from a
+looser, non-canonical `grep -c 'warning:'` pattern (no leading colon) that
+additionally matches two bare `Inheritance graph ... not generated` advisory
+lines, not from an actual warning-count regression this ticket introduced.
+This correction is recorded here rather than silently rewriting the paragraph
+above, per this repository's practice of preserving historical narrative.
+
 ## Initial validation evidence
 
 `git diff --check` passed. `scripts/local_ci_check.sh build` reached the test

@@ -3,7 +3,7 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-readonlydict-empty`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-docs-doxygen-count-reconcile`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
@@ -17,8 +17,9 @@ design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 (`ArgumentNullException` duplicate parameter suffix), #1777 (typed
 `CopyTo` doc-comment sync), #1778 (`ConcurrentDictionary::AddOrUpdate`
 compare-and-retry), #1779 (`ReadOnlyDictionary::Empty` const-reference
-design), and #1780 (`ReadOnlyDictionary::Empty` const-reference
-implementation) are complete; the
+design), #1780 (`ReadOnlyDictionary::Empty` const-reference
+implementation), and #1781 (Doxygen 1,942-vs-1,944 count reconciliation) are
+complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md), the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
@@ -46,7 +47,11 @@ making the change, since it is a public signature change requiring the same
 explicit approval `ICollection::CopyTo`'s removal needed. The user then
 explicitly approved that change, and implementation ticket #1780
 (`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS) landed it, remediating
-SR-AUD-359.
+SR-AUD-359. Ticket #1781 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS,
+planning-integrity only, no `SR-AUD-*` finding) then re-verified the
+Doxygen warning count #1779 had flagged as possibly drifted, reconfirmed
+1,942 (the documented ceiling, not 1,944), and corrected the two documents
+that still stated 1,944 as a measured fact.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -673,7 +678,9 @@ tracked this discrepancy; inactive ticket **#1781**
 (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS) now does, to re-verify at
 pickup time (an intervening ticket could change the count again) before
 correcting any other documents that repeat the 1,944 figure. Not begun under
-this ticket.
+this ticket. **Ticket #1781 has since completed this re-verification** — see
+"Completed Doxygen count reconciliation: ticket #1781" below — and
+reconfirmed 1,942 with no intervening drift.
 
 ### Completed ReadOnlyDictionary::Empty design: ticket #1779
 
@@ -863,6 +870,65 @@ Closure evidence:
   database consistent, the ten-job selective matrix green, `git diff --check`
   clean, and Doxygen 1.9.8 re-measured at exactly 1,942/1,942 — unchanged, at
   the ceiling.
+
+No repair ticket is active.
+
+### Completed Doxygen count reconciliation: ticket #1781
+
+**`P3: Reconcile ticket #1778's 1,944 Doxygen count against the canonical
+1,942 script measurement`** (`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, size XS,
+planning-integrity only, no `SR-AUD-*` finding) is **done**, opened and
+closed 2026-07-27 on local branch
+`feature/remediation-docs-doxygen-count-reconcile`, in a session scoped
+exclusively to this ticket.
+
+This ticket was itself opened inactive while verifying the Doxygen baseline
+during design ticket #1779's validation pass (see the correction note under
+"Completed ConcurrentDictionary AddOrUpdate remediation: ticket #1778"
+above), to re-verify at pickup time — since an intervening ticket could
+change the count again — before correcting any other document that repeats
+the stale 1,944 figure as a measured fact.
+
+Re-ran `scripts/check_doxygen_warnings.sh` (Doxygen 1.9.8, `doxygen Doxyfile`,
+`grep -c ': warning:'`, the exact colon-qualified pattern the tracked script
+uses) on a clean, current tree three times, including once from a fully
+clean `docs/generated/`: **1,942** warnings every time, exactly at the
+documented ceiling and unchanged since ticket #1779's own re-measurement —
+no intervening drift. This is a pure re-verification; no header or source
+file changed between #1779 and this ticket's measurement.
+
+Per the ticket's acceptance criteria, since the canonical count reproduced
+1,942 (not 1,944), the two documents that still stated 1,944 as a measured
+fact were corrected with preserved-history Correction notes rather than
+having their original text silently rewritten, matching this repository's
+established practice (see the #1776, #1778, and #1779 corrections elsewhere
+in this file):
+
+- `plan.sqlite3`'s ticket #1778 row `notes` field gained an appended
+  Correction paragraph;
+- `audit/AUDIT_PROGRESS.md`'s ticket #1778 entry gained an appended
+  Correction paragraph.
+
+`NEXT.md` (this file) and `plan.md` already carried an accurate correction
+recorded under ticket #1779 and needed no further content change beyond this
+closure section, this file's own header/summary lines, and `plan.md`'s
+ticket-count summary line and closure paragraph. `audit/AUDIT_FINAL_REPORT.md`
+and `audit/AUDIT_FINDINGS_INDEX.md` were checked and do not contain the 1,944
+figure, so neither needed correction.
+
+No production or test source changed; no `SR-AUD-*` finding was reopened,
+remediated, or created; this was kept a documentation/measurement-methodology
+-only change and was not folded into any unrelated ticket, per the ticket's
+own bounded acceptance criteria. Validation: `scripts/check_doxygen_warnings.sh`
+passed (1,942/1,942 against the 1,942 ceiling); `python3
+scripts/db_consistency_check.py --db plan.sqlite3` passed with no consistency
+problems; `git diff --check` clean. Because no production or test source
+changed, a full `scripts/local_ci_check.sh build` rerun was not required and
+was not performed — the existing 13,022/13,022 gate from ticket #1780 stands
+unchanged; module boundaries, the validator suite, and the generated
+catalogue were likewise left unchanged and were not re-run, since nothing
+that would affect them changed. CNA and mobile-eggbert were not inspected or
+modified. No push, merge, rebase, tag, or publication occurred.
 
 No repair ticket is active.
 
