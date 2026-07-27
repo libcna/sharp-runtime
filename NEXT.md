@@ -14,6 +14,144 @@ This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
 Historical session detail belongs in git history and `plan.sqlite3`.
 
+## Planning audit and 500-hour remediation tranche
+
+The 2026-07-27 post-audit planning review confirms that the evidence inventory
+is usable, but the remediation backlog has not yet been converted into an
+executable ticket queue. This section is the authoritative next-session
+ordering and supersedes the still-ambiguous choice near the end of the older
+handoff text below.
+
+### Independently rechecked state
+
+- The configured native build completed successfully with no compiler
+  diagnostics.
+- The build currently exposes 12,694 GoogleTest cases across 37 executables.
+  `SharpRuntimeTests_Collections_Core` passed 1,435/1,435.
+- Database consistency, component-boundary validation (41 physical modules,
+  90 production dependency edges), generated-catalogue freshness, and
+  `git diff --check` passed.
+- The audit contains all 1,748 frozen-scope mirrored reports when hidden paths
+  such as `audit/.github/` are included. The findings index contains every
+  identifier from SR-AUD-001 through SR-AUD-364 exactly once, with no duplicate
+  or missing identifier, and every referenced report path exists.
+- The open inventory is 362 findings: 90 high, 261 medium, and 11 low.
+  SR-AUD-356 and SR-AUD-364 are the two remediated findings.
+- The full 12,694-test suite was not rerun during this read-only planning
+  review because local socket cases require network permission. Ticket #1767's
+  recorded network-permitted 12,694/12,694 run remains the latest complete
+  repository gate.
+- The worktree was clean after the checks. No ticket or production change was
+  created by the planning review.
+
+### Planning/documentation defects to repair
+
+These are planning-integrity tasks, not newly classified runtime findings:
+
+1. `plan.sqlite3` has 1,767 tickets and all are `done`; there is no `todo` or
+   `doing` ticket from which an autonomous session can resume.
+2. `CLAUDE.md` and `README.md` still state the old 12,681-test floor although
+   the current measured floor is 12,694. Leaving the lower number would permit
+   an undocumented thirteen-test regression.
+3. `CLAUDE.md` says that only `feature/work` may be pushed, while the completed
+   audit/remediation workflow uses dedicated `feature/audit` and
+   `feature/remediation-*` branches. Clarify whether bounded branches are
+   local-only and land through `feature/work`, or update the branch policy
+   before any future push.
+4. `plan.md` still describes the project as being primarily in a
+   consumer-driven expansion phase. Post-audit remediation is now the active
+   priority; optional P2 breadth must remain behind confirmed safety defects.
+5. This file calls itself a concise cold-start handoff but has grown to more
+   than 1,300 lines and duplicates most of `AUDIT_FINDINGS_INDEX.md`. A later
+   documentation-only ticket should reduce it to current state, active queue,
+   validation commands, and links to authoritative audit history.
+6. The twelve index entries SR-AUD-286 through SR-AUD-297 contain Markdown
+   fragments for headings that do not exist in their owning Text reports.
+   Either promote the report bullets to matching headings or remove the
+   fragments while preserving the report links.
+7. `AUDIT_PROGRESS.md` says there are two open documented-adaptation questions
+   but does not give their identifiers or owning reports. Identify them or
+   remove the unsupported roll-up.
+8. The inventory has severity but no explicit severity rubric, compatibility
+   risk, dependency, or effort field. Each remediation ticket must add those
+   planning dimensions rather than treating every same-severity finding as
+   interchangeable.
+
+### Exact next ticket: proposed #1768
+
+Open exactly one ticket first:
+
+**`P0: Define LinkedListNode detached lifetime contract`**
+(`REMED-COLL-LINKED-NODE-DESIGN`, SR-AUD-357 / CCF-019, estimated 8 hours,
+size S).
+
+This is a design ticket and must be recorded before production code changes.
+Its acceptance criteria are:
+
+- compare the current C++ surface with the local current-.NET
+  `LinkedList<T>`/`LinkedListNode<T>` implementation;
+- decide how a default/null handle differs from a real detached node;
+- define `Value`, `Next`, `Previous`, list membership, copying, and
+  `operator bool` after `Remove`, `Clear`, and destruction of the C++ wrapper;
+- decide whether detached nodes retain their value and can be reattached,
+  including the missing existing-node `AddFirst`/`AddLast`/`AddBefore`/
+  `AddAfter` overloads;
+- preserve or explicitly migrate the public STL `begin()`/`end()` behavior;
+- inventory repository consumers and add a standalone public-header compile
+  fixture for the selected representation;
+- specify permanent tests retaining copied node handles across removal,
+  clearing, cross-list validation, and owner destruction;
+- specify a focused ASan/UBSan probe that must be clean before SR-AUD-357 can
+  be marked remediated.
+
+If the design is compatible, follow it with one implementation ticket
+(proposed #1769, size L, nominal 24-32 hours). A likely safe direction is an
+independently owned node state with explicit attachment state, rather than a
+copyable raw `std::list` pointer/iterator pair, but ticket #1768 must make the
+compatibility decision from evidence rather than pre-committing to that
+representation.
+
+Only after the LinkedListNode decision is stable, open a separate design
+ticket for SR-AUD-358 / CCF-020. `ICollection::CopyTo(void*, int)` has no
+destination type or length and therefore cannot validate nullability,
+capacity, rank, or element compatibility. That ticket must inventory all
+ArrayList, Queue, Stack, Hashtable, and ListDictionaryInternal callers and
+produce a typed or length-aware migration plan. Do not silently break the
+public virtual interface or claim the finding closed after checking only one
+concrete collection.
+
+### Nominal 500-hour first remediation programme
+
+The 500-hour figure is credible for a first risk-reduction tranche, not for
+closing all 362 findings. The following allocation includes implementation,
+permanent regression tests, focused sanitizer/stress evidence, ticket
+documentation, and normal focused/component validation:
+
+| Work package | Bounded scope | Hours |
+|---|---|---:|
+| Planning truth and ticket setup | Synchronize baselines/phase/branch policy, repair twelve broken anchors, identify the two open questions, add severity/effort rules, and seed the bounded queue | 20 |
+| LinkedListNode lifetime | Design plus compatible implementation for SR-AUD-357 / CCF-019 | 40 |
+| Raw ICollection output boundary | ADR, consumer inventory, compile fixtures, and compatible prototype for SR-AUD-358 / CCF-020; no unapproved API break | 20 |
+| Eight immediate public-input crash tickets | SR-AUD-089, SR-AUD-097, SR-AUD-132, SR-AUD-236, SR-AUD-242, SR-AUD-257, SR-AUD-338, and SR-AUD-341 | 80 |
+| Seven bounds/copy safety tickets | SR-AUD-041, SR-AUD-043, SR-AUD-044, SR-AUD-047, SR-AUD-049, SR-AUD-051, SR-AUD-054, SR-AUD-067, SR-AUD-071 through SR-AUD-073, SR-AUD-078, and SR-AUD-084, grouped only by demonstrated shared contract | 90 |
+| Six defined-arithmetic tickets | SR-AUD-008, SR-AUD-019, SR-AUD-020, SR-AUD-025 through SR-AUD-027, SR-AUD-057, SR-AUD-060, SR-AUD-131, and SR-AUD-135 | 70 |
+| Eight ownership/use-after-free tickets | SR-AUD-187, SR-AUD-221, SR-AUD-230, SR-AUD-237, SR-AUD-245, SR-AUD-247, SR-AUD-263, and SR-AUD-310 | 90 |
+| Five concurrency/entropy tickets | SR-AUD-010/SR-AUD-050, SR-AUD-203/SR-AUD-204, SR-AUD-207, SR-AUD-210 through SR-AUD-212, and SR-AUD-216/SR-AUD-218 | 60 |
+| Integrated closure and risk reserve | Final sanitizer/stress passes, network-permitted full gate, selective consumers, documentation/index reconciliation, and estimate variance | 30 |
+| **Total** | | **500** |
+
+Treat the hours as a capacity boundary with roughly +/-30% uncertainty, not a
+promise to batch unrelated findings until the allocation is consumed. Recheck
+the remaining estimate after every five completed tickets. The nominal tranche
+can reasonably close roughly 40-50 high findings; design-only SR-AUD-358
+remains open until its compatible implementation passes closure.
+
+The preliminary whole-backlog estimate is 1,600-2,400 engineering hours:
+after the first 500-hour tranche, roughly forty high findings and essentially
+the full 261-medium/11-low inventory remain. A deliberately chosen
+consumer-risk stopping point may be smaller, but 500 hours must not be
+presented as complete remediation of all 362 open findings.
+
 ## Current state
 
 - The CNA-style deep audit is complete. `audit/AUDIT_SCOPE.md` fixes its
@@ -1355,8 +1493,16 @@ HTTP, socket, and ping tests require permission for local network operations.
    not search for a new audit shard: the 1,748-file audit is complete.
 3. Ticket #1767 is complete; preserve its permanent regression and retained
    audit evidence. No remediation ticket is active.
-4. Before further production changes, choose exactly one bounded design-first
-   collection ticket. The next candidates are SR-AUD-357 / CCF-019
-   (`LinkedListNode` lifetime) and SR-AUD-358 / CCF-020 (a typed or
-   length-aware `ICollection::CopyTo` boundary). Record its public
-   compatibility decision and validation matrix before implementation.
+4. Open proposed ticket #1768,
+   `P0: Define LinkedListNode detached lifetime contract`, for SR-AUD-357 /
+   CCF-019. Copy its scope and acceptance criteria from the planning-audit
+   section near the top of this file and mark only that ticket `doing`.
+5. Do not change production code until #1768 records the null-versus-detached
+   model, value/neighbor/owner-destruction semantics, `operator bool` and STL
+   iterator compatibility, consumer inventory, and sanitizer/test matrix.
+6. If #1768 selects a compatible design, open one implementation ticket
+   (proposed #1769) and close it through the focused Collections target plus
+   ASan/UBSan and the standard repository controls.
+7. Only then open the separate SR-AUD-358 / CCF-020 typed-or-length-aware
+   `ICollection::CopyTo` design ticket. Do not combine it with LinkedListNode
+   or a concrete-collection symptom patch.
