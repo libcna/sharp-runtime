@@ -3,7 +3,7 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-concurrentdict-addorupdate`.
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-readonlydict-empty-design`.
 The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
@@ -15,12 +15,16 @@ design), #1771 (raw `ICollection::CopyTo` implementation), #1774 (raw
 `ICollection::CopyTo` zero-length-destination correction), #1775
 (`Hashtable` `IDictionary` key/view contracts), #1776
 (`ArgumentNullException` duplicate parameter suffix), #1777 (typed
-`CopyTo` doc-comment sync), and #1778 (`ConcurrentDictionary::AddOrUpdate`
-compare-and-retry) are complete; the
+`CopyTo` doc-comment sync), #1778 (`ConcurrentDictionary::AddOrUpdate`
+compare-and-retry), and #1779 (`ReadOnlyDictionary::Empty` const-reference
+design) are complete; the
 node contract is recorded in
-[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
+[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md), the copy
 boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
-(see its section 22 for the #1774 correction), with consumer guidance in
+(see its section 22 for the #1774 correction), and the mutable-singleton
+contract in
+[`docs/ReadOnlyDictionaryEmptyDesign.md`](docs/ReadOnlyDictionaryEmptyDesign.md),
+with consumer guidance in
 [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
 Ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`, P1, size M) restored the
 `Hashtable` `IDictionary` key and view contracts for SR-AUD-363, which is now
@@ -33,7 +37,12 @@ null-destination rule so they state the rule ticket #1774 corrected instead.
 Ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`, P2, size S) then made
 `ConcurrentDictionary::AddOrUpdate` retry against the observed value instead
 of unconditionally overwriting a concurrent intervening write, remediating
-SR-AUD-360.
+SR-AUD-360. Ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`, P2, size S,
+design-only) then recorded the selected fix for SR-AUD-359 — changing
+`ReadOnlyDictionary<K,V>::Empty()`'s return type from
+`ReadOnlyDictionary<K,V>&` to `const ReadOnlyDictionary<K,V>&` — without
+making the change, since it is a public signature change requiring the same
+explicit approval `ICollection::CopyTo`'s removal needed.
 **No ticket is active.** #1771 removed the
 pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
@@ -42,7 +51,10 @@ source- and ABI-breaking release for downstream consumers, which must rebuild.
 with a zero length (e.g. `ObjectSpan{nullptr, 0}` or a default-constructed empty
 `std::vector<std::any>`) is a valid empty destination; only a null pointer
 paired with a positive length is still rejected. This is a behavioral
-relaxation, not a further source or ABI break.
+relaxation, not a further source or ABI break. Implementation ticket #1780
+(`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS) is inactive and `blocked`
+pending that approval; see the "Completed ReadOnlyDictionary::Empty design"
+section below.
 
 **Correction (ticket #1776, 2026-07-27):** the #1775-era notes below and in
 `plan.md`/`audit/AUDIT_FINAL_REPORT.md` describing ticket #1776 as a fresh,
@@ -626,6 +638,152 @@ Closure evidence:
   attributable to this change. Not investigated or corrected here — flagged
   for a future documentation-integrity ticket, consistent with this session's
   one-active-ticket rule and the transparency requirement not to conceal it.
+
+No repair ticket is active.
+
+**Correction (ticket #1779, 2026-07-27):** the paragraph above states ticket
+#1778 "measured independently at exactly 1,944 warnings." While verifying the
+Doxygen baseline during ticket #1779's own validation pass, an independent
+re-measurement on the identical tree ticket #1778 left behind (no header or
+source file changed since) using the repository's own canonical
+`scripts/check_doxygen_warnings.sh` — Doxygen 1.9.8, `doxygen Doxyfile`,
+`grep -c ': warning:'`, the exact colon-qualified pattern the tracked script
+uses — returned **1,942** warnings, exactly at the documented ceiling, three
+times including once from a fully clean `docs/generated/`. A looser
+`grep -c 'warning:'` (no leading colon) on the same run returns 1,944: it
+additionally matches two lines that are not `file:line: warning:` diagnostics
+at all, but bare `warning: Inheritance graph for ... not generated, too many
+nodes` advisory lines (for `System::Attribute` and `System::SystemException`)
+that begin with the word `warning:` with no preceding colon-qualified
+location — exactly the two extra matches accounting for 1,944 vs 1,942. This
+strongly suggests ticket #1778's 1,944 figure came from a looser counting
+method than the tracked script uses, not from an actual regression, and that
+the 1,942 ceiling documented in `CLAUDE.md`/`README.md`/`plan.md` remains the
+correct, current, canonical count as of this ticket. This correction is
+recorded here rather than silently rewriting the paragraph above, per this
+repository's practice of preserving historical narrative (see the #1776 and
+#1778 corrections elsewhere in this file). No inactive ticket previously
+tracked this discrepancy; inactive ticket **#1781**
+(`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS) now does, to re-verify at
+pickup time (an intervening ticket could change the count again) before
+correcting any other documents that repeat the 1,944 figure. Not begun under
+this ticket.
+
+### Completed ReadOnlyDictionary::Empty design: ticket #1779
+
+**`P2: Design a safe const-reference contract for ReadOnlyDictionary::Empty`**
+(`REMED-COLL-READONLYDICT-EMPTY-DESIGN`, SR-AUD-359, size S, design-only) is
+**done**, opened and closed 2026-07-27 on local branch
+`feature/remediation-coll-readonlydict-empty-design`. It made no production or
+test-source change.
+
+Selected from the two remaining findings NEXT.md flagged as possibly needing a
+public-surface design decision (SR-AUD-359 `ReadOnlyDictionary::Empty` and
+SR-AUD-361 `SortedSet::GetViewBetween`), compared in detail before selection.
+Both are medium-severity confirmed findings affecting a public contract, but
+SR-AUD-359's fix is a bounded one-line return-type change with a fully
+compatible design (no in-repository source break found), while SR-AUD-361
+would require replacing `SortedSet<T>`'s `std::set` backing with a custom tree
+structure supporting live, bounded, write-through sub-range views — .NET's own
+`TreeSubSet` nested class is 378 lines — before any bounded implementation
+ticket could even be written, an architecture change far beyond a single
+ticket and already flagged as such in `SortedSet.hpp`'s own doc-comment.
+SR-AUD-361 was left untouched, confirmed, and not selected.
+
+`ReadOnlyDictionary<K,V>::Empty()` returns a non-`const` reference to a
+process-wide function-local `static` singleton. Because the class relies on
+its compiler-generated copy assignment operator, ordinary assignment through
+that reference (`Empty() = someOtherInstance;`) silently rebinds the
+singleton's private backing map for the remainder of the process, corrupting
+every past and future caller of `Empty()` for that `<K,V>` instantiation.
+.NET's own `Empty` is a get-only auto-property with no setter (`CS0200` on
+assignment), so the C++ port introduced this hazard by translating a get-only
+property into a mutable reference-returning static method.
+
+Selected design (recorded in full, with three evaluated alternatives and a
+compatibility matrix, in
+[`docs/ReadOnlyDictionaryEmptyDesign.md`](docs/ReadOnlyDictionaryEmptyDesign.md)):
+change `Empty()`'s return type from `ReadOnlyDictionary<K,V>&` to
+`const ReadOnlyDictionary<K,V>&`. This is not a compromise — it is the literal
+C++ expression of ".NET has no setter," fully closing the finding while
+preserving every other observable behavior, including the existing
+singleton-identity regression test (`&empty1 == &empty2`). Returning `Empty()`
+by value instead (rejected Alternative B) would have broken that exact test
+and the class's own documented "shared, permanently-empty instance" contract
+for no additional safety benefit; deleting the class's assignment operators
+entirely (rejected Alternative C) would have been broader than the finding's
+bounded scope, restricting ordinary non-singleton instances the finding never
+implicated.
+
+This is a public API signature change (the qualifier of a returned reference),
+so per this repository's established approval boundary — the same one applied
+to ticket #1770/#1771's `ICollection::CopyTo` removal — it requires explicit
+user approval before implementation, even though this design finds no actual
+in-repository source break (the sole in-repo caller uses `auto&`, which
+deduces correctly either way) and no ABI break (the class is a header-only
+template with no vtable and no exported linkage symbol). Implementation is
+proposed as separate, inactive ticket **#1780**
+(`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS), marked `blocked` on that
+approval.
+
+Reproduction (repository-local, gitignored `build-probe-readonlydict/` tree,
+excluded by the repository's `build*` `.gitignore` entry):
+
+- `probe1_mutable_empty.cpp`, compiled `-std=c++23 -Wall -Wextra -Wpedantic
+  -fsanitize=address,undefined` against `Core.Base` and run with
+  `ASAN_OPTIONS=detect_leaks=0`, independently reproduces the audit's own
+  `empty-before=0` / `empty-after-assignment=1` symptom, and adds two facts
+  beyond the original evidence: an unrelated second call site observes the
+  contamination (`second-caller-observes=1`), and `&empty == &empty2` confirms
+  it is the identical process-wide singleton object (`same-instance=1`), not a
+  copy — this is real, silent, global data corruption for every consumer of
+  `Empty()`, not a mistake local to one call site. No sanitizer diagnostic
+  fires (it is a logic defect, not a memory-safety one: the assignment is
+  valid, well-defined C++, simply semantically wrong for an advertised
+  immutable singleton).
+- `probe2_fix_rejects_assignment.cpp`, compiled against a modified copy of the
+  header (`ReadOnlyDictionary_fixed.hpp`, production source untouched) with
+  only `Empty()`'s return type changed: the same hazardous assignment now
+  fails to compile (`error: passing 'const ReadOnlyDictionary<...>' as 'this'
+  argument discards qualifiers`).
+- `probe3_fix_preserves_behavior.cpp`, compiled and run clean under
+  ASan+UBSan (`all-assertions-passed=1`) against the same fixed header:
+  confirms singleton identity, emptiness, normal construction, `ContainsKey`,
+  indexer access, and independent local copy-construction all remain exactly
+  as they behave today.
+
+Closure evidence:
+
+- the three probes above, all `-Wall -Wextra -Wpedantic` clean;
+- the existing 17 `ReadOnlyDictionary` regression tests (10 in
+  `ObjectModelTests.cpp`, 7 in `ObjectModelBatch18Tests.cpp`) rerun unchanged
+  and passing, confirming the design work introduced no regression;
+  `SharpRuntimeTests_Collections_ObjectModel` 124/124;
+- a full local gate: `python3 scripts/validate_module_boundaries.py`,
+  `python3 test/validate_module_boundaries_test.py` (7/7),
+  `python3 scripts/generate_component_catalog.py --check`,
+  `python3 scripts/db_consistency_check.py --db plan.sqlite3`, and
+  `git diff --check` all pass; boundaries unchanged at 41 modules/90 edges;
+  `scripts/local_ci_check.sh build`: 13,021/13,021 tests across 37
+  executables, zero warnings/errors — unchanged, since no production or test
+  source changed;
+- Doxygen 1.9.8 independently re-measured at 1,942 warnings (see the
+  correction note above this section) — unchanged, since this ticket added
+  only `docs/*.md` and `audit/*.md` files, which Doxygen does not scan.
+
+**SR-AUD-362 reconciliation (not the active ticket, done alongside #1779's
+housekeeping):** per this run's instruction to inspect SR-AUD-362's status
+without repairing it as production code, its per-file audit report
+(`audit/modules/collections/include/System/Collections/Frozen/FrozenDictionary.hpp.audit.md`)
+and `audit/AUDIT_FINDINGS_INDEX.md` row now carry a Correction note
+cross-referencing ticket #1778's planning-accuracy finding that
+`FrozenDictionary::Create`'s last-value-wins behavior matches the current
+.NET reference's own documented intent. The repository's findings-index
+status vocabulary supports only `confirmed`/`remediated` — no
+`not-a-defect`/`false-positive` status exists — so SR-AUD-362 is deliberately
+left `confirmed` rather than assigned an invented status, but it must not be
+read as an active, un-investigated defect. It is not counted as `remediated`
+and no code changed.
 
 No repair ticket is active.
 
@@ -1949,17 +2107,29 @@ one reproduction changes shape.
      tickets after the lifetime and raw-output decisions have a stable
      contract.  They are not substitutes for the three safety boundaries.
      SR-AUD-363 is **done** (ticket #1775, the Hashtable `IDictionary` key and
-     view contracts).  The four that remain are SR-AUD-359
-     (`ReadOnlyDictionary::Empty` is an assignable process-static singleton),
-     SR-AUD-360 (`ConcurrentDictionary::AddOrUpdate` overwrites an intervening
-     write instead of retrying), SR-AUD-361 (`SortedSet::GetViewBetween`
-     returns a detached snapshot rather than a live write-through view), and
-     SR-AUD-362 (`FrozenDictionary::Create` accepts duplicate keys
-     last-value-wins).  Note that SR-AUD-359 and SR-AUD-361 are the two whose
-     natural repairs may need a public-surface decision — changing `Empty()`'s
-     returned reference, and making a range view write through — so each may
-     warrant a design-first ticket the way SR-AUD-357 and SR-AUD-358 did.
-     SR-AUD-360 and SR-AUD-362 look implementable without any signature change.
+     view contracts) and SR-AUD-360 is **done** (ticket #1778, the
+     `ConcurrentDictionary::AddOrUpdate` compare-and-retry loop).  SR-AUD-359
+     (`ReadOnlyDictionary::Empty` is an assignable process-static singleton) is
+     now **design-complete**: design ticket #1779
+     (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`) recorded the selected fix — a
+     `const`-reference return type — in
+     `docs/ReadOnlyDictionaryEmptyDesign.md`; implementation ticket #1780
+     (`REMED-COLL-READONLYDICT-EMPTY`) is inactive and `blocked` pending
+     explicit approval of the public return-type change, the same approval
+     category SR-AUD-358's `ICollection::CopyTo` removal needed. SR-AUD-359
+     stays `confirmed` until #1780 lands. The two that remain unstarted are
+     SR-AUD-361 (`SortedSet::GetViewBetween` returns a detached snapshot rather
+     than a live write-through view — confirmed by comparison against .NET's
+     378-line `TreeSubSet` nested class while selecting between it and
+     SR-AUD-359 for ticket #1779; it needs a full tree-backed rearchitecture of
+     `SortedSet<T>` before any bounded implementation ticket could be written,
+     so it is not yet design-first-ready in the way SR-AUD-357/SR-AUD-358/
+     SR-AUD-359 were) and SR-AUD-362 (`FrozenDictionary::Create` accepts
+     duplicate keys last-value-wins — reviewed under ticket #1778 and again
+     under #1779's SR-AUD-362 reconciliation: this matches the current .NET
+     reference's own documented intent and is not actually a defect; left
+     `confirmed` since no `not-a-defect` status exists in this repository's
+     index, but not an active fix target).
 
 2. **Take self-contained ASan/UBSan-backed public-input failures next.**
    SR-AUD-338 and SR-AUD-341 (null text-stream and `MemoryStream`

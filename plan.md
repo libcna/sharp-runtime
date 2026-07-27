@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 13,017 passing tests across 37
+dependency edges, a clean native build, 13,021 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,778 rows: 1,776 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), and ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,781 rows: 1,777 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), ticket #1775 (`REMED-COLL-HASHTABLE-VIEWS`), ticket #1776 (`REMED-CORE-ARGNULL-MESSAGE`), ticket #1777 (`REMED-COLL-COPYTO-DOC-SYNC`), ticket #1778 (`REMED-COLL-CONCURRENTDICT-ADDORUPDATE`), and ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`) — one `wontfix` (#1772, obsoleted by #1771), two deliberately inactive `blocked` rows (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep, and #1780, `REMED-COLL-READONLYDICT-EMPTY`, pending public-signature approval), and one deliberately inactive `todo` row (#1781, `REMED-DOCS-DOXYGEN-COUNT-RECONCILE`); no `doing` or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -471,6 +471,61 @@ probe; 4 new permanent regressions in `ConcurrentDictionaryTests.cpp`;
 `Collections.Core` 1,736/1,736 (was 1,732); and a full
 `scripts/local_ci_check.sh build` gate of 13,021/13,021 tests across 37
 executables with zero warnings/errors (was 13,017).
+
+Design ticket #1779 (`REMED-COLL-READONLYDICT-EMPTY-DESIGN`, P2, size S),
+opened and closed 2026-07-27 on local branch
+`feature/remediation-coll-readonlydict-empty-design`, then answered SR-AUD-359,
+selected over SR-AUD-361 after comparing both in detail. `ReadOnlyDictionary
+<K,V>::Empty()` returns a non-`const` reference to a process-wide `static`
+singleton; because the class relies on its compiler-generated copy assignment
+operator, ordinary assignment through that reference silently rebinds the
+singleton's private backing map for the remainder of the process. .NET's own
+`Empty` is a get-only auto-property with no setter, so this is a C++-port-only
+hazard, not a parity gap. SR-AUD-361 (`SortedSet::GetViewBetween`) would
+instead require replacing `SortedSet<T>`'s `std::set` backing with a
+tree structure supporting live, bounded, write-through sub-range views —
+.NET's own `TreeSubSet` nested class is 378 lines — before any bounded
+implementation ticket could be written, so it was left `confirmed` and not
+selected. Recorded in
+[`docs/ReadOnlyDictionaryEmptyDesign.md`](docs/ReadOnlyDictionaryEmptyDesign.md):
+change `Empty()`'s return type to `const ReadOnlyDictionary<K,V>&`, the
+literal C++ expression of ".NET has no setter." This is a public signature
+change, so per the same approval boundary ticket #1770/#1771 used, it requires
+explicit user approval; implementation is proposed as inactive ticket **#1780**
+(`REMED-COLL-READONLYDICT-EMPTY`, P2, size XS), `blocked` on that approval. No
+production or test source changed under #1779. Evidence: three repository-local
+ASan/UBSan-clean probes in the gitignored `build-probe-readonlydict/` tree
+independently reproducing the audit's `empty-before=0`/
+`empty-after-assignment=1` symptom (plus confirming the contamination is
+visible process-wide, not local to one call site) and proving the proposed fix
+both rejects the hazardous assignment at compile time and preserves every
+existing observable behavior; the existing 17 `ReadOnlyDictionary` regression
+tests rerun unchanged; and a full `scripts/local_ci_check.sh build` gate of
+13,021/13,021 tests across 37 executables, zero warnings/errors (unchanged,
+since no production/test source changed).
+
+While verifying the Doxygen baseline for ticket #1779, an independent
+re-measurement using the repository's own canonical
+`scripts/check_doxygen_warnings.sh` on the identical tree ticket #1778 left
+behind returned exactly **1,942** warnings — the documented ceiling — not the
+1,944 ticket #1778 recorded. A looser, non-canonical grep pattern reproduces
+1,944 by additionally matching two `Inheritance graph ... not generated`
+advisory lines that are not `file:line: warning:` diagnostics. This suggests
+ticket #1778's figure came from a looser counting method, not a real
+regression; inactive ticket **#1781**
+(`REMED-DOCS-DOXYGEN-COUNT-RECONCILE`, P3, size XS) tracks re-verifying and
+correcting this at pickup time. Not begun under #1779. See `NEXT.md`'s
+equivalent correction note for full detail.
+
+SR-AUD-362 (`FrozenDictionary::Create` duplicate keys) was reconciled
+conservatively alongside #1779, per that finding's own instruction to inspect
+rather than repair it: its per-file audit report and
+`audit/AUDIT_FINDINGS_INDEX.md` row now carry a Correction note
+cross-referencing ticket #1778's finding that its premise does not hold
+against the current .NET reference. The repository's index status vocabulary
+supports only `confirmed`/`remediated`, so it stays `confirmed` rather than
+being assigned an invented status — but it must not be read as an active,
+un-investigated defect, and it is not counted as `remediated`.
 
 No repair ticket is active.
 
