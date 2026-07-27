@@ -3,12 +3,14 @@
 
 # NEXT.md
 
-*Last verified: 2026-07-27. Branch: `feature/remediation-coll-enum`. The P0 component-boundary
-repair, three P1 parity repairs, P1 portability revalidation, and twenty-two bounded
-P2 API slices are complete: 41 physical modules, 90 production dependency
-edges, and 12,694 tests across 37 executables. The repository-wide,
+*Last verified: 2026-07-27. Branch: `feature/remediation-coll-linked-node`. The P0
+component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
+twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
+dependency edges, and 12,694 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766); its
-first bounded remediation ticket #1767 is complete.*
+first bounded remediation ticket #1767 is complete and design ticket #1768 has
+recorded the LinkedListNode lifetime contract in
+[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -48,8 +50,10 @@ handoff text below.
 
 These are planning-integrity tasks, not newly classified runtime findings:
 
-1. `plan.sqlite3` has 1,767 tickets and all are `done`; there is no `todo` or
-   `doing` ticket from which an autonomous session can resume.
+1. ~~`plan.sqlite3` has 1,767 tickets and all are `done`; there is no `todo` or
+   `doing` ticket from which an autonomous session can resume.~~ Repaired:
+   design ticket #1768 and implementation ticket #1769 now carry the active
+   remediation queue.
 2. `CLAUDE.md` and `README.md` still state the old 12,681-test floor although
    the current measured floor is 12,694. Leaving the lower number would permit
    an undocumented thirteen-test regression.
@@ -77,39 +81,32 @@ These are planning-integrity tasks, not newly classified runtime findings:
    planning dimensions rather than treating every same-severity finding as
    interchangeable.
 
-### Exact next ticket: proposed #1768
-
-Open exactly one ticket first:
+### Completed design ticket #1768
 
 **`P0: Define LinkedListNode detached lifetime contract`**
 (`REMED-COLL-LINKED-NODE-DESIGN`, SR-AUD-357 / CCF-019, estimated 8 hours,
-size S).
+size S) is recorded in
+[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md). It answers
+all fourteen required questions against the local current-.NET
+`LinkedList.cs`/`Strings.resx` sources rather than from memory, and no
+production code changed under it.
 
-This is a design ticket and must be recorded before production code changes.
-Its acceptance criteria are:
+Selected representation: **independently allocated, reference-counted node
+objects**, replacing the copyable raw `std::list<T>` pointer/iterator pair.
+`LinkedListNode<T>` becomes a handle over a shared node object with three
+states — null handle, detached node (owner cleared, value retained), attached
+node. `Remove`, `Clear`, removal through another copied handle, and destruction
+of the owning `LinkedList<T>` all produce the detached state instead of a
+dangling iterator; the destructor performs the same detaching walk as `Clear`.
+Detached nodes can be reattached through the four newly added existing-node
+insertion overloads, and `validateNewNode` rejects an already-attached node
+with the exact .NET message. `begin()`/`end()` migrate to a bidirectional
+`LinkedList<T>::iterator` with the same range-`for`, `std::ranges`, and
+invalidation contract. No public member is removed or renamed, so this is not a
+broad public API break.
 
-- compare the current C++ surface with the local current-.NET
-  `LinkedList<T>`/`LinkedListNode<T>` implementation;
-- decide how a default/null handle differs from a real detached node;
-- define `Value`, `Next`, `Previous`, list membership, copying, and
-  `operator bool` after `Remove`, `Clear`, and destruction of the C++ wrapper;
-- decide whether detached nodes retain their value and can be reattached,
-  including the missing existing-node `AddFirst`/`AddLast`/`AddBefore`/
-  `AddAfter` overloads;
-- preserve or explicitly migrate the public STL `begin()`/`end()` behavior;
-- inventory repository consumers and add a standalone public-header compile
-  fixture for the selected representation;
-- specify permanent tests retaining copied node handles across removal,
-  clearing, cross-list validation, and owner destruction;
-- specify a focused ASan/UBSan probe that must be clean before SR-AUD-357 can
-  be marked remediated.
-
-If the design is compatible, follow it with one implementation ticket
-(proposed #1769, size L, nominal 24-32 hours). A likely safe direction is an
-independently owned node state with explicit attachment state, rather than a
-copyable raw `std::list` pointer/iterator pair, but ticket #1768 must make the
-compatibility decision from evidence rather than pre-committing to that
-representation.
+The design is compatible, so implementation proceeds as ticket #1769
+(`REMED-COLL-LINKED-NODE`, size L, nominal 24-32 hours).
 
 Only after the LinkedListNode decision is stable, open a separate design
 ticket for SR-AUD-358 / CCF-020. `ICollection::CopyTo(void*, int)` has no
@@ -162,8 +159,10 @@ presented as complete remediation of all 362 open findings.
 - Post-audit remediation ticket #1767 completed on
   `feature/remediation-coll-enum`. It remediates SR-AUD-356 and SR-AUD-364 /
   CCF-018 with one guarded lifecycle state across ten collection enumerators
-  and BitArray mutation invalidation. SR-AUD-357 and SR-AUD-358 remain
-  separate design-first work; no repair ticket is active.
+  and BitArray mutation invalidation. Design ticket #1768 then recorded the
+  SR-AUD-357 / CCF-019 LinkedListNode lifetime contract in
+  `docs/LinkedListNodeLifetime.md`, leaving implementation ticket #1769 as the
+  active work. SR-AUD-358 remains separate design-first work.
 - Initial audit validation passed boundary validation, catalogue freshness, and
   a zero-warning native build. It could not complete the full suite in this
   sandbox because the six local-server `Net.Http` cases fail immediately with
@@ -1374,9 +1373,11 @@ one reproduction changes shape.
    - Completed `REMED-COLL-ENUM` ticket #1767 covers SR-AUD-356 and
      SR-AUD-364 / CCF-018 with one lifecycle policy and permanent regressions
      across all affected storage categories.
-   - A proposed `REMED-COLL-LIFETIME` ticket should cover SR-AUD-357's
-     `LinkedListNode` owner/iterator lifetime.  CCF-019 also contains JsonNode
-     and XML LINQ instances, but they should remain separate repair tickets
+   - Design ticket #1768 (`REMED-COLL-LINKED-NODE-DESIGN`) covers SR-AUD-357's
+     `LinkedListNode` owner/iterator lifetime and is recorded in
+     `docs/LinkedListNodeLifetime.md`; implementation ticket #1769
+     (`REMED-COLL-LINKED-NODE`) carries it out.  CCF-019 also contains JsonNode
+     and XML LINQ instances, but they remain separate repair tickets
      unless a deliberately shared lifetime abstraction is introduced and its
      public compatibility is reviewed.
    - SR-AUD-358 / CCF-020 is a design-first item: legacy
@@ -1491,18 +1492,17 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Ticket #1767 is complete; preserve its permanent regression and retained
-   audit evidence. No remediation ticket is active.
-4. Open proposed ticket #1768,
-   `P0: Define LinkedListNode detached lifetime contract`, for SR-AUD-357 /
-   CCF-019. Copy its scope and acceptance criteria from the planning-audit
-   section near the top of this file and mark only that ticket `doing`.
-5. Do not change production code until #1768 records the null-versus-detached
-   model, value/neighbor/owner-destruction semantics, `operator bool` and STL
-   iterator compatibility, consumer inventory, and sanitizer/test matrix.
-6. If #1768 selects a compatible design, open one implementation ticket
-   (proposed #1769) and close it through the focused Collections target plus
-   ASan/UBSan and the standard repository controls.
+3. Tickets #1767 and #1768 are complete; preserve their permanent regressions,
+   the recorded design, and the retained audit evidence.
+4. The LinkedListNode lifetime design is recorded in
+   `docs/LinkedListNodeLifetime.md`; do not redesign it. Implementation ticket
+   #1769, `P0: Implement safe LinkedListNode detached lifetime`
+   (`REMED-COLL-LINKED-NODE`, SR-AUD-357 / CCF-019, size L), is the active
+   work.
+5. Close #1769 through the focused Collections target, the retained
+   `build-probe-linkednode` ASan/UBSan reproduction, the standalone
+   `test/consumer/collections_linked_list.cpp` fixture, and the standard
+   repository controls.
 7. Only then open the separate SR-AUD-358 / CCF-020 typed-or-length-aware
    `ICollection::CopyTo` design ticket. Do not combine it with LinkedListNode
    or a concrete-collection symptom patch.

@@ -262,10 +262,16 @@ approved, bounded tickets.
 The audit is complete and ticket #1767 has remediated SR-AUD-356 and
 SR-AUD-364 / CCF-018. The findings index therefore retains 364 original
 findings while recording 362 as open `confirmed` and two as `remediated`.
-No repair ticket is active. The next bounded decision is the design-first
-collection safety work: SR-AUD-357 (`LinkedListNode` lifetime / CCF-019) or
-SR-AUD-358 (typed or length-aware `ICollection::CopyTo` / CCF-020). Open only
-one after its compatibility boundary is explicit.
+Post-audit remediation is the active priority; optional P2 breadth stays
+behind confirmed safety defects.
+
+Design ticket #1768 selected the SR-AUD-357 / CCF-019 `LinkedListNode`
+lifetime contract — independently allocated, reference-counted nodes with an
+explicit null/detached/attached state model — and recorded it in
+[`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md).
+Implementation ticket #1769 (`REMED-COLL-LINKED-NODE`) is the active work.
+SR-AUD-358 (typed or length-aware `ICollection::CopyTo` / CCF-020) remains the
+next design-first item and must not be combined with it.
 
 ### P2 — Consumer-driven API breadth
 
