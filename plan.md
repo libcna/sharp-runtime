@@ -1,7 +1,7 @@
 # Sharp Runtime plan
 
 *Last verified: 2026-07-27 — 41 physical components, 90 direct production
-dependency edges, a clean native build, 12,871 passing tests across 37
+dependency edges, a clean native build, 12,921 passing tests across 37
 executables, and a locally green ten-job selective matrix. The tracked CI
 matrix covers nine fixtures; its missing direct `Collections.Blocking` fixture
 is recorded as audit finding `SR-AUD-001`.*
@@ -36,7 +36,7 @@ was never created. Neither file should be linked as current documentation.
 ### Code and validation
 
 - Native Linux/GCC build: zero errors and zero warnings.
-- Tests: 12,871 passing across 36 component binaries plus one integration
+- Tests: 12,921 passing across 36 component binaries plus one integration
   binary.
 - Component graph: 41 physical modules and 90 direct production edges.
 - Boundary validator: no cycles, duplicate public include paths, orphan
@@ -61,7 +61,7 @@ The 2026-07-27 local snapshot contains:
 | Table | State |
 |---|---|
 | `task` | 16,201 rows: 1,082 `ported`, 140 `ignore`, 14,979 legacy `ignored`; no unclassified or `tobedecided` rows |
-| `ticket` | 1,773 rows: 1,771 `done` — including audit ticket #1766 and post-audit tickets #1767, #1768, #1769, #1770, and #1771 — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
+| `ticket` | 1,774 rows: 1,772 `done` — including audit ticket #1766, post-audit tickets #1767, #1768, #1769, #1770, and #1771, and follow-up correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`) — one `wontfix` (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep); no `todo`, `doing`, or `needs_user` rows |
 
 Because `plan.sqlite3` is git-ignored, these counts describe the maintainer
 snapshot, not data shipped in a fresh clone.
@@ -219,6 +219,19 @@ assertion without an explicit architecture decision.
   documentation link already produces, offsetting one warning removed from
   ICollection.hpp. Consumer guidance is in
   [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
+- Corrected a follow-on defect in #1771's own validation rule under ticket
+  #1774: `detail::requireValidCopyDestination` had rejected every null-pointer
+  destination outright, including a valid empty `ObjectSpan{nullptr, 0}` or a
+  default-constructed empty `std::vector<std::any>` copied from an empty
+  collection. The rule now rejects a null pointer only when paired with a
+  positive length; a non-empty collection copied into a zero-length
+  destination still fails, but on capacity, not nullness. SR-AUD-358 remains
+  `remediated`. `CopyToBoundaryTests.cpp` grew to 1,662 Collections.Core tests
+  and a new standalone probe
+  (`build-probe-copyto/probe10_empty_span_correction.cpp`) is clean under
+  ASan/UBSan/LeakSanitizer; the 12,921-test repository gate passes with zero
+  build warnings/errors and Doxygen stays at 1,942/1,942. Recorded in section 22
+  of [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md).
 - Added consumer-driven coverage across core, collections, IO, networking,
   threading/tasks, text/JSON, XML, numerics, globalization, and cryptographic
   hashing/random APIs.
@@ -279,7 +292,7 @@ The first consumer-driven ports after modularization added:
 - XML schema exception types.
 
 The verified test baseline grew from 12,494 at the modularization checkpoint
-to 12,871, most recently through the post-audit remediation regressions.
+to 12,921, most recently through the post-audit remediation regressions.
 
 ## Completed repository audit
 
@@ -340,7 +353,19 @@ a member that no longer exists. The only follow-up is inactive ticket #1773
 (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S), the CNA and mobile-eggbert sweep
 described in [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md);
 neither repository is in this checkout, so nothing is claimed about their current
-usage. No repair ticket is active.
+usage.
+
+Follow-up ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`, P1, size XS), opened and
+closed 2026-07-27 on the same branch, then corrected a narrow defect found in
+#1771's own validation rule: `detail::requireValidCopyDestination` rejected
+every null-pointer destination outright, including a valid empty
+`ObjectSpan{nullptr, 0}` or default-constructed empty `std::vector<std::any>`
+copied from an empty collection. The rule now rejects a null pointer only when
+the destination's length is positive; a non-empty collection copied into a
+zero-length destination still fails, but on capacity, not nullness. SR-AUD-358
+remains `remediated` — this did not reopen it. See
+[`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md) section 22.
+No repair ticket is active.
 
 ### P2 — Consumer-driven API breadth
 

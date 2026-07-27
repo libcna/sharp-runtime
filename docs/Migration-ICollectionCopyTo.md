@@ -4,7 +4,10 @@
 # Migration: `System::Collections::ICollection::CopyTo`
 
 *Breaking change landed by ticket #1771 on 2026-07-27, remediating audit findings
-SR-AUD-358 / CCF-020. Design record: [`docs/ICollectionCopyToDesign.md`](ICollectionCopyToDesign.md).*
+SR-AUD-358 / CCF-020; the zero-length-destination rule in section 7 was
+corrected by follow-up ticket #1774 the same day. Design record:
+[`docs/ICollectionCopyToDesign.md`](ICollectionCopyToDesign.md) (see its
+section 22 for the correction).*
 
 ---
 
@@ -156,26 +159,43 @@ An empty `std::any` is this port's boxed `null`.
 
 ## 7. Exceptions
 
-| Condition | Exception |
-|---|---|
-| Destination has no storage (null pointer) | `System::ArgumentNullException("destination")` |
-| Negative `index` | `System::ArgumentOutOfRangeException("index", "Non-negative number required.")` |
-| `index` past the destination end | `System::ArgumentException(..., "destination")` |
-| Destination too short for `getCountProperty()` elements from `index` | `System::ArgumentException(..., "destination")` |
+*Corrected by ticket #1774 (2026-07-27): the null-destination check is now
+conditional on a positive destination length. See the note at the end of this
+section for what changed and why.*
+
+Checked in this exact order:
+
+| # | Condition | Exception |
+|---|---|---|
+| 1 | Negative `index` | `System::ArgumentOutOfRangeException("index", "Non-negative number required.")` |
+| 2 | `index` past the destination end | `System::ArgumentException(..., "destination")` |
+| 3 | Destination has a null pointer **and** a positive length | `System::ArgumentNullException("destination")` |
+| 4 | Destination too short for `getCountProperty()` elements from `index` | `System::ArgumentException(..., "destination")` |
+| — | none of the above | success; `copyToCore` runs |
 
 Validation always precedes the copy, so a rejected call never performs a partial
 write. `index + Count` is never computed; the capacity test is the subtraction
 `length - index < count`, so a large index cannot overflow past the check.
 
-**Known strictness note.** A destination with a null data pointer is rejected even
-when the collection is empty, matching .NET's `ArgumentNullException` for a null
-array. A default-constructed `std::vector<std::any>` typically *has* a null
-`data()`, so `collection.CopyTo(emptyVector, 0)` throws
-`ArgumentNullException` even when `getCountProperty() == 0` — unlike .NET, where
-`new object[0]` is a non-null zero-length array and the copy succeeds. Size the
-destination to at least one element, or guard on `getCountProperty()`, if a
-zero-element copy has to succeed. `ObjectSpan` over real storage with length 0 is
-accepted for an empty collection.
+**A null pointer with a zero length is a valid empty destination.**
+`ObjectSpan` (`= System::Span<std::any>`) has no distinct managed-null-array
+state — `ObjectSpan{nullptr, 0}` and a default-constructed empty
+`std::vector<std::any>` (whose `data()` is typically null) both mean "no
+storage, no elements", exactly like .NET's `new object[0]`. Copying an empty
+collection into either now succeeds with no exception, matching row "—" above:
+
+```cpp
+std::vector<std::any> destination;      // default-constructed, empty
+emptyCollection.CopyTo(destination, 0); // succeeds
+emptyCollection.CopyTo(System::Collections::ObjectSpan(), 0); // succeeds
+```
+
+A **non-empty** collection copied into a zero-length destination still fails,
+but now on capacity (row 4, `ArgumentException`), not on nullness — the
+destination is valid, it is simply too small. Only a null pointer paired with
+a **positive** length (`ObjectSpan(nullptr, 5)`, a destination claiming
+elements it has no storage for) is malformed and throws
+`ArgumentNullException` (row 3), regardless of the source collection's size.
 
 ## 8. Not supported, by design
 

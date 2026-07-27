@@ -14,6 +14,12 @@ production or test source was modified under this ticket.*
 > and 12 was **not** retained — the raw overload is removed outright, so a stale
 > call site is a compile error instead of a run-time throw. Section 21 records
 > that, the resulting ABI break, and the closure evidence.
+>
+> **Corrected by ticket #1774 on 2026-07-27 — see [section 22](#22-follow-up-correction-ticket-1774-2026-07-27).**
+> Section 21.4's "known behavioural note" is left unchanged as a historical
+> record, but its rule is superseded: a null-pointer destination with a
+> **zero** length is a valid empty destination and is no longer rejected.
+> Only a null pointer paired with a **positive** length remains rejected.
 
 ---
 
@@ -1317,6 +1323,10 @@ Concrete additions, all public unless marked:
 
 ### 21.4 Known behavioural note: a null-data destination is always rejected
 
+> **Superseded by [section 22](#22-follow-up-correction-ticket-1774-2026-07-27).**
+> Left unchanged below as the historical record of what #1771 actually shipped;
+> the described strictness was corrected by ticket #1774 on the same day.
+
 Section 11's rule is implemented exactly: a destination whose data pointer is null
 throws `ArgumentNullException` even when the collection is empty, matching .NET's
 `ArgumentNullException` for a null `Array`. A `Span` cannot distinguish "the
@@ -1407,3 +1417,134 @@ workflow.
   the CNA and mobile-eggbert sweep described in
   `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is in this
   checkout, so nothing is claimed or changed about them.
+
+---
+
+## 22. Follow-up correction (ticket #1774, 2026-07-27)
+
+*Sections 1-21 are the design record and #1771 closure exactly as originally
+written and are left unchanged, including section 21.4's now-superseded
+"known behavioural note". This section records a narrow correction found and
+fixed immediately afterward, on the same branch.*
+
+### 22.1 The defect
+
+Section 21.4 documented, as an accepted strictness note, that a destination
+with a null data pointer is rejected **even when the collection is empty**,
+because `requireValidCopyDestination` checked `data == nullptr` unconditionally,
+before ever looking at `length`. That is stricter than intended and stricter
+than useful: `ObjectSpan` (`= System::Span<std::any>`) has no distinct
+managed-null-array state to begin with (section 9.1) — a null pointer paired
+with a zero length is not ".NET null", it is simply "no storage, no elements",
+which is exactly what an empty destination for an empty source looks like.
+Rejecting it forced every caller of an empty collection's `CopyTo` to
+pre-allocate at least one destination element it would never receive, purely
+to dodge a spurious `ArgumentNullException` — a burden .NET callers do not
+carry (`new object[0]` is a valid destination for an empty source).
+
+The one case that **is** genuinely malformed — a null pointer paired with a
+**positive** length, i.e. a destination that claims elements it has no storage
+for — was never distinguished from the harmless null-and-zero case. Both were
+rejected by the same unconditional `data == nullptr` check.
+
+### 22.2 The corrected rule
+
+```cpp
+inline void requireValidCopyDestination(const void* data, intcs length,
+                                        intcs index, intcs count) {
+    if (index < 0)
+        throw System::ArgumentOutOfRangeException("index", "Non-negative number required.");
+    if (index > length)
+        throw System::ArgumentException(
+            "Destination array is not long enough to copy all the items in the "
+            "collection. Check array index and length.", "destination");
+    if (data == nullptr && length > 0)
+        throw System::ArgumentNullException("destination");
+    if (length - index < count)
+        throw System::ArgumentException(
+            "Destination array is not long enough to copy all the items in the "
+            "collection. Check array index and length.", "destination");
+}
+```
+
+`data == nullptr && length == 0` is now a valid empty destination.
+`data == nullptr && length > 0` remains the only null-pointer condition that is
+rejected. Everything else about the boundary from sections 9, 10, 13, 14, 15,
+and 21 is unchanged: the same two public non-virtual `CopyTo` overloads, the
+same protected `copyToCore`, no restored `CopyTo(void*, intcs)`, no nullable
+managed-array abstraction added to `ObjectSpan`.
+
+### 22.3 Validation order
+
+The order is now checked and tested explicitly, and differs from #1771's
+implementation in one respect: the capacity-adjacent `index > length` check
+and the null-data check swap relative positions so that a *malformed* pointer
+is distinguished from a merely *short* one only after the index itself has
+been range-checked against the destination's own length:
+
+1. negative `index` → `ArgumentOutOfRangeException`;
+2. `index` past the destination end (`index > length`) → `ArgumentException`;
+3. null `data` paired with a positive `length` → `ArgumentNullException`;
+4. insufficient remaining capacity (`length - index < count`) → `ArgumentException`;
+5. success — `copyToCore` is dispatched to.
+
+Splitting the former combined `index > length || length - index < count` check
+into steps 2 and 4 does not change any existing test's outcome (both branches
+already threw the same `ArgumentException` with the same message), but it is
+what makes step 3's placement — and therefore the exact diagnosis when more
+than one condition holds — observable and testable. The subtraction form of
+step 4 is unchanged from #1771 and remains overflow-safe: step 2 having passed
+guarantees `0 <= index <= length` before the subtraction runs.
+
+### 22.4 Why a null pointer with a positive length is still rejected
+
+`ObjectSpan(nullptr, 5)` is directly constructible through the public
+`Span(T*, intcs)` constructor — nothing in `Span`'s invariants prevents a
+caller from pairing a null pointer with a nonzero length, so this is a real,
+reachable malformed state, not a hypothetical one requiring a special test
+helper. It is rejected unconditionally (regardless of the source collection's
+size or whether the copy would otherwise fit) because it claims storage for
+elements that provably do not exist; treating it as valid would let a caller's
+bug reach `copyToCore` with a pointer that must not be dereferenced.
+
+### 22.5 Files changed
+
+| File | Change |
+|---|---|
+| `modules/collections/include/System/Collections/ICollection.hpp` | `detail::requireValidCopyDestination` reordered and its null check made conditional on `length > 0`; doc-comments on the helper and on `CopyTo(ObjectSpan, intcs)` corrected |
+| `modules/collections/tests/.../CopyToBoundaryTests.cpp` | two tests encoding the old unconditional-null rule replaced; new parameterised cases for empty-to-empty (both overloads), the malformed-null-with-length case, negative/past-end indices against a zero-length destination, span/vector agreement on the empty case, and a `ProbeCollection`-based proof that `copyToCore` is never reached on a validation failure; one lifetime case for a fully empty copy; two pre-existing typed-overload assertions corrected from `ArgumentNullException` to `ArgumentException` |
+| `test/consumer/collections_copyto.cpp` | `rejectsInvalidDestinations()` corrected to expect `ArgumentException` for a zero-length destination against a non-empty source, plus new checks for the malformed-null-with-length case and an empty-to-empty success case |
+| `docs/Migration-ICollectionCopyTo.md` | §7 exception table and the former "known strictness note" corrected |
+| `README.md`, `NEXT.md`, `plan.md` | corrected references to the null-destination rule |
+| `audit/AUDIT_FINDINGS_INDEX.md` | SR-AUD-358 remediation note extended to mention the correction |
+
+### 22.6 Validation
+
+| Check | Result |
+|---|---|
+| `cmake --build build --target SharpRuntimeTests_Collections_Core --parallel 4` | 0 errors, 0 warnings |
+| `SharpRuntimeTests_Collections_Core` | 1,662/1,662 (was 1,612 after #1771; net +50) |
+| `test/consumer/collections_copyto.cpp`, compile-only | compiles `-Wall -Wextra -Wpedantic -Werror` against only `Collections.Core` + `Core.Base` |
+| `test/consumer/collections_copyto.cpp`, linked and run | exits 0 |
+| `build-probe-copyto/probe10_empty_span_correction.cpp` under `-fsanitize=address,undefined` + LeakSanitizer | 10/10 assertions pass, `failures=0`, exit 0, no diagnostic, no leak |
+| `scripts/check_selective_components.sh` | all ten jobs pass |
+| `scripts/local_ci_check.sh build` | 12,921/12,921 tests across 37 executables (floor was 12,871), zero build warnings/errors |
+| `python3 scripts/validate_module_boundaries.py` / `test/validate_module_boundaries_test.py` | 41 modules, 90 edges unchanged; 7/7 |
+| `python3 scripts/generate_component_catalog.py --check` / `db_consistency_check.py` | catalogue current; no consistency problems |
+| `git diff --check` | clean |
+| `scripts/check_doxygen_warnings.sh` | Doxygen 1.9.8, **1,942** warnings -- at the ceiling, unchanged. One draft of this ticket's `README.md` addition briefly added a second markdown-style link to `docs/Migration-ICollectionCopyTo.md`, producing a 1,943rd warning (a second instance of the same unresolved-markdown-link class every README documentation link already produces); it was rewritten as plain backtick text pointing at the existing link, restoring the ceiling. |
+
+Probe 10 covers: an empty source into `ObjectSpan{nullptr, 0}` and into a
+default-constructed empty `std::vector<std::any>`; a non-empty source into
+`ObjectSpan{nullptr, 0}` (capacity failure, not null); a null pointer with a
+positive length rejected regardless of source size; a zero-length span over
+real, non-null storage behaving identically to `{nullptr, 0}`; negative and
+past-end indices against a zero-length destination; a non-trivial `std::any`
+value surviving source destruction with exactly-once destruction on the
+destination side; and polymorphic dispatch through `ICollection*`. No scenario
+produced a sanitizer diagnostic, confirming that the empty-copy path never
+dereferences the null pointer.
+
+SR-AUD-358 remains `remediated`; this ticket did not reopen it. It corrects an
+overly strict, previously-undocumented-as-a-defect corner of #1771's own
+remediation, found immediately afterward on the same branch.

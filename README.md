@@ -7,7 +7,7 @@ collector, or the complete .NET platform.
 
 The repository currently builds as 41 independently selectable CMake
 components. The verified Linux baseline on 2026-07-27 is a warning-free build
-with **12,871 passing tests across 37 test executables**.
+with **12,921 passing tests across 37 test executables**.
 
 ## What is included
 
@@ -181,7 +181,7 @@ Other platform evidence is narrower:
 
 | Platform/toolchain | Verified scope |
 |---|---|
-| Linux/GCC | Current full component build and all 12,871 tests. |
+| Linux/GCC | Current full component build and all 12,921 tests. |
 | Windows/MinGW | MinGW-w64 GCC 14-win32/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. GoogleTest was not cross-built and repository CI remains Ubuntu-only. |
 | Emscripten | Emscripten 5.0.7/CMake 3.31.6 compiled the post-component `All` and selective `Text.Json` library graphs under ticket #1741. Tests were not cross-built or run, and some runtime APIs deliberately throw `PlatformNotSupportedException`. |
 | macOS/Apple Clang | Real downstream Xcode 15.4 builds drove portability fixes on 2026-07-20; this repository has no macOS job or recorded full standalone test baseline. |
@@ -249,6 +249,16 @@ and what each collection puts in a destination slot, is in
 Downstream consumers such as CNA and mobile-eggbert are outside this repository
 and have not been checked; §9 of that document lists what each of them needs to
 do.
+
+**Follow-up correction (2026-07-27, ticket #1774):** the initial landing
+rejected every zero-length destination with a null pointer, including a valid
+empty `ObjectSpan{nullptr, 0}` or a default-constructed empty
+`std::vector<std::any>` copied from an empty collection. That is corrected: a
+null pointer paired with a zero length is now a valid empty destination; only
+a null pointer paired with a *positive* length is rejected. A non-empty
+collection copied into a zero-length destination still fails, but on capacity
+(`ArgumentException`), not nullness. See `docs/Migration-ICollectionCopyTo.md`
+§7 (linked above).
 
 ## Planning and implementation status
 

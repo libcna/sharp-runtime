@@ -154,3 +154,16 @@ and diff checks pass, and Doxygen 1.9.8 reports 1,942 warnings, exactly at the
 new migration document adds one instance of the pre-existing unresolved-
 markdown-link warning that every README documentation link produces, offsetting
 one warning removed from `ICollection.hpp`.
+
+Follow-up ticket #1774 corrected a narrow defect in #1771's own validation rule
+on the same day, still 2026-07-27: `detail::requireValidCopyDestination`
+rejected every null-pointer destination outright, including a valid empty
+`ObjectSpan{nullptr, 0}` or default-constructed empty `std::vector<std::any>`
+copied from an empty collection. The rule now rejects a null pointer only when
+paired with a positive length; a non-empty collection copied into a
+zero-length destination still fails, but on capacity, not nullness. SR-AUD-358
+and CCF-020 remain `remediated` — this did not reopen either finding. Evidence:
+`CopyToBoundaryTests.cpp` grew to 1,662 Collections.Core tests, and the new
+standalone probe `build-probe-copyto/probe10_empty_span_correction.cpp` passes
+under ASan + UBSan + LeakSanitizer with zero diagnostics and zero leaks.
+Recorded in section 22 of `docs/ICollectionCopyToDesign.md`.

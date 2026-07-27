@@ -493,6 +493,23 @@ Collections.Core; 12,871 tests across 37 executables. Consumer guidance is in
 `docs/Migration-ICollectionCopyTo.md`. CCF-019's JsonNode and XML LINQ members are
 unaffected and remain `confirmed`.
 
+**Follow-up correction (ticket #1774, 2026-07-27): still REMEDIATED.** SR-AUD-358
+and CCF-020 are not reopened; the paragraph above is left as the historical
+record of what #1771 shipped. #1771's `detail::requireValidCopyDestination`
+rejected every null-pointer destination outright, including a valid empty
+`ObjectSpan{nullptr, 0}` or a default-constructed empty `std::vector<std::any>`
+copied from an empty collection — stricter than intended, since `ObjectSpan` has
+no distinct managed-null-array state and a null-and-zero-length destination is
+simply "no storage, no elements", matching .NET's `new object[0]`. Ticket #1774
+corrected the rule so a null pointer is rejected only when paired with a
+*positive* length; a non-empty collection copied into a zero-length destination
+still fails, but on capacity, not nullness. Evidence: `CopyToBoundaryTests.cpp`
+gained parameterised empty-to-empty, malformed-null-with-length, and
+`copyToCore`-not-reached cases (1,662/1,662 after the addition); the standalone
+probe `build-probe-copyto/probe10_empty_span_correction.cpp` passes 10/10
+assertions under ASan + UBSan + LeakSanitizer with zero diagnostics and zero
+leaks. Recorded in section 22 of `docs/ICollectionCopyToDesign.md`.
+
 - `modules/collections/include/System/Collections/ICollection.hpp.audit.md`;
 - `modules/collections/include/System/Collections/ArrayList.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Queue.hpp.audit.md`;

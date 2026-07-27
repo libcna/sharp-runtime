@@ -6,19 +6,25 @@
 *Last verified: 2026-07-27. Branch: `feature/remediation-coll-copyto`. The P0
 component-boundary repair, three P1 parity repairs, P1 portability revalidation, and
 twenty-two bounded P2 API slices are complete: 41 physical modules, 90 production
-dependency edges, and 12,871 tests across 37 executables. The repository-wide,
+dependency edges, and 12,921 tests across 37 executables. The repository-wide,
 evidence-only audit is complete under `audit/` (local ticket #1766). Remediation
 tickets #1767 (enumerator lifecycle), #1768 (LinkedListNode lifetime design),
 #1769 (LinkedListNode lifetime implementation), #1770 (raw `ICollection::CopyTo`
-design), and #1771 (raw `ICollection::CopyTo` implementation) are complete; the
+design), #1771 (raw `ICollection::CopyTo` implementation), and #1774 (raw
+`ICollection::CopyTo` zero-length-destination correction) are complete; the
 node contract is recorded in
 [`docs/LinkedListNodeLifetime.md`](docs/LinkedListNodeLifetime.md) and the copy
-boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md),
-with consumer guidance in
+boundary in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
+(see its section 22 for the #1774 correction), with consumer guidance in
 [`docs/Migration-ICollectionCopyTo.md`](docs/Migration-ICollectionCopyTo.md).
 No ticket is active. #1771 removed the pure virtual `CopyTo(void*, intcs)` from
 `System::Collections::ICollection` under explicit user approval, so this is a
-source- and ABI-breaking release for downstream consumers, which must rebuild.*
+source- and ABI-breaking release for downstream consumers, which must rebuild.
+#1774 then corrected #1771's validation rule so that a null-pointer destination
+with a zero length (e.g. `ObjectSpan{nullptr, 0}` or a default-constructed empty
+`std::vector<std::any>`) is a valid empty destination; only a null pointer
+paired with a positive length is still rejected. This is a behavioral
+relaxation, not a further source or ABI break.*
 
 This is the cold-start handoff for the next working session. Keep it focused
 on verified facts, remaining bounded work, and commands needed to resume.
@@ -36,8 +42,9 @@ handoff text below.
 
 - The configured native build completed successfully with no compiler
   diagnostics.
-- The build currently exposes 12,871 GoogleTest cases across 37 executables.
-  `SharpRuntimeTests_Collections_Core` passed 1,612/1,612 after ticket #1771.
+- The build currently exposes 12,921 GoogleTest cases across 37 executables.
+  `SharpRuntimeTests_Collections_Core` passed 1,662/1,662 after ticket #1774
+  (was 1,612/1,612 after #1771).
 - Database consistency, component-boundary validation (41 physical modules,
   90 production dependency edges), generated-catalogue freshness, and
   `git diff --check` passed.
@@ -48,8 +55,8 @@ handoff text below.
 - The open inventory is 360 findings: 88 high, 261 medium, and 11 low.
   SR-AUD-356, SR-AUD-357, SR-AUD-358, and SR-AUD-364 are the four remediated
   findings.
-- Ticket #1771's repository gate is the latest complete one: a warning-free full
-  build and 12,871/12,871 tests across 37 executables. The last
+- Ticket #1774's repository gate is the latest complete one: a warning-free full
+  build and 12,921/12,921 tests across 37 executables. The last
   network-permitted `scripts/local_ci_check.sh build` run, which additionally
   exercised the six local-server `Net.Http` cases, was ticket #1769's
   12,743/12,743.
@@ -244,6 +251,45 @@ removed member. New ticket **#1773** (`REMED-COLL-COPYTO-DOWNSTREAM`, P2, size S
 is **inactive**: it requires the CNA and mobile-eggbert `CopyTo` sweep and full
 rebuild described in `docs/Migration-ICollectionCopyTo.md` §9. Neither repository
 is in this checkout, so nothing is asserted about their current usage.
+
+### Completed raw-CopyTo correction: ticket #1774
+
+**Done**, opened and closed 2026-07-27 on the same branch immediately after
+#1771. `detail::requireValidCopyDestination` rejected every null-pointer
+destination outright, including a valid empty `ObjectSpan{nullptr, 0}` or a
+default-constructed empty `std::vector<std::any>` copied from an empty
+collection — stricter than intended, since `ObjectSpan` has no distinct
+managed-null-array state and a null-and-zero-length destination is simply "no
+storage, no elements", matching .NET's `new object[0]`. The corrected rule and
+its exact checking order (negative index, index past the destination end,
+null data with a *positive* length, insufficient capacity, success) are
+recorded in [`docs/ICollectionCopyToDesign.md`](docs/ICollectionCopyToDesign.md)
+section 22. A non-empty collection copied into a zero-length destination still
+fails, but on capacity, not nullness; a null pointer paired with a positive
+length remains rejected regardless of source size. SR-AUD-358 stays
+`remediated` — this did not reopen it, and it did not restore
+`CopyTo(void*, intcs)`, redesign `ObjectSpan`, or touch individual
+`copyToCore` bodies.
+
+Closure evidence: `CopyToBoundaryTests.cpp` gained parameterised cases for the
+empty-to-empty success paths (both overloads), the malformed
+null-with-positive-length case, negative/past-end indices against a
+zero-length destination, and a `ProbeCollection`-based proof that a validation
+failure never reaches `copyToCore`; two pre-existing typed-overload assertions
+were corrected from `ArgumentNullException` to `ArgumentException`; the
+standalone `test/consumer/collections_copyto.cpp` fixture was corrected,
+compiles `-Werror`, and runs successfully; and the new standalone probe
+`build-probe-copyto/probe10_empty_span_correction.cpp` passes 10/10 assertions
+under ASan + UBSan + LeakSanitizer with no diagnostic and no leak.
+`SharpRuntimeTests_Collections_Core` grew from 1,612/1,612 to 1,662/1,662
+(net +50); the full `scripts/local_ci_check.sh build` gate passed
+12,921/12,921 tests across 37 executables with zero build warnings/errors
+(was 12,871); boundaries stayed at 41 modules/90 edges, validator tests 7/7,
+catalogue current, database consistent, the ten-job selective matrix green,
+`git diff --check` clean, and Doxygen 1.9.8 stayed at exactly 1,942/1,942 --
+unchanged from the #1771 ceiling, since the one new markdown link this ticket
+added to `README.md` was written without link syntax specifically to avoid
+adding a second instance of the pre-existing unresolved-markdown-link warning.
 
 ### Nominal 500-hour first remediation programme
 
@@ -1297,8 +1343,9 @@ presented as complete remediation of all 362 open findings.
   ASan/LSan ownership scenarios, including 100 continuation teardowns, pass.
 
 The local `plan.sqlite3` snapshot contains 16,201 classified `task` rows and
-1,773 ticket rows: 1,771 completed, including closed audit ticket #1766 and
-post-audit tickets #1767, #1768, #1769, #1770, and #1771, one `wontfix` row
+1,774 ticket rows: 1,772 completed, including closed audit ticket #1766,
+post-audit tickets #1767, #1768, #1769, #1770, and #1771, and follow-up
+correction ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`), one `wontfix` row
 (#1772, obsoleted by #1771), and one deliberately inactive `blocked` row
 (#1773, the out-of-repository CNA / mobile-eggbert `CopyTo` sweep). No ticket is
 active. Ticket #1737 records the
@@ -1666,9 +1713,9 @@ HTTP, socket, and ping tests require permission for local network operations.
 2. Inspect `git status --short --branch`, `audit/AUDIT_PROGRESS.md`, and the
    selected finding's mirrored reports and current implementation/tests.  Do
    not search for a new audit shard: the 1,748-file audit is complete.
-3. Tickets #1767, #1768, #1769, #1770, and #1771 are complete and no ticket is
-   active; preserve their permanent regressions, the two recorded designs, and
-   the retained audit evidence.
+3. Tickets #1767, #1768, #1769, #1770, #1771, and #1774 are complete and no
+   ticket is active; preserve their permanent regressions, the two recorded
+   designs, and the retained audit evidence.
 4. The LinkedListNode lifetime contract is recorded in
    `docs/LinkedListNodeLifetime.md` and implemented. Do not redesign it, do not
    reopen SR-AUD-357, and keep `LinkedListNodeLifetimeTests.cpp` and
@@ -1701,3 +1748,14 @@ HTTP, socket, and ping tests require permission for local network operations.
    for `CopyTo` calls and rebuild them against the new vtable, per
    `docs/Migration-ICollectionCopyTo.md` §9. Neither repository is in this
    checkout, so do not guess at their usage or modify them from here.
+7. Follow-up ticket #1774 (`REMED-COLL-COPYTO-EMPTY-SPAN`, P1, size XS) is
+   **done**. It corrected `detail::requireValidCopyDestination` so a null
+   pointer is rejected only when paired with a *positive* length — a
+   null-pointer destination with a zero length (`ObjectSpan{nullptr, 0}`, a
+   default-constructed empty `std::vector<std::any>`) is now a valid empty
+   destination, matching .NET's `new object[0]`. Do not reintroduce the old
+   unconditional null check, do not restore `CopyTo(void*, intcs)`, and keep
+   the extended `CopyToBoundaryTests.cpp` cases and
+   `build-probe-copyto/probe10_empty_span_correction.cpp` in place: they are
+   the durable evidence for the corrected rule, recorded in section 22 of
+   `docs/ICollectionCopyToDesign.md`. SR-AUD-358 remains `remediated`.
