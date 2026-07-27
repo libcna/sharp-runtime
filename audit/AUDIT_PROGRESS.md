@@ -168,6 +168,50 @@ lines, not from an actual warning-count regression this ticket introduced.
 This correction is recorded here rather than silently rewriting the paragraph
 above, per this repository's practice of preserving historical narrative.
 
+Design ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`, P2, size M,
+design-only) then answered SR-AUD-361 on 2026-07-27 on local branch
+`feature/remediation-coll-sortedset-view-design`, changing no production or test
+source. `SortedSet<T>::GetViewBetween` returns an independent snapshot instead
+of .NET's live, range-enforced, write-through `TreeSubSet`. The selected
+architecture -- `SortedSet<T>` holding `std::shared_ptr<State>` plus optional
+bounds, so one public type is either an owning set or a bounded live view, with
+`GetViewBetween`'s return type unchanged -- is recorded in
+`docs/SortedSetLiveViewDesign.md` alongside four rejected alternatives, a
+fourteen-row compatibility matrix, all thirty-five required design decisions,
+and a six-probe evidence index. **SR-AUD-361 stays `confirmed`**, qualified
+`confirmed (design-complete)`, so the open/remediated counts are unchanged at
+355/9. Implementation is ticket **#1783**
+(`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L), created **`blocked`** pending
+explicit approval of the `const` removal on `GetViewBetween`, the
+snapshot-to-live-view semantic change, and the measured object-layout change
+(`sizeof(SortedSet<int>)` 56 → 40, `sizeof(SortedSet<std::string>)` 56 → 104).
+
+Evidence: the gitignored `build-probe-sortedset/` tree independently reproduced
+the finding's own `source-add-visible-in-view=0` /
+`view-add-visible-in-source=0` symptom and the full pre-fix contract under
+ASan+UBSan+LeakSanitizer with no diagnostic and no leak; a prototype of the
+selected architecture passes the identical matrix with `failures=0`, including a
+100,000-element scale case; the three existing `GetViewBetween` tests and the 41
+mutable-`SortedSet` tests rerun unchanged and passing; boundaries unchanged at
+41 modules/90 edges, validator tests 7/7, catalogue current, database
+consistent, `git diff --check` clean; and Doxygen 1.9.8 at exactly 1,942/1,942 --
+unchanged, since this ticket added only `docs/*.md` and `audit/*.md`, which
+Doxygen does not scan. The full `scripts/local_ci_check.sh build` gate was run
+rather than omitted and passed 13,022/13,022 tests across 37 executables with
+zero build warnings/errors — unchanged from ticket #1780.
+`scripts/check_selective_components.sh` was not run: no public header and no
+component metadata changed.
+
+**Planning-accuracy correction (ticket #1782, 2026-07-27):** `NEXT.md`,
+`plan.md`, and `SortedSet.hpp`'s own `@warning` block each state that a live
+view is not achievable on `std::set` without a hand-rolled tree matching .NET's
+own, and ticket #1779 used that premise to defer SR-AUD-361. The premise does
+not hold -- `std::set` already provides `lower_bound`, `upper_bound`, and stable
+iterators, and the prototype demonstrates a working bounded view. The real cost
+is the ownership model, the copy/move semantics, and the `const` removal.
+Recorded here rather than rewritten in place, per the same preserved-narrative
+practice.
+
 ## Initial validation evidence
 
 `git diff --check` passed. `scripts/local_ci_check.sh build` reached the test

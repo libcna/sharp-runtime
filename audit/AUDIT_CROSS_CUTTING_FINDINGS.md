@@ -438,6 +438,26 @@ original evidence above and in the per-file reports is retained.
 - `modules/xml-linq/include/System/Xml/Linq/XObject.hpp.audit.md`;
 - `modules/collections/include/System/Collections/Generic/LinkedList.hpp.audit.md`.
 
+**Related, but deliberately not a member (ticket #1782, 2026-07-27):**
+SR-AUD-361 (`SortedSet<T>::GetViewBetween`) is **not** a CCF-019 instance and
+must not be counted as one. Its returned object is a fully detached snapshot
+that retains no pointer or iterator into the source, so it exhibits the opposite
+of this shared cause: probe evidence confirms it survives owner destruction with
+no sanitizer diagnostic. The cross-reference is recorded only because ticket
+#1782's design independently selected the *same ownership idiom* CCF-019's
+LinkedListNode repair used -- independently allocated, reference-counted state
+shared by every handle -- for a different reason: to give the live bounded view
+required by SR-AUD-361 a lifetime rule equivalent to .NET's GC-rooted
+`TreeSubSet._underlying`. See `docs/SortedSetLiveViewDesign.md` §12. Ticket
+#1782 additionally measured, inside that same class, one genuine instance of
+this cause's failure mode that is **not** SR-AUD-361 and receives no new
+identifier (the numbering is frozen at 364): `SortedSet<T>::Iterator` stores a
+raw `const SortedSet*` owner, and whole-object assignment overwrites the
+`version_` guard instead of bumping it, so copy-assignment yields a silently
+wrong dereference and move-assignment is an ASan-confirmed
+`heap-use-after-free`. It is folded into ticket #1783's scope, which replaces
+that raw owner pointer with a `shared_ptr<const State>`.
+
 ## CCF-020 — raw polymorphic output parameters erase the validation information public contracts require
 
 The legacy non-generic ICollection interface accepts `void*` plus a starting

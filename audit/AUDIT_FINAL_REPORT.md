@@ -451,3 +451,87 @@ remain 41 modules/90 edges; validator-test (7/7), catalogue, database, the
 ten-job selective-component matrix, and `git diff --check` all pass, and
 Doxygen 1.9.8 stays at exactly 1,942/1,942 -- unchanged, at the ceiling, since
 no touched header gained or lost a documented public member.
+
+Design ticket #1782 (`REMED-COLL-SORTEDSET-VIEW-DESIGN`, P2, size M) completed
+a ninth bounded batch on 2026-07-27 on local branch
+`feature/remediation-coll-sortedset-view-design` and answered SR-AUD-361
+without changing any production or test source. **SR-AUD-361 stays
+`confirmed`**, now qualified `confirmed (design-complete)`; the counts above are
+unchanged at **355 open findings and nine `remediated`**. The original audit
+evidence in
+`audit/modules/collections/include/System/Collections/Generic/SortedSet.hpp.audit.md`
+remains in place.
+
+`SortedSet<T>::GetViewBetween` returns an independent snapshot copy of the
+in-range elements instead of .NET's live, range-enforced, bidirectionally
+write-through `TreeSubSet`. A repository-local, gitignored `build-probe-sortedset/`
+probe reproduced the finding's own `source-add-visible-in-view=0` /
+`view-add-visible-in-source=0` symptom and established the complete pre-fix
+contract under ASan+UBSan+LeakSanitizer with **no diagnostic and no leak** --
+the current implementation is memory-safe and semantically wrong.
+
+The selected architecture, recorded in `docs/SortedSetLiveViewDesign.md`, is
+one public type with a tagged representation: `SortedSet<T>` holds
+`std::shared_ptr<State>` (the `State` owning the `std::set<T>` and the single
+version counter) plus `std::optional<T>` lower and upper bounds, so an object is
+either an owning full set or a bounded live view over the same state.
+`GetViewBetween` keeps returning `SortedSet<T>` **by value**; `std::shared_ptr`
+reproduces .NET's GC lifetime rule exactly, so a view or an iterator that
+outlives the set it came from is well-defined rather than dangling. Four other
+alternatives were evaluated against a fourteen-row compatibility matrix and
+rejected, including a dedicated `SortedSetView<T>` type -- which does not avoid
+the layout change, breaks the return type on top of it, and breaks .NET's
+structural parity in which a view **is a** `SortedSet<T>`. A working prototype
+passes the identical scenario matrix with `failures=0`, clean under
+ASan+UBSan+LeakSanitizer including a 100,000-element scale case.
+
+**Planning-accuracy correction (2026-07-27, ticket #1782).** `NEXT.md`,
+`plan.md`, and `SortedSet.hpp`'s own `@warning` block each state that a live
+view is not achievable on `std::set` without replacing the internal
+representation with a hand-rolled tree matching .NET's own, and ticket #1779
+used that premise to defer SR-AUD-361 in favour of SR-AUD-359. **The premise
+does not hold.** `std::set` already provides `lower_bound`, `upper_bound`, and
+stable iterators; a bounded view needs only a shared owner for the container
+plus a pair of bounds, as the prototype demonstrates. .NET's `TreeSubSet` is 378
+lines mainly because it re-implements tree walks against raw `Node` pointers --
+work `std::set` already does. The real cost is the ownership model, the
+copy/move semantics, and one required `const` removal, which is why the item
+remained design-first. This correction is recorded here rather than rewritten
+into the earlier text, per this repository's practice of preserving historical
+narrative (see the #1776, #1778, and #1779 corrections above).
+
+Four adjacent defects inside the same member's surface were measured and are
+folded into the implementation ticket's scope rather than receiving new
+`SR-AUD-*` identifiers, since the audit numbering is frozen at 364:
+`GetViewBetween` is the only member spelling its comparisons with `operator>`,
+so an element type providing `operator<` alone -- the contract the class's own
+doc-comment states -- fails to compile; the returned object does not enforce its
+bounds after construction (`view.Add(99)` on a `[3,7]` range succeeds); a nested
+`GetViewBetween` may silently widen a bound where .NET throws; and whole-object
+assignment defeats the class's advertised fail-fast version guard, producing a
+silently wrong dereference on copy-assignment and an ASan-confirmed
+`heap-use-after-free` on move-assignment.
+
+Implementation is proposed as separate ticket **#1783**
+(`REMED-COLL-SORTEDSET-LIVE-VIEW`, P2, size L), created **`blocked`** pending
+explicit user approval of three things together: removing the `const` qualifier
+from `GetViewBetween` (measured: the Itanium mangled name changes `_ZNK…` to
+`_ZN…`, unlike ticket #1780's `Empty()`, whose name was byte-identical), the
+semantic snapshot-to-live-view change, and the `SortedSet<T>` object-layout
+change (measured `sizeof(SortedSet<int>)` 56 → 40,
+`sizeof(SortedSet<std::string>)` 56 → 104). This is the same approval category
+tickets #1770/#1771 and #1779/#1780 required. No in-repository source break
+exists: all three `GetViewBetween` call sites are tests using non-`const` sets,
+and none asserts a snapshot property, so no existing assertion changes.
+
+Closure evidence for #1782: six repository-local probes (§29 of the design
+record), the three existing `GetViewBetween` tests and the 41 mutable-`SortedSet`
+tests rerun unchanged and passing, module boundaries unchanged at 41 modules/90
+edges, validator-test (7/7), catalogue, database consistency, `git diff --check`,
+and Doxygen 1.9.8 at exactly 1,942/1,942 -- unchanged, since this ticket added
+only `docs/*.md` and `audit/*.md`, which Doxygen does not scan. The full
+`scripts/local_ci_check.sh build` gate was run rather than omitted and passed
+13,022/13,022 tests across 37 executables with zero build warnings/errors,
+unchanged from ticket #1780. `scripts/check_selective_components.sh` was not
+run: no public header and no component metadata changed, which is the condition
+that requires it.
